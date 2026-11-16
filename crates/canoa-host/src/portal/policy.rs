@@ -91,8 +91,14 @@ impl Policy {
     pub fn new(settings: &Settings, methods: &[Method]) -> Result<Self, String> {
         let mut registry = new_registry()?;
         let Some(entry) = &settings.sign_in_policy else {
-            let rules = SignInRules::single_factor(methods.iter().map(|method| method.id()))
-                .map_err(|error| format!("sign_in_policy: {error}"))?;
+            // A code is checked for an account an earlier step named, so it is never a way in alone.
+            let rules = SignInRules::single_factor(
+                methods
+                    .iter()
+                    .filter(|method| !method.needs_account())
+                    .map(|method| method.id()),
+            )
+            .map_err(|error| format!("sign_in_policy: {error}"))?;
             return Ok(Self {
                 provider: Arc::new(rules),
                 summary: "none: every method from anywhere".to_owned(),

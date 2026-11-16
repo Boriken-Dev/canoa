@@ -95,6 +95,26 @@ allow = [["certificate"]]
 EOF
 } > /opt/canoatest/portal_network.toml
 
+# The same portal where a certificate a CA signed names its account by the UPN it carries, through the portal's matcher. The CA
+# is the test's own: it writes /etc/canoatest/clients-ca.pem when it runs.
+{
+    cat /opt/canoatest/portal.toml
+    cat <<'EOF'
+authenticators = [
+  { provider = "coqui_access_system" },
+  { provider = "coqui_access_mtls", library = "/opt/canoatest/libcoqui_access_mtls_plugin.so",
+    config = { trust = "ca", ca_file = "/etc/canoatest/clients-ca.pem" } },
+]
+
+matcher = [
+  { by = "name", template = "{san.upn|local}", domain = "corp.example" },
+]
+
+[[sign_in_policy.config.rule]]
+allow = [["certificate"]]
+EOF
+} > /opt/canoatest/portal_matcher.toml
+
 # The passwords of the test accounts, and the PAM service that checks them and counts how often it was asked.
 printf 'canoatesta:pw-a-test\ncanoatestb:pw-b-test\ncanoatestc:pw-c-test\n' > /etc/canoatest/passwords
 chmod 0644 /etc/canoatest/passwords

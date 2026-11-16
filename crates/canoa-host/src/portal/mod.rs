@@ -8,6 +8,7 @@
 
 mod access;
 mod conn;
+mod factor;
 mod instance;
 mod page;
 mod policy;
@@ -15,6 +16,7 @@ mod relay;
 mod session;
 mod settings;
 mod signin;
+mod steps;
 
 use alloc::sync::Arc;
 use core::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -24,20 +26,21 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::{Instant, SystemTime};
 
-use coqui_access::purposes;
+use coqui_access::{methods, purposes};
 use coqui_transport_pipe::{PipeName, SocketGroup};
 
-pub use access::Access;
+pub use access::{Access, FactorEntry, check_code_files_owned};
 pub use conn::Conn;
 pub use instance::{Controller, Instances, Lease, Systemd};
 pub use session::{Attempt, Session, Sessions, Throttle};
-pub use settings::{Entry, Settings};
+pub use settings::{Entry, MatcherRule, Settings};
 pub use signin::{
-    Accounts, CertificateStatus, MAX_PASSWORD, Method, NAME_PATTERN, PinError, PinState, Presented,
-    SignIn, Standing, valid_user,
+    Accounts, CertificateStatus, CodeCheck, Enrolment, FactorError, FactorStanding, MAX_PASSWORD,
+    Method, NAME_PATTERN, PinError, PinState, Presented, SignIn, Standing, valid_user,
 };
 
 use crate::pipe::PipeChannel;
@@ -52,10 +55,14 @@ pub const LOGIN: &str = "/portal/login";
 pub const METHODS: &str = "/portal/methods";
 /// Where a signed-in person sees the certificate their browser offers, pins it to their account, or removes the pin.
 pub const CERTIFICATE: &str = "/portal/certificate";
+/// Where a signed-in person, or a sign-in waiting for a one-time code, sets one up.
+pub const FACTOR: &str = "/portal/factor";
 const MAX_HEAD: usize = 16 * 1024;
 const MAX_HEADERS: usize = 64;
 const MAX_FORM: usize = 4096;
 const REST: Duration = Duration::from_millis(50);
+/// How often a channel of a session made with a one-time code looks at whether the code is still the account's.
+const CODE_LOOK: Duration = Duration::from_secs(3);
 
 /// The ways the portal cannot start.
 #[derive(Debug)]
@@ -85,7 +92,12 @@ struct Inner {
     settings: Settings,
     root: PathBuf,
     sessions: Sessions,
+    pendings: session::Pendings,
     throttle: Throttle,
+    /// When the portal last warned of an account's failures tripping a limit, by user id: once for each window.
+    warned: Mutex<alloc::collections::BTreeMap<u32, Instant>>,
+    /// The unlock time the portal last acted on for each account.
+    unlocked: Mutex<alloc::collections::BTreeMap<u32, i64>>,
     policy: policy::Policy,
     instances: Arc<Instances>,
     accounts: Arc<dyn Accounts>,
@@ -195,13 +207,23 @@ impl Portal {
                 settings.max_sessions,
                 settings.max_sessions_per_user,
             ),
+            warned: Mutex::new(alloc::collections::BTreeMap::new()),
+            unlocked: Mutex::new(alloc::collections::BTreeMap::new()),
+            pendings: session::Pendings::new(
+                settings.pending,
+                settings.max_pending_tries,
+                settings.max_sessions,
+                settings.max_sessions_per_user,
+            ),
             throttle: Throttle::new(
                 settings.failure_window,
                 settings.max_failures_per_pair,
                 settings.max_failures_per_address,
                 settings.slow_after_user_failures,
                 settings.slow,
-            ),
+            )
+            .with_person_limit(settings.max_factor_failures_per_person)
+            .with_person_daily(settings.max_factor_failures_per_day, settings.factor_day),
             policy,
             root,
             instances,
@@ -348,14 +370,19 @@ impl Request {
     }
 
     fn token(&self) -> Option<String> {
+        self.cookie(COOKIE)
+    }
+
+    /// The value of the cookie called `cookie`; none when the browser sent two of that name, since it cannot be told which is
+    /// its own.
+    fn cookie(&self, cookie: &str) -> Option<String> {
         let mut found = None;
         for (name, value) in &self.headers {
             if name != "cookie" {
                 continue;
             }
             for part in value.split(';') {
-                if let Some(token) = part.trim().strip_prefix(&format!("{COOKIE}=")) {
-                    // Two cookies of the name are two sessions the browser cannot be told apart by: none.
+                if let Some(token) = part.trim().strip_prefix(&format!("{cookie}=")) {
                     if found.is_some() {
                         return None;
                     }
@@ -711,11 +738,11 @@ fn offer_for(inner: &Inner, request: &Request, conn: &Conn) -> Option<policy::De
     let address = client_address(inner, request, conn);
     match inner.policy.decide(policy::offer_context(address)) {
         Ok(mut decision) => {
-            let have = inner.accounts.methods();
-            decision.offers.retain(|offer| {
-                have.contains(&offer.method)
-                    && (offer.method != Method::Certificate || conn.from_proxy())
-            });
+            // A step that checks a code for an account is never a first one, whatever the policy says.
+            decision
+                .offers
+                .retain(|offer| !offer.method.needs_account());
+            usable(inner, conn, &mut decision);
             Some(decision)
         }
         Err(why) => {
@@ -725,8 +752,59 @@ fn offer_for(inner: &Inner, request: &Request, conn: &Conn) -> Option<policy::De
     }
 }
 
-/// The sign-in page.
+/// Leaves in `decision` only what this portal can do on this connection: a method it has, and a certificate only on the proxy's
+/// socket.
+fn usable(inner: &Inner, conn: &Conn, decision: &mut policy::Decision) {
+    let have = inner.accounts.methods();
+    decision.offers.retain(|offer| {
+        have.contains(&offer.method) && (offer.method != Method::Certificate || conn.from_proxy())
+    });
+}
+
+/// The sign-in page, or, for a browser whose sign-in has passed a step, the page of the next.
 fn login_response(
+    inner: &Inner,
+    request: &Request,
+    conn: &Conn,
+    status: u16,
+    notice: Option<page::Notice>,
+    retry: Option<u64>,
+) -> Response {
+    let mut stale = false;
+    if let Some((token, pending)) = steps::pending_of(inner, request, session::Purpose::SignIn) {
+        match steps::decide_pending(inner, request, conn, &pending, purposes::SIGN_IN) {
+            Ok((decision, _)) if !decision.complete && !decision.offers.is_empty() => {
+                let setup = steps::setup_offer(inner, request, conn, &pending, &decision);
+                return Response::text(
+                    status,
+                    "text/html; charset=utf-8",
+                    page::render_step(&pending.user, &decision.methods(), notice, retry, setup),
+                )
+                .with("Content-Security-Policy", page::POLICY.to_owned());
+            }
+            Err(steps::Stale::Unavailable) => {
+                return Response::text(
+                    503,
+                    "text/html; charset=utf-8",
+                    page::render(&[], Some(page::Notice::Unavailable), None),
+                )
+                .with("Content-Security-Policy", page::POLICY.to_owned());
+            }
+            _ => {
+                inner.pendings.close(&token);
+                stale = true;
+            }
+        }
+    }
+    let mut response = login_first(inner, request, conn, status, notice, retry);
+    if stale {
+        response = response.with("Set-Cookie", steps::clear_pending());
+    }
+    response
+}
+
+/// The page of the first step.
+fn login_first(
     inner: &Inner,
     request: &Request,
     conn: &Conn,
@@ -750,8 +828,19 @@ fn asset(kind: &'static str, body: &'static str) -> Response {
     Response::text(200, kind, body).replacing("Cache-Control", "no-cache".to_owned())
 }
 
-/// What a browser may ask before it signs in: the ways in this portal accepts here.
+/// What a browser may ask before it signs in: the ways in this portal accepts here, or, once its sign-in has passed a step, the
+/// next ones, which `"step": "next"` says.
 fn methods_response(inner: &Inner, request: &Request, conn: &Conn) -> Response {
+    if let Some((_, pending)) = steps::pending_of(inner, request, session::Purpose::SignIn) {
+        match steps::decide_pending(inner, request, conn, &pending, purposes::SIGN_IN) {
+            Ok((decision, _)) if !decision.complete && !decision.offers.is_empty() => {
+                let ids: Vec<&str> = decision.methods().into_iter().map(Method::id).collect();
+                return Response::json(200, &serde_json::json!({ "step": "next", "methods": ids }));
+            }
+            Err(steps::Stale::Unavailable) => return Response::refusal(503),
+            _ => {}
+        }
+    }
     let Some(decision) = offer_for(inner, request, conn) else {
         return Response::refusal(503);
     };
@@ -815,6 +904,14 @@ fn host_for(
         })
 }
 
+/// Whether a one-time or recovery code is among the steps that made the session.
+fn coded(session: &Session) -> bool {
+    session
+        .done
+        .iter()
+        .any(|done| done.method == methods::TOTP || done.method == methods::RECOVERY_CODE)
+}
+
 /// Whether the session may be used now, asked at each use that starts or reaches a host, shows who the person is or changes their
 /// certificate: the account must still be the one that signed in, and the policy decides again with the steps the session was
 /// opened with, the account's groups now and the address the browser is at now. A session carried to where its method is no
@@ -829,6 +926,7 @@ fn resume(
     let groups = match inner.accounts.still(&session.user, session.uid) {
         Standing::Gone => {
             inner.sessions.close_user(&session.user);
+            inner.pendings.close_user(&session.user);
             tracing::info!(
                 "{} is no longer an account: its sessions ended",
                 session.user
@@ -844,6 +942,36 @@ fn resume(
             return Err(Response::refusal(503));
         }
     };
+    // A session made with a one-time code does not outlive the code: an administrator's reset ends it at its next use.
+    if coded(session) {
+        let (standing, made) = inner.accounts.factor_record(&session.user, session.uid);
+        match standing {
+            FactorStanding::NotEnrolled | FactorStanding::Disabled | FactorStanding::Reset => {
+                inner.sessions.close_user(&session.user);
+                inner.pendings.close_user(&session.user);
+                tracing::info!(
+                    "{}'s one-time code is gone: its sessions ended",
+                    session.user
+                );
+                return Err(Response::refusal(401));
+            }
+            FactorStanding::Unknown => {
+                tracing::warn!("the one-time codes could not be read: the request is not served");
+                return Err(Response::refusal(503));
+            }
+            _ => {}
+        }
+        // The code that made the session is the one the account has: one set up again since is another factor.
+        if made != session.code_made {
+            inner.sessions.close_user(&session.user);
+            inner.pendings.close_user(&session.user);
+            tracing::info!(
+                "{}'s one-time code was set up again: the sessions made with the old one ended",
+                session.user
+            );
+            return Err(Response::refusal(401));
+        }
+    }
     let address = client_address(inner, request, conn);
     let context = policy::context(
         purposes::RESUME,
@@ -910,7 +1038,9 @@ fn answer(inner: &Inner, request: &Request, conn: &Conn) -> Response {
             Some(_) => Response::refusal(403),
             None => Response::refusal(401),
         },
-        ("POST", LOGIN) => sign_in(inner, request, conn, started),
+        ("POST", LOGIN) => steps::sign_in(inner, request, conn, started),
+        ("GET" | "HEAD", FACTOR) => factor::show(inner, request, conn),
+        ("POST", FACTOR) => factor::act(inner, request, conn, started),
         ("POST", "/portal/logout") => {
             if !from_own_page(request, conn) {
                 return Response::refusal(403);
@@ -985,267 +1115,6 @@ fn presented(request: &Request) -> Vec<(String, String)> {
         })
         .cloned()
         .collect()
-}
-
-fn sign_in(inner: &Inner, request: &Request, conn: &Conn, started: Instant) -> Response {
-    if !from_own_page(request, conn) {
-        return Response::refusal(403);
-    }
-    if !request
-        .header("content-type")
-        .is_some_and(|kind| kind.starts_with("application/x-www-form-urlencoded"))
-    {
-        return Response::refusal(400);
-    }
-    let address = client_of(inner, request, conn);
-    let seen = client_address(inner, request, conn);
-    let method = match form_field(&request.body, "method").as_deref() {
-        None | Some("password") => Method::Password,
-        Some("certificate") => Method::Certificate,
-        Some(_) => return Response::refusal(400),
-    };
-    // Decided on this request's own, before the throttle counts it and before any provider is asked: a method the policy does
-    // not offer from here costs the directory nothing and counts against no one.
-    let Some(decision) = offer_for(inner, request, conn) else {
-        return login_response(
-            inner,
-            request,
-            conn,
-            503,
-            Some(page::Notice::Unavailable),
-            None,
-        );
-    };
-    let Some(offer) = decision.offer(method) else {
-        tracing::info!(
-            "a {} sign-in from {} is not accepted (rule {})",
-            method.id(),
-            shown(seen),
-            decision.rule_name()
-        );
-        return Response::refusal(403);
-    };
-    // A certificate try whose request carries no certificate is no guess: the browser chose none, and a person told to try again
-    // would be locked out by their own clicks. It is not counted and no provider is asked.
-    if method == Method::Certificate && !inner.accounts.carries_certificate(&presented(request)) {
-        tracing::info!(
-            "a certificate sign-in from {} carried no certificate",
-            shown(seen)
-        );
-        return login_response(
-            inner,
-            request,
-            conn,
-            401,
-            Some(page::Notice::NoCertificate),
-            None,
-        );
-    }
-    let providers = offer.providers.clone();
-    let (user, password, key) = match method {
-        Method::Certificate => (String::new(), String::new(), String::new()),
-        _ => {
-            let (Some(user), Some(password)) = (
-                form_field(&request.body, "user"),
-                form_field(&request.body, "password"),
-            ) else {
-                return Response::refusal(400);
-            };
-            let key: String = user.trim().to_ascii_lowercase().chars().take(64).collect();
-            (user, password, key)
-        }
-    };
-    let refused = match method {
-        Method::Certificate => page::Notice::Certificate,
-        _ => page::Notice::Failed,
-    };
-    // Counted as a failure as it is let through, before the accounts are asked, so that tries made together cannot all pass the
-    // limit and a refused try never reaches the directory, where it could lock an account.
-    let begun = match method {
-        Method::Certificate => inner.throttle.begin_certificate(address),
-        _ => inner.throttle.begin(address, &key),
-    };
-    let Some(attempt) = begun else {
-        tracing::info!("a sign-in from {address} was refused for its failures");
-        let wait = inner.settings.failure_window.as_secs();
-        return after_floor(
-            inner,
-            started,
-            login_response(
-                inner,
-                request,
-                conn,
-                429,
-                Some(page::Notice::Throttled),
-                Some(wait),
-            )
-            .with("Retry-After", wait.to_string()),
-        );
-    };
-    if !attempt.wait.is_zero() {
-        thread::sleep(attempt.wait);
-    }
-    if inner.signing_in.fetch_add(1, Ordering::SeqCst) >= inner.settings.max_sign_ins {
-        inner.signing_in.fetch_sub(1, Ordering::SeqCst);
-        // Nothing was asked of the accounts, so nothing counts against the address.
-        inner.throttle.succeeded(attempt);
-        return login_response(inner, request, conn, 503, Some(page::Notice::Busy), None);
-    }
-    let result = match method {
-        Method::Certificate => {
-            inner
-                .accounts
-                .sign_in_certificate(&presented(request), address, &providers)
-        }
-        _ => inner.accounts.sign_in(user.trim(), &password, &providers),
-    };
-    inner.signing_in.fetch_sub(1, Ordering::SeqCst);
-    match result {
-        SignIn::Admitted {
-            user,
-            uid,
-            groups,
-            provider,
-        } if !crate::portal_link::system_uid(uid) && uid >= inner.settings.min_uid => {
-            // Decided again now that the credential names someone: the steps passed so far must be enough, and one that is not
-            // is answered, counted and slowed as a wrong password is, so nothing tells the two apart.
-            let factor = policy::factor(method, &provider, uid);
-            let after = inner.policy.decide(policy::context(
-                purposes::SIGN_IN,
-                seen,
-                Some(policy::person(&user, uid, &groups)),
-                vec![factor.clone()],
-            ));
-            match after {
-                Ok(after) if after.complete => {}
-                Ok(after) => {
-                    tracing::info!(
-                        "a {} sign-in from {} is not enough (rule {})",
-                        method.id(),
-                        shown(seen),
-                        after.rule_name()
-                    );
-                    return after_floor(
-                        inner,
-                        started,
-                        login_response(inner, request, conn, 401, Some(refused), None),
-                    );
-                }
-                // A policy that cannot decide once the credential names someone is a refusal, as a policy that decides against is:
-                // the answer must not tell a person whose password is right from one whose is not.
-                Err(why) => {
-                    tracing::warn!("the sign-in policy could not decide: {why}");
-                    return after_floor(
-                        inner,
-                        started,
-                        login_response(inner, request, conn, 401, Some(refused), None),
-                    );
-                }
-            }
-            let by_password = method == Method::Password;
-            // What the browser offered with this sign-in: the only certificate a pin from this session may be, unless the
-            // password is typed again.
-            let status = if conn.from_proxy() {
-                inner
-                    .accounts
-                    .certificate_status(&user, uid, &presented(request))
-            } else {
-                None
-            };
-            let seen = status.and_then(|status| status.presented);
-            let fingerprint = seen.as_ref().map(|(cert, _)| cert.fingerprint.clone());
-            let Some((token, _)) =
-                inner
-                    .sessions
-                    .open_with(&user, uid, Some(method), fingerprint, vec![factor])
-            else {
-                inner.throttle.succeeded(attempt);
-                return login_response(inner, request, conn, 503, Some(page::Notice::Busy), None);
-            };
-            inner.throttle.succeeded(attempt);
-            tracing::info!("{user} signed in from {address} by {}", method.id());
-            // A person who signed in by password with a certificate their account does not use yet is offered to pin it.
-            let offered = by_password
-                && seen.is_some_and(|(cert, state)| state == PinState::Unpinned && !cert.expired);
-            Response::redirect(if offered { CERTIFICATE } else { "/" }).with(
-                "Set-Cookie",
-                format!(
-                    "{COOKIE}={token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={}",
-                    inner.settings.session.as_secs()
-                ),
-            )
-        }
-        // Counted like any failed try; the log says which kind it was, and never the certificate.
-        SignIn::NoCertificate => certificate_failure(
-            inner,
-            request,
-            conn,
-            started,
-            address,
-            "absent",
-            page::Notice::NoCertificate,
-        ),
-        SignIn::Expired => certificate_failure(
-            inner,
-            request,
-            conn,
-            started,
-            address,
-            "expired",
-            page::Notice::CertificateExpired,
-        ),
-        SignIn::Unpinned => certificate_failure(
-            inner,
-            request,
-            conn,
-            started,
-            address,
-            "pinned to no account",
-            page::Notice::CertificateUnpinned,
-        ),
-        // An account the accounts admit that the portal does not (root, or below the lowest user id) is refused as any other.
-        SignIn::Admitted { .. } | SignIn::Refused => {
-            tracing::info!("a {} sign-in from {address} failed", method.id());
-            after_floor(
-                inner,
-                started,
-                login_response(inner, request, conn, 401, Some(refused), None),
-            )
-        }
-        SignIn::Failed(why) => {
-            tracing::warn!("the accounts could not be asked: {why}");
-            after_floor(
-                inner,
-                started,
-                login_response(
-                    inner,
-                    request,
-                    conn,
-                    503,
-                    Some(page::Notice::Unavailable),
-                    None,
-                ),
-            )
-        }
-    }
-}
-
-/// The answer to a certificate try that failed in a way the person can act on; the log says which, never the certificate.
-fn certificate_failure(
-    inner: &Inner,
-    request: &Request,
-    conn: &Conn,
-    started: Instant,
-    address: IpAddr,
-    why: &str,
-    notice: page::Notice,
-) -> Response {
-    tracing::info!("a certificate sign-in from {address} failed: the certificate is {why}");
-    after_floor(
-        inner,
-        started,
-        login_response(inner, request, conn, 401, Some(notice), None),
-    )
 }
 
 /// Whether the password typed to sign this session in, within `enrol`, was typed with the certificate `fingerprint` offered: then
@@ -1706,10 +1575,37 @@ fn upgrade(inner: &Inner, conn: &mut Conn, request: &Request) {
         return;
     }
     let id = session.id;
+    // A channel outlives the request that opened it, so a session made with a code is looked at again every few seconds: a reset
+    // ends its channels too.
+    let looked = Mutex::new(Instant::now());
     relay::run(
         conn,
         channel,
-        &|| inner.sessions.alive(id),
+        &|| {
+            if !inner.sessions.alive(id) {
+                return false;
+            }
+            if coded(&session) {
+                let mut at = looked.lock().unwrap_or_else(PoisonError::into_inner);
+                if at.elapsed() >= CODE_LOOK {
+                    *at = Instant::now();
+                    // One read says both; one that fails keeps the channel, as a request that cannot be served is answered
+                    // `503` and keeps its session.
+                    let (standing, made) = inner.accounts.factor_record(&session.user, session.uid);
+                    if matches!(
+                        standing,
+                        FactorStanding::NotEnrolled
+                            | FactorStanding::Disabled
+                            | FactorStanding::Reset
+                    ) || (standing == FactorStanding::Enrolled && made != session.code_made)
+                    {
+                        inner.sessions.close_id(id);
+                        return false;
+                    }
+                }
+            }
+            true
+        },
         &inner.stopped,
         max_message,
         inner.settings.ping,

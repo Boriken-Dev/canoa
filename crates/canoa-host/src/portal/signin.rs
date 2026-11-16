@@ -93,6 +93,10 @@ pub enum Method {
     Password,
     /// A client certificate that the proxy verified and forwards in a header; only on the proxy's socket.
     Certificate,
+    /// A one-time code from an authenticator app. It is checked for an account an earlier step named.
+    Totp,
+    /// A one-time recovery code made when the code was set up. It is checked for an account an earlier step named.
+    RecoveryCode,
 }
 
 impl Method {
@@ -102,16 +106,95 @@ impl Method {
         match self {
             Self::Password => "password",
             Self::Certificate => "certificate",
+            Self::Totp => "totp",
+            Self::RecoveryCode => "recovery_code",
         }
     }
 
     /// The method a policy's word names, if the portal has it.
     #[must_use]
     pub fn from_id(word: &str) -> Option<Self> {
-        [Self::Password, Self::Certificate]
-            .into_iter()
-            .find(|method| method.id() == word)
+        [
+            Self::Password,
+            Self::Certificate,
+            Self::Totp,
+            Self::RecoveryCode,
+        ]
+        .into_iter()
+        .find(|method| method.id() == word)
     }
+
+    /// Whether the method checks a code against an account an earlier step already named, so it is never offered first.
+    #[must_use]
+    pub const fn needs_account(self) -> bool {
+        matches!(self, Self::Totp | Self::RecoveryCode)
+    }
+}
+
+/// What a one-time code came to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CodeCheck {
+    /// The code is the person's; the id is the provider that accepted it.
+    Valid {
+        /// The provider that accepted the code, which the sign-in policy's `providers` read.
+        provider: String,
+    },
+    /// Not accepted: wrong, used, expired, for an account with no code set up or one the provider has disabled.
+    Refused,
+    /// The store could not be asked; the reason is for the log, never for the browser.
+    Failed(String),
+}
+
+/// Whether a person has a one-time code set up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FactorStanding {
+    /// A code is set up and in use.
+    Enrolled,
+    /// A code is set up and an administrator disabled it.
+    Disabled,
+    /// An administrator reset it: none is set up, and only an administrator sets one up again.
+    Reset,
+    /// None is set up.
+    NotEnrolled,
+    /// This portal keeps no one-time codes.
+    Unsupported,
+    /// The store could not be read.
+    Unknown,
+}
+
+/// A one-time code just begun for a person: nothing is a factor until its first code confirms it.
+#[derive(Clone, PartialEq, Eq)]
+#[must_use]
+pub struct Enrolment {
+    /// The `otpauth://` link an authenticator app reads, a secret in it.
+    pub uri: String,
+    /// The recovery codes, shown once.
+    pub codes: Vec<String>,
+}
+
+impl core::fmt::Debug for Enrolment {
+    /// Nothing of the link or the codes: they are the factor.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Enrolment")
+            .field("codes", &self.codes.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Why a one-time code was not begun, confirmed or reset.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FactorError {
+    /// This portal keeps no one-time codes.
+    Unsupported,
+    /// No setup was waiting for a code, or it timed out.
+    NothingWaiting,
+    /// The code did not confirm the setup.
+    Wrong,
+    /// The store could not be read or written; the reason is for the log.
+    Failed(String),
 }
 
 /// Whoever says if a credential is an account.
@@ -175,6 +258,75 @@ pub trait Accounts: Send + Sync {
     ) -> SignIn {
         let _ = (headers, client, providers);
         SignIn::Refused
+    }
+
+    /// Checks `code`, a one-time code (`Method::Totp`) or a recovery code (`Method::RecoveryCode`), for the account with user id
+    /// `uid`, which an earlier step named: the code is never presented with any other name. Asks only the providers in
+    /// `providers`, or every one that takes codes when it is empty. The default refuses.
+    fn check_code(
+        &self,
+        user: &str,
+        uid: u32,
+        method: Method,
+        code: &str,
+        providers: &[String],
+    ) -> CodeCheck {
+        let _ = (user, uid, method, code, providers);
+        CodeCheck::Refused
+    }
+
+    /// Whether the account `user` with user id `uid` has a one-time code set up, and when it was set up, read together: one read
+    /// that fails is [`FactorStanding::Unknown`], never a code that is not there. A code belongs to the pair, so an account made
+    /// again under the same user id and another name has none, and counts as reset. A session made with a code keeps the time
+    /// and ends when it changes, so a code set up again does not carry the sessions of the one it replaced.
+    fn factor_record(&self, user: &str, uid: u32) -> (FactorStanding, Option<i64>) {
+        let _ = (user, uid);
+        (FactorStanding::Unsupported, None)
+    }
+
+    /// [`Accounts::factor_record`]'s standing.
+    fn factor_standing(&self, user: &str, uid: u32) -> FactorStanding {
+        self.factor_record(user, uid).0
+    }
+
+    /// When an administrator last cleared the account's failure counts (milliseconds since the epoch): the portal that sees a
+    /// later time than it last acted on forgets what it counted for the account.
+    fn unlock_stamp(&self, user: &str, uid: u32) -> Option<i64> {
+        let _ = (user, uid);
+        None
+    }
+
+    /// Begins setting up a one-time code for the account, replacing a setup already waiting; `user` is also the name the app
+    /// shows. The code that is in use keeps working until a first code confirms the new one.
+    ///
+    /// # Errors
+    ///
+    /// [`FactorError`] for a portal that keeps no codes or a store that cannot be written.
+    fn begin_factor(&self, user: &str, uid: u32) -> Result<Enrolment, FactorError> {
+        let _ = (user, uid);
+        Err(FactorError::Unsupported)
+    }
+
+    /// Confirms the setup waiting for `uid` with the first code from the app, which makes it the account's code; the id of the
+    /// provider that now holds it.
+    ///
+    /// # Errors
+    ///
+    /// [`FactorError`] when nothing waits, the code is wrong or the store fails.
+    fn confirm_factor(&self, user: &str, uid: u32, code: &str) -> Result<String, FactorError> {
+        let _ = (user, uid, code);
+        Err(FactorError::Unsupported)
+    }
+
+    /// Removes the account's one-time code and any setup waiting, and marks the account reset, so that it is not open to setting
+    /// one up for itself: an administrator sets the next one up. Whether there was one.
+    ///
+    /// # Errors
+    ///
+    /// [`FactorError`] when the store cannot be written.
+    fn reset_factor(&self, user: &str, uid: u32) -> Result<bool, FactorError> {
+        let _ = (user, uid);
+        Err(FactorError::Unsupported)
     }
 
     /// Whether `user` is still the account with user id `uid`, asked again each time a host is wanted, so an account that was

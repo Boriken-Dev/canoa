@@ -28,13 +28,15 @@ json = []
 web = []
 # `canoa portal`: sign users in through the operating system's accounts and give each their own host, as themselves. Unix only;
 # it links the system's libpam.
-portal = ["dep:coqui-access", "dep:coqui-access-system", "dep:coqui-access-signin", "dep:coqui-peer-tls", "dep:tungstenite"]
+portal = ["dep:coqui-access", "dep:coqui-access-system", "dep:coqui-access-signin", "dep:coqui-access-kit", "dep:coqui-peer-tls", "dep:qrcode", "dep:tungstenite"]
 
 [dependencies]
 coqui-access = { workspace = true, optional = true }
 coqui-access-system = { workspace = true, optional = true }
 coqui-access-signin = { workspace = true, optional = true }
+coqui-access-kit = { workspace = true, optional = true }
 coqui-peer-tls = { workspace = true, optional = true }
+qrcode = { workspace = true, optional = true }
 # The WebSocket handshake of the portal's relay, which checks the session before it upgrades; already in the graph through
 # coqui-transport-web.
 tungstenite = { workspace = true, optional = true, features = ["handshake"] }
@@ -99,7 +101,7 @@ tracing-subscriber.workspace = true
 # Ends a provider's process group, through a safe call; and passes the descriptors of a child's standard streams to the host's own
 # process starter, over a socket (`spawn`).
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true, features = ["process", "net", "event"] }
+rustix = { workspace = true, features = ["process", "net", "event", "fs"] }
 
 # The operating system's credential store: Secret Service on a Linux or other Unix desktop.
 [target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
@@ -180,4 +182,8 @@ alloc_instead_of_core = "warn"
 [target.'cfg(unix)'.dev-dependencies]
 coqui-access-password-plugin.workspace = true
 coqui-access-mtls-plugin.workspace = true
+coqui-access-totp-plugin.workspace = true
 coqui-access-signin = { workspace = true, features = ["test-support"] }
+# The tests compute the code an authenticator app shows (RFC 6238) without the provider's help.
+hmac = "0.13"
+sha1 = { version = "0.11", default-features = false }

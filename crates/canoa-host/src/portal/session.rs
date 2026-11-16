@@ -36,6 +36,8 @@ pub struct Session {
     pub fingerprint: Option<String>,
     /// The steps that signed it in, which the sign-in policy is asked about again each time it is used.
     pub done: Vec<Factor>,
+    /// When the one-time code that signed it in was set up, if one did: the session ends when the account's code is not that one.
+    pub code_made: Option<i64>,
 }
 
 struct Kept {
@@ -47,6 +49,7 @@ struct Kept {
     method: Option<Method>,
     fingerprint: Option<String>,
     done: Vec<Factor>,
+    code_made: Option<i64>,
 }
 
 /// The sessions of signed-in browsers, by the digest of the token the browser holds: the token itself is never kept.
@@ -95,7 +98,26 @@ impl Sessions {
         fingerprint: Option<String>,
         done: Vec<Factor>,
     ) -> Option<(String, Session)> {
-        let password = method == Some(Method::Password);
+        let password_at = (method == Some(Method::Password)).then(Instant::now);
+        self.open_after(user, uid, method, password_at, fingerprint, done, None)
+    }
+
+    /// [`Sessions::open_with`] for a sign-in whose password, if it had one, was typed at `password_at`: a step before the one
+    /// that completed it.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "everything a session records of the sign-in that made it"
+    )]
+    pub fn open_after(
+        &self,
+        user: &str,
+        uid: u32,
+        method: Option<Method>,
+        password_at: Option<Instant>,
+        fingerprint: Option<String>,
+        done: Vec<Factor>,
+        code_made: Option<i64>,
+    ) -> Option<(String, Session)> {
         let mut bytes = [0_u8; TOKEN_BYTES];
         getrandom::fill(&mut bytes).ok()?;
         let token = BASE64URL_NOPAD.encode(&bytes);
@@ -127,10 +149,11 @@ impl Sessions {
                 uid,
                 id,
                 until: now.checked_add(self.lifetime)?,
-                password_at: password.then_some(now),
+                password_at,
                 method,
                 fingerprint: fingerprint.clone(),
                 done: done.clone(),
+                code_made,
             },
         );
         Some((
@@ -139,10 +162,11 @@ impl Sessions {
                 user: user.to_owned(),
                 uid,
                 id,
-                password_at: password.then_some(now),
+                password_at,
                 method,
                 fingerprint,
                 done,
+                code_made,
             },
         ))
     }
@@ -168,6 +192,7 @@ impl Sessions {
             method: kept.method,
             fingerprint: kept.fingerprint.clone(),
             done: kept.done.clone(),
+            code_made: kept.code_made,
         })
     }
 
@@ -192,16 +217,212 @@ impl Sessions {
     pub fn close_certificates(&self, user: &str, keep: Option<&str>) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.1.retain(|_, kept| {
+            let by_certificate = kept.method == Some(Method::Certificate)
+                || kept
+                    .done
+                    .iter()
+                    .any(|done| done.method == Method::Certificate.id());
             kept.user != user
-                || kept.method != Some(Method::Certificate)
+                || !by_certificate
                 || (keep.is_some() && kept.fingerprint.as_deref() == keep)
         });
+    }
+
+    /// Ends the session `id` names, for a relay that finds it no longer stands.
+    pub fn close_id(&self, id: u64) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.1.retain(|_, kept| kept.id != id);
     }
 
     /// Ends every session of `user`.
     pub fn close_user(&self, user: &str) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.1.retain(|_, kept| kept.user != user);
+    }
+}
+
+/// What a pending step is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Purpose {
+    /// A sign-in that has passed a step and is asked for the next.
+    SignIn,
+    /// A signed-in person who is asked their factors again before they may set a code up; bound to that session.
+    Enrol,
+}
+
+/// A sign-in, or a setup of a second factor, that has passed some steps and waits for the rest.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pending {
+    /// The account the steps named, as the system spells it.
+    pub user: String,
+    /// Its user id: the next step must name the same one.
+    pub uid: u32,
+    /// What the steps are for.
+    pub purpose: Purpose,
+    /// For [`Purpose::Enrol`], the session that asked.
+    pub session: Option<u64>,
+    /// The steps passed so far.
+    pub done: Vec<Factor>,
+    /// The tries made so far at the steps after the first, right or wrong.
+    pub tries: usize,
+    /// The method of the first step, which the session it opens records.
+    pub first: Option<Method>,
+    /// When a password step was passed, if one was.
+    pub password_at: Option<Instant>,
+    /// The fingerprint of the certificate a step carried: what a pin made from the session it opens may be.
+    pub fingerprint: Option<String>,
+}
+
+struct KeptPending {
+    pending: Pending,
+    id: u64,
+    until: Instant,
+}
+
+/// Whether a try at a pending step may begin.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Tried {
+    /// The try is counted.
+    Allowed,
+    /// The pending state is gone, expired, or has used up its tries: the person starts again.
+    Ended,
+}
+
+/// The pending steps of browsers, by the digest of the token the browser holds. Short-lived, bounded and held in memory only, so
+/// a restart of the portal starts everyone's pending sign-in over.
+pub struct Pendings {
+    lifetime: Duration,
+    max_tries: usize,
+    limit: usize,
+    per_user: usize,
+    state: Mutex<(u64, HashMap<[u8; 32], KeptPending>)>,
+}
+
+impl core::fmt::Debug for Pendings {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Pendings").finish_non_exhaustive()
+    }
+}
+
+impl Pendings {
+    /// Pending steps that last `lifetime`, allow `max_tries` tries each, `limit` at once and `per_user` for one account.
+    #[must_use]
+    pub fn new(lifetime: Duration, max_tries: usize, limit: usize, per_user: usize) -> Self {
+        Self {
+            lifetime,
+            max_tries,
+            limit,
+            per_user: per_user.max(1),
+            state: Mutex::new((0, HashMap::new())),
+        }
+    }
+
+    /// Keeps `pending` for the browser that holds the token returned, ending the oldest of the same account when it holds its
+    /// share already. `None` when the table is full of live ones of others.
+    pub fn open(&self, pending: Pending) -> Option<String> {
+        self.open_for(pending, self.lifetime)
+    }
+
+    /// [`Pendings::open`] for a pending state that lasts `lifetime` rather than the usual.
+    pub fn open_for(&self, pending: Pending, lifetime: Duration) -> Option<String> {
+        let mut bytes = [0_u8; TOKEN_BYTES];
+        getrandom::fill(&mut bytes).ok()?;
+        let token = BASE64URL_NOPAD.encode(&bytes);
+        let now = Instant::now();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let (next, map) = &mut *state;
+        map.retain(|_, kept| kept.until > now);
+        let mut mine: Vec<([u8; 32], u64)> = map
+            .iter()
+            .filter(|(_, kept)| kept.pending.user == pending.user)
+            .map(|(key, kept)| (*key, kept.id))
+            .collect();
+        if mine.len() >= self.per_user {
+            mine.sort_by_key(|(_, id)| *id);
+            for (key, _) in mine.iter().take(mine.len() + 1 - self.per_user) {
+                map.remove(key);
+            }
+        }
+        if map.len() >= self.limit {
+            return None;
+        }
+        *next += 1;
+        let id = *next;
+        map.insert(
+            digest(&token),
+            KeptPending {
+                pending,
+                id,
+                until: now.checked_add(lifetime)?,
+            },
+        );
+        Some(token)
+    }
+
+    /// The pending state `token` names, while it lives.
+    pub fn get(&self, token: &str) -> Option<Pending> {
+        if token.is_empty() || token.len() > 128 {
+            return None;
+        }
+        let now = Instant::now();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = digest(token);
+        let kept = state.1.get(&key)?;
+        if kept.until <= now {
+            state.1.remove(&key);
+            return None;
+        }
+        Some(kept.pending.clone())
+    }
+
+    /// Counts a try at the step `token` waits for. A pending state that has had its tries, or is gone, ends and is not given
+    /// another: the person starts again.
+    pub fn begin_try(&self, token: &str) -> Tried {
+        let now = Instant::now();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = digest(token);
+        let Some(kept) = state.1.get_mut(&key) else {
+            return Tried::Ended;
+        };
+        if kept.until <= now || kept.pending.tries >= self.max_tries {
+            state.1.remove(&key);
+            return Tried::Ended;
+        }
+        kept.pending.tries += 1;
+        Tried::Allowed
+    }
+
+    /// Replaces the steps passed of the pending state `token` names; false when it is gone.
+    pub fn record(&self, token: &str, pending: &Pending) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        match state.1.get_mut(&digest(token)) {
+            Some(kept) => {
+                // The tries stay as the store counted them: a state read before a try began would otherwise give it back.
+                let tries = kept.pending.tries;
+                kept.pending = pending.clone();
+                kept.pending.tries = tries;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Ends the pending state `token` names.
+    pub fn close(&self, token: &str) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.1.remove(&digest(token));
+    }
+
+    /// Ends every pending state of `user`.
+    pub fn close_user(&self, user: &str) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.1.retain(|_, kept| kept.pending.user != user);
+    }
+
+    /// How long a pending state lasts.
+    #[must_use]
+    pub const fn lifetime(&self) -> Duration {
+        self.lifetime
     }
 }
 
@@ -212,6 +433,9 @@ pub struct Throttle {
     per_address: usize,
     slow_after: usize,
     slow: Duration,
+    per_person: usize,
+    per_day: usize,
+    day: Duration,
     state: Mutex<Counts>,
 }
 
@@ -221,6 +445,8 @@ struct Counts {
     pairs: BTreeMap<(Subject, IpAddr), Vec<(u64, Instant)>>,
     addresses: BTreeMap<IpAddr, Vec<(u64, Instant)>>,
     users: BTreeMap<Subject, Vec<(u64, Instant)>>,
+    people: BTreeMap<u32, Vec<(u64, Instant)>>,
+    days: BTreeMap<u32, Vec<(u64, Instant)>>,
 }
 
 impl core::fmt::Debug for Throttle {
@@ -249,6 +475,15 @@ pub struct Attempt {
     id: u64,
     /// How long the try waits before the accounts are asked: the account's failures, from anywhere, make it slower.
     pub wait: Duration,
+}
+
+/// A try at a second step that was let through, and counts against the person until [`Throttle::person_succeeded`] says it did
+/// not fail.
+#[derive(Debug)]
+#[must_use]
+pub struct PersonTry {
+    uid: u32,
+    id: u64,
 }
 
 /// An IPv6 address is the whole /64 it sits in, since one browser has all of it.
@@ -311,7 +546,78 @@ impl Throttle {
             per_address,
             slow_after,
             slow,
+            per_person: usize::MAX,
+            per_day: usize::MAX,
+            day: Duration::from_secs(24 * 3600),
             state: Mutex::new(Counts::default()),
+        }
+    }
+
+    /// Refuses a try at a second step for a person after `limit` failures of it, from any address, in the window.
+    #[must_use]
+    pub fn with_person_limit(mut self, limit: usize) -> Self {
+        self.per_person = limit;
+        self
+    }
+
+    /// Also refuses a try at a second step for a person after `limit` failures of it, from any address, in `day`: a guesser who
+    /// keeps under the window's limit is stopped by this one.
+    #[must_use]
+    pub fn with_person_daily(mut self, limit: usize, day: Duration) -> Self {
+        self.per_day = limit;
+        self.day = day;
+        self
+    }
+
+    /// Lets a try at a step after the first, for the account with user id `uid`, through, or says which limit stopped it: the
+    /// window's or the day's. Counted as a failure as it is let through, like [`Throttle::begin`]; whoever the try came from, the
+    /// person's count rises, and it is forgotten when its failures leave the window. A refused try is not counted, so it does
+    /// not hold the window open.
+    ///
+    /// # Errors
+    ///
+    /// Which limit was reached.
+    pub fn begin_person(&self, uid: u32) -> Result<PersonTry, &'static str> {
+        let now = Instant::now();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let seen = state
+            .people
+            .get_mut(&uid)
+            .map_or(0, |times| recent(times, self.window, now));
+        if seen >= self.per_person {
+            return Err("in the window");
+        }
+        let today = state
+            .days
+            .get_mut(&uid)
+            .map_or(0, |times| recent(times, self.day, now));
+        if today >= self.per_day {
+            return Err("in the day");
+        }
+        state.next += 1;
+        let id = state.next;
+        state.people.entry(uid).or_default().push((id, now));
+        state.days.entry(uid).or_default().push((id, now));
+        trim(&mut state.people, self.window, now);
+        trim(&mut state.days, self.day, now);
+        Ok(PersonTry { uid, id })
+    }
+
+    /// Forgets what was counted against the account with user id `uid`: an administrator's unlock.
+    pub fn clear_person(&self, uid: u32) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.people.remove(&uid);
+        state.days.remove(&uid);
+    }
+
+    /// The try at a second step did not fail: its count is taken back.
+    pub fn person_succeeded(&self, attempt: PersonTry) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(times) = state.people.get_mut(&attempt.uid) {
+            times.retain(|(each, _)| *each != attempt.id);
+        }
+        if let Some(times) = state.days.get_mut(&attempt.uid) {
+            times.retain(|(each, _)| *each != attempt.id);
         }
     }
 
@@ -628,5 +934,78 @@ mod tests {
         let _b = throttle.begin(same, "b").unwrap();
         assert!(throttle.begin(one, "c").is_none());
         assert!(throttle.begin(other, "c").is_some());
+    }
+
+    fn pending(user: &str) -> Pending {
+        Pending {
+            user: user.to_owned(),
+            uid: 1,
+            purpose: Purpose::SignIn,
+            session: None,
+            done: Vec::new(),
+            tries: 0,
+            first: Some(Method::Password),
+            password_at: None,
+            fingerprint: None,
+        }
+    }
+
+    #[test]
+    fn a_pending_state_ends_after_its_tries_and_recording_steps_never_gives_a_try_back() {
+        let pendings = Pendings::new(Duration::from_secs(60), 2, 10, 4);
+        let token = pendings.open(pending("a")).unwrap();
+        let stale = pendings.get(&token).unwrap();
+        assert_eq!(pendings.begin_try(&token), Tried::Allowed);
+        assert_eq!(pendings.begin_try(&token), Tried::Allowed);
+        // A state read before the tries and written back after them does not undo them.
+        assert!(pendings.record(&token, &stale));
+        assert_eq!(pendings.get(&token).unwrap().tries, 2);
+        assert_eq!(pendings.begin_try(&token), Tried::Ended);
+        assert!(pendings.get(&token).is_none());
+        assert_eq!(pendings.begin_try("not-a-token"), Tried::Ended);
+    }
+
+    #[test]
+    fn a_pending_state_ends_with_its_time_and_an_account_keeps_only_its_share() {
+        let short = Pendings::new(Duration::from_millis(30), 5, 10, 1);
+        let token = short.open(pending("a")).unwrap();
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(short.get(&token).is_none());
+        assert_eq!(short.begin_try(&token), Tried::Ended);
+        let one = Pendings::new(Duration::from_secs(60), 5, 10, 1);
+        let first = one.open(pending("a")).unwrap();
+        let other = one.open(pending("b")).unwrap();
+        let second = one.open(pending("a")).unwrap();
+        assert!(
+            one.get(&first).is_none() && one.get(&second).is_some() && one.get(&other).is_some()
+        );
+        one.close_user("a");
+        assert!(one.get(&second).is_none() && one.get(&other).is_some());
+        let full = Pendings::new(Duration::from_secs(60), 5, 1, 4);
+        full.open(pending("a")).unwrap();
+        assert!(
+            full.open(pending("b")).is_none(),
+            "the table is full of others"
+        );
+        // A token is long and never kept as itself.
+        assert!(one.open(pending("c")).unwrap().len() >= 43);
+    }
+
+    #[test]
+    fn a_persons_failures_from_any_address_stop_the_next_and_leave_the_window() {
+        let throttle = throttle(100, 100, 100).with_person_limit(2);
+        let one = throttle.begin_person(7).unwrap();
+        let two = throttle.begin_person(7).unwrap();
+        assert!(throttle.begin_person(7).is_err(), "the limit is reached");
+        assert!(
+            throttle.begin_person(8).is_ok(),
+            "another person has their own"
+        );
+        // A refused try is not counted, so it does not hold the window open; a right one takes its count back.
+        throttle.person_succeeded(one);
+        assert!(throttle.begin_person(7).is_ok());
+        drop(two);
+        std::thread::sleep(Duration::from_millis(250));
+        assert!(throttle.begin_person(7).is_ok(), "failures left the window");
     }
 }

@@ -915,6 +915,146 @@ fn the_network_rule_refuses_a_password_from_outside_and_takes_a_certificate_from
         .status();
 }
 
+/// A client certificate a CA signed that names `upn` in its alternative names, as a certificate from a directory's own CA does:
+/// the CA as PEM and the certificate as the proxy forwards it (DER in base64).
+struct TestCa {
+    params: rcgen::CertificateParams,
+    key: rcgen::KeyPair,
+    pem: String,
+}
+
+impl TestCa {
+    fn new(name: &str) -> Self {
+        use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair};
+        let key = KeyPair::generate().expect("a key");
+        let mut params = CertificateParams::new(Vec::<String>::new()).expect("parameters");
+        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        params.distinguished_name.push(DnType::CommonName, name);
+        let pem = params.self_signed(&key).expect("a CA").pem();
+        Self { params, key, pem }
+    }
+
+    /// A client certificate this CA signed that names `upn` in its alternative names, as the proxy forwards it (DER in base64).
+    fn issue(&self, upn: &str) -> String {
+        use rcgen::{
+            CertificateParams, DnType, ExtendedKeyUsagePurpose, Issuer, KeyPair, OtherNameValue,
+            SanType,
+        };
+        let key = KeyPair::generate().expect("a key");
+        let mut params = CertificateParams::new(Vec::<String>::new()).expect("parameters");
+        params
+            .distinguished_name
+            .push(DnType::CommonName, "a test person");
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        // The UPN is an `otherName` with the OID Microsoft gave it.
+        params.subject_alt_names = vec![SanType::OtherName((
+            vec![1, 3, 6, 1, 4, 1, 311, 20, 2, 3],
+            OtherNameValue::Utf8String(upn.to_owned()),
+        ))];
+        let issuer = Issuer::from_params(&self.params, &self.key);
+        let cert = params.signed_by(&key, &issuer).expect("a certificate");
+        data_encoding::BASE64.encode(cert.der())
+    }
+}
+
+#[test]
+#[ignore = "needs CANOA_TEST_PORTAL_USERS and the accounts tests/portal_users/setup.sh makes"]
+fn a_certificate_a_ca_signed_for_a_upn_signs_in_the_account_the_matcher_finds() {
+    if std::env::var_os("CANOA_TEST_PORTAL_USERS").is_none() {
+        panic!("CANOA_TEST_PORTAL_USERS is not set: run tests/portal_users/setup.sh first");
+    }
+    let _ = Command::new("sudo")
+        .args(["-n", "systemctl", "stop", &unit("canoatesta")])
+        .status();
+    let ca = TestCa::new("Canoa test CA");
+    let certificate = ca.issue("canoatesta@corp.example");
+    // The CA the portal trusts is this test's own, written where only root may change it.
+    let mut tee = Command::new("sudo")
+        .args(["-n", "tee", "/etc/canoatest/clients-ca.pem"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("tee");
+    tee.stdin
+        .take()
+        .expect("piped")
+        .write_all(ca.pem.as_bytes())
+        .expect("the CA is written");
+    assert!(tee.wait().expect("tee ends").success());
+    let _portal = start_portal_with("/opt/canoatest/portal_matcher.toml");
+    let outside = "203.0.113.7";
+    assert_eq!(methods_for(outside), json!(["certificate"]));
+
+    // The certificate names canoatesta by its UPN, and the directory has that account: it signs in, from anywhere.
+    let signed = sign_in_via_proxy("", "", outside, Some(&certificate));
+    assert_eq!(signed.status, 303, "{}", signed.body);
+    let cookie = signed.cookie().expect("a session");
+    let session = call_unix(
+        "GET",
+        "/portal/session",
+        &[
+            ("Cookie", cookie.clone()),
+            ("X-Forwarded-For", outside.to_owned()),
+        ],
+        "",
+    );
+    assert_eq!(session.status, 200, "{}", session.body);
+    assert_eq!(
+        serde_json::from_str::<Value>(&session.body).expect("json")["user"],
+        "canoatesta"
+    );
+    assert_eq!(index_via_proxy(&cookie, outside).status, 200);
+    assert_eq!(
+        process_uid(main_pid("canoatesta")),
+        uid_of("canoatesta"),
+        "its host runs as the account the matcher found"
+    );
+
+    // Not this account: another realm's name, an account outside the sign-in group, and one the system does not have.
+    for (index, upn) in [
+        "canoatesta@evil.example",
+        "canoatestc@corp.example",
+        "nobodyatall@corp.example",
+        "canoatestportal@corp.example",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let refused = ca.issue(upn);
+        let answer =
+            sign_in_via_proxy("", "", &format!("203.0.113.{}", 20 + index), Some(&refused));
+        assert_eq!(answer.status, 401, "{upn}: {}", answer.body);
+        assert!(answer.cookie().is_none());
+    }
+
+    // A certificate of a CA the portal does not trust is refused before any matching, whatever UPN it names.
+    let stranger = TestCa::new("Another CA").issue("canoatesta@corp.example");
+    assert_eq!(
+        sign_in_via_proxy("", "", "203.0.113.99", Some(&stranger)).status,
+        401
+    );
+
+    // The certificate on the loopback address, where no header is believed, never reaches the matcher.
+    let local = call(
+        _portal.addr,
+        "POST",
+        "/portal/login",
+        &[
+            ("Origin", origin(_portal.addr)),
+            ("X-Client-Cert", certificate.clone()),
+            (
+                "Content-Type",
+                "application/x-www-form-urlencoded".to_owned(),
+            ),
+        ],
+        "method=certificate",
+    );
+    assert_eq!(local.status, 403, "{}", local.body);
+    let _ = Command::new("sudo")
+        .args(["-n", "systemctl", "stop", &unit("canoatesta")])
+        .status();
+}
+
 /// Where setup.sh put the script, readable by every account.
 fn uds_script() -> String {
     "/opt/canoatest/uds.py".to_owned()

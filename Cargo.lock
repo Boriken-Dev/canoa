@@ -561,10 +561,12 @@ dependencies = [
  "clap",
  "coqui-a2a",
  "coqui-access",
+ "coqui-access-kit",
  "coqui-access-mtls-plugin",
  "coqui-access-password-plugin",
  "coqui-access-signin",
  "coqui-access-system",
+ "coqui-access-totp-plugin",
  "coqui-acp",
  "coqui-acp-api",
  "coqui-acp-bridge",
@@ -591,11 +593,13 @@ dependencies = [
  "getrandom 0.4.3",
  "guatiao",
  "guatiao-serde",
+ "hmac 0.13.0",
  "httparse",
  "indexmap 2.14.2",
  "is_elevated",
  "keyring-core",
  "percent-encoding",
+ "qrcode",
  "rcgen",
  "rpassword",
  "rustix",
@@ -603,6 +607,7 @@ dependencies = [
  "serde",
  "serde-saphyr",
  "serde_json",
+ "sha1",
  "sha2 0.10.9",
  "tar",
  "time",
@@ -799,7 +804,7 @@ dependencies = [
 [[package]]
 name = "coqui-access"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d7f0f377e1b5d9bfb399e628592419a8ce0ed96d#d7f0f377e1b5d9bfb399e628592419a8ce0ed96d"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
 dependencies = [
  "coqui-builder",
  "guatiao",
@@ -808,7 +813,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-claims"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d7f0f377e1b5d9bfb399e628592419a8ce0ed96d#d7f0f377e1b5d9bfb399e628592419a8ce0ed96d"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
 dependencies = [
  "coqui-access",
  "coqui-peer-tls",
@@ -820,7 +825,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-kit"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d7f0f377e1b5d9bfb399e628592419a8ce0ed96d#d7f0f377e1b5d9bfb399e628592419a8ce0ed96d"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
 dependencies = [
  "argon2",
  "coqui-access",
@@ -837,7 +842,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-mtls"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d7f0f377e1b5d9bfb399e628592419a8ce0ed96d#d7f0f377e1b5d9bfb399e628592419a8ce0ed96d"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
 dependencies = [
  "coqui-access",
  "coqui-access-claims",
@@ -850,7 +855,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-mtls-plugin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d7f0f377e1b5d9bfb399e628592419a8ce0ed96d#d7f0f377e1b5d9bfb399e628592419a8ce0ed96d"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
@@ -867,7 +872,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-password"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d7f0f377e1b5d9bfb399e628592419a8ce0ed96d#d7f0f377e1b5d9bfb399e628592419a8ce0ed96d"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
@@ -876,7 +881,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-password-plugin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d7f0f377e1b5d9bfb399e628592419a8ce0ed96d#d7f0f377e1b5d9bfb399e628592419a8ce0ed96d"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
@@ -891,7 +896,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-signin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d7f0f377e1b5d9bfb399e628592419a8ce0ed96d#d7f0f377e1b5d9bfb399e628592419a8ce0ed96d"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
 dependencies = [
  "coqui-access",
  "coqui-builder",
@@ -902,7 +907,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-system"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=d7f0f377e1b5d9bfb399e628592419a8ce0ed96d#d7f0f377e1b5d9bfb399e628592419a8ce0ed96d"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
 dependencies = [
  "coqui-access",
  "coqui-builder",
@@ -910,6 +915,38 @@ dependencies = [
  "nonstick",
  "uzers",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "coqui-access-totp"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+ "coqui-builder",
+ "data-encoding",
+ "getrandom 0.4.3",
+ "hmac 0.13.0",
+ "percent-encoding",
+ "sha1",
+ "sha2 0.11.1",
+ "subtle",
+]
+
+[[package]]
+name = "coqui-access-totp-plugin"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+ "coqui-access-totp",
+ "coqui-builder",
+ "guatiao-builder",
+ "serde",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
@@ -2997,6 +3034,12 @@ checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quinn"

@@ -553,7 +553,7 @@ fn signed_in(rig: &Rig, user: &str) -> String {
         .expect("a cookie")
 }
 
-fn origin(rig: &Rig) -> String {
+fn origin(rig: &Rig<impl Sized>) -> String {
     format!("http://{}", rig.addr)
 }
 
@@ -1098,7 +1098,7 @@ fn a_host_that_never_answers_delays_nobody_else() {
 }
 
 fn open_channel(
-    rig: &Rig,
+    rig: &Rig<impl Sized>,
     path: &str,
     cookie: &str,
     origin: &str,
@@ -1108,7 +1108,7 @@ fn open_channel(
 
 /// [`open_channel`] reaching the portal at `via`, a proxy in front of it, still naming the portal in `Host`.
 fn open_channel_via(
-    rig: &Rig,
+    rig: &Rig<impl Sized>,
     via: SocketAddr,
     path: &str,
     cookie: &str,
@@ -2361,6 +2361,7 @@ fn the_certificate_sign_in_is_asked_for_the_browsers_address_not_the_proxys() {
     );
 }
 
+mod second_step;
 mod sign_in_policy;
 
 #[test]

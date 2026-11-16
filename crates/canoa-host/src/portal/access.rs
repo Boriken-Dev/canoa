@@ -15,27 +15,171 @@ use core::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use coqui_access::guatiao::library::{ImportSearch, Registry};
-use coqui_access::guatiao::{Alloc, Map, Value};
+use coqui_access::guatiao::{Alloc, Map, Status, Value};
 use coqui_access::{
     AccountPut, Accounts as AccountKind, Attempt as Credential, Authenticator, Directory, Lookup,
     Verdict, takes,
 };
+use coqui_access_kit::matcher::{Match, MatchRule, Matcher, MatcherConfig};
 use coqui_access_signin::SignInRules;
 use coqui_access_system::SystemAccounts;
 use coqui_peer_tls::CertificateFields;
 
 use super::settings::{Entry, Settings};
 use super::signin::{
-    Accounts, CertificateStatus, MAX_PASSWORD, Method, PinError, PinState, Presented, SignIn,
-    Standing, valid_user,
+    Accounts, CertificateStatus, CodeCheck, Enrolment, FactorError, FactorStanding, MAX_PASSWORD,
+    Method, PinError, PinState, Presented, SignIn, Standing, valid_user,
 };
 
 /// The provider id of the operating system's accounts.
 pub const SYSTEM: &str = "coqui_access_system";
 
+/// The provider that reads a certificate a front proxy forwarded and answers by its claims. The portal refuses it: it trusts what
+/// the proxy says, and a proxy that ignores certificate errors makes every claim a stranger's.
+const PROXY: &str = "coqui_access_proxy";
+
 /// The group a pinned certificate's record carries to name the user id its account had when it was pinned, so that an account
 /// deleted and made again under the same name does not inherit the pin.
 const UID_MARKER: &str = "uid:";
+
+/// The matcher `settings` describe: its rules, or coqui-access's defaults when it gives none.
+fn build_matcher(settings: &Settings) -> Result<Matcher, String> {
+    let Some(rules) = &settings.matcher else {
+        return Ok(Matcher::default());
+    };
+    let mut config = MatcherConfig::default();
+    config.rule = rules
+        .iter()
+        .map(|rule| {
+            let mut built = MatchRule::new(rule.by.clone(), rule.template.clone());
+            if let Some(domain) = &rule.domain {
+                built = built.domain(domain.clone());
+            }
+            if let Some(pins) = &rule.pins {
+                built = built.pins(pins.clone());
+            }
+            built
+        })
+        .collect();
+    Matcher::new(config).map_err(|error| format!("matcher: {error}"))
+}
+
+/// What a code record is called in its table: the account's user id and name, so a user id made again for another account does
+/// not find the code of the one before.
+fn code_key(user: &str, uid: u32) -> String {
+    format!("{uid}:{user}")
+}
+
+/// The user id and name a code key holds, when it is one.
+fn split_key(key: &str) -> Option<(u32, &str)> {
+    let (uid, user) = key.split_once(':')?;
+    let uid = uid.parse().ok()?;
+    valid_user(user).then_some((uid, user))
+}
+
+/// Why a code could not be taken away.
+enum KeyError {
+    Unsupported,
+    Failed(String),
+}
+
+impl CodeStore {
+    /// The accounts an administrator reset, which only an administrator sets a code up for again: one key a line in a file
+    /// beside the table. A file that is not there is none.
+    fn reset_marks(&self) -> Result<Vec<String>, String> {
+        match &self.resets {
+            Some(path) => read_lines(path),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Changes the reset marks while holding the lock beside them, so that two commands do not lose each other's changes.
+    fn update_marks(&self, change: impl FnOnce(&mut Vec<String>)) -> Result<(), String> {
+        let Some(path) = &self.resets else {
+            return Ok(());
+        };
+        locked(path, || {
+            let mut marks = read_lines(path)?;
+            let before = marks.clone();
+            change(&mut marks);
+            if marks != before {
+                write_lines(path, &marks)?;
+            }
+            Ok(())
+        })
+    }
+
+    /// The time an administrator last cleared an account's failure counts, if one did.
+    fn unlock_stamp(&self, key: &str) -> Option<i64> {
+        let path = self.unlocks.as_ref()?;
+        read_lines(path).ok()?.into_iter().find_map(|line| {
+            let (found, millis) = line.rsplit_once(' ')?;
+            (found == key).then(|| millis.parse().ok())?
+        })
+    }
+
+    fn write_unlock(&self, key: &str, millis: i64) -> Result<(), String> {
+        let Some(path) = &self.unlocks else {
+            return Ok(());
+        };
+        locked(path, || {
+            let mut lines = read_lines(path)?;
+            lines.retain(|line| line.rsplit_once(' ').is_none_or(|(found, _)| found != key));
+            lines.push(format!("{key} {millis}"));
+            write_lines(path, &lines)
+        })
+    }
+}
+
+fn read_lines(path: &Path) -> Result<Vec<String>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text.lines().map(str::to_owned).collect()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Writes `lines` to `path`, privately and in one step.
+fn write_lines(path: &Path, lines: &[String]) -> Result<(), String> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let mut temporary = path.to_path_buf().into_os_string();
+    temporary.push(".new");
+    let temporary = PathBuf::from(temporary);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&temporary)
+        .map_err(|error| error.to_string())?;
+    for line in lines {
+        writeln!(file, "{line}").map_err(|error| error.to_string())?;
+    }
+    file.sync_all().map_err(|error| error.to_string())?;
+    std::fs::rename(&temporary, path).map_err(|error| error.to_string())
+}
+
+/// Runs `body` holding an exclusive lock on the file `<path>.lock`, which every process that changes `path` takes.
+fn locked<T>(path: &Path, body: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let mut lock = path.to_path_buf().into_os_string();
+    lock.push(".lock");
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(PathBuf::from(lock))
+        .map_err(|error| error.to_string())?;
+    rustix::fs::flock(&file, rustix::fs::FlockOperation::LockExclusive)
+        .map_err(|error| error.to_string())?;
+    // Released when `file` is closed, at the end of this call.
+    body()
+}
+
+/// The longest one-time or recovery code a try takes, in bytes: a code is a few digits or a hyphenated group of ten.
+const MAX_CODE: usize = 32;
 
 /// The most certificates (leaf first) and bytes a forwarded header may carry.
 const MAX_CHAIN: usize = 8;
@@ -63,6 +207,126 @@ struct PinStore {
     directory: Arc<dyn Directory>,
 }
 
+/// The provider that keeps one-time codes: it checks them, and its account kind sets them up and takes them away.
+struct CodeStore {
+    link: Link,
+    accounts: Arc<dyn AccountKind>,
+    /// The file that says which accounts were reset, beside the table.
+    resets: Option<PathBuf>,
+    /// The file that says when an administrator last cleared an account's failure counts.
+    unlocks: Option<PathBuf>,
+}
+
+/// Whether an `authenticators` entry is the one-time code provider, by its id or its library's file name.
+fn keeps_codes(entry: &Entry) -> bool {
+    let says = |text: &str| text.to_ascii_lowercase().contains("totp");
+    says(&entry.provider)
+        || entry
+            .library
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .is_some_and(|name| says(&name.to_string_lossy()))
+}
+
+/// A file named `<source><suffix>`, for a provider that keeps its table in a file.
+fn beside(config: &serde_json::Map<String, serde_json::Value>, suffix: &str) -> Option<PathBuf> {
+    let mut file = source_path(config)?.into_os_string();
+    file.push(suffix);
+    Some(PathBuf::from(file))
+}
+
+/// The file a provider's `source` names, if it names one.
+fn source_path(config: &serde_json::Map<String, serde_json::Value>) -> Option<PathBuf> {
+    config
+        .get("source")?
+        .get("file")?
+        .get("path")?
+        .as_str()
+        .map(PathBuf::from)
+}
+
+/// Whether the files the one-time codes are kept in, and the folder they are made in, belong to the account this process runs
+/// as. An administrator's command run as another account (root) would make files the portal's account cannot read, and every
+/// code step would then answer `503`. Asked before anything is opened.
+///
+/// # Errors
+///
+/// A message naming the path and whose it is.
+pub fn check_code_files_owned(settings: &Settings) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt as _;
+    let me = rustix::process::geteuid().as_raw();
+    // The code provider's files only: a password table under a folder root owns is no reason to refuse. The provider is found
+    // before anything is opened, by its id or its library's file name saying `totp`, whatever else it is called.
+    for entry in settings
+        .authenticators
+        .iter()
+        .filter(|entry| keeps_codes(entry))
+    {
+        for key in ["source", "pending", "waiting"] {
+            let Some(source) = entry
+                .config
+                .get(key)
+                .and_then(|value| value.get("file"))
+                .and_then(|value| value.get("path"))
+                .and_then(serde_json::Value::as_str)
+                .map(PathBuf::from)
+            else {
+                continue;
+            };
+            let mut paths = vec![source.clone()];
+            for suffix in [
+                ".pending",
+                ".lock",
+                ".pending.lock",
+                ".reset",
+                ".reset.lock",
+                ".unlock",
+                ".unlock.lock",
+            ] {
+                let mut path = source.clone().into_os_string();
+                path.push(suffix);
+                paths.push(PathBuf::from(path));
+            }
+            paths.push(match source.parent() {
+                Some(folder) if !folder.as_os_str().is_empty() => folder.to_path_buf(),
+                _ => PathBuf::from("."),
+            });
+            for path in paths {
+                match std::fs::metadata(&path) {
+                    Ok(meta) if meta.uid() != me => {
+                        return Err(format!(
+                            "{} belongs to user id {}, not to the account this command runs as ({me}): run it as the portal's account",
+                            path.display(),
+                            meta.uid()
+                        ));
+                    }
+                    Ok(_) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(format!("{}: {error}", path.display())),
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// One account's one-time code as an administrator's listing shows it: never a secret.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FactorEntry {
+    /// The record's key: the user id and the name, `1000:alice`. What `factor reset --id` takes.
+    pub id: String,
+    /// The account's name, when the system still has one for the id.
+    pub user: Option<String>,
+    /// A code is set up.
+    pub enrolled: bool,
+    /// An administrator disabled it.
+    pub disabled: bool,
+    /// A setup is waiting for its first code.
+    pub waiting: bool,
+    /// An administrator reset it: only an administrator sets one up again.
+    pub reset: bool,
+}
+
 /// The portal's accounts: the authenticators of `Settings::authenticators`, in order, over the operating system's directory.
 pub struct Access {
     /// Who the operating system admits (`min_uid`, `groups`): every method ends here.
@@ -72,6 +336,13 @@ pub struct Access {
     /// The header the proxy puts the verified-or-not client certificate in, lower case.
     header: String,
     pins: Option<PinStore>,
+    /// Ties the claims of a certificate to an account for a provider that names none.
+    matcher: Matcher,
+    /// The directory the matcher asks, in place of the operating system's: only a test sets it, since only the operating
+    /// system's accounts give the numeric user id the match is compared with.
+    matcher_directory: Option<Arc<dyn Directory>>,
+    /// The one-time codes, when a provider keeps them.
+    codes: Option<CodeStore>,
     /// Dropped after the links, whose instances point into what it loaded.
     _registry: Arc<Registry>,
 }
@@ -185,6 +456,15 @@ impl Access {
             );
         }
         let built_in = |id: &str| id == SYSTEM;
+        if settings
+            .authenticators
+            .iter()
+            .any(|entry| entry.provider == PROXY)
+        {
+            return Err(format!(
+                "authenticators: {PROXY} is not used by the portal: a certificate it takes from a header the proxy sets is believed whatever the proxy checked; use `coqui_access_mtls` behind the portal's certificate header"
+            ));
+        }
         for entry in &settings.authenticators {
             match (&entry.library, built_in(&entry.provider)) {
                 (Some(path), false) => {
@@ -213,6 +493,8 @@ impl Access {
         let mut passwords = Vec::new();
         let mut certificates = Vec::new();
         let mut pins = None;
+        let mut codes = None;
+        let matcher = build_matcher(settings)?;
         for entry in &settings.authenticators {
             for path in loose_sources(&entry.config) {
                 tracing::warn!(
@@ -250,6 +532,27 @@ impl Access {
                         ..link
                     });
                 }
+                Some(takes::OTP) => {
+                    if codes.is_some() {
+                        return Err(
+                            "authenticators: at most one provider keeps one-time codes".to_owned()
+                        );
+                    }
+                    // The authenticator and the account kind are two instances of the provider; only a file they share makes
+                    // a setup the one visible to the other.
+                    if !entry.config.contains_key("source") {
+                        return Err(format!(
+                            "authenticators: {} needs a `source` file to keep one-time codes in",
+                            entry.provider
+                        ));
+                    }
+                    codes = Some(CodeStore {
+                        accounts: code_accounts(&registry, &entry.provider, &config)?,
+                        link,
+                        resets: beside(&entry.config, ".reset"),
+                        unlocks: beside(&entry.config, ".unlock"),
+                    });
+                }
                 // A provider that says nothing of what it takes is asked for a name and a password.
                 Some(takes::PASSWORD) | None => passwords.push(link),
                 Some(other) => {
@@ -269,20 +572,166 @@ impl Access {
             certificates,
             header: settings.certificate_header.clone(),
             pins,
+            matcher,
+            matcher_directory: None,
+            codes,
             _registry: Arc::new(registry),
         })
     }
 
+    /// The account called `name` as the portal admits one (`min_uid`, `groups`), for an administrator's command: its name as the
+    /// system spells it and its user id.
+    ///
+    /// # Errors
+    ///
+    /// A message when the system does not have it, the portal would not admit it, or the directory failed.
+    pub fn admitted(&self, name: &str) -> Result<(String, u32), String> {
+        match self.admit(name, "") {
+            SignIn::Admitted { user, uid, .. } => Ok((user, uid)),
+            SignIn::Failed(why) => Err(why),
+            _ => Err("not an account this portal signs in".to_owned()),
+        }
+    }
+
+    /// Who has a one-time code set up, being set up or reset, for an administrator's listing.
+    ///
+    /// # Errors
+    ///
+    /// A message when no provider keeps codes or its store cannot be read.
+    pub fn list_factors(&self) -> Result<Vec<FactorEntry>, String> {
+        let store = self
+            .codes
+            .as_ref()
+            .ok_or_else(|| "this portal keeps no one-time codes".to_owned())?;
+        let enrolled = store
+            .accounts
+            .accounts()
+            .map_err(|error| error.to_string())?;
+        let waiting = store
+            .accounts
+            .waiting()
+            .map_err(|error| error.to_string())?;
+        let marks = store.reset_marks()?;
+        let mut ids: Vec<String> = enrolled
+            .iter()
+            .map(|account| account.name.clone())
+            .chain(waiting.iter().map(|each| each.shown.clone()))
+            .chain(marks.iter().cloned())
+            .collect();
+        ids.sort();
+        ids.dedup();
+        Ok(ids
+            .into_iter()
+            .map(|id| {
+                let found = enrolled.iter().find(|account| account.name == id);
+                FactorEntry {
+                    user: split_key(&id).map(|(_, name)| name.to_owned()),
+                    enrolled: found.is_some(),
+                    disabled: found.is_some_and(|account| account.disabled == Some(true)),
+                    waiting: waiting.iter().any(|each| each.shown == id),
+                    reset: marks.contains(&id),
+                    id,
+                }
+            })
+            .collect())
+    }
+
+    /// Removes the code whose record is called `key` (`1000:alice`, as the listing shows it) and marks it reset: for an account
+    /// that is gone, whose name no command can give.
+    ///
+    /// # Errors
+    ///
+    /// A message for a key that is not one, a portal that keeps no codes or a store that cannot be written.
+    pub fn reset_by_id(&self, key: &str) -> Result<bool, String> {
+        if split_key(key).is_none() {
+            return Err("not a code id: it is a user id, a colon and a user name".to_owned());
+        }
+        self.reset_key(key).map_err(|error| match error {
+            KeyError::Unsupported => "this portal keeps no one-time codes".to_owned(),
+            KeyError::Failed(why) => why,
+        })
+    }
+
+    fn reset_key(&self, key: &str) -> Result<bool, KeyError> {
+        let store = self.codes.as_ref().ok_or(KeyError::Unsupported)?;
+        // The mark is written first: a reset that is interrupted leaves an account that is marked and still has its code, not
+        // one that has neither and is open to setting one up for itself. It is made even when there is nothing to remove.
+        store
+            .update_marks(|marks| {
+                if !marks.iter().any(|mark| mark == key) {
+                    marks.push(key.to_owned());
+                }
+            })
+            .map_err(KeyError::Failed)?;
+        match store.accounts.remove(key.to_owned()) {
+            Ok(()) => Ok(true),
+            Err(error) if error.status == Status::GUATIAO_ERR_NOT_FOUND => Ok(false),
+            Err(error) => Err(KeyError::Failed(error.to_string())),
+        }
+    }
+
+    /// Lifts the reset mark of an account an administrator has just set a code up for, and the marks of the same user id under
+    /// other names, which were the accounts it was before.
+    ///
+    /// # Errors
+    ///
+    /// A message when the marks cannot be written.
+    pub fn clear_reset(&self, user: &str, uid: u32) -> Result<(), String> {
+        let Some(store) = &self.codes else {
+            return Ok(());
+        };
+        let _ = user;
+        store.update_marks(|marks| {
+            marks.retain(|mark| split_key(mark).is_none_or(|(id, _)| id != uid))
+        })
+    }
+
+    /// Clears what the portal counted of an account's failed second-step tries, and the provider's delay of it, for a person who
+    /// was locked out by someone else's guesses and has changed their password. A portal that is running reads the time written
+    /// here at the account's next try.
+    ///
+    /// # Errors
+    ///
+    /// A message when the time cannot be written or the provider cannot be asked.
+    pub fn unlock(&self, user: &str, uid: u32) -> Result<(), String> {
+        let store = self
+            .codes
+            .as_ref()
+            .ok_or_else(|| "this portal keeps no one-time codes".to_owned())?;
+        let key = code_key(user, uid);
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| {
+                i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+            });
+        store.write_unlock(&key, millis)?;
+        // The provider's own delay ends with an administrator's `disabled` toggle, which is passed back as it stands: a code an
+        // administrator disabled stays disabled. An account with no code has no delay.
+        let all = store
+            .accounts
+            .accounts()
+            .map_err(|error| error.to_string())?;
+        let Some(record) = all.iter().find(|account| account.name == key) else {
+            return Ok(());
+        };
+        match store.accounts.put(AccountPut {
+            name: key,
+            disabled: Some(record.disabled == Some(true)),
+            ..AccountPut::default()
+        }) {
+            Ok(_) => Ok(()),
+            Err(error) if error.status == Status::GUATIAO_ERR_NOT_FOUND => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
     /// The account a provider's valid answer names, if the operating system admits it: its name and user id.
     fn resolve(&self, link: &Link, lookup: Lookup) -> SignIn {
-        // A provider that names no account itself leaves it to a matcher over the credential's claims, which the portal does
-        // not run: such a certificate is refused, and the log says what to set instead.
+        // A provider that names no account itself answers by the credential's claims, and the matcher ties them to an account in
+        // the directory. Only a certificate the proxy forwarded reaches here, and the directory, not the certificate, decides
+        // the account: it is then admitted by the operating system like any other.
         if lookup.by == "claims" {
-            tracing::warn!(
-                "authenticators: {} answered by claims, which the portal has no matcher for; give it `account` picks that name an account",
-                link.id
-            );
-            return SignIn::Refused;
+            return self.match_claims(&link.id, &lookup);
         }
         let named = if link.id == SYSTEM {
             self.system.lookup(lookup.clone())
@@ -319,6 +768,49 @@ impl Access {
                 self.admit(&lookup.value, &link.id)
             }
             Ok(None) => SignIn::Refused,
+            Err(error) => SignIn::Failed(error.to_string()),
+        }
+    }
+
+    /// The account the matcher finds for the claims `link` answered; refused when none matches or more than one does.
+    fn match_claims(&self, provider: &str, lookup: &Lookup) -> SignIn {
+        let directory: &dyn Directory = match &self.matcher_directory {
+            Some(directory) => directory.as_ref(),
+            None => &self.system,
+        };
+        match self.matcher.resolve(lookup, directory) {
+            Ok(matched) => match matched.result {
+                Match::Found(person) => {
+                    let admitted = self.admit(&person.name, provider);
+                    // The directory that found the person and the operating system that admits the account must mean one
+                    // account: the directory gives the account's numeric user id as the person's id.
+                    match &admitted {
+                        SignIn::Admitted { uid, .. }
+                            if person.id.parse::<u32>().ok() != Some(*uid) =>
+                        {
+                            tracing::info!(
+                                "a certificate from {provider} matched a directory account that is not the operating system's account of that name: refused"
+                            );
+                            SignIn::Refused
+                        }
+                        _ => admitted,
+                    }
+                }
+                Match::Ambiguous => {
+                    tracing::info!(
+                        "a certificate from {} matched more than one account: refused",
+                        provider
+                    );
+                    SignIn::Refused
+                }
+                _ => {
+                    tracing::info!(
+                        "a certificate from {} matched no account: refused",
+                        provider
+                    );
+                    SignIn::Refused
+                }
+            },
             Err(error) => SignIn::Failed(error.to_string()),
         }
     }
@@ -431,6 +923,22 @@ fn pin_store(
     })
 }
 
+fn code_accounts(
+    registry: &Registry,
+    id: &str,
+    config: &Value,
+) -> Result<Arc<dyn AccountKind>, String> {
+    let built = |why: String| format!("authenticators: {id}: {why}");
+    Ok(Arc::new(
+        registry
+            .offer::<dyn AccountKind>(id)
+            .ok_or_else(|| built("no provider has that id".to_owned()))?
+            .map_err(|_| built("it keeps no accounts, so it cannot set up codes".to_owned()))?
+            .instantiate(config)
+            .map_err(|error| built(error.to_string()))?,
+    ))
+}
+
 fn link(registry: &Registry, id: &str, config: &Value) -> Result<Link, String> {
     let built = |why: String| format!("authenticators: {id}: {why}");
     let offer = registry
@@ -506,6 +1014,9 @@ impl Accounts for Access {
         }
         if !self.certificates.is_empty() {
             methods.push(Method::Certificate);
+        }
+        if self.codes.is_some() {
+            methods.extend([Method::Totp, Method::RecoveryCode]);
         }
         methods
     }
@@ -663,6 +1174,129 @@ impl Accounts for Access {
             .remove(user.to_owned())
             .map(|()| true)
             .map_err(|error| PinError::Failed(error.to_string()))
+    }
+
+    fn check_code(
+        &self,
+        user: &str,
+        uid: u32,
+        method: Method,
+        code: &str,
+        providers: &[String],
+    ) -> CodeCheck {
+        let Some(store) = &self.codes else {
+            return CodeCheck::Refused;
+        };
+        if !method.needs_account()
+            || code.is_empty()
+            || code.len() > MAX_CODE
+            || (!providers.is_empty() && !providers.contains(&store.link.id))
+        {
+            return CodeCheck::Refused;
+        }
+        let name = code_key(user, uid);
+        let credential = Credential {
+            name: Some(name.clone()),
+            secret: Some(code.to_owned()),
+            method: Some(method.id().to_owned()),
+            ..Credential::default()
+        };
+        match store.link.authenticator.authenticate(credential) {
+            // The provider answers by the account key it was given; any other answer is not the account that was named.
+            Ok(Verdict::Valid(lookup)) if lookup.by == "id" && lookup.value == name => {
+                CodeCheck::Valid {
+                    provider: store.link.id.clone(),
+                }
+            }
+            Ok(_) => CodeCheck::Refused,
+            Err(error) => CodeCheck::Failed(error.to_string()),
+        }
+    }
+
+    fn factor_record(&self, user: &str, uid: u32) -> (FactorStanding, Option<i64>) {
+        let Some(store) = &self.codes else {
+            return (FactorStanding::Unsupported, None);
+        };
+        let name = code_key(user, uid);
+        let Ok(all) = store.accounts.accounts() else {
+            return (FactorStanding::Unknown, None);
+        };
+        if let Some(account) = all.iter().find(|account| account.name == name) {
+            let standing = if account.disabled == Some(true) {
+                FactorStanding::Disabled
+            } else {
+                FactorStanding::Enrolled
+            };
+            return (standing, account.made_unix);
+        }
+        let Ok(marks) = store.reset_marks() else {
+            return (FactorStanding::Unknown, None);
+        };
+        // The same user id under another name is the account renamed, or another made in its place: either way the code was
+        // another account's, and the account is the administrator's to set up, not open to setting one up for itself.
+        let renamed =
+            |key: &str| split_key(key).is_some_and(|(id, each)| id == uid && each != user);
+        if marks.contains(&name)
+            || marks.iter().any(|mark| renamed(mark))
+            || all.iter().any(|account| renamed(&account.name))
+        {
+            (FactorStanding::Reset, None)
+        } else {
+            (FactorStanding::NotEnrolled, None)
+        }
+    }
+
+    fn unlock_stamp(&self, user: &str, uid: u32) -> Option<i64> {
+        self.codes.as_ref()?.unlock_stamp(&code_key(user, uid))
+    }
+
+    fn begin_factor(&self, user: &str, uid: u32) -> Result<Enrolment, FactorError> {
+        let store = self.codes.as_ref().ok_or(FactorError::Unsupported)?;
+        let outcome = store
+            .accounts
+            .put(AccountPut {
+                name: code_key(user, uid),
+                display_name: Some(user.to_owned()),
+                ..AccountPut::default()
+            })
+            .map_err(|error| FactorError::Failed(error.to_string()))?;
+        match (outcome.secret, outcome.codes) {
+            (Some(uri), codes) => Ok(Enrolment {
+                uri,
+                codes: codes.unwrap_or_default(),
+            }),
+            _ => Err(FactorError::Failed(
+                "the provider returned no setup link".to_owned(),
+            )),
+        }
+    }
+
+    fn confirm_factor(&self, user: &str, uid: u32, code: &str) -> Result<String, FactorError> {
+        let store = self.codes.as_ref().ok_or(FactorError::Unsupported)?;
+        if code.is_empty() || code.len() > MAX_CODE {
+            return Err(FactorError::Wrong);
+        }
+        store
+            .accounts
+            .put(AccountPut {
+                name: code_key(user, uid),
+                secret: Some(code.to_owned()),
+                ..AccountPut::default()
+            })
+            .map(|_| store.link.id.clone())
+            .map_err(|error| match error.status {
+                Status::GUATIAO_ERR_NOT_FOUND => FactorError::NothingWaiting,
+                Status::GUATIAO_ERR_BAD_VALUE => FactorError::Wrong,
+                _ => FactorError::Failed(error.to_string()),
+            })
+    }
+
+    fn reset_factor(&self, user: &str, uid: u32) -> Result<bool, FactorError> {
+        self.reset_key(&code_key(user, uid))
+            .map_err(|error| match error {
+                KeyError::Unsupported => FactorError::Unsupported,
+                KeyError::Failed(why) => FactorError::Failed(why),
+            })
     }
 
     fn still(&self, user: &str, uid: u32) -> Standing {
@@ -1381,5 +2015,523 @@ mod tests {
         ] {
             assert!(Access::new(&settings(entries)).is_err());
         }
+    }
+
+    /// A directory of the test's own for the matcher to ask: `alice@example.org` is this process's account, `twin@example.org`
+    /// is two accounts, and the filter and id lookups find nobody. It counts the lookups it was asked.
+    struct Book {
+        asked: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Directory for Book {
+        fn lookup(
+            &self,
+            lookup: Lookup,
+        ) -> Result<Option<coqui_access::Person>, coqui_access::guatiao::library::ProviderError>
+        {
+            self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            match (lookup.by.as_str(), lookup.value.as_str()) {
+                ("email", "alice@example.org") => Ok(Some(coqui_access::Person {
+                    id: mine().to_string(),
+                    name: my_name(),
+                    ..coqui_access::Person::default()
+                })),
+                ("email", "twin@example.org") => Err(coqui_access::error::ambiguous()),
+                // A directory that finds an account by a name that holds an `@`, and one that means another user id.
+                ("name", name) if name == format!("{}@evil", my_name()) => {
+                    Ok(Some(coqui_access::Person {
+                        id: mine().to_string(),
+                        name: my_name(),
+                        ..coqui_access::Person::default()
+                    }))
+                }
+                ("email", "mismatch@example.org") => Ok(Some(coqui_access::Person {
+                    id: (mine() + 7).to_string(),
+                    name: my_name(),
+                    ..coqui_access::Person::default()
+                })),
+                ("name", name) if name == my_name() => Ok(Some(coqui_access::Person {
+                    id: mine().to_string(),
+                    name: my_name(),
+                    ..coqui_access::Person::default()
+                })),
+                _ => Ok(None),
+            }
+        }
+    }
+
+    fn claims(pairs: &[(&str, &str)]) -> Lookup {
+        let mut values = std::collections::BTreeMap::<String, Vec<String>>::new();
+        for (name, value) in pairs {
+            values
+                .entry((*name).to_owned())
+                .or_default()
+                .push((*value).to_owned());
+        }
+        Lookup {
+            by: "claims".to_owned(),
+            value: "a certificate".to_owned(),
+            claims: Some(coqui_access::Claims {
+                values,
+                certificate: None,
+            }),
+        }
+    }
+
+    fn matching(change: impl FnOnce(&mut Settings)) -> (Access, Arc<Book>) {
+        let dir = scratch("matcher");
+        let file = dir.join("accounts.toml");
+        seed_password(&file, &my_name(), "x");
+        let mut own = settings(vec![password_entry(&file)]);
+        change(&mut own);
+        let mut access = Access::new(&own).unwrap();
+        let book = Arc::new(Book {
+            asked: std::sync::atomic::AtomicUsize::new(0),
+        });
+        access.matcher_directory = Some(book.clone());
+        (access, book)
+    }
+
+    #[test]
+    fn a_upn_claim_that_is_an_account_name_signs_that_account_in() {
+        let (access, _) = matching(|_| {});
+        let me = my_name();
+        admits(
+            access.match_claims("cert", &claims(&[("san.upn", &me)])),
+            &me,
+            "cert",
+        );
+    }
+
+    #[test]
+    fn an_email_claim_finds_the_account_the_directory_gives_it() {
+        let (access, book) = matching(|_| {});
+        let me = my_name();
+        admits(
+            access.match_claims("cert", &claims(&[("san.email", "alice@example.org")])),
+            &me,
+            "cert",
+        );
+        assert!(book.asked.load(std::sync::atomic::Ordering::SeqCst) > 0);
+    }
+
+    #[test]
+    fn an_ambiguous_claim_and_one_nobody_has_are_refused() {
+        let (access, _) = matching(|_| {});
+        for lookup in [
+            claims(&[("san.email", "twin@example.org")]),
+            claims(&[("san.email", "nobody@example.org")]),
+            claims(&[("subject.cn", &my_name())]),
+            claims(&[]),
+        ] {
+            assert_eq!(access.match_claims("cert", &lookup), SignIn::Refused);
+        }
+    }
+
+    #[test]
+    fn a_rule_may_strip_the_realm_only_when_it_names_it() {
+        let rule = |domain: Option<&str>| {
+            vec![crate::portal::MatcherRule::new(
+                "name",
+                "{san.upn|local}",
+                domain,
+            )]
+        };
+        let dir = scratch("realm");
+        let file = dir.join("accounts.toml");
+        seed_password(&file, &my_name(), "x");
+        let mut bare = settings(vec![password_entry(&file)]);
+        bare.matcher = Some(rule(None));
+        assert!(
+            Access::new(&bare).is_err(),
+            "`local` without a realm does not start"
+        );
+        let (access, _) = matching(|own| own.matcher = Some(rule(Some("corp.example"))));
+        let me = my_name();
+        admits(
+            access.match_claims(
+                "cert",
+                &claims(&[("san.upn", &format!("{me}@corp.example"))]),
+            ),
+            &me,
+            "cert",
+        );
+        // The same name in another realm is not this account.
+        assert_eq!(
+            access.match_claims(
+                "cert",
+                &claims(&[("san.upn", &format!("{me}@evil.example"))])
+            ),
+            SignIn::Refused
+        );
+    }
+
+    fn totp_entry(file: &Path) -> Entry {
+        let mut config = file_source(file);
+        config["skew"] = 10.into();
+        entry(
+            "coqui_access_totp",
+            Some(plugin("coqui_access_totp")),
+            &config,
+        )
+    }
+
+    #[test]
+    fn a_code_store_needs_a_source_file_and_only_one_provider_keeps_codes() {
+        let dir = scratch("totp-source");
+        let file = dir.join("accounts.toml");
+        seed_password(&file, &my_name(), "x");
+        let memory = entry(
+            "coqui_access_totp",
+            Some(plugin("coqui_access_totp")),
+            &serde_json::json!({}),
+        );
+        assert!(Access::new(&settings(vec![password_entry(&file), memory])).is_err());
+        let twice = settings(vec![
+            password_entry(&file),
+            totp_entry(&dir.join("a.toml")),
+            totp_entry(&dir.join("b.toml")),
+        ]);
+        assert!(Access::new(&twice).is_err());
+    }
+
+    #[test]
+    fn an_administrators_listing_names_who_has_a_code_and_never_shows_a_secret() {
+        let dir = scratch("totp-list");
+        let file = dir.join("accounts.toml");
+        let me = my_name();
+        seed_password(&file, &me, "x");
+        let access = Access::new(&settings(vec![
+            password_entry(&file),
+            totp_entry(&dir.join("totp.toml")),
+        ]))
+        .unwrap();
+        assert!(access.methods().contains(&Method::Totp));
+        assert_eq!(access.admitted(&me), Ok((me.clone(), mine())));
+        assert!(access.admitted("nobody-here").is_err());
+        assert!(access.admitted("../x").is_err());
+        assert_eq!(access.list_factors(), Ok(Vec::new()));
+        let begun = access.begin_factor(&me, mine()).unwrap();
+        let waiting = access.list_factors().unwrap();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0].user.as_deref(), Some(me.as_str()));
+        assert!((waiting[0].waiting, waiting[0].enrolled) == (true, false));
+        let shown = format!("{waiting:?}{begun:?}");
+        assert!(!shown.contains("otpauth") && !shown.contains("secret="));
+        assert_eq!(
+            access.factor_standing(&me, mine()),
+            FactorStanding::NotEnrolled
+        );
+        assert_eq!(access.reset_factor(&me, mine()), Ok(true));
+        // Reset leaves the account marked for an administrator, with nothing else of it.
+        let after = access.list_factors().unwrap();
+        assert_eq!(
+            (after.len(), after[0].reset, after[0].enrolled),
+            (1, true, false)
+        );
+        // A code is checked for the account named, whatever the portal's other methods say.
+        assert_eq!(
+            access.check_code(&me, mine(), Method::Totp, "000000", &[]),
+            CodeCheck::Refused
+        );
+        assert_eq!(
+            access.check_code(&me, mine(), Method::Password, "000000", &[]),
+            CodeCheck::Refused
+        );
+        assert_eq!(
+            access.check_code(&me, mine(), Method::Totp, "000000", &["another".to_owned()]),
+            CodeCheck::Refused,
+            "a provider the policy did not name is not asked"
+        );
+    }
+
+    #[test]
+    fn a_value_with_two_ats_is_refused_before_the_realm_is_stripped() {
+        let (access, _) = matching(|own| {
+            own.matcher = Some(vec![crate::portal::MatcherRule::new(
+                "name",
+                "{san.upn|local}",
+                Some("corp.example"),
+            )]);
+        });
+        let me = my_name();
+        // One `@` is the realm and strips to the account; two leave a name the directory above finds as the same account.
+        admits(
+            access.match_claims(
+                "cert",
+                &claims(&[("san.upn", &format!("{me}@corp.example"))]),
+            ),
+            &me,
+            "cert",
+        );
+        for value in [
+            format!("{me}@evil@corp.example"),
+            format!("@{me}@corp.example"),
+        ] {
+            assert_eq!(
+                access.match_claims("cert", &claims(&[("san.upn", &value)])),
+                SignIn::Refused,
+                "{value}"
+            );
+        }
+        assert_eq!(
+            access.match_claims(
+                "cert",
+                &claims(&[("san.email", &format!("{me}@evil@corp.example"))])
+            ),
+            SignIn::Refused
+        );
+    }
+
+    #[test]
+    fn a_directory_that_means_another_user_id_than_the_system_does_is_not_the_account() {
+        let (access, _) = matching(|_| {});
+        assert_eq!(
+            access.match_claims("cert", &claims(&[("san.email", "mismatch@example.org")])),
+            SignIn::Refused
+        );
+    }
+
+    #[test]
+    fn the_proxy_provider_is_refused_and_so_is_a_listing_that_names_it() {
+        let dir = scratch("proxy");
+        let file = dir.join("accounts.toml");
+        seed_password(&file, &my_name(), "x");
+        let mut proxy = Entry::new("coqui_access_proxy");
+        proxy.library = Some(PathBuf::from("/does/not/exist.so"));
+        let error = Access::new(&settings(vec![password_entry(&file), proxy])).unwrap_err();
+        assert!(error.contains("not used by the portal"), "{error}");
+    }
+
+    #[test]
+    fn code_files_made_by_another_account_are_refused_before_anything_is_opened() {
+        let dir = scratch("owned");
+        let ours = settings(vec![totp_entry(&dir.join("totp.toml"))]);
+        assert_eq!(check_code_files_owned(&ours), Ok(()));
+        // `/tmp` belongs to root: files made there as this account would be root's to remove, and root's as the other way round.
+        let name = format!("canoa-not-made-{}.toml", std::process::id());
+        let rooted = settings(vec![totp_entry(&PathBuf::from("/tmp").join(&name))]);
+        let error = check_code_files_owned(&rooted).unwrap_err();
+        assert!(error.contains("belongs to user id 0"), "{error}");
+        assert!(!PathBuf::from("/tmp").join(&name).exists());
+        // Under another id, and in a key the provider is given for a second file, it is the same.
+        let other = entry(
+            "codes_under_another_name",
+            Some(PathBuf::from("/opt/libcoqui_access_totp_plugin.so")),
+            &serde_json::json!({"source": {"file": {"path": dir.join("t.toml"), "format": "toml"}},
+                "pending": {"file": {"path": PathBuf::from("/tmp").join(&name), "format": "toml"}}}),
+        );
+        let error = check_code_files_owned(&settings(vec![other])).unwrap_err();
+        assert!(error.contains("belongs to user id 0"), "{error}");
+    }
+
+    fn access_with_codes(name: &str) -> (Access, PathBuf, String) {
+        let dir = scratch(name);
+        let file = dir.join("accounts.toml");
+        let me = my_name();
+        seed_password(&file, &me, "x");
+        let totp = dir.join("totp.toml");
+        let access =
+            Access::new(&settings(vec![password_entry(&file), totp_entry(&totp)])).unwrap();
+        (access, totp, me)
+    }
+
+    #[test]
+    fn a_code_table_that_cannot_be_read_is_unknown_and_never_a_code_that_is_not_there() {
+        let (access, table, me) = access_with_codes("unreadable");
+        let begun = access.begin_factor(&me, mine()).unwrap();
+        access
+            .confirm_factor(&me, mine(), &totp_in(&begun.uri))
+            .unwrap();
+        let (standing, made) = access.factor_record(&me, mine());
+        assert_eq!(standing, FactorStanding::Enrolled);
+        assert!(made.is_some());
+        let kept = std::fs::read(&table).unwrap();
+        std::fs::write(&table, b"[[accounts\nnot a table").unwrap();
+        assert_eq!(
+            access.factor_record(&me, mine()),
+            (FactorStanding::Unknown, None)
+        );
+        assert_eq!(access.factor_standing(&me, mine()), FactorStanding::Unknown);
+        std::fs::write(&table, kept).unwrap();
+        assert_eq!(
+            access.factor_record(&me, mine()).0,
+            FactorStanding::Enrolled
+        );
+    }
+
+    /// The code an app shows now for the secret in a setup link.
+    fn totp_in(link: &str) -> String {
+        use hmac::{Hmac, KeyInit, Mac as _};
+        let secret = link
+            .split(['?', '&'])
+            .find_map(|part| part.strip_prefix("secret="))
+            .unwrap();
+        let key = data_encoding::BASE32_NOPAD
+            .decode(secret.as_bytes())
+            .unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut mac = <Hmac<sha1::Sha1> as KeyInit>::new_from_slice(&key).unwrap();
+        mac.update(&(now / 30).to_be_bytes());
+        let digest = mac.finalize().into_bytes();
+        let offset = usize::from(digest[19] & 0x0f);
+        let number = u32::from_be_bytes([
+            digest[offset] & 0x7f,
+            digest[offset + 1],
+            digest[offset + 2],
+            digest[offset + 3],
+        ]);
+        format!("{:06}", number % 1_000_000)
+    }
+
+    #[test]
+    fn marks_are_written_before_the_code_goes_and_two_commands_do_not_lose_each_others() {
+        let (access, table, me) = access_with_codes("marks");
+        let begun = access.begin_factor(&me, mine()).unwrap();
+        access
+            .confirm_factor(&me, mine(), &totp_in(&begun.uri))
+            .unwrap();
+        // A table that cannot be written: the removal fails, and the mark is already there.
+        let key = format!("{}:{me}", mine());
+        let mut lock = table.clone().into_os_string();
+        lock.push(".lock");
+        let lock = PathBuf::from(lock);
+        let mut permissions = std::fs::metadata(&lock).unwrap().permissions();
+        let writable = permissions.clone();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o400);
+        std::fs::set_permissions(&lock, permissions).unwrap();
+        let outcome = access.reset_by_id(&key);
+        std::fs::set_permissions(&lock, writable).unwrap();
+        assert!(outcome.is_err(), "the removal could not be made");
+        let listed = access.list_factors().unwrap();
+        assert!(
+            listed.iter().any(|entry| entry.id == key && entry.reset),
+            "{listed:?}"
+        );
+        // Many commands at once each leave their mark.
+        std::thread::scope(|scope| {
+            for index in 0..16_u32 {
+                let access = &access;
+                scope.spawn(move || {
+                    access
+                        .reset_by_id(&format!("{}:person{index}", 5000 + index))
+                        .unwrap();
+                });
+            }
+        });
+        let marked = access
+            .list_factors()
+            .unwrap()
+            .into_iter()
+            .filter(|entry| entry.reset && entry.id.starts_with(|c: char| c.is_ascii_digit()))
+            .count();
+        assert_eq!(marked, 17, "a mark was lost to another command's write");
+    }
+
+    #[test]
+    fn an_account_renamed_or_made_again_under_the_same_user_id_is_reset_and_not_open_to_a_first_code()
+     {
+        let (access, _, me) = access_with_codes("renamed");
+        let begun = access.begin_factor(&me, mine()).unwrap();
+        access
+            .confirm_factor(&me, mine(), &totp_in(&begun.uri))
+            .unwrap();
+        // The same user id under another name finds no code, and is not an account with none to set up.
+        assert_eq!(
+            access.factor_standing("renamed-account", mine()),
+            FactorStanding::Reset
+        );
+        // A reset recorded for the old name carries to the new one, and an administrator's setup lifts both.
+        access.reset_factor(&me, mine()).unwrap();
+        assert_eq!(
+            access.factor_standing("renamed-account", mine()),
+            FactorStanding::Reset
+        );
+        access.clear_reset("renamed-account", mine()).unwrap();
+        assert_eq!(
+            access.factor_standing("renamed-account", mine()),
+            FactorStanding::NotEnrolled
+        );
+        assert_eq!(
+            access.factor_standing("elsewhere", mine() + 1),
+            FactorStanding::NotEnrolled,
+            "another user id is not this one"
+        );
+    }
+
+    #[test]
+    fn an_unlock_is_a_time_the_portal_reads_and_does_not_need_a_code_to_exist() {
+        let (access, _, me) = access_with_codes("unlock");
+        assert_eq!(access.unlock_stamp(&me, mine()), None);
+        access.unlock(&me, mine()).unwrap();
+        let first = access.unlock_stamp(&me, mine()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        access.unlock(&me, mine()).unwrap();
+        assert!(access.unlock_stamp(&me, mine()).unwrap() > first);
+        assert_eq!(access.unlock_stamp("someone-else", mine()), None);
+    }
+
+    #[test]
+    fn an_unlock_leaves_a_code_an_administrator_disabled_disabled() {
+        let (access, _, me) = access_with_codes("unlock-disabled");
+        let begun = access.begin_factor(&me, mine()).unwrap();
+        access
+            .confirm_factor(&me, mine(), &totp_in(&begun.uri))
+            .unwrap();
+        let store = access.codes.as_ref().unwrap();
+        store
+            .accounts
+            .put(AccountPut {
+                name: format!("{}:{me}", mine()),
+                disabled: Some(true),
+                ..AccountPut::default()
+            })
+            .unwrap();
+        assert_eq!(
+            access.factor_standing(&me, mine()),
+            FactorStanding::Disabled
+        );
+        access.unlock(&me, mine()).unwrap();
+        assert_eq!(
+            access.factor_standing(&me, mine()),
+            FactorStanding::Disabled,
+            "an unlock is not an enable"
+        );
+        // And an enabled one stays enabled.
+        store
+            .accounts
+            .put(AccountPut {
+                name: format!("{}:{me}", mine()),
+                disabled: Some(false),
+                ..AccountPut::default()
+            })
+            .unwrap();
+        access.unlock(&me, mine()).unwrap();
+        assert_eq!(
+            access.factor_standing(&me, mine()),
+            FactorStanding::Enrolled
+        );
+    }
+
+    #[test]
+    fn the_owner_check_looks_at_the_code_providers_files_and_no_others() {
+        let dir = scratch("owner-scope");
+        // A password table under a folder root owns, and a code table under ours: nothing to refuse.
+        let name = format!("canoa-owner-scope-{}.toml", std::process::id());
+        let password = entry(
+            "coqui_access_password",
+            None,
+            &serde_json::json!({"source": {"file": {"path": PathBuf::from("/tmp").join(&name), "format": "toml"}}}),
+        );
+        let ours = settings(vec![password.clone(), totp_entry(&dir.join("totp.toml"))]);
+        assert_eq!(check_code_files_owned(&ours), Ok(()));
+        // A code provider under another id is found by its library's name, and its files are the ones that count.
+        let mut codes = totp_entry(&PathBuf::from("/tmp").join(&name));
+        codes.provider = "second_factor".to_owned();
+        let error = check_code_files_owned(&settings(vec![password, codes])).unwrap_err();
+        assert!(error.contains("belongs to user id 0"), "{error}");
     }
 }

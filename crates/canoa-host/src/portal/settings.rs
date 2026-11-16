@@ -46,6 +46,34 @@ impl core::fmt::Debug for Entry {
     }
 }
 
+/// One rule of the matcher that ties a certificate's claims to an account: a template over the claims, and what its rendering
+/// is in the directory (`by` is `name`, `email`, `id` or `filter`). The words are coqui-access's `MatchRule`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct MatcherRule {
+    /// What the rendered text is: `name`, `email`, `id` or `filter`.
+    pub by: String,
+    /// The template, such as `{san.upn|local}`.
+    pub template: String,
+    /// The realm `local` strips; a rule that uses `local` names this or `pins`.
+    pub domain: Option<String>,
+    /// The name of a pin source the account must hold the certificate in. The portal gives none yet.
+    pub pins: Option<String>,
+}
+
+impl MatcherRule {
+    /// A rule: `by`, `template` and the realm it strips, if it does.
+    #[must_use]
+    pub fn new(by: &str, template: &str, domain: Option<&str>) -> Self {
+        Self {
+            by: by.to_owned(),
+            template: template.to_owned(),
+            domain: domain.map(str::to_owned),
+            pins: None,
+        }
+    }
+}
+
 /// How the portal runs. `Settings::default()` is what runs with no file; each field is the file's key of the same name
 /// (a duration as `NAME_seconds`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,6 +113,10 @@ pub struct Settings {
     /// defaults to the rules provider `coqui_signin_rules`, which is built in, and any other comes from `library`. With none,
     /// each configured method is enough alone, from anywhere.
     pub sign_in_policy: Option<Entry>,
+    /// `matcher`: the rules that tie the claims of a certificate to an account, for a provider that names none itself (it answers
+    /// by `claims`). `None` is coqui-access's defaults: the UPN as a name, then the email address as an email; `Some(vec![])`
+    /// matches nobody. A rule that strips the realm (`local`) names its `domain`.
+    pub matcher: Option<Vec<MatcherRule>>,
     /// `certificate_header`: the header the proxy puts a client certificate in, as base64 DER, leaf first, comma-separated. It
     /// is read only on `socket`, and the proxy must delete any of that name the browser sent.
     pub certificate_header: String,
@@ -92,8 +124,22 @@ pub struct Settings {
     /// directory above it must be owned by root and writable by no group or other, since the portal runs the library's code.
     pub libraries_any_owner: bool,
     /// `enrol_seconds`: how long after a password sign-in a session may pin a certificate. A session opened any other way never
-    /// may.
+    /// may. It is also how long a person has, once they have shown the factors the policy's `enrol` rule asks for, to set up a
+    /// one-time code.
     pub enrol: Duration,
+    /// `pending_seconds`: how long a sign-in that has passed a step waits for the next one.
+    pub pending: Duration,
+    /// `max_pending_tries`: the tries a pending sign-in allows at its next steps, right or wrong, before it ends and the person
+    /// starts again.
+    pub max_pending_tries: usize,
+    /// `max_factor_failures_per_person`: failed tries at a second step for one account, from any address, in the window, after
+    /// which its further tries are refused until failures leave the window.
+    pub max_factor_failures_per_person: usize,
+    /// `max_factor_failures_per_day`: failed second-step tries for one account, from any address, in `factor_day_seconds`
+    /// (a day), which a guesser keeping under the window's limit is stopped by.
+    pub max_factor_failures_per_day: usize,
+    /// `factor_day_seconds`: the span `max_factor_failures_per_day` counts in.
+    pub factor_day: Duration,
     /// `hosts`: names a request may carry in `Host`, besides `localhost` and addresses; an `Origin` must match `Host`.
     pub hosts: Vec<String>,
     /// `trusted_proxies`: addresses in `client_address_header` that are proxies of ours and so not the browser's.
@@ -164,9 +210,15 @@ impl Default for Settings {
             groups: Vec::new(),
             authenticators: vec![Entry::new("coqui_access_system")],
             sign_in_policy: None,
+            matcher: None,
             certificate_header: "x-client-cert".to_owned(),
             libraries_any_owner: false,
             enrol: Duration::from_secs(10 * 60),
+            pending: Duration::from_secs(5 * 60),
+            max_pending_tries: 5,
+            max_factor_failures_per_person: 5,
+            max_factor_failures_per_day: 20,
+            factor_day: Duration::from_secs(24 * 3600),
             hosts: Vec::new(),
             trusted_proxies: Vec::new(),
             client_address_header: "x-forwarded-for".to_owned(),
@@ -206,6 +258,15 @@ struct RawEntry {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawMatcherRule {
+    by: String,
+    template: String,
+    domain: Option<String>,
+    pins: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawPolicy {
     provider: Option<String>,
     library: Option<PathBuf>,
@@ -228,8 +289,14 @@ struct Raw {
     groups: Option<Vec<String>>,
     authenticators: Option<Vec<RawEntry>>,
     sign_in_policy: Option<RawPolicy>,
+    matcher: Option<Vec<RawMatcherRule>>,
     certificate_header: Option<String>,
     enrol_seconds: Option<u64>,
+    pending_seconds: Option<u64>,
+    max_pending_tries: Option<usize>,
+    max_factor_failures_per_person: Option<usize>,
+    max_factor_failures_per_day: Option<usize>,
+    factor_day_seconds: Option<u64>,
     libraries_any_owner: Option<bool>,
     hosts: Option<Vec<String>>,
     trusted_proxies: Option<Vec<String>>,
@@ -321,6 +388,19 @@ impl Settings {
                 enrol: false,
             });
         }
+        if let Some(rules) = raw.matcher {
+            settings.matcher = Some(
+                rules
+                    .into_iter()
+                    .map(|rule| MatcherRule {
+                        by: rule.by,
+                        template: rule.template,
+                        domain: rule.domain,
+                        pins: rule.pins,
+                    })
+                    .collect(),
+            );
+        }
         settings.hosts = raw
             .hosts
             .unwrap_or(settings.hosts)
@@ -341,6 +421,8 @@ impl Settings {
         settings.session = seconds(raw.session_seconds, settings.session);
         settings.idle = seconds(raw.idle_seconds, settings.idle);
         settings.enrol = seconds(raw.enrol_seconds, settings.enrol);
+        settings.pending = seconds(raw.pending_seconds, settings.pending);
+        settings.factor_day = seconds(raw.factor_day_seconds, settings.factor_day);
         settings.start = seconds(raw.start_seconds, settings.start);
         settings.pair = seconds(raw.pair_seconds, settings.pair);
         settings.slow = seconds(raw.slow_seconds, settings.slow);
@@ -359,6 +441,15 @@ impl Settings {
         settings.slow_after_user_failures = count(
             raw.slow_after_user_failures,
             settings.slow_after_user_failures,
+        );
+        settings.max_pending_tries = count(raw.max_pending_tries, settings.max_pending_tries);
+        settings.max_factor_failures_per_person = count(
+            raw.max_factor_failures_per_person,
+            settings.max_factor_failures_per_person,
+        );
+        settings.max_factor_failures_per_day = count(
+            raw.max_factor_failures_per_day,
+            settings.max_factor_failures_per_day,
         );
         settings.max_connections = count(raw.max_connections, settings.max_connections);
         settings.max_sign_ins = count(raw.max_sign_ins, settings.max_sign_ins);
@@ -462,6 +553,17 @@ impl Settings {
                 "max_failures_per_address",
                 self.max_failures_per_address == 0,
             ),
+            ("max_pending_tries", self.max_pending_tries == 0),
+            (
+                "max_factor_failures_per_person",
+                self.max_factor_failures_per_person == 0,
+            ),
+            ("pending_seconds", self.pending.is_zero()),
+            ("factor_day_seconds", self.factor_day.is_zero()),
+            (
+                "max_factor_failures_per_day",
+                self.max_factor_failures_per_day == 0,
+            ),
             ("session_seconds", self.session.is_zero()),
             ("idle_seconds", self.idle.is_zero()),
             ("start_seconds", self.start.is_zero()),
@@ -518,6 +620,35 @@ mod tests {
     }
 
     #[test]
+    fn the_second_step_and_matcher_settings_read_and_default() {
+        let defaults = Settings::default();
+        assert_eq!(
+            (
+                defaults.pending.as_secs(),
+                defaults.max_pending_tries,
+                defaults.max_factor_failures_per_person,
+                defaults.matcher.is_none()
+            ),
+            (300, 5, 5, true)
+        );
+        let settings = Settings::from_toml(
+            "pending_seconds = 60\nmax_pending_tries = 2\nmax_factor_failures_per_person = 3\nmatcher = [{ by = \"name\", template = \"{san.upn|local}\", domain = \"corp.example\" }]",
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                settings.pending.as_secs(),
+                settings.max_pending_tries,
+                settings.max_factor_failures_per_person
+            ),
+            (60, 2, 3)
+        );
+        let rules = settings.matcher.unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].domain.as_deref(), Some("corp.example"));
+    }
+
+    #[test]
     fn the_authenticators_default_to_the_system_and_read_in_order_with_their_configuration() {
         assert_eq!(
             Settings::default()
@@ -560,6 +691,12 @@ mod tests {
             "unit = \"canoa.service\"",
             "pam_service = \"../x\"",
             "idle_seconds = 0",
+            "matcher_directory = \"x\"",
+            "pending_seconds = 0",
+            "max_pending_tries = 0",
+            "max_factor_failures_per_person = 0",
+            "matcher = [{ by = \"name\" }]",
+            "matcher = [{ by = \"name\", template = \"{san.upn}\", extra = 1 }]",
             "min_uid = 0",
             "authenticators = []",
             "authenticators = [{ provider = \"\" }]",

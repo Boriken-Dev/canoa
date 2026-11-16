@@ -112,3 +112,10 @@ dd { margin: 0 0 8px; overflow-wrap: anywhere; }
 a { color: var(--accent); }
 form + form, p + form { margin-top: 10px; }
 @media (prefers-color-scheme: dark) { .notice.ok { background: #2f4a34; color: #d5edd7; } }
+
+.qrbox { display: flex; justify-content: center; margin: 12px 0; }
+.qr { width: 14rem; height: 14rem; background: #fff; border-radius: 8px; }
+.link { overflow-wrap: anywhere; text-align: left; }
+.codes { columns: 2; padding-left: 1.2rem; margin: 8px 0 12px; }
+details.recovery { margin: 14px 0 12px; }
+details.recovery summary { cursor: pointer; color: var(--accent); }

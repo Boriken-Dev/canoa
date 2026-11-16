@@ -18,7 +18,7 @@ allow = [["password"], ["certificate"]]
 allow = [["certificate"]]
 "#;
 
-fn network_rule() -> Option<Entry> {
+pub(super) fn network_rule() -> Option<Entry> {
     Settings::from_toml(NETWORK_RULE).unwrap().sign_in_policy
 }
 
@@ -26,12 +26,12 @@ fn under_the_network_rule() -> Rig {
     rig(|settings| settings.sign_in_policy = network_rule(), 0)
 }
 
-fn proxied(rig: &Rig<impl Sized>) -> To {
+pub(super) fn proxied(rig: &Rig<impl Sized>) -> To {
     To::Unix(rig.sock.clone())
 }
 
 /// The methods `GET /portal/methods` answers a browser the proxy says is at `forwarded` (none: the proxy said nothing).
-fn methods_at(rig: &Rig<impl Sized>, forwarded: Option<&str>) -> Vec<String> {
+pub(super) fn methods_at(rig: &Rig<impl Sized>, forwarded: Option<&str>) -> Vec<String> {
     let extra: Vec<(&str, String)> = forwarded
         .map(|address| ("X-Forwarded-For", address.to_owned()))
         .into_iter()
@@ -48,7 +48,7 @@ fn methods_at(rig: &Rig<impl Sized>, forwarded: Option<&str>) -> Vec<String> {
 }
 
 /// A sign-in form posted from the proxy for a browser at `forwarded`.
-fn form_at(
+pub(super) fn form_at(
     rig: &Rig<impl Sized>,
     forwarded: Option<&str>,
     certificate: Option<&str>,
@@ -72,7 +72,7 @@ fn form_at(
 }
 
 /// The person's host index, which is where a session is decided again, for a browser at `forwarded`.
-fn index_at(rig: &Rig<impl Sized>, cookie: &str, forwarded: Option<&str>) -> Answer {
+pub(super) fn index_at(rig: &Rig<impl Sized>, cookie: &str, forwarded: Option<&str>) -> Answer {
     let mut extra = vec![("Cookie", cookie.to_owned())];
     if let Some(address) = forwarded {
         extra.push(("X-Forwarded-For", address.to_owned()));
@@ -448,13 +448,25 @@ fn a_policy_that_names_a_provider_or_a_library_that_is_not_there_does_not_start(
 }
 
 /// Stand-in providers for the shared flows: `local` accepts `alice` with `pw`, `ldap` accepts nobody, and a certificate names
-/// `alice` or `bob`. It records which providers were asked.
-struct Flow {
-    asked: Mutex<Vec<String>>,
+/// `alice` or `bob`. A one-time code is `123456` for alice and `654321` for bob, and alice's recovery code `RECOVER-1` works once.
+/// It records which providers were asked.
+pub(super) struct Flow {
+    pub(super) asked: Mutex<Vec<String>>,
+    /// Bob's user id: his own when a flow needs two people, else alice's, whose host the stand-in hosts run.
+    bob: u32,
+    recovery_used: AtomicBool,
 }
 
 impl Flow {
-    fn person(name: &str, provider: &str) -> SignIn {
+    fn new(bob: u32) -> Self {
+        Self {
+            asked: Mutex::new(Vec::new()),
+            bob,
+            recovery_used: AtomicBool::new(false),
+        }
+    }
+
+    fn person(&self, name: &str, provider: &str) -> SignIn {
         let groups = if name == "alice" {
             vec!["admins".to_owned()]
         } else {
@@ -462,7 +474,7 @@ impl Flow {
         };
         SignIn::Admitted {
             user: name.to_owned(),
-            uid: mine(),
+            uid: if name == "bob" { self.bob } else { mine() },
             groups,
             provider: provider.to_owned(),
         }
@@ -479,17 +491,84 @@ impl Flow {
 
 impl Accounts for Flow {
     fn methods(&self) -> Vec<Method> {
-        vec![Method::Password, Method::Certificate]
+        vec![
+            Method::Password,
+            Method::Certificate,
+            Method::Totp,
+            Method::RecoveryCode,
+        ]
     }
 
     fn sign_in(&self, user: &str, password: &str, providers: &[String]) -> SignIn {
         for provider in self.providers(providers) {
             self.asked.lock().unwrap().push(provider.clone());
             if provider == "local" && user == "alice" && password == "pw" {
-                return Self::person("alice", &provider);
+                return self.person("alice", &provider);
             }
         }
         SignIn::Refused
+    }
+
+    fn carries_certificate(&self, headers: &[(String, String)]) -> bool {
+        headers.iter().any(|(name, _)| name == "x-client-cert")
+    }
+
+    fn certificate_status(
+        &self,
+        user: &str,
+        _uid: u32,
+        headers: &[(String, String)],
+    ) -> Option<CertificateStatus> {
+        // A certificate is the name it carries: pinned to that account, unpinned when it is `stranger`.
+        let presented = headers
+            .iter()
+            .find(|(name, _)| name == "x-client-cert")
+            .map(|(_, value)| {
+                let state = match value.as_str() {
+                    "stranger" => PinState::Unpinned,
+                    name if name == user => PinState::Yours,
+                    _ => PinState::Another,
+                };
+                (
+                    Presented {
+                        subject: format!("CN={value}"),
+                        fingerprint: format!("sha256:{value}"),
+                        expired: false,
+                    },
+                    state,
+                )
+            });
+        Some(CertificateStatus {
+            presented,
+            pinned: true,
+            disabled: false,
+        })
+    }
+
+    fn check_code(
+        &self,
+        _user: &str,
+        uid: u32,
+        method: Method,
+        code: &str,
+        _providers: &[String],
+    ) -> CodeCheck {
+        self.asked.lock().unwrap().push("totp".to_owned());
+        let right = match method {
+            Method::Totp if uid == mine() => code == "123456",
+            Method::Totp if uid == self.bob => code == "654321",
+            Method::RecoveryCode if uid == mine() => {
+                code == "RECOVER-1" && !self.recovery_used.swap(true, Ordering::SeqCst)
+            }
+            _ => false,
+        };
+        if right {
+            CodeCheck::Valid {
+                provider: "totp".to_owned(),
+            }
+        } else {
+            CodeCheck::Refused
+        }
     }
 
     fn sign_in_certificate(
@@ -505,7 +584,7 @@ impl Accounts for Flow {
             .find(|(name, _)| name == "x-client-cert")
             .map(|(_, value)| value.as_str())
         {
-            Some(name @ ("alice" | "bob")) => Self::person(name, &provider),
+            Some(name @ ("alice" | "bob")) => self.person(name, &provider),
             _ => SignIn::Refused,
         }
     }
@@ -519,7 +598,7 @@ impl Accounts for Flow {
     }
 }
 
-fn flow_rig(config: &serde_json::Value) -> Rig<Flow> {
+pub(super) fn flow_rig(config: &serde_json::Value) -> Rig<Flow> {
     let entry = Entry {
         provider: policy::RULES.to_owned(),
         library: None,
@@ -527,9 +606,7 @@ fn flow_rig(config: &serde_json::Value) -> Rig<Flow> {
         enrol: false,
     };
     rig_with(
-        Arc::new(Flow {
-            asked: Mutex::new(Vec::new()),
-        }),
+        Arc::new(Flow::new(mine())),
         |settings| {
             settings.sign_in_policy = Some(entry);
             settings.max_failures_per_pair = 100;
@@ -539,38 +616,146 @@ fn flow_rig(config: &serde_json::Value) -> Rig<Flow> {
     )
 }
 
-/// Whether a flow needs a second factor, which the portal does not ask for yet.
-fn needs_a_second_factor(flow: &serde_json::Value) -> bool {
-    flow["steps"].as_array().unwrap().iter().any(|step| {
-        step["expect"]["result"] == "next"
-            || matches!(step["method"].as_str(), Some("totp" | "recovery_code"))
-    })
+/// [`flow_rig`] where bob is a person of his own, as the flows with a second step need, with `change` made to the settings.
+pub(super) fn flow_rig_apart(
+    config: &serde_json::Value,
+    change: impl FnOnce(&mut Settings),
+) -> Rig<Flow> {
+    let entry = Entry {
+        provider: policy::RULES.to_owned(),
+        library: None,
+        config: config.as_object().unwrap().clone(),
+        enrol: false,
+    };
+    rig_with(
+        Arc::new(Flow::new(mine() + 1)),
+        |settings| {
+            settings.sign_in_policy = Some(entry);
+            settings.max_failures_per_pair = 100;
+            settings.max_failures_per_address = 1000;
+            change(settings);
+        },
+        0,
+    )
+}
+
+/// The name and value of each cookie an answer sets (a clearing one has an empty value).
+pub(super) fn set_cookies(answer: &Answer) -> Vec<(String, String)> {
+    answer
+        .headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
+        .filter_map(|(_, line)| line.split(';').next()?.split_once('='))
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .collect()
+}
+
+/// The value of the cookie `name` that an answer sets to something.
+pub(super) fn set_to(answer: &Answer, name: &str) -> Option<String> {
+    set_cookies(answer)
+        .into_iter()
+        .find(|(each, value)| each == name && !value.is_empty())
+        .map(|(_, value)| value)
+}
+
+/// `GET /portal/methods` for a browser holding `cookie`: the step it says, if it does, and the methods.
+pub(super) fn methods_holding(
+    rig: &Rig<impl Sized>,
+    forwarded: Option<&str>,
+    cookie: Option<&str>,
+) -> (Option<String>, Vec<String>) {
+    let mut extra: Vec<(&str, String)> = forwarded
+        .map(|address| ("X-Forwarded-For", address.to_owned()))
+        .into_iter()
+        .collect();
+    if let Some(cookie) = cookie {
+        extra.push(("Cookie", cookie.to_owned()));
+    }
+    let answer = request(&proxied(rig), "GET", METHODS, &extra, "");
+    assert_eq!(answer.status, 200);
+    let list: serde_json::Value = serde_json::from_str(&answer.body).unwrap();
+    (
+        list.get("step")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        list["methods"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|word| word.as_str().unwrap().to_owned())
+            .collect(),
+    )
+}
+
+/// A sign-in form posted from the proxy for a browser at `forwarded`, holding `cookie`.
+pub(super) fn form_holding(
+    rig: &Rig<impl Sized>,
+    forwarded: Option<&str>,
+    certificate: Option<&str>,
+    cookie: Option<&str>,
+    body: &str,
+) -> Answer {
+    let to = proxied(rig);
+    let mut extra = vec![
+        ("Origin", to.origin()),
+        (
+            "Content-Type",
+            "application/x-www-form-urlencoded".to_owned(),
+        ),
+    ];
+    if let Some(address) = forwarded {
+        extra.push(("X-Forwarded-For", address.to_owned()));
+    }
+    if let Some(cert) = certificate {
+        extra.push(("X-Client-Cert", cert.to_owned()));
+    }
+    if let Some(cookie) = cookie {
+        extra.push(("Cookie", cookie.to_owned()));
+    }
+    request(&to, "POST", LOGIN, &extra, body)
 }
 
 #[test]
-fn every_flow_without_a_second_factor_goes_through_the_portals_request_path_as_the_contract_says() {
+fn every_flow_goes_through_the_portals_request_path_as_the_contract_says() {
     let document: serde_json::Value = serde_json::from_str(FLOWS).unwrap();
     let flows = document["flows"].as_array().unwrap();
-    let (second, single): (Vec<_>, Vec<_>) =
-        flows.iter().partition(|flow| needs_a_second_factor(flow));
-    assert_eq!(single.len(), 8, "the flows that need no second factor");
-    assert!(!second.is_empty());
-    for flow in single {
+    assert_eq!(flows.len(), 18, "the flows the vectors hold");
+    for flow in flows {
         let name = flow["name"].as_str().unwrap();
-        let rig = flow_rig(&flow["config"]);
-        let mut cookie: Option<String> = None;
+        // The vectors' quiet period is 15 minutes; the portal's window is shortened to a second and a half, and a step's wait
+        // by the same factor.
+        let window = Duration::from_millis(1500);
+        let rig = flow_rig_apart(&flow["config"], |settings| {
+            settings.failure_window = window;
+            settings.max_factor_failures_per_person = 3;
+        });
+        let mut session: Option<String> = None;
+        let mut pending: Option<String> = None;
         for (index, step) in flow["steps"].as_array().unwrap().iter().enumerate() {
             let at = format!("{name}, step {index}");
             let address = step.get("address").and_then(serde_json::Value::as_str);
             let counted_from: IpAddr = address.map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |text| {
                 text.parse().unwrap()
             });
+            if let Some(after) = step
+                .get("after_seconds")
+                .and_then(serde_json::Value::as_u64)
+            {
+                thread::sleep(window * u32::try_from(after).unwrap() / 900);
+            }
             let calls_before = rig.accounts.asked.lock().unwrap().len();
             let counted_before = rig.inner.throttle.failures_from(counted_from);
+            let held = pending
+                .as_deref()
+                .map(|token| format!("{}={token}", steps::PENDING));
             let (result, methods) = match step["action"].as_str().unwrap() {
-                "offer" => ("methods", Some(methods_at(&rig, address))),
+                "offer" => {
+                    let (step, methods) = methods_holding(&rig, address, held.as_deref());
+                    assert_eq!(step.is_some(), pending.is_some(), "{at}: the step word");
+                    ("methods", Some(methods))
+                }
                 "resume" => {
-                    let answer = index_at(&rig, cookie.as_deref().unwrap(), address);
+                    let answer = index_at(&rig, session.as_deref().unwrap(), address);
                     (
                         if answer.status == 200 {
                             "signed_in"
@@ -584,6 +769,16 @@ fn every_flow_without_a_second_factor_goes_through_the_portals_request_path_as_t
                     let text = |key: &str| step[key].as_str().unwrap_or_default();
                     let (certificate, body) = match text("method") {
                         "certificate" => (Some(text("name")), "method=certificate".to_owned()),
+                        // The browser never says whose code it is: the portal takes the account from the sign-in. A code
+                        // the vectors give to another person is that person's own, which the first account's does not accept.
+                        method @ ("totp" | "recovery_code") => {
+                            let code = if text("name") == "id-bob" {
+                                "654321"
+                            } else {
+                                text("secret")
+                            };
+                            (None, format!("method={method}&code={code}"))
+                        }
                         method => (
                             None,
                             format!(
@@ -593,14 +788,23 @@ fn every_flow_without_a_second_factor_goes_through_the_portals_request_path_as_t
                             ),
                         ),
                     };
-                    let answer = form_at(&rig, address, certificate, &body);
+                    let answer = form_holding(&rig, address, certificate, held.as_deref(), &body);
                     let result = match answer.status {
                         303 => {
-                            cookie = answer.cookie();
-                            "signed_in"
+                            if let Some(token) = set_to(&answer, COOKIE) {
+                                session = Some(format!("{COOKIE}={token}"));
+                                pending = None;
+                                "signed_in"
+                            } else {
+                                pending = Some(
+                                    set_to(&answer, steps::PENDING)
+                                        .unwrap_or_else(|| panic!("{at}: a pending cookie")),
+                                );
+                                "next"
+                            }
                         }
                         403 => "refused_unasked",
-                        401 => "failed",
+                        401 | 429 => "failed",
                         other => panic!("{at}: status {other}"),
                     };
                     (result, None)
@@ -624,7 +828,14 @@ fn every_flow_without_a_second_factor_goes_through_the_portals_request_path_as_t
                     .iter()
                     .map(|word| word.as_str().unwrap().to_owned())
                     .collect();
-                assert_eq!(methods.unwrap(), expected, "{at}");
+                // After a first step the answer to a present is the redirect; what the page asks is what the methods say.
+                let offered = methods.unwrap_or_else(|| {
+                    let held = pending
+                        .as_deref()
+                        .map(|token| format!("{}={token}", steps::PENDING));
+                    methods_holding(&rig, address, held.as_deref()).1
+                });
+                assert_eq!(offered, expected, "{at}");
             }
             if let Some(list) = expect.get("asked") {
                 let expected: Vec<&str> = list
