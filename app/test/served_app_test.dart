@@ -15,6 +15,7 @@ import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/served/folder_dialog.dart';
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/config/connection.dart';
 import 'package:canoa/served/host_config.dart';
 import 'package:canoa/served/host_files.dart';
 import 'package:canoa/served/served_app.dart';
@@ -160,6 +161,28 @@ void main() {
       );
       await store.save(changed);
       expect(link.asked.where((method) => method == 'config/set'), hasLength(1));
+    });
+
+    test('a connection saved on the page is sent as its own table, and as the one table', () async {
+      final sent = <String, Object?>{};
+      final link = _Link((method, params) {
+        if (method == 'config/get') return {'section': params['section'], 'value': null};
+        sent[params['section'] as String] = params['value'];
+        return {'section': params['section'], 'restart': false};
+      });
+      final store = HostConfigStore(HostFiles(HostControl.dialing(() async => link)));
+      final config = await store.load();
+      final desk = Connection(
+        name: 'Desk',
+        kind: ConnectionKind.canoa,
+        address: 'https://desk.example:7800',
+        peer: 'sha256:${'ab' * 32}',
+        method: 'noise',
+        transport: ConnectionTransport.websocket,
+      );
+      expect(await store.save(config.withConnection(desk)), isFalse);
+      expect(sent.keys, ['connections']);
+      expect((sent['connections'] as Map)['Desk'], desk.toTable());
     });
 
     test('a table the host had is removed only when the person emptied it, and one it never had is never sent as removed', () async {

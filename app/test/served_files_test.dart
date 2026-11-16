@@ -18,6 +18,7 @@ import 'package:canoa/acp/connect.dart';
 import 'package:canoa/acp/served_host.dart';
 import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/config/connection.dart';
 import 'package:canoa/desktop/control_client.dart';
 import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
@@ -301,6 +302,44 @@ own_profile = true
     expect((await loadCatalog(overlays, 'dirs', at('icons'), const StoreSettings())).problem,
         'It has no file icons at that commit');
     await overlays.removeCatalog('dirs');
+  }, skip: skip);
+
+  test('a page saves, renames and removes a connection in canoa.cfg on the host, and the host refuses one that holds a credential', () async {
+    final files = HostFiles(control());
+    final store = HostConfigStore(files);
+    final desk = Connection(
+      name: 'Desk',
+      kind: ConnectionKind.canoa,
+      address: 'https://desk.example:7800',
+      peer: 'sha256:${'ab' * 32}',
+      method: 'noise',
+      transport: ConnectionTransport.websocket,
+    );
+    var current = await store.load();
+    expect(current.connections, isEmpty);
+    expect(await store.save(current.withConnection(desk)), isFalse, reason: 'the host reads no connection at start');
+    expect(File(host.config.path).readAsStringSync(), contains('desk.example'));
+    current = await store.load();
+    expect(current.connections.single.address, 'https://desk.example:7800');
+    await store.save(current.withConnection(desk.renamed('Desk upstairs'), replacing: 'Desk'));
+    expect([for (final each in (await store.load()).connections) each.name], ['Desk upstairs']);
+    await store.save((await store.load()).withoutConnection('Desk upstairs'));
+    expect((await store.load()).connections, isEmpty);
+    expect(File(host.config.path).readAsStringSync(), isNot(contains('desk.example')));
+
+    // The page's own check is not the host's: a table written around it is refused by the host, and nothing is written.
+    final before = File(host.config.path).readAsStringSync();
+    for (final address in ['https://me:secret@desk.example', 'wss://me@desk.example/acp']) {
+      await expectLater(
+        files.configSet('connections', {'Desk': {...desk.toTable(), 'address': address}}),
+        throwsA(isA<ControlFailed>().having((error) => error.code, 'code', -32002)),
+      );
+    }
+    await expectLater(
+      files.configSet('connections', {'Desk': {...desk.toTable(), 'token': 'abc'}}),
+      throwsA(isA<ControlFailed>().having((error) => error.code, 'code', -32002)),
+    );
+    expect(File(host.config.path).readAsStringSync(), before);
   }, skip: skip);
 
   test('an overlay is installed from a local catalog through the store, selected, and reaches the next session', () async {

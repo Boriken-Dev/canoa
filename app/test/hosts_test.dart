@@ -76,7 +76,7 @@ Future<(HostsController, List<CanoaConfig>)> _show(
     local: local == null ? null : () => local,
     servedName: servedName,
     servedSummary: servedName == null ? null : () => const HostSummary(state: 'Serving this page', agents: ['Claude'], capabilities: ['Session list']),
-    canSave: canSave,
+    mayWrite: () => canSave,
   )..adopt(config);
   addTearDown(controller.dispose);
   await tester.pumpWidget(MaterialApp(
@@ -326,7 +326,35 @@ void main() {
       expect(find.text('Local'), findsNothing);
       expect(find.text('Serves this page'), findsOneWidget);
       expect(find.textContaining('it is not Local'), findsOneWidget);
-      expect(tester.widget<IconButton>(find.byKey(const ValueKey('hosts-add'))).onPressed, isNull, reason: 'its host keeps canoa.cfg');
+      expect(tester.widget<IconButton>(find.byKey(const ValueKey('hosts-add'))).onPressed, isNull, reason: 'its host has not given this key config.write');
+    });
+
+    testWidgets('on a page the host served with config.write, a connection is added, renamed and removed', (tester) async {
+      final (controller, saved) = await _show(tester, local: null, servedName: 'desk.example:7800');
+      expect(tester.widget<IconButton>(find.byKey(const ValueKey('hosts-add'))).onPressed, isNotNull);
+      await controller.add(_desk);
+      await tester.pumpAndSettle();
+      expect(CanoaConfig.parse(saved.last.encode()).connections.single.name, 'Desk');
+      await tester.tap(find.byKey(const ValueKey('host-row connection:Desk')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('host-rename')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('rename-field')), 'Desk upstairs');
+      await tester.tap(find.byKey(const ValueKey('rename-save')));
+      await tester.pumpAndSettle();
+      expect([for (final connection in CanoaConfig.parse(saved.last.encode()).connections) connection.name], ['Desk upstairs']);
+      await tester.tap(find.byKey(const ValueKey('host-remove')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('remove-confirm')));
+      await tester.pumpAndSettle();
+      expect(CanoaConfig.parse(saved.last.encode()).connections, isEmpty);
+      expect(controller.items.map((item) => item.name), ['desk.example:7800'], reason: 'the serving host stays listed');
+    });
+
+    testWidgets('a page without config.write is refused in the controller too', (tester) async {
+      final (controller, saved) = await _show(tester, local: null, servedName: 'desk.example:7800', canSave: false);
+      await expectLater(controller.add(_desk), throwsA(isA<FormatException>()));
+      expect(saved, isEmpty);
     });
 
     testWidgets('with nothing listed it says so and offers Add', (tester) async {

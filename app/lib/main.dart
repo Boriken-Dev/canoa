@@ -460,8 +460,8 @@ class _CanoaAppState extends State<CanoaApp> {
             agents: [for (final entry in widget.served!.host.entries) if (entry.kind == 'agent') entry.title ?? entry.name],
             capabilities: _grants?.held == null ? const [] : HostSummary.capabilitiesOf(_grants!.held!),
           ),
-    // A page whose host keeps canoa.cfg for it saves only the tables the host lets it, which do not include connections.
-    canSave: widget.served == null,
+    // A page the host served writes through the host, which takes the table from a key that holds config.write.
+    mayWrite: () => widget.served == null || (_grants?.may(HostGrants.configWrite) ?? false),
     start: _connect,
     browserProvider: kIsWeb ? _provider : null,
     useBrowserAgents: _useBrowserAgents,

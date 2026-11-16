@@ -180,6 +180,7 @@ const configEntryPaths = <List<String>>[
   ['profile', 'env', '*'],
   ['overlays', '*'],
   ['catalogs', '*'],
+  ['connections', '*'],
 ];
 
 bool _isEntry(List<String> path) => configEntryPaths.any(

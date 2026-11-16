@@ -172,7 +172,7 @@ class HostsController extends ChangeNotifier {
     this.local,
     this.servedName,
     this.servedSummary,
-    this.canSave = true,
+    this.mayWrite = _always,
     this.start,
     this.addDialog,
     this.browserProvider,
@@ -210,8 +210,12 @@ class HostsController extends ChangeNotifier {
   final Future<AcpPage?>? browserProvider;
   final UseBrowserAgents? useBrowserAgents;
 
-  /// Whether saved connections can be written: not by a page whose host keeps canoa.cfg for it.
-  final bool canSave;
+  /// Whether this app may write saved connections: not a page whose host has not given its key `config.write`.
+  final bool Function() mayWrite;
+
+  static bool _always() => true;
+
+  bool get canSave => mayWrite();
 
   CanoaConfig _config = const CanoaConfig();
   final Map<String, HostStatus> _status = {};
@@ -276,7 +280,7 @@ class HostsController extends ChangeNotifier {
 
   /// Saves [connection], in place of the one named [replacing] when that is given. Throws [FormatException] naming what is wrong.
   Future<void> add(Connection connection, {String? replacing}) async {
-    if (!canSave) throw const FormatException('This page cannot save connections: its host keeps canoa.cfg.');
+    if (!canSave) throw const FormatException('This page cannot save connections: its host has not given it config.write.');
     if (replacing != connection.name && _config.connections.any((each) => each.name == connection.name)) {
       throw FormatException('A connection named ${connection.name} is already saved.');
     }
