@@ -316,9 +316,37 @@ fn lan_addresses() -> Vec<String> {
 pub(crate) fn this_computer() -> Value {
     let mut claim = json!({ "addresses": lan_addresses() });
     if let Some(name) = computer_name() {
+        let mut names = vec![name.clone()];
+        names.extend(dns_name(&name).filter(|dns| *dns != name));
         claim["hostname"] = name.into();
+        claim["hostnames"] = names.into();
     }
     claim
+}
+
+/// The name this computer has in the network's DNS, when it is one the system says: a domain's, which Windows keeps in
+/// `USERDNSDOMAIN`; on Unix the node name already is whatever the system calls it, which may carry its domain.
+fn dns_name(name: &str) -> Option<String> {
+    #[cfg(windows)]
+    {
+        let domain = std::env::var("USERDNSDOMAIN").ok()?;
+        let domain = domain.trim().trim_matches('.').to_ascii_lowercase();
+        (!domain.is_empty()).then(|| format!("{name}.{domain}"))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = name;
+        None
+    }
+}
+
+/// Adds what [`this_computer`] says to a `hello` reply that does not already say it.
+fn add_this_computer(reply: &mut Value) {
+    if let (Value::Object(reply), Value::Object(names)) = (reply, this_computer()) {
+        for (key, value) in names {
+            reply.entry(key).or_insert(value);
+        }
+    }
 }
 
 /// What a relay answers to `hello`: the host's claim of itself, with `running`. A claim: nothing pins a key from it.
@@ -334,7 +362,9 @@ fn hello(home: &Home, origin: &str) -> Value {
         Some(Value::Object(mut claim)) if !claim.contains_key("error") => {
             claim.insert("reply".into(), "hello".into());
             claim.insert("running".into(), true.into());
-            Value::Object(claim)
+            let mut reply = Value::Object(claim);
+            add_this_computer(&mut reply);
+            reply
         }
         _ => {
             let held = running(home);
@@ -346,6 +376,7 @@ fn hello(home: &Home, origin: &str) -> Value {
                 });
                 reply["why"] = why.into();
             }
+            add_this_computer(&mut reply);
             reply
         }
     }

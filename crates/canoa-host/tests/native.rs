@@ -277,6 +277,21 @@ fn hello_names_this_computer_and_its_network_addresses() {
 }
 
 #[test]
+fn a_stopped_hello_still_names_this_computer() {
+    let scratch = Scratch::new();
+    let relay = Relay::start(&scratch.0.join("home"), ORIGIN);
+    let reply = relay.ask(&json!({ "op": "hello" }));
+    assert_eq!(reply["running"], false, "{reply}");
+    let name = reply["hostname"].as_str().expect("a host name");
+    assert!(!name.is_empty(), "{reply}");
+    assert!(reply["addresses"].is_array(), "{reply}");
+    let names = reply["hostnames"]
+        .as_array()
+        .expect("the names DNS may know it by");
+    assert!(names.iter().any(|known| known == name), "{reply}");
+}
+
+#[test]
 fn no_host_running_answers_that_it_is_not() {
     let scratch = Scratch::new();
     let relay = Relay::start(&scratch.0.join("home"), ORIGIN);
