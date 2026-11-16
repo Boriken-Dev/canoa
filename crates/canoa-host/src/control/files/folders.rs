@@ -18,7 +18,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
-use super::{Files, Outcome, confined, network_path, plain, text_of};
+use super::{Files, Outcome, confined, plain, text_of};
 use crate::control::{Caller, Grant, NOT_FOUND, REFUSED, bad, text_param};
 
 /// The most folders one `fs/info` answers for.
@@ -55,14 +55,8 @@ const FOLDER_VARIABLES: [&str; 2] = ["documents", "home"];
 
 impl Files {
     /// The folder or file `asked` names, as `caller` may see it: resolved, and for a key not holding `files` under a place it may
-    /// browse. A key is never sent to a network share, which would send this computer's login there.
+    /// browse, as `fs/list` keeps to them; a share is a place like any other, reached through the operating system.
     fn place(&self, caller: &Caller, asked: &str) -> Result<PathBuf, (i32, String)> {
-        if matches!(caller, Caller::Peer { .. }) && network_path(asked) {
-            return Err((
-                REFUSED,
-                "a network share is not opened for a key: Windows would send this computer's login to its server".to_owned(),
-            ));
-        }
         let roots = self.browse_roots(caller);
         if caller.may(Grant::Files) {
             if !Path::new(asked).is_absolute() {

@@ -139,12 +139,15 @@ fn a_key_is_told_only_of_the_places_it_may_browse() {
     assert_eq!(found[0]["exists"], true, "{said}");
     assert_eq!(found[1]["exists"], false, "outside its places: {said}");
     assert!(found[1]["why"].is_string(), "the refusal says why: {said}");
-    assert_eq!(found[2]["exists"], false, "a share is not opened: {said}");
+    assert_eq!(
+        found[2]["exists"], false,
+        "a share outside its places is like any other place: {said}"
+    );
     assert!(
         found[2]["why"]
             .as_str()
-            .is_some_and(|why| why.contains("share")),
-        "{said}"
+            .is_some_and(|why| !why.contains("login")),
+        "no share is singled out for refusal: {said}"
     );
     // A key holding files is told of any place.
     let files = key(&[Grant::Folders, Grant::Files]);
