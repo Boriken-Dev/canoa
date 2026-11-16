@@ -333,6 +333,9 @@ fn a_gateway_that_cannot_start_is_a_refusal_the_person_can_read_and_lets_the_acc
 #[test]
 #[ignore = "needs Foundry Local running with CANOA_LIVE_MODEL loaded"]
 fn live_gateway_for_the_three_harnesses() {
+    let _ = tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .try_init();
     let model = std::env::var("CANOA_LIVE_MODEL").expect("CANOA_LIVE_MODEL names a loaded model");
     let out =
         PathBuf::from(std::env::var("CANOA_LIVE_OUT").expect("CANOA_LIVE_OUT names a folder"));
@@ -386,7 +389,7 @@ fn live_gateway_for_the_three_harnesses() {
 #[test]
 fn the_catalog_the_app_reads_is_the_one_the_host_writes() {
     fn json<T: coqui_acp_api::guatiao::ToValue>(value: &T) -> serde_json::Value {
-        let value = value.to_value().ok().expect("converts");
+        let value = value.to_value().expect("converts");
         serde_json::to_value(guatiao_serde::Serializable::from(&value)).expect("JSON")
     }
     let catalog = catalog_of("claude");
@@ -395,10 +398,19 @@ fn the_catalog_the_app_reads_is_the_one_the_host_writes() {
         "kinds": [json(catalog.kind(KIND).expect("the kind"))],
         "logins": [json(&catalog.logins[0])],
     });
-    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/vectors/foundry_catalog.json");
-    let text = format!("{}\n", serde_json::to_string_pretty(&written).expect("text"));
+    let file =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/vectors/foundry_catalog.json");
+    let text = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&written).expect("text")
+    );
     if std::env::var_os("CANOA_WRITE_VECTORS").is_some() {
         std::fs::write(&file, &text).expect("writes");
     }
-    assert_eq!(std::fs::read_to_string(&file).expect("the vector file").replace("\r\n", "\n"), text);
+    assert_eq!(
+        std::fs::read_to_string(&file)
+            .expect("the vector file")
+            .replace("\r\n", "\n"),
+        text
+    );
 }

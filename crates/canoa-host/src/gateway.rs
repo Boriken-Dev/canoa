@@ -116,10 +116,10 @@ impl Gateway {
     }
 
     fn run(&self, made: &Translated) -> Result<Completion, ApiError> {
-        let answer = self
-            .engine
-            .chat(&made.chat)
-            .map_err(|error| engine_error(&error))?;
+        let answer = self.engine.chat(&made.chat).map_err(|error| {
+            tracing::warn!("the local model did not answer: {error}");
+            engine_error(&error)
+        })?;
         let mut done = Completion::from_chat(&answer)?;
         if let Ok(model) = self.engine.model() {
             done.model = model.id;

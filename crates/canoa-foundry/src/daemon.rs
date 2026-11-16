@@ -152,6 +152,53 @@ fn reason(body: &str) -> String {
         .unwrap_or_else(|| body.trim().chars().take(300).collect())
 }
 
+impl DaemonEngine {
+    /// One chat request: the status and the body of what the service answered.
+    fn post(&self, request: &Value) -> Result<(u16, String), EngineError> {
+        let response = self
+            .agent
+            .post(format!("{}/v1/chat/completions", self.base))
+            .header("Content-Type", "application/json")
+            .send(request.to_string())
+            .map_err(|error| {
+                EngineError::Failed(format!("the Foundry Local service did not answer: {error}"))
+            })?;
+        let status = response.status().as_u16();
+        let mut body = String::new();
+        response
+            .into_body()
+            .into_reader()
+            .take(256 * 1024 * 1024)
+            .read_to_string(&mut body)
+            .map_err(|error| EngineError::Failed(format!("the answer was cut off: {error}")))?;
+        Ok((status, body))
+    }
+}
+
+/// What a window leaves for the answer, from the service's refusal: "requires 67001 total tokens (3001 input + 64000 output),
+/// which exceeds the model's maximum context length of 40960 tokens".
+fn room_left(reason: &str) -> Option<u64> {
+    let number_before = |text: &str, word: &str| -> Option<u64> {
+        let end = text.find(word)?;
+        text[..end]
+            .split(|c: char| !c.is_ascii_digit())
+            .rfind(|s| !s.is_empty())?
+            .parse()
+            .ok()
+    };
+    let input = number_before(reason, " input")?;
+    let window = reason
+        .split("context length of ")
+        .nth(1)?
+        .split(|c: char| !c.is_ascii_digit())
+        .next()?
+        .parse::<u64>()
+        .ok()?;
+    // A few tokens of margin, since the service counts the template's own.
+    let left = window.checked_sub(input)?.checked_sub(64)?;
+    (left > 0).then_some(left)
+}
+
 impl Engine for DaemonEngine {
     fn model(&self) -> Result<ModelInfo, EngineError> {
         Ok(self.info.clone())
@@ -171,22 +218,17 @@ impl Engine for DaemonEngine {
             .one_at_a_time
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let response = self
-            .agent
-            .post(format!("{}/v1/chat/completions", self.base))
-            .header("Content-Type", "application/json")
-            .send(request.to_string())
-            .map_err(|error| {
-                EngineError::Failed(format!("the Foundry Local service did not answer: {error}"))
-            })?;
-        let status = response.status().as_u16();
-        let mut body = String::new();
-        response
-            .into_body()
-            .into_reader()
-            .take(256 * 1024 * 1024)
-            .read_to_string(&mut body)
-            .map_err(|error| EngineError::Failed(format!("the answer was cut off: {error}")))?;
+        let (mut status, mut body) = self.post(&request)?;
+        // The service refuses a request whose prompt and allowed answer together exceed the model's window, and agents ask for
+        // far more than that (Claude Code asks for 64000): the answer is allowed what the window leaves, and the request is
+        // made again once.
+        if status == 400
+            && let Some(left) = room_left(&reason(&body))
+            && let Some(object) = request.as_object_mut()
+        {
+            object.insert("max_tokens".into(), left.into());
+            (status, body) = self.post(&request)?;
+        }
         if (200..300).contains(&status) {
             return serde_json::from_str(&body)
                 .map_err(|_| EngineError::Failed("the service's answer is not JSON".to_owned()));
@@ -329,6 +371,32 @@ mod tests {
         // The service has no more answers: its listener is gone.
         let gone = engine.chat(&ask).expect_err("gone");
         assert!(matches!(gone, EngineError::Failed(_)), "{gone:?}");
+    }
+
+    #[test]
+    fn a_window_that_the_prompt_and_the_answer_overflow_is_asked_again_with_what_it_leaves() {
+        let refusal = r#"{"error":{"message":"Invalid request: x.cc:112 requires 67001 total tokens (3001 input + 64000 output), which exceeds the model's maximum context length of 40960 tokens"}}"#;
+        assert_eq!(room_left(&reason(refusal)), Some(40960 - 3001 - 64));
+        assert_eq!(room_left("some other refusal"), None);
+        let (address, seen) = serve(vec![
+            (200, r#"{"data":[{"id":"local-model"}]}"#.to_owned()),
+            (400, refusal.to_owned()),
+            (
+                200,
+                r#"{"choices":[{"message":{"content":"ok"}}]}"#.to_owned(),
+            ),
+        ]);
+        let engine = open(&address).expect("opens");
+        let _ = seen.recv().expect("the listing");
+        let said = engine
+            .chat(&serde_json::json!({"max_tokens": 64000, "messages": []}))
+            .expect("answers on the second try");
+        assert_eq!(said["choices"][0]["message"]["content"], "ok");
+        let _first = seen.recv().expect("the first");
+        let second = seen.recv().expect("the second");
+        let (_, sent) = second.split_once("\r\n\r\n").expect("body");
+        let body: Value = serde_json::from_str(sent).expect("JSON");
+        assert_eq!(body["max_tokens"], 40960 - 3001 - 64);
     }
 
     #[test]
