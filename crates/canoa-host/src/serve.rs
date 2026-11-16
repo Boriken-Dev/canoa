@@ -1640,6 +1640,10 @@ impl Serving {
                                 .map(|dir| dir.join("overlays")),
                             control::OverlayLimits::default(),
                         ))
+                        .with_terminals(crate::terminal::Terminals::new(
+                            config.shell.clone(),
+                            options.home_dir.clone().or_else(home_from_environment),
+                        ))
                         .with_files(control::Files::new(
                             options.home_dir.clone().or_else(home_from_environment),
                             config

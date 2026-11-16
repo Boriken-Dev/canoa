@@ -16,6 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use coqui_peer_webcrypto::{PeerId, TrustStore};
 use coqui_transport::{Channel, Failure};
 
+use crate::terminal::{self, Terminals};
 use crate::worktree::Worktrees;
 pub use files::{
     DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_TOTAL, DEFAULT_MAX_UPLOADS, MAX_CHUNK, MAX_LIST,
@@ -109,12 +110,16 @@ pub enum Grant {
     /// `fs/read`, and with `folders` an `fs/list` not kept to any place: this computer's files as the account the host runs as can
     /// read them. The grant is the only gate.
     Files,
+    /// `terminal/open`, `terminal/write`, `terminal/resize`, `terminal/scrollback` and `terminal/close`: the person's own shell on this
+    /// computer, as this user, with output pushed back on the same link as `terminal/output`. It is a shell, so it is as much as
+    /// access to the agent and to everything else this user can do here; a delegated child connection never holds it.
+    Terminal,
 }
 
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 17] {
+    pub fn all() -> [Self; 18] {
         [
             Self::LedgerRead,
             Self::LedgerWrite,
@@ -133,6 +138,7 @@ impl Grant {
             Self::Discover,
             Self::Usage,
             Self::Files,
+            Self::Terminal,
         ]
     }
 
@@ -157,6 +163,7 @@ impl Grant {
             Self::Discover => "discover",
             Self::Usage => "usage",
             Self::Files => "files",
+            Self::Terminal => "terminal",
         }
     }
 
@@ -272,6 +279,8 @@ pub(crate) struct Control {
     entries: Vec<EntryRoots>,
     /// What a page may do with this computer's files.
     files: Files,
+    /// The shells this host runs for the person.
+    terminals: Terminals,
     overlays: Arc<Overlays>,
     /// The catalogs and programs, indexed for `store/index`.
     index: Arc<crate::store::index::StoreIndex>,
@@ -371,6 +380,7 @@ impl Control {
             sealer: None,
             entries,
             files: Files::default(),
+            terminals: Terminals::default(),
             overlays: Arc::new(Overlays::default()),
             index: Arc::new(crate::store::index::StoreIndex::default()),
             restart: Arc::new(AtomicBool::new(false)),
@@ -395,6 +405,19 @@ impl Control {
     pub(crate) fn with_files(mut self, files: Files) -> Self {
         self.files = files;
         self
+    }
+
+    /// Offers `terminal/*` with this shell, started in this folder unless a request names another.
+    #[must_use]
+    pub(crate) fn with_terminals(mut self, terminals: Terminals) -> Self {
+        self.terminals = terminals;
+        self
+    }
+
+    /// The terminals this host runs.
+    #[cfg(test)]
+    pub(crate) fn terminals(&self) -> &Terminals {
+        &self.terminals
     }
 
     /// Offers `overlay/*` and `catalog/*` over these overlays.
@@ -642,6 +665,13 @@ impl Control {
                     allow(caller, Grant::Discover).and_then(|()| discover::nearby(&params))
                 }
                 Some("host/grants") => Ok(caller.grants_json()),
+                Some(method) if method.starts_with("terminal/") => allow(caller, Grant::Terminal)
+                    .and_then(|()| {
+                        Err((
+                            REFUSED,
+                            "this needs a link that can carry its output".to_owned(),
+                        ))
+                    }),
                 Some("store/apply" | "accounts/add" | "accounts/login") => Err((
                     REFUSED,
                     "this needs a link that can carry its progress".to_owned(),
@@ -897,6 +927,19 @@ fn now_millis() -> u64 {
         })
 }
 
+/// Whether `line` is a request for a terminal, which needs the link it came on to push the shell's output back.
+fn is_terminal(line: &[u8]) -> bool {
+    line.windows(b"terminal/".len())
+        .any(|window| window == b"terminal/")
+        && serde_json::from_slice::<Value>(line).is_ok_and(|request| {
+            request.get("id").is_some()
+                && request
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .is_some_and(|method| method.starts_with("terminal/"))
+        })
+}
+
 fn is_apply(line: &[u8]) -> bool {
     serde_json::from_slice::<Value>(line).is_ok_and(|request| {
         request.get("id").is_some()
@@ -910,6 +953,33 @@ fn is_apply(line: &[u8]) -> bool {
 }
 
 impl Control {
+    /// A `terminal/*` request, for the terminals of the link it came on.
+    fn terminal<C: Channel>(
+        &self,
+        caller: &Caller,
+        link: &terminal::Link<'_, '_, C>,
+        line: &[u8],
+    ) -> Vec<u8> {
+        let request: Value = serde_json::from_slice(line).unwrap_or(Value::Null);
+        let id = request.get("id").cloned().unwrap_or(Value::Null);
+        let outcome = allow(caller, Grant::Terminal).and_then(|()| {
+            let method = request.get("method").and_then(Value::as_str).unwrap_or("");
+            let params = request.get("params").unwrap_or(&Value::Null);
+            link.call(method, params).map_err(|fail| match fail {
+                terminal::Fail::Bad(what) => (BAD_PARAMS, what),
+                terminal::Fail::Refused(what) => (REFUSED, what),
+                terminal::Fail::NotFound(what) => (NOT_FOUND, what),
+            })
+        });
+        match outcome {
+            Ok(result) => {
+                serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "result": result}))
+                    .unwrap_or_default()
+            }
+            Err((code, message)) => error_line(&id, code, &message),
+        }
+    }
+
     /// `store/apply` on `channel`, which carries its progress and questions until the answer.
     fn apply<C: Channel>(&self, caller: &Caller, line: &[u8], channel: &C) -> Vec<u8> {
         let request: Value = serde_json::from_slice(line).unwrap_or(Value::Null);
@@ -963,6 +1033,22 @@ impl Control {
 
 /// Answers `channel`'s requests as `caller` until it closes or the host stops it.
 pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C) {
+    // The shells this link opens run on threads of this scope, and end with the link.
+    std::thread::scope(|scope| {
+        let terminals = terminal::Link::new(scope, channel, &control.terminals);
+        serve_requests(control, caller, channel, &terminals);
+        // A reader waiting to hand output to a link that nobody reads is let go by closing it.
+        terminals.close_all();
+        channel.close();
+    });
+}
+
+fn serve_requests<C: Channel>(
+    control: &Control,
+    caller: &Caller,
+    channel: &C,
+    terminals: &terminal::Link<'_, '_, C>,
+) {
     let mut last = std::time::Instant::now();
     loop {
         match channel.receive(Some(POLL)) {
@@ -973,6 +1059,8 @@ pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C)
                 }
                 let answer = if is_apply(&line) {
                     Some(control.apply(caller, &line, channel))
+                } else if is_terminal(&line) {
+                    Some(control.terminal(caller, terminals, &line))
                 } else {
                     control.handle(caller, &line)
                 };
@@ -984,7 +1072,11 @@ pub(crate) fn serve<C: Channel>(control: &Control, caller: &Caller, channel: &C)
             }
             Err(Failure::Timeout) => {
                 // A key's connection that says nothing is ended; the app's own link lasts as long as the host.
-                if matches!(caller, Caller::Peer { .. }) && last.elapsed() > IDLE {
+                // A shell the person left running is not silence: its output is what the link is for.
+                if matches!(caller, Caller::Peer { .. })
+                    && last.elapsed() > IDLE
+                    && !terminals.any_running()
+                {
                     return;
                 }
             }

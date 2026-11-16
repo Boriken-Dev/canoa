@@ -34,6 +34,7 @@ mod site;
 mod sources;
 pub mod spawn;
 pub mod store;
+mod terminal;
 pub mod tool;
 mod transport;
 mod usage_log;

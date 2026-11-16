@@ -1854,6 +1854,7 @@ fn host_native_is_on_with_a_narrow_control_by_default_and_takes_a_list_that_neve
         Grant::OverlayWrite,
         Grant::HostRestart,
         Grant::Upload,
+        Grant::Terminal,
     ] {
         assert!(!none.native.control.contains(&never), "{never:?}");
     }
@@ -1884,6 +1885,7 @@ fn host_native_is_on_with_a_narrow_control_by_default_and_takes_a_list_that_neve
             "host.native",
         ),
         ("[host.native]\ncontrol = [\"upload\"]\n", "host.native"),
+        ("[host.native]\ncontrol = [\"terminal\"]\n", "host.native"),
         ("[host.native]\ncontrol = [\"nonsense\"]\n", "host.native"),
         ("[host.native]\nlisten = \"x\"\n", "native"),
     ] {
@@ -1934,4 +1936,16 @@ fn the_store_tools_are_on_unless_the_file_says_false() {
         Some(false)
     );
     assert!(parse("[host.store]\ntools = \"no\"\n").is_err());
+}
+
+#[test]
+fn host_shell_is_a_program_name_and_defaults_to_the_persons_own() {
+    let none = Config::from_str_in("", &base()).expect("parses");
+    assert_eq!(none.shell, None);
+    let named = Config::from_str_in("[host]\nshell = \"pwsh\"\n", &base()).expect("parses");
+    assert_eq!(named.shell.as_deref(), Some("pwsh"));
+    for text in ["[host]\nshell = \"\"\n", "[host]\nshell = \"a\\u0001b\"\n"] {
+        let error = Config::from_str_in(text, &base()).expect_err("refused");
+        assert!(error.to_string().contains("shell"), "{error}");
+    }
 }

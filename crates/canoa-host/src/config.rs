@@ -54,6 +54,9 @@ pub struct Config {
     pub accounts: IndexMap<String, AccountConfig>,
     /// Where the accounts' credentials are kept: `[host] account_store`.
     pub account_store: AccountStore,
+    /// `[host] shell`: the program a terminal starts, with no arguments; `None` leaves it to the person's own (`$SHELL`, else
+    /// `pwsh` or `powershell` on Windows).
+    pub shell: Option<String>,
     /// `[host.store]`: what the program stores' installs are held to.
     pub store: StoreConfig,
     /// `[host.delegate]`: what an agent may hand to another one.
@@ -1192,6 +1195,7 @@ struct RawHost {
     #[serde(default)]
     accounts: IndexMap<String, RawAccount>,
     account_store: Option<String>,
+    shell: Option<String>,
     web: Option<RawWeb>,
     control: Option<RawControl>,
     native: Option<RawNative>,
@@ -1486,6 +1490,14 @@ impl Config {
                 });
             }
         };
+        if host.shell.as_deref().is_some_and(|shell| {
+            shell.is_empty() || shell.contains(' ') || shell.chars().any(char::is_control)
+        }) {
+            return Err(ConfigError::Invalid {
+                entry: None,
+                what: "shell is the name or path of a program".to_owned(),
+            });
+        }
         let store = host
             .store
             .map_or_else(StoreConfig::default, |raw| StoreConfig {
@@ -1870,6 +1882,7 @@ impl Config {
             protected_paths,
             accounts,
             account_store,
+            shell: host.shell,
             local_agents,
             remote_agents,
             local_profiles,
@@ -1941,10 +1954,11 @@ fn native_of(raw: RawNative) -> Result<NativeConfig, ConfigError> {
                         | crate::control::Grant::OverlayWrite
                         | crate::control::Grant::HostRestart
                         | crate::control::Grant::Upload
+                        | crate::control::Grant::Terminal
                 )
             }) {
                 return Err(refused(
-                    "control cannot hold config.write.sessions, overlay.write, host.restart or upload: a browser key does not get them through the door",
+                    "control cannot hold config.write.sessions, overlay.write, host.restart, upload or terminal: a browser key does not get them through the door",
                 ));
             }
             set
