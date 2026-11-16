@@ -55,6 +55,7 @@ void main() {
       addTearDown(store.dispose);
       await pumpApp(tester, store, folderExists: folderExists);
       await newSession(tester);
+      await chooseWorkspace(tester);
       expect(find.byKey(ValueKey('recent-folder $shared\\project')), findsOneWidget);
       expect(find.byKey(ValueKey('recent-folder $shared\\gone')), findsNothing);
       await tester.tap(find.byKey(ValueKey('recent-folder $shared\\project')));
