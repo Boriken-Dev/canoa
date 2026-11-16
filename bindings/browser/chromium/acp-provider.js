@@ -1,6 +1,6 @@
 // The gateway on Chrome's APIs: storage, the windows that ask the person, and getting the two scripts into a site the person allowed.
 import { METHODS, dialAgent, ownPeerId, pairWithPin, unreachable } from "./acp-dial.js";
-import { createLocalHost, fromExtensionPage, fromOwnPage, localAgents, localGrants, viewOf } from "./acp-local.js";
+import { createLocalHost, fromExtensionPage, fromOwnPage, localAgents, localGrants, rememberedEntries, stoppedAgents, viewOf } from "./acp-local.js";
 import { addedMethod, lookNearby, mcpConfigCommand, offersOf, readCandidates, sameKey } from "./acp-discovery.js";
 import { createGateway, dialRecord } from "./acp-gateway.js";
 import { createStanding, fromPermissionsPage } from "./acp-standing.js";
@@ -23,6 +23,7 @@ const TOOL_MS = 30_000;
 const SEARCH_SECONDS = 3;
 const LOCAL_PIN = "canoa_local_host";
 const LOCAL_STATE = "canoa_local_state";
+const LOCAL_ENTRIES = "canoa_local_entries";
 const CONTROL_MS = 30_000;
 const STANDING = "canoa_standing";
 const STANDING_STATUS = "canoa_standing_status";
@@ -71,14 +72,38 @@ const lastLocal = () => read("session", LOCAL_STATE, { state: "unknown" });
 /** Asks the native host what Canoa on this computer is doing, and remembers it for the lists that cannot wait for it. */
 async function refreshLocal() {
   const state = await localHost.hello();
+  return { state: await noteLocal(state), pinned: await pinnedHost() };
+}
+
+/** Remembers a state the host was seen in, and what a paired host served, for a grant on one of its agents to outlast its being stopped. */
+async function noteLocal(state) {
   await write("session", LOCAL_STATE, state);
-  return { state, pinned: await pinnedHost() };
+  const kept = rememberedEntries(state, await pinnedHost(), null);
+  if (kept !== null) await write("local", LOCAL_ENTRIES, kept);
+  return state;
+}
+
+/** What the provider's window shows of Canoa on this computer: its state, and the agents a page could be given of it. */
+async function localForWindow(state) {
+  const pinned = await pinnedHost();
+  const view = viewOf(state, pinned);
+  return {
+    view: { state: view.state, why: view.why, paired: view.paired, changed: view.changed, forbidden: view.forbidden },
+    agents: localAgents(state, pinned).map(({ key, label, source, peer, proven }) => ({ key, label, source, peer, proven, local: true })),
+  };
 }
 
 const store = {
   stored: () => read("local", AGENTS, []),
   // What this computer's Canoa serves is listed beside the agents the person added, once this browser's key is paired with it.
-  agents: async () => [...(await read("local", AGENTS, [])), ...localAgents(await lastLocal(), await pinnedHost())],
+  agents: async ({ stale = false } = {}) => {
+    const state = await lastLocal();
+    const pinned = await pinnedHost();
+    const live = localAgents(state, pinned);
+    // A page's grant on one of its agents outlasts the host being stopped: it is listed, and connecting says it cannot be reached.
+    const local = live.length > 0 || !stale ? live : stoppedAgents(state, pinned, await read("local", LOCAL_ENTRIES, null));
+    return [...(await read("local", AGENTS, [])), ...local];
+  },
   addAgent: (details) => oneAtATime(() => addAgent(details)),
   removeAgent: (key) => oneAtATime(async () => {
     await write("local", AGENTS, (await store.stored()).filter((agent) => agent.key !== key));
@@ -185,7 +210,7 @@ function installLocalHost() {
       answer = view();
     } else if (type === "canoa.host.start") {
       answer = localHost.start().then(async (state) => {
-        await write("session", LOCAL_STATE, state);
+        await noteLocal(state);
         return viewOf(state, await pinnedHost());
       });
     } else if (type === "canoa.host.pair") {
@@ -546,6 +571,14 @@ export function installProvider() {
       pairWithPin({ url: pairUrl, pin })
         .then((peer) => store.addAgent({ label, url, peer, method: "noise" }))
         .then((agent) => reply({ agent }), (error) => reply({ error: error.refusal ?? error.message }));
+      return true;
+    } else if (message.acp === "host") {
+      // What the window says about Canoa on this computer, asked fresh: the person may have started it since the page asked.
+      refreshLocal().then(({ state }) => localForWindow(state)).then(reply, () => reply({ view: { state: "unavailable" }, agents: [] }));
+      return true;
+    } else if (message.acp === "start") {
+      // The person's click in this window, which only the extension's own pages can send: a page cannot open it with its own script.
+      localHost.start().then(noteLocal).then(localForWindow).then(reply, () => reply({ view: { state: "unavailable" }, agents: [] }));
       return true;
     } else if (message.acp === "reachable") {
       Promise.all(METHODS.map(async (method) => [method, await unreachable(method)])).then((pairs) => reply(Object.fromEntries(pairs)));

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createLocalHost, fromOwnPage, localAgents, localGrants, readHello, viewOf } from "./acp-local.js";
+import { createLocalHost, fromOwnPage, localAgents, localGrants, readHello, rememberedEntries, stoppedAgents, viewOf } from "./acp-local.js";
 
 const PEER = `sha256:${"ab".repeat(32)}`;
 const runningReply = (extra = {}) => ({
@@ -197,4 +197,24 @@ test("discover asks the native host to look itself, bounds the wait, and tells n
   assert.equal(refused.why, "unknown op");
   const wrong = scripted(() => ({ reply: "discover", candidates: "many" }));
   assert.equal((await createLocalHost({ ...wrong, helloMs: 50 }).discover(3)).state, "unavailable");
+});
+
+test("the host's agents are proven by the key a PIN bound, and are remembered for a grant to outlast the host being stopped", () => {
+  const state = running();
+  assert.ok(localAgents(state, pinned).every((agent) => agent.proven === true));
+  const kept = rememberedEntries(state, pinned, null);
+  assert.equal(kept.peer, PEER);
+  assert.deepEqual(kept.entries.map((entry) => entry.name), ["claude", "scripted"]);
+  // Nothing is remembered from a host this browser is not paired with, and a state that is not a host's keeps what was.
+  assert.equal(rememberedEntries(state, null, null), null);
+  assert.equal(rememberedEntries({ state: "stopped" }, pinned, kept), kept);
+  const stopped = stoppedAgents({ state: "stopped" }, pinned, kept);
+  assert.deepEqual(stopped.map((agent) => agent.key), ["local:claude", "local:scripted"]);
+  assert.ok(stopped.every((agent) => agent.peer === PEER && agent.local === true));
+  assert.equal(stoppedAgents({ state: "unavailable", why: "x" }, pinned, kept).length, 2);
+  // Not for an uninstalled host, a running one (its own list is the truth), an unpaired browser or another host's key.
+  assert.deepEqual(stoppedAgents({ state: "not-installed" }, pinned, kept), []);
+  assert.deepEqual(stoppedAgents(state, pinned, kept), []);
+  assert.deepEqual(stoppedAgents({ state: "stopped" }, null, kept), []);
+  assert.deepEqual(stoppedAgents({ state: "stopped" }, { ...pinned, peer: `sha256:${"cd".repeat(32)}` }, kept), []);
 });

@@ -59,11 +59,17 @@ async function request(origin) {
   return { asked, grants, answer: port.received.find((message) => message.id === 1) };
 }
 
-test("a page's window is not offered the local host's agents, and a decision naming one grants nothing", async () => {
+test("a page's window is offered the local host's agents beside the others, and a grant on one names no directory", async () => {
   const { asked, grants } = await request(PAGE);
   const { agents: offered } = asked[0];
-  assert.deepEqual(offered.map((agent) => agent.key), ["hand"]);
-  assert.deepEqual(grants.map((grant) => grant.agent), ["hand"]);
+  assert.deepEqual(offered.map((agent) => [agent.key, agent.local]), [["hand", false], ["local:claude", true]]);
+  assert.deepEqual(grants.map((grant) => grant.agent), ["hand", "local:claude"]);
+  const [hand, local] = grants;
+  assert.equal(hand.cwd, "/w");
+  assert.equal(hand.folder, undefined);
+  // The person typed a directory for the others; it is not the local host's, whose folder the host makes.
+  assert.equal(local.cwd, null);
+  assert.equal(local.folder, "provider");
 });
 
 test("Canoa's own chat is offered them", async () => {

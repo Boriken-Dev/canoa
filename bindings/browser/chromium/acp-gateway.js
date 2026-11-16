@@ -4,6 +4,11 @@ import { Scope } from "./vendor/coqui-acp/scope.mjs";
 import { OFFER } from "./acp-tools.js";
 
 const MAX_TEXT = 400;
+// The key of a webpage's session folder in `_meta`, in a request (`{site}`) and in the host's answer to `session/new` (`{site, id, folder}`).
+const SITE_META = "dev.boriken.canoa/site";
+// How many sessions' folders a grant keeps for resuming, and the longest folder it keeps.
+const MAX_FOLDERS = 256;
+const MAX_FOLDER = 1024;
 // Windows waiting to ask the person about one connection. Past this an agent is refused without asking: it has no way to make
 // one person read more than one at a time, and a request of its own making costs it nothing.
 const MAX_WAITING_PERMISSIONS = 8;
@@ -25,6 +30,16 @@ function origins(value) {
       return false;
     }
   });
+}
+
+/** The host name the browser reported for an origin, which is all of a page the host's folder is named for. */
+function siteOf(origin) {
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === "" ? undefined : hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 function list(value) {
@@ -58,7 +73,7 @@ export async function dialRecord(store, dial, agent, options) {
 }
 
 /**
- * @param store agents(), addAgent(agent), markProven(key), grants(origin), saveGrant(grant), deleteGrant(grant), secret()
+ * @param store agents({ stale }) (stale: also the local host's entries a grant holds while it is stopped), addAgent(agent), markProven(key), grants(origin), saveGrant(grant), deleteGrant(grant), secret()
  * @param dial (agent) => a proven channel: { send(text), onMessage(fn), onClose(fn), close() }
  * @param askPerson (details) => { allow: agent keys, add: new agents, cwd, permissions, lifetime } or null, in the provider's window
  * @param askPermission (details) => an option id, or null
@@ -93,7 +108,7 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
   }
 
   async function held(origin) {
-    const agents = await store.agents();
+    const agents = await store.agents({ stale: true });
     const pairs = [];
     for (const grant of await store.grants(origin)) {
       const agent = agents.find((candidate) => candidate.key === grant.agent);
@@ -127,8 +142,7 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       let decision;
       try {
         const own = origin === ownOrigin;
-        // The Canoa on this computer is Canoa's own to use; what a page may be given of it is not decided here.
-        const known = (await store.agents()).filter((agent) => own || agent.local !== true);
+        const known = await store.agents();
         decision = await askPerson({
           origin,
           own,
@@ -137,7 +151,7 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
           mcpOrigins: origins(options.mcpOrigins),
           peers: list(options.peers),
           permissions: options.permissions === true,
-          agents: known.map(({ key, label, source, peer, proven }) => ({ key, label, source, peer, proven })),
+          agents: known.map(({ key, label, source, peer, proven, local }) => ({ key, label, source, peer, proven, local: local === true })),
         });
       } finally {
         asking.delete(origin);
@@ -147,22 +161,26 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       const added = [];
       for (const agent of decision.add ?? []) added.push(await store.addAgent(agent));
       const keys = [...(decision.allow ?? []), ...added.map((agent) => agent.key)];
-      const agents = (await store.agents()).filter((agent) => own || agent.local !== true);
+      const agents = await store.agents();
       const granted = [];
       for (const key of keys) {
         const agent = agents.find((candidate) => candidate.key === key);
         if (agent === undefined) continue;
         const earlier = (await store.grants(origin)).find((grant) => grant.agent === key);
+        // The Canoa on this computer makes a page's folder itself, from the site; the person names none and the page cannot.
+        const folder = agent.local === true && !own;
         const grant = {
           origin,
           agent: key,
           tabId,
           lifetime: decision.lifetime === "always" ? "always" : "once",
-          cwd: typeof decision.cwd === "string" ? decision.cwd : null,
+          cwd: !folder && typeof decision.cwd === "string" ? decision.cwd : null,
+          ...(folder ? { folder: "provider" } : {}),
           // The chat is where a person answers, so it needs no separate say.
           permissions: decision.permissions === true || own,
           mcpOrigins: origins(decision.mcpOrigins),
           sessions: earlier?.sessions ?? [],
+          ...(folder ? { folders: earlier?.folders ?? {} } : {}),
         };
         await store.saveGrant(grant);
         granted.push(await describe(origin, grant, agent));
@@ -180,9 +198,20 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       const channel = await dialRecord(store, dial, agent, options);
       if (channel.proven) await store.markProven(agent.key);
       const sessions = new Set(grant.sessions ?? []);
-      const scope = new Scope({ ...grant, sessions }, origin);
+      // A page's session with a local entry is placed by the host, in a folder for the site the browser reported.
+      const placedByHost = grant.folder === "provider" || (agent.local === true && origin !== ownOrigin);
+      const site = placedByHost ? siteOf(origin) : grant.site;
+      if (placedByHost && site === undefined) {
+        channel.close();
+        throw NOT_ALLOWED();
+      }
+      const folders = new Map(placedByHost ? Object.entries(grant.folders ?? {}) : []);
+      const scope = new Scope({ ...grant, folder: placedByHost ? "provider" : undefined, sessions }, origin);
       const conn = entry.nextConn++;
-      const link = { conn, entry, channel, scope, grant, sessions, known: sessions.size, waiting: 0, asking: Promise.resolve(), outgoing: Promise.resolve() };
+      const link = {
+        conn, entry, channel, scope, grant, sessions, site, placedByHost, folders,
+        known: sessions.size, knownFolders: folders.size, waiting: 0, asking: Promise.resolve(), outgoing: Promise.resolve(),
+      };
       if (channel.proven && channel.mux !== undefined) link.tools = offerTools({ mux: channel.mux, peer: agent.peer, label: agent.label });
       entry.links.set(conn, link);
       live.add(link);
@@ -190,6 +219,7 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
         if (!live.has(link)) return;
         link.tools?.fromAgent(message);
         const step = scope.fromAgent(message);
+        if (placedByHost && step.forward !== undefined) step.forward = learnFolder(link, step.forward);
         saveSessions(link);
         if (step.forward !== undefined) port.postMessage({ conn, msg: step.forward });
         if (step.reply !== undefined) channel.send(step.reply);
@@ -231,9 +261,11 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
 
   function saveSessions(link) {
     // A link that has ended has no grant to write back: the person may have just revoked it.
-    if (!live.has(link) || link.sessions.size === link.known) return;
+    if (!live.has(link) || (link.sessions.size === link.known && link.folders.size === link.knownFolders)) return;
     link.known = link.sessions.size;
+    link.knownFolders = link.folders.size;
     link.grant.sessions = [...link.sessions];
+    if (link.placedByHost) link.grant.folders = Object.fromEntries(link.folders);
     store.saveGrant(link.grant);
   }
 
@@ -245,8 +277,11 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
     if (notify) link.entry.port.postMessage({ conn: link.conn, closed: reason });
   }
 
-  /** A session of the person's own Canoa runs in a scratch folder the host makes for `site`, never in one this side names. */
-  function inSite(text, site) {
+  /**
+   * A session of the person's own Canoa runs in a scratch folder the host makes for `site`, never in one this side names. A page's
+   * session is reopened in the folder the host reported for it, which only this side knows: the page never sees a path.
+   */
+  function inSite(link, text) {
     let message;
     try {
       message = JSON.parse(text);
@@ -254,7 +289,34 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       return text;
     }
     if (!["session/new", "session/load", "session/resume"].includes(message?.method)) return text;
-    return JSON.stringify({ ...message, params: { ...message.params, _meta: { "dev.boriken.canoa/site": { site } } } });
+    const params = { ...message.params, _meta: { [SITE_META]: { site: link.site } } };
+    if (link.placedByHost && message.method !== "session/new") {
+      const folder = link.folders.get(params.sessionId);
+      if (typeof folder === "string") params.cwd = folder;
+    }
+    return JSON.stringify({ ...message, params });
+  }
+
+  /** Keeps the folder the host made for a new session, and takes it out of what the page is told. */
+  function learnFolder(link, text) {
+    let message;
+    try {
+      message = JSON.parse(text);
+    } catch {
+      return text;
+    }
+    const meta = message?.result?._meta;
+    if (meta === null || typeof meta !== "object" || !Object.hasOwn(meta, SITE_META)) return text;
+    const placed = meta[SITE_META];
+    const session = message.result.sessionId;
+    if (typeof session === "string" && typeof placed?.folder === "string" && placed.folder.length <= MAX_FOLDER) {
+      link.folders.delete(session);
+      link.folders.set(session, placed.folder);
+      while (link.folders.size > MAX_FOLDERS) link.folders.delete(link.folders.keys().next().value);
+    }
+    delete meta[SITE_META];
+    if (Object.keys(meta).length === 0) delete message.result._meta;
+    return JSON.stringify(message);
   }
 
   function fromPage(entry, message) {
@@ -266,7 +328,7 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
         finish(link, "page", false);
       } else if (typeof message.msg === "string") {
         const step = link.scope.fromPage(message.msg);
-        if (step.forward !== undefined) forward(link, link.grant.site === undefined ? step.forward : inSite(step.forward, link.grant.site));
+        if (step.forward !== undefined) forward(link, link.site === undefined ? step.forward : inSite(link, step.forward));
         if (step.reply !== undefined) entry.port.postMessage({ conn: link.conn, msg: step.reply });
       }
       return;

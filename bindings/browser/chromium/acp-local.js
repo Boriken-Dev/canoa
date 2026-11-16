@@ -195,9 +195,28 @@ export function localAgents(state, pinned) {
     native: { entry: entry.name },
     peer: pinned.peer,
     method: pinned.method,
+    // The key was bound by a PIN the person typed, and every connection proves it again: this is the host they paired.
+    proven: true,
     offers: [],
     local: true,
   }));
+}
+
+/** What a browser that paired once keeps of the host's entries, so a grant on one outlasts the host being stopped. */
+export function rememberedEntries(state, pinned, earlier) {
+  const view = viewOf(state, pinned);
+  if (view.paired) return { peer: pinned.peer, entries: view.host.entries };
+  return earlier;
+}
+
+/**
+ * The agents a page holds a grant on while the host is not answering: the entries it last served, under the key that was paired.
+ * Connecting to one fails as an unreachable agent does, not as one the page was never given. Never offered in a window.
+ */
+export function stoppedAgents(state, pinned, remembered) {
+  if (!["stopped", "unavailable"].includes(state.state) || pinned === null || pinned === undefined) return [];
+  if (remembered?.peer !== pinned.peer || !Array.isArray(remembered.entries)) return [];
+  return localAgents({ state: "running", host: { ...remembered, peer: pinned.peer, method: pinned.method, name: "Canoa", version: "", control: false } }, pinned);
 }
 
 /** The grants Canoa's own pages hold on those agents with nothing to ask: the person's own chat, on the person's own computer. */

@@ -153,15 +153,32 @@ function searchButton(onFound) {
 
 const WHERE = { "dns-sd": "says it is on this network", local: "on this machine", manual: "added by hand" };
 
+/** What the window tells of Canoa on this computer, in the person's words; the page has no say in any of it. */
+function localSaid(view, count) {
+  if (view.state === "running" && view.paired) {
+    return count > 0
+      ? "These run on this computer. Canoa makes a folder for this site for each conversation: the site does not choose one."
+      : "Canoa on this computer serves no agents.";
+  }
+  if (view.state === "running") {
+    return view.changed
+      ? "This browser is paired with another Canoa than the one running on this computer. Pair it again in Canoa's options page."
+      : "Canoa on this computer is running, but this browser is not paired with it. Pair it in Canoa's options page first.";
+  }
+  if (view.state === "stopped") return "Canoa on this computer is not running.";
+  if (view.state === "not-installed") return "Canoa is not installed on this computer.";
+  return `Canoa on this computer cannot be used right now${view.why ? `: ${view.why}` : ""}.`;
+}
+
 /** A row about an agent. A record naming a key the person knows is about that agent, so its own choice of name is not shown. */
 function describeAgent(agent) {
   const about = agent.proven ? "proven" : agent.peer ? "not proven yet" : "unverified";
   const lines = agent.sameKeyAs
     ? [element("strong", { textContent: agent.sameKeyAs }), " — something on this network says it is now at this address"]
-    : [element("strong", { textContent: agent.label }), ` — ${WHERE[agent.source] ?? WHERE.manual}, ${about}`];
+    : [element("strong", { textContent: agent.label }), ` — ${agent.local ? "Canoa on this computer" : (WHERE[agent.source] ?? WHERE.manual)}, ${about}`];
   if (agent.url) lines.push(element("br"), element("code", { textContent: agent.url }));
   lines.push(element("br"), element("code", { textContent: agent.peer ?? "no peer id: nothing proves who answers" }));
-  if (agent.peer) lines.push(` (${agent.method ?? "webcrypto"})`);
+  if (agent.peer && !agent.local) lines.push(` (${agent.method ?? "webcrypto"})`);
   if (agent.unreachable) lines.push(element("br"), element("span", { className: "warn", textContent: `Unreachable from this browser: ${agent.unreachable}` }));
   if (agent.offers?.length > 0) {
     lines.push(element("br"), `Says it serves: ${agent.offers.join(", ")}`);
@@ -178,24 +195,37 @@ function describeAgent(agent) {
 function grantView(details) {
   const added = [];
   const picks = element("div");
+  const here = element("div");
+  const choices = element("div", {}, picks, here);
   const row = (agent, checked, isNew) => {
     const box = element("input", { type: "checkbox", checked });
     box.dataset.key = agent.key ?? "";
     box.dataset.fresh = isNew ? String(added.length - 1) : "";
-    picks.append(element("label", { className: "pick" }, box, element("span", {}, ...describeAgent(agent))));
+    if (agent.local) box.dataset.local = "yes";
+    (agent.local ? here : picks).append(element("label", { className: "pick" }, box, element("span", {}, ...describeAgent(agent))));
   };
-  for (const agent of details.agents) row(agent, details.peers.includes(agent.peer), false);
-  if (details.agents.length === 0) picks.append(element("p", { textContent: "No agents yet. Add one below." }));
+  // What a page names as agents it knows never ticks one of Canoa's: every one shares the key of the computer's Canoa.
+  for (const agent of details.agents) row(agent, details.peers.includes(agent.peer) && !agent.local, false);
+  if (details.agents.filter((agent) => !agent.local).length === 0) picks.append(element("p", { textContent: "No other agents yet. Add one below." }));
 
   const cwd = element("input", { type: "text", placeholder: "An absolute path on the agent's machine" });
+  const weighty = element("p", { className: "warn" });
+  const warnAboutApproving = () => {
+    const ticked = choices.querySelector("input[data-local=yes]:checked") !== null;
+    weighty.textContent = ticked && approve.checked
+      ? "On this computer that lets the site decide whether the agent may run commands and change files here."
+      : "";
+  };
   const lifetime = element("select", {},
     element("option", { value: "once", textContent: "Until this tab closes" }),
     element("option", { value: "always", textContent: "Until I revoke it" }));
   const approve = element("input", { type: "checkbox" });
+  approve.addEventListener("change", () => warnAboutApproving());
+  choices.addEventListener("change", () => warnAboutApproving());
   const allow = element("button", { type: "button", textContent: "Allow" });
   const refuse = element("button", { type: "button", className: "quiet", textContent: "Refuse" });
   allow.addEventListener("click", () => {
-    const boxes = [...picks.querySelectorAll("input[type=checkbox]:checked")];
+    const boxes = [...choices.querySelectorAll("input[type=checkbox]:checked")];
     send({
       acp: "answer",
       ask: askId,
@@ -220,8 +250,33 @@ function grantView(details) {
   if (details.mcpOrigins.length > 0) {
     asked.push(element("p", { className: "warn", textContent: `It may also connect them to: ${details.mcpOrigins.join(", ")}` }));
   }
+  const hereStatus = element("p", { textContent: "Looking for Canoa on this computer…" });
+  const start = element("button", { type: "button", className: "quiet", textContent: "Start Canoa" });
+  start.hidden = true;
+  // What the host says now: the person may have started it, stopped it or paired since the page asked. Its rows are replaced by
+  // what it serves now, keeping the ones the person ticked that are still there.
+  const learnHere = ({ view, agents }) => {
+    hereStatus.textContent = localSaid(view, agents.length);
+    start.hidden = view.state !== "stopped";
+    start.disabled = false;
+    const ticked = new Set([...here.querySelectorAll("input:checked")].map((box) => box.dataset.key));
+    here.replaceChildren();
+    for (const agent of agents) row(agent, ticked.has(agent.key), false);
+    holdClicks();
+  };
+  send({ acp: "host" }).then(learnHere, () => {
+    hereStatus.textContent = "Canoa on this computer could not be asked.";
+  });
+  start.addEventListener("click", () => {
+    start.disabled = true;
+    hereStatus.textContent = "Starting Canoa…";
+    send({ acp: "start" }).then(learnHere, () => {
+      start.disabled = false;
+    });
+  });
   // Above the list, so a row that appears cannot land under a second click.
   main.replaceChildren(...asked, element("h2", { textContent: "Choose agents" }),
+    element("h3", { textContent: "Canoa on this computer" }), hereStatus, start,
     searchButton((candidates) => {
       for (const candidate of candidates) {
         if (added.some((agent) => agent.url === candidate.url && agent.peer === candidate.peer)) continue;
@@ -229,15 +284,15 @@ function grantView(details) {
         // Never ticked for the person: choosing one is what accepts its key.
         row(candidate, false, true);
       }
-    }), picks,
+    }), choices,
     agentForm(async (agent) => {
       added.push(agent);
       row(agent, true, true);
     }),
-    element("label", { textContent: "Working directory for its sessions" }), cwd,
+    element("label", { textContent: "Working directory for its sessions (for agents added by hand; Canoa on this computer makes its own)" }), cwd,
     element("label", { textContent: "For how long" }), lifetime,
     ...(details.own ? [] : [element("label", { className: "pick" }, approve,
-      element("span", { className: "warn", textContent: "This site can approve what the agent does for me" }))]),
+      element("span", { className: "warn", textContent: "This site can approve what the agent does for me" })), weighty]),
     allow, refuse);
   holdClicks();
 }
