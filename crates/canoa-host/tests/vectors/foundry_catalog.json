@@ -52,6 +52,10 @@
       "notices": [
         "the model runs in Foundry Local on this computer: load it there first, and unload it when you are done, since it holds memory other work needs",
         "the agent is told any model name is this model; what the model cannot do (tools, images) is refused with the reason"
+      ],
+      "provides": [
+        "anthropic-api",
+        "openai-api"
       ]
     }
   ],
