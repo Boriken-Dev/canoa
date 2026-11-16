@@ -48,6 +48,9 @@ List<String> _workingIn(Directory dir) {
   return found;
 }
 
+/// A canoa.cfg serving the host's own source [name] on loopback: the host runs only once it listens for someone.
+String _own(String name) => '[host.agents.$name]\nharness = "${name.toLowerCase()}"\nlisten = "127.0.0.1:0"\n';
+
 String _said(ChatSession session) =>
     session.messages.where((message) => message.role == MessageRole.agent).map((message) => message.text).join(' ').toLowerCase();
 
@@ -55,11 +58,11 @@ void main() {
   final real = Platform.environment['CANOA_TEST_REAL_TURN'];
   // Two short turns, and a third program that opens the conversation again. Prints whether each thing held, never what was said.
   test('a real agent reads what is attached, and a later program can open that conversation again', () async {
-    final host = await EmbeddedHost.start();
+    final host = await EmbeddedHost.start(config: _own(real!));
     addTearDown(host.stop);
     final dir = Directory.systemTemp.createTempSync('canoa-earlier-');
     final store = SessionStore();
-    final first = await host.agent(real!, decider: store.askPermission);
+    final first = await host.agent(real, decider: store.askPermission);
     final remote = await first.createSession(cwd: dir.path);
     final session = store.addProviderSession(title: 'T', agent: real, peerId: first.peerId, remoteSessionId: remote, cwd: dir.path);
     store.attachVerifiedClient(session.id, first);
@@ -114,7 +117,7 @@ void main() {
   }, skip: real == null ? 'set CANOA_TEST_REAL_TURN' : false, timeout: const Timeout(Duration(minutes: 12)));
 
   test('a real agent asks, is answered, and does it', () async {
-    final host = await EmbeddedHost.start();
+    final host = await EmbeddedHost.start(config: _own(real!));
     addTearDown(host.stop);
     final dir = Directory.systemTemp.createTempSync('canoa-turn-');
     final settings = File('${dir.path}${Platform.pathSeparator}.claude${Platform.pathSeparator}settings.json');
@@ -122,7 +125,7 @@ void main() {
     settings.writeAsStringSync('{"permissions": {"ask": ["Write", "Edit", "Bash", "PowerShell"]}}');
     final allow = Platform.environment['CANOA_TEST_REAL_TURN_ANSWER'] != 'refuse';
     final store = SessionStore();
-    final client = await host.agent(real!, decider: store.askPermission);
+    final client = await host.agent(real, decider: store.askPermission);
     final remote = await client.createSession(cwd: dir.path);
     final session = store.addProviderSession(title: 'T', agent: real, peerId: client.peerId, remoteSessionId: remote);
     store.attachVerifiedClient(session.id, client);
