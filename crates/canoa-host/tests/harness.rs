@@ -994,10 +994,10 @@ fn options_of_a_configured_entry_reads_canoa_cfg_and_a_program_entry_lists_none(
 harness = \"claude\"
 executable = {}
 [host.agents.Plain]
-program = \"agy\"
-args = [\"acp\"]
+program = {}
 ",
-            quoted(&program.to_string_lossy())
+            quoted(&program.to_string_lossy()),
+            quoted(&support::example("stdio_agent", false).to_string_lossy())
         ),
     )
     .expect("written");

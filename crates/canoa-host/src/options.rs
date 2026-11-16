@@ -10,19 +10,22 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::time::Duration;
-use std::ffi::OsStr;
+use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
+use std::sync::Mutex;
 use std::sync::mpsc;
 
+use coqui_acp_api::guatiao::library::Object;
 use coqui_acp_api::{
-    AccountKeeper as _, AcpHarness, CacheLifetime, ModelInfo, ModelListing, ModelsRequest,
-    ProcessSpawner as _, UnknownKind,
+    AccountGrant, AccountKeeper, AcpHarness, CacheLifetime, ModelInfo, ModelListing, ModelsRequest,
+    ProcessSpawner, UnknownKind,
 };
-use coqui_acp_harness::LocalSpawner;
 use serde_json::{Map, Value, json};
 
 use crate::spawn::{Command, Stdio};
 
-use crate::accounts::NoAccounts;
+mod probe;
+
 use crate::config::{Config, EntryKind, Settings, cache_lifetime_name};
 use crate::harness::Harness;
 use crate::kind;
@@ -31,6 +34,31 @@ use crate::kind;
 const VERSION_WAIT: Duration = Duration::from_secs(10);
 /// The most of a version line kept, in bytes.
 const VERSION_BYTES: usize = 128;
+
+/// How long a probe session is waited for, unless the caller says another.
+pub const PROBE_WAIT: Duration = Duration::from_secs(20);
+
+/// What a probe session answered, by the entry, its program and the program's version: asked once per version.
+static PROBED: Mutex<BTreeMap<String, Choices>> = Mutex::new(BTreeMap::new());
+
+/// How a source is asked beyond its own settings.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct Asking {
+    /// How long a probe session is waited for.
+    pub wait: Duration,
+    /// The account of the entry to ask as, with the host's accounts; `None` asks on the login the machine has.
+    pub(crate) account: Option<(String, Arc<crate::accounts::Accounts>)>,
+}
+
+impl Default for Asking {
+    fn default() -> Self {
+        Self {
+            wait: PROBE_WAIT,
+            account: None,
+        }
+    }
+}
 
 /// What one source offers before it starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -180,18 +208,30 @@ pub fn preset(harness: Harness, executable: Option<&OsStr>) -> Choices {
         false,
         Vec::new(),
     ) {
-        Ok(configured) => ask(configured
-            .connection(None, None, CacheLifetime::Default)
-            .harness
-            .as_ref()),
+        Ok(configured) => {
+            let connection = configured.connection(None, None, CacheLifetime::Default);
+            ask(
+                connection.harness.as_ref(),
+                connection.spawner,
+                connection.keeper,
+                None,
+            )
+        }
         Err(error) => Choices::failed(error.to_string()),
     }
 }
 
-/// What the entry `name` of `config` offers: a harness entry's provider lists its models; an entry that runs a program
-/// speaking ACP, a provider or a tool says it lists none before it starts. `None` when `config` has no such entry.
+/// What the entry `name` of `config` offers, asked on the machine's own login: a harness entry's provider lists its models;
+/// an entry that runs a program speaking ACP is asked through a short probe session. `None` when `config` has no such entry.
 #[must_use]
 pub fn entry(config: &Config, name: &str) -> Option<Choices> {
+    entry_with(config, name, &Asking::default())
+}
+
+/// What the entry `name` of `config` offers, asked as `asking` says: with an account of the entry when it names one, and
+/// within its time.
+#[must_use]
+pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choices> {
     let entry = config.entry(name)?;
     Some(match &entry.kind {
         EntryKind::Harness {
@@ -200,6 +240,7 @@ pub fn entry(config: &Config, name: &str) -> Option<Choices> {
             executable,
             options,
             settings,
+            accounts,
             ..
         } => {
             let configured = crate::serve::harness_settings(
@@ -213,34 +254,106 @@ pub fn entry(config: &Config, name: &str) -> Option<Choices> {
                 Ok(registry) => Arc::new(registry),
                 Err(error) => return Some(Choices::failed(error.to_string())),
             };
-            match kind::Harness::new(&registry, harness, &configured, false, Vec::new()) {
-                Ok(built) => {
-                    let mut choices = ask(built
-                        .connection(None, None, CacheLifetime::Default)
-                        .harness
-                        .as_ref());
-                    choices.configured_cache_lifetime = options
-                        .cache_lifetime
-                        .map(|lifetime| cache_lifetime_name(lifetime).to_owned());
-                    choices
+            let mut built =
+                match kind::Harness::new(&registry, harness, &configured, false, Vec::new()) {
+                    Ok(built) => built,
+                    Err(error) => return Some(Choices::failed(error.to_string())),
+                };
+            let mut held = None;
+            if let Some((account, store)) = &asking.account {
+                if !accounts.contains(account) {
+                    return Some(Choices::failed(format!(
+                        "{name} does not offer the account {account}"
+                    )));
                 }
-                Err(error) => Choices::failed(error.to_string()),
+                let listed = match crate::serve::offered_accounts(config, harness, accounts, &built)
+                {
+                    Ok(listed) => listed,
+                    Err(why) => return Some(Choices::failed(why)),
+                };
+                built = built.offering(store, listed);
+                match built.hold_account(account, "choices") {
+                    Ok(taken) => held = Some(taken),
+                    Err(refusal) => return Some(Choices::failed(refusal.client_reason())),
+                }
             }
+            let connection = built.connection(None, held.as_ref(), CacheLifetime::Default);
+            let mut choices = ask(
+                connection.harness.as_ref(),
+                connection.spawner,
+                connection.keeper,
+                held.as_ref().map(crate::accounts::Held::grant),
+            );
+            choices.configured_cache_lifetime = options
+                .cache_lifetime
+                .map(|lifetime| cache_lifetime_name(lifetime).to_owned());
+            choices
         }
-        EntryKind::Agent { .. } | EntryKind::Provider { .. } | EntryKind::Tool { .. } => {
-            Choices::unknown("this source lists its models in its session, not before it")
-        }
+        EntryKind::Agent { program, args, .. } => probed(name, program, args, asking.wait),
+        EntryKind::Provider { .. } | EntryKind::Tool { .. } => Choices::unknown(
+            "this source lists its models in its session, and is not asked before it starts",
+        ),
     })
 }
 
-/// Asks `harness` for its models with the machine's own login, and its program for its version.
-fn ask(harness: &dyn AcpHarness) -> Choices {
-    let listing = harness
-        .models(
-            ModelsRequest::new(),
-            LocalSpawner::new().into_object(),
-            NoAccounts.into_object(),
+/// What a program speaking ACP lists in a session of its own, asked once per version of the program.
+fn probed(name: &str, program: &OsString, args: &[OsString], wait: Duration) -> Choices {
+    let program_text = program.to_string_lossy().into_owned();
+    let version = version_of(&program_text);
+    let key = version.as_ref().map(|version| {
+        format!(
+            "{name}\0{program_text}\0{}\0{version}",
+            args.iter()
+                .map(|arg| arg.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ")
         )
+    });
+    if let Some(key) = &key
+        && let Some(held) = PROBED.lock().ok().and_then(|held| held.get(key).cloned())
+    {
+        return held;
+    }
+    let mut choices = match probe::ask(program, args, &[], wait) {
+        Ok(probed) if probed.models.is_empty() => Choices::unknown(
+            "this agent's session lists no models or efforts, so they are known once a session has started",
+        ),
+        Ok(probed) => Choices {
+            known: true,
+            unknown_because: None,
+            models: probed.models,
+            ..Choices::unknown("")
+        },
+        Err(probe::Failure::NotInstalled(why)) => Choices {
+            unknown_kind: Some("not_installed"),
+            ..Choices::unknown(why)
+        },
+        Err(failure) => Choices::failed(failure.text().to_owned()),
+    };
+    choices.program = Some(program_text);
+    choices.program_version = version;
+    if choices.known
+        && let Some(key) = key
+        && let Ok(mut held) = PROBED.lock()
+    {
+        held.insert(key, choices.clone());
+    }
+    choices
+}
+
+/// Asks `harness` for its models, as `account` when one is named, and its program for its version.
+fn ask(
+    harness: &dyn AcpHarness,
+    spawner: Object<dyn ProcessSpawner>,
+    keeper: Object<dyn AccountKeeper>,
+    account: Option<AccountGrant>,
+) -> Choices {
+    let mut request = ModelsRequest::new();
+    if let Some(account) = account {
+        request = request.account(account);
+    }
+    let listing = harness
+        .models(request, spawner, keeper)
         .unwrap_or_else(|error| ModelListing::unavailable(UnknownKind::Failed, error.message()));
     let info = harness.describe().ok();
     let program = harness.program().ok().flatten();

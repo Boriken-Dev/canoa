@@ -2779,7 +2779,7 @@ fn keeps_key_in_environment(listed: &[kind::Offered]) -> bool {
 
 /// The accounts an entry of `harness` offers, each with its kind in the provider's catalog, once canoa.cfg's settings for
 /// it are checked against that kind's schema.
-fn offered_accounts(
+pub(crate) fn offered_accounts(
     config: &Config,
     harness: &str,
     names: &[String],

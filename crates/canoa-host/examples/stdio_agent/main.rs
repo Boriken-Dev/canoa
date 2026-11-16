@@ -19,6 +19,10 @@ use serde_json::{Value, json};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args == ["--version"] {
+        println!("stdio_agent 1.0");
+        return;
+    }
     if args.iter().any(|arg| arg == "--agy") {
         agy::run(&args);
         return;

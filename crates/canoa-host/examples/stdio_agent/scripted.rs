@@ -67,6 +67,10 @@ struct Shared {
     reopens: bool,
     /// Whether it says it takes a system prompt.
     system_prompt: bool,
+    /// Whether it says it closes a session (`--closeable`).
+    closeable: bool,
+    /// A file each method it is asked is appended to, one per line (`--record=FILE`).
+    record: Option<PathBuf>,
     waiting: Mutex<HashMap<u64, Sender<Value>>>,
     next_id: Mutex<u64>,
     /// "<session> <kind>" of a tool the person said to always allow or reject.
@@ -1078,6 +1082,21 @@ impl Shared {
             }
             return;
         };
+        if let Some(record) = &self.record
+            && let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(record)
+        {
+            let _ = std::io::Write::write_all(
+                &mut file,
+                format!(
+                    "{method}
+"
+                )
+                .as_bytes(),
+            );
+        }
         let session = params["sessionId"].as_str().unwrap_or("").to_owned();
         match (method, id) {
             ("initialize", Some(id)) => {
@@ -1101,6 +1120,9 @@ impl Shared {
                     json!({"promptCapabilities": {"embeddedContext": true, "image": true}})
                 };
                 let mut agent = agent;
+                if self.closeable {
+                    agent["sessionCapabilities"]["close"] = json!({});
+                }
                 if self.system_prompt {
                     agent["sessionCapabilities"]["systemPrompt"] = json!({});
                 }
@@ -1310,6 +1332,8 @@ pub fn run(args: &[String]) {
         agent_info,
         reopens: !args.iter().any(|arg| arg == "--no-reopen"),
         system_prompt: args.iter().any(|arg| arg == "--system-prompt"),
+        closeable: args.iter().any(|arg| arg == "--closeable"),
+        record: option_of(args, "record").map(PathBuf::from),
         waiting: Mutex::new(HashMap::new()),
         next_id: Mutex::new(1000),
         remembered: Mutex::new(HashMap::new()),

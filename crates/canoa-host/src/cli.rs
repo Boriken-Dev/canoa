@@ -427,6 +427,12 @@ struct OptionsArgs {
     /// For claude or codex, the program; the variable `canoa agent` reads, or the harness's name, without it.
     #[arg(long)]
     executable: Option<OsString>,
+    /// With --entry, the entry's account to ask as, so that it lists what that account may use.
+    #[arg(long, requires = "entry")]
+    account: Option<String>,
+    /// With --entry, the seconds a probe session of an agent that lists its models only in a session is waited for.
+    #[arg(long, requires = "entry", default_value_t = 20)]
+    wait: u64,
     #[command(flatten)]
     config: ConfigArgs,
 }
@@ -1711,7 +1717,17 @@ fn check(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
 fn options(args: &OptionsArgs, front: &dyn Front) -> Result<(), Failed> {
     let choices = if args.entry {
         let config = load(&args.config, front)?;
-        crate::options::entry(&config, &args.source)
+        let mut asking = crate::options::Asking {
+            wait: core::time::Duration::from_secs(args.wait),
+            ..crate::options::Asking::default()
+        };
+        if let Some(account) = &args.account {
+            let home = home_of(front)?;
+            let store = crate::accounts::Accounts::open(config.account_store, home.dir())
+                .map_err(|error| Failed::run(error.to_string()))?;
+            asking.account = Some((account.clone(), store));
+        }
+        crate::options::entry_with(&config, &args.source, &asking)
             .ok_or_else(|| Failed::usage("canoa.cfg has no entry of that name"))?
     } else {
         let harness = crate::Harness::named(&args.source).ok_or_else(|| {
