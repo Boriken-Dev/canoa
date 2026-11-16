@@ -18,7 +18,9 @@ use coqui_acp_api::{LoginAnswer, LoginForm};
 use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
 
+use super::accounts::{open_answer, put_form};
 use super::{BAD_PARAMS, NO_METHOD, POLL, REFUSED, error_line};
+use crate::secrets::ask::{Asked, Asker};
 use crate::store::programs::{Event, Programs, Sink, StoreError};
 use crate::store::registry::BUILT_IN;
 use crate::store::shelf::Shelf;
@@ -213,7 +215,7 @@ impl Stores {
 /// What a running apply hands the link that carries it.
 enum Out {
     Event(Event),
-    Ask(LoginForm, mpsc::Sender<Option<LoginAnswer>>),
+    Ask(LoginForm, mpsc::Sender<Result<LoginAnswer, String>>),
     Done(Box<Result<Option<crate::store::programs::Applied>, StoreError>>),
 }
 
@@ -236,8 +238,9 @@ impl Sink for LinkSink {
             .send(Out::Ask(form, reply))
             .map_err(|_| "the link is gone".to_owned())?;
         match answer.recv_timeout(ASK_WAIT) {
-            Ok(Some(answer)) => Ok(answer),
-            _ => Err("the person gave no answer".to_owned()),
+            Ok(Ok(answer)) => Ok(answer),
+            Ok(Err(why)) => Err(why),
+            Err(_) => Err("the person gave no answer".to_owned()),
         }
     }
 }
@@ -278,13 +281,14 @@ fn applied(
 
 impl Stores {
     /// `store/apply`: carries out a plan the host made and handed back, on `channel`, which carries `store/progress` and
-    /// `store/ask` until the answer. The link closing, or the person giving no answer, cancels the install. Other requests on
-    /// the link are answered as they come by `others`.
+    /// the form's request until the answer. A question goes to the person as the sign-in's does, sealed to the key that asked
+    /// (`asker`), so a typed value never crosses the link in the clear; with no `asker` it is not asked. The link closing, or
+    /// the person giving no answer, cancels the install. Other requests on the link are answered as they come by `others`.
     pub(crate) fn apply<C: Channel>(
         &self,
         owner: &str,
         request: &Value,
-        channel: &C,
+        (channel, asker): (&C, Option<&Asker>),
         others: &dyn Fn(&[u8]) -> Option<Vec<u8>>,
     ) -> Vec<u8> {
         let id = request.get("id").cloned().unwrap_or(Value::Null);
@@ -315,8 +319,7 @@ impl Stores {
             let done = programs.apply_store_for(&owner, store, &provider, &plan, sink, stop);
             let _ = out.send(Out::Done(Box::new(done)));
         });
-        let mut asking: Option<(Value, mpsc::Sender<Option<LoginAnswer>>)> = None;
-        let mut asked = 0_u32;
+        let mut asking: Option<(Asked, mpsc::Sender<Result<LoginAnswer, String>>)> = None;
         let answer = loop {
             match events.recv_timeout(POLL) {
                 Ok(Out::Event(event)) => {
@@ -325,22 +328,26 @@ impl Stores {
                     }
                 }
                 Ok(Out::Ask(form, reply)) => {
-                    asked += 1;
-                    let ask_id = json!(format!("ask-{asked}"));
-                    let ask = json!({
-                        "jsonrpc": "2.0",
-                        "id": ask_id,
-                        "method": "store/ask",
-                        "params": json_of(&form).unwrap_or(Value::Null),
-                    });
-                    let sent = serde_json::to_vec(&ask)
-                        .ok()
-                        .is_some_and(|bytes| channel.send(&bytes).is_ok());
-                    if sent {
-                        asking = Some((ask_id, reply));
-                    } else {
-                        cancel.store(true, Ordering::SeqCst);
-                        let _ = reply.send(None);
+                    let put = match asker {
+                        _ if asking.is_some() => Err("a question is already open".to_owned()),
+                        Some(asker) => put_form(asker, &form),
+                        None => Err(
+                            "this host has no secret to seal a typed answer with, so it cannot ask"
+                                .to_owned(),
+                        ),
+                    };
+                    match put {
+                        Ok((line, asked)) => {
+                            if channel.send(&line).is_ok() {
+                                asking = Some((asked, reply));
+                            } else {
+                                cancel.store(true, Ordering::SeqCst);
+                                let _ = reply.send(Err("the link ended".to_owned()));
+                            }
+                        }
+                        Err(why) => {
+                            let _ = reply.send(Err(why));
+                        }
                     }
                 }
                 Ok(Out::Done(done)) => {
@@ -362,12 +369,14 @@ impl Stores {
                     let message: Value = serde_json::from_slice(&line).unwrap_or(Value::Null);
                     let is_answer = message.get("method").is_none();
                     if is_answer {
-                        if let Some((_, reply)) =
-                            asking.take_if(|(ask_id, _)| message.get("id") == Some(ask_id))
-                        {
-                            let answer = message
-                                .get("result")
-                                .and_then(|result| from_json::<LoginAnswer>(result, "answer").ok());
+                        let waiting = asking.take_if(|(asked, _)| {
+                            message.get("id").and_then(Value::as_str) == Some(asked.request_id())
+                        });
+                        if let (Some((asked, reply)), Some(asker)) = (waiting, asker) {
+                            let answer = match message.get("result") {
+                                Some(result) => open_answer(asker, asked, result),
+                                None => Err("the person gave no answer".to_owned()),
+                            };
                             let _ = reply.send(answer);
                         }
                     } else if let Some(reply) = others(&line)
@@ -380,7 +389,7 @@ impl Stores {
                 Ok(None) | Err(_) => {
                     cancel.store(true, Ordering::SeqCst);
                     if let Some((_, reply)) = asking.take() {
-                        let _ = reply.send(None);
+                        let _ = reply.send(Err("the link ended".to_owned()));
                     }
                 }
             }

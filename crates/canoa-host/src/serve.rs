@@ -1622,6 +1622,7 @@ impl Serving {
                         Some(log) => kept.with_usage(Arc::clone(log)),
                         None => kept,
                     };
+                    let kept = kept.with_sealer(control::Sealer::new(Arc::clone(&secrets)));
                     let kept = kept.with_history(control::Moves {
                         store: recorded,
                         targets: movers,

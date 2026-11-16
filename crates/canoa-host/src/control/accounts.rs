@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use coqui_acp_api::guatiao::ToValue;
 use coqui_acp_api::guatiao::schema::inline_refs;
-use coqui_acp_api::{Credentials, LoginAnswer};
+use coqui_acp_api::{Credentials, LoginAnswer, LoginForm};
 use coqui_transport::{Channel, Failure};
 use serde_json::{Map, Value, json};
 
@@ -312,11 +312,7 @@ impl Accounts {
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let params = request.get("params").cloned().unwrap_or(Value::Null);
         let started = (|| {
-            let asker = match peer {
-                Some(peer) => self.hub.asker_for(peer),
-                None => self.hub.asker(),
-            }
-            .ok_or((
+            let asker = self.hub.asker_of(peer).ok_or((
                 REFUSED,
                 "this host has no secret to seal a typed answer with, so it cannot sign in"
                     .to_owned(),
@@ -459,18 +455,8 @@ impl Accounts {
                     let _ = reply.send(Err("a question is already open".to_owned()));
                     return;
                 }
-                let schema = inline_refs(&form.schema)
-                    .ok()
-                    .and_then(|schema| {
-                        serde_json::to_string(&guatiao_serde::Serializable::from(&schema)).ok()
-                    })
-                    .unwrap_or_default();
-                match asker.ask(&form.title, &schema) {
-                    Ok((params, asked)) => {
-                        let line = serde_json::to_vec(&json!({
-                            "jsonrpc": "2.0", "id": asked.request_id(), "method": METHOD, "params": params,
-                        }))
-                        .unwrap_or_default();
+                match put_form(asker, &form) {
+                    Ok((line, asked)) => {
                         if channel.send(&line).is_ok() {
                             *asking = Some(Pending {
                                 asked,
@@ -521,22 +507,46 @@ impl Accounts {
             return;
         };
         let answer = match message.get("result") {
-            Some(result) => asker.open(asked, result).and_then(|opened| {
-                let opened = opened.ok_or_else(|| "the person gave no answer".to_owned())?;
-                let values = map_of(&Settings::new(opened.plain))?;
-                let mut secrets = Credentials::new();
-                for (key, value) in &opened.secrets {
-                    secrets.insert(key.clone(), value.to_string());
-                }
-                Ok(LoginAnswer::new(
-                    coqui_acp_api::guatiao::Value::from(values),
-                    secrets,
-                ))
-            }),
+            Some(result) => open_answer(asker, asked, result),
             None => Err("the person gave no answer".to_owned()),
         };
         let _ = reply.send(answer);
     }
+}
+
+/// The request that puts `form` to the person, sealed to the key `asker` asks, as a line for the link, and what opens the answer.
+/// A control request that carries a typed value uses this and no other way to ask for it.
+pub(super) fn put_form(asker: &Asker, form: &LoginForm) -> Result<(Vec<u8>, Asked), String> {
+    let schema = inline_refs(&form.schema)
+        .ok()
+        .and_then(|schema| serde_json::to_string(&guatiao_serde::Serializable::from(&schema)).ok())
+        .unwrap_or_default();
+    let (params, asked) = asker.ask(&form.title, &schema)?;
+    let line = serde_json::to_vec(&json!({
+        "jsonrpc": "2.0", "id": asked.request_id(), "method": METHOD, "params": params,
+    }))
+    .map_err(|_| "the form cannot be put to the person".to_owned())?;
+    Ok((line, asked))
+}
+
+/// What the person typed, from the application's `result` to the request `asked`: opened, and checked to be bound to it.
+pub(super) fn open_answer(
+    asker: &Asker,
+    asked: Asked,
+    result: &Value,
+) -> Result<LoginAnswer, String> {
+    let opened = asker
+        .open(asked, result)?
+        .ok_or_else(|| "the person gave no answer".to_owned())?;
+    let values = map_of(&Settings::new(opened.plain))?;
+    let mut secrets = Credentials::new();
+    for (key, value) in &opened.secrets {
+        secrets.insert(key.clone(), value.to_string());
+    }
+    Ok(LoginAnswer::new(
+        coqui_acp_api::guatiao::Value::from(values),
+        secrets,
+    ))
 }
 
 /// The form put to the person, waiting for what it answers.

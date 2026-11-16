@@ -232,6 +232,22 @@ pub(crate) struct EntryRoots {
     pub(crate) roots: Vec<PathBuf>,
 }
 
+/// The host's secrets, which make the asker of a form for whoever a request came from.
+#[derive(Clone)]
+pub(crate) struct Sealer(Arc<crate::secrets::Hub>);
+
+impl Sealer {
+    pub(crate) fn new(hub: Arc<crate::secrets::Hub>) -> Self {
+        Self(hub)
+    }
+}
+
+impl core::fmt::Debug for Sealer {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Sealer").finish_non_exhaustive()
+    }
+}
+
 /// The ledger and its limits.
 #[derive(Debug)]
 pub(crate) struct Control {
@@ -245,6 +261,8 @@ pub(crate) struct Control {
     usage: Option<Arc<crate::usage_log::UsageLog>>,
     /// The paired keys, so a key can take itself out.
     trust: Option<Arc<TrustStore>>,
+    /// What seals a form the host puts to the person, for the accounts' sign-in and a program install alike.
+    sealer: Option<Sealer>,
     entries: Vec<EntryRoots>,
     /// What a page may do with this computer's files.
     files: Files,
@@ -344,6 +362,7 @@ impl Control {
             accounts: None,
             usage: None,
             trust: None,
+            sealer: None,
             entries,
             files: Files::default(),
             overlays: Arc::new(Overlays::default()),
@@ -402,6 +421,13 @@ impl Control {
     #[must_use]
     pub(crate) fn with_history(mut self, history: Moves) -> Self {
         self.history = Some(history);
+        self
+    }
+
+    /// Puts a program install's questions to the person sealed, as the accounts' sign-in does.
+    #[must_use]
+    pub(crate) fn with_sealer(mut self, sealer: Sealer) -> Self {
+        self.sealer = Some(sealer);
         self
     }
 
@@ -900,9 +926,22 @@ impl Control {
             return error_line(&id, code, &message);
         }
         match self.stores() {
-            Ok(stores) => stores.apply(caller.owner(), &request, channel, &|other| {
-                self.handle(caller, other)
-            }),
+            Ok(stores) => {
+                let peer = match caller {
+                    Caller::Owner => None,
+                    Caller::Peer { id, .. } => Some(id.as_str()),
+                };
+                let asker = self
+                    .sealer
+                    .as_ref()
+                    .and_then(|sealer| sealer.0.asker_of(peer));
+                stores.apply(
+                    caller.owner(),
+                    &request,
+                    (channel, asker.as_ref()),
+                    &|other| self.handle(caller, other),
+                )
+            }
             Err((code, message)) => error_line(&id, code, &message),
         }
     }

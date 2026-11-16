@@ -171,6 +171,14 @@ impl Hub {
         ask::Asker::new(&self.local.as_ref()?.key)
     }
 
+    /// The asker for the caller of a control request: the host's own application when `peer` is `None`, else the paired key.
+    pub(crate) fn asker_of(&self, peer: Option<&str>) -> Option<ask::Asker> {
+        match peer {
+            Some(peer) => self.asker_for(peer),
+            None => self.asker(),
+        }
+    }
+
     /// What puts a form of the host's own to the person behind `peer`, a paired key, sealed to that key: `None` for the host's own
     /// key, a key the trust store does not hold, or a host key secret prompts do not serve.
     pub(crate) fn asker_for(&self, peer: &str) -> Option<ask::Asker> {
