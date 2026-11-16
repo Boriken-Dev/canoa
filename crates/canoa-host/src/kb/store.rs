@@ -130,7 +130,7 @@ fn read_generation(path: &Path, generation: u64) -> Result<Loaded, Error> {
         let line: Line = serde_json::from_str(line).map_err(|error| bad(error.to_string()))?;
         let vector = line
             .vector
-            .map(|encoded| decode(&encoded).map_err(&bad))
+            .map(|encoded| decode(&encoded).map_err(bad))
             .transpose()?;
         chunks.push(Chunk {
             path: line.path,
