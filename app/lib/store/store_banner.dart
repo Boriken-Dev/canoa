@@ -6,58 +6,70 @@ import 'overlay_page.dart' show oneLine;
 import 'store.dart';
 import 'store_icon.dart';
 
-/// What one banner at the top of an opened store says: a line about whose it is, a title, a sentence, the icons of the items it
+/// One item a banner can feature: its name and icon, the catalog it is listed in, its tags, and what opens it.
+final class BannerItem {
+  const BannerItem({required this.name, required this.catalog, required this.open, this.iconPath, this.iconBytes, this.tags = const []});
+
+  final String name, catalog;
+  final String? iconPath;
+  final List<int>? iconBytes;
+  final List<String> tags;
+  final VoidCallback open;
+}
+
+/// What one banner at the top of a type's page says: a line about whose it is, a title, a sentence, the icons of the items it
 /// features and what Explore does.
 final class BannerSpec {
   const BannerSpec({required this.kicker, required this.title, required this.about, required this.featured, required this.onExplore,
       this.exploreKey});
 
   final String kicker, title, about;
-  final List<ListedEntry> featured;
+  final List<BannerItem> featured;
   final VoidCallback onExplore;
   final Key? exploreKey;
 }
 
-/// The banners of an opened store, from its own catalog's data: its name, its description and what it features, then one for each
-/// of its most used tags. With nothing featured the first banner is the store's name and mark alone.
+/// The banners of a type's page, from the data of the catalogs in [scope]: the type and what it lists, with the items tagged
+/// `featured` first, then one for each of the most used tags. [noun] is the type's plural in lower case, [title] its name.
+/// With one catalog in scope the first banner is that catalog's own name and description. With nothing featured the first
+/// banner is the title and mark alone.
 List<BannerSpec> bannersFor({
-  required LoadedCatalog catalog,
-  required List<ListedEntry> entries,
-  required void Function(ListedEntry) open,
+  required String noun,
+  required String title,
+  required List<LoadedCatalog> scope,
+  required List<BannerItem> items,
   required void Function(String tag) showTag,
 }) {
-  final named = catalog.catalog?.name;
-  final description = catalog.catalog?.description;
-  final featured = [
-    for (final listed in entries)
-      if ((listed.entry.about['tags'] as List?)?.contains('featured') ?? false) listed,
-  ];
-  final lead = (featured.isEmpty ? entries : featured).take(6).toList();
+  final only = scope.length == 1 ? scope.single : null;
+  final catalogs = scope.isNotEmpty ? scope.length : {for (final item in items) item.catalog}.length;
+  final featured = [for (final item in items) if (item.tags.contains('featured')) item];
+  final lead = (featured.isEmpty ? items : featured).take(6).toList();
   final specs = <BannerSpec>[
     BannerSpec(
-      kicker: 'A store of Canoa',
-      title: oneLine(named ?? catalog.label),
-      about: oneLine(description ?? '${entries.length} overlays, as ${catalog.label} lists them.'),
+      kicker: only == null ? 'Across $catalogs ${catalogs == 1 ? 'catalog' : 'catalogs'}' : 'From ${oneLine(only.label)}',
+      title: oneLine(only?.catalog?.name ?? (only?.label ?? title)),
+      about: oneLine(only?.catalog?.description ??
+          (only == null ? '${items.length} $noun from the catalogs you have added.' : '${items.length} $noun, as ${only.label} lists them.')),
       featured: lead,
       onExplore: () {
-        if (lead.isNotEmpty) open(lead.first);
+        if (lead.isNotEmpty) lead.first.open();
       },
       exploreKey: const Key('store-banner-explore'),
     ),
   ];
-  final uses = <String, List<ListedEntry>>{};
-  for (final listed in entries) {
-    for (final tag in {for (final tag in (listed.entry.about['tags'] as List?) ?? const []) '$tag'}) {
-      if (tag != 'featured') (uses[tag] ??= []).add(listed);
+  final uses = <String, List<BannerItem>>{};
+  for (final item in items) {
+    for (final tag in item.tags.toSet()) {
+      if (tag != 'featured') (uses[tag] ??= []).add(item);
     }
   }
   final tags = uses.keys.where((tag) => uses[tag]!.length >= 2).toList()
     ..sort((a, b) => uses[a]!.length != uses[b]!.length ? uses[b]!.length - uses[a]!.length : a.compareTo(b));
   for (final tag in tags.take(2)) {
     specs.add(BannerSpec(
-      kicker: 'From ${oneLine(catalog.label)}',
+      kicker: only == null ? 'Across the catalogs' : 'From ${oneLine(only.label)}',
       title: oneLine(tag),
-      about: '${uses[tag]!.length} overlays carry this tag.',
+      about: '${uses[tag]!.length} $noun carry this tag.',
       featured: uses[tag]!.take(6).toList(),
       onExplore: () => showTag(tag),
       exploreKey: Key('store-banner-explore-$tag'),
@@ -66,14 +78,16 @@ List<BannerSpec> bannersFor({
   return specs;
 }
 
-/// The wide card at the top of an opened store: a soft gradient of the look's own accent, a small line, a title, a sentence, the
+/// The wide card at the top of a type's page: a soft gradient of the look's own accent, a small line, a title, a sentence, the
 /// icons it features and Explore. Arrows page through several on a wide window, with dots under; a narrow one swipes.
 class StoreBanner extends StatefulWidget {
-  const StoreBanner({super.key, required this.specs, required this.catalog, required this.iconLimits});
+  const StoreBanner({super.key, required this.specs, required this.iconLimits, this.mark = Icons.storefront_outlined});
 
   final List<BannerSpec> specs;
-  final LoadedCatalog catalog;
   final aos.Settings? iconLimits;
+
+  /// The icon shown when nothing is featured.
+  final IconData mark;
 
   @override
   State<StoreBanner> createState() => _StoreBannerState();
@@ -170,15 +184,15 @@ class _StoreBannerState extends State<StoreBanner> {
         const Spacer(),
         Row(children: [
           if (spec.featured.isEmpty)
-            const Icon(Icons.storefront_outlined, size: 32)
+            Icon(widget.mark, size: 32)
           else
-            for (final listed in spec.featured.take(narrow ? 4 : 6))
+            for (final item in spec.featured.take(narrow ? 4 : 6))
               Padding(
                 padding: const EdgeInsets.only(right: 6),
                 child: StillIcon(
-                  name: listed.entry.name,
-                  path: listed.entry.about['icon'] as String?,
-                  bytes: widget.catalog.icons[listed.entry.name]?.bytes,
+                  name: item.name,
+                  path: item.iconPath,
+                  bytes: item.iconBytes,
                   size: 32,
                   limits: widget.iconLimits,
                 ),
@@ -195,11 +209,14 @@ class _StoreBannerState extends State<StoreBanner> {
 /// right that installs it, which is a check once it is here. The card opens the item's page.
 class StoreTile extends StatelessWidget {
   const StoreTile({super.key, required this.leading, required this.title, required this.by, required this.installed,
-      required this.onOpen, required this.onInstall, this.summary, this.busy = false, this.installKey});
+      required this.onOpen, required this.onInstall, this.summary, this.needs, this.busy = false, this.installKey});
 
   final Widget leading;
   final String title;
   final String? summary;
+
+  /// What it needs of this computer or the agent, one line; null when nothing is said.
+  final String? needs;
   final String by;
   final bool installed, busy;
   final Key? installKey;
@@ -226,6 +243,9 @@ class StoreTile extends StatelessWidget {
                 if (summary != null) Text(oneLine(summary!), style: text.bodyMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
                 Text(oneLine(by), key: const Key('provenance'),
                     style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
+                if (needs != null)
+                  Text(oneLine(needs!), key: const Key('compatibility'),
+                      style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
               ]),
             ),
             const SizedBox(width: 8),
@@ -249,9 +269,12 @@ class StoreTile extends StatelessWidget {
 }
 
 /// The publisher a store tile names: its authors, else where its source is.
-String publisherOf(ListedEntry listed) {
-  final authors = (listed.entry.about['authors'] as List?)?.map((author) => '$author').toList() ?? const [];
-  return authors.isEmpty ? 'from ${displaySource(listed.entry.source)}' : 'by ${authors.join(', ')}';
+String publisherOf(ListedEntry listed) => publisherFrom(listed.entry.about, displaySource(listed.entry.source));
+
+/// The same for any entry: its `authors` in [about], else [where] its source is.
+String publisherFrom(Map<String, Object?> about, String where) {
+  final authors = (about['authors'] as List?)?.map((author) => '$author').toList() ?? const [];
+  return authors.isEmpty ? 'from $where' : 'by ${authors.join(', ')}';
 }
 
 /// Whether [config] names an overlay of this entry's identity from its very source, as the store installs it.
@@ -264,3 +287,6 @@ bool isInstalled(CanoaConfig config, CatalogEntry entry) {
     return false;
   }
 }
+
+/// The line that says what an entry needs of this computer, from its manifest; null when it needs nothing.
+String? needsOf(EntryFacts? facts) => facts == null || facts.requirements.isEmpty ? null : 'Needs ${facts.requirements.join(', ')}';

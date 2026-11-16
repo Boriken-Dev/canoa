@@ -1,25 +1,26 @@
 import 'package:flutter/material.dart';
 
-/// The Store's types, in the order of its tabs.
+/// The Store's built-in types, in the order of the index.
 enum StoreType {
-  agents('Agents', 'agents'),
-  overlays('Overlays', 'overlays'),
-  skills('Skills', 'skills'),
-  mcps('MCPs', 'mcps');
+  overlays('Overlays', 'overlays', Icons.layers_outlined),
+  skills('Skills', 'skills', Icons.auto_stories_outlined),
+  agents('Agents', 'agents', Icons.smart_toy_outlined),
+  mcps('MCP servers', 'mcps', Icons.hub_outlined);
 
-  const StoreType(this.label, this.id);
+  const StoreType(this.label, this.id, this.icon);
   final String label;
 
-  /// The word in this type's keys.
+  /// The word in this type's keys, and the id the index keeps its choice by.
   final String id;
+  final IconData icon;
 }
 
 /// What the toolbar holds for one type: the Installed/Discover switch, the search and the filters. It is kept per type, so
 /// leaving a type and coming back, or opening an entry's details and returning, finds them as they were.
 class StoreView extends ChangeNotifier {
-  StoreView(this.type);
+  StoreView(this.id);
 
-  final StoreType type;
+  final String id;
   bool _discover = false;
   final query = TextEditingController();
 

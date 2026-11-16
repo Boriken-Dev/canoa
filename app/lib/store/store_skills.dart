@@ -11,7 +11,10 @@ import '../selectable.dart';
 import 'entry_details.dart';
 import 'overlay_page.dart' show SkillRows, oneLine;
 import 'skills.dart';
+import 'store.dart' show LoadedCatalog;
+import 'store_banner.dart';
 import 'store_cards.dart';
+import 'store_icon.dart';
 import 'store_overlays.dart' show sourceNotes;
 import 'store_view.dart';
 
@@ -126,17 +129,57 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
 
   Widget _discover(BuildContext context, List<Widget> head) {
     final offered = c.skillsOffered();
+    final inScope = [for (final item in offered) if (view.catalogs.isEmpty || view.catalogs.contains(item.$1)) item];
     final shown = [
-      for (final item in offered)
-        if ((view.catalogs.isEmpty || view.catalogs.contains(item.$1)) &&
-            view.matches('${item.$2}\n${item.$1}\n${item.$3.description ?? ''}\n${item.$3.source.shown()}'))
+      for (final item in inScope)
+        if (view.matches('${item.$2}\n${item.$1}\n${item.$3.description ?? ''}\n${item.$3.source.shown()}') &&
+            view.tags.every((tag) => _tagsOf(item.$3).contains(tag)))
           item,
     ];
+    final scope = [for (final loaded in c.loaded) if (loaded.catalog != null && (view.catalogs.isEmpty || view.catalogs.contains(loaded.label))) loaded];
+    final text = Theme.of(context).textTheme;
+    final filtered = view.tags.isNotEmpty || view.query.text.isNotEmpty;
     return CardList(
       header: [
         ...head,
         ...sourceNotes(c, only: view.catalogs),
         if (c.loadingCatalogs) const LinearProgressIndicator(),
+        if (scope.isNotEmpty)
+          StoreBanner(
+            specs: bannersFor(
+              noun: 'skills',
+              title: 'Skills',
+              scope: scope,
+              items: [for (final (label, name, offer) in inScope) _bannerItem(label, name, offer)],
+              showTag: (tag) {
+                view.tags
+                  ..clear()
+                  ..add(tag);
+                view.changed();
+              },
+            ),
+            iconLimits: c.config.store.iconLimits,
+            mark: StoreType.skills.icon,
+          ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(children: [
+            Text(filtered ? 'Matching skills' : 'Top skills', style: text.titleMedium),
+            const SizedBox(width: 8),
+            Chip(key: const Key('store-count'), label: Text('${shown.length}'), visualDensity: VisualDensity.compact),
+            const Spacer(),
+            if (filtered)
+              TextButton(
+                key: const Key('store-show-all'),
+                onPressed: () {
+                  view.tags.clear();
+                  view.query.clear();
+                  view.changed();
+                },
+                child: const Text('Show all →'),
+              ),
+          ]),
+        ),
         if (offered.isEmpty && !c.loadingCatalogs)
           Text(c.config.catalogs.isEmpty
               ? 'No catalogs yet, so nothing is offered. Add one in Store settings, or paste a skill below.'
@@ -145,7 +188,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
         else if (shown.isEmpty && !c.loadingCatalogs)
           const Text('Nothing listed matches.', key: Key('skills-nothing-matches')),
       ],
-      cards: [for (final (label, name, offer) in shown) _offerCard(label, name, offer)],
+      cards: [for (final (label, name, offer) in shown) _offerTile(label, name, offer)],
       footer: [
         const SizedBox(height: 16),
         Text('Paste a skill', style: Theme.of(context).textTheme.titleSmall),
@@ -164,21 +207,33 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     );
   }
 
-  Widget _offerCard(String label, String name, aos.CatalogEntry offer) {
-    final facts = c.loaded.where((catalog) => catalog.label == label).firstOrNull?.facts['skill:$name'];
-    return StoreCard(
-      key: Key('store-offered-skill-$label-$name'),
-      leading: const LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined),
-      title: name,
-      summary: offer.description ?? offer.about?['summary'] as String?,
-      source: 'from the catalog $label · ${offer.source.shown()} · ${offer.pin ?? 'unpinned'}',
-      compatibility: facts == null || facts.requirements.isEmpty ? null : 'Needs ${facts.requirements.join(', ')}',
-      actionLabel: 'Install…',
-      actionKey: Key('store-skill-install-$label-$name'),
-      onAction: c.busy != null ? null : () => unawaited(_review(label, name, offer)),
-      onOpen: () => unawaited(_details(label, name, offer)),
-    );
-  }
+  static List<String> _tagsOf(aos.CatalogEntry offer) => [for (final tag in (offer.about?['tags'] as List?) ?? const []) '$tag'];
+
+  LoadedCatalog? _catalogOf(String label) => c.loaded.where((catalog) => catalog.label == label).firstOrNull;
+
+  BannerItem _bannerItem(String label, String name, aos.CatalogEntry offer) => BannerItem(
+    name: name,
+    catalog: label,
+    iconPath: offer.about?['icon'] as String?,
+    iconBytes: _catalogOf(label)?.icons[name]?.bytes,
+    tags: _tagsOf(offer),
+    open: () => unawaited(_details(label, name, offer)),
+  );
+
+  /// A skill the catalogs offer, as a tile: the + reviews it and installs it on a yes.
+  Widget _offerTile(String label, String name, aos.CatalogEntry offer) => StoreTile(
+    key: Key('store-offered-skill-$label-$name'),
+    leading: StillIcon(name: name, path: offer.about?['icon'] as String?, bytes: _catalogOf(label)?.icons[name]?.bytes, size: 48,
+        limits: c.config.store.iconLimits),
+    title: name,
+    summary: offer.description ?? offer.about?['summary'] as String?,
+    by: '${publisherFrom(offer.about ?? const {}, offer.source.shown())} · $label',
+    needs: needsOf(_catalogOf(label)?.facts['skill:$name']),
+    installed: false,
+    installKey: Key('store-skill-install-$label-$name'),
+    onOpen: () => unawaited(_details(label, name, offer)),
+    onInstall: c.busy != null ? null : () => unawaited(_review(label, name, offer)),
+  );
 
   Future<void> _details(String label, String name, aos.CatalogEntry offer) async {
     final catalog = c.loaded.where((each) => each.label == label).firstOrNull;

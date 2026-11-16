@@ -1,36 +1,27 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
 import '../shell/layout_state.dart';
-import 'store.dart' show LoadedCatalog;
 
-/// One store the Store section's index lists: a catalog as it was read, and how many overlays and skills it offers.
-final class StoreSource {
-  const StoreSource({required this.label, required this.overlays, required this.skills, this.problem, this.stale = false});
+/// One store type the Store section's index lists: its id, its name, its icon and how much of it there is.
+final class StoreTypeRow {
+  const StoreTypeRow({required this.id, required this.label, required this.icon, required this.installed, this.available});
 
-  factory StoreSource.of(LoadedCatalog catalog) => StoreSource(
-    label: catalog.label,
-    overlays: catalog.catalog?.entries.length ?? 0,
-    skills: catalog.catalog?.skills.length ?? 0,
-    problem: catalog.problem ?? catalog.staleBecause,
-    stale: catalog.catalog != null && (catalog.problem ?? catalog.staleBecause) != null,
-  );
+  final String id, label;
+  final IconData icon;
 
-  final String label;
-  final int overlays, skills;
+  /// How many are installed, and how many the catalogs (or the registry) offer; null while that is not known.
+  final int installed;
+  final int? available;
 
-  /// Why the store could not be read, or only its last copy is shown.
-  final String? problem;
-
-  /// Whether the entries shown are an older copy.
-  final bool stale;
-
-  bool get failed => problem != null && !stale;
+  bool same(StoreTypeRow other) =>
+      id == other.id && label == other.label && icon == other.icon && installed == other.installed && available == other.available;
 }
 
-/// The store chosen in the Store section's index, which the section's content is scoped to; none means every store.
+/// The store type chosen in the Store section's index, which the section's content shows.
 ///
-/// The section's content publishes the stores it has read, and the index and the content both listen. The choice is kept with
-/// the shell's layout, so it comes back after a restart; a store that is no longer listed reads as none.
+/// The section publishes the types it has, in order (the built-in ones, then those extensions add), and the index and the
+/// content both listen. The choice is kept with the shell's layout, so it comes back after a restart; a type that is no longer
+/// listed reads as the first.
 class StoreSelection extends ChangeNotifier {
   StoreSelection({this.layout});
 
@@ -39,59 +30,38 @@ class StoreSelection extends ChangeNotifier {
 
   final ShellLayout? layout;
 
-  List<StoreSource> _sources = const [];
-  bool _read = false;
-  bool _loading = false;
+  List<StoreTypeRow> _types = const [];
   String? _chosen;
   bool _restored = false;
 
-  /// The stores read, in the order the host gave them.
-  List<StoreSource> get sources => _sources;
+  /// The types, in the order of the index.
+  List<StoreTypeRow> get types => _types;
 
-  /// Whether the stores are being read now.
-  bool get loading => _loading;
-
-  /// Whether any read has finished, which is when a kept choice of a store no longer listed may be dropped.
-  bool get read => _read;
-
-  /// The label of the chosen store, or null for every store.
+  /// The id of the chosen type, or of the first when none was chosen or the chosen one is not listed; null before any type is
+  /// published and nothing was kept.
   String? get selected {
     if (!_restored) {
       _restored = true;
       _chosen = layout?.of(section).item;
     }
+    if (_types.isEmpty) return _chosen;
     final chosen = _chosen;
-    if (chosen == null) return null;
-    if (_read && !_sources.any((source) => source.label == chosen)) return null;
-    return chosen;
+    return _types.any((type) => type.id == chosen) ? chosen : _types.first.id;
   }
 
-  StoreSource? get selectedSource {
-    final label = selected;
-    return label == null ? null : _sources.where((source) => source.label == label).firstOrNull;
-  }
-
-  /// Chooses the store [label], or every store for null.
-  void select(String? label) {
-    if (selected == label) return;
-    _chosen = label;
-    layout?.setItem(section, label);
+  /// Chooses the type [id].
+  void select(String id) {
+    if (selected == id) return;
+    _chosen = id;
+    layout?.setItem(section, id);
     notifyListeners();
   }
 
-  /// Takes what the section has read of its stores.
-  void publish(List<LoadedCatalog> catalogs, {required bool loading}) {
-    final next = [for (final catalog in catalogs) StoreSource.of(catalog)];
-    if (!loading) _read = true;
-    final same = _loading == loading &&
-        next.length == _sources.length &&
-        [for (var i = 0; i < next.length; i++) _same(next[i], _sources[i])].every((equal) => equal);
+  /// Takes the types the section has.
+  void publish(List<StoreTypeRow> types) {
+    final same = types.length == _types.length && [for (var i = 0; i < types.length; i++) types[i].same(_types[i])].every((equal) => equal);
     if (same) return;
-    _sources = next;
-    _loading = loading;
+    _types = types;
     notifyListeners();
   }
-
-  static bool _same(StoreSource a, StoreSource b) =>
-      a.label == b.label && a.overlays == b.overlays && a.skills == b.skills && a.problem == b.problem && a.stale == b.stale;
 }

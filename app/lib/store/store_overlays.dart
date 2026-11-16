@@ -232,53 +232,39 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
     if (c.home == null) return CardList(header: [...head, const Text('The desktop app fetches catalogs and installs overlays.')]);
     if (c.config.catalogs.isEmpty) return CardList(header: [...head, NoCatalogs(controller: c)]);
     final listing = c.listing;
+    final inScope = [
+      for (final listed in listing?.entries ?? const <ListedEntry>[])
+        if (view.catalogs.isEmpty || view.catalogs.contains(listed.label)) listed,
+    ];
     final shown = [
       for (final listed in listing?.search(view.query.text, tags: view.tags) ?? const <ListedEntry>[])
         if (view.catalogs.isEmpty || view.catalogs.contains(listed.label)) listed,
     ];
-    if (view.catalogs.length == 1) {
-      final opened = c.loaded.where((loaded) => loaded.label == view.catalogs.first && loaded.catalog != null).firstOrNull;
-      if (opened != null) return _storePage(context, head, opened, shown);
-    }
-    return CardList(
-      header: [
-        ...head,
-        ...sourceNotes(c, only: view.catalogs),
-        if (c.loadingCatalogs) ...[const LinearProgressIndicator(), const Text('Fetching catalogs…')],
-        if (!c.loadingCatalogs && shown.isEmpty)
-          Text(
-            view.catalogs.isNotEmpty && view.query.text.isEmpty && view.tags.isEmpty
-                ? '${view.catalogs.first} lists no overlays.'
-                : 'Nothing listed matches.',
-            key: const Key('overlays-nothing'),
-          ),
-      ],
-      cards: [for (final listed in shown) _discoverCard(context, listed)],
-    );
-  }
-
-  /// An opened store: its banner, then its items as tiles with a + that installs.
-  Widget _storePage(BuildContext context, List<Widget> head, LoadedCatalog catalog, List<ListedEntry> shown) {
-    final all = c.listing!.entries.where((listed) => listed.label == catalog.label).toList();
+    final scope = [for (final loaded in c.loaded) if (loaded.catalog != null && (view.catalogs.isEmpty || view.catalogs.contains(loaded.label))) loaded];
     final text = Theme.of(context).textTheme;
-    final specs = bannersFor(
-      catalog: catalog,
-      entries: all,
-      open: (listed) => unawaited(_open(listed)),
-      showTag: (tag) {
-        view.tags
-          ..clear()
-          ..add(tag);
-        view.changed();
-      },
-    );
     final filtered = view.tags.isNotEmpty || view.query.text.isNotEmpty;
     return CardList(
       header: [
         ...head,
         ...sourceNotes(c, only: view.catalogs),
         if (c.loadingCatalogs) const LinearProgressIndicator(),
-        StoreBanner(specs: specs, catalog: catalog, iconLimits: c.config.store.iconLimits),
+        if (scope.isNotEmpty)
+          StoreBanner(
+            specs: bannersFor(
+              noun: 'overlays',
+              title: 'Overlays',
+              scope: scope,
+              items: [for (final listed in inScope) _bannerItem(listed)],
+              showTag: (tag) {
+                view.tags
+                  ..clear()
+                  ..add(tag);
+                view.changed();
+              },
+            ),
+            iconLimits: c.config.store.iconLimits,
+            mark: StoreType.overlays.icon,
+          ),
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Row(children: [
@@ -299,11 +285,27 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
           ]),
         ),
         if (!c.loadingCatalogs && shown.isEmpty)
-          Text(filtered ? 'Nothing listed matches.' : '${catalog.label} lists no overlays.', key: const Key('overlays-nothing')),
+          Text(
+            filtered
+                ? 'Nothing listed matches.'
+                : view.catalogs.isEmpty
+                    ? 'No catalog lists an overlay.'
+                    : '${view.catalogs.first} lists no overlays.',
+            key: const Key('overlays-nothing'),
+          ),
       ],
-      cards: [for (final listed in shown) _tile(context, listed, catalog)],
+      cards: [for (final listed in shown) _tile(context, listed, c.listing!.catalogOf(listed))],
     );
   }
+
+  BannerItem _bannerItem(ListedEntry listed) => BannerItem(
+    name: listed.entry.name,
+    catalog: listed.label,
+    iconPath: listed.entry.about['icon'] as String?,
+    iconBytes: c.listing!.catalogOf(listed).icons[listed.entry.name]?.bytes,
+    tags: [for (final tag in (listed.entry.about['tags'] as List?) ?? const []) '$tag'],
+    open: () => unawaited(_open(listed)),
+  );
 
   final _installing = <String>{};
 
@@ -317,7 +319,8 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
           limits: c.config.store.iconLimits),
       title: listed.shown,
       summary: entry.about['summary'] as String?,
-      by: publisherOf(listed),
+      by: '${publisherOf(listed)} · ${listed.label}',
+      needs: needsOf(catalog.facts['overlay:${entry.name}']),
       installed: isInstalled(c.config, entry),
       busy: _installing.contains(key),
       installKey: Key('store-entry-install-${listed.label}-${entry.name}'),
@@ -360,39 +363,6 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
       if (mounted) setState(() => _installing.remove(key));
     }
     if (needsLook && mounted) await _open(listed);
-  }
-
-  Widget _discoverCard(BuildContext context, ListedEntry listed) {
-    final entry = listed.entry;
-    final catalog = c.listing!.catalogOf(listed);
-    final icon = catalog.icons[entry.name];
-    final facts = catalog.facts['overlay:${entry.name}'];
-    final status = _stateOf(entry);
-    return StoreCard(
-      key: Key('store-entry-${listed.label}-${entry.name}'),
-      leading: StillIcon(name: entry.name, path: entry.about['icon'] as String?, bytes: icon?.bytes, limits: c.config.store.iconLimits),
-      title: listed.shown,
-      summary: entry.about['summary'] as String?,
-      source: 'from the catalog ${listed.label} · ${displaySource(entry.source)}',
-      compatibility: facts == null || facts.requirements.isEmpty ? null : 'Needs ${facts.requirements.join(', ')}',
-      state: status,
-      actionLabel: status == 'Installed' ? 'Manage' : 'Review…',
-      actionKey: Key('store-entry-open-${listed.label}-${entry.name}'),
-      onAction: () => unawaited(_open(listed)),
-    );
-  }
-
-  String? _stateOf(CatalogEntry entry) {
-    try {
-      return switch (entryState(c.config, installName(entry), installSource(entry), overlays: c.home?.overlays)) {
-        EntryState.installed => 'Installed',
-        EntryState.taken => 'Another overlay of this name is in canoa.cfg',
-        EntryState.byHand => 'Named in canoa.cfg by hand',
-        EntryState.absent => null,
-      };
-    } on StoreRefusal {
-      return null;
-    }
   }
 
   Future<void> _open(ListedEntry listed) async {

@@ -1,5 +1,6 @@
-// The Store section: its index lists the stores, the content shows the chosen store as a banner and tiles with a +, the index
-// toggle lives at the top right only, and the choice survives a restart.
+// The Store section: its index lists the store types (the built-in ones, then those an extension adds), the content shows the
+// chosen type across every catalog as a banner and tiles with a +, a catalog filter narrows it, the index toggle lives at the
+// top right only, and the choice survives a restart.
 
 import 'dart:io';
 
@@ -8,6 +9,7 @@ import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/shell/section_rail.dart';
 import 'package:canoa/shell/sections.dart';
 import 'package:canoa/shell/shell.dart';
+import 'package:canoa/store/store_extension.dart';
 import 'package:canoa/store/store_index_view.dart';
 import 'package:canoa/store/store_section.dart';
 import 'package:canoa/store/store_selection.dart';
@@ -37,6 +39,9 @@ source = "./overlays/docs-tools"
 [overlays.docs-tools.about]
 summary = "Docs tools."
 tags = ["docs"]
+
+[skills]
+reviewing = "https://example.invalid/skills/reviewing.git"
 ''';
 
 const _other = '''
@@ -44,6 +49,9 @@ const _other = '''
 source = "./overlays/lint"
 [overlays.lint.about]
 summary = "Lint rules."
+
+[skills]
+linting = "https://example.invalid/skills/linting.git"
 ''';
 
 void main() {
@@ -78,17 +86,21 @@ void main() {
   });
 
   group('the selection', () {
-    test('is kept in the layout, and a store no longer listed reads as every store', () async {
+    StoreTypeRow row(String id) => StoreTypeRow(id: id, label: id, icon: Icons.apps, installed: 0);
+
+    test('is kept in the layout, and a type no longer listed reads as the first', () async {
       final backend = MemoryLayoutBackend();
       final layout = ShellLayout(backend: backend);
-      StoreSelection(layout: layout).select('main');
+      StoreSelection(layout: layout).select('skills');
       await layout.flush();
       final again = ShellLayout(backend: backend);
       await again.load();
       final restored = StoreSelection(layout: again);
-      expect(restored.selected, 'main', reason: 'kept until the stores are read');
-      restored.publish(const [], loading: false);
-      expect(restored.selected, isNull, reason: 'the store is gone');
+      expect(restored.selected, 'skills', reason: 'kept until the types are listed');
+      restored.publish([row('overlays'), row('skills')]);
+      expect(restored.selected, 'skills');
+      restored.publish([row('overlays'), row('mcps')]);
+      expect(restored.selected, 'overlays', reason: 'the type is gone');
     });
   });
 
@@ -97,6 +109,7 @@ void main() {
     late MemoryOverlays overlays;
     late List<CanoaConfig> saved;
     late ShellLayout layout;
+    var installs = <String>[];
 
     setUp(() {
       overlays = MemoryOverlays()
@@ -108,9 +121,27 @@ void main() {
         ..put(_otherRepo, {'catalog.toml': _other, 'overlays/lint/overlay.cfg': '[env]\nLINT = "1"\n'});
       saved = [];
       layout = ShellLayout();
+      installs = [];
     });
 
-    Future<void> open(WidgetTester tester, {Size size = const Size(1200, 800), ShellLayout? using}) async {
+    ExtensionStoreType themes() => ExtensionStoreType(
+      id: 'themes',
+      label: 'Themes',
+      items: () => [
+        ExtensionStoreItem(
+          catalog: 'team',
+          name: 'dusk',
+          by: 'by Ana',
+          summary: 'A dark theme.',
+          installed: installs.contains('dusk'),
+          install: () async => installs.add('dusk'),
+        ),
+        const ExtensionStoreItem(catalog: 'other', name: 'dawn', by: 'by Bo', summary: 'A light theme.'),
+      ],
+    );
+
+    Future<void> open(WidgetTester tester,
+        {Size size = const Size(1200, 800), ShellLayout? using, List<ExtensionStoreType> extensions = const []}) async {
       await tester.binding.setSurfaceSize(size);
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final shell = using ?? layout;
@@ -135,6 +166,7 @@ void main() {
                 config: config,
                 home: MemoryHome(overlays),
                 index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last),
+                extensionTypes: extensions,
                 onSave: (changed) async {
                   saved.add(changed);
                   return changed;
@@ -147,36 +179,92 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('the index lists the stores with what each offers, and a store shows only its own items', (tester) async {
+    testWidgets('the index lists the store types, the built-in ones first, then the extension\'s, each with its count', (tester) async {
+      await open(tester, extensions: [themes()]);
+      final ids = ['overlays', 'skills', 'mcps', 'themes'];
+      for (final id in ids) {
+        expect(find.byKey(Key('store-index-$id')), findsOneWidget, reason: id);
+      }
+      expect(find.byKey(const Key('store-index-agents')), findsNothing, reason: 'the host grants no programs');
+      expect(find.byKey(const Key('store-index-team')), findsNothing, reason: 'a catalog is not a type');
+      final tops = [for (final id in ids) tester.getTopLeft(find.byKey(Key('store-index-$id'))).dy];
+      expect(tops, [...tops]..sort(), reason: 'in order');
+      expect(find.text('0 installed · 3 to discover'), findsOneWidget, reason: 'overlays across both catalogs');
+      expect(find.text('0 installed · 2 to discover'), findsNWidgets(2), reason: 'skills and themes');
+      expect(find.byKey(const Key('store-tabs')), findsNothing, reason: 'the index chooses the type');
+    });
+
+    testWidgets('a type shows its items across every catalog, and the catalog filter narrows them', (tester) async {
       await open(tester);
-      expect(find.byKey(const Key('store-index-all')), findsOneWidget);
-      expect(find.text('2 overlays · 0 skills'), findsOneWidget);
-      expect(find.text('1 overlays · 0 skills'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('store-index-team')));
-      await tester.pumpAndSettle();
       expect(find.byKey(const Key('store-banner')), findsOneWidget);
-      expect(find.text('Team overlays'), findsWidgets);
+      expect(find.text('Top overlays'), findsOneWidget);
       expect(find.byKey(const Key('store-entry-team-review')), findsOneWidget);
       expect(find.byKey(const Key('store-entry-team-docs-tools')), findsOneWidget);
-      expect(find.byKey(const Key('store-entry-other-lint')), findsNothing);
-      expect(find.text('by Ana'), findsOneWidget);
-      expect(find.byKey(const Key('store-tag-featured')), findsOneWidget, reason: 'the store\'s own tags');
+      expect(find.byKey(const Key('store-entry-other-lint')), findsOneWidget);
+      expect(find.text('by Ana · team'), findsOneWidget);
+      expect(find.byKey(const Key('store-count')), findsOneWidget);
+      expect(find.byKey(const Key('catalog-filter-all')), findsOneWidget);
 
-      await tester.enterText(find.byKey(const Key('store-search')), 'lint');
+      await tester.tap(find.byKey(const Key('catalog-filter-team')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('store-entry-other-lint')), findsNothing, reason: 'search stays within the store');
-      expect(find.byKey(const Key('overlays-nothing')), findsOneWidget);
-      await tester.enterText(find.byKey(const Key('store-search')), '');
-      await tester.tap(find.byKey(const Key('store-index-other')));
+      expect(find.text('Team overlays'), findsWidgets, reason: 'the catalog\'s own banner');
+      expect(find.byKey(const Key('store-entry-team-review')), findsOneWidget);
+      expect(find.byKey(const Key('store-entry-other-lint')), findsNothing);
+      expect(find.byKey(const Key('store-tag-featured')), findsOneWidget, reason: 'the catalog\'s own tags');
+
+      await tester.tap(find.byKey(const Key('catalog-filter-other')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('store-entry-other-lint')), findsOneWidget);
       expect(find.byKey(const Key('store-entry-team-review')), findsNothing);
-      expect(find.byKey(const Key('store-tag-featured')), findsNothing, reason: 'another store\'s tag');
+      expect(find.byKey(const Key('store-tag-featured')), findsNothing, reason: 'another catalog\'s tag');
+
+      await tester.tap(find.byKey(const Key('catalog-filter-all')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('store-entry-team-review')), findsOneWidget);
+      expect(find.byKey(const Key('store-entry-other-lint')), findsOneWidget);
     });
 
-    testWidgets('the banner pages through the store and its tags, and the + installs from the tile', (tester) async {
+    testWidgets('choosing a type shows only that type, and a search stays within it', (tester) async {
       await open(tester);
-      await tester.tap(find.byKey(const Key('store-index-team')));
+      await tester.tap(find.byKey(const Key('store-index-skills')));
+      await tester.pumpAndSettle();
+      expect(find.text('Top skills'), findsOneWidget);
+      expect(find.byKey(const Key('store-offered-skill-team-reviewing')), findsOneWidget);
+      expect(find.byKey(const Key('store-offered-skill-other-linting')), findsOneWidget, reason: 'across both catalogs');
+      expect(find.byKey(const Key('store-entry-team-review')), findsNothing, reason: 'an overlay is not a skill');
+
+      await tester.enterText(find.byKey(const Key('store-search')), 'lint');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('store-offered-skill-other-linting')), findsOneWidget);
+      expect(find.byKey(const Key('store-offered-skill-team-reviewing')), findsNothing);
+      expect(find.byKey(const Key('store-entry-other-lint')), findsNothing, reason: 'the overlay lint is another type\'s');
+
+      await tester.tap(find.byKey(const Key('store-index-overlays')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('store-entry-other-lint')), findsOneWidget);
+      expect(find.byKey(const Key('store-entry-team-review')), findsOneWidget, reason: 'the search of Skills is Skills\' alone');
+    });
+
+    testWidgets('an extension\'s type has the same page, its catalog filter and a + that installs', (tester) async {
+      await open(tester, extensions: [themes()]);
+      await tester.tap(find.byKey(const Key('store-index-themes')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('store-banner')), findsOneWidget);
+      expect(find.text('Top themes'), findsOneWidget);
+      expect(find.byKey(const Key('store-entry-team-dusk')), findsOneWidget);
+      expect(find.byKey(const Key('store-entry-other-dawn')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('store-entry-install-team-dusk')));
+      await tester.pumpAndSettle();
+      expect(installs, ['dusk']);
+      await tester.tap(find.byKey(const Key('catalog-filter-other')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('store-entry-team-dusk')), findsNothing);
+      expect(find.byKey(const Key('store-entry-other-dawn')), findsOneWidget);
+    });
+
+    testWidgets('the banner pages through the catalog and its tags, and the + installs from the tile', (tester) async {
+      await open(tester);
+      await tester.tap(find.byKey(const Key('catalog-filter-team')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('store-banner-dot-1')), findsOneWidget, reason: 'a second banner for the tag docs');
       await tester.tap(find.byKey(const Key('store-banner-next')));
@@ -194,15 +282,17 @@ void main() {
     });
 
     for (final (label, size) in const [('desktop', Size(1200, 800)), ('phone', Size(420, 800))]) {
-      testWidgets('an opened store as a banner and tiles, $label', (tester) async {
+      testWidgets('a type\'s page as a banner and tiles, $label', (tester) async {
         await open(tester, size: size);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/store_page_$label.png'));
+      });
+      testWidgets('the index of the store types, $label', (tester) async {
+        await open(tester, size: size, extensions: [themes()]);
         if (label == 'phone') {
           await tester.tap(find.byKey(const Key('open-navigation')));
           await tester.pumpAndSettle();
         }
-        await tester.tap(find.byKey(const Key('store-index-team')));
-        await tester.pumpAndSettle();
-        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/store_page_$label.png'));
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/store_types_$label.png'));
       });
     }
 
@@ -210,41 +300,36 @@ void main() {
       final backend = MemoryLayoutBackend();
       final first = ShellLayout(backend: backend);
       await open(tester, using: first);
-      await tester.tap(find.byKey(const Key('store-index-other')));
+      await tester.tap(find.byKey(const Key('store-index-skills')));
       await tester.pumpAndSettle();
       await first.flush();
       await tester.pumpWidget(const SizedBox());
       final again = ShellLayout(backend: backend);
       await again.load();
       await open(tester, using: again);
-      expect(find.byKey(const Key('store-entry-other-lint')), findsOneWidget);
+      expect(find.byKey(const Key('store-offered-skill-team-reviewing')), findsOneWidget);
       expect(find.byKey(const Key('store-entry-team-review')), findsNothing);
     });
 
-    testWidgets('a phone has the stores in the drawer, which closes once one is chosen, and the banner swipes', (tester) async {
+    testWidgets('a phone has the types in the drawer, which closes once one is chosen, and the banner swipes', (tester) async {
       await open(tester, size: const Size(420, 800));
-      expect(find.byKey(const Key('store-index-team')), findsNothing);
+      expect(find.byKey(const Key('store-index-skills')), findsNothing);
       await tester.tap(find.byKey(const Key('open-navigation')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('store-index-team')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('store-index-team')));
+      expect(find.byKey(const Key('store-index-skills')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('store-index-skills')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('store-index-team')), findsNothing, reason: 'the drawer closed');
+      expect(find.byKey(const Key('store-index-skills')), findsNothing, reason: 'the drawer closed');
+      expect(find.text('Top skills'), findsOneWidget);
       expect(find.byKey(const Key('store-banner')), findsOneWidget);
       expect(find.byKey(const Key('store-banner-next')), findsNothing, reason: 'arrows become swipes');
-      await tester.drag(find.byKey(const Key('store-banner')), const Offset(-300, 0));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('store-banner-explore-docs')), findsOneWidget);
     });
 
-    testWidgets('a store that could not be read says so in the index and in its content', (tester) async {
+    testWidgets('a catalog that could not be read says so in the page', (tester) async {
       overlays.repos.remove(_otherRepo);
       await open(tester);
-      expect(find.text('Could not be read'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('store-index-other')));
-      await tester.pumpAndSettle();
       expect(find.byKey(const Key('store-source-note-other')), findsOneWidget);
+      expect(find.byKey(const Key('store-entry-team-review')), findsOneWidget);
     });
   });
-
 }
