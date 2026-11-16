@@ -508,6 +508,24 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     }());
   }
 
+  /// Asks the host for [source]'s choices again now, whatever is held, and tells whoever listens; what it answers, or what was
+  /// held when the host cannot be asked.
+  Future<SourceChoices?> askChoicesAgain(AgentSource source) async {
+    final load = choicesLoader;
+    if (load == null) return choicesOf(source);
+    final key = sourceKey(source);
+    try {
+      final got = await load(source);
+      if (got != null && !_disposed) {
+        _choices[key] = got.at(DateTime.now());
+        notifyListeners();
+      }
+    } catch (error) {
+      debugPrint('Canoa: choices of ${source.label} could not be asked: ${reasonOf(error)}');
+    }
+    return choicesOf(source);
+  }
+
   /// The largest file, in bytes, sent as the agent's embedded context; a larger one goes as a link to it.
   int embedLimit;
 

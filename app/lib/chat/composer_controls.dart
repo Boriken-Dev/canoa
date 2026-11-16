@@ -160,6 +160,9 @@ class ModelEffortChooser extends StatelessWidget {
     final draft = session.isDraft;
     final known = model != null || effort != null || pendingModel != null || pendingEffort != null;
     if (!known && !draft) return const SizedBox.shrink();
+    // A source that could not be started says why in its own chip, and has no list to wait for.
+    final source = session.source;
+    if (!known && draft && source != null && store.choicesOf(source)?.unknownKind != null) return const SizedBox.shrink();
     // Nothing is known of this agent's list until it runs: say so, rather than offer a lone Default.
     if (!known) {
       return const Tooltip(

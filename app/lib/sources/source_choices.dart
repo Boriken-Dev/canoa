@@ -56,12 +56,31 @@ final class ModelChoice {
   }
 }
 
+/// Why a source's provider could not list its models when it could not be started at all. A provider that lists only in its
+/// session has none.
+enum UnknownKind {
+  /// The program is not on the machine the host runs on.
+  notInstalled,
+
+  /// The program is there and could not be asked; [SourceChoices.unknownBecause] has its words.
+  failed;
+
+  static UnknownKind? named(Object? name) => switch (name) {
+    'not_installed' => notInstalled,
+    'failed' => failed,
+    _ => null,
+  };
+}
+
 /// What a source's provider lists before a session starts: its models and each one's efforts. A source whose provider cannot
-/// say before it starts is [known] false, and the composer says its choices come after it starts.
+/// say before it starts is [known] false, and the composer says its choices come after it starts, or, when the provider could
+/// not be started, why.
 final class SourceChoices {
   const SourceChoices({
     required this.known,
     this.unknownBecause,
+    this.unknownKind,
+    this.signedOut = false,
     this.models = const [],
     this.programVersion,
     this.cacheLifetime,
@@ -71,6 +90,13 @@ final class SourceChoices {
 
   final bool known;
   final String? unknownBecause;
+
+  /// Why the provider could not be asked at all, when it could not be started.
+  final UnknownKind? unknownKind;
+
+  /// Whether the provider listed its models and says nobody is signed in on the machine's own login. Says nothing of an
+  /// account the host applies.
+  final bool signedOut;
   final List<ModelChoice> models;
 
   /// The first line of the program's `--version`, when it answered.
@@ -91,6 +117,8 @@ final class SourceChoices {
       SourceChoices(
         known: known,
         unknownBecause: unknownBecause,
+        unknownKind: unknownKind,
+        signedOut: signedOut,
         models: models,
         programVersion: programVersion,
         cacheLifetime: cacheLifetime,
@@ -107,6 +135,8 @@ final class SourceChoices {
         return SourceChoices(
           known: value['known'] as bool,
           unknownBecause: value['unknown_because'] is String ? value['unknown_because'] as String : null,
+          unknownKind: UnknownKind.named(value['unknown_kind']),
+          signedOut: value['signed_out'] == true,
           models: [if (value['models'] is List) for (final model in value['models'] as List) ?ModelChoice._parse(model)],
           programVersion: value['program_version'] is String ? value['program_version'] as String : null,
           cacheLifetime: value['cache_lifetime'] is String ? value['cache_lifetime'] as String : null,

@@ -52,6 +52,7 @@ import 'chat/delegation_row.dart';
 import 'chat/delegation_view.dart';
 import 'chat/new_session_view.dart';
 import 'chat/palette.dart';
+import 'chat/source_trouble.dart';
 import 'chat/agent_events.dart' show AgentCommandInfo;
 import 'chat/session_views.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -1159,6 +1160,7 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _startDraft(ChatSession draft) async {
     final source = draft.source;
     if (source == null) throw StateError('Choose where its agent comes from first');
+    await _stopForTrouble(source);
     final check = _checks[source] ?? await timed<SourceCheck>('lookup', () => _check(source));
     if (!check.ready) {
       throw StateError(check.describe(source.label)!);
@@ -1187,6 +1189,19 @@ class _CanoaAppState extends State<CanoaApp> {
     } finally {
       _inFlight.remove(starting);
     }
+  }
+
+  /// A source the host says cannot start, the program missing or nobody signed in, is not started: the action that puts it right
+  /// opens instead, and the draft stays as it is. The host is asked once more first, since it may have been put right since.
+  Future<void> _stopForTrouble(AgentSource source) async {
+    var trouble = sourceTrouble(source, store.choicesOf(source), accounts: _accounts);
+    if (trouble == null || !trouble.blocksStart) return;
+    await store.askChoicesAgain(source);
+    trouble = sourceTrouble(source, store.choicesOf(source), accounts: _accounts);
+    if (trouble == null || !trouble.blocksStart) return;
+    final context = _navigator.currentContext;
+    if (mounted && context != null && context.mounted && canAct(trouble, _kit)) unawaited(actOnTrouble(context, store, _kit, trouble));
+    throw StateError('${trouble.message}.');
   }
 
   /// Starts under way, whose worktree and agent quitting takes back.
@@ -1686,6 +1701,7 @@ class _CanoaAppState extends State<CanoaApp> {
     onSettings: () => unawaited(_showSettings()),
     accounts: _accounts,
     onAccountSettings: () => unawaited(_showSettings(section: 'accounts')),
+    programs: _programs,
     extension: _tabs,
     onProfile: (session) {
       final above = _navigator.currentContext;

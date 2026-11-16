@@ -11,9 +11,11 @@ import '../acp/local_agent.dart' show InsideFile;
 import '../extension/composer_extension.dart';
 import '../session_store.dart';
 import '../sources/sources.dart';
+import '../store/programs.dart' show ProgramStores;
 import 'agent_events.dart' show AgentCommandInfo, MessageRole;
 import 'attachments.dart';
 import 'composer_controls.dart';
+import 'source_trouble.dart';
 import 'mentions.dart';
 import 'session_options.dart';
 import 'session_views.dart' show appName;
@@ -51,6 +53,7 @@ final class ComposerKit {
     this.onProfile,
     this.accounts,
     this.onAccountSettings,
+    this.programs,
     this.extension,
   });
 
@@ -108,6 +111,9 @@ final class ComposerKit {
 
   /// Opens Settings.
   final VoidCallback? onSettings;
+
+  /// The programs the host's Store keeps, when it grants installing them: where a source whose program is missing is put right.
+  final ProgramStores? programs;
 
   /// The accounts the host knows, for the chip that names the one a session runs on; null where the app has none.
   final AccountsController? accounts;
@@ -342,6 +348,7 @@ class SessionComposer extends StatelessWidget {
         if (draft) PlaceToggle(store: store, session: session, kit: kit),
       ],
       trailing: [
+        if (draft) SourceTroubleChip(store: store, session: session, kit: kit),
         ModelEffortChooser(store: store, session: session, options: options, seen: seen),
         if (options.any((option) => roleOf(option) == OptionRole.other)) MoreChooser(store: store, session: session, options: options),
         if (draft) CacheChooser(store: store, session: session),

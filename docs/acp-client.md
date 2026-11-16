@@ -206,7 +206,11 @@ Model and effort are one pill beside Send ("Opus · High"): its menu lists the m
 Before an agent has started, the menu lists what its source's agent offered when it last ran, kept with the session list,
 else only Default, and the pill says what Default is where the source knows it ("Opus 5.5", or "GPT-6 Luna · Medium" where
 the source also names the model's default effort) rather than Default twice; a source that cannot list its models says
-"Model: after start". The mode control is at the composer's bottom left (see Modes above), with Bypass beside the agent's own
+"Model: after start". A source that cannot start on its host says why beside the model instead, with the one thing to do:
+"Claude Code isn't installed on this host" with **Install** (the Store's programs, where the host allows installing),
+"Claude needs a sign-in" with **Sign in** (the Accounts flow; an account the entry offers carries its own login, so the
+machine's is not asked for), or "Couldn't start Claude" with **Try again**. Sending to a source of the first two asks the host
+once more, then opens that action and keeps the message. The mode control is at the composer's bottom left (see Modes above), with Bypass beside the agent's own
 modes; its menu is headed "Permissions · this session" and gives each mode Canoa knows a line on what it does.
 
 ## Usage
