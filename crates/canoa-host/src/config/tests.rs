@@ -1629,20 +1629,71 @@ fn a2a_keys_and_agents_on_another_machine_are_read_and_a_wrong_one_is_refused() 
 }
 
 #[test]
-fn loadout_skills_are_the_chosen_skills_that_are_on_and_the_rest_of_the_table_is_the_apps() {
+fn loadouts_are_named_collections_and_the_default_names_one_of_them() {
     let config = Config::from_str_in(
-        "[loadout]\noff = [\"team\"]\nskills = [\"Audit\", \"audit\", \"lint\"]\n[loadout.mcp.files]\nregistry = \"x\"\n",
+        "[overlays]\nteam = \"https://x/team.git\"\nother = \"https://x/other.git\"\n\
+         [loadouts.review]\ndescription = \"Reading code\"\noverlays = [\"other\", \"team\"]\nskills = [\"Audit\", \"audit\", \"lint\"]\nmcp = [\"files\"]\n\
+         [loadouts.bare]\n[defaults]\nloadout = \"review\"\ntheme = \"the app's\"\n",
         Path::new("."),
     )
     .expect("parses");
-    assert_eq!(config.local_profiles.chosen_skills, ["Audit", "lint"]);
+    let local = &config.local_profiles;
+    assert_eq!(local.default_loadout.as_deref(), Some("review"));
+    assert_eq!(
+        local
+            .loadouts
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["review", "bare"]
+    );
+    let review = &local.loadouts["review"];
+    assert_eq!(review.description, "Reading code");
+    assert_eq!(review.skills, ["Audit", "lint"]);
+    assert_eq!(review.mcp, ["files"]);
+    // Overlays apply in the order `[overlays]` composes them, not the order the loadout lists them.
+    let resolved = local
+        .resolve_loadout(None)
+        .expect("known")
+        .expect("the default");
+    assert_eq!(resolved.overlays, ["team", "other"]);
+    let bare = local
+        .resolve_loadout(Some("bare"))
+        .expect("known")
+        .expect("named");
+    assert!(bare.overlays.is_empty() && bare.skills.is_empty() && bare.mcp.is_empty());
+}
+
+#[test]
+fn a_loadout_that_is_malformed_or_a_default_that_names_none_refuses_the_file() {
     for text in [
-        "[loadout]\nskills = \"audit\"\n",
-        "[loadout]\nskills = [1]\n",
-        "[loadout]\nskills = [\"../x\"]\n",
+        "[loadouts.x]\nskills = \"audit\"\n",
+        "[loadouts.x]\nskills = [1]\n",
+        "[loadouts.x]\nskills = [\"../x\"]\n",
+        "[loadouts.x]\noverlays = [\"not valid\"]\n",
+        "[loadouts.x]\nmcp = [\"a b\"]\n",
+        "[loadouts.x]\ndescription = 3\n",
+        "[loadouts.x]\norder = [\"a\"]\n",
+        "[loadouts.\"a b\"]\n",
+        "loadouts = 1\n",
+        "[defaults]\nloadout = \"x\"\n",
+        "[loadouts.y]\n[defaults]\nloadout = \"x\"\n",
+        "[loadouts.x]\n[defaults]\nloadout = 1\n",
     ] {
         assert!(Config::from_str_in(text, Path::new(".")).is_err(), "{text}");
     }
+}
+
+#[test]
+fn a_session_names_a_loadout_the_file_does_not_hold_and_it_is_refused_with_its_name() {
+    let config = Config::from_str_in("[loadouts.a]\n", Path::new(".")).expect("parses");
+    let error = config
+        .local_profiles
+        .resolve_loadout(Some("ghost"))
+        .expect_err("unknown");
+    assert!(error.to_string().contains("ghost"), "{error}");
+    // Nothing asked and no default: the profile's own, unnarrowed.
+    assert_eq!(config.local_profiles.resolve_loadout(None), Ok(None));
 }
 
 #[test]

@@ -218,12 +218,14 @@ impl crate::store::mcp::Backend for ToolsBackend {
         if let Some(Value::Object(overlays)) = section("overlays") {
             installed.overlays.extend(overlays.keys().cloned());
         }
-        if let Some(Value::Array(skills)) =
-            section("loadout").and_then(|loadout| loadout.get("skills").cloned())
-        {
-            installed
-                .skills
-                .extend(skills.iter().filter_map(Value::as_str).map(str::to_owned));
+        if let Some(Value::Object(loadouts)) = section("loadouts") {
+            for loadout in loadouts.values() {
+                if let Some(Value::Array(skills)) = loadout.get("skills") {
+                    installed
+                        .skills
+                        .extend(skills.iter().filter_map(Value::as_str).map(str::to_owned));
+                }
+            }
         }
         installed
     }

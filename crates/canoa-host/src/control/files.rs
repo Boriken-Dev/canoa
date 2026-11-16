@@ -42,7 +42,8 @@ pub const SECTIONS: &[&str] = &[
     "assets",
     "attachments",
     "catalogs",
-    "loadout",
+    "defaults",
+    "loadouts",
     "network",
     "notifications",
     "overlays",
@@ -55,7 +56,7 @@ pub const SECTIONS: &[&str] = &[
 /// The tables that change what an agent may do or is given (the permission mode and protected paths, the overlays and skills
 /// every `own_profile` session starts with): writing them takes the grant `config.write.sessions`, which is as much as access to
 /// the agent.
-pub const GUARDED_SECTIONS: &[&str] = &["loadout", "overlays", "permissions"];
+pub const GUARDED_SECTIONS: &[&str] = &["defaults", "loadouts", "overlays", "permissions"];
 
 /// The sections the host itself reads, which it takes up when it next starts.
 const READ_AT_START: &[&str] = &["permissions", "usage"];

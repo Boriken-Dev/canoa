@@ -1,5 +1,5 @@
 {
-  "about": "Profile documents, their merge and the effective view, read by canoa (tests/profile.rs) and the app (app/test/profile_vectors_test.dart). Each layer is a TOML document; `effective` is the view both produce, or `error` the first refusal: its layer's index, a code, and for every code but parse the key it names. `sources` are AOS source strings held to what Canoa fetches. `overlays` are AOS overlays, each given as its files: the overlays refused whole, the view of their layers in composition order under an optional user layer, and the environment built from them over `host`, or the refusal.",
+  "about": "Profile documents, their merge and the effective view, read by canoa (tests/profile.rs) and the app (app/test/profile_vectors_test.dart). Each layer is a TOML document; `effective` is the view both produce, or `error` the first refusal: its layer's index, a code, and for every code but parse the key it names. `sources` are AOS source strings held to what Canoa fetches. `overlays` are AOS overlays, each given as its files: the overlays refused whole, the view of their layers in composition order under an optional user layer, and the environment built from them over `host`, or the refusal. `loadouts` are canoa.cfg texts and the loadout a session names (null: none named): the loadout resolved against `[overlays]` (overlays in composition order, those `[overlays]` lacks apart, skills, servers), or null when none applies, or `error`: `unknown-loadout` with the name, or `invalid` when the file is refused.",
   "merges": [
     {
       "name": "all six layers: a later layer wins per key, lists merge by name, a layer removes an entry",
@@ -2750,5 +2750,100 @@
       "_BASE_URL",
       "_PROXY"
     ]
-  }
+  },
+  "loadouts": [
+    {
+      "name": "the default loadout holds its overlays in composition order, its skills and its servers",
+      "config": "[overlays]\nteam = \"https://example.invalid/team.git@main\"\nother = \"https://example.invalid/other.git@main\"\n[loadouts.review]\ndescription = \"Reading code\"\noverlays = [\"other\", \"team\"]\nskills = [\"Audit\", \"audit\", \"lint\"]\nmcp = [\"files\"]\n[loadouts.bare]\n[defaults]\nloadout = \"review\"\n",
+      "loadout": null,
+      "resolved": {
+        "name": "review",
+        "overlays": [
+          "team",
+          "other"
+        ],
+        "missing_overlays": [],
+        "skills": [
+          "Audit",
+          "lint"
+        ],
+        "mcp": [
+          "files"
+        ]
+      }
+    },
+    {
+      "name": "a named loadout yields exactly its own, whatever the default",
+      "config": "[overlays]\nteam = \"https://example.invalid/team.git@main\"\nother = \"https://example.invalid/other.git@main\"\n[loadouts.review]\noverlays = [\"team\"]\nskills = [\"audit\"]\n[loadouts.bare]\n[defaults]\nloadout = \"review\"\n",
+      "loadout": "bare",
+      "resolved": {
+        "name": "bare",
+        "overlays": [],
+        "missing_overlays": [],
+        "skills": [],
+        "mcp": []
+      }
+    },
+    {
+      "name": "an overlay no longer in [overlays] is reported missing, not applied",
+      "config": "[overlays]\nteam = \"https://example.invalid/team.git@main\"\nother = \"https://example.invalid/other.git@main\"\n[loadouts.review]\noverlays = [\"team\", \"gone\"]\n",
+      "loadout": "review",
+      "resolved": {
+        "name": "review",
+        "overlays": [
+          "team"
+        ],
+        "missing_overlays": [
+          "gone"
+        ],
+        "skills": [],
+        "mcp": []
+      }
+    },
+    {
+      "name": "with no loadouts and no default a session starts with everything the profile lists",
+      "config": "[overlays]\nteam = \"https://example.invalid/team.git@main\"\nother = \"https://example.invalid/other.git@main\"\n",
+      "loadout": null,
+      "resolved": null
+    },
+    {
+      "name": "with loadouts but no default and none named a session starts with everything the profile lists",
+      "config": "[overlays]\nteam = \"https://example.invalid/team.git@main\"\nother = \"https://example.invalid/other.git@main\"\n[loadouts.review]\noverlays = [\"team\"]\n",
+      "loadout": null,
+      "resolved": null
+    },
+    {
+      "name": "a name the file does not hold is refused with the name",
+      "config": "[overlays]\nteam = \"https://example.invalid/team.git@main\"\nother = \"https://example.invalid/other.git@main\"\n[loadouts.review]\n",
+      "loadout": "ghost",
+      "error": {
+        "code": "unknown-loadout",
+        "name": "ghost"
+      }
+    },
+    {
+      "name": "a default that names no loadout refuses the file",
+      "config": "[overlays]\nteam = \"https://example.invalid/team.git@main\"\nother = \"https://example.invalid/other.git@main\"\n[loadouts.review]\n[defaults]\nloadout = \"ghost\"\n",
+      "loadout": null,
+      "error": {
+        "code": "invalid"
+      }
+    },
+    {
+      "name": "a loadout with a key it does not have refuses the file",
+      "config": "[overlays]\nteam = \"https://example.invalid/team.git@main\"\nother = \"https://example.invalid/other.git@main\"\n[loadouts.review]\norder = [\"team\", \"other\"]\n",
+      "loadout": "review",
+      "error": {
+        "code": "invalid"
+      }
+    },
+    {
+      "name": "a skill name that climbs out refuses the file",
+      "config": "[overlays]\nteam = \"https://example.invalid/team.git@main\"\nother = \"https://example.invalid/other.git@main\"\n[loadouts.review]\nskills = [\"../x\"]\n",
+      "loadout": "review",
+      "error": {
+        "code": "invalid"
+      }
+    }
+  ]
 }

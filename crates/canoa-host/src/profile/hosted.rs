@@ -38,6 +38,12 @@ pub const PROFILE_META: &str = "dev.boriken.canoa/profile";
 /// client leaves out is reported as not chosen. Absent, the connection starts with every overlay the profile lists.
 pub const OVERLAYS_META: &str = "dev.boriken.canoa/overlays";
 
+/// The `_meta` key a client names, in `initialize`, the loadout this connection starts with: the name of one of the profile's
+/// `[loadouts]`. The host resolves it once, when the connection starts, into the overlays, skills and servers it gives; a later
+/// edit of canoa.cfg reaches new connections only. Absent, the profile's default loadout applies, if it has one. A name the
+/// profile does not hold is refused.
+pub const LOADOUT_META: &str = "dev.boriken.canoa/loadout";
+
 /// The longest initial context a session is given, in UTF-8 bytes, every layer's together.
 const MAX_CONTEXT: usize = 1024 * 1024;
 pub(crate) mod fetched;
@@ -217,6 +223,40 @@ pub(crate) fn choose(offer: &Offer, first: &[u8]) -> Result<usize, Refusal> {
         })
 }
 
+/// The loadout `first` names for the connection in `initialize`'s `_meta`; `None` when it names none. A name the profile
+/// `index` of `offer` does not hold, and anything but a name, is refused with the name.
+pub(crate) fn choose_loadout(
+    offer: &Offer,
+    index: usize,
+    first: &[u8],
+) -> Result<Option<String>, Refusal> {
+    let message: Value = serde_json::from_slice(first).unwrap_or(Value::Null);
+    let Some(chosen) = message
+        .get("params")
+        .and_then(|params| params.get("_meta"))
+        .and_then(|meta| meta.get(LOADOUT_META))
+    else {
+        return Ok(None);
+    };
+    let refuse = |text: String, log: &'static str| Refusal {
+        answer: message.get("id").map(|id| error(id, INVALID_PARAMS, &text)),
+        log,
+    };
+    let Some(name) = chosen.as_str() else {
+        return Err(refuse(
+            "a loadout is chosen by its name".to_owned(),
+            "a client sent something other than a loadout's name as its choice, which was refused",
+        ));
+    };
+    match offer.profiles[index].1.resolve_loadout(Some(name)) {
+        Ok(_) => Ok(Some(name.to_owned())),
+        Err(unknown) => Err(refuse(
+            unknown.to_string(),
+            "a client asked for a loadout the profile does not hold, which was refused",
+        )),
+    }
+}
+
 /// The overlays `first` chooses for the connection in `initialize`'s `_meta`; `None` when it chooses none, which is every
 /// overlay the profile lists. Anything but an array of names is refused.
 pub(crate) fn choose_overlays(first: &[u8]) -> Result<Option<Vec<String>>, Refusal> {
@@ -353,7 +393,7 @@ impl Connection {
         entry: &str,
         lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Self, String> {
-        Self::prepare_with(offer, index, entry, lookup, None)
+        Self::prepare_with(offer, index, entry, lookup, None, None)
     }
 
     /// As [`Self::prepare`], with the overlays the client chose: only those of them the profile lists are read, and each
@@ -368,13 +408,44 @@ impl Connection {
         entry: &str,
         lookup: &dyn Fn(&str) -> Option<String>,
         only: Option<&[String]>,
+        loadout: Option<&str>,
     ) -> Result<Self, String> {
         let (name, listed) = &offer.profiles[index];
         let mut notes = Vec::new();
-        let narrowed;
-        let host = if let Some(only) = only {
-            let mut host = listed.clone();
-            host.overlays.retain(|identity| {
+        let mut narrowed = listed.clone();
+        let resolved = listed
+            .resolve_loadout(loadout)
+            .map_err(|error| error.to_string())?;
+        // The overlays the client named win over the loadout's.
+        let from_loadout: Option<Vec<String>> = resolved.as_ref().map(|resolved| {
+            resolved
+                .overlays
+                .iter()
+                .chain(&resolved.missing_overlays)
+                .cloned()
+                .collect()
+        });
+        let only = only.or(from_loadout.as_deref());
+        if let Some(resolved) = &resolved {
+            narrowed.chosen_skills.clone_from(&resolved.skills);
+            for server in listed.profile.mcp.keys() {
+                if !resolved.mcp.contains(server) {
+                    narrowed.off_mcp.insert(server.clone());
+                }
+            }
+            for server in &resolved.mcp {
+                if !listed.profile.mcp.contains_key(server) {
+                    notes.push(Item::new(
+                        format!("mcp.{server}"),
+                        LayerId::new(LayerKind::User, ""),
+                        State::Unsupported,
+                        "the loadout names it, and [profile.mcp] does not define it",
+                    ));
+                }
+            }
+        }
+        if let Some(only) = only {
+            narrowed.overlays.retain(|identity| {
                 let chosen = only.contains(identity);
                 if !chosen {
                     notes.push(Item::new(
@@ -394,11 +465,8 @@ impl Connection {
                     "this profile does not list it, so a client cannot add it",
                 ));
             }
-            narrowed = host;
-            &narrowed
-        } else {
-            listed
-        };
+        }
+        let host = &narrowed;
         let overlays = read_overlays(host, &mut notes);
         let chosen = read_chosen(host, &mut notes);
         let layers = layers_of(host, &overlays, &chosen, None, &mut notes);
@@ -602,7 +670,7 @@ fn read_overlays(host: &HostProfile, notes: &mut Vec<Item>) -> Vec<ReadOverlay> 
     out
 }
 
-/// The skills the person chose that are on (`[loadout] skills`), as the app recorded them, checked again here. What fails is
+/// The skills the session's loadout names, as the app recorded them, checked again here. What fails is
 /// reported and left out.
 fn read_chosen(host: &HostProfile, notes: &mut Vec<Item>) -> Chosen {
     if host.chosen_skills.is_empty() {

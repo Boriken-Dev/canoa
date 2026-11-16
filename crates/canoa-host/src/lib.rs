@@ -45,8 +45,8 @@ pub use accounts::ACCOUNT_META;
 pub use config::{
     AccountConfig, AccountStore, CACHE_LIFETIMES, Config, ConfigError, ControlConfig,
     DelegateConfig, ENTRIES, Entry, EntryKind, HarnessOptions, INSTALLED_DIR_VARIABLE, Layers,
-    Listen, NativeConfig, Origin, Settings, StoreConfig, TransportListen, UsageSource, WebConfig,
-    cache_lifetime_name, cache_lifetime_named, merge_into,
+    Listen, Loadout, NativeConfig, Origin, ResolvedLoadout, Settings, StoreConfig, TransportListen,
+    UnknownLoadout, UsageSource, WebConfig, cache_lifetime_name, cache_lifetime_named, merge_into,
 };
 /// The `_meta` key of `initialize` that asks a host for the delegation tools, and that a task's permission request carries
 /// with its task id, title and source.

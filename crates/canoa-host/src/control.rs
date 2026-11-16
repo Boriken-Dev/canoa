@@ -80,7 +80,7 @@ pub enum Grant {
     ConfigRead,
     /// `config/set`: a named section of canoa.cfg, the app's own tables only; never `host`, `agents` or `profile`.
     ConfigWrite,
-    /// `config/set` of `overlays`, `loadout` and `permissions`, which change what an agent may do or is given: as much as access to the agent.
+    /// `config/set` of `overlays`, `loadouts`, `defaults` and `permissions`, which change what an agent may do or is given: as much as access to the agent.
     ConfigWriteSessions,
     /// `upload/put` and `upload/remove`: files in a folder of the key's own, within the limits of `[host.control]`.
     Upload,

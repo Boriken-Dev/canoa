@@ -2460,8 +2460,22 @@ fn prepare<C: Channel>(
             return None;
         }
     };
+    let loadout = match hosted::choose_loadout(offer, index, first) {
+        Ok(loadout) => loadout,
+        Err(refusal) => {
+            refuse(refusal.answer, refusal.log);
+            return None;
+        }
+    };
     let lookup = |name: &str| std::env::var(name).ok();
-    match Connection::prepare_with(offer, index, &served.name, &lookup, only.as_deref()) {
+    match Connection::prepare_with(
+        offer,
+        index,
+        &served.name,
+        &lookup,
+        only.as_deref(),
+        loadout.as_deref(),
+    ) {
         Ok(connection) => Some(connection.asking(in_process)),
         Err(why) => {
             let id = serde_json::from_slice::<serde_json::Value>(first)

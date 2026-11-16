@@ -940,8 +940,8 @@ fn a_client_narrows_the_overlays_a_connection_starts_with_and_never_adds_one() {
     install_overlay(&temp);
     let offer = offer_of(&temp, &config_with("overlays = [\"team\"]\n"));
     let report_of = |only: Option<Vec<String>>| {
-        let connection =
-            Connection::prepare_with(&offer, 0, "a", &lookup, only.as_deref()).expect("prepared");
+        let connection = Connection::prepare_with(&offer, 0, "a", &lookup, only.as_deref(), None)
+            .expect("prepared");
         parts_for(&connection, Some("claude-code"), &claude(), &lookup).report
     };
 
@@ -1191,7 +1191,7 @@ fn the_body_of_overlay_md_is_templated_and_its_front_matter_is_not_context() {
     assert!(text.contains("Body at deep, in /work/one."), "{text}");
 }
 
-/// The profile's parts for Claude Code of the person's own top-level `text` (`[loadout]`, `[skill_pins]`), for an agent `a`.
+/// The profile's parts for Claude Code of the person's own top-level `text` (`[loadouts]`, `[skill_pins]`), for an agent `a`.
 fn chosen_parts(temp: &Temp, text: &str) -> (Connection, Parts) {
     let config = Config::from_str_in(&format!("[agents.a]\nprogram = \"agent\"\n{text}"), &temp.0)
         .expect("parses");
@@ -1223,7 +1223,10 @@ fn choose_audit(temp: &Temp, chosen: bool) -> String {
 fn a_skill_the_person_chose_is_delivered_from_its_record_when_the_files_agree() {
     let temp = Temp::new();
     choose_audit(&temp, true);
-    let (_connection, parts) = chosen_parts(&temp, "[loadout]\nskills = [\"audit\"]\n");
+    let (_connection, parts) = chosen_parts(
+        &temp,
+        "[loadouts.main]\nskills = [\"audit\"]\n[defaults]\nloadout = \"main\"\n",
+    );
     let audit = item(&parts.report, "skills.audit");
     assert_eq!(audit["state"], "applied", "{}", parts.report);
     assert_eq!(audit["layer"], "user", "{}", parts.report);
@@ -1238,7 +1241,10 @@ fn a_chosen_skill_whose_files_changed_after_the_record_was_written_is_not_delive
     let temp = Temp::new();
     choose_audit(&temp, true);
     temp.write("overlays/.skills/audit/notes/more.md", "Changed.\n");
-    let (_connection, parts) = chosen_parts(&temp, "[loadout]\nskills = [\"audit\"]\n");
+    let (_connection, parts) = chosen_parts(
+        &temp,
+        "[loadouts.main]\nskills = [\"audit\"]\n[defaults]\nloadout = \"main\"\n",
+    );
     let audit = item(&parts.report, "skills.audit");
     assert_eq!(audit["state"], "refused", "{}", parts.report);
     assert!(
@@ -1251,7 +1257,10 @@ fn a_chosen_skill_whose_files_changed_after_the_record_was_written_is_not_delive
     let temp = Temp::new();
     choose_audit(&temp, true);
     temp.write("overlays/.skills/audit/extra.md", "Added.\n");
-    let (_connection, parts) = chosen_parts(&temp, "[loadout]\nskills = [\"audit\"]\n");
+    let (_connection, parts) = chosen_parts(
+        &temp,
+        "[loadouts.main]\nskills = [\"audit\"]\n[defaults]\nloadout = \"main\"\n",
+    );
     assert_eq!(item(&parts.report, "skills.audit")["state"], "refused");
 
     // A pin in canoa.cfg that the record's digest is not.
@@ -1260,7 +1269,9 @@ fn a_chosen_skill_whose_files_changed_after_the_record_was_written_is_not_delive
     let pin = format!("sha256:{}", "0".repeat(64));
     let (_connection, parts) = chosen_parts(
         &temp,
-        &format!("[loadout]\nskills = [\"audit\"]\n[skill_pins]\naudit = \"{pin}\"\n"),
+        &format!(
+            "[loadouts.main]\nskills = [\"audit\"]\n[defaults]\nloadout = \"main\"\n[skill_pins]\naudit = \"{pin}\"\n"
+        ),
     );
     assert_eq!(item(&parts.report, "skills.audit")["state"], "refused");
 }
@@ -1269,7 +1280,10 @@ fn a_chosen_skill_whose_files_changed_after_the_record_was_written_is_not_delive
 fn a_skill_a_record_does_not_say_the_person_chose_is_not_delivered_whoever_names_it() {
     let temp = Temp::new();
     choose_audit(&temp, false);
-    let (_connection, parts) = chosen_parts(&temp, "[loadout]\nskills = [\"audit\"]\n");
+    let (_connection, parts) = chosen_parts(
+        &temp,
+        "[loadouts.main]\nskills = [\"audit\"]\n[defaults]\nloadout = \"main\"\n",
+    );
     assert_eq!(
         item(&parts.report, "skills.audit")["state"],
         "not supported"
@@ -1280,20 +1294,172 @@ fn a_skill_a_record_does_not_say_the_person_chose_is_not_delivered_whoever_names
 #[test]
 fn a_chosen_skill_with_no_record_is_reported_and_one_not_listed_is_never_read() {
     let temp = Temp::new();
-    let (_connection, parts) = chosen_parts(&temp, "[loadout]\nskills = [\"audit\"]\n");
+    let (_connection, parts) = chosen_parts(
+        &temp,
+        "[loadouts.main]\nskills = [\"audit\"]\n[defaults]\nloadout = \"main\"\n",
+    );
     assert_eq!(
         item(&parts.report, "skills.audit")["state"],
         "not supported"
     );
-    // Fetched and chosen, but not turned on in `[loadout] skills`.
+    // Fetched and chosen, but not named by the loadout.
     let temp = Temp::new();
     choose_audit(&temp, true);
     let config = Config::from_str_in(
-        "[agents.a]\nprogram = \"agent\"\n[loadout]\noff = []\n",
+        "[agents.a]\nprogram = \"agent\"\n[loadouts.main]\noverlays = []\n[defaults]\nloadout = \"main\"\n",
         &temp.0,
     )
     .expect("parses");
-    assert!(config.local_profiles.for_agent("a").is_none());
+    let local = config.local_profiles.for_agent("a").expect("a profile");
+    let resolved = local
+        .resolve_loadout(None)
+        .expect("known")
+        .expect("a default");
+    assert!(resolved.skills.is_empty());
+}
+
+/// The offer of the person's own layer for agent `a` from `text`, with overlay `team` installed.
+fn loadout_offer(temp: &Temp, text: &str) -> Offer {
+    let config = Config::from_str_in(&format!("[agents.a]\nprogram = \"agent\"\n{text}"), &temp.0)
+        .expect("parses");
+    let local = config.local_profiles.for_agent("a").expect("a profile");
+    Arc::into_inner(
+        offer(
+            &[],
+            &IndexMap::new(),
+            Some(&local),
+            "launcher".into(),
+            Vec::new(),
+        )
+        .expect("an offer"),
+    )
+    .expect("one owner")
+}
+
+/// A session of `offer` that names `loadout`, and the report it starts with.
+fn loadout_report(offer: &Offer, loadout: Option<&str>) -> (Connection, Value) {
+    let connection =
+        Connection::prepare_with(offer, 0, "a", &lookup, None, loadout).expect("prepared");
+    let report = parts_for(&connection, Some("claude-code"), &claude(), &lookup).report;
+    (connection, report)
+}
+
+const LOADOUTS: &str = "[overlays]\nteam = \"https://example.invalid/team.git\"\n\
+    [profile.mcp.own]\ntype = \"stdio\"\ncommand = \"probe\"\n\
+    [profile.mcp.spare]\ntype = \"stdio\"\ncommand = \"node\"\n\
+    [loadouts.full]\noverlays = [\"team\"]\nmcp = [\"own\"]\n\
+    [loadouts.lean]\nmcp = [\"spare\", \"ghost\"]\n\
+    [defaults]\nloadout = \"full\"\n";
+
+#[test]
+fn a_session_starts_with_exactly_the_overlays_and_servers_of_its_loadout() {
+    let temp = temp_with_skill();
+    install_overlay(&temp);
+    let offer = loadout_offer(&temp, LOADOUTS);
+
+    // The default loadout, when the session names none: its overlay, and the person's servers it does not name are off.
+    let (_, full) = loadout_report(&offer, None);
+    assert_eq!(item(&full, "mcp.team")["state"], "off", "{full}");
+    assert_ne!(item(&full, "mcp.own")["state"], "off", "{full}");
+    assert_eq!(item(&full, "mcp.spare")["state"], "off", "{full}");
+
+    // Another loadout by name: no overlay, so nothing of `team` applies; its own server, and one the profile lacks.
+    let (_, lean) = loadout_report(&offer, Some("lean"));
+    assert_eq!(item(&lean, "overlay")["state"], "off", "{lean}");
+    assert_eq!(item(&lean, "overlay")["layer"], "overlay:team", "{lean}");
+    assert!(
+        lean["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .all(|item| item["key"] != "mcp.team"),
+        "{lean}"
+    );
+    assert_eq!(item(&lean, "mcp.own")["state"], "off", "{lean}");
+    assert_ne!(item(&lean, "mcp.spare")["state"], "off", "{lean}");
+    assert_eq!(item(&lean, "mcp.ghost")["state"], "not supported", "{lean}");
+}
+
+#[test]
+fn an_overlay_the_client_names_wins_over_the_loadouts_and_skills_come_from_the_loadout() {
+    let temp = temp_with_skill();
+    install_overlay(&temp);
+    choose_audit(&temp, true);
+    let offer = loadout_offer(
+        &temp,
+        &format!("{LOADOUTS}[loadouts.lean2]\nskills = [\"audit\"]\n"),
+    );
+    let connection = Connection::prepare_with(
+        &offer,
+        0,
+        "a",
+        &lookup,
+        Some(&["team".to_owned()]),
+        Some("lean2"),
+    )
+    .expect("prepared");
+    let report = parts_for(&connection, Some("claude-code"), &claude(), &lookup).report;
+    assert_eq!(item(&report, "mcp.team")["state"], "off", "{report}");
+    assert_eq!(
+        item(&report, "skills.audit")["state"],
+        "applied",
+        "{report}"
+    );
+}
+
+#[test]
+fn a_loadout_a_session_names_that_the_profile_does_not_hold_is_refused_with_its_name() {
+    let temp = temp_with_skill();
+    let offer = loadout_offer(&temp, LOADOUTS);
+    let first = |value: Value| {
+        serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"_meta": {LOADOUT_META: value}}}))
+        .expect("json")
+    };
+    assert_eq!(
+        choose_loadout(&offer, 0, &first(json!("lean"))).expect("held"),
+        Some("lean".to_owned())
+    );
+    assert_eq!(
+        choose_loadout(&offer, 0, b"{\"method\":\"initialize\"}").expect("none"),
+        None
+    );
+    for bad in [json!("ghost"), json!(3), json!(["lean"])] {
+        let refusal = choose_loadout(&offer, 0, &first(bad.clone())).expect_err("refused");
+        let answer: Value =
+            serde_json::from_slice(&refusal.answer.expect("an answer")).expect("json");
+        assert_eq!(answer["error"]["code"], INVALID_PARAMS, "{answer}");
+        if bad == json!("ghost") {
+            assert!(
+                answer["error"]["message"]
+                    .as_str()
+                    .expect("text")
+                    .contains("ghost"),
+                "{answer}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_change_to_canoa_cfg_after_a_session_started_leaves_that_sessions_report_as_it_was() {
+    let temp = temp_with_skill();
+    install_overlay(&temp);
+    let offer = loadout_offer(&temp, LOADOUTS);
+    let (started, before) = loadout_report(&offer, Some("full"));
+
+    // The person empties the loadout; a session started now sees it, the one running does not.
+    let edited = loadout_offer(
+        &temp,
+        &LOADOUTS.replace(
+            "[loadouts.full]\noverlays = [\"team\"]\nmcp = [\"own\"]\n",
+            "[loadouts.full]\n",
+        ),
+    );
+    let (_, after) = loadout_report(&edited, Some("full"));
+    assert_ne!(before, after);
+    let again = parts_for(&started, Some("claude-code"), &claude(), &lookup).report;
+    assert_eq!(before, again);
 }
 
 /// What `agy acp` 1.5.9 answers to `initialize`, trimmed to the parts that decide how it is served.

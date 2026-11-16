@@ -764,7 +764,7 @@ fn plain(text: &str) -> bool {
 }
 
 /// 1 to [`MAX_NAME`] letters, digits, `-` or `_`.
-fn entry_name(name: &str) -> bool {
+pub(crate) fn entry_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= MAX_NAME
         && name

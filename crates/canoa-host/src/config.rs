@@ -113,11 +113,90 @@ pub struct LocalProfiles {
     pub skill_pins: BTreeMap<String, String>,
     /// `[overlays.NAME] options`: the values the person gave an overlay's declared options, by overlay name.
     pub options: BTreeMap<String, coqui_aos::Document>,
-    /// `[loadout] skills`: the skills the person chose themselves and turned on, which the host delivers from the app's record
-    /// of each, once the record and the files agree.
-    pub chosen_skills: Vec<String>,
+    /// `[loadouts.NAME]`: the named collections of overlays, skills and MCP servers a session may start with, in the file's order.
+    pub loadouts: IndexMap<String, Loadout>,
+    /// `[defaults] loadout`: the loadout a session starts with when it names none.
+    pub default_loadout: Option<String>,
     /// `[permissions] protected`: the places a hook's allow never answers for.
     pub protected: Option<Vec<String>>,
+}
+
+/// One `[loadouts.NAME]`: a named collection a session is started with. Overlays apply whole, in the order `[overlays]` composes
+/// them; the loadout cannot reorder them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Loadout {
+    /// What the loadout is for, in the person's words.
+    pub description: String,
+    /// Overlays by the name `[overlays]` gives them.
+    pub overlays: Vec<String>,
+    /// The skills the person chose themselves, which the host delivers from the app's record of each once the record and the
+    /// files agree.
+    pub skills: Vec<String>,
+    /// The servers of `[profile.mcp]` the session starts with; the person's own servers it does not name are off.
+    pub mcp: Vec<String>,
+}
+
+/// What a session starts with once its loadout is resolved: the loadout as the file said it at that moment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ResolvedLoadout {
+    /// The loadout's name.
+    pub name: String,
+    /// Its installed overlays, in the order `[overlays]` composes them.
+    pub overlays: Vec<String>,
+    /// Overlays it names that `[overlays]` does not list.
+    pub missing_overlays: Vec<String>,
+    /// Its chosen skills.
+    pub skills: Vec<String>,
+    /// Its servers of `[profile.mcp]`.
+    pub mcp: Vec<String>,
+}
+
+/// A session asked for a loadout `[loadouts]` does not hold.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnknownLoadout(pub String);
+
+impl fmt::Display for UnknownLoadout {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "there is no loadout named {}", self.0)
+    }
+}
+
+impl core::error::Error for UnknownLoadout {}
+
+/// The loadout `name` (or `[defaults] loadout` when it is `None`) as it stands, against the overlays `[overlays]` lists. `None`
+/// when none is asked for and no default is set: the session then starts with everything the profile lists.
+fn resolve_loadout(
+    loadouts: &IndexMap<String, Loadout>,
+    default: Option<&str>,
+    installed: &[String],
+    name: Option<&str>,
+) -> Result<Option<ResolvedLoadout>, UnknownLoadout> {
+    let Some(name) = name.or(default) else {
+        return Ok(None);
+    };
+    let loadout = loadouts
+        .get(name)
+        .ok_or_else(|| UnknownLoadout(name.to_owned()))?;
+    let overlays = installed
+        .iter()
+        .filter(|each| loadout.overlays.contains(each))
+        .cloned()
+        .collect();
+    let missing_overlays = loadout
+        .overlays
+        .iter()
+        .filter(|each| !installed.contains(each))
+        .cloned()
+        .collect();
+    Ok(Some(ResolvedLoadout {
+        name: name.to_owned(),
+        overlays,
+        missing_overlays,
+        skills: loadout.skills.clone(),
+        mcp: loadout.mcp.clone(),
+    }))
 }
 
 /// One agent's `[agents.NAME.profile]` layer and `[agents.NAME.mcp]` choices.
@@ -152,7 +231,7 @@ impl LocalProfiles {
         let own = layer.and_then(|layer| layer.profile.clone());
         if self.profile.is_none()
             && self.overlays.is_empty()
-            && self.chosen_skills.is_empty()
+            && self.loadouts.is_empty()
             && own.is_none()
             && layer.is_none_or(|layer| layer.mcp.is_empty() && layer.hooks.is_empty())
         {
@@ -181,9 +260,28 @@ impl LocalProfiles {
             directory: self.directory.clone(),
             skill_pins: self.skill_pins.clone(),
             options: self.options.clone(),
-            chosen_skills: self.chosen_skills.clone(),
+            chosen_skills: Vec::new(),
+            loadouts: self.loadouts.clone(),
+            default_loadout: self.default_loadout.clone(),
             protected: self.protected.clone(),
         })
+    }
+
+    /// The loadout `name` (`[defaults] loadout` when `None`) as the file says it now; `None` when none applies.
+    ///
+    /// # Errors
+    ///
+    /// [`UnknownLoadout`] when `name` is not in `[loadouts]`.
+    pub fn resolve_loadout(
+        &self,
+        name: Option<&str>,
+    ) -> Result<Option<ResolvedLoadout>, UnknownLoadout> {
+        resolve_loadout(
+            &self.loadouts,
+            self.default_loadout.as_deref(),
+            &self.overlays,
+            name,
+        )
     }
 }
 
@@ -562,12 +660,35 @@ pub struct HostProfile {
     /// `[overlays.NAME] options`: the values the person gave an overlay's declared options, by overlay name. The overlay's
     /// manifest says which exist and of what type; a value of another type refuses the text that reads it.
     pub options: BTreeMap<String, coqui_aos::Document>,
-    /// The skills the person chose themselves that are on (`[loadout] skills`), for the host's own sources only: each is
-    /// delivered from the app's record of it when the record and the files agree.
+    /// The skills the session's loadout names, for the host's own sources only: each is delivered from the app's record of it
+    /// when the record and the files agree. Empty until a connection resolves its loadout.
     pub chosen_skills: Vec<String>,
+    /// `[loadouts.NAME]`, which a connection resolves once when it starts.
+    pub loadouts: IndexMap<String, Loadout>,
+    /// `[defaults] loadout`.
+    pub default_loadout: Option<String>,
     /// `[permissions] protected`: the places a hook's allow never answers for, in gitignore syntax; none leaves it to the
     /// host's recommended places.
     pub protected: Option<Vec<String>>,
+}
+
+impl HostProfile {
+    /// The loadout `name` (`[defaults] loadout` when `None`) as this profile holds it; `None` when none applies.
+    ///
+    /// # Errors
+    ///
+    /// [`UnknownLoadout`] when `name` is not in `[loadouts]`.
+    pub fn resolve_loadout(
+        &self,
+        name: Option<&str>,
+    ) -> Result<Option<ResolvedLoadout>, UnknownLoadout> {
+        resolve_loadout(
+            &self.loadouts,
+            self.default_loadout.as_deref(),
+            &self.overlays,
+            name,
+        )
+    }
 }
 
 /// Where an entry listens, as an entry's `listen` writes it.
@@ -1031,9 +1152,12 @@ struct RawFile {
     overlays: IndexMap<String, toml::Value>,
     #[serde(default)]
     skill_pins: toml::Table,
-    /// `[loadout]`: the app's table, of which the host reads `skills`.
+    /// `[loadouts.NAME]`: the named collections a session starts with.
     #[serde(default)]
-    loadout: Option<toml::Table>,
+    loadouts: IndexMap<String, toml::Value>,
+    /// `[defaults]`: the app's table, of which the host reads `loadout`.
+    #[serde(default)]
+    defaults: Option<toml::Table>,
 }
 
 /// `[permissions]`: the app reads the modes and the rules, so only the key the host passes on is named.
@@ -1318,7 +1442,9 @@ impl Config {
         local_profiles.skill_pins.clone_from(&skill_pins);
         let options = overlay_options_of(&raw.overlays)?;
         local_profiles.options.clone_from(&options);
-        local_profiles.chosen_skills = chosen_skills_of(raw.loadout.as_ref())?;
+        local_profiles.loadouts = loadouts_of(&raw.loadouts)?;
+        local_profiles.default_loadout =
+            default_loadout_of(raw.defaults.as_ref(), &local_profiles.loadouts)?;
         local_profiles.protected.clone_from(&protected_paths);
         let Some(host) = raw.host else {
             return Ok(Self {
@@ -2207,6 +2333,8 @@ fn profile_of(
         skill_pins: BTreeMap::new(),
         options: BTreeMap::new(),
         chosen_skills: Vec::new(),
+        loadouts: IndexMap::new(),
+        default_loadout: None,
         protected: None,
     })
 }
@@ -2291,7 +2419,8 @@ fn local_profiles_of(
         directory,
         skill_pins: BTreeMap::new(),
         options: BTreeMap::new(),
-        chosen_skills: Vec::new(),
+        loadouts: IndexMap::new(),
+        default_loadout: None,
         protected: None,
     })
 }
@@ -2314,31 +2443,87 @@ fn hook_allowances(allowed: toml::Table) -> Result<BTreeMap<String, String>, Str
     Ok(out)
 }
 
-/// `[loadout] skills`: the names of the skills the person chose that are on. The rest of the table is the app's.
-fn chosen_skills_of(loadout: Option<&toml::Table>) -> Result<Vec<String>, ConfigError> {
-    let refused = |what: &str| ConfigError::Invalid {
-        entry: None,
-        what: format!("[loadout] skills {what}"),
-    };
-    let Some(listed) = loadout.and_then(|table| table.get("skills")) else {
-        return Ok(Vec::new());
-    };
-    let toml::Value::Array(names) = listed else {
-        return Err(refused("is not a list of skill names"));
-    };
-    let mut out: Vec<String> = Vec::new();
-    for name in names {
-        let toml::Value::String(name) = name else {
-            return Err(refused("is not a list of skill names"));
+/// `[loadouts.NAME]`: each a description and lists of overlay, skill and server names. Errors name the table and the key, never
+/// a value.
+fn loadouts_of(
+    raw: &IndexMap<String, toml::Value>,
+) -> Result<IndexMap<String, Loadout>, ConfigError> {
+    let invalid = |what: String| ConfigError::Invalid { entry: None, what };
+    let mut out = IndexMap::new();
+    for (name, table) in raw {
+        if !crate::profile::entry_name(name) {
+            return Err(invalid(
+                "loadouts holds a name of more than letters, digits, - and _, or of over 64 characters".to_owned(),
+            ));
+        }
+        let toml::Value::Table(table) = table else {
+            return Err(invalid(format!("loadouts.{name} is not a table")));
         };
-        if !crate::profile::hosted::fetched::confined(name) {
-            return Err(refused("names something that is not a skill's name"));
+        let mut loadout = Loadout::default();
+        for (key, value) in table {
+            let refused = |what: &str| invalid(format!("loadouts.{name}.{key} {what}"));
+            match key.as_str() {
+                "description" => {
+                    let toml::Value::String(text) = value else {
+                        return Err(refused("is not text"));
+                    };
+                    loadout.description.clone_from(text);
+                }
+                "overlays" | "skills" | "mcp" => {
+                    let toml::Value::Array(items) = value else {
+                        return Err(refused("is not a list of names"));
+                    };
+                    let mut names: Vec<String> = Vec::new();
+                    for item in items {
+                        let toml::Value::String(item) = item else {
+                            return Err(refused("is not a list of names"));
+                        };
+                        let fits = match key.as_str() {
+                            "overlays" => coqui_aos::valid_overlay_name(item),
+                            "skills" => crate::profile::hosted::fetched::confined(item),
+                            _ => crate::profile::entry_name(item),
+                        };
+                        if !fits {
+                            return Err(refused("names something that is not a name of its kind"));
+                        }
+                        if !names.iter().any(|held| held.eq_ignore_ascii_case(item)) {
+                            names.push(item.clone());
+                        }
+                    }
+                    match key.as_str() {
+                        "overlays" => loadout.overlays = names,
+                        "skills" => loadout.skills = names,
+                        _ => loadout.mcp = names,
+                    }
+                }
+                _ => {
+                    return Err(refused(
+                        "is not a loadout setting: description, overlays, skills and mcp are",
+                    ));
+                }
+            }
         }
-        if !out.iter().any(|held| held.eq_ignore_ascii_case(name)) {
-            out.push(name.clone());
-        }
+        out.insert(name.clone(), loadout);
     }
     Ok(out)
+}
+
+/// `[defaults] loadout`: the loadout a session with none named starts with. The rest of the table is the app's.
+fn default_loadout_of(
+    defaults: Option<&toml::Table>,
+    loadouts: &IndexMap<String, Loadout>,
+) -> Result<Option<String>, ConfigError> {
+    let Some(value) = defaults.and_then(|table| table.get("loadout")) else {
+        return Ok(None);
+    };
+    let named = value
+        .as_str()
+        .filter(|name| loadouts.contains_key(*name))
+        .ok_or_else(|| ConfigError::Invalid {
+            entry: None,
+            what: "[defaults] loadout is not the name of a loadout in [loadouts]".to_owned(),
+        })?;
+    Ok(Some(named.to_owned()))
 }
 
 /// `[skill_pins]`: a skill's name (compared without regard to ASCII case) and the `sha256:` tree digest it must have.

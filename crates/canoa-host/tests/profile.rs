@@ -391,3 +391,51 @@ fn canoa_and_dotagents_give_the_same_skills_for_one_overlay() {
         }
     }
 }
+
+#[test]
+fn every_loadout_vector_resolves_to_its_collection_or_is_refused() {
+    use canoa_host::Config;
+    let vectors = vectors();
+    let cases = vectors["loadouts"].as_array().expect("loadouts");
+    assert!(cases.len() >= 9, "the vectors are all there");
+    for case in cases {
+        let name = case["name"].as_str().expect("name");
+        let parsed = Config::from_str_in(
+            case["config"].as_str().expect("config"),
+            std::path::Path::new("."),
+        );
+        let asked = case["loadout"].as_str();
+        match (parsed, case.get("resolved"), case.get("error")) {
+            (Ok(config), Some(expected), None) => {
+                let got = config
+                    .local_profiles
+                    .resolve_loadout(asked)
+                    .unwrap_or_else(|error| panic!("{name}: {error}"));
+                let got = got.map_or(Value::Null, |got| {
+                    serde_json::json!({
+                        "name": got.name,
+                        "overlays": got.overlays,
+                        "missing_overlays": got.missing_overlays,
+                        "skills": got.skills,
+                        "mcp": got.mcp,
+                    })
+                });
+                assert_eq!(&got, expected, "{name}");
+            }
+            (Ok(config), None, Some(expected)) => {
+                assert_eq!(expected["code"], "unknown-loadout", "{name}");
+                let error = config
+                    .local_profiles
+                    .resolve_loadout(asked)
+                    .expect_err("refused");
+                assert_eq!(expected["name"], error.0.as_str(), "{name}");
+            }
+            (Err(_), None, Some(expected)) => assert_eq!(expected["code"], "invalid", "{name}"),
+            (Ok(_), _, Some(_)) => panic!("{name}: accepted, and the vector refuses it"),
+            (Err(error), Some(_), _) => {
+                panic!("{name}: refused ({error}), and the vector takes it")
+            }
+            _ => panic!("{name}: a vector has either resolved or error"),
+        }
+    }
+}
