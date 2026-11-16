@@ -586,7 +586,7 @@ caller has no grant for it), `-32002` **refused** (a limit), `-32003` not found.
 ```toml
 [host.control]
 listen = "127.0.0.1:0"                              # or a pipe, as an entry has it; without it there is no network control
-grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write", "config.write.sessions", "upload", "host.restart", "overlay.read", "overlay.write", "store.programs", "accounts", "discover"] }   # per key; a key not here gets nothing
+grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write", "config.write.sessions", "upload", "host.restart", "overlay.read", "overlay.write", "store.programs", "accounts", "discover", "usage"] }   # per key; a key not here gets nothing
 max_records = 10000                                 # ledger records the host keeps, per host; the oldest by `updated` are refused at, not dropped
 max_record_bytes = 262144                           # one ledger record
 max_upload_bytes = 8388608                          # one uploaded file, sent in chunks of at most 512 KiB
@@ -612,6 +612,7 @@ max_uploads = 256                                   # files one key may keep upl
 | `store.programs` | `store/apply`, `store/rollback`, `store/remove`, and `store/report` with `probe` or `pick`: install, update, roll back and remove an agent program on the host's programs shelf. It downloads and runs code as the user, and a program it installs is then what an entry may run, so it is as much as access to the agent; `[host.control]` refuses `store.write` as a grant |
 | `discover` | `discover/nearby` `{"seconds"?}` (whole seconds, default 3, at most 10) -> `{"candidates": [{label, url, peer, method, source, webtransport, webtransportHash, acpVersions, offers}], "directory"?, "networkError"?}`: the host reads this user's descriptors (agents listening on loopback) and browses `_acp-agent._tcp` for that long (`networkError` says why it could not, the descriptors still being read). Granting it to a key reveals this machine's loopback agents and the link it is on to whoever holds the key, so a network key gets it only by `[host.control] grants`. `directory` is `"shared"` when another user can change the descriptor folder (on Unix: group or other write permission, or an owner who is neither this user nor root) and none of its descriptors were read, and `"unchecked"` when the platform could not show the folder to be this user's alone (Windows, for a folder named by `COQUI_ACP_DESCRIPTORS`; the default under `%LOCALAPPDATA%` is believed) and they were read. A call that arrives while a search runs waits for it and answers what it found, so there is no busy error. Every field is a claim of whatever answered; a portal host does not give the grant to its people. MCP has no service type here: a server shows only as a candidate's `offers` |
 | `accounts` | `accounts/catalog`, `accounts/list`, `accounts/remove`, `accounts/add`, `accounts/login`, `accounts/entries`, `accounts/offer`: sign in to a provider on this host, which runs the provider's program as the user and keeps a credential in the host's store. A typed answer of the sign-in's form is sealed to the key that asked, so the host opens it itself; a key the trust store does not hold, or a host key secret prompts do not serve, gets a refusal |
+| `usage` | `usage/summary` `{from?, to?, group_by?, account?, provider?, host?}` -> `{"from", "to", "group_by", "timezone": "UTC", "total", "groups": [{"key", "records", "sessions", "input"?, "output"?, "cache_read"?, "cache_write"?, "cost_micro_usd"?}]}`: the spend recorded for lines with `from <= time < to` (Unix seconds, default all), grouped by `day` (UTC, `YYYY-MM-DD`, the default), `account`, `provider` (the harness), `model` (`key` null when the agent named none) or `session`. A counter is absent from a group when no line in it has one, never 0. `host` is the client's label for this host: it is read and ignored. `usage/limits` -> `{"accounts": [{"account", "updated_at", "observed_at", "buckets", "limit"?}]}`: the allowances each account last reported, with when the host read them. A host with no home answers `-32002`. The portal host gives the grant to the key it paired for its own person; `canoa serve` only when canoa.cfg names the key; a delegated child connection never has it |
 | *(none)* | `host/grants` `{}` -> `{"grants": [names]}`: what the asking key holds (the owner, all of them), so an application shows only what it can use |
 | *(none)* | `history/export`, `history/move`, `history/importable`, `history/import`, `history/imported`: **owner only**; no grant names them |
 
@@ -696,6 +697,22 @@ as opaque JSON objects the host never reads into: it keeps an `id`, the record, 
 - `peer/forget` `{}` -> `{"removed": bool}`: a paired key takes its own pairing out of the trust store, the real revoke (its links end within about a second). It needs no grant, and the owner's link, which holds no key, is refused.
 - `ledger/remove` `{"id"}` -> `{"removed": bool}`; `ledger/clear` `{}` -> `{"removed": n}`, the caller's own records.
 - A request over 16 MiB, or not JSON, ends the connection; `-32700` first when it can be answered.
+
+**Usage records.** The host keeps what its agents spend in its home, `usage/` (files only this user reads): one line a turn and
+model appended to `YYYY-MM.jsonl` with `time` (Unix seconds), `account`, `harness`, `model`?, `session_id`, `parent_session_id`?,
+`input`?, `output`?, `cache_read`?, `cache_write`?, `cost_micro_usd`?. An agent reports running totals for a session; the host
+keeps the last total it saw for each account, session and model (`seen.json`) and writes the difference when the turn ends (a
+report with no turn open, at once), so a reconnect, a session loaded again or a restart counts nothing twice. A total that falls
+is a counter that started over. A counter the agent never moved, a cost it never gave and an agent that reports no spend leave no
+field and no line. The model is the report's own per-model split, else the model the session opened or was set to. Only what
+reaches the host from an agent that reports usage and that the client asked notices of (or polled) is seen; `parent_session_id` is
+not filled yet. The allowances an agent reports are kept as the latest for each account (`limits.json`), not appended. Answered by
+the `usage` grant (above).
+
+```toml
+[host.usage]
+keep_days = 400                     # a month's file is removed at start once all of it is older; at least 1
+```
 
 **Session history.** The host records each session it serves in the session-history format (`coqui-acp-history`) in its home,
 `history/`, one `<sha256 of entry and session id>.jsonl` a session in a directory and files only this user reads (`0700`/`0600`
