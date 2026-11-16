@@ -495,10 +495,14 @@ impl Runner<'_> {
         let staging = sandbox.staging("probe");
         let env = sandbox.environment(&staging);
         let transport = WorldTransport::new(World::new());
+        // The search sees only the sandbox's own folder: the system folders on the path hold the machine's own copies of a
+        // program (a Linux system's `python3`), and this check is of a machine with none.
+        let mut empty = env.clone();
+        empty.insert("PATH", sandbox.root().join("bin").to_string_lossy());
         let tools = || {
             LocalTools::new(transport.clone(), self.info.endpoints.clone())
                 .allow_unverified(true)
-                .lookup(sandbox.lookup(&env))
+                .lookup(sandbox.lookup(&empty))
         };
         let spawner =
             GuardedSpawner::new(LocalSpawner::new(), staging.to_string_lossy()).lenient_cwd();
