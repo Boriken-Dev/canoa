@@ -171,9 +171,11 @@ impl Scope {
         }
     }
 
-    /// Puts the usage extension's opt-in back on an `initialize` that `strip_meta` cleared: the client's own wish for
-    /// notifications, and the account only the host names.
+    /// Puts the usage extension's opt-in back on an `initialize` that `strip_meta` cleared: the account only the host names,
+    /// and notices, which the host asks for whenever it keeps a usage log (it hides them from a client that did not ask) and
+    /// otherwise passes on as the client wished.
     fn tell_usage(&self, object: &mut Map<String, Value>, notify: bool) {
+        let notify = notify || (self.log.is_some() && self.account.is_some());
         if object.get("method").and_then(Value::as_str) != Some("initialize")
             || !(notify || self.account.is_some())
         {
@@ -700,7 +702,7 @@ impl<C: Channel + ?Sized> Channel for Scoped<'_, C> {
             return Ok(None);
         };
         match self.sites.check(self.scope, &message) {
-            Verdict::Forward(bytes) => match self.splice.read_client(&bytes) {
+            Verdict::Forward(bytes) => match self.splice.read_client_as(&bytes, &message) {
                 Client::Answer(answer) => {
                     self.reply(&answer)?;
                     Err(Failure::Timeout)

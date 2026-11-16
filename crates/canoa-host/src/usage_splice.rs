@@ -422,9 +422,23 @@ impl Splice {
 
     /// Reads a message from the client: it goes on to the agent, stops here with this host's own answer, or stops here with
     /// its answer to come once a reading ends.
+    #[cfg(test)]
     pub(crate) fn read_client(&self, message: &[u8]) -> Client {
+        self.read_client_as(message, message)
+    }
+
+    /// As [`Splice::read_client`] for a `message` the scope rebuilt: `original` is what the client sent, which is where its
+    /// wish for notices is read, since the scope always asks the agent for them.
+    pub(crate) fn read_client_as(&self, message: &[u8], original: &[u8]) -> Client {
         if let Some(tap) = &self.tap {
             tap.heard_client(message);
+        }
+        if contains(message, b"initialize")
+            && let Ok(value) = serde_json::from_slice::<Value>(message)
+            && value.get("method").and_then(Value::as_str) == Some("initialize")
+        {
+            lock(&self.conn).notify =
+                serde_json::from_slice::<Value>(original).is_ok_and(|sent| asks_notices(&sent));
         }
         self.client(message).unwrap_or(Client::Forward)
     }
@@ -449,7 +463,6 @@ impl Splice {
         conn.answered.remove(&key);
         match method {
             "initialize" => {
-                conn.notify = asks_notices(&value);
                 if conn.initializes.len() < MAX_OPEN {
                     conn.initializes.insert(key);
                 }
@@ -781,6 +794,9 @@ impl Splice {
         if let Some(tap) = &self.tap {
             tap.heard_agent(message);
         }
+        if self.unwanted_notice(message) {
+            return Ok(());
+        }
         if !self.inference.active() {
             return send(message);
         }
@@ -797,6 +813,16 @@ impl Splice {
         }
         self.notify_if_owed(&send);
         Ok(())
+    }
+
+    /// Whether `message` is an agent's usage notice the client did not ask for. The host asks every agent for them so its log
+    /// has the spend; they go no further than the log unless the client asked in its own `initialize`.
+    fn unwanted_notice(&self, message: &[u8]) -> bool {
+        contains(message, USAGE_NOTIFICATION.as_bytes())
+            && !lock(&self.conn).notify
+            && serde_json::from_slice::<Value>(message).is_ok_and(|value| {
+                value.get("method").and_then(Value::as_str) == Some(USAGE_NOTIFICATION)
+            })
     }
 
     /// Delivers what a reading left for the client: the answers to its usage requests, then a notice if one is owed. Called

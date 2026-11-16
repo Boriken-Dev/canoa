@@ -2348,7 +2348,7 @@ impl<C: Channel + ?Sized> Channel for Hosted<'_, C> {
             Verdict::Refuse(answer) => Err(answer.unwrap_or_default()),
         };
         match forwarded {
-            Ok(bytes) => match self.splice.read_client(&bytes) {
+            Ok(bytes) => match self.splice.read_client_as(&bytes, &message) {
                 Client::Answer(answer) => {
                     self.abandon_opening(&bytes);
                     self.reply(&answer)?;

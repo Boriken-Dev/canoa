@@ -636,3 +636,21 @@ mod shares {
         }
     }
 }
+
+#[test]
+fn a_scope_that_keeps_a_log_asks_the_agent_for_notices_whatever_the_client_wished() {
+    let dir = std::env::temp_dir().join(format!("canoa-scope-log-{}", std::process::id()));
+    let log = Arc::new(UsageLog::open(dir.clone(), 400, 0));
+    let scope = Scope::default()
+        .account("work".to_owned())
+        .usage_log(Some(log), "claude");
+    let silent = forwarded(
+        &scope,
+        &initialize(1, "clientCapabilities", json!({"other": 1})),
+    );
+    assert_eq!(
+        silent["params"]["clientCapabilities"]["_meta"],
+        json!({USAGE_CAPABILITY: {"notify": true, "account": "work"}})
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

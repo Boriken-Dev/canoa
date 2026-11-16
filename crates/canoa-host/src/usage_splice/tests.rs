@@ -1382,4 +1382,49 @@ mod recording {
         assert_eq!(rows[1]["model"], "haiku");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn a_client_that_never_asked_leaves_a_record_and_sees_no_notice() {
+        let dir = folder("unasked");
+        let log = Arc::new(UsageLog::open(dir.clone(), 400, unix_now()));
+        let splice = recording(&log);
+        // The scope rebuilt this `initialize` with notices asked for; the client's own said no.
+        let sent = bytes(&json!({"id": 0, "method": "initialize",
+            "params": {"protocolVersion": 1, "clientCapabilities": {"_meta": {USAGE_CAPABILITY: {"notify": true}}}}}));
+        let original =
+            bytes(&json!({"id": 0, "method": "initialize", "params": {"protocolVersion": 1}}));
+        assert!(matches!(
+            splice.read_client_as(&sent, &original),
+            Client::Forward
+        ));
+        prompt(&splice, 1, "s1");
+        let told = from_agent(&splice, &report("s1", 100, 20, Some(4_000)));
+        assert!(told.is_empty(), "{told:?}");
+        from_agent(
+            &splice,
+            &json!({"id": 1, "result": {"stopReason": "end_turn"}}),
+        );
+        let rows = rows(&dir);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["input"], 100);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_client_that_asked_sees_the_notice_as_before() {
+        let dir = folder("asked");
+        let log = Arc::new(UsageLog::open(dir.clone(), 400, unix_now()));
+        let splice = recording(&log);
+        let sent = bytes(&json!({"id": 0, "method": "initialize",
+            "params": {"protocolVersion": 1, "clientCapabilities": {"_meta": {USAGE_CAPABILITY: {"notify": true}}}}}));
+        assert!(matches!(
+            splice.read_client_as(&sent, &sent),
+            Client::Forward
+        ));
+        prompt(&splice, 1, "s1");
+        let told = from_agent(&splice, &report("s1", 100, 20, None));
+        assert_eq!(told.len(), 1, "{told:?}");
+        assert_eq!(told[0]["method"], USAGE_NOTIFICATION);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
