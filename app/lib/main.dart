@@ -61,6 +61,7 @@ import 'chat/session_views.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'chat/update_log.dart';
 import 'auth/peer_proof.dart' show PeerMethod;
+import 'history/agent_switch.dart';
 import 'history/session_import.dart';
 import 'history/session_move.dart';
 import 'ledger/host_ledger_backend.dart';
@@ -233,7 +234,7 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.served, this.layout, this.surfaces, this.probe,
+    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe,
   });
 
   /// Which section is shown and how each section's index is sized, kept across runs; the app keeps its own when none is given.
@@ -257,6 +258,11 @@ class CanoaApp extends StatefulWidget {
   /// What the app asks of the host about accounts; by default the host this app runs, over its control channel.
   @visibleForTesting
   final AccountsHost? accountsHost;
+
+  /// What the app asks of the host to change a running conversation's agent; by default the host this app runs, over its control
+  /// channel.
+  @visibleForTesting
+  final AgentMoves? agentMoves;
 
   /// The extension's tabs and the browser's provider of agents, by default the platform's; a test gives its own.
   @visibleForTesting
@@ -964,6 +970,10 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
+  /// Whether the agents this app runs for itself can be changed inside a conversation: only where it runs them, not through a page
+  /// another host serves.
+  bool get _canSwitchAgents => widget.agentMoves != null || (_control != null && widget.served == null);
+
   List<AgentSource> get _hostedSources => hostedSources(widget.host?.listening ?? const []);
 
   /// The host's own Claude and Codex sources: the ones whose earlier sessions it can bring in from the programs' folders.
@@ -1059,6 +1069,14 @@ class _CanoaAppState extends State<CanoaApp> {
   AccountsController? get _accounts => widget.accountsHost != null || (_grants?.may(HostGrants.accounts) ?? false) ? _accountsHeld : null;
 
   late final AccountsController? _accountsHeld = _buildAccounts();
+
+  /// How a running conversation changes agent: the host's own export and import, over its control channel.
+  late final AgentMoves? _moves = widget.agentMoves ?? _controlMoves();
+  AgentMoves? _controlMoves() {
+    final control = _control;
+    return control == null ? null : ControlAgentMoves(() => control.ready());
+  }
+  late final PortableAgents? _portable = _moves == null ? null : PortableAgents(_moves);
 
   AccountsController? _buildAccounts() {
     final control = _control;
@@ -2005,6 +2023,25 @@ class _CanoaAppState extends State<CanoaApp> {
       },
       expected: _hasProfiles,
     ),
+    switchAgent: _moves == null || !_canSwitchAgents
+        ? null
+        : (session, target) => store.switchAgent(
+            session,
+            target,
+            move: (moving, to) => _moves.move(entry: moving.agent, session: moving.remoteSessionId!, to: to, cwd: moving.cwd),
+            start: (moving, source) async {
+              final client = await _agentFor(
+                place: SessionPlace.local,
+                entryName: source.label,
+                peerId: null,
+                cacheLifetime: moving.cacheLifetime?.id,
+                overlays: moving.overlays?.toList(),
+              );
+              _ownedClients.add(client);
+              return client;
+            },
+          ),
+    portable: _portable,
     programs: _programs,
     extension: _tabs,
     onProfile: (session) {

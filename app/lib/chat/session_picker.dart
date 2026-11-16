@@ -8,6 +8,7 @@ import '../accounts/account_models.dart';
 import '../accounts/accounts_controller.dart';
 import '../accounts/add_account_dialog.dart';
 import '../accounts/usage_view.dart' show windowSummary;
+import '../history/agent_switch.dart' show cannotTake;
 import '../session_store.dart';
 import '../sources/source_icons.dart';
 import '../sources/sources.dart';
@@ -102,6 +103,7 @@ class _SessionPickerState extends State<SessionPicker> {
   void initState() {
     super.initState();
     _search.addListener(() => setState(() => _highlight = 0));
+    if (!draft) unawaited(kit.portable?.refresh());
   }
 
   @override
@@ -154,9 +156,27 @@ class _SessionPickerState extends State<SessionPicker> {
   }
 
   void _pickSource(AgentSource source) {
-    if (!draft || source == session.source) return;
+    if (source == session.source) return;
+    if (!draft) {
+      // A running conversation goes with the person to another agent: the host exports it and imports it there.
+      final switchAgent = kit.switchAgent;
+      if (switchAgent == null) return;
+      _close();
+      unawaited(switchAgent(session, source));
+      return;
+    }
     store.updateDraft(session, source: source);
     setState(() => _stars = false);
+  }
+
+  /// Why a running conversation cannot go to [source]; null when it can, and always for a draft or a source it is on.
+  String? _cannotSwitchTo(AgentSource source) {
+    if (draft || source == session.source) return null;
+    final switchAgent = kit.switchAgent, portable = kit.portable;
+    if (switchAgent == null || portable == null) return 'A different agent needs a new conversation';
+    if (!portable.asked) return 'Asking the host which agents can take a conversation…';
+    if (portable.failed) return 'The host did not say which agents can take a conversation.';
+    return cannotTake(portable.of(source.label), name: source.displayName) ?? store.agentSwitchBlock(session);
   }
 
   void _pickNumber(int n, List<_ModelRow> rows) {
@@ -168,7 +188,7 @@ class _SessionPickerState extends State<SessionPicker> {
 
   @override
   Widget build(BuildContext context) {
-    final listenables = <Listenable>[store, ?store.ledger, ?kit.accounts];
+    final listenables = <Listenable>[store, ?store.ledger, ?kit.accounts, ?kit.portable];
     return ListenableBuilder(
       listenable: Listenable.merge(listenables),
       builder: (context, _) {
@@ -282,15 +302,19 @@ class _SessionPickerState extends State<SessionPicker> {
     final check = kit.checks[each];
     final needs = check != null && !check.ready ? 'Needs ${_and(check.missing.isEmpty ? ['setting up'] : check.missing)}' : trouble?.message;
     final here = each == session.source && !_stars;
+    final cannot = _cannotSwitchTo(each);
+    final portable = kit.portable?.of(each.label);
+    // A source that cannot take a conversation says so under its name; a wait or a busy agent is said in the tooltip alone.
+    final saysNo = !draft && each != session.source && kit.portable?.asked == true && kit.portable?.failed == false && cannotTake(portable, name: each.displayName) != null;
     return _railTile(
       context,
       key: Key('source ${each.label}'),
       leading: SourceMark.of(each, size: 18),
       title: each.displayName,
-      caption: needs,
+      caption: saysNo ? 'Cannot take a conversation' : needs,
       selected: here,
-      enabled: draft || each == session.source,
-      tooltip: draft || each == session.source ? needs ?? each.displayName : 'A different agent needs a new conversation',
+      enabled: (draft || each == session.source || cannot == null) && (draft || each == session.source || needs == null),
+      tooltip: cannot ?? needs ?? each.displayName,
       captionColor: look.danger,
       onTap: () => _pickSource(each),
     );
@@ -640,7 +664,7 @@ class _SessionPickerState extends State<SessionPicker> {
     final enabled = store.canChangeMode(session) || draft;
     final note = draft
         ? null
-        : 'A different agent needs a new conversation.${session.status == SessionStatus.working ? ' A model or effort chosen now applies from the next turn.' : ''}';
+        : '${kit.switchAgent == null || kit.portable?.failed == true ? 'A different agent needs a new conversation.' : 'Another agent takes the whole conversation with it: it is exported from this one and imported there.'}${session.status == SessionStatus.working ? ' A model or effort chosen now applies from the next turn.' : ''}';
     return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
       if (session.status != SessionStatus.preview)
         Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [

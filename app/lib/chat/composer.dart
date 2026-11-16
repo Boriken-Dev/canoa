@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../accounts/account_chooser.dart';
 import '../accounts/accounts_controller.dart';
 import '../acp/local_agent.dart' show InsideFile;
+import '../history/agent_switch.dart' show PortableAgents;
 import '../config/canoa_config.dart' show ResolvedLoadout;
 import '../extension/composer_extension.dart';
 import '../session_store.dart';
@@ -58,6 +59,8 @@ final class ComposerKit {
     this.accounts,
     this.onAccountSettings,
     this.switchAccount,
+    this.switchAgent,
+    this.portable,
     this.programs,
     this.extension,
   });
@@ -138,6 +141,13 @@ final class ComposerKit {
   /// Moves a running session to another account, ending its agent and starting one on that account that opens the same
   /// conversation; answers whether it moved. Null where the app cannot start agents.
   final Future<bool> Function(ChatSession session, String account)? switchAccount;
+
+  /// Moves a running session to another agent of this computer: the host exports the conversation and imports it into that agent,
+  /// which opens it; answers whether it moved. Null where the app cannot do that.
+  final Future<bool> Function(ChatSession session, AgentSource source)? switchAgent;
+
+  /// What each of the host's sources can export and import, which says which agents a running conversation can go to.
+  final PortableAgents? portable;
 
   /// Shows what a session was given of its profile.
   final void Function(ChatSession session)? onProfile;

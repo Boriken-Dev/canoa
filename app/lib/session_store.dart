@@ -23,6 +23,7 @@ import 'chat/session_options.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretCardEnvironment, shortLine;
 import 'drafts/draft_store.dart';
 import 'accounts/account_models.dart' show AccountMove, machineLogin;
+import 'history/session_move.dart' show MoveReport, lossText;
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
 import 'profile/report.dart';
@@ -265,6 +266,11 @@ class ChatSession {
 
   /// What the session was opened with, which an earlier conversation opened from it is opened with too.
   AcpSessionSetup setup = AcpSessionSetup.none;
+
+  /// The agents this conversation has run on and left, by source name: the session it had there and how many things had been
+  /// said by then. Switching back to one that has heard nothing since needs no new copy; any other gets the whole conversation
+  /// again, since an agent's own session is never added to from outside. Kept while the app runs.
+  final Map<String, ({String id, int said})> agentLinks = {};
 
   /// Preferred HTTPS WebTransport or direct WSS endpoint.
   Uri? endpoint;
@@ -1842,6 +1848,145 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     session.chat.note('Account: ${before == null ? 'the first' : _accountWords(before)} → ${_accountWords(account)}. The conversation was $how.');
     notifyListeners();
     return true;
+  }
+
+  /// What the person and the agent have said in [session], which is what an agent's own copy of it holds.
+  static List<({MessageRole role, String text})> _spoken(ChatSession session) => [
+    for (final message in session.messages)
+      if (message.role == MessageRole.user || message.role == MessageRole.agent) (role: message.role, text: message.text),
+  ];
+
+  /// Why [session] cannot change agent now; null when it can. The conversation moves by the host's export and import, so it
+  /// has to be one of this computer's own agents, started, and at rest.
+  String? agentSwitchBlock(ChatSession session) {
+    if (session.isDraft) return null;
+    final client = _clients[session.id];
+    if (session.status == SessionStatus.preview || session.site != null || session.place != SessionPlace.local) {
+      return 'Only a conversation with one of this computer\'s own agents can change agent.';
+    }
+    if (session.status == SessionStatus.connecting || session.opening) return 'Wait for the agent to finish starting.';
+    if (session.status == SessionStatus.working) return 'Wait for the turn to end, or stop it.';
+    if (session.needsYou) return 'Answer what the agent asked first.';
+    if (client == null || client.isClosed) return 'The agent is not connected.';
+    if (session.remoteSessionId == null || session.cwd == null) return 'The agent has not said where this conversation is.';
+    if (_clients.entries.any((each) => each.key != session.id && identical(each.value, client))) {
+      return 'Another conversation uses the same agent. Close it first.';
+    }
+    return null;
+  }
+
+  /// Moves the running [session] to the agent [target]: the host exports the conversation from the agent it is with and imports it
+  /// into [target] as that agent's own session ([move], answering the new id and what did not carry), [start] starts [target]'s
+  /// agent, and the conversation opens on it, so the new agent has all of what was said. The agent it leaves keeps its session
+  /// and the link to it, and a switch back brings what was said since: its whole conversation again at a new id, or its own
+  /// session as it was when nothing was said in between. If any step fails the conversation stays with the agent it had, which was
+  /// never stopped, and the transcript says why. Answers whether it moved.
+  Future<bool> switchAgent(
+    ChatSession session,
+    AgentSource target, {
+    required Future<MoveReport> Function(ChatSession session, String to) move,
+    required Future<VerifiedAgent> Function(ChatSession session, AgentSource target) start,
+  }) async {
+    final from = session.agent, fromSource = session.source;
+    if (from == target.label) return true;
+    final fromName = fromSource?.displayName ?? from, toName = target.displayName;
+    final block = agentSwitchBlock(session);
+    if (block != null) {
+      session.chat.note('Agent: not moved to $toName. $block');
+      return false;
+    }
+    final old = _clients[session.id]!;
+    final oldId = session.remoteSessionId!, cwd = session.cwd!;
+    final said = _spoken(session);
+    final earlier = session.agentLinks[target.label];
+    final unchanged = earlier != null && earlier.said == said.length;
+    final oldEntry = session.peerId == null ? null : ledger?.find(session.peerId!, oldId);
+    final oldPeer = session.peerId, oldAccount = session.account, oldSetup = session.setup, oldProfile = session.profile;
+
+    MoveReport? report;
+    final String newId;
+    try {
+      if (unchanged) {
+        newId = earlier.id;
+      } else {
+        report = await move(session, target.label);
+        newId = report.session;
+      }
+    } catch (error) {
+      session.chat.note('Agent: not moved to $toName: ${reasonOf(error)}. This conversation stays with $fromName.');
+      notifyListeners();
+      return false;
+    }
+
+    VerifiedAgent? fresh;
+    var changed = false;
+    try {
+      fresh = await start(session, target);
+      if (!fresh.canReopenSessions) throw AcpFailure('$toName offers neither session/load nor session/resume');
+      changed = true;
+      session
+        ..agent = target.label
+        ..source = target
+        ..peerId = fresh.peerId
+        ..account = null
+        ..setup = AcpSessionSetup.none
+        ..profile = null
+        ..remoteSessionId = newId;
+      attachVerifiedClient(session.id, fresh, record: false);
+      final opened = await session.chat.reopen(() => fresh!.reopenSession(newId, cwd: cwd));
+      _takeHostReport(session, opened);
+      await applyHostProfile(session);
+      // An agent that sent back less than was said has shown less than the conversation holds: what it was is put back.
+      bool isSpoken(model.ChatMessage m) => m.role == MessageRole.user || m.role == MessageRole.agent;
+      if (session.messages.where(isSpoken).length < said.length) {
+        session.chat.removeMessages(isSpoken);
+        for (final each in said) {
+          session.chat.addMessage(each.role, each.text);
+        }
+      }
+    } catch (error) {
+      if (changed) {
+        session
+          ..agent = from
+          ..source = fromSource
+          ..peerId = oldPeer
+          ..account = oldAccount
+          ..setup = oldSetup
+          ..profile = oldProfile
+          ..remoteSessionId = oldId;
+        attachVerifiedClient(session.id, old, record: false);
+      }
+      await fresh?.close();
+      session.chat.note('Agent: not moved to $toName: ${reasonOf(error)}. This conversation stays with $fromName.');
+      notifyListeners();
+      return false;
+    }
+    session.agentLinks[from] = (id: oldId, said: said.length);
+    await old.close();
+    // The conversation has another id, with another agent: the list follows it, with what the person had made of it.
+    if (oldEntry != null) ledger?.remove(oldEntry);
+    _record(session, fresh);
+    if (oldEntry != null && session.peerId != null) {
+      ledger?.setPlacement(session.peerId!, newId, pinned: oldEntry.pinned, archived: oldEntry.archived);
+    }
+    session.chat.note(_switchLine(fromName, toName, report));
+    notifyListeners();
+    return true;
+  }
+
+  /// The one line a switch leaves in the conversation: where it went, and what the move could not carry.
+  static String _switchLine(String from, String to, MoveReport? report) {
+    final head = 'Agent: $from → $to.';
+    if (report == null) return '$head $to had its own copy of this conversation, and nothing was said since it left, so that copy was picked up.';
+    final line = StringBuffer('$head The conversation was exported from $from and imported into $to, which now has all of it.');
+    if (report.replayed) line.write(' $to keeps no session to seed, so what was said reaches it in your first message here.');
+    if (report.compacted) line.write(' Earlier turns were left out, as they did not fit.');
+    if (report.losses.isEmpty) {
+      line.write(' Nothing was left out.');
+    } else {
+      line.write(' Left out: ${report.losses.map((loss) => lossText(loss).replaceAll('\n', ' ')).join('; ')}.');
+    }
+    return line.toString();
   }
 
   /// A person's choice of one of the agent's options. It goes to the agent now when it can take it; before the agent starts, or

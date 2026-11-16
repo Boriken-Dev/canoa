@@ -14,6 +14,7 @@ import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/desktop_shell.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool.dart';
+import 'package:canoa/history/agent_switch.dart' show AgentMoves;
 import 'package:canoa/main.dart';
 import 'package:canoa/popout/popout_hub.dart' show PopoutWindows;
 import 'package:canoa/served/served_app.dart' show ServedApp;
@@ -99,6 +100,7 @@ Future<List<CanoaConfig>> pumpApp(
   bool hostChoices = false,
   PopoutWindows? popoutWindows,
   AccountsHost? accountsHost,
+  AgentMoves? agentMoves,
   ServedApp? served,
   Future<CanoaConfig> Function()? readConfig,
   ShellLayout? layout,
@@ -142,6 +144,7 @@ Future<List<CanoaConfig>> pumpApp(
     askChoices: hostChoices ? null : askChoices ?? FakeHost().call,
     popoutWindows: popoutWindows,
     accountsHost: accountsHost,
+    agentMoves: agentMoves,
     served: served,
     layout: layout,
     probe: probe,
