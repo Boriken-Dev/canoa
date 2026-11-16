@@ -43,6 +43,8 @@ import 'chat/git_changes.dart' show GitReader;
 import 'chat/inspector.dart';
 import 'chat/timing_log.dart';
 import 'chat/inspector_surfaces.dart';
+import 'surfaces/files_surface.dart';
+import 'served/host_files.dart' show HostFiles, WorkspaceFiles;
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show SessionUsage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'chat/child_thread.dart';
@@ -397,7 +399,7 @@ class _CanoaAppState extends State<CanoaApp> {
   String? _settingsFirst;
 
   late final ShellLayout _layout = widget.layout ?? ShellLayout();
-  late final WorkSurfaces _surfaces = WorkSurfaces(widget.surfaces ?? builtInSurfaces());
+  late final WorkSurfaces _surfaces = WorkSurfaces(widget.surfaces ?? [...builtInSurfaces(), FilesSurface(_filesOf)]);
 
   /// Hosting is part of Local's overview, in the Hosts section.
   Future<void> _showHosting() async {
@@ -795,6 +797,17 @@ class _CanoaAppState extends State<CanoaApp> {
   bool get _hasProfiles => config.overlays.isNotEmpty || !config.profile.isEmpty || config.agentProfiles.isNotEmpty;
 
   late final HostControl? _control = widget.served?.control ?? (widget.host == null ? null : HostControl(widget.host!));
+
+  late final HostFiles? _hostFiles = widget.served?.files ?? (_control == null ? null : HostFiles(_control));
+
+  /// The files of the host a session runs on, when this app has a channel to it: its own host, or the one that served this page.
+  WorkspaceFiles? _filesOf(ChatSession session) {
+    final served = widget.served;
+    final here = served == null
+        ? session.place == SessionPlace.local || session.place == SessionPlace.host
+        : session.peerId == null || session.peerId == served.host.peer;
+    return here ? _hostFiles : null;
+  }
 
   Worktrees? _localWorktrees() => _control == null ? null : controlWorktrees(_control);
 

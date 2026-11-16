@@ -67,6 +67,7 @@ final class HostSummary {
   static const _grantLabels = <String, String>{
     'ledger.read': 'Session list',
     'folders': 'Folder browsing',
+    'files': 'Reading workspace files',
     'worktree': 'Git worktrees',
     'store.read': 'Store',
     'store.programs': 'Installing agent programs',

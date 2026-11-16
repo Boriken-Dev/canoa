@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
@@ -28,6 +29,36 @@ final class HostFolderListing {
   final bool more;
 }
 
+/// What `fs/read` answered: the start of a file, for a preview.
+final class HostFileRead {
+  const HostFileRead({required this.path, required this.name, required this.size, required this.kind, required this.truncated, this.mime, this.bytes});
+
+  final String path;
+  final String name;
+
+  /// The file's whole size on the host.
+  final int size;
+
+  /// `text`, `image` (one a page can draw: PNG, JPEG, GIF or WebP) or `binary`.
+  final String kind;
+  final String? mime;
+
+  /// Whether [bytes] stops short of the file. A cut image carries no bytes.
+  final bool truncated;
+
+  /// What was read; null for a binary file and for an image the limit cut.
+  final Uint8List? bytes;
+}
+
+/// What the Files surface needs of a host: the places to browse and the start of a file. [HostFiles] is the host's own channel; a test
+/// gives another computer's disk.
+abstract interface class WorkspaceFiles {
+  Future<HostFolderListing> listFolders({String? path, bool hidden = false, bool files = false});
+
+  /// The start of the file at [path], at most [maxBytes] of it (the host's default when null).
+  Future<HostFileRead> readFile(String path, {int? maxBytes});
+}
+
 /// A file the host keeps for this key.
 final class HostUpload {
   const HostUpload({required this.path, required this.name, required this.size});
@@ -40,7 +71,7 @@ final class HostUpload {
 
 /// The host's files as a page may use them over the control channel: folders to browse, canoa.cfg by section, uploads, and the
 /// host's restart. Each is a grant the host gave this page's key; a refusal is the host's own words.
-final class HostFiles {
+final class HostFiles implements WorkspaceFiles {
   HostFiles(this._control);
 
   final HostControl _control;
@@ -51,7 +82,22 @@ final class HostFiles {
     return result is Map<Object?, Object?> ? result : const {};
   }
 
-  /// The folders in [path], or the places to start from when it is null. [hidden] adds the names that start with a dot; [files] the files.
+  @override
+  Future<HostFileRead> readFile(String path, {int? maxBytes}) async {
+    final answer = await _call('fs/read', {'path': path, 'max_bytes': ?maxBytes});
+    final data = answer['data'];
+    return HostFileRead(
+      path: answer['path'] as String? ?? path,
+      name: answer['name'] as String? ?? path.split(RegExp(r'[\\/]')).last,
+      size: (answer['size'] as num?)?.toInt() ?? 0,
+      kind: answer['kind'] as String? ?? 'binary',
+      mime: answer['mime'] as String?,
+      truncated: answer['truncated'] == true,
+      bytes: data is String ? base64Decode(data) : null,
+    );
+  }
+
+  @override
   Future<HostFolderListing> listFolders({String? path, bool hidden = false, bool files = false}) async {
     final answer = await _call('fs/list', {'path': ?path, if (hidden) 'hidden': true, if (files) 'files': true});
     return HostFolderListing(
