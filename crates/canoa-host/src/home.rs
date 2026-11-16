@@ -382,6 +382,21 @@ mod tests {
         dir
     }
 
+    /// Takes the home once the lock just given up is free. A thread of this process that forks a child holds a copy of the
+    /// lock's descriptor until the child execs, which under load takes long enough for a lock taken at once to find it held.
+    fn lock_when_free(home: &Home, name: &str) -> HomeLock {
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            match home.lock(name) {
+                Ok(lock) => return lock,
+                Err(LockError::Held { .. }) if std::time::Instant::now() < until => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(failure) => panic!("a lock given up is free: {failure:?}"),
+            }
+        }
+    }
+
     #[test]
     fn a_home_with_none_named_is_dot_canoa_in_the_persons_home_folder() {
         let user = |path: &str| Some(PathBuf::from(path));
@@ -422,7 +437,7 @@ mod tests {
         assert!(said.contains("CanoaUI"), "{said}");
         assert!(said.contains(&std::process::id().to_string()), "{said}");
         drop(lock);
-        drop(home.lock("canoa").expect("a lock given up is free"));
+        drop(lock_when_free(&home, "canoa"));
         fs::remove_dir_all(&dir).expect("removed");
     }
 
