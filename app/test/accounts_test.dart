@@ -22,7 +22,7 @@ import 'fixtures/secret_host.dart' show until;
 
 const _canary = 'sk-ant-CANARY-4f9a2c71e8d0';
 
-AccountsController _controller(FakeAccountsHost host, {CanoaConfig config = const CanoaConfig(), String? Function(String)? holder, List<CanoaConfig>? saved}) {
+AccountsController _controller(FakeAccountsHost host, {CanoaConfig config = const CanoaConfig(), String? Function(String)? holder, List<CanoaConfig>? saved, bool hostIsHere = true}) {
   var held = config;
   return AccountsController(
     host: host,
@@ -32,6 +32,7 @@ AccountsController _controller(FakeAccountsHost host, {CanoaConfig config = cons
       saved?.add(held);
     },
     holder: holder,
+    hostIsHere: hostIsHere,
   );
 }
 
@@ -79,6 +80,85 @@ void main() {
     await tester.enterText(find.byKey(const Key('add-account-name')), 'metered');
     await tester.pump();
     expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNotNull);
+  });
+
+  testWidgets('away from the host Codex signs in by a device code unless the person chooses the browser', (tester) async {
+    final host = FakeAccountsHost();
+    await _show(tester, _controller(host, hostIsHere: false));
+    await tester.tap(find.byKey(const Key('add-account-codex')));
+    await tester.pumpAndSettle();
+    // Nothing was touched, and Sign in is ready: the device code is what it runs.
+    expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNotNull);
+    await tester.tap(find.byKey(const Key('add-account-start')));
+    await tester.pump();
+    expect(host.signIns.single.method, 'chatgpt-device');
+  });
+
+  testWidgets('away from the host the person can still choose the browser sign-in', (tester) async {
+    final host = FakeAccountsHost();
+    await _show(tester, _controller(host, hostIsHere: false));
+    await tester.tap(find.byKey(const Key('add-account-codex')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('login-method chatgpt')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('add-account-start')));
+    await tester.pump();
+    expect(host.signIns.single.method, 'chatgpt');
+  });
+
+  testWidgets('on the host\'s own machine no method is chosen first, and away from it a provider with no device code leaves the choice', (tester) async {
+    final host = FakeAccountsHost();
+    await _show(tester, _controller(host));
+    await tester.tap(find.byKey(const Key('add-account-codex')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNull);
+    await tester.tap(find.byKey(const Key('add-account-cancel')));
+    await tester.pumpAndSettle();
+    await _show(tester, _controller(FakeAccountsHost(), hostIsHere: false));
+    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNull);
+  });
+
+  testWidgets('the browser sign-in asks for the address the browser ended on, and it goes to the host sealed, never held here', (tester) async {
+    const address = 'http://127.0.0.1:1455/auth/callback?code=CODE-4f9a2c71&state=abc';
+    final host = FakeAccountsHost();
+    await _show(tester, _controller(host, hostIsHere: false));
+    await tester.tap(find.byKey(const Key('add-account-codex')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('login-method chatgpt')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('add-account-start')));
+    await tester.pump();
+    final run = host.signIns.single;
+    run.showPage(const SignInPage(url: 'https://auth.example/oauth/authorize?state=abc'));
+    final (request, environment, receiver) = (await tester.runAsync(() => keyRequest(
+      message: 'After signing in, paste the address your browser ends on (it starts http://127.0.0.1:1455/auth/callback)',
+      field: 'address',
+    )))!;
+    final answered = run.ask(request, environment);
+    await tester.pump();
+    expect(find.textContaining('paste the address your browser ends on'), findsWidgets);
+    await until(tester, find.byKey(const ValueKey('secret-address')));
+    await tester.enterText(find.byKey(const ValueKey('secret-address')), address);
+    await tester.pump();
+    await tester.tap(find.text('Send sealed'));
+    final reply = (await tester.runAsync(() => answered.timeout(const Duration(seconds: 5))))!;
+    expect(jsonEncode(reply.toJson()), isNot(contains('CODE-4f9a2c71')));
+    final ends = (await tester.runAsync(linkEnds))!;
+    final accepted = reply as AcpSecretAccepted;
+    final opened = (await tester.runAsync(() => receiver.openValues(
+      ends.hostVerifier,
+      ends.app.identity.prover.id,
+      accepted.plain,
+      accepted.sealed,
+      accepted.auth,
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    )))!;
+    expect(opened.secrets['address']!.text, address);
+    run.complete(account('chatgpt', kind: 'codex-chatgpt', harness: 'codex'));
+    await tester.pump();
+    expect(find.textContaining('CODE-4f9a2c71'), findsNothing);
   });
 
   testWidgets('a method that asks something first shows that form, and what is answered is what the host is given', (tester) async {

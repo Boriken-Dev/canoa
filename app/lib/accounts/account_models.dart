@@ -160,6 +160,12 @@ final class AccountCatalog {
 
   AccountKindInfo? kind(String id) => kinds.where((each) => each.id == id).firstOrNull;
   LoginMethodInfo? login(String id) => logins.where((each) => each.id == id).firstOrNull;
+
+  /// The method the dialog has chosen before the person does. A host on this machine chooses none. Away from it a browser sign-in
+  /// comes back to a port of the host, which the person's browser cannot reach, so the first method that works away from the host
+  /// and shows a code to confirm (a device code) is chosen; a provider with none leaves the choice to the person.
+  LoginMethodInfo? preferred({required bool hostIsHere}) =>
+      hostIsHere ? null : logins.where((each) => each.remote && each.steps.contains('user_code')).firstOrNull;
 }
 
 /// Where an account stands, from the host's words.

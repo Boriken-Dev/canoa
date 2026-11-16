@@ -60,6 +60,9 @@ const claudeCatalog = {
 
 const keyForm = '{"type":"object","properties":{"api_key":{"type":"string","title":"API key","writeOnly":true,"x-sensitive":true}},"required":["api_key"]}';
 
+String _secretForm(String field) =>
+    '{"type":"object","properties":{"$field":{"type":"string","title":"$field","writeOnly":true,"x-sensitive":true}},"required":["$field"]}';
+
 /// The app's half of the link binding, and the host's prover for it.
 Future<({LinkSecretIdentity app, AcpSecretProver host, AcpSecretVerifier hostVerifier})> linkEnds() async {
   final app = await linkSecretIdentity(linkSecret);
@@ -69,10 +72,14 @@ Future<({LinkSecretIdentity app, AcpSecretProver host, AcpSecretVerifier hostVer
 }
 
 /// The sealed request the host asks a sign-in's form with, and the environment the app checks and answers it with.
-Future<(AcpSecretRequestParams, SecretCardEnvironment, AcpSecretReceiver)> keyRequest({String id = 'canoa-secret-1'}) async {
+Future<(AcpSecretRequestParams, SecretCardEnvironment, AcpSecretReceiver)> keyRequest({
+  String id = 'canoa-secret-1',
+  String message = 'Anthropic API key',
+  String? field,
+}) async {
   final ends = await linkEnds();
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-  final context = AcpSecretContext(sessionId: 'accounts', requestId: id, message: 'Anthropic API key', schema: keyForm);
+  final context = AcpSecretContext(sessionId: 'accounts', requestId: id, message: message, schema: field == null ? keyForm : _secretForm(field));
   final receiver = await AcpSecretReceiver.create(AcpSecretMethod.request, context, ends.host, ends.app.identity.prover.id, now);
   ends.app.identity.verifier.trust(ends.app.host);
   final environment = SecretCardEnvironment(
@@ -81,11 +88,23 @@ Future<(AcpSecretRequestParams, SecretCardEnvironment, AcpSecretReceiver)> keyRe
   return (AcpSecretRequestParams(context: context, recipient: receiver.recipient), environment, receiver);
 }
 
+/// Codex as its provider says it: a browser sign-in that takes the address the browser ends on, and a device code.
+const codexCatalog = {
+  'harness': 'codex',
+  'kinds': [
+    {'id': 'codex-chatgpt', 'title': 'ChatGPT login', 'rotates': true, 'state_dir': true},
+  ],
+  'logins': [
+    {'id': 'chatgpt', 'title': 'Sign in with ChatGPT', 'produces': 'codex-chatgpt', 'steps': ['open_url', 'paste_code'], 'remote': true},
+    {'id': 'chatgpt-device', 'title': 'Sign in with ChatGPT by a code', 'produces': 'codex-chatgpt', 'steps': ['open_url', 'user_code'], 'remote': true},
+  ],
+};
+
 final class FakeAccountsHost implements AccountsHost {
   FakeAccountsHost({List<AccountInfo>? accounts}) : accounts = accounts ?? [];
 
   final List<AccountInfo> accounts;
-  final catalogs = <String, Object?>{'claude': claudeCatalog};
+  final catalogs = <String, Object?>{'claude': claudeCatalog, 'codex': codexCatalog};
   final signIns = <SignIn>[];
   final inputsGiven = <Map<String, String>>[];
   final removed = <String>[];

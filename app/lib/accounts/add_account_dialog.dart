@@ -57,7 +57,13 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
 
   void _load() {
     _method = null;
-    _catalog = widget.accounts.catalog(_harness);
+    final catalog = _catalog = widget.accounts.catalog(_harness);
+    // Chosen before the person chooses, unless they have by the time the host answers or have moved to another provider.
+    unawaited(catalog.then<void>((made) {
+      if (!mounted || _catalog != catalog || _method != null) return;
+      final first = made.preferred(hostIsHere: widget.accounts.hostIsHere);
+      if (first != null) setState(() => _method = first.id);
+    }, onError: (Object _) {}));
   }
 
   @override

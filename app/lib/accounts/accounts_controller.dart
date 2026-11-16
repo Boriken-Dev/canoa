@@ -20,6 +20,7 @@ class AccountsController extends ChangeNotifier {
     this.harnesses = const ['claude', 'codex'],
     this.usage,
     this.holder,
+    this.hostIsHere = true,
   });
 
   final AccountsHost host;
@@ -35,6 +36,10 @@ class AccountsController extends ChangeNotifier {
 
   /// What the sessions on an account have last heard of its allowances, by the account's id.
   final UsageReport? Function(String accountId)? usage;
+
+  /// Whether the host runs on the machine this app does. It does not for the web page a host serves and for a host elsewhere: a browser
+  /// sign-in that comes back to the host's loopback then reaches nothing, and a device code is chosen first.
+  final bool hostIsHere;
 
   /// The title of the open session that runs on [account], or null when none does.
   final String? Function(String account)? holder;
