@@ -100,7 +100,9 @@ fn main() -> ExitCode {
     match cli::run(parsed, &Standard) {
         Ok(()) => ExitCode::SUCCESS,
         Err(failed) => {
-            eprintln!("canoa: {}", failed.why);
+            if !failed.why.is_empty() {
+                eprintln!("canoa: {}", failed.why);
+            }
             ExitCode::from(failed.status)
         }
     }

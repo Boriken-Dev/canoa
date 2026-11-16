@@ -71,6 +71,7 @@ guatiao-serde.workspace = true
 httparse.workspace = true
 # The address a remote source is dialed at; already in the graph through coqui-transport-web.
 url.workspace = true
+if-addrs.workspace = true
 indexmap.workspace = true
 percent-encoding.workspace = true
 rustls.workspace = true
@@ -103,7 +104,7 @@ tracing-subscriber.workspace = true
 # Ends a provider's process group, through a safe call; and passes the descriptors of a child's standard streams to the host's own
 # process starter, over a socket (`spawn`).
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true, features = ["process", "net", "event", "fs"] }
+rustix = { workspace = true, features = ["process", "net", "event", "fs", "system"] }
 
 # The operating system's credential store: Secret Service on a Linux or other Unix desktop.
 [target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
@@ -126,7 +127,7 @@ is_elevated.workspace = true
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
 
 [dev-dependencies]
-# A certificate for the web app's HTTPS tests, at the version coqui-acp-bridge already builds.
+# A certificate for the web app's HTTPS tests, at the version the bridge library (coqui-acp-bridge) already builds.
 rcgen.workspace = true
 # The peers the web_peer example plays the page of; already in the graph through coqui-acp-bridge.
 coqui-peer-noise.workspace = true

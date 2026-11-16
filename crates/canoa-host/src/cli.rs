@@ -21,6 +21,8 @@ use coqui_agentic_peer::{auth, pairing};
 use coqui_transport::{Channel as _, Failure};
 use coqui_transport_web::Limits;
 
+mod bridge;
+
 use crate::accounts::commands::Env as AccountsEnv;
 use crate::config::{ImportSearch, Layers};
 use crate::home::{Home, LockError};
@@ -130,7 +132,7 @@ enum Command {
     Portal(PortalArgs),
     /// Serve every entry of canoa.cfg's [host] table until stopped; prints one JSON line per entry, then {"ready"}.
     /// Only one host runs on a home: a second says which is running and ends with status 3.
-    Serve(ServeArgs),
+    Serve(Box<ServeArgs>),
     /// Check canoa.cfg's [host] table and print its entries, serving nothing.
     Check(ConfigArgs),
     /// Print the canoa.cfg files in the order they are read, lowest layer first, and the one that is written.
@@ -142,6 +144,10 @@ enum Command {
         method: MethodArg,
         #[command(flatten)]
         force: ForceArg,
+        /// Print the peer id of the key in FILE instead, making the key when the file is absent: for a client or a program that
+        /// proves itself with a key of its own, as `dial` and `forward` take with --identity.
+        #[arg(long, value_name = "FILE", conflicts_with = "force")]
+        identity: Option<PathBuf>,
     },
     /// List paired keys, then keys waiting to be paired.
     Peers {
@@ -159,8 +165,8 @@ enum Command {
         /// The key's peer id.
         peer: String,
     },
-    /// Show a PIN and pair the native key that uses it, then end. Prints {"pin", "peer", "url"}, then {"paired"}.
-    /// One wrong try ends it. A browser cannot pair this way: it connects once and is accepted by its id.
+    /// Show a PIN and pair the key that uses it, then end. Prints {"pin", "peer", "url"}, then {"paired"}.
+    /// One wrong try ends it. A browser is refused unless --origin names it; with --join, pair with a waiting `pair` instead.
     Pair {
         /// The address to wait on; loopback unless you say otherwise.
         #[arg(long, default_value = "127.0.0.1:0")]
@@ -176,10 +182,70 @@ enum Command {
         /// is bound to the key it pairs.
         #[arg(long)]
         native: bool,
+        /// A browser origin allowed to pair, such as chrome-extension://ID for an extension's page. Repeat for more. Without
+        /// one a browser is refused before its handshake, so a page cannot spend the PIN; a native client sends no origin.
+        #[arg(long = "origin", value_name = "ORIGIN", conflicts_with_all = ["native", "join"])]
+        origins: Vec<String>,
+        /// Join the `pair` waiting at URL with its PIN, under this host's own identity, and print its peer id. The PIN is read
+        /// from --pin-file, else from standard input, never from an argument.
+        #[arg(long, value_name = "URL", conflicts_with_all = ["native", "until_stdin_closes"])]
+        join: Option<String>,
+        /// With --join: a file holding the PIN.
+        #[arg(long, requires = "join", value_name = "FILE")]
+        pin_file: Option<PathBuf>,
+        /// With --join: a PEM bundle the server's certificate must chain to. Without it any certificate is taken, since the PIN
+        /// authenticates the peer.
+        #[arg(long, requires = "join", value_name = "FILE")]
+        ca_file: Option<PathBuf>,
         #[command(flatten)]
         method: MethodArg,
         #[command(flatten)]
         force: ForceArg,
+    },
+    /// Search this machine and the link for agents, and print each as one line of JSON. What it prints is what they claim.
+    Discover {
+        /// How long to listen on the link, in seconds.
+        #[arg(long, default_value_t = 3)]
+        seconds: u64,
+    },
+    /// Connect out to a peer, for an agent behind NAT: reconnects and keeps the agent running, and ends with its status.
+    Dial(Box<coqui_acp_bridge::dial::Dial>),
+    /// Forward TCP over a link: listen here for what the far side was asked to reach, and let it reach what is named here. Runs
+    /// until stopped, connecting again when the link goes.
+    Forward(Box<coqui_acp_bridge::forward::Forward>),
+    /// Let a peer this user paired with open a protocol, or with --revoke no longer. It counts at once, on a live link too.
+    Grant {
+        /// The peer id.
+        peer: String,
+        /// The protocol token, or `tcp/1:HOST:PORT` for a target a forward may reach, which also grants `tcp/1`.
+        protocol: String,
+        /// Take it away instead.
+        #[arg(long)]
+        revoke: bool,
+    },
+    /// Print the `mcpServers` entry that gives an MCP client on this machine a peer's tools, such as a browser's. It holds
+    /// nothing secret and stays good across restarts of either side.
+    McpConfig {
+        /// The peer whose tools to reach, by its id.
+        #[arg(long)]
+        peer: String,
+        /// What the client calls this server.
+        #[arg(long, default_value = coqui_acp_bridge::standing::DEFAULT_NAME)]
+        name: String,
+    },
+    /// The stdio MCP server that `mcp-offer/1` declares to an agent: carries its lines to the peer that offered it. With --peer,
+    /// the one `mcp-config` prints, which finds that peer's standing stream.
+    McpShim {
+        /// The peer whose tools to reach, by its id.
+        #[arg(long)]
+        peer: Option<String>,
+    },
+    /// Waits on standard input, and ends the agent's process group if it closes with nothing said: what `serve --program
+    /// --linger` starts for each agent on Unix, to clean up after a host that went.
+    #[command(hide = true)]
+    AgentGuard {
+        /// The agent's process id.
+        pid: u32,
     },
     /// Serve one Guatiao agent provider as an ACP agent on standard input and output.
     Provider {
@@ -624,14 +690,11 @@ impl Drop for ClearPin<'_> {
 struct ServeArgs {
     #[command(flatten)]
     config: ConfigArgs,
-    #[command(flatten)]
-    method: MethodArg,
-    /// What one key may carry in each direction, in bytes. Default 2^38; above it the log lists it as a non-default setting.
-    #[arg(long, value_name = "BYTES")]
-    key_limit: Option<u64>,
-    /// Under Noise, end a session at the key limit rather than changing keys, as WebCrypto always does.
+    /// Serve the one program after `--` to paired keys over the network, with no canoa.cfg: this host's own proof (--method,
+    /// --key-limit, --no-rekey) and the flags below it. The way to give one agent TLS, WebTransport, a linger or a
+    /// standing MCP offer.
     #[arg(long)]
-    no_rekey: bool,
+    program: bool,
     /// End, with every agent started, when standard input closes: for a program that runs the host as its child.
     #[arg(long)]
     until_stdin_closes: bool,
@@ -668,6 +731,9 @@ struct ServeArgs {
     /// The web app's address, in place of [host.web]'s listen. Beyond loopback it needs [host.web]'s cert and key.
     #[arg(long, value_name = "ADDRESS")]
     web_listen: Option<SocketAddr>,
+    /// The proof's method and session settings, which both forms of `serve` take, and with --program the program's own flags.
+    #[command(flatten)]
+    bridge: coqui_acp_bridge::serve::Serve,
 }
 
 #[derive(Debug, Args)]
@@ -1072,6 +1138,15 @@ fn portal(args: &PortalArgs, front: &dyn Front) -> Result<(), Failed> {
 }
 
 fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
+    if args.program {
+        if args.bridge.agent.is_empty() {
+            return Err(Failed::usage(
+                "--program needs the program to serve, after --",
+            ));
+        }
+        return bridge::serve_program(args, front);
+    }
+    bridge::refuse_program_flags(args)?;
     // Before anything of the home is touched: a host for a portal runs only as the account whose folder it is.
     if let Some(dir) = &args.portal {
         crate::portal_link::check_account(dir, args.portal_min_uid, &args.portal_group)
@@ -1088,14 +1163,17 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
         },
         _ => Failed::run(error),
     })?;
-    let identity = args.method.identity(&home)?;
+    let identity = MethodArg {
+        method: args.bridge.method.method,
+    }
+    .identity(&home)?;
     let peer = identity.peer_id().to_string();
     let program = front
         .program()
         .map_err(|error| Failed::run(format!("this program cannot find itself: {error}")))?;
     let mut options = ServeOptions::new(program.path)
         .with_program_args(program.args)
-        .with_rekey(!args.no_rekey)
+        .with_rekey(!args.bridge.session.no_rekey)
         .with_nothing_to_serve(args.allow_empty || args.portal.is_some())
         .with_local_sources(args.local_sources || args.portal.is_some())
         .with_supervised(args.supervised)
@@ -1104,7 +1182,7 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
     if let Ok(layers) = layers_of(&args.config, front, false) {
         options = options.with_config_file(layers.own);
     }
-    if let Some(bytes) = args.key_limit {
+    if let Some(bytes) = args.bridge.session.key_limit {
         options = options.with_key_limit(bytes);
     }
     if let Some((programs, providers)) = front.programs() {
@@ -1388,6 +1466,7 @@ fn pair(
     listen: SocketAddr,
     timeout: Duration,
     until_stdin_closes: bool,
+    origins: Vec<String>,
     method: MethodArg,
     force: ForceArg,
     front: &dyn Front,
@@ -1397,12 +1476,17 @@ fn pair(
     let store = Arc::new(store(&home)?);
     // The PIN exchange runs inside the method's own session and takes one guess, so where the socket sits is the person's to
     // choose.
-    // A page could run its own PIN exchange and spend the one try, so a browser is refused before the handshake.
+    // A page could run its own PIN exchange and spend the one try, so a browser is refused before the handshake unless its origin
+    // is named.
     let mut limits = Limits::default();
     limits.max_message = auth::MAX_PROOF_MESSAGE;
     limits.pending = 8;
-    let listener = crate::serve::plain_listener(listen, limits, vec![NO_BROWSER.to_owned()])
-        .map_err(Failed::run)?;
+    let origins = if origins.is_empty() {
+        vec![NO_BROWSER.to_owned()]
+    } else {
+        origins
+    };
+    let listener = crate::serve::plain_listener(listen, limits, origins).map_err(Failed::run)?;
     let bound = listener.local_addr().map_err(Failed::run)?;
     if listener.plain_beyond_loopback() {
         tracing::info!(
@@ -1666,7 +1750,12 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         Command::Check(args) => check(&args, front),
         Command::Layers(args) => layers(&args, front),
         Command::Options(args) => options(&args, front),
-        Command::Id { method, force } => print(
+        Command::Id {
+            method,
+            identity: Some(path),
+            ..
+        } => print(front, &bridge::identity_file(&path, method.method)?),
+        Command::Id { method, force, .. } => print(
             front,
             &method
                 .identity_unless_running(&home_of(front)?, force)?
@@ -1675,12 +1764,28 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         ),
         Command::Peers { format } => list_peers(format, front),
         Command::Pair {
+            join: Some(url),
+            pin_file,
+            ca_file,
+            timeout_seconds,
+            method,
+            ..
+        } => bridge::pair_join(
+            &url,
+            pin_file,
+            ca_file,
+            timeout_seconds,
+            method.method,
+            front,
+        ),
+        Command::Pair {
             listen: _,
             timeout_seconds,
             until_stdin_closes,
             native,
             method,
             force,
+            ..
         } if native => pair_native(
             Duration::from_secs(timeout_seconds),
             until_stdin_closes,
@@ -1692,17 +1797,35 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
             listen,
             timeout_seconds,
             until_stdin_closes,
-            native: _,
+            origins,
             method,
             force,
+            ..
         } => pair(
             listen,
             Duration::from_secs(timeout_seconds),
             until_stdin_closes,
+            origins,
             method,
             force,
             front,
         ),
+        Command::Discover { seconds } => bridge::discover(seconds),
+        Command::Dial(args) => bridge::dial(*args, front),
+        Command::Forward(args) => bridge::forward(*args, front),
+        Command::Grant {
+            peer,
+            protocol,
+            revoke,
+        } => bridge::grant(&peer, &protocol, revoke, front),
+        Command::McpConfig { peer, name } => {
+            print(front, &bridge::mcp_config(&peer, &name, front)?)
+        }
+        Command::McpShim { peer } => bridge::mcp_shim(peer.as_deref()),
+        Command::AgentGuard { pid } => {
+            bridge::agent_guard(pid);
+            Ok(())
+        }
         Command::Accept { peer } => {
             let id = peers::accept(&store(&home_of(front)?)?, &peer).map_err(peers_failure)?;
             print(front, &format!("accepted {id}"))
@@ -1843,6 +1966,8 @@ impl Cli {
                 | Command::Launch { .. }
                 | Command::McpBridge
                 | Command::NativeHost { .. }
+                | Command::McpShim { .. }
+                | Command::AgentGuard { .. }
                 | Command::HookForward { .. }
         )
     }
