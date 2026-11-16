@@ -589,7 +589,7 @@ caller has no grant for it), `-32002` **refused** (a limit), `-32003` not found.
 ```toml
 [host.control]
 listen = "127.0.0.1:0"                              # or a pipe, as an entry has it; without it there is no network control
-grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "config.read", "config.write", "config.write.sessions", "upload", "host.restart", "overlay.read", "overlay.write", "store.programs", "accounts", "discover", "usage"] }   # per key; a key not here gets nothing
+grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "files", "config.read", "config.write", "config.write.sessions", "upload", "host.restart", "overlay.read", "overlay.write", "store.programs", "accounts", "discover", "usage"] }   # per key; a key not here gets nothing
 max_records = 10000                                 # ledger records the host keeps, per host; the oldest by `updated` are refused at, not dropped
 max_record_bytes = 262144                           # one ledger record
 max_upload_bytes = 8388608                          # one uploaded file, sent in chunks of at most 512 KiB
@@ -605,6 +605,7 @@ max_uploads = 256                                   # files one key may keep upl
 | `store.read` | `store/list`, `store/report`, `store/latest`, `store/plan` |
 | `overlay.read` / `store.programs` | `store/index`: the first reads the catalog entries, the second the program entries; a key holding either gets that half, none is refused; `refresh` also needs `overlay.write` |
 | `folders` | `fs/list` |
+| `files` | `fs/read`, and with `folders` an `fs/list` that is not kept to the home and the working roots: this computer's files as the account the host runs as can read them. The grant is the only gate: a key holding it reads and lists whatever that account can, anywhere (the owner, the person's own browser or app, the portal's person on their own host); there is no list of places it is kept to. Not in the browser door's default grants, and a delegated child connection never has it |
 | `config.read` | `config/get` |
 | `config.write` | `config/set` of the preference sections |
 | `config.write.sessions` | `config/set` of `overlays`, `loadouts`, `defaults` and `permissions`, which change what an agent may do or is given (the permission mode, protected paths, the overlays, skills and servers every `own_profile` session starts with): as much as access to the agent |
@@ -627,8 +628,12 @@ program, asks its host to do as the user. Each is behind its own grant, so a key
   With no `path` it lists the places to start from: for a key the user's home and the working roots of the entries the key may use
   (all keys when an entry has no `peers`); for the owner every drive or `/`. A path must be absolute with no `.` or `..` and, once
   every link is resolved, under one of those places; a path outside them and one that is not there are the same answer (`-32003`).
-  An entry whose link leads out of the places is not listed. `parent` is null where the parent is outside them. Names with control
-  or bidirectional characters are left out.
+  An entry whose link leads out of the places is not listed. `parent` is null where the parent is outside them. Every name is
+  listed, with each control, direction or invisible character shown as `<U+XXXX>` (`path` is the real one). A key that also holds
+  `files` is not kept to those places: it lists whatever the host's account can, anywhere (the places to start from are then the
+  home and every drive or `/`), any absolute path, links and network shares included, and `parent` is offered wherever it is.
+- `fs/read` `{"path": absolute, "max_bytes"?: positive whole number}` -> `{"path", "name", "size", "kind": "text"|"image"|"binary", "mime": string|null, "truncated", "data": base64|null}`, the start of one regular file, for a preview (grant `files`). It reads what the host's account can read, wherever it is: any drive, a network share or a link the operating system follows. `max_bytes` defaults to `DEFAULT_READ_BYTES` (256 KiB) and is cut to `MAX_READ_BYTES` (512 KiB), the most a page's transport carries once in base64; `size` is the whole file and `truncated` says the bytes stop short. `kind` is `text` (valid UTF-8 with no zero byte; a character cut off by the limit does not make it binary), `image` (PNG, JPEG, GIF or WebP by their first bytes, never SVG; a cut image carries no `data`, and the answer says nothing of its dimensions, so the client bounds what it decodes) or `binary` (no `data`). `name` shows every control, direction and invisible character as `<U+XXXX>`. The only refusals are for what cannot be read as a file, each with its reason in the message: `-32602` for a path that is not absolute, a folder, anything that is not a regular file (a pipe, a socket or a device, which could wait for ever; the file is also opened without waiting, in case the name became one after it was looked at) and `max_bytes` that is not a positive whole number; `-32003` when there is no such file or the account cannot see it; `-32002` with the operating system's own words when it cannot open or read it.
+
 - `config/get` `{"section"}` -> `{"section", "value": object|null, "restart": false}` and `config/set` `{"section", "value": object|null}`
   -> `{"section", "restart"}` read and write one table of the person's own canoa.cfg (the file `--config` lists last), in the format
   it is in (a `.yaml`/`.json` name or a `#!` first line, else TOML; comments and layout are not kept). Only `SECTIONS` are named

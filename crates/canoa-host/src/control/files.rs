@@ -7,7 +7,7 @@
 )]
 
 use std::fs;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
@@ -20,6 +20,11 @@ type Outcome = Result<Value, (i32, String)>;
 
 /// The most entries one `fs/list` answers.
 pub const MAX_LIST: usize = 1000;
+/// The bytes `fs/read` answers with when the request names no limit. A page's transport takes no message over a mebibyte, and the
+/// bytes go in base64.
+pub const DEFAULT_READ_BYTES: u64 = 256 * 1024;
+/// The most bytes `fs/read` answers with, whatever the request asks.
+pub const MAX_READ_BYTES: u64 = 512 * 1024;
 /// The largest upload, in bytes, unless `[host.control] max_upload_bytes` says otherwise. A request carries it in base64.
 pub const DEFAULT_MAX_UPLOAD_BYTES: u64 = 8 * 1024 * 1024;
 /// What one owner (a key, or the app) may keep uploaded, in bytes, unless `max_upload_total_bytes` says otherwise.
@@ -152,6 +157,24 @@ impl Files {
         roots
     }
 
+    /// The places `fs/list` starts from and keeps to: for a caller holding `files`, and for the owner, the home and the whole
+    /// computer; for any other key what [`Self::roots_of`] gives.
+    fn browse_roots(&self, caller: &Caller) -> Vec<PathBuf> {
+        if !caller.may(super::Grant::Files) {
+            return self.roots_of(caller, true);
+        }
+        let mut roots: Vec<PathBuf> = Vec::new();
+        for root in self.home.iter().cloned().chain(whole_machine()) {
+            if let Ok(resolved) = fs::canonicalize(&root) {
+                let resolved = plain(resolved);
+                if !roots.contains(&resolved) {
+                    roots.push(resolved);
+                }
+            }
+        }
+        roots
+    }
+
     /// Whether `caller` may name the place on this computer `repo` stands for as a source: it needs the `folders` grant, and the
     /// place must be under a working root of an entry it may use (not the whole home), not a folder this host keeps for itself,
     /// and a repository's own top level: a `.git` folder (not a file that points elsewhere), or a bare repository.
@@ -183,37 +206,52 @@ impl Files {
 
     /// `fs/list`: the folders in `path`, or the places to start from when it names none.
     pub(crate) fn list(&self, caller: &Caller, params: &Value) -> Outcome {
-        let roots = self.roots_of(caller, true);
+        let free = caller.may(super::Grant::Files);
+        let roots = self.browse_roots(caller);
         let hidden = params.get("hidden") == Some(&Value::Bool(true));
         let files = params.get("files") == Some(&Value::Bool(true));
         let Some(asked) = text_param(params, "path")? else {
             let places: Vec<Value> = roots
                 .iter()
-                .map(|root| json!({"name": shown_name(root), "path": text_of(root), "dir": true}))
+                .map(|root| json!({"name": visible_name(&shown_name(root)), "path": text_of(root), "dir": true}))
                 .collect();
             return Ok(json!({"path": null, "entries": places, "more": false}));
         };
-        let path = confined(asked, &roots)?;
+        let path = if free {
+            // The grant is the only gate: what this account can list, anywhere, a share included.
+            if !Path::new(asked).is_absolute() {
+                return Err(bad("a path must be absolute: it starts at a drive or at /"));
+            }
+            fs::canonicalize(asked).map(plain).map_err(|_| {
+                (
+                    super::NOT_FOUND,
+                    "there is no folder at that path, or this account cannot see it".to_owned(),
+                )
+            })?
+        } else {
+            confined(asked, &roots)?
+        };
         let metadata = fs::metadata(&path).map_err(|_| not_found())?;
         if !metadata.is_dir() {
-            return Err(bad("that is not a folder"));
+            return Err(bad("that is a file, not a folder: read it instead"));
         }
-        let reader = fs::read_dir(&path).map_err(|_| not_found())?;
+        let reader = fs::read_dir(&path)
+            .map_err(|error| refused(&format!("this account cannot list that folder: {error}")))?;
         let mut entries: Vec<(String, bool, PathBuf)> = Vec::new();
         let mut more = false;
         for entry in reader.flatten() {
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            if !listable(&name) || (!hidden && name.starts_with('.')) {
+            if name.is_empty() || (!hidden && name.starts_with('.')) {
                 continue;
             }
-            // What a link points to counts, so a link out of the roots is not listed.
             let target = entry.path();
+            // What a link points to counts: a key held to some places is not shown a link out of them.
             let Ok(resolved) = fs::canonicalize(&target).map(plain) else {
                 continue;
             };
-            if !roots.iter().any(|root| resolved.starts_with(root)) {
+            if !free && !roots.iter().any(|root| resolved.starts_with(root)) {
                 continue;
             }
             let Ok(kind) = fs::metadata(&resolved) else {
@@ -235,7 +273,7 @@ impl Files {
         let parent = path
             .parent()
             .map(Path::to_path_buf)
-            .filter(|parent| roots.iter().any(|root| parent.starts_with(root)))
+            .filter(|parent| free || roots.iter().any(|root| parent.starts_with(root)))
             .map(|parent| Value::String(text_of(&parent)))
             .unwrap_or(Value::Null);
         Ok(json!({
@@ -243,9 +281,91 @@ impl Files {
             "parent": parent,
             "entries": entries
                 .iter()
-                .map(|(name, dir, resolved)| json!({"name": name, "path": text_of(resolved), "dir": dir}))
+                .map(|(name, dir, resolved)| json!({"name": visible_name(name), "path": text_of(resolved), "dir": dir}))
                 .collect::<Vec<_>>(),
             "more": more,
+        }))
+    }
+
+    /// `fs/read`: the start of one file, for a preview. See [`DEFAULT_READ_BYTES`] for the size.
+    ///
+    /// A key holding `files` reads what this computer's account can read, anywhere: the grant is the only gate. What is refused is
+    /// what would hurt the person who asked, and the answer says why: a path or a link into a network share (Windows would send
+    /// this computer's login to its server), and anything that is not a regular file (opening a pipe waits for ever).
+    pub(crate) fn read(&self, params: &Value) -> Outcome {
+        let asked =
+            text_param(params, "path")?.ok_or_else(|| bad("a path is needed: the file to read"))?;
+        let limit = match params.get("max_bytes") {
+            None | Some(Value::Null) => DEFAULT_READ_BYTES,
+            Some(value) => value
+                .as_u64()
+                .filter(|bytes| *bytes > 0)
+                .ok_or_else(|| bad("max_bytes is a whole number of bytes above zero"))?
+                .min(MAX_READ_BYTES),
+        };
+        let path = Path::new(asked);
+        if !path.is_absolute() {
+            return Err(bad("a path must be absolute: it starts at a drive or at /"));
+        }
+        let missing = || {
+            (
+                super::NOT_FOUND,
+                "there is no file at that path, or this account cannot see it".to_owned(),
+            )
+        };
+        let path = fs::canonicalize(path).map(plain).map_err(|_| missing())?;
+        let metadata = fs::metadata(&path).map_err(|_| missing())?;
+        if metadata.is_dir() {
+            return Err(bad("that is a folder, not a file: list it instead"));
+        }
+        if !metadata.is_file() {
+            return Err(bad(
+                "that is not a regular file (a pipe, a socket or a device), and reading one can wait for ever, so it is not opened",
+            ));
+        }
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            // Without waiting, in case the name became a pipe since it was looked at.
+            let flags = rustix::fs::OFlags::NONBLOCK.bits();
+            options.custom_flags(
+                i32::try_from(flags).map_err(|_| refused("that file could not be opened"))?,
+            );
+        }
+        let mut file = options
+            .open(&path)
+            .map_err(|error| refused(&format!("this account cannot open that file: {error}")))?;
+        let opened = file
+            .metadata()
+            .map_err(|error| refused(&format!("that file could not be inspected: {error}")))?;
+        if !opened.is_file() {
+            return Err(bad(
+                "that is not a regular file any more, so it is not read",
+            ));
+        }
+        let mut bytes = Vec::new();
+        std::io::Read::take(&mut file, limit)
+            .read_to_end(&mut bytes)
+            .map_err(|error| refused(&format!("that file could not be read: {error}")))?;
+        let size = opened.len();
+        let truncated = size > bytes.len() as u64;
+        let (kind, mime) = classify(&bytes, truncated);
+        // A cut image shows nothing, so none of it is sent.
+        let data = match kind {
+            "text" => Some(bytes.as_slice()),
+            "image" if !truncated => Some(bytes.as_slice()),
+            _ => None,
+        };
+        Ok(json!({
+            "path": text_of(&path),
+            "name": visible_name(&shown_name(&path)),
+            "size": size,
+            "kind": kind,
+            "mime": mime,
+            "truncated": truncated,
+            "data": data.map(|data| data_encoding::BASE64.encode(data)),
         }))
     }
 
@@ -612,7 +732,10 @@ fn refused(what: &str) -> (i32, String) {
 }
 
 fn not_found() -> (i32, String) {
-    (super::NOT_FOUND, "no such folder".to_owned())
+    (
+        super::NOT_FOUND,
+        "there is no folder at that path that this key may list".to_owned(),
+    )
 }
 
 fn section_of(params: &Value) -> Result<&str, (i32, String)> {
@@ -670,12 +793,46 @@ fn file_name_of(name: &str) -> String {
     }
 }
 
-/// Whether a directory entry's name may be shown: no control or bidirectional characters.
-fn listable(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|c| !c.is_control() && !crate::store::text::hides_text(c))
+/// What the first bytes of a file are: `text` (valid UTF-8, with no zero byte, allowing a character cut off by the end of what
+/// was read), an `image` a page can draw (PNG, JPEG, GIF, WebP; never SVG, which can carry script), or `binary`; and the
+/// image's media type.
+fn classify(bytes: &[u8], truncated: bool) -> (&'static str, Option<&'static str>) {
+    let image = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    };
+    if let Some(mime) = image {
+        return ("image", Some(mime));
+    }
+    if bytes.contains(&0) {
+        return ("binary", None);
+    }
+    match core::str::from_utf8(bytes) {
+        Ok(_) => ("text", None),
+        Err(error) if truncated && error.error_len().is_none() => ("text", None),
+        Err(_) => ("binary", None),
+    }
+}
+
+/// `name` with each control, bidirectional or invisible character shown as `<U+XXXX>`: every name is listed, and none can pass for
+/// another.
+fn visible_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c.is_control() || crate::store::text::hides_text(c) {
+            out.push_str(&format!("<U+{:04X}>", u32::from(c)));
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Whether `text` opens with `\` or `//`: a network share, a verbatim path or a device path, which a filesystem call would open.
@@ -687,10 +844,6 @@ pub(crate) fn network_path(text: &str) -> bool {
 /// `asked` resolved, when it is plain and under one of `roots`.
 fn confined(asked: &str, roots: &[PathBuf]) -> Result<PathBuf, (i32, String)> {
     let path = Path::new(asked);
-    // A network share, a verbatim or a device path is refused by its text, before anything opens it.
-    if network_path(asked) {
-        return Err(bad("that is a network, verbatim or device path"));
-    }
     if !roots.iter().any(|root| text_under(asked, root)) {
         return Err(not_found());
     }
@@ -701,7 +854,9 @@ fn confined(asked: &str, roots: &[PathBuf]) -> Result<PathBuf, (i32, String)> {
         || asked.split(['/', '\\']).any(|segment| segment == "..")
         || asked.chars().any(char::is_control)
     {
-        return Err(bad("path is absolute and plain"));
+        return Err(bad(
+            "a path must be absolute, with no `.` or `..` and no control character",
+        ));
     }
     let resolved = fs::canonicalize(path).map(plain).map_err(|_| not_found())?;
     if roots.iter().any(|root| resolved.starts_with(root)) {

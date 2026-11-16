@@ -857,7 +857,7 @@ fn a_canoa_cfg_that_is_a_link_is_written_through_to_its_target() {
 }
 
 #[test]
-fn a_network_or_device_path_is_refused_by_its_text() {
+fn a_key_kept_to_some_places_lists_nothing_outside_them() {
     let tmp = dir("unc");
     let control = control(Files::new(
         Some(tmp.clone()),
@@ -867,7 +867,7 @@ fn a_network_or_device_path_is_refused_by_its_text() {
         UploadLimits::default(),
     ));
     let who = key("sha256:aa", &[Grant::Folders]);
-    // Refused by their text, with their own answer, not as a path that is merely absent.
+    // A key kept to some places is shown nothing outside them, a share and a device path included.
     for path in [
         r"\\attacker\share",
         r"//attacker/share",
@@ -876,13 +876,7 @@ fn a_network_or_device_path_is_refused_by_its_text() {
         r"\??\UNC\attacker\share",
     ] {
         let answer = ask(&control, &who, "fs/list", json!({"path": path}));
-        assert_eq!(answer["error"]["code"], BAD_PARAMS, "{path}: {answer}");
-        assert!(
-            answer["error"]["message"]
-                .as_str()
-                .is_some_and(|m| m.contains("network")),
-            "{answer}"
-        );
+        assert_eq!(answer["error"]["code"], NOT_FOUND, "{path}: {answer}");
     }
     for path in ["/etc", r"C:\Windows"] {
         let answer = ask(&control, &who, "fs/list", json!({"path": path}));

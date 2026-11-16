@@ -106,12 +106,15 @@ pub enum Grant {
     /// `usage/summary` and `usage/limits`: what the agents on this host spent, by account, harness, model and session, and the
     /// allowances they last reported. It reads the host's records and changes nothing; a delegated child connection never holds it.
     Usage,
+    /// `fs/read`, and with `folders` an `fs/list` not kept to any place: this computer's files as the account the host runs as can
+    /// read them. The grant is the only gate.
+    Files,
 }
 
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 16] {
+    pub fn all() -> [Self; 17] {
         [
             Self::LedgerRead,
             Self::LedgerWrite,
@@ -129,6 +132,7 @@ impl Grant {
             Self::Accounts,
             Self::Discover,
             Self::Usage,
+            Self::Files,
         ]
     }
 
@@ -152,6 +156,7 @@ impl Grant {
             Self::Accounts => "accounts",
             Self::Discover => "discover",
             Self::Usage => "usage",
+            Self::Files => "files",
         }
     }
 
@@ -521,6 +526,10 @@ impl Control {
         fs::rename(&beside, path).map_err(|error| error.to_string())
     }
 
+    fn fs_read(&self, caller: &Caller, params: &Value) -> Result<Value, (i32, String)> {
+        allow(caller, Grant::Files).and_then(|()| self.files.read(params))
+    }
+
     /// The answer to one request line.
     pub(crate) fn handle(&self, caller: &Caller, line: &[u8]) -> Option<Vec<u8>> {
         let request: Value = match serde_json::from_slice(line) {
@@ -536,6 +545,7 @@ impl Control {
                 Some("ledger/remove") => self.remove(caller, &params),
                 Some("ledger/clear") => self.clear(caller),
                 Some("peer/forget") => self.forget(caller),
+                Some("fs/read") => self.fs_read(caller, &params),
                 Some("fs/list") => {
                     allow(caller, Grant::Folders).and_then(|()| self.files.list(caller, &params))
                 }

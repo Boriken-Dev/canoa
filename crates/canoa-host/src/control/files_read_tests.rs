@@ -1,0 +1,408 @@
+use std::path::{Path, PathBuf};
+
+use super::files::{Files, MAX_READ_BYTES, UploadLimits};
+use super::*;
+
+fn dir(name: &str) -> PathBuf {
+    static NEXT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!("canoa-read-{name}-{}-{n}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("directory");
+    dir
+}
+
+fn ask(control: &Control, caller: &Caller, method: &str, params: Value) -> Value {
+    let line =
+        serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))
+            .expect("encodes");
+    serde_json::from_slice(&control.handle(caller, &line).expect("answered")).expect("JSON")
+}
+
+fn key(grants: &[Grant]) -> Caller {
+    Caller::Peer {
+        id: "sha256:aa".to_owned(),
+        grants: grants.iter().copied().collect(),
+    }
+}
+
+fn text(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+/// A host that names one working root and a home, and a key that holds `files` alone: the roots are no part of what it may read.
+fn control_over(home: &Path, root: &Path) -> Control {
+    Control::open(
+        None,
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens")
+    .with_files(Files::new(
+        Some(home.to_owned()),
+        vec![EntryRoots {
+            peers: Some(vec!["sha256:aa".to_owned()]),
+            roots: vec![root.to_owned()],
+        }],
+        None,
+        None,
+        UploadLimits::default(),
+    ))
+}
+
+struct Place {
+    tmp: PathBuf,
+    home: PathBuf,
+    work: PathBuf,
+    elsewhere: PathBuf,
+}
+
+fn place(name: &str) -> Place {
+    let tmp = dir(name);
+    let (home, work, elsewhere) = (tmp.join("home"), tmp.join("work"), tmp.join("elsewhere"));
+    for folder in [&home, &work, &elsewhere] {
+        fs::create_dir_all(folder).expect("folder");
+    }
+    Place {
+        tmp,
+        home,
+        work,
+        elsewhere,
+    }
+}
+
+fn reader() -> Caller {
+    key(&[Grant::Files])
+}
+
+fn read(control: &Control, caller: &Caller, path: &Path) -> Value {
+    ask(control, caller, "fs/read", json!({"path": text(path)}))
+}
+
+fn bytes_of(answer: &Value) -> Vec<u8> {
+    data_encoding::BASE64
+        .decode(answer["result"]["data"].as_str().expect("data").as_bytes())
+        .expect("base64")
+}
+
+fn why(answer: &Value) -> String {
+    answer["error"]["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("an error: {answer}"))
+        .to_owned()
+}
+
+#[test]
+fn reading_takes_its_own_grant_and_nothing_else() {
+    let place = place("grant");
+    fs::write(place.work.join("a.txt"), "hello").expect("file");
+    let control = control_over(&place.home, &place.work);
+    for grants in [
+        &[][..],
+        &[Grant::Folders],
+        &[Grant::ConfigRead, Grant::Upload],
+    ] {
+        let answer = read(&control, &key(grants), &place.work.join("a.txt"));
+        assert_eq!(answer["error"]["code"], DENIED, "{answer}");
+    }
+    let granted = read(&control, &reader(), &place.work.join("a.txt"));
+    assert_eq!(granted["result"]["kind"], "text", "{granted}");
+    assert_eq!(Grant::named("files"), Some(Grant::Files));
+    let held = ask(&control, &reader(), "host/grants", json!({}));
+    assert_eq!(held["result"]["grants"], json!(["files"]));
+    let _ = fs::remove_dir_all(&place.tmp);
+}
+
+#[test]
+fn a_key_with_the_grant_reads_what_the_account_can_read_anywhere() {
+    let place = place("anywhere");
+    // Outside every working root and the home, in a dotted folder, and under names an agent would be kept from.
+    let hidden = place.elsewhere.join(".ssh");
+    fs::create_dir_all(&hidden).expect("folder");
+    let files = [
+        (hidden.join("id_rsa"), "private"),
+        (place.elsewhere.join(".env"), "TOKEN=1"),
+        (place.elsewhere.join("server.pem"), "pem"),
+        (place.elsewhere.join("package.json"), "{}"),
+        (place.work.join("canoa.cfg"), "[host]\n"),
+    ];
+    for (path, body) in &files {
+        fs::write(path, body).expect("file");
+    }
+    let control = control_over(&place.home, &place.work);
+    for caller in [reader(), Caller::Owner] {
+        for (path, body) in &files {
+            let answer = read(&control, &caller, path);
+            assert_eq!(bytes_of(&answer), body.as_bytes(), "{path:?}: {answer}");
+        }
+    }
+    // A path that says `..` is still a path.
+    let roundabout = place.work.join("..").join("elsewhere").join(".env");
+    assert_eq!(
+        bytes_of(&read(&control, &reader(), &roundabout)),
+        b"TOKEN=1"
+    );
+    let _ = fs::remove_dir_all(&place.tmp);
+}
+
+#[test]
+fn a_key_reads_text_with_its_size_name_and_kind() {
+    let place = place("text");
+    fs::create_dir_all(place.work.join("src")).expect("folder");
+    let body = "fn main() {}\nunicode: \u{e9}\u{4e2d}\n";
+    fs::write(place.work.join("src").join("main.rs"), body).expect("file");
+    let control = control_over(&place.home, &place.work);
+    let answer = read(&control, &reader(), &place.work.join("src").join("main.rs"));
+    let got = &answer["result"];
+    assert_eq!(got["kind"], "text", "{answer}");
+    assert_eq!(got["name"], "main.rs");
+    assert_eq!(got["size"], body.len());
+    assert_eq!(got["truncated"], false);
+    assert_eq!(bytes_of(&answer), body.as_bytes());
+    let _ = fs::remove_dir_all(&place.tmp);
+}
+
+#[test]
+fn a_refusal_says_why() {
+    let place = place("why");
+    fs::write(place.work.join("in.txt"), "in").expect("file");
+    let control = control_over(&place.home, &place.work);
+    let missing = read(&control, &reader(), &place.work.join("nothing.txt"));
+    assert_eq!(missing["error"]["code"], NOT_FOUND, "{missing}");
+    assert!(why(&missing).contains("no file"), "{missing}");
+    let relative = ask(&control, &reader(), "fs/read", json!({"path": "in.txt"}));
+    assert_eq!(relative["error"]["code"], BAD_PARAMS, "{relative}");
+    assert!(why(&relative).contains("absolute"), "{relative}");
+    let none = ask(&control, &reader(), "fs/read", json!({}));
+    assert_eq!(none["error"]["code"], BAD_PARAMS, "{none}");
+    assert!(why(&none).contains("path"), "{none}");
+    let folder = read(&control, &reader(), &place.work);
+    assert_eq!(folder["error"]["code"], BAD_PARAMS, "{folder}");
+    assert!(why(&folder).contains("folder"), "{folder}");
+    let _ = fs::remove_dir_all(&place.tmp);
+}
+
+#[test]
+fn a_read_stops_at_the_limit_and_says_so() {
+    let place = place("limit");
+    fs::write(place.work.join("big.txt"), vec![b'a'; 2000]).expect("file");
+    let control = control_over(&place.home, &place.work);
+    let big_path = text(&place.work.join("big.txt"));
+    let cut = ask(
+        &control,
+        &reader(),
+        "fs/read",
+        json!({"path": big_path, "max_bytes": 100}),
+    );
+    assert_eq!(cut["result"]["truncated"], true, "{cut}");
+    assert_eq!(cut["result"]["size"], 2000);
+    assert_eq!(bytes_of(&cut).len(), 100);
+    let whole = read(&control, &reader(), &place.work.join("big.txt"));
+    assert_eq!(whole["result"]["truncated"], false, "{whole}");
+    assert_eq!(bytes_of(&whole).len(), 2000);
+    // A request cannot ask for more than the host answers with, or for nothing.
+    let huge = vec![b'b'; usize::try_from(MAX_READ_BYTES).expect("fits") + 10];
+    fs::write(place.work.join("huge.txt"), &huge).expect("file");
+    let capped = ask(
+        &control,
+        &reader(),
+        "fs/read",
+        json!({"path": text(&place.work.join("huge.txt")), "max_bytes": u64::MAX}),
+    );
+    assert_eq!(capped["result"]["truncated"], true, "{capped}");
+    assert_eq!(bytes_of(&capped).len() as u64, MAX_READ_BYTES);
+    for bad in [json!(0), json!(-1), json!("9"), json!(1.5)] {
+        let answer = ask(
+            &control,
+            &reader(),
+            "fs/read",
+            json!({"path": big_path, "max_bytes": bad}),
+        );
+        assert_eq!(answer["error"]["code"], BAD_PARAMS, "{bad}: {answer}");
+        assert!(why(&answer).contains("max_bytes"), "{answer}");
+    }
+    let _ = fs::remove_dir_all(&place.tmp);
+}
+
+#[test]
+fn a_cut_character_is_still_text_and_an_image_is_whole_or_not_sent() {
+    let place = place("kinds");
+    fs::write(place.work.join("e.txt"), "\u{e9}\u{e9}\u{e9}").expect("file");
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend_from_slice(&[0; 40]);
+    fs::write(place.work.join("p.png"), &png).expect("file");
+    fs::write(place.work.join("b.bin"), [1u8, 2, 0, 3]).expect("file");
+    fs::write(place.work.join("bad.txt"), [0xffu8, 0xfe, b'a']).expect("file");
+    fs::write(place.work.join("i.svg"), "<svg onload=\"x()\"></svg>").expect("file");
+    let control = control_over(&place.home, &place.work);
+    let ask_of = |name: &str, max: u64| {
+        ask(
+            &control,
+            &reader(),
+            "fs/read",
+            json!({"path": text(&place.work.join(name)), "max_bytes": max}),
+        )
+    };
+    let cut = ask_of("e.txt", 3);
+    assert_eq!(cut["result"]["kind"], "text", "{cut}");
+    assert_eq!(cut["result"]["truncated"], true);
+    let image = ask_of("p.png", 1000);
+    assert_eq!(image["result"]["kind"], "image", "{image}");
+    assert_eq!(image["result"]["mime"], "image/png");
+    assert_eq!(bytes_of(&image), png);
+    let cut_image = ask_of("p.png", 20);
+    assert_eq!(cut_image["result"]["kind"], "image");
+    assert_eq!(cut_image["result"]["truncated"], true);
+    assert!(cut_image["result"]["data"].is_null(), "{cut_image}");
+    for name in ["b.bin", "bad.txt"] {
+        let answer = ask_of(name, 1000);
+        assert_eq!(answer["result"]["kind"], "binary", "{answer}");
+        assert!(answer["result"]["data"].is_null());
+    }
+    // SVG is text, never an image to draw: it can carry script.
+    let svg = ask_of("i.svg", 1000);
+    assert_eq!(svg["result"]["kind"], "text", "{svg}");
+    let _ = fs::remove_dir_all(&place.tmp);
+}
+
+/// A pipe is not a file, and opening one for reading would wait for a writer.
+#[cfg(unix)]
+#[test]
+fn a_named_pipe_is_refused_and_never_waited_on() {
+    let place = place("fifo");
+    let pipe = place.work.join("pipe");
+    let made = std::process::Command::new("mkfifo")
+        .arg(&pipe)
+        .status()
+        .expect("mkfifo runs");
+    assert!(made.success());
+    let control = control_over(&place.home, &place.work);
+    let answer = read(&control, &reader(), &pipe);
+    assert_eq!(answer["error"]["code"], BAD_PARAMS, "{answer}");
+    assert!(why(&answer).contains("not a regular file"), "{answer}");
+    let _ = fs::remove_dir_all(&place.tmp);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_device_is_not_read() {
+    let place = place("device");
+    let control = control_over(&place.home, &place.work);
+    for device in ["/dev/zero", "/dev/null"] {
+        let answer = read(&control, &reader(), Path::new(device));
+        assert_eq!(answer["error"]["code"], BAD_PARAMS, "{device}: {answer}");
+        assert!(why(&answer).contains("not a regular file"), "{answer}");
+    }
+    let _ = fs::remove_dir_all(&place.tmp);
+}
+
+/// A link made where the platform lets this user make one.
+fn link(target: &Path, at: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, at).is_ok()
+    }
+    #[cfg(windows)]
+    {
+        if target.is_dir() {
+            std::os::windows::fs::symlink_dir(target, at).is_ok()
+        } else {
+            std::os::windows::fs::symlink_file(target, at).is_ok()
+        }
+    }
+}
+
+#[test]
+fn a_link_is_followed_wherever_it_goes() {
+    let place = place("links");
+    fs::write(place.elsewhere.join("secret.txt"), "there").expect("file");
+    let (out, dir_out) = (place.work.join("out.txt"), place.work.join("outdir"));
+    assert!(
+        link(&place.elsewhere.join("secret.txt"), &out),
+        "this platform makes no links, which these tests need"
+    );
+    assert!(link(&place.elsewhere, &dir_out));
+    let control = control_over(&place.home, &place.work);
+    assert_eq!(bytes_of(&read(&control, &reader(), &out)), b"there");
+    let through = read(&control, &reader(), &dir_out.join("secret.txt"));
+    assert_eq!(bytes_of(&through), b"there", "{through}");
+    let _ = fs::remove_dir_all(&place.tmp);
+}
+
+fn names(answer: &Value) -> Vec<String> {
+    answer["result"]["entries"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{answer}"))
+        .iter()
+        .map(|entry| entry["name"].as_str().expect("a name").to_owned())
+        .collect()
+}
+
+#[test]
+fn a_key_with_the_grant_lists_anywhere_and_starts_from_the_home() {
+    let place = place("list");
+    fs::create_dir_all(place.elsewhere.join("deep")).expect("folder");
+    fs::write(place.elsewhere.join("a.txt"), "a").expect("file");
+    fs::write(place.elsewhere.join(".dot"), "d").expect("file");
+    let control = control_over(&place.home, &place.work);
+    let lister = key(&[Grant::Files, Grant::Folders]);
+    let listed = ask(
+        &control,
+        &lister,
+        "fs/list",
+        json!({"path": text(&place.elsewhere), "files": true, "hidden": true}),
+    );
+    assert_eq!(names(&listed), ["deep", ".dot", "a.txt"], "{listed}");
+    // The parent of a place is offered wherever it is.
+    assert_eq!(listed["result"]["parent"], text(&place.tmp), "{listed}");
+    let places = ask(&control, &lister, "fs/list", json!({}));
+    let first = places["result"]["entries"][0]["path"]
+        .as_str()
+        .expect("a path");
+    assert!(Path::new(first).ends_with("home"), "{places}");
+    // A key with `folders` alone is still kept to the home and its working roots.
+    let only_folders = key(&[Grant::Folders]);
+    let outside = ask(
+        &control,
+        &only_folders,
+        "fs/list",
+        json!({"path": text(&place.elsewhere)}),
+    );
+    assert_eq!(outside["error"]["code"], NOT_FOUND, "{outside}");
+    let relative = ask(&control, &lister, "fs/list", json!({"path": "elsewhere"}));
+    assert!(why(&relative).contains("absolute"), "{relative}");
+    let a_file = ask(
+        &control,
+        &lister,
+        "fs/list",
+        json!({"path": text(&place.elsewhere.join("a.txt"))}),
+    );
+    assert!(why(&a_file).contains("file"), "{a_file}");
+    let _ = fs::remove_dir_all(&place.tmp);
+}
+
+/// A name with a direction mark or a control character is listed, shown as what it is, and its path still opens it.
+#[cfg(unix)]
+#[test]
+fn every_name_is_listed_with_what_hides_in_it_shown() {
+    let place = place("names");
+    let odd = place.work.join("a\u{202e}txt.exe");
+    fs::write(&odd, "x").expect("file");
+    let control = control_over(&place.home, &place.work);
+    let lister = key(&[Grant::Files, Grant::Folders]);
+    let listed = ask(
+        &control,
+        &lister,
+        "fs/list",
+        json!({"path": text(&place.work), "files": true}),
+    );
+    assert_eq!(names(&listed), ["a<U+202E>txt.exe"], "{listed}");
+    let path = listed["result"]["entries"][0]["path"]
+        .as_str()
+        .expect("a path");
+    let read = read(&control, &reader(), Path::new(path));
+    assert_eq!(read["result"]["name"], "a<U+202E>txt.exe", "{read}");
+    assert_eq!(bytes_of(&read), b"x");
+    let _ = fs::remove_dir_all(&place.tmp);
+}
