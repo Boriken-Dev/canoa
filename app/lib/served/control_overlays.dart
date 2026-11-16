@@ -17,10 +17,22 @@ import '../profile/skill_copies.dart';
 ///
 /// [installed] answers from what [refresh] last read, since a page cannot read the host's disk in a call that is not a request.
 /// Skills fetched from elsewhere are not part of it: the host fetches none for a page.
+///
+/// A desktop app, whose host shares its disk, passes [local]: the same work is then done by the host while it is up, and by
+/// [local] while it is not, and what only this computer's files answer ([installed], [directoryOf], the skills) is [local]'s.
 final class ControlOverlayManager implements OverlayManager {
-  ControlOverlayManager(this._control, {this.root = 'overlays'});
+  ControlOverlayManager(this._control, {this.root = 'overlays', this.local, this.hostUp});
 
   final HostControl _control;
+
+  /// The manager that reads this computer's own disk, for a desktop; none for a page.
+  final OverlayManager? local;
+
+  /// Whether the host answers now; absent means it does. While it does not, [local] does the work.
+  final bool Function()? hostUp;
+
+  /// The manager to use for the host's work: [local] while the host is down, else null.
+  OverlayManager? get _instead => (hostUp?.call() ?? true) ? null : local;
 
   /// Where the host keeps overlays, as it said; only for showing.
   final String root;
@@ -58,13 +70,14 @@ final class ControlOverlayManager implements OverlayManager {
   }
 
   @override
-  InstalledOverlay? installed(String name) => _installed[name];
+  InstalledOverlay? installed(String name) => local?.installed(name) ?? _installed[name];
 
   @override
-  String directoryOf(String name) => '$root/$name';
+  String directoryOf(String name) => local?.directoryOf(name) ?? '$root/$name';
 
   @override
   Future<OverlayUpdate> check(String name, GitOverlay given) async {
+    if (_instead case final other?) return other.check(name, given);
     final answer = await _call('overlay/check', {
       'name': name,
       ..._sourceOf(given),
@@ -96,6 +109,7 @@ final class ControlOverlayManager implements OverlayManager {
 
   @override
   Future<InstalledOverlay> apply(OverlayUpdate update, {String? catalog}) async {
+    if (_instead case final other?) return other.apply(update, catalog: catalog);
     final answer = await _call('overlay/apply', {'token': _planOf(update), 'catalog': ?catalog});
     final record = InstalledOverlay.fromJson(update.name, answer.cast<String, dynamic>());
     _installed[update.name] = record;
@@ -104,12 +118,14 @@ final class ControlOverlayManager implements OverlayManager {
 
   @override
   Future<void> remove(String name) async {
+    if (_instead case final other?) return other.remove(name);
     await _call('overlay/remove', {'name': name});
     _installed.remove(name);
   }
 
   @override
   Future<Map<String, List<int>>> read(OverlayUpdate update) async {
+    if (_instead case final other?) return other.read(update);
     final answer = await _call('overlay/read', {'token': _planOf(update)});
     return {
       for (final MapEntry(:key, :value) in (answer['files'] as Map<Object?, Object?>).entries) '$key': base64Decode('$value'),
@@ -118,32 +134,37 @@ final class ControlOverlayManager implements OverlayManager {
 
   @override
   Future<void> discard(String name) async {
+    if (_instead case final other?) return other.discard(name);
     await _call('overlay/discard', {'name': name});
   }
 
   @override
   Future<FetchedTree> fetchCatalog(String label, GitOverlay source) async {
+    if (_instead case final other?) return other.fetchCatalog(label, source);
     final answer = await _call('catalog/fetch', {'label': label, ..._sourceOf(source)});
     return _RemoteTree(this, label, answer['commit']! as String);
   }
 
   @override
   Future<void> removeCatalog(String label) async {
+    if (_instead case final other?) return other.removeCatalog(label);
     await _call('catalog/remove', {'label': label});
   }
 
   @override
-  Future<Map<String, SkillCopy>> skillCopies() async => const {};
+  Future<Map<String, SkillCopy>> skillCopies() async => local?.skillCopies() ?? const {};
 
   @override
   Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source) =>
-      throw const OverlayException('This host fetches no skills for a web page');
+      local?.fetchSkillFiles(source) ?? (throw const OverlayException('This host fetches no skills for a web page'));
 
   @override
-  Future<void> saveSkill(SkillCopy copy) => throw const OverlayException('This host keeps no skills for a web page');
+  Future<void> saveSkill(SkillCopy copy) =>
+      local?.saveSkill(copy) ?? (throw const OverlayException('This host keeps no skills for a web page'));
 
   @override
-  Future<void> removeSkill(String name) => throw const OverlayException('This host keeps no skills for a web page');
+  Future<void> removeSkill(String name) =>
+      local?.removeSkill(name) ?? (throw const OverlayException('This host keeps no skills for a web page'));
 
   static Map<String, Object?> _sourceOf(GitOverlay source) => {
     'repo': source.repo,

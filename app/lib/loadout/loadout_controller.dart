@@ -361,7 +361,7 @@ class LoadoutController extends ChangeNotifier {
   /// A git registry's one page: the list file at the ref's commit.
   Future<McpRegistryPage> _readGitRegistry(String address) async {
     final home = this.home;
-    if (home == null) throw const RegistryRefusal('A git registry is read by the desktop app');
+    if (home == null) throw const RegistryRefusal('A git registry is read through the host, and this app has none');
     final source = gitRegistrySource(address);
     final FetchedTree tree;
     try {
@@ -381,7 +381,7 @@ class LoadoutController extends ChangeNotifier {
     final read = fetch;
     final git = isGitRegistry(selectedRegistry);
     if (read == null && !git) {
-      registryProblem = 'Registries are read by the desktop app';
+      registryProblem = 'Registries are read through the host, and this app has none';
       registryRead = true;
       notifyListeners();
       return;

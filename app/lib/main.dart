@@ -80,6 +80,8 @@ import 'permissions/protected_paths.dart' show ProtectedPaths;
 import 'permissions/real_path.dart';
 import 'permissions/rule_log.dart';
 import 'profile/profile_home.dart' show ProfileHome;
+import 'served/control_overlays.dart' show ControlOverlayManager;
+import 'store/control_data.dart';
 import 'profile/profile_home_platform.dart';
 import 'acp/usage_wire.dart' show ProfileApprover, noApproval;
 import 'profile/approval_dialog.dart';
@@ -642,7 +644,27 @@ class _CanoaAppState extends State<CanoaApp> {
   }.toList();
 
   /// Where overlays install and catalogs are fetched: the host that served this page, else beside canoa.cfg.
-  ProfileHome? get _home => widget.served?.home ?? platformProfileHome(configPath: _configPath);
+  ProfileHome? get _home => widget.served?.home ?? _desktopHome();
+
+  ProfileHome? _desktopHomeHeld;
+  String? _desktopHomeFor;
+
+  /// Beside canoa.cfg, with the overlay and catalog work done by this app's host while it is up and by git here while it is not.
+  ProfileHome? _desktopHome() {
+    final path = _configPath;
+    if (_desktopHomeFor == path && _desktopHomeHeld != null) return _desktopHomeHeld;
+    final control = _control;
+    final home = platformProfileHome(
+      configPath: path,
+      overlays: control == null ? null : (local) => ControlOverlayManager(control, local: local, hostUp: () => _hostUp),
+    );
+    _desktopHomeFor = path;
+    return _desktopHomeHeld = home;
+  }
+
+  /// Whether the host answers: the one that served this page, or this app's own once it runs.
+  bool get _hostUp =>
+      widget.served != null || (widget.host != null && (widget.host!.phase == HostPhase.running || widget.host!.phase == HostPhase.idle));
 
   /// Shows the Store: agents, overlays, skills and MCP servers, installed and to discover.
   Future<void> _showLoadout() async {
@@ -682,14 +704,19 @@ class _CanoaAppState extends State<CanoaApp> {
     key: _loadoutKey,
     embedded: true,
     selection: _storeSelection,
-    contentsStorage: platformContentsStorage(_home?.configDir),
+    contentsStorage: _control == null
+        ? platformContentsStorage(_home?.configDir)
+        : ControlContentsStorage(_control, direct: platformContentsStorage(_home?.configDir), hostUp: () => _hostUp),
     config: config,
     home: _home,
     onSave: _saveLoadout,
     agents: _profileAgents,
     programs: _programs,
-    fetchRegistry: kIsWeb ? null : fetchRegistry,
-    findProgram: findProgram,
+    // The host reads registries and looks programs up; the page never does, and a desktop whose host is down reads them itself.
+    fetchRegistry: _control == null
+        ? (kIsWeb ? null : fetchRegistry)
+        : controlRegistryFetch(_control, direct: kIsWeb ? null : fetchRegistry, hostUp: () => _hostUp),
+    findProgram: _control == null ? findProgram : controlFindProgram(_control, direct: kIsWeb ? null : findProgram, hostUp: () => _hostUp),
     index: ControlStoreIndex.over(_control)?.catalogs,
   );
 

@@ -12,12 +12,15 @@ import 'profile_home.dart';
 import 'project_trust.dart';
 
 /// The profile home beside canoa.cfg at [configPath]: overlays in `overlays/`, trusted projects in `trust.json`.
-ProfileHome? platformProfileHome({String? configPath}) =>
-    configPath == null ? null : IoProfileHome(File(configPath).parent.path);
+///
+/// [overlays] wraps the store that works on this computer's disk, for a host that does the same work: the app gives it the
+/// control-backed manager over that store.
+ProfileHome? platformProfileHome({String? configPath, OverlayManager Function(OverlayManager local)? overlays}) =>
+    configPath == null ? null : IoProfileHome(File(configPath).parent.path, wrap: overlays);
 
 final class IoProfileHome implements ProfileHome {
-  IoProfileHome(this.configDir, {String git = 'git'})
-      : overlays = OverlayStore('$configDir${Platform.pathSeparator}overlays', git: git) {
+  IoProfileHome(this.configDir, {String git = 'git', OverlayManager Function(OverlayManager local)? wrap})
+      : overlays = _overlaysOf('$configDir${Platform.pathSeparator}overlays', git, wrap) {
     final record = File('$configDir${Platform.pathSeparator}trust.json');
     trust = ProjectTrust(
       read: () async => record.existsSync() ? record.readAsString() : null,
@@ -29,6 +32,11 @@ final class IoProfileHome implements ProfileHome {
       },
       caseInsensitive: Platform.isWindows || Platform.isMacOS,
     );
+  }
+
+  static OverlayManager _overlaysOf(String root, String git, OverlayManager Function(OverlayManager local)? wrap) {
+    final store = OverlayStore(root, git: git);
+    return wrap == null ? store : wrap(store);
   }
 
   @override
