@@ -143,8 +143,9 @@ final class SecretShowPrompt extends SecretPrompt {
 
   @override
   void cancel() {
-    if (!ready.isCompleted)
+    if (!ready.isCompleted) {
       ready.complete(const AcpSecretShowOpened.cancelled());
+    }
     if (!done.isCompleted) done.complete(false);
   }
 }
@@ -440,8 +441,9 @@ final class _Policy implements model.PermissionPolicy {
     // What another instance revoked since the file was read stops applying before this request is matched, and a file that could
     // not be read earlier is tried again. A read that waits too long applies no rule: the request is asked.
     final rules = store.rules;
-    if (rules != null && (rules.rules.isNotEmpty || rules.problem != null))
+    if (rules != null && (rules.rules.isNotEmpty || rules.problem != null)) {
       await rules.refresh();
+    }
   }
 
   @override
@@ -631,8 +633,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (same && _asking.contains(key)) return;
     if (same &&
         held != null &&
-        DateTime.now().difference(held.fetchedAt) < choicesLife)
+        DateTime.now().difference(held.fetchedAt) < choicesLife) {
       return;
+    }
     _askedAs[key] = as;
     final mine = _asks[key] = (_asks[key] ?? 0) + 1;
     _asking.add(key);
@@ -719,8 +722,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   int get waiting => _sessions.where((session) => session.needsYou).length;
 
   void _needs(ChatSession session, AttentionKind kind) {
-    if (kind == AttentionKind.finished && session.id != _selectedId)
+    if (kind == AttentionKind.finished && session.id != _selectedId) {
       session.unread = true;
+    }
     if (!_attention.isClosed) _attention.add((session, kind));
   }
 
@@ -764,7 +768,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     } else {
       chat.presetBypass(false);
       final option = modeOptionIn(optionsOf(session));
-      if (option != null)
+      if (option != null) {
         chat.holdChoice(
           PendingChoice(
             option.id,
@@ -773,6 +777,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
             byPerson: true,
           ),
         );
+      }
     }
     _keepDraft(session);
   }
@@ -858,7 +863,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   final Map<String, StreamSubscription<model.ChatEvent>> _eventSubscriptions =
       {};
   final Map<String, StreamSubscription<DelegateNotice>> _taskSubscriptions = {};
-  final Map<String, StreamSubscription<AcpSessionUpdate>> _contextSubscriptions = {};
+  final Map<String, StreamSubscription<AcpSessionUpdate>>
+  _contextSubscriptions = {};
   int _nextId = 0;
   String? _selectedId;
 
@@ -936,8 +942,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     chat.agentModeIsChosen = false;
     chat.modeLabel = (choice) => choiceLabel(OptionRole.mode, choice);
     _eventSubscriptions[session.id] = chat.events.listen((event) {
-      if (event is TurnEvent)
+      if (event is TurnEvent) {
         _turnEnded(session, event.turn.outcome ?? TurnOutcome.completed);
+      }
     });
   }
 
@@ -1059,8 +1066,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (asked == null ||
         choices == null ||
         choices.cacheLifetime == null ||
-        choices.offersCache(asked))
+        choices.offersCache(asked)) {
       return null;
+    }
     return asked;
   }
 
@@ -1130,8 +1138,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           ..loadout = defaultLoadout ? null : loadout
           ..overlays = null;
       }
-      if (overlays != null || allOverlays)
+      if (overlays != null || allOverlays) {
         session.overlays = allOverlays ? null : overlays;
+      }
     }
     _keepDraft(session);
     notifyListeners();
@@ -1249,8 +1258,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     Uri? websocketFallback,
     String? method,
   }) {
-    if (!_sessions.contains(draft) || !draft.isDraft)
+    if (!_sessions.contains(draft) || !draft.isDraft) {
       throw StateError('The session was closed before it started');
+    }
     draft
       ..peerId = client.peerId
       ..remoteSessionId = opened.id
@@ -1348,8 +1358,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       OptionRole.effort,
     ]) {
       if (session.pending.values.any((choice) => choice.role == role) ||
-          (role == OptionRole.mode && session.bypass))
+          (role == OptionRole.mode && session.bypass)) {
         continue;
+      }
       final value =
           hints[role] ??
           (role == OptionRole.mode ? defaultMode : null) ??
@@ -1369,8 +1380,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// Bypass chosen before the agent was known is the agent's own, once it turns out to have one that asks for nothing.
   void _resolveBypass(ChatSession session) {
-    if (!session.bypass || !session.bypassBeforeAgent || session.isDraft)
+    if (!session.bypass || !session.bypassBeforeAgent || session.isDraft) {
       return;
+    }
     session.bypassBeforeAgent = false;
     final option = modeOptionIn(session.options);
     final native = modeEntries(
@@ -1388,12 +1400,15 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// person's to send again; a start that fails says why in the conversation and leaves the draft as it was.
   Future<void> _startThenDeliver(ChatSession session, String text) async {
     final starter = this.starter;
-    if (starter == null)
+    if (starter == null) {
       throw StateError('This app cannot start an agent here');
-    if (session.status != SessionStatus.draft)
+    }
+    if (session.status != SessionStatus.draft) {
       throw StateError('It is starting already');
-    if (session.source == null)
+    }
+    if (session.source == null) {
       throw StateError('Choose where its agent comes from first');
+    }
     session.status = SessionStatus.connecting;
     _starting.add(session.id);
     // The conversation shows the message at once; the composer's attachments go with it, and come back if it cannot start.
@@ -1432,16 +1447,18 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           debugPrint(
             'Canoa: ${session.source?.label ?? 'an agent'} was not started: ${reasonOf(error)}',
           );
-          if (_sessions.contains(session))
+          if (_sessions.contains(session)) {
             session.chat.note('Not started: ${reasonOf(error)}');
+          }
         }
         // A tab closed while it connected has nobody to tell.
         if (!_sessions.contains(session)) return;
         rethrow;
       }
       if (!_sessions.contains(session)) return;
-      if (_clients[session.id] == null)
+      if (_clients[session.id] == null) {
         throw StateError('The agent did not start');
+      }
       try {
         await _send(
           session,
@@ -1457,8 +1474,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         // The agent runs, but never took the message: it goes back to the composer with what came with it.
         session.chat.releaseFirst();
         for (final item in taken) {
-          if (!session.attachments.contains(item))
+          if (!session.attachments.contains(item)) {
             session.attachments.add(item);
+          }
         }
         rethrow;
       }
@@ -1482,8 +1500,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     ChatSession? target;
     for (final session in _sessions) {
       if (session.remoteSessionId == remote &&
-          identical(_clients[session.id], from))
+          identical(_clients[session.id], from)) {
         target = session;
+      }
     }
     return target;
   }
@@ -1495,8 +1514,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     VerifiedAgent from,
   ) {
     final target = _sessionOf(request.sessionId, from);
-    if (target == null)
+    if (target == null) {
       return Future.value(const AcpDeny('not a session here'));
+    }
     return target.chat.askPermission(request);
   }
 
@@ -1537,8 +1557,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       return null;
     }
     final session = _sessionOf(remote, from);
-    if (session == null || session.pendingSecrets.length >= maxPendingSecrets)
+    if (session == null || session.pendingSecrets.length >= maxPendingSecrets) {
       return null;
+    }
     identity.verifier.trust(host);
     return (session, host, identity);
   }
@@ -1586,8 +1607,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     VerifiedAgent from,
   ) {
     final target = _secretTarget(open.context.sessionId, from);
-    if (target == null)
+    if (target == null) {
       return Future.value(const AcpSecretShowOpened.cancelled());
+    }
     final prompt = SecretShowPrompt(open, target.$2, identity: target.$3);
     target.$1.pendingSecrets.add(prompt);
     _needs(target.$1, AttentionKind.question);
@@ -1721,14 +1743,16 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (outcome == null ||
         outcome.how != Settlement.answered ||
         outcome.by == model.bypassClient ||
-        answer is! AcpSelect)
+        answer is! AcpSelect) {
       return;
+    }
     if (question.options
             .where((option) => option.optionId == answer.optionId)
             .firstOrNull
             ?.kind !=
-        'allow_always')
+        'allow_always') {
       return;
+    }
     final task = question.task, key = question.allowanceKey;
     if (task != null && key != null) {
       // A task's "always" is the task's: the conversation's own mode and the other tasks are not changed by it.
@@ -1785,18 +1809,22 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     String value,
   ) {
     final store = rules, folder = session.cwd;
-    if (store == null || folder == null || folder.isEmpty)
+    if (store == null || folder == null || folder.isEmpty) {
       return 'There is nowhere to keep a rule.';
-    if (!session.pendingPermissions.contains(question))
+    }
+    if (!session.pendingPermissions.contains(question)) {
       return 'That request is no longer waiting.';
+    }
     final subject = question.subject, kind = question.kind;
     final once = question.options
         .where((option) => option.kind == 'allow_once')
         .firstOrNull;
-    if (subject == null || kind == null || once == null)
+    if (subject == null || kind == null || once == null) {
       return 'No rule can cover this request.';
-    if (store.problem != null)
+    }
+    if (store.problem != null) {
       return 'The rules file cannot be read, so no rule is made: ${store.problem}';
+    }
     final problem =
         store.checkScope(type, value, subject, folder) ??
         store.conflict(folder, type);
@@ -1810,8 +1838,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       type: type,
       value: value,
     );
-    if (rule == null)
+    if (rule == null) {
       return 'Canoa keeps at most ${PermissionRules.maxRules} rules: revoke one in Settings, Permissions first.';
+    }
     session.chat.note(
       'Always allow here: ${rule.describe}, for ${shortLine(session.agent) ?? 'this source'} in $folder. Canoa now '
       'answers a matching request with allow once, without asking you. Settings, Permissions revokes it.',
@@ -1976,8 +2005,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// A turn of [session] ended, stopped or failed. Failing in a session not shown is told to the person.
   void _turnEnded(ChatSession session, TurnOutcome outcome) {
-    if (outcome == TurnOutcome.failed && session.id != _selectedId)
+    if (outcome == TurnOutcome.failed && session.id != _selectedId) {
       session.failed = true;
+    }
     _keepText(session);
     unawaited(refreshGit(session));
   }
@@ -1993,8 +2023,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// A prompt of [session] is about to go: the disk as it is now is what the turn is measured from, and the ledger notes it.
   void _prompting(ChatSession session) {
     _gitBeforeTurn(session);
-    if (session.peerId != null && session.remoteSessionId != null)
+    if (session.peerId != null && session.remoteSessionId != null) {
       ledger?.touch(session.peerId!, session.remoteSessionId!);
+    }
   }
 
   /// The agent took a choice the person made: it is the source's default from now on.
@@ -2028,8 +2059,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         remote == null ||
         peerId == null ||
         session.isDraft ||
-        session.opening)
+        session.opening) {
       return;
+    }
     ledger!.setMode(peerId, remote, mode: mode, bypass: bypass);
   }
 
@@ -2037,8 +2069,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   void _agentChangedMode(ChatSession session, String now) {
     final answered = session.alwaysAnsweredAt;
     if (answered == null ||
-        DateTime.now().difference(answered) >= const Duration(seconds: 30))
+        DateTime.now().difference(answered) >= const Duration(seconds: 30)) {
       return;
+    }
     session.alwaysAnsweredAt = null;
     final label =
         modeEntries(
@@ -2065,7 +2098,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   void _watchContext(ChatSession session, VerifiedAgent client) {
     unawaited(_contextSubscriptions.remove(session.id)?.cancel());
     _contextSubscriptions[session.id] = client.updates.listen((update) {
-      if (update.kind != 'usage_update' || update.sessionId != session.remoteSessionId) return;
+      if (update.kind != 'usage_update' ||
+          update.sessionId != session.remoteSessionId) {
+        return;
+      }
       session.contextKinds = contextKindsOf(update.raw);
       notifyListeners();
     });
@@ -2073,8 +2109,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   void _taskEvent(ChatSession session, DelegateNotice notice) {
     if (notice['sessionId'] != session.remoteSessionId ||
-        !session.tasks.apply(notice, at: clock()))
+        !session.tasks.apply(notice, at: clock())) {
       return;
+    }
     final ended = [
       for (final task in session.tasks.all)
         if (task.phase.ended) task.id,
@@ -2083,8 +2120,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       session.taskAllowances.remove(id);
       // The host gave the task's question up with the task, so a card still waiting for it has nothing to answer.
       for (final question in [...session.pendingPermissions]) {
-        if (question.task?.id == id)
+        if (question.task?.id == id) {
           session.chat.settle(question, const AcpCancel());
+        }
       }
     }
     notifyListeners();
@@ -2166,8 +2204,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (ledger == null ||
         remote == null ||
         peerId == null ||
-        !ledger!.settings.keepText)
+        !ledger!.settings.keepText) {
       return;
+    }
     ledger!.keepText(peerId, remote, [
       for (final message in session.messages)
         if (message.role == MessageRole.user ||
@@ -2202,10 +2241,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         session.place == SessionPlace.browser) {
       return 'This conversation cannot be moved to another account.';
     }
-    if (session.status == SessionStatus.connecting || session.opening)
+    if (session.status == SessionStatus.connecting || session.opening) {
       return 'Wait for the agent to finish starting.';
-    if (session.status == SessionStatus.working)
+    }
+    if (session.status == SessionStatus.working) {
       return 'Wait for the turn to end, or stop it.';
+    }
     if (session.needsYou) return 'Answer what the agent asked first.';
     if (client == null || client.isClosed) return 'The agent is not connected.';
     if (session.remoteSessionId == null ||
@@ -2252,8 +2293,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final oldId = session.remoteSessionId!, cwd = session.cwd!;
     for (final role in const [OptionRole.model, OptionRole.effort]) {
       final option = optionIn(session.options, role);
-      if (option != null && option.current.isNotEmpty)
+      if (option != null && option.current.isNotEmpty) {
         session.chat.holdChoice(PendingChoice(option.id, role, option.current));
+      }
     }
     final keptMode = session.chat.underlyingMode ?? session.chat.mode,
         keptBypass = session.bypass;
@@ -2331,9 +2373,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   }
 
   /// What the person and the agent have said in [session], which is what an agent's own copy of it holds.
-  static List<({MessageRole role, String text})> _spoken(ChatSession session) => [
+  static List<({MessageRole role, String text})> _spoken(
+    ChatSession session,
+  ) => [
     for (final message in session.messages)
-      if (message.role == MessageRole.user || message.role == MessageRole.agent) (role: message.role, text: message.text),
+      if (message.role == MessageRole.user || message.role == MessageRole.agent)
+        (role: message.role, text: message.text),
   ];
 
   /// Why [session] cannot change agent now; null when it can. The conversation moves by the host's export and import, so it
@@ -2341,15 +2386,25 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   String? agentSwitchBlock(ChatSession session) {
     if (session.isDraft) return null;
     final client = _clients[session.id];
-    if (session.status == SessionStatus.preview || session.site != null || session.place != SessionPlace.local) {
+    if (session.status == SessionStatus.preview ||
+        session.site != null ||
+        session.place != SessionPlace.local) {
       return 'Only a conversation with one of this computer\'s own agents can change agent.';
     }
-    if (session.status == SessionStatus.connecting || session.opening) return 'Wait for the agent to finish starting.';
-    if (session.status == SessionStatus.working) return 'Wait for the turn to end, or stop it.';
+    if (session.status == SessionStatus.connecting || session.opening) {
+      return 'Wait for the agent to finish starting.';
+    }
+    if (session.status == SessionStatus.working) {
+      return 'Wait for the turn to end, or stop it.';
+    }
     if (session.needsYou) return 'Answer what the agent asked first.';
     if (client == null || client.isClosed) return 'The agent is not connected.';
-    if (session.remoteSessionId == null || session.cwd == null) return 'The agent has not said where this conversation is.';
-    if (_clients.entries.any((each) => each.key != session.id && identical(each.value, client))) {
+    if (session.remoteSessionId == null || session.cwd == null) {
+      return 'The agent has not said where this conversation is.';
+    }
+    if (_clients.entries.any(
+      (each) => each.key != session.id && identical(each.value, client),
+    )) {
       return 'Another conversation uses the same agent. Close it first.';
     }
     return null;
@@ -2365,11 +2420,16 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     ChatSession session,
     AgentSource target, {
     required Future<MoveReport> Function(ChatSession session, String to) move,
-    required Future<VerifiedAgent> Function(ChatSession session, AgentSource target) start,
+    required Future<VerifiedAgent> Function(
+      ChatSession session,
+      AgentSource target,
+    )
+    start,
   }) async {
     final from = session.agent, fromSource = session.source;
     if (from == target.label) return true;
-    final fromName = fromSource?.displayName ?? from, toName = target.displayName;
+    final fromName = fromSource?.displayName ?? from,
+        toName = target.displayName;
     final block = agentSwitchBlock(session);
     if (block != null) {
       session.chat.note('Agent: not moved to $toName. $block');
@@ -2380,8 +2440,13 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final said = _spoken(session);
     final earlier = session.agentLinks[target.label];
     final unchanged = earlier != null && earlier.said == said.length;
-    final oldEntry = session.peerId == null ? null : ledger?.find(session.peerId!, oldId);
-    final oldPeer = session.peerId, oldAccount = session.account, oldSetup = session.setup, oldProfile = session.profile;
+    final oldEntry = session.peerId == null
+        ? null
+        : ledger?.find(session.peerId!, oldId);
+    final oldPeer = session.peerId,
+        oldAccount = session.account,
+        oldSetup = session.setup,
+        oldProfile = session.profile;
 
     MoveReport? report;
     final String newId;
@@ -2393,7 +2458,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         newId = report.session;
       }
     } catch (error) {
-      session.chat.note('Agent: not moved to $toName: ${reasonOf(error)}. This conversation stays with $fromName.');
+      session.chat.note(
+        'Agent: not moved to $toName: ${reasonOf(error)}. This conversation stays with $fromName.',
+      );
       notifyListeners();
       return false;
     }
@@ -2402,7 +2469,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     var changed = false;
     try {
       fresh = await start(session, target);
-      if (!fresh.canReopenSessions) throw AcpFailure('$toName offers neither session/load nor session/resume');
+      if (!fresh.canReopenSessions) {
+        throw AcpFailure(
+          '$toName offers neither session/load nor session/resume',
+        );
+      }
       changed = true;
       session
         ..agent = target.label
@@ -2413,11 +2484,14 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         ..profile = null
         ..remoteSessionId = newId;
       attachVerifiedClient(session.id, fresh, record: false);
-      final opened = await session.chat.reopen(() => fresh!.reopenSession(newId, cwd: cwd));
+      final opened = await session.chat.reopen(
+        () => fresh!.reopenSession(newId, cwd: cwd),
+      );
       _takeHostReport(session, opened);
       await applyHostProfile(session);
       // An agent that sent back less than was said has shown less than the conversation holds: what it was is put back.
-      bool isSpoken(model.ChatMessage m) => m.role == MessageRole.user || m.role == MessageRole.agent;
+      bool isSpoken(model.ChatMessage m) =>
+          m.role == MessageRole.user || m.role == MessageRole.agent;
       if (session.messages.where(isSpoken).length < said.length) {
         session.chat.removeMessages(isSpoken);
         for (final each in said) {
@@ -2437,7 +2511,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         attachVerifiedClient(session.id, old, record: false);
       }
       await fresh?.close();
-      session.chat.note('Agent: not moved to $toName: ${reasonOf(error)}. This conversation stays with $fromName.');
+      session.chat.note(
+        'Agent: not moved to $toName: ${reasonOf(error)}. This conversation stays with $fromName.',
+      );
       notifyListeners();
       return false;
     }
@@ -2447,7 +2523,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (oldEntry != null) ledger?.remove(oldEntry);
     _record(session, fresh);
     if (oldEntry != null && session.peerId != null) {
-      ledger?.setPlacement(session.peerId!, newId, pinned: oldEntry.pinned, archived: oldEntry.archived);
+      ledger?.setPlacement(
+        session.peerId!,
+        newId,
+        pinned: oldEntry.pinned,
+        archived: oldEntry.archived,
+      );
     }
     session.chat.note(_switchLine(fromName, toName, report));
     notifyListeners();
@@ -2457,14 +2538,26 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// The one line a switch leaves in the conversation: where it went, and what the move could not carry.
   static String _switchLine(String from, String to, MoveReport? report) {
     final head = 'Agent: $from → $to.';
-    if (report == null) return '$head $to had its own copy of this conversation, and nothing was said since it left, so that copy was picked up.';
-    final line = StringBuffer('$head The conversation was exported from $from and imported into $to, which now has all of it.');
-    if (report.replayed) line.write(' $to keeps no session to seed, so what was said reaches it in your first message here.');
-    if (report.compacted) line.write(' Earlier turns were left out, as they did not fit.');
+    if (report == null) {
+      return '$head $to had its own copy of this conversation, and nothing was said since it left, so that copy was picked up.';
+    }
+    final line = StringBuffer(
+      '$head The conversation was exported from $from and imported into $to, which now has all of it.',
+    );
+    if (report.replayed) {
+      line.write(
+        ' $to keeps no session to seed, so what was said reaches it in your first message here.',
+      );
+    }
+    if (report.compacted) {
+      line.write(' Earlier turns were left out, as they did not fit.');
+    }
     if (report.losses.isEmpty) {
       line.write(' Nothing was left out.');
     } else {
-      line.write(' Left out: ${report.losses.map((loss) => lossText(loss).replaceAll('\n', ' ')).join('; ')}.');
+      line.write(
+        ' Left out: ${report.losses.map((loss) => lossText(loss).replaceAll('\n', ' ')).join('; ')}.',
+      );
     }
     return line.toString();
   }
@@ -2482,8 +2575,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       session.chat.holdChoice(
         PendingChoice(option.id, role, value, byPerson: true),
       );
-      if (session.isDraft && role == OptionRole.model)
+      if (session.isDraft && role == OptionRole.model) {
         _dropUnofferedEffort(session);
+      }
       _keepDraft(session);
       return false;
     }
@@ -2517,8 +2611,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final reported = hostProfileOf(session.hostReport, fallback: session.agent);
     session.hostReport = null;
     if (reported == null || reported.report.items.isEmpty) {
-      if (reported == null && expected)
+      if (reported == null && expected) {
         chat.note('The host gave this agent no profile.');
+      }
       notifyListeners();
       return;
     }
@@ -2627,8 +2722,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (session == null) return;
     // A message written while a card waits declines it once and says what to do instead; the turn is not stopped.
     if (session.pendingPermissions.isNotEmpty &&
-        (text.trim().isNotEmpty || session.attachments.isNotEmpty))
+        (text.trim().isNotEmpty || session.attachments.isNotEmpty)) {
       _refuseOnce(session);
+    }
     await sendTextTo(session, text, steer: steer);
   }
 
@@ -2642,18 +2738,20 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     bool steer = false,
   }) async {
     // A file named by an @ goes only while the message still names it.
-    if (attached)
+    if (attached) {
       session.attachments.removeWhere(
         (item) => item.mention && !text.contains('@${item.name}'),
       );
+    }
     final held = attached ? List.of(session.attachments) : <Attachment>[];
     if (text.trim().isEmpty && held.isEmpty) return;
     if (session.status == SessionStatus.preview) {
       sendPreviewText(text);
       return;
     }
-    if (isStarting(session))
+    if (isStarting(session)) {
       throw StateError('Its first message is still on its way');
+    }
     if (session.isDraft) {
       await _startThenDeliver(session, text);
       return;
@@ -2737,17 +2835,20 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     model.QueuedMessage message, {
     required void Function(String text) into,
   }) {
-    if (!session.chat.queue.contains(message))
+    if (!session.chat.queue.contains(message)) {
       return 'It has been sent already.';
+    }
     final origin = _originOf(message);
-    if (origin == null)
+    if (origin == null) {
       return 'It came with attachments this window cannot take back.';
+    }
     final fresh = [
       for (final item in origin)
         if (!session.attachments.any((other) => other.name == item.name)) item,
     ];
-    if (session.attachments.length + fresh.length > maxAttachments)
+    if (session.attachments.length + fresh.length > maxAttachments) {
       return 'The draft has no room for its attachments.';
+    }
     if (!session.chat.unqueue(message)) return 'It has been sent already.';
     session.attachments.addAll(fresh);
     _keepDraft(session);
@@ -2872,10 +2973,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   String? _add(ChatSession session, Attachment attachment) {
     if (!canAttach(session)) return 'This conversation has no agent.';
-    if (session.attachments.length >= maxAttachments)
+    if (session.attachments.length >= maxAttachments) {
       return 'That is as many as one message can take.';
-    if (session.attachments.any((item) => item.name == attachment.name))
+    }
+    if (session.attachments.any((item) => item.name == attachment.name)) {
       return '${attachment.name} is already there.';
+    }
     final refused = refusalOf(session, attachment);
     if (refused != null) return '$refused.';
     session.attachments.add(attachment);
@@ -2896,17 +2999,20 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (bytes.isEmpty) return '$name is empty.';
     final image = imageTypeOf(name, mimeType);
     if (image != null) {
-      if (bytes.length > maxAttachedImage)
+      if (bytes.length > maxAttachedImage) {
         return '$name is larger than an image can be here.';
+      }
       return _add(session, Attachment.image(name, image, bytes, path: path));
     }
-    if (path != null)
+    if (path != null) {
       return _add(
         session,
         Attachment.file(name, path, bytes.length, mimeType: mimeType),
       );
-    if (bytes.length > maxAttachedText)
+    }
+    if (bytes.length > maxAttachedText) {
       return '$name is larger than a file can be here.';
+    }
     final String text;
     try {
       text = utf8.decode(bytes);
@@ -2937,8 +3043,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       );
     }
     final fitted = await fitImage(bytes);
-    if (fitted == null)
+    if (fitted == null) {
       return '$name is larger than an image can be here, and could not be made smaller.';
+    }
     final dot = name.lastIndexOf('.');
     return addAttachment(
       session,
@@ -2971,8 +3078,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     int size, {
     bool folder = false,
   }) {
-    if (session.attachments.any((item) => item.mention && item.name == label))
+    if (session.attachments.any((item) => item.mention && item.name == label)) {
       return null;
+    }
     return _add(session, Attachment.mention(label, path, size, folder: folder));
   }
 
@@ -2987,8 +3095,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     for (var n = 2; session.attachments.any((item) => item.name == name); n++) {
       name = 'Pasted text $n, $lines line${lines == 1 ? '' : 's'}';
     }
-    if (utf8.encode(text).length > maxAttachedText)
+    if (utf8.encode(text).length > maxAttachedText) {
       return 'That paste is larger than a file can be here.';
+    }
     return _add(session, Attachment.text(name, text, mimeType: 'text/plain'));
   }
 
@@ -3016,8 +3125,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     String? cursor,
   }) async {
     final client = _clients[from.id];
-    if (client == null || client.isClosed)
+    if (client == null || client.isClosed) {
       throw StateError('A verified ACP peer must be connected');
+    }
     final page = await client.listSessions(cwd: from.cwd, cursor: cursor);
     return AcpSessionPage(
       page.sessions
@@ -3034,10 +3144,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   ) async {
     final client = _clients[from.id];
     final cwd = earlier.cwd ?? from.cwd;
-    if (client == null || client.isClosed)
+    if (client == null || client.isClosed) {
       throw StateError('A verified ACP peer must be connected');
-    if (cwd == null)
+    }
+    if (cwd == null) {
       throw StateError('The agent did not say where that conversation was');
+    }
     for (final session in _sessions) {
       if (session.remoteSessionId == earlier.id &&
           _clients[session.id] == client) {
@@ -3065,8 +3177,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       // The profile the host reports for this session, else the one of the conversation it opens beside, on the same agent.
       await applyHostProfile(session);
       if (from.profile case final profile?
-          when identical(session.profile, profile))
+          when identical(session.profile, profile)) {
         session.chat.note(profile.summary);
+      }
       _record(session, client);
       notifyListeners();
       return session;
@@ -3087,8 +3200,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     required List<String> notes,
     List<({MessageRole role, String text})> carried = const [],
   }) async {
-    if (!client.canReopenSessions)
+    if (!client.canReopenSessions) {
       throw AcpFailure('$agent offers neither session/load nor session/resume');
+    }
     final session = addProviderSession(
       title: from.title,
       agent: agent,
@@ -3138,20 +3252,22 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         return session;
       }
     }
-    if (client.peerId != entry.peerId)
+    if (client.peerId != entry.peerId) {
       throw StateError(
         'That agent is not the one this session was opened with',
       );
+    }
     if (client.identity.reopenBy == null || !client.canReopenSessions) {
       throw AcpFailure(
         '${entry.harness} offers neither session/load nor session/resume, so this session cannot be opened again',
       );
     }
     final cwd = entry.cwd;
-    if (cwd == null)
+    if (cwd == null) {
       throw StateError(
         'Canoa did not note where this session was, which the agent needs to open it',
       );
+    }
     // What the agent lists now names the session, when it still has it under the same name.
     var title = entry.title ?? 'Earlier conversation';
     try {
@@ -3159,8 +3275,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         sessions: AcpKnown(value: final listed),
       )) {
         for (final info in listed.sessions) {
-          if (info.id == entry.sessionId && !entry.named)
+          if (info.id == entry.sessionId && !entry.named) {
             title = shortLine(info.title) ?? title;
+          }
         }
       }
     } on AcpFailure {
@@ -3284,8 +3401,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     _cancelSecrets(session);
     session.chat.onChange = null;
     _sessions.remove(session);
-    if (_selectedId == session.id)
+    if (_selectedId == session.id) {
       _selectedId = _sessions.isEmpty ? null : _sessions.first.id;
+    }
     notifyListeners();
   }
 
@@ -3295,8 +3413,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final client = _clients[session.id];
     session.chat.close();
     forget(session);
-    if (client != null && !_clients.values.contains(client))
+    if (client != null && !_clients.values.contains(client)) {
       await client.close();
+    }
   }
 
   Future<void> cancelActiveSession() async {
@@ -3323,8 +3442,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   Future<void> stopTasks(ChatSession session) async {
     final client = _clients[session.id];
     final remote = session.remoteSessionId;
-    if (client == null || remote == null || session.tasks.hostLive.isEmpty)
+    if (client == null || remote == null || session.tasks.hostLive.isEmpty) {
       return;
+    }
     if (await client.stopTasks(remote)) _tasksStopped(session);
   }
 
@@ -3349,8 +3469,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         remote != null) {
       unawaited(
         client.taskHistory(remote, taskId).then((kept) {
-          if (kept != null && session.tasks.backfill(taskId, kept))
+          if (kept != null && session.tasks.backfill(taskId, kept)) {
             notifyListeners();
+          }
         }, onError: (Object _) {}),
       );
     }
@@ -3372,10 +3493,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         remote == null ||
         task == null ||
         task.native ||
-        task.phase.ended)
+        task.phase.ended) {
       return;
-    if (await client.stopTasks(remote, taskId: taskId))
+    }
+    if (await client.stopTasks(remote, taskId: taskId)) {
       _tasksStopped(session, only: taskId);
+    }
   }
 
   void _tasksStopped(ChatSession session, {String? only}) {
@@ -3469,8 +3592,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     session.namedByPerson = true;
     session.titleFromMessage = false;
     final peer = session.peerId, remote = session.remoteSessionId;
-    if (peer != null && remote != null)
+    if (peer != null && remote != null) {
       ledger?.touch(peer, remote, title: session.title, byPerson: true);
+    }
     notifyListeners();
   }
 
@@ -3507,7 +3631,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   @override
   void dispose() {
     _disposed = true;
-    for (final subscription in [..._eventSubscriptions.values, ..._taskSubscriptions.values, ..._contextSubscriptions.values]) {
+    for (final subscription in [
+      ..._eventSubscriptions.values,
+      ..._taskSubscriptions.values,
+      ..._contextSubscriptions.values,
+    ]) {
       unawaited(subscription.cancel());
     }
     _eventSubscriptions.clear();
