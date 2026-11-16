@@ -384,7 +384,7 @@ fn a_removal_is_shown_first_takes_the_overlay_and_its_entry_and_follows_the_stat
 #[test]
 fn the_loadout_turns_an_overlay_off_and_on_for_new_sessions_and_skills_only_when_chosen() {
     let rig = Rig::new(
-        "[overlays.alpha]\nsource = \"git+https://example.test/a.git@main\"\n\n[loadout]\nregistries = [\"https://example.test/r\"]\n",
+        "[overlays.alpha]\nsource = \"git+https://example.test/a.git@main\"\n\n[loadouts.other]\nmcp = [\"x\"]\n",
     );
     let off = Change {
         action: Action::Disable,
@@ -404,24 +404,37 @@ fn the_loadout_turns_an_overlay_off_and_on_for_new_sessions_and_skills_only_when
             .join("\n")
             .contains("Turn off the overlay alpha")
     );
-    assert!(
-        rig.section("loadout").get("off").is_none(),
-        "shown, not done"
-    );
+    assert!(rig.section("defaults").is_null(), "shown, not done");
     rig.control
         .tool_commit("s1", &grants(), &prepared, &no_cancel())
         .expect("applied");
-    let loadout = rig.section("loadout");
-    assert_eq!(loadout["off"], json!(["alpha"]), "{loadout}");
+    // With no default loadout the first change writes `Default`, which held every overlay, and names it the default.
+    let loadouts = rig.section("loadouts");
+    assert!(loadouts["Default"].get("overlays").is_none(), "{loadouts}");
+    assert_eq!(rig.section("defaults")["loadout"], "Default");
     assert_eq!(
-        loadout["registries"],
-        json!(["https://example.test/r"]),
-        "the rest of the table stays"
+        loadouts["other"]["mcp"],
+        json!(["x"]),
+        "the other loadouts stay"
     );
-    // Turned off already: nothing to ask.
+    // Turned on again: it is back in the default loadout.
+    let mut on = off.clone();
+    on.action = Action::Enable;
+    let back = rig
+        .control
+        .tool_prepare("s1", &grants(), &on)
+        .expect("prepared");
+    rig.control
+        .tool_commit("s1", &grants(), &back, &no_cancel())
+        .expect("applied");
+    assert_eq!(
+        rig.section("loadouts")["Default"]["overlays"],
+        json!(["alpha"])
+    );
+    // Turned on already: nothing to ask.
     assert!(
         rig.control
-            .tool_prepare("s1", &grants(), &off)
+            .tool_prepare("s1", &grants(), &on)
             .expect("prepared")
             .nothing
             .is_some()
@@ -806,12 +819,12 @@ fn two_writers_of_canoa_cfg_do_not_take_each_others_change_out() {
         });
         vec![one.join().expect("ends"), two.join().expect("ends")]
     });
-    let listed = rig.section("loadout")["off"].clone();
+    let listed = rig.section("loadouts")["Default"]["overlays"].clone();
     assert!(results.iter().any(|(_, done)| *done), "{results:?}");
     for (name, done) in results {
         assert!(
-            !done || listed.to_string().contains(name),
-            "{name} was lost: {listed}"
+            !done || !listed.to_string().contains(name),
+            "{name}'s change was lost: {listed}"
         );
     }
 }

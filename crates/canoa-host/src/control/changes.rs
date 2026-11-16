@@ -721,11 +721,40 @@ impl Control {
 
     // ---- the loadout ----------------------------------------------------------------------------------------------
 
-    fn loadout_digest(section: &Value) -> String {
+    fn loadout_digest(loadouts: &Value, defaults: &Value) -> String {
         format!(
             "loadout:{}",
-            hex(&Sha256::digest(section.to_string().as_bytes()))
+            hex(&Sha256::digest(
+                json!([loadouts, defaults]).to_string().as_bytes()
+            ))
         )
+    }
+
+    /// The loadout new sessions start with: its name, and what it holds now. With no default it is the `Default` the app
+    /// writes, holding everything the profile lists.
+    fn starting_loadout(&self, loadouts: &Value, defaults: &Value) -> (String, Map<String, Value>) {
+        let named = defaults
+            .get("loadout")
+            .and_then(Value::as_str)
+            .filter(|name| loadouts.get(name).is_some_and(Value::is_object));
+        let name = named.unwrap_or("Default").to_owned();
+        if let Some(Value::Object(held)) = loadouts.get(&name) {
+            return (name, held.clone());
+        }
+        let mut table = Map::new();
+        let overlays: Vec<String> = self
+            .config_section("overlays")
+            .as_object()
+            .map(|table| table.keys().cloned().collect())
+            .unwrap_or_default();
+        if !overlays.is_empty() {
+            table.insert("overlays".to_owned(), json!(overlays));
+        }
+        let servers = self.files.profile_mcp_names();
+        if !servers.is_empty() {
+            table.insert("mcp".to_owned(), json!(servers));
+        }
+        (name, table)
     }
 
     fn loadout_change(&self, caller: &Caller, change: &Change) -> Made<Prepared> {
@@ -745,19 +774,20 @@ impl Control {
             if !named {
                 return Err(format!("[overlays] does not name {name}"));
             }
-            ("off", "an overlay")
+            ("overlays", "an overlay")
         };
         if change.kind == "skill" && on && !self.overlays.chosen_skill(name) {
             return Err(format!(
                 "no skill named {name} is recorded as one the person chose: it is chosen in the Store first"
             ));
         }
-        let section = self.config_section("loadout");
-        let current = names(section.get(list));
-        let held = current.iter().any(|item| item.eq_ignore_ascii_case(name));
-        // Skills are on when listed; overlays are off when listed.
-        let listed_wanted = if change.kind == "skill" { on } else { !on };
-        if held == listed_wanted {
+        let loadouts = self.config_section("loadouts");
+        let defaults = self.config_section("defaults");
+        let (loadout, table) = self.starting_loadout(&loadouts, &defaults);
+        let held = names(table.get(list))
+            .iter()
+            .any(|item| item.eq_ignore_ascii_case(name));
+        if held == on {
             return Ok(Prepared {
                 token: String::new(),
                 digest: String::new(),
@@ -771,14 +801,14 @@ impl Control {
                 protected: None,
             });
         }
-        let digest = Self::loadout_digest(&section);
+        let digest = Self::loadout_digest(&loadouts, &defaults);
         Ok(Prepared {
             token: String::new(),
-            digest: digest.clone(),
+            digest,
             title: format!("Turn {what} {}: {name}", if on { "on" } else { "off" }),
             lines: vec![
-                format!("Turn {} the {} {name} in the loadout", if on { "on" } else { "off" }, change.kind),
-                "It is kept in canoa.cfg's [loadout] and applies to sessions started after it; running ones keep what they have.".to_owned(),
+                format!("Turn {} the {} {name} in the loadout {loadout}", if on { "on" } else { "off" }, change.kind),
+                "It is kept in canoa.cfg's [loadouts] and applies to sessions started after it; running ones keep what they have.".to_owned(),
             ],
             nothing: None,
             protected: self.protected_place(false),
@@ -792,35 +822,48 @@ impl Control {
         let name = text(detail, "name").ok_or("the host holds no name for this change")?;
         let list = text(detail, "list").ok_or("the host holds no list for this change")?;
         let on = detail.get("on").and_then(Value::as_bool).unwrap_or(false);
-        let skill = text(detail, "kind") == Some("skill");
+        let mut starting = String::new();
         self.files
-            .config_update("loadout", true, |section| {
-                if Self::loadout_digest(&section) != prepared.digest {
+            .config_update("loadouts", true, |section| {
+                let defaults = self.config_section("defaults");
+                if Self::loadout_digest(&section, &defaults) != prepared.digest {
                     return Err(
                         "the loadout changed since the person was shown it: nothing was changed"
                             .to_owned(),
                     );
                 }
-                let mut table = match section {
-                    Value::Object(table) => table,
-                    _ => Map::new(),
-                };
+                let (loadout, mut table) = self.starting_loadout(&section, &defaults);
                 let mut items = names(table.get(list));
                 items.retain(|item| !item.eq_ignore_ascii_case(name));
-                if skill == on {
+                if on {
                     items.push(name.to_owned());
                 }
-                items.sort();
+                if list == "skills" {
+                    items.sort();
+                }
                 if items.is_empty() {
                     table.remove(list);
                 } else {
                     table.insert(list.to_owned(), json!(items));
                 }
-                Ok(if table.is_empty() {
-                    Value::Null
-                } else {
-                    Value::Object(table)
-                })
+                let mut all = match section {
+                    Value::Object(all) => all,
+                    _ => Map::new(),
+                };
+                all.insert(loadout.clone(), Value::Object(table));
+                starting = loadout;
+                Ok(Value::Object(all))
+            })
+            .map_err(why)?;
+        // The loadout is written first: one that is not yet the default changes no session until the default names it.
+        self.files
+            .config_update("defaults", true, |section| {
+                let mut table = match section {
+                    Value::Object(table) => table,
+                    _ => Map::new(),
+                };
+                table.insert("loadout".to_owned(), json!(starting));
+                Ok(Value::Object(table))
             })
             .map_err(why)?;
         Ok(json!({"name": name, "on": on, "reaches": "sessions started from now on"}))

@@ -292,6 +292,26 @@ impl Files {
             .map(|_| ())
     }
 
+    /// The names of the servers `[profile.mcp]` defines, which a page cannot read as a section.
+    pub(crate) fn profile_mcp_names(&self) -> Vec<String> {
+        let Ok(path) = self.config_path() else {
+            return Vec::new();
+        };
+        let Ok((text, _)) = read_cfg(path) else {
+            return Vec::new();
+        };
+        parse(path, &text)
+            .ok()
+            .and_then(|table| {
+                table
+                    .get("profile")?
+                    .get("mcp")?
+                    .as_table()
+                    .map(|servers| servers.keys().cloned().collect())
+            })
+            .unwrap_or_default()
+    }
+
     /// Where the person's canoa.cfg is, when this host has one a page may edit.
     pub(crate) fn config_file(&self) -> Option<&Path> {
         self.config.as_deref()
