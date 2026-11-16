@@ -13,6 +13,8 @@ import 'package:canoa/sources/sources.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/fake_speech.dart';
+import 'package:canoa/voice/speech_backend.dart';
 import 'fixtures/settings_fixture.dart';
 import 'fixtures/store_fixtures.dart';
 
@@ -93,6 +95,36 @@ void main() {
         rules.add(source: 'Codex', folder: '/work/site', kind: 'edit', type: RuleType.path, value: 'src/**');
         await open(tester, section: 'permissions', rules: rules);
         await golden(tester, 'permissions');
+      });
+
+      testWidgets('Voice: the service, where it is processed, the input and a test of the microphone', (tester) async {
+        final speech = FakeSpeech(
+          'system',
+          'System speech',
+          where: const SpeechWhere(
+            place: SpeechPlace.system,
+            leaves: AudioLeaves.maybe,
+            words: 'The operating system turns it into text. When its speech service is online, the system sends the audio to its '
+                'maker; its own privacy settings say whether that is on.',
+          ),
+          languageChoices: const [SpeechChoice('en-US', 'English'), SpeechChoice('es-PR', 'Espanol')],
+        );
+        await openSettings(tester, config: CanoaConfig.parse(_config), size: size, section: 'voice', voiceBackends: [speech]);
+        await tester.ensureVisible(find.byKey(const Key('voice-test')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('voice-test')));
+        await tester.pump();
+        speech.level(0.55);
+        speech.hear('Make the sum test pass');
+        await tester.pump();
+        await golden(tester, 'voice');
+        await tester.tap(find.byKey(const Key('voice-test-stop')));
+        await tester.pumpAndSettle();
+      });
+
+      testWidgets('Voice with no speech service here', (tester) async {
+        await open(tester, section: 'voice');
+        await golden(tester, 'voice_none');
       });
     });
   }

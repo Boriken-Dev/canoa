@@ -118,6 +118,7 @@ import 'worktree/close_dialog.dart';
 import 'worktree/host.dart';
 import 'worktree/worktree.dart';
 import 'selectable.dart';
+import 'voice/system_speech.dart';
 
 /// The folder [file] is in, else null.
 String? _parentFolder(String? file) {
@@ -391,6 +392,9 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   final _settingsKey = GlobalKey<SettingsPageState>();
+
+  /// The speech services this build has, held for the app's life so a test of the microphone survives a rebuild.
+  final _speech = platformSpeechBackends();
   final _loadoutKey = GlobalKey<StoreSectionState>();
 
   /// The loadout being edited, which a visit to the Store leaves as it was.
@@ -535,6 +539,7 @@ class _CanoaAppState extends State<CanoaApp> {
       onLoadout: _showLoadout,
       accounts: _accounts,
       usageSection: _usage != null,
+      voiceBackends: _speech,
       version: const String.fromEnvironment('CANOA_VERSION'),
     );
 

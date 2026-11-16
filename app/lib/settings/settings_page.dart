@@ -10,6 +10,8 @@ import '../profile/profiles_panel.dart' show ProfilesPanel;
 import '../selectable.dart';
 import '../sources/sources.dart';
 import '../store/programs.dart';
+import '../voice/speech_backend.dart';
+import '../voice/voice_settings.dart';
 import 'agent_sections.dart';
 import 'app_sections.dart';
 import '../shell/shell.dart' show ShellScope;
@@ -34,6 +36,7 @@ const _sections = [
   SettingsSection(id: 'general', group: 'App', title: 'General', icon: Icons.tune, keywords: 'tray window startup network webtransport timeout sessions remembered folder workspace keep history'),
   SettingsSection(id: 'appearance', group: 'App', title: 'Appearance', icon: Icons.palette_outlined, keywords: 'look theme brightness dark light detail verbose density preview'),
   SettingsSection(id: 'notifications', group: 'App', title: 'Notifications', icon: Icons.notifications_none, keywords: 'alerts permission question finished browser toast'),
+  SettingsSection(id: 'voice', group: 'App', title: 'Voice', icon: Icons.mic_none, keywords: 'dictation speech microphone input device language push to talk transcribe audio'),
   SettingsSection(id: 'shortcuts', group: 'App', title: 'Shortcuts', icon: Icons.keyboard_outlined, keywords: 'keyboard keys chords hotkeys'),
   SettingsSection(id: 'sources', group: 'Agents', title: 'Sources', icon: Icons.hub_outlined, keywords: 'agents providers programs claude codex command install update version ready'),
   SettingsSection(id: 'profiles', group: 'Agents', title: 'Profiles', icon: Icons.layers_outlined, keywords: 'overlays layers model effort mode skills trusted directories project'),
@@ -67,6 +70,7 @@ class SettingsPage extends StatefulWidget {
     this.onLoadout,
     this.accounts,
     this.usageSection = false,
+    this.voiceBackends = const [],
     this.version = '',
   });
 
@@ -115,6 +119,9 @@ class SettingsPage extends StatefulWidget {
 
   /// Whether the app has a Usage section of its own, which then holds the usage warning.
   final bool usageSection;
+
+  /// The speech services this build offers for dictation; none makes Voice say so.
+  final List<SpeechBackend> voiceBackends;
 
   /// The app's version, for About.
   final String version;
@@ -215,6 +222,7 @@ class SettingsPageState extends State<SettingsPage> {
       'general' => GeneralSection(controller: controller, ledger: widget.ledger, workspacePreview: widget.workspacePreview),
       'appearance' => AppearanceSection(controller: controller),
       'notifications' => NotificationsSection(controller: controller, onAllowNotifications: widget.onAllowNotifications),
+      'voice' => VoiceSection(controller: controller, backends: widget.voiceBackends),
       'shortcuts' => const ShortcutsSection(),
       'sources' => SourcesSection(
         controller: controller, presets: widget.presets, hosted: widget.hosted, checkSource: widget.checkSource, programs: widget.programs),
