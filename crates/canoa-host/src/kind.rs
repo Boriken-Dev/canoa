@@ -259,6 +259,34 @@ impl Harness {
         self
     }
 
+    /// The accounts this entry offers, in its order; none when it offers none.
+    pub(crate) fn offered(&self) -> &[Offered] {
+        self.accounts.as_ref().map_or(&[], |offer| &offer.offered)
+    }
+
+    /// The account `name`, one this entry offers, held for a call that is not a connection (moving a session between accounts).
+    ///
+    /// # Errors
+    ///
+    /// Why it cannot be had: not offered, held by another connection, or its store failed.
+    pub(crate) fn hold_account(
+        &self,
+        name: &str,
+        holder: &str,
+    ) -> Result<Held, crate::accounts::Refusal> {
+        let offer = self.accounts.as_ref().ok_or_else(|| {
+            crate::accounts::Refusal::Store("this entry offers no accounts".to_owned())
+        })?;
+        let (name, config, info) = offer
+            .offered
+            .iter()
+            .find(|(offered, ..)| offered == name)
+            .ok_or_else(|| {
+                crate::accounts::Refusal::Store("this entry does not offer that account".to_owned())
+            })?;
+        offer.host.begin(name, config, info, holder)
+    }
+
     /// The account the client's first message chooses for its connection, held for it: the one it names in `_meta`, else the
     /// entry's first; `None` for an entry that offers none. `holder` says who is holding it.
     ///

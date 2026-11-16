@@ -649,6 +649,9 @@ impl Control {
                 Some(method @ ("history/export" | "history/move")) => {
                     owner_only_history(caller).and_then(|()| self.history_call(method, &params))
                 }
+                Some("history/account") => {
+                    owner_only_history(caller).and_then(|()| self.account_move(&params))
+                }
                 Some(method @ ("history/importable" | "history/import" | "history/imported")) => {
                     owner_only_history(caller).and_then(|()| self.import_call(method, &params))
                 }
@@ -1139,6 +1142,7 @@ mod import;
 mod import_tests;
 mod index;
 pub(crate) use index::ToolsBackend;
+mod account_move;
 #[cfg(test)]
 mod index_tests;
 mod moves;

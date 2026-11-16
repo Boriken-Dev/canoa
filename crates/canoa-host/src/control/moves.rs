@@ -45,7 +45,7 @@ fn from_store(error: &StoreError) -> (i32, String) {
     }
 }
 
-fn new_uuid() -> Result<String, (i32, String)> {
+pub(super) fn new_uuid() -> Result<String, (i32, String)> {
     let mut bytes = [0_u8; 16];
     getrandom::fill(&mut bytes).map_err(|e| (REFUSED, format!("no randomness: {e}")))?;
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
