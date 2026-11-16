@@ -479,3 +479,82 @@ fn an_entry_is_offered_the_accounts_the_person_picks_and_the_host_says_it_must_s
     plain_call(&link, 11, "accounts/remove", json!({"name": "work"})).expect("removed");
     host.stop();
 }
+
+#[test]
+fn an_account_says_what_it_provides_an_entry_what_it_accepts_and_an_offer_follows_them() {
+    let host = host();
+    let link = host.local.open("@control").expect("a link");
+    let mut app = app_of(&host);
+    let (_, added) = app.drive(
+        &link,
+        1,
+        "accounts/add",
+        &json!({"name": "work", "harness": "claude", "method": "api-key"}),
+        &Typed::Fills(&[("api_key", KEY)]),
+    );
+    added.expect("the account is added");
+    let listed = plain_call(&link, 2, "accounts/list", json!({})).expect("listed");
+    assert_eq!(listed["accounts"][0]["provides"], json!(["anthropic-api"]));
+
+    let entries = plain_call(&link, 3, "accounts/entries", json!({})).expect("entries");
+    let of = |name: &str| {
+        entries["entries"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .find(|each| each["name"] == name)
+            .expect("the entry")
+            .clone()
+    };
+    assert_eq!(
+        of("Claude")["accepts"],
+        json!(["claude-code", "anthropic-api"])
+    );
+    assert_eq!(of("Claude")["usable"], json!(["work"]));
+    assert_eq!(of("Codex")["accepts"], json!(["codex", "openai-api"]));
+    assert_eq!(
+        of("Codex")["usable"],
+        json!([]),
+        "Codex takes no Anthropic key"
+    );
+
+    // Codex refuses it, saying what each side says; Pi, which has a variable for an Anthropic key, takes it.
+    let codex = plain_call(
+        &link,
+        4,
+        "accounts/offer",
+        json!({"entry": "Codex", "accounts": ["work"]}),
+    )
+    .expect_err("Codex accepts no Anthropic key");
+    assert!(
+        codex.contains("anthropic-api") && codex.contains("codex, openai-api"),
+        "{codex}"
+    );
+    assert!(!codex.contains(KEY), "{codex}");
+    let pi = plain_call(
+        &link,
+        5,
+        "accounts/offer",
+        json!({"entry": "Pi", "harness": "pi", "accounts": ["work"]}),
+    )
+    .expect("Pi takes an Anthropic key");
+    assert_eq!(pi["restart"], true);
+    let entries = plain_call(&link, 6, "accounts/entries", json!({})).expect("entries");
+    let pi = entries["entries"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .find(|each| each["name"] == "Pi")
+        .expect("the entry offers it now")
+        .clone();
+    assert_eq!(pi["accounts"], json!(["work"]));
+    assert!(
+        pi["accepts"]
+            .as_array()
+            .expect("a list")
+            .contains(&json!("anthropic-api")),
+        "{pi}"
+    );
+    assert_eq!(pi["usable"], json!(["work"]));
+    host.stop();
+}

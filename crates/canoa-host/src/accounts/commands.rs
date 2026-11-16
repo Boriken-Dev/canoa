@@ -245,7 +245,7 @@ fn cancel_on_input_closing(front: &dyn Front, until: bool) -> Result<Cancel, Fai
 }
 
 /// The provider of `harness`, as the first entry that runs it configures it, else the built-in one.
-fn provider_for(config: &Config, harness: &str) -> Result<kind::Harness, Failed> {
+pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harness, Failed> {
     let entry = config.entries.iter().find(
         |entry| matches!(&entry.kind, EntryKind::Harness { harness: id, .. } if id == harness),
     );
@@ -383,6 +383,8 @@ pub(crate) struct Row {
     pub(crate) state: String,
     pub(crate) revision: u64,
     pub(crate) expires_at: Option<String>,
+    /// The standards the account's kind provides, which say the harnesses that can run a session on it.
+    pub(crate) provides: Vec<String>,
 }
 
 impl Row {
@@ -390,6 +392,7 @@ impl Row {
         serde_json::json!({
             "name": self.name, "harness": self.harness, "kind": self.kind, "id": self.id,
             "state": self.state, "revision": self.revision, "expires_at": self.expires_at,
+            "provides": self.provides,
         })
     }
 }
@@ -400,6 +403,7 @@ pub(crate) fn rows(cfg: Cfg<'_>) -> Result<Vec<Row>, Failed> {
 }
 
 fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
+    let catalogs = super::matching::Catalogs::new(cfg.config);
     cfg.config
         .accounts
         .iter()
@@ -413,6 +417,10 @@ fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
                 state,
                 revision,
                 expires_at,
+                provides: catalogs
+                    .kind(account)
+                    .map(|info| info.provides)
+                    .unwrap_or_default(),
             }
         })
         .collect()

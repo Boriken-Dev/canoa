@@ -30,6 +30,7 @@ use coqui_transport_web::websocket::{self, Frames};
 use door::Door;
 use indexmap::IndexMap;
 
+use crate::accounts::matching::{Catalogs, fits};
 use crate::accounts::{Accounts, Gated, Held};
 use crate::child::{self, Running};
 use crate::config::{
@@ -1386,7 +1387,7 @@ impl Serving {
                     // account whose credential is in the environment loads no settings files unless it says which.
                     if let Some(listed) = &listed
                         && harness == "claude"
-                        && keeps_key_in_environment(listed)
+                        && keeps_key_in_environment(listed, harness)
                     {
                         let named = asks.setting_sources.is_some()
                             || settings
@@ -1413,7 +1414,8 @@ impl Serving {
                         let listed = listed.unwrap_or_default();
                         let others = other_accounts(config, harness, &listed, &provider);
                         if !listed.is_empty() || !others.is_empty() {
-                            provider = provider.offering(host, listed, others);
+                            let unfit = unfit_accounts(config, harness, &provider);
+                            provider = provider.offering(host, listed, others).with_unfit(unfit);
                         }
                     }
                     let provider = Arc::new(provider);
@@ -2768,19 +2770,27 @@ pub(crate) fn harness_settings(
 }
 
 /// Whether an offered account's credential reaches the agent in its environment, for a kind that names the model's address:
-/// the login kinds keep theirs in a file, and every other kind with an address is a key or a token.
-fn keeps_key_in_environment(listed: &[kind::Offered]) -> bool {
-    listed.iter().any(|(_, _, info)| {
-        !info.state_dir
+/// the login kinds keep theirs in a file, and every other kind with an address is a key or a token. An account another
+/// provider made, that provides an API standard, is a key whatever its kind says of where it rests.
+fn keeps_key_in_environment(listed: &[kind::Offered], runs: &str) -> bool {
+    listed.iter().any(|(_, account, info)| {
+        let borrowed = account.harness != runs
             && info
-                .endpoints
+                .provides
                 .iter()
-                .any(|slot| slot.purpose == "model_api" && slot.key.is_some())
+                .any(|standard| standard.ends_with("-api"));
+        borrowed
+            || (!info.state_dir
+                && info
+                    .endpoints
+                    .iter()
+                    .any(|slot| slot.purpose == "model_api" && slot.key.is_some()))
     })
 }
 
-/// The accounts an entry of `harness` offers, each with its kind in the provider's catalog, once canoa.cfg's settings for
-/// it are checked against that kind's schema.
+/// The accounts an entry of `harness` offers, each with its kind in the catalog of the provider that made it, once canoa.cfg's
+/// settings for it are checked against that kind's schema. An account another provider made is offered when what its kind
+/// provides meets what `harness` accepts.
 pub(crate) fn offered_accounts(
     config: &Config,
     harness: &str,
@@ -2790,33 +2800,30 @@ pub(crate) fn offered_accounts(
     let catalog = provider
         .catalog()
         .ok_or_else(|| "the provider did not list the accounts it takes".to_owned())?;
+    let catalogs = Catalogs::with(config, harness, catalog);
     let mut listed = Vec::new();
     for name in names {
         let Some(account) = config.accounts.get(name) else {
             return Err(format!("account {name} is not in [host.accounts]"));
         };
-        if account.harness != harness {
-            return Err(format!(
-                "account {name} is of harness {}, not {harness}",
-                account.harness
-            ));
-        }
-        let Some(info) = catalog.kind(&account.kind) else {
+        let Some(info) = catalogs.kind(account) else {
             return Err(format!(
                 "account {name}: the provider has no account kind {}",
                 account.kind
             ));
         };
-        crate::accounts::check_settings(info, account.settings.as_ref())
+        fits(catalog, harness, account, &info)
+            .map_err(|why| format!("account {name} cannot run on {harness}: {why}"))?;
+        crate::accounts::check_settings(&info, account.settings.as_ref())
             .map_err(|why| format!("account {name}: {why}"))?;
-        listed.push((name.clone(), account.clone(), info.clone()));
+        listed.push((name.clone(), account.clone(), info));
     }
     Ok(listed)
 }
 
-/// The accounts of `harness` that an entry which does not list them can still run a session on, for a key trusted with
-/// accounts. One whose key reaches the agent in its environment is left out: only an entry that lists it limits the
-/// settings files a repository could use to redirect that key, so it has to be listed.
+/// The accounts, of `harness` or of another provider whose standards it accepts, that an entry which does not list them can
+/// still run a session on, for a key trusted with accounts. One whose key reaches the agent in its environment is left out:
+/// only an entry that lists it limits the settings files a repository could use to redirect that key, so it has to be listed.
 pub(crate) fn other_accounts(
     config: &Config,
     harness: &str,
@@ -2826,24 +2833,51 @@ pub(crate) fn other_accounts(
     let Some(catalog) = provider.catalog() else {
         return Vec::new();
     };
+    let catalogs = Catalogs::with(config, harness, catalog);
     let mut others = Vec::new();
     for (name, account) in &config.accounts {
-        if account.harness != harness || listed.iter().any(|(each, ..)| each == name) {
+        if listed.iter().any(|(each, ..)| each == name) {
             continue;
         }
-        let Some(info) = catalog.kind(&account.kind) else {
+        let Some(info) = catalogs.kind(account) else {
             continue;
         };
-        if crate::accounts::check_settings(info, account.settings.as_ref()).is_err() {
+        if fits(catalog, harness, account, &info).is_err() {
             continue;
         }
-        let one = (name.clone(), account.clone(), info.clone());
-        if keeps_key_in_environment(core::slice::from_ref(&one)) {
+        if crate::accounts::check_settings(&info, account.settings.as_ref()).is_err() {
+            continue;
+        }
+        let one = (name.clone(), account.clone(), info);
+        if keeps_key_in_environment(core::slice::from_ref(&one), harness) {
             continue;
         }
         others.push(one);
     }
     others
+}
+
+/// The accounts of other providers that `provider`'s harness cannot run a session on, each with why: the standards the account
+/// provides and the ones the harness accepts.
+pub(crate) fn unfit_accounts(
+    config: &Config,
+    harness: &str,
+    provider: &kind::Harness,
+) -> Vec<(String, String)> {
+    let Some(catalog) = provider.catalog() else {
+        return Vec::new();
+    };
+    let catalogs = Catalogs::with(config, harness, catalog);
+    config
+        .accounts
+        .iter()
+        .filter_map(|(name, account)| {
+            let info = catalogs.kind(account)?;
+            fits(catalog, harness, account, &info)
+                .err()
+                .map(|why| (name.clone(), why))
+        })
+        .collect()
 }
 
 /// What a connection's sessions are given beside the agent: its profile, and the delegation, secret and store tools.
@@ -3142,5 +3176,43 @@ mod tests {
                 .any(|arg| arg.to_string_lossy().contains("SECRET")),
             "{args:?}"
         );
+    }
+
+    /// An offered account as the entry's harness would see it: made by `harness`, of a kind that keeps nothing in a directory.
+    fn offered(harness: &str, provides: &[&str], endpoint: bool) -> kind::Offered {
+        let mut info =
+            coqui_acp_api::AccountKindInfo::new("k", "K").provides(provides.iter().copied());
+        if endpoint {
+            info.endpoints = vec![coqui_acp_api::EndpointSlot::new("model_api").key("base_url")];
+        }
+        let account = crate::config::AccountConfig {
+            harness: harness.to_owned(),
+            kind: "k".to_owned(),
+            id: "id".to_owned(),
+            settings: None,
+        };
+        ("a".to_owned(), account, info)
+    }
+
+    #[test]
+    fn a_key_another_provider_made_is_a_key_in_the_environment_whatever_its_kind_says_of_an_address()
+     {
+        // Its own provider's key says it by its address; an API standard's account made elsewhere says it by what it provides.
+        assert!(keeps_key_in_environment(
+            &[offered("claude", &["anthropic-api"], true)],
+            "claude"
+        ));
+        assert!(!keeps_key_in_environment(
+            &[offered("claude", &["claude-code"], false)],
+            "claude"
+        ));
+        assert!(keeps_key_in_environment(
+            &[offered("claude", &["anthropic-api"], false)],
+            "pi"
+        ));
+        assert!(!keeps_key_in_environment(
+            &[offered("pi", &["pi"], false)],
+            "claude"
+        ));
     }
 }

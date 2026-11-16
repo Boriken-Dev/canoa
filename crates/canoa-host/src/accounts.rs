@@ -16,6 +16,7 @@ pub(crate) mod commands;
 pub(crate) mod foundry;
 mod gate;
 pub(crate) mod login;
+pub(crate) mod matching;
 mod private;
 mod spawner;
 pub(crate) mod store;
@@ -42,6 +43,7 @@ use zeroize::Zeroize as _;
 use crate::config::{AccountConfig, AccountStore, Settings};
 use crate::gateway::Ticket;
 use crate::provider::map_of;
+use matching::Runs;
 
 pub(crate) use gate::Gated;
 use spawner::Recording;
@@ -495,17 +497,21 @@ impl Accounts {
         Ok(grant)
     }
 
-    /// The account `name` of `config`, of the kind `info`, for one connection of `holder`.
+    /// The account `name` of `config`, of the kind `info`, for one connection of `holder` to the harness `runs`, which may not
+    /// be the one that made the account: the grant says which standards it provides, and `runs` applies it by one it accepts.
     pub(crate) fn begin(
         self: &Arc<Self>,
         name: &str,
         config: &AccountConfig,
         info: &AccountKindInfo,
+        runs: Runs<'_>,
         holder: &str,
     ) -> Result<Held, Refusal> {
         let id = config.id.clone();
         let settings = settings_value(config.settings.as_ref());
-        let mut grant = AccountGrant::new(id.clone(), config.kind.clone()).settings(settings);
+        let mut grant = AccountGrant::new(id.clone(), config.kind.clone())
+            .settings(settings)
+            .provides(info.provides.iter().cloned());
         if config.kind == HARNESS_LOGIN {
             return Ok(Held::new(self, name, grant, None, Arc::default(), false));
         }
@@ -530,7 +536,7 @@ impl Accounts {
         grant = grant
             .credentials(record.credentials())
             .revision(record.revision);
-        if info.state_dir {
+        if info.state_dir || runs.directory(config, info) {
             let dir = self.state_dir(&id);
             match private::create_dir(&dir) {
                 Ok(()) => grant = grant.state_dir(dir.to_string_lossy().into_owned()),
@@ -542,7 +548,7 @@ impl Accounts {
         }
         let mut session = None;
         if foundry {
-            match foundry::grant(&self.gateways, &config.harness, &grant) {
+            match foundry::grant(&self.gateways, runs.harness, &grant) {
                 Ok((mapped, ticket)) => {
                     grant = mapped;
                     session = Some(ticket);

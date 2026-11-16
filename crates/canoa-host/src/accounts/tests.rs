@@ -187,7 +187,13 @@ fn a_lost_login_marks_the_account_and_keeps_the_stored_copy_for_the_next_start()
     let mut info = AccountKindInfo::new("claude-login", "Claude");
     info.state_dir = true;
     let held = accounts
-        .begin("work", &config, &info, "a test")
+        .begin(
+            "work",
+            &config,
+            &info,
+            Runs::plain(&config.harness),
+            "a test",
+        )
         .expect("held");
     assert_eq!(
         held.grant().credentials.expose().get("credentials_file"),
@@ -213,9 +219,21 @@ fn an_account_that_rotates_is_held_by_one_connection_at_a_time() {
     rotating.state_dir = true;
 
     let first = accounts
-        .begin("work", &config, &rotating, "the first")
+        .begin(
+            "work",
+            &config,
+            &rotating,
+            Runs::plain(&config.harness),
+            "the first",
+        )
         .expect("held");
-    match accounts.begin("work", &config, &rotating, "the second") {
+    match accounts.begin(
+        "work",
+        &config,
+        &rotating,
+        Runs::plain(&config.harness),
+        "the second",
+    ) {
         Err(Refusal::InUse(holder)) => assert_eq!(holder, "the first"),
         other => panic!("a second holder: {other:?}"),
     }
@@ -225,7 +243,13 @@ fn an_account_that_rotates_is_held_by_one_connection_at_a_time() {
     drop(first);
     assert!(!accounts.held("a"));
     let second = accounts
-        .begin("work", &config, &rotating, "the second")
+        .begin(
+            "work",
+            &config,
+            &rotating,
+            Runs::plain(&config.harness),
+            "the second",
+        )
         .expect("held after");
     drop(second);
 
@@ -233,10 +257,22 @@ fn an_account_that_rotates_is_held_by_one_connection_at_a_time() {
     let mut shared = AccountKindInfo::new("claude-login", "Claude");
     shared.state_dir = true;
     let one = accounts
-        .begin("work", &config, &shared, "one")
+        .begin(
+            "work",
+            &config,
+            &shared,
+            Runs::plain(&config.harness),
+            "one",
+        )
         .expect("held");
     let two = accounts
-        .begin("work", &config, &shared, "two")
+        .begin(
+            "work",
+            &config,
+            &shared,
+            Runs::plain(&config.harness),
+            "two",
+        )
         .expect("held too");
     drop((one, two));
 }
@@ -252,10 +288,22 @@ fn the_files_a_provider_placed_go_with_the_last_connection() {
     let mut shared = AccountKindInfo::new("claude-login", "Claude");
     shared.state_dir = true;
     let one = accounts
-        .begin("work", &config, &shared, "one")
+        .begin(
+            "work",
+            &config,
+            &shared,
+            Runs::plain(&config.harness),
+            "one",
+        )
         .expect("held");
     let two = accounts
-        .begin("work", &config, &shared, "two")
+        .begin(
+            "work",
+            &config,
+            &shared,
+            Runs::plain(&config.harness),
+            "two",
+        )
         .expect("held too");
     let state = accounts.state_dir("a");
     let place = |held: &Held| {

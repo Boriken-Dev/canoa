@@ -832,3 +832,114 @@ grants = {{ \"{}\" = [\"accounts\"] }}
     .expect("served");
     assert!(own["_meta"].get(ACCOUNT_META).is_none(), "{own}");
 }
+
+/// A fixture whose Claude entry's provider made the account `one` from a key, and whose entry `Pi` runs the Pi stand-in and
+/// offers it; `extra` is more of canoa.cfg. The names of what each start of Pi was given are in `pi.log` of the scratch.
+fn pi_on_a_claude_key(extra: &str) -> Fixture {
+    let fixture = Fixture::bare();
+    let added = fixture.canoa(
+        &[
+            "accounts",
+            "add",
+            "one",
+            "--harness",
+            "claude",
+            "--method",
+            "api-key",
+        ],
+        Some("sk-test-key-0000\n"),
+    );
+    assert!(added.status.success(), "{}", text(&added.stderr));
+    let pi = fixture
+        .scratch
+        .0
+        .join(format!("pi{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(example("fake_pi", false), &pi).expect("the Pi stand-in is copied");
+    let mut cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
+    cfg.push_str(&format!(
+        "\n[host.agents.Pi]\nharness = \"pi\"\nexecutable = {}\naccounts = [\"one\"]\n{extra}",
+        quoted(&pi.to_string_lossy())
+    ));
+    std::fs::write(&fixture.config, cfg).expect("canoa.cfg");
+    fixture
+}
+
+#[test]
+fn an_account_says_which_standards_it_provides() {
+    let fixture = Fixture::signed_in();
+    assert_eq!(fixture.account()["provides"], json!(["claude-code"]));
+    let fixture = offering("api-key", "sk-test-key-0000\n", "");
+    assert_eq!(fixture.account()["provides"], json!(["anthropic-api"]));
+}
+
+#[test]
+fn a_pi_session_runs_on_an_anthropic_key_that_claude_codes_provider_made() {
+    let fixture = pi_on_a_claude_key("");
+    let scratch = fixture.scratch.0.clone();
+    let log = scratch.join("pi.log");
+    let config = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
+    let env = vec![("COQUI_ACP_FAKE_PI_LOG", log.clone().into_os_string())];
+    let (host, _log) = Host::start_logged(fixture.scratch, &config, 2, &env);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    let answer = with_link(host.url("Pi"), &client, host.peer, |rpc| {
+        let answer = rpc
+            .request(
+                "initialize",
+                json!({"protocolVersion": 1, "clientCapabilities": {}, "_meta": {ACCOUNT_META: "one"}}),
+            )
+            .expect("initialized on the account");
+        rpc.request("session/new", json!({"cwd": dir, "mcpServers": []}))
+            .expect("a session opens");
+        answer
+    })
+    .expect("served");
+    assert_eq!(
+        answer["_meta"][ACCOUNT_META],
+        json!({"name": "one", "kind": "anthropic-api-key"}),
+        "{answer}"
+    );
+    waits_for("Pi started", || !records(&log).is_empty());
+    let names: Vec<String> = records(&log)
+        .iter()
+        .filter_map(|each| each["env_names"].as_array())
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        names.contains(&"ANTHROPIC_API_KEY".to_owned()),
+        "Pi was given the key in the variable it reads: {names:?}"
+    );
+    assert!(
+        names.contains(&"PI_CODING_AGENT_DIR".to_owned()),
+        "and a directory of its own for the account: {names:?}"
+    );
+}
+
+#[test]
+fn an_entry_that_lists_an_account_its_harness_takes_no_standard_of_does_not_start_and_says_why() {
+    // A Claude subscription provides `claude-code`, which only Claude Code takes.
+    let fixture = Fixture::unlisted();
+    let codex = fixture
+        .scratch
+        .0
+        .join(format!("codex{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(example("harness_standin", false), &codex).expect("copied");
+    let mut cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
+    cfg.push_str(&format!(
+        "\n[host.agents.Codex]\nharness = \"codex\"\nexecutable = {}\naccounts = [\"work\"]\n",
+        quoted(&codex.to_string_lossy())
+    ));
+    std::fs::write(&fixture.config, cfg).expect("canoa.cfg");
+    let output = fixture.canoa(&["serve"], None);
+    assert!(!output.status.success());
+    let said = text(&output.stderr);
+    assert!(
+        said.contains("account work cannot run on codex")
+            && said.contains("claude-code")
+            && said.contains("codex, openai-api"),
+        "{said}"
+    );
+}

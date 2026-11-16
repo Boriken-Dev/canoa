@@ -281,7 +281,8 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
                 } else {
                     Vec::new()
                 };
-                built = built.offering(store, listed, others);
+                let unfit = crate::serve::unfit_accounts(config, harness, &built);
+                built = built.offering(store, listed, others).with_unfit(unfit);
                 match built.hold_account(account, "choices", asking.any_account) {
                     Ok(taken) => held = Some(taken),
                     Err(refusal) => return Some(Choices::failed(refusal.client_reason())),

@@ -15,6 +15,7 @@ use canoa_foundry::{EngineError, ModelInfo};
 use serde_json::json;
 
 use super::*;
+use crate::accounts::matching::Runs;
 use crate::accounts::store::FileStore;
 use crate::accounts::{Accounts, Refusal};
 use crate::config::AccountConfig;
@@ -169,7 +170,13 @@ fn a_claude_session_is_given_a_gateway_token_and_its_address() {
     let accounts = accounts(&dir);
     let info = catalog_of("claude").kind(KIND).expect("the kind").clone();
     let held = accounts
-        .begin("local", &config("claude"), &info, "a session")
+        .begin(
+            "local",
+            &config("claude"),
+            &info,
+            Runs::plain("claude"),
+            "a session",
+        )
         .expect("begins");
     let grant = held.grant();
     assert_eq!(grant.kind, "anthropic-auth-token");
@@ -207,7 +214,13 @@ fn a_codex_session_is_given_an_api_key_the_v1_address_and_a_folder_that_turns_of
     let accounts = accounts(&dir);
     let info = catalog_of("codex").kind(KIND).expect("the kind").clone();
     let held = accounts
-        .begin("local", &config("codex"), &info, "a session")
+        .begin(
+            "local",
+            &config("codex"),
+            &info,
+            Runs::plain("codex"),
+            "a session",
+        )
         .expect("begins");
     let grant = held.grant();
     assert_eq!(grant.kind, "codex-api-key");
@@ -231,7 +244,13 @@ fn a_pi_session_is_given_an_api_key_in_the_openai_variable_and_a_folder_that_nam
     let accounts = accounts(&dir);
     let info = catalog_of("pi").kind(KIND).expect("the kind").clone();
     let held = accounts
-        .begin("local", &config("pi"), &info, "a session")
+        .begin(
+            "local",
+            &config("pi"),
+            &info,
+            Runs::plain("pi"),
+            "a session",
+        )
         .expect("begins");
     let grant = held.grant();
     assert_eq!(grant.kind, "pi-api-key");
@@ -256,15 +275,69 @@ fn a_pi_session_is_given_an_api_key_in_the_openai_variable_and_a_folder_that_nam
 }
 
 #[test]
+fn an_account_made_for_one_harness_runs_another_in_that_harness_s_own_kind_and_keeps_its_standards()
+{
+    let dir = Dir::new();
+    let accounts = accounts(&dir);
+    let info = catalog_of("claude").kind(KIND).expect("the kind").clone();
+    // Made for Claude Code, used by Codex: the gateway is addressed the way Codex reads it.
+    let held = accounts
+        .begin(
+            "local",
+            &config("claude"),
+            &info,
+            Runs::plain("codex"),
+            "a session",
+        )
+        .expect("begins");
+    let grant = held.grant();
+    assert_eq!(grant.kind, "codex-api-key");
+    assert!(text(&grant, "openai_base_url").ends_with("/v1"));
+    assert!(grant.state_dir.is_some(), "Codex's folder is made");
+    assert_eq!(held.report()["kind"], KIND);
+    // A grant of another provider's kind carries what it provides, so the harness can apply it by a standard it accepts.
+    let key = AccountKindInfo::new("anthropic-api-key", "Key").provides([standard::ANTHROPIC_API]);
+    let plain = AccountConfig {
+        harness: "claude".to_owned(),
+        kind: "anthropic-api-key".to_owned(),
+        id: "id-key".to_owned(),
+        settings: None,
+    };
+    accounts
+        .store_login(
+            "id-key",
+            &Credentials::from_iter([("api_key", "sk-test-0000")]),
+            None,
+        )
+        .expect("stored");
+    let held = accounts
+        .begin("key", &plain, &key, Runs::plain("pi"), "a session")
+        .expect("begins");
+    assert_eq!(held.grant().provides, [standard::ANTHROPIC_API]);
+}
+
+#[test]
 fn sessions_on_one_account_share_a_gateway_and_each_has_its_own_bearer() {
     let dir = Dir::new();
     let accounts = accounts(&dir);
     let info = catalog_of("claude").kind(KIND).expect("the kind").clone();
     let one = accounts
-        .begin("local", &config("claude"), &info, "one")
+        .begin(
+            "local",
+            &config("claude"),
+            &info,
+            Runs::plain("claude"),
+            "one",
+        )
         .expect("begins");
     let two = accounts
-        .begin("local", &config("claude"), &info, "two")
+        .begin(
+            "local",
+            &config("claude"),
+            &info,
+            Runs::plain("claude"),
+            "two",
+        )
         .expect("begins");
     let (a, b) = (one.grant(), two.grant());
     assert_eq!(text(&a, "base_url"), text(&b, "base_url"));
@@ -308,7 +381,13 @@ fn a_gateway_that_cannot_start_is_a_refusal_the_person_can_read_and_lets_the_acc
         .store_login("id-foundry", &Credentials::new(), None)
         .expect("stores");
     let refused = broken
-        .begin("local", &config("claude"), &info, "a session")
+        .begin(
+            "local",
+            &config("claude"),
+            &info,
+            Runs::plain("claude"),
+            "a session",
+        )
         .expect_err("no service");
     assert_eq!(
         refused,
@@ -318,7 +397,13 @@ fn a_gateway_that_cannot_start_is_a_refusal_the_person_can_read_and_lets_the_acc
     assert!(!broken.held("id-foundry"), "the account was let go");
     // A harness no gateway can be given to is refused by name.
     let refused = accounts
-        .begin("local", &config("grok"), &info, "a session")
+        .begin(
+            "local",
+            &config("grok"),
+            &info,
+            Runs::plain("grok"),
+            "a session",
+        )
         .expect_err("no route");
     assert!(
         refused
@@ -355,7 +440,7 @@ fn live_gateway_for_the_three_harnesses() {
         let mut account = config(harness);
         account.settings = Some(settings(&model));
         let session = accounts
-            .begin("local", &account, &info, harness)
+            .begin("local", &account, &info, Runs::plain(harness), harness)
             .expect("begins on the real service");
         let grant = session.grant();
         let settings = guatiao_serde::adapt::from_value::<serde_json::Value>(&grant.settings)

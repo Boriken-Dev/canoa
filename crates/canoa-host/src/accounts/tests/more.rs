@@ -138,7 +138,13 @@ fn the_accounts_directories_and_files_are_the_owners_alone() {
         .store_login("a", &credentials("1"), None)
         .expect("stored");
     let held = accounts
-        .begin("work", &config("a"), &rotating(), "a test")
+        .begin(
+            "work",
+            &config("a"),
+            &rotating(),
+            Runs::plain("claude"),
+            "a test",
+        )
         .expect("held");
     let root = dir.0.join("accounts");
     #[cfg(unix)]
@@ -214,7 +220,7 @@ fn what_a_crash_left_in_the_accounts_directory_is_swept_when_it_opens() {
     let mut shared = AccountKindInfo::new("claude-login", "Claude");
     shared.state_dir = true;
     let held = accounts
-        .begin("work", &config("a"), &shared, "one")
+        .begin("work", &config("a"), &shared, Runs::plain("claude"), "one")
         .expect("held");
     let state = accounts.state_dir("a");
     place(&held);
@@ -245,12 +251,24 @@ fn a_file_a_new_holder_placed_survives_the_old_holder_letting_go() {
     let file = accounts.state_dir("a").join(".credentials.json");
     for round in 0..150 {
         let old = accounts
-            .begin("work", &config("a"), &rotating(), "old")
+            .begin(
+                "work",
+                &config("a"),
+                &rotating(),
+                Runs::plain("claude"),
+                "old",
+            )
             .expect("held");
         place(&old);
         let letting_go = std::thread::spawn(move || drop(old));
         let new = loop {
-            match accounts.begin("work", &config("a"), &rotating(), "new") {
+            match accounts.begin(
+                "work",
+                &config("a"),
+                &rotating(),
+                Runs::plain("claude"),
+                "new",
+            ) {
                 Ok(new) => break new,
                 Err(_) => std::thread::yield_now(),
             }

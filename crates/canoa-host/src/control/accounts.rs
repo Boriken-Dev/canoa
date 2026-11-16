@@ -22,6 +22,7 @@ use serde_json::{Map, Value, json};
 
 use super::{BAD_PARAMS, NOT_FOUND, POLL, REFUSED, error_line};
 use crate::accounts::commands::{self, Cfg, Event, Relay};
+use crate::accounts::matching::{self, Catalogs};
 use crate::cli::Failed;
 use crate::config::{Config, EntryKind, Layers, Settings};
 use crate::home::Home;
@@ -55,6 +56,7 @@ const BUILT_IN_SOURCES: [(&str, &str); 2] = [("Claude", "claude"), ("Codex", "co
 /// The entries that run a built-in provider: those canoa.cfg has, then the built-in sources it has not named. A built-in source
 /// reaches only this computer's own application, except on the host of a portal, whose sockets only the person's browser reaches.
 fn entries_of(config: &Config, portal: bool) -> Vec<Value> {
+    let catalogs = Catalogs::new(config);
     let mut entries: Vec<Value> = config
         .entries
         .iter()
@@ -66,6 +68,8 @@ fn entries_of(config: &Config, portal: bool) -> Vec<Value> {
                 "harness": harness,
                 "accounts": accounts,
                 "open": entry.peers.is_none(),
+                "accepts": catalogs.accepts(harness),
+                "usable": matching::usable(config, &catalogs, harness),
             })),
             _ => None,
         })
@@ -74,6 +78,8 @@ fn entries_of(config: &Config, portal: bool) -> Vec<Value> {
         if config.entries.iter().all(|entry| entry.name != name) {
             entries.push(json!({
                 "name": name, "harness": harness, "accounts": [], "open": portal,
+                "accepts": catalogs.accepts(harness),
+                "usable": matching::usable(config, &catalogs, harness),
             }));
         }
     }
@@ -252,19 +258,30 @@ fn offer(
         }
     };
     let harness = harness.as_str();
+    let mut catalogs = None;
     for (index, name) in names.iter().enumerate() {
         let account = config
             .accounts
             .get(name)
             .ok_or((NOT_FOUND, format!("no account called {name}")))?;
         if account.harness != harness {
-            return Err((
-                REFUSED,
-                format!(
-                    "{name} signs in to {}, and {entry} runs {harness}",
-                    account.harness
-                ),
-            ));
+            let catalogs = catalogs.get_or_insert_with(|| Catalogs::new(config));
+            let fit = match (catalogs.of(harness), catalogs.kind(account)) {
+                (Some(catalog), Some(info)) => matching::fits(&catalog, harness, account, &info),
+                _ => Err(format!(
+                    "{harness} does not list what {} provides",
+                    account.kind
+                )),
+            };
+            if let Err(why) = fit {
+                return Err((
+                    REFUSED,
+                    format!(
+                        "{name} signs in to {}, and {entry} runs {harness}: {why}",
+                        account.harness
+                    ),
+                ));
+            }
         }
         if names[..index].contains(name) {
             return Err((BAD_PARAMS, format!("{name} is listed twice")));

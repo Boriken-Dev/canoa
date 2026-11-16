@@ -27,6 +27,7 @@ use coqui_acp_api::{
     HarnessNotice, ProcessSpawner, StartRequest,
 };
 
+use crate::accounts::matching::Runs;
 use crate::accounts::{ACCOUNT_META, Accounts, Held, NoAccounts};
 use crate::config::{AccountConfig, Origin, Settings, cache_lifetime_named};
 use crate::provider::{ProviderError, map_of, open};
@@ -105,6 +106,8 @@ struct Offer {
     offered: Vec<Offered>,
     /// The other accounts of the entry's provider, which only a key trusted with accounts may choose.
     others: Vec<Offered>,
+    /// The accounts of other providers that cannot run here, with why, which only a key trusted with accounts is told.
+    unfit: Vec<(String, String)>,
     /// Number the plain and the profiled instance's sequences, so one's are not taken for the other's.
     sources: (u64, u64),
 }
@@ -249,6 +252,14 @@ impl Harness {
         self.catalog.as_ref()
     }
 
+    /// This harness as an account is held for it.
+    fn runs(&self) -> Runs<'_> {
+        Runs {
+            harness: &self.id,
+            catalog: self.catalog.as_ref(),
+        }
+    }
+
     /// The provider as configured, for the commands that sign in.
     pub(crate) fn provider(&self) -> &Arc<dyn AcpHarness> {
         &self.plain
@@ -266,8 +277,17 @@ impl Harness {
             host: Arc::clone(host),
             offered,
             others,
+            unfit: Vec::new(),
             sources: (host.source(), host.source()),
         });
+        self
+    }
+
+    /// This harness, knowing why each of `unfit` (an account's name and the reason) cannot run a session on it.
+    pub(crate) fn with_unfit(mut self, unfit: Vec<(String, String)>) -> Self {
+        if let Some(offer) = &mut self.accounts {
+            offer.unfit = unfit;
+        }
         self
     }
 
@@ -305,7 +325,7 @@ impl Harness {
                 "this entry does not offer that account".to_owned(),
             ));
         };
-        offer.host.begin(name, config, info, holder)
+        offer.host.begin(name, config, info, self.runs(), holder)
     }
 
     /// The grant of the account `name`, for a call that only reads with its credential (no lease, nothing started).
@@ -359,16 +379,31 @@ impl Harness {
                 None => return Ok(None),
             },
             Some(serde_json::Value::Null) if any => return Ok(None),
-            Some(serde_json::Value::String(name)) => listed(&name).or_else(|| {
-                any.then(|| offer.others.iter().find(|(other, ..)| *other == name))
+            Some(serde_json::Value::String(ref name)) => listed(name).or_else(|| {
+                any.then(|| offer.others.iter().find(|(other, ..)| other == name))
                     .flatten()
             }),
             Some(_) => return Err("the account is named by its name, as text".to_owned()),
         }
-        .ok_or_else(|| "this entry does not offer that account".to_owned())?;
+        .ok_or_else(|| {
+            let why = any
+                .then(|| match &named {
+                    Some(serde_json::Value::String(name)) => offer
+                        .unfit
+                        .iter()
+                        .find(|(each, _)| each == name)
+                        .map(|(_, why)| format!(": it cannot run on {}: {why}", self.id)),
+                    _ => None,
+                })
+                .flatten();
+            format!(
+                "this entry does not offer that account{}",
+                why.unwrap_or_default()
+            )
+        })?;
         let held = offer
             .host
-            .begin(name, config, info, holder)
+            .begin(name, config, info, self.runs(), holder)
             .map_err(|refusal| refusal.client_reason())?;
         // What using the kind weakens is said at every start, and so is a credential the host's own environment sets that
         // the account takes the place of.
