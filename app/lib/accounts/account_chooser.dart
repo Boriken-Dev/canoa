@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../chat/composer.dart' show ComposerKit;
 import '../chat/session_picker.dart';
 import '../session_store.dart';
+import '../sources/source_icons.dart';
 
 /// The account a session runs on, beside the source, which opens the one picker where the accounts the source's entry offers are
 /// listed, each with where it stands. One that a session holds (a login that rotates allows one holder) or that needs signing in
@@ -34,7 +35,14 @@ class AccountChooser extends StatelessWidget {
           onTap: () => unawaited(showSessionPicker(context, store: store, session: session, kit: kit)),
           child: Tooltip(
             message: session.isDraft ? 'The account this session runs on' : 'The account this session runs on; another needs a new conversation',
-            child: ComposerPill(label: chosen?.name ?? machineLoginLabel, icon: Icons.account_circle_outlined),
+            child: ComposerPill(
+              label: chosen?.name ?? machineLoginLabel,
+              leading: SourceMark.provider(
+                chosen == null ? accounts.harnessOf(entry) : accountMarkId(chosen.harness, chosen.kind),
+                size: 16,
+                key: const Key('account-chip-mark'),
+              ),
+            ),
           ),
         );
       },

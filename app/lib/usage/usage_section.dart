@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../settings/agent_sections.dart' show WarnFromRow;
 import '../settings/settings_row.dart' show SettingsGroup;
+import '../sources/source_icons.dart';
 import 'cost_view.dart';
 import 'limits_view.dart';
 import 'spend_model.dart';
@@ -37,6 +38,7 @@ class UsageIndex extends StatelessWidget {
             ListTile(
               key: Key('usage-index provider $provider'),
               dense: true,
+              leading: SourceMark.provider(provider, size: 18, key: Key('usage-index-mark $provider')),
               title: Text(
                 provider,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
@@ -53,7 +55,7 @@ class UsageIndex extends StatelessWidget {
                 key: Key('usage-index account ${each.id}'),
                 dense: true,
                 contentPadding: const EdgeInsets.only(left: 28, right: 12),
-                leading: const Icon(Icons.account_circle_outlined, size: 18),
+                leading: SourceMark.provider(each.provider, size: 18, key: Key('usage-index-mark ${each.id}')),
                 title: Text(each.name),
                 selected: controller.account == each.id,
                 onTap: () =>

@@ -119,7 +119,11 @@ class ProgramTile extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            SourceMark.provider(id, size: 18),
+            SourceMark.provider(
+              firstMarkId([for (final each in status.info.serves) each.provider, id, status.info.program, status.info.title]),
+              size: 24,
+              key: Key('program-mark-$id'),
+            ),
             const SizedBox(width: 8),
             Flexible(child: Text(status.info.title, style: Theme.of(context).textTheme.titleSmall)),
           ]),

@@ -16,6 +16,7 @@ class SettingsRow extends StatelessWidget {
     this.enabled = true,
     this.machine = false,
     this.below,
+    this.leading,
     this.configKey,
     this.onLayerReset,
   });
@@ -38,6 +39,9 @@ class SettingsRow extends StatelessWidget {
   /// Full-width content under the title, such as a field or a list.
   final Widget? below;
 
+  /// A mark before the title, such as an agent's.
+  final Widget? leading;
+
   /// The value's key in canoa.cfg: the row then says when a lower layer gives it, and offers Reset when the person's file
   /// overrides one.
   final List<String>? configKey;
@@ -50,7 +54,7 @@ class SettingsRow extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
     final muted = scheme.onSurfaceVariant;
-    final label = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    final titles = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, children: [
         Text(title, style: text.bodyLarge),
         if (machine) const MachineBadge(),
@@ -58,6 +62,13 @@ class SettingsRow extends StatelessWidget {
       ]),
       if (description != null) Padding(padding: const EdgeInsets.only(top: 2), child: Text(description!, style: text.bodySmall?.copyWith(color: muted))),
     ]);
+    final label = leading == null
+        ? titles
+        : Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+            leading!,
+            const SizedBox(width: 12),
+            Expanded(child: titles),
+          ]);
     final body = Padding(
       padding: EdgeInsets.fromLTRB(child ? 40 : 16, 12, 16, 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -103,9 +114,12 @@ class MachineBadge extends StatelessWidget {
 
 /// A titled group of rows in a rounded card.
 class SettingsGroup extends StatelessWidget {
-  const SettingsGroup({super.key, this.title, this.trailing, required this.children});
+  const SettingsGroup({super.key, this.title, this.leading, this.trailing, required this.children});
 
   final String? title;
+
+  /// A mark before the title.
+  final Widget? leading;
   final Widget? trailing;
   final List<Widget> children;
 
@@ -119,6 +133,7 @@ class SettingsGroup extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
             child: Row(children: [
+              if (leading != null) ...[leading!, const SizedBox(width: 8)],
               Expanded(child: Text(title!, style: Theme.of(context).textTheme.titleSmall)),
               ?trailing,
             ]),

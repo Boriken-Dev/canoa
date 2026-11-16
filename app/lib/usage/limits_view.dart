@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../accounts/usage_view.dart';
+import '../sources/source_icons.dart';
 import 'usage_model.dart';
 
 /// The allowances of each account the filters leave, under its provider: each bucket with how much is left, a bar, when it resets,
@@ -51,11 +52,11 @@ class LimitsView extends StatelessWidget {
         for (final provider in providers) ...[
           Padding(
             padding: const EdgeInsets.only(top: 8, bottom: 8),
-            child: Text(
-              provider,
-              key: Key('usage-provider $provider'),
-              style: text.titleSmall,
-            ),
+            child: Row(children: [
+              SourceMark.provider(provider, size: 20, key: Key('usage-provider-mark $provider')),
+              const SizedBox(width: 8),
+              Text(provider, key: Key('usage-provider $provider'), style: text.titleSmall),
+            ]),
           ),
           for (final each in shown.where((each) => each.provider == provider))
             Card(
@@ -66,7 +67,11 @@ class LimitsView extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(each.name, style: text.titleMedium),
+                    Row(children: [
+                      SourceMark.provider(each.provider, size: 22, key: Key('usage-account-mark ${each.id}')),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(each.name, style: text.titleMedium)),
+                    ]),
                     Padding(
                       padding: const EdgeInsets.only(top: 2, bottom: 12),
                       child: Text(

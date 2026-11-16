@@ -568,9 +568,17 @@ class _SessionPickerState extends State<SessionPicker> {
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(chosen ? Icons.check : Icons.account_circle_outlined, size: 14, color: usable ? null : look.muted),
-              const SizedBox(width: 4),
+              Opacity(
+                opacity: usable ? 1 : 0.5,
+                child: SourceMark.provider(
+                  account == null ? accounts.harnessOf(entry) : accountMarkId(account.harness, account.kind),
+                  size: 16,
+                  key: Key('account-mark $name'),
+                ),
+              ),
+              const SizedBox(width: 6),
               Text(name, style: TextStyle(fontSize: 13, color: usable || !draft ? null : look.muted)),
+              if (chosen) ...[const SizedBox(width: 4), const Icon(Icons.check, size: 14)],
             ]),
             Text(state, style: TextStyle(fontSize: 11, color: usable ? look.muted : look.danger)),
             if (summary != null) Text(summary, key: Key('account-left-summary $name'), style: TextStyle(fontSize: 11, color: look.muted)),

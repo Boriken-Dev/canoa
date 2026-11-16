@@ -4,6 +4,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretRequestCard
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../sources/source_icons.dart';
 import '../store/links.dart';
 import '../store/programs.dart' show ProgramAsk;
 import '../store/programs_view.dart' show AskDialog;
@@ -120,7 +121,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
             key: const Key('add-account-harness'),
             initialValue: _harness,
             decoration: const InputDecoration(labelText: 'Provider', border: OutlineInputBorder(), isDense: true),
-            items: [for (final each in providers) DropdownMenuItem(value: each, child: Text(harnessTitle(each)))],
+            items: [for (final each in providers) DropdownMenuItem(value: each, child: Row(children: [SourceMark.provider(each, size: 18), const SizedBox(width: 8), Text(harnessTitle(each))]))],
             onChanged: (value) => setState(() {
               _harness = value ?? _harness;
               _name.text = _suggest();
@@ -162,7 +163,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
               groupValue: _method,
               onChanged: (value) => setState(() => _method = value),
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                for (final method in catalog.logins) _MethodTile(method: method, kind: catalog.kind(method.produces)),
+                for (final method in catalog.logins) _MethodTile(method: method, kind: catalog.kind(method.produces), harness: _harness),
               ]),
             );
           },
@@ -204,10 +205,11 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
 }
 
 class _MethodTile extends StatelessWidget {
-  const _MethodTile({required this.method, required this.kind});
+  const _MethodTile({required this.method, required this.kind, required this.harness});
 
   final LoginMethodInfo method;
   final AccountKindInfo? kind;
+  final String harness;
 
   @override
   Widget build(BuildContext context) {
@@ -218,6 +220,7 @@ class _MethodTile extends StatelessWidget {
       contentPadding: EdgeInsets.zero,
       dense: true,
       value: method.id,
+      secondary: SourceMark.provider(accountMarkId(harness, method.produces), size: 24, key: Key('method-mark ${method.id}')),
       title: Text(method.title),
       subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         if (method.description.isNotEmpty) Text(method.description, style: small),

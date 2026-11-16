@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../settings/settings_row.dart';
+import '../sources/source_icons.dart';
 import 'account_models.dart';
 import 'accounts_controller.dart';
 import 'accounts_host.dart';
@@ -128,6 +129,7 @@ class _AccountsSectionState extends State<AccountsSection> {
         SettingsGroup(
           key: Key('accounts-$harness'),
           title: harnessTitle(harness),
+          leading: SourceMark.provider(harness, size: 20),
           trailing: TextButton.icon(
             key: Key('add-account-$harness'),
             onPressed: () => unawaited(_add(harness)),
@@ -164,6 +166,7 @@ class _AccountsSectionState extends State<AccountsSection> {
     return Column(key: Key('account ${account.name}'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       SettingsRow(
         title: account.name,
+        leading: SourceMark.provider(accountMarkId(account.harness, account.kind), size: 24, key: Key('account-mark ${account.name}')),
         description: detail,
         control: Row(mainAxisSize: MainAxisSize.min, children: [
           if (account.status == AccountStatus.needsSignIn)

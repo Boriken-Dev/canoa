@@ -4,6 +4,22 @@ import 'agent_marks.dart';
 import 'sources.dart';
 import 'svg_path.dart';
 
+/// The key of [agentMarks] that an id, a standard or a harness belongs to, or null when it has no mark: its first word names
+/// the agent, so `claude`, `claude-code`, `claude_store` and `anthropic-api` are Claude's, `codex` and `openai-api` Codex's,
+/// `grok` and `xai-api` Grok's. One function serves a source, a Store program and an account.
+String? markIdOf(String? name) {
+  if (name == null) return null;
+  final word = name.trim().toLowerCase().split(RegExp(r'[-_\s.]')).first;
+  final id = switch (word) { 'anthropic' => 'claude', 'openai' => 'codex', 'xai' => 'grok', _ => word };
+  return agentMarks.containsKey(id) ? id : null;
+}
+
+/// The first of [names] that has a mark, as [markIdOf] reads each.
+String? firstMarkId(Iterable<String?> names) => names.map(markIdOf).nonNulls.firstOrNull;
+
+/// The mark an account shows: its harness's, else its kind's (`anthropic-api-key`); null when neither has one (Foundry Local).
+String? accountMarkId(String harness, String kind) => firstMarkId([harness, kind]);
+
 /// The generic icon for a provider with no vendor mark here: any other id, and an entry with no provider (a program on
 /// standard streams).
 IconData providerIcon(String? harness) => Icons.dns_outlined;
@@ -32,7 +48,7 @@ class SourceMark extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = IconTheme.of(context);
     final side = size ?? theme.size ?? 24;
-    final mark = agentMarks[_fromSource ? sourceProvider(source) : provider];
+    final mark = agentMarks[markIdOf(_fromSource ? sourceProvider(source) : provider)];
     if (mark == null) {
       return Icon(_fromSource ? sourceIcon(source) : providerIcon(provider), size: side, color: color);
     }
