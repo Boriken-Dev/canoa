@@ -48,6 +48,21 @@ void main() {
     expect(Icons.dns_outlined, providerIcon(null));
   });
 
+  test('a served page\'s harness entry offers its provider\'s modes before it starts, without the Bypass the host gates', () {
+    // What a served page gets from canoa.json: an entry that is not local, whose `harness` names the provider.
+    final entry = _line('{"name":"Claude","kind":"agent","url":"ws://127.0.0.1:1","harness":"claude","peer":"$_peer"}');
+    final source = hostedSources([entry]).single;
+    expect(source.local, isFalse);
+    List<String> ids(AgentSource each) => [for (final option in knownModes(each)) ...option.choices.map((choice) => choice.value)];
+    expect(ids(source), ['manual', 'accept_edits', 'auto', 'plan']);
+    const codex = AgentSource.hosted('Codex review', harness: 'codex');
+    expect(ids(codex), ['manual', 'accept_edits', 'auto', 'plan']);
+    // A local source keeps the agent-side Bypass its app runs it with, and an entry with another provider offers none.
+    expect(ids(const AgentSource.hosted('Claude', harness: 'claude', local: true)), contains('bypass'));
+    expect(ids(const AgentSource.hosted('Pi', harness: 'pi')), isEmpty);
+    expect(ids(const AgentSource.hosted('mine')), isEmpty);
+  });
+
   test('the translators the host runs are Claude Code and Codex, for the ledger', () {
     final names = HarnessNames();
     expect(names.label(reportedName: 'coqui-acp-claude', entry: 'Claude'), 'Claude Code');
