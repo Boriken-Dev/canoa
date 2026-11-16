@@ -545,7 +545,7 @@ peer = "sha256:..."             # the pinned peer id, 64 hex digits
 method = "noise"                # the proof the other end runs: "noise" or "webcrypto"
 ```
 
-A Canoa host is read from the list it serves at its address when the section opens, which connects to nothing; a direct agent is connected to only when the person asks it to be checked. What either lists of itself is its claim: connecting proves that it holds the pinned id. A direct endpoint offers a session and nothing else, so the section shows no folder browsing, files or management for it, and a workspace is typed as a path on that machine. Removing a connection removes only this app's record of it and names the sessions that were on it; nothing is stopped on the other end. A page served by a host keeps canoa.cfg on that host and saves no connections.
+A Canoa host is read from the list it serves at its address when the section opens, which connects to nothing; a direct agent is connected to only when the person asks it to be checked. What either lists of itself is its claim: connecting proves that it holds the pinned id. A direct endpoint offers a session and nothing else, so the section shows no folder browsing, files or management for it, and a workspace is typed as a path on that machine. Removing a connection removes only this app's record of it and names the sessions that were on it; nothing is stopped on the other end. A page served by a host saves its connections in canoa.cfg on that host, through the control channel, when its key holds `config.write`; the host refuses an address with a user name or password and any key but the five above.
 
 ### Trusting a project
 

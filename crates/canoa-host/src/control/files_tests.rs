@@ -890,3 +890,123 @@ fn a_network_or_device_path_is_refused_by_its_text() {
     }
     let _ = fs::remove_dir_all(tmp);
 }
+
+const PEER: &str = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+
+fn desk() -> Value {
+    json!({"kind": "canoa", "address": "https://desk.example:7800", "peer": PEER, "method": "noise"})
+}
+
+#[test]
+fn a_page_adds_renames_and_removes_a_saved_connection_with_config_write() {
+    let (path, control, _) = editing("canoa.cfg", "[desktop]\nstart_hidden = true\n");
+    let plain = key("sha256:aa", &[Grant::ConfigRead, Grant::ConfigWrite]);
+    let set = |value: Value| {
+        ask(
+            &control,
+            &plain,
+            "config/set",
+            json!({"section": "connections", "value": value}),
+        )
+    };
+    let added = set(json!({"Desk": desk()}));
+    assert_eq!(added["result"]["restart"], false, "{added}");
+    let read = ask(
+        &control,
+        &plain,
+        "config/get",
+        json!({"section": "connections"}),
+    );
+    assert_eq!(
+        read["result"]["value"]["Desk"]["address"], "https://desk.example:7800",
+        "{read}"
+    );
+    let renamed = set(json!({"Desk upstairs": desk()}));
+    assert!(renamed["result"].is_object(), "{renamed}");
+    let read = ask(
+        &control,
+        &plain,
+        "config/get",
+        json!({"section": "connections"}),
+    );
+    assert!(read["result"]["value"]["Desk"].is_null(), "{read}");
+    assert_eq!(
+        read["result"]["value"]["Desk upstairs"]["peer"], PEER,
+        "{read}"
+    );
+    let removed = set(Value::Null);
+    assert!(removed["result"].is_object(), "{removed}");
+    let read = ask(
+        &control,
+        &plain,
+        "config/get",
+        json!({"section": "connections"}),
+    );
+    assert_eq!(read["result"]["value"], Value::Null, "{read}");
+    let text = fs::read_to_string(&path).expect("canoa.cfg");
+    assert!(
+        text.contains("start_hidden") && !text.contains("desk.example"),
+        "{text}"
+    );
+    // Without config.write the table is not written.
+    let reader = key("sha256:bb", &[Grant::ConfigRead]);
+    let denied = ask(
+        &control,
+        &reader,
+        "config/set",
+        json!({"section": "connections", "value": {"Desk": desk()}}),
+    );
+    assert!(denied["error"].is_object(), "{denied}");
+    let _ = fs::remove_dir_all(path.parent().expect("dir"));
+}
+
+#[test]
+fn a_connection_that_holds_a_credential_or_anything_but_its_five_keys_is_refused() {
+    let (path, control, who) = editing("canoa.cfg", "[desktop]\nstart_hidden = true\n");
+    let before = fs::read_to_string(&path).expect("canoa.cfg");
+    let with = |key: &str, value: Value| {
+        let mut table = desk();
+        table[key] = value;
+        json!({"Desk": table})
+    };
+    for (what, value) in [
+        (
+            "a user name",
+            with("address", json!("https://me@desk.example")),
+        ),
+        (
+            "a password",
+            with("address", json!("wss://me:secret@desk.example/acp")),
+        ),
+        (
+            "an empty password",
+            with("address", json!("https://:@desk.example")),
+        ),
+        ("a token key", with("token", json!("abc"))),
+        ("a password key", with("password", json!("abc"))),
+        ("an address that is not text", with("address", json!(7))),
+        (
+            "an address that is not a URL",
+            with("address", json!("not a url")),
+        ),
+        ("a peer that is not text", with("peer", json!(["x"]))),
+        (
+            "a connection that is not a table",
+            json!({"Desk": "https://desk.example"}),
+        ),
+    ] {
+        let answer = ask(
+            &control,
+            &who,
+            "config/set",
+            json!({"section": "connections", "value": value}),
+        );
+        assert_eq!(answer["error"]["code"], REFUSED, "{what}: {answer}");
+        assert_eq!(
+            fs::read_to_string(&path).expect("canoa.cfg"),
+            before,
+            "{what}"
+        );
+    }
+    let _ = fs::remove_dir_all(path.parent().expect("dir"));
+}

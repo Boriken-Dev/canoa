@@ -164,6 +164,7 @@ pub const ENTRIES: &[&[&str]] = &[
     &["profile", "env", "*"],
     &["overlays", "*"],
     &["catalogs", "*"],
+    &["connections", "*"],
 ];
 
 fn is_entry(path: &[&str]) -> bool {
@@ -335,6 +336,32 @@ mod tests {
         );
         assert!(!shown.contains("SECRET"), "{shown}");
         std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn a_saved_connection_in_a_higher_layer_replaces_the_one_below_whole() {
+        let parse = |text: &str| toml::Value::Table(text.parse::<toml::Table>().expect("toml"));
+        let mut merged = parse(
+            "[connections.Desk]
+kind = \"canoa\"
+address = \"https://a.example\"
+peer = \"sha256:aa\"
+",
+        );
+        merge_into(
+            &mut merged,
+            parse(
+                "[connections.Desk]
+address = \"https://b.example\"
+",
+            ),
+        );
+        let desk = &merged["connections"]["Desk"];
+        assert_eq!(desk["address"].as_str(), Some("https://b.example"));
+        assert!(
+            desk.get("peer").is_none(),
+            "the address of one layer must not meet the pinned id of another: {desk}"
+        );
     }
 
     #[test]

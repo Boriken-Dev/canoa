@@ -632,7 +632,7 @@ program, asks its host to do as the user. Each is behind its own grant, so a key
 - `config/get` `{"section"}` -> `{"section", "value": object|null, "restart": false}` and `config/set` `{"section", "value": object|null}`
   -> `{"section", "restart"}` read and write one table of the person's own canoa.cfg (the file `--config` lists last), in the format
   it is in (a `.yaml`/`.json` name or a `#!` first line, else TOML; comments and layout are not kept). Only `SECTIONS` are named
-  (`appearance assets attachments catalogs defaults loadouts network notifications overlays permissions sessions store usage`); any other, `host`,
+  (`appearance assets attachments catalogs connections defaults loadouts network notifications overlays permissions sessions store usage`); any other, `host`,
   `agents`, `profile`, `desktop` and `skill_pins` among them, is `-32001`, since those name programs to run or what may run. `value` is
   an object of at most `MAX_SECTION_BYTES` (256 KiB) or null, which removes the table. The text that would result is read by the host's
   own loader first, and a file it would refuse is not written (`-32002`); the text is read back and no other table may differ; the write is beside the file first, then renamed, and through the link when canoa.cfg is one. `restart` is

@@ -42,6 +42,7 @@ pub const SECTIONS: &[&str] = &[
     "assets",
     "attachments",
     "catalogs",
+    "connections",
     "defaults",
     "loadouts",
     "network",
@@ -336,6 +337,9 @@ impl Files {
                 format!("a section is at most {MAX_SECTION_BYTES} bytes"),
             ));
         }
+        if section == "connections" {
+            check_connections(value)?;
+        }
         let _all = crate::accounts::commands::config_writes();
         let (text, existed) = read_cfg(path)?;
         let name = path
@@ -558,6 +562,45 @@ fn forget_stale(dir: &Path) {
             let _ = fs::remove_file(entry.path());
         }
     }
+}
+
+/// The keys of one `[connections.NAME]` table: where to connect and the peer's id, never a secret.
+const CONNECTION_KEYS: &[&str] = &["kind", "address", "transport", "peer", "method"];
+
+/// Refuses a `connections` table that holds anything but those keys as text, or an address with a user name or password: a
+/// page writes this table, and what it keeps there is shown and dialled later.
+fn check_connections(value: &Value) -> Result<(), (i32, String)> {
+    let Some(table) = value.as_object() else {
+        return Ok(());
+    };
+    for (name, connection) in table {
+        let Some(keys) = connection.as_object() else {
+            return Err(refused(&format!("connections.{name} is a table")));
+        };
+        for (key, field) in keys {
+            if !CONNECTION_KEYS.contains(&key.as_str()) {
+                return Err(refused(&format!(
+                    "connections.{name}: {key} is not a key of a connection"
+                )));
+            }
+            if !field.is_string() {
+                return Err(refused(&format!("connections.{name}: {key} is text")));
+            }
+        }
+        if let Some(address) = keys.get("address").and_then(Value::as_str) {
+            let url = url::Url::parse(address.trim())
+                .map_err(|_| refused(&format!("connections.{name}: address is a URL")))?;
+            let authority = address.split_once("://").map_or("", |(_, rest)| {
+                rest.split(['/', '?', '#']).next().unwrap_or("")
+            });
+            if !url.username().is_empty() || url.password().is_some() || authority.contains('@') {
+                return Err(refused(&format!(
+                    "connections.{name}: an address holds no user name or password"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn too_big(limit: u64) -> (i32, String) {
