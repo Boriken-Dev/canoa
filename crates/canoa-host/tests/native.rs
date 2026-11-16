@@ -953,6 +953,72 @@ fn discover_nearby_over_the_door_lists_the_agents_this_machine_advertises() {
     found(&result, &nearby);
 }
 
+/// Gives a directory to another user through `sudo`, and back to this one when dropped so the scratch folder can be removed.
+#[cfg(unix)]
+struct Given<'a> {
+    dir: &'a Path,
+    back: String,
+}
+
+#[cfg(unix)]
+impl<'a> Given<'a> {
+    /// `None` when this process cannot change an owner without a password.
+    fn to(dir: &'a Path, user: &str) -> Option<Self> {
+        let me = Command::new("id").arg("-u").output().ok()?;
+        let me = format!(
+            "{}:{}",
+            String::from_utf8_lossy(&me.stdout).trim(),
+            String::from_utf8_lossy(&Command::new("id").arg("-g").output().ok()?.stdout).trim()
+        );
+        let given = Command::new("sudo")
+            .args(["-n", "chown", user])
+            .arg(dir)
+            .status()
+            .ok()?
+            .success();
+        given.then_some(Self { dir, back: me })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Given<'_> {
+    fn drop(&mut self) {
+        let _ = Command::new("sudo")
+            .args(["-n", "chown", &self.back])
+            .arg(self.dir)
+            .status();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn discover_nearby_reports_a_descriptor_folder_another_user_owns_as_shared() {
+    let nearby = Nearby::new();
+    let Some(_given) = Given::to(nearby.path(), "65534:65534") else {
+        eprintln!("skipped: cannot change a folder's owner without a password (sudo -n chown)");
+        return;
+    };
+    let host = Host::start_with(
+        &agent_entry(),
+        1,
+        &[],
+        &[("COQUI_ACP_DESCRIPTORS", &nearby.path().to_string_lossy())],
+    );
+    let client = support::key();
+    host.pair(&client);
+    let result = on_control(&host, &client, |rpc| {
+        rpc.request("discover/nearby", json!({ "seconds": 1 }))
+    })
+    .expect("a paired key reaches the control channel")
+    .expect("the default grants include discovery");
+    assert_eq!(result["directory"], "shared", "{result}");
+    let listed = result["candidates"].as_array().expect("a list");
+    assert!(
+        listed.iter().all(|c| c["label"] != "Nearby fixture"),
+        "no descriptor of a folder another user owns is read: {result}"
+    );
+}
+
 #[test]
 fn discover_nearby_is_refused_to_a_key_without_the_grant_and_a_seconds_that_is_not_a_number() {
     let nearby = Nearby::new();
