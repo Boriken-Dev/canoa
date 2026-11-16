@@ -18,6 +18,9 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
+#[cfg(target_os = "linux")]
+mod owner;
+
 /// Connections that have not yet shown a bearer, at once; past it a new one is closed unread.
 const MAX_CONNECTIONS: usize = 32;
 /// The largest request head.
@@ -147,18 +150,31 @@ fn accept<S: Service>(listener: &TcpListener, service: &Arc<S>, stop: &AtomicBoo
 pub(crate) fn ours(peer: SocketAddr, local: SocketAddr) -> bool {
     #[cfg(target_os = "linux")]
     {
-        let read = |path| std::fs::read_to_string(path).unwrap_or_default();
-        // A client on a dual-stack socket reaches this IPv4 port from the IPv6 table.
-        let owner = owned_by(&read("/proc/net/tcp"), peer, local)
-            .or_else(|| owned_by_mapped(&read("/proc/net/tcp6"), peer, local));
         // The kernel stamps a socket with its process's effective user.
-        owner == Some(rustix::process::geteuid().as_raw())
+        placed(peer, local) == Some(rustix::process::geteuid().as_raw())
     }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = (peer, local);
         true
     }
+}
+
+/// The user of the connecting socket: the kernel's answer for this one connection, and the table of every socket where a
+/// kernel does not answer that.
+#[cfg(target_os = "linux")]
+fn placed(peer: SocketAddr, local: SocketAddr) -> Option<u32> {
+    if let (SocketAddr::V4(peer), SocketAddr::V4(local)) = (peer, local) {
+        match owner::owner(&peer, &local) {
+            owner::Owner::User(user) => return Some(user),
+            owner::Owner::Gone => return None,
+            owner::Owner::Unknown => {}
+        }
+    }
+    let read = |path| std::fs::read_to_string(path).unwrap_or_default();
+    // A client on a dual-stack socket reaches this IPv4 port from the IPv6 table.
+    owned_by(&read("/proc/net/tcp"), peer, local)
+        .or_else(|| owned_by_mapped(&read("/proc/net/tcp6"), peer, local))
 }
 
 /// The user that owns the socket in `/proc/net/tcp` whose local end is `peer` and remote end `local`: the connecting side.
