@@ -720,7 +720,7 @@ fn a_session_opening_reads_the_quota_and_the_client_that_asked_is_told() {
     while !told.borrow().iter().any(|message| {
         message["params"]["report"]["buckets"]
             .as_array()
-            .is_some_and(|buckets| !buckets.is_empty())
+            .is_some_and(|buckets| buckets.len() >= 2)
     }) && std::time::Instant::now() < until
     {
         splice.tick(|message| {
@@ -733,8 +733,13 @@ fn a_session_opening_reads_the_quota_and_the_client_that_asked_is_told() {
     let told = told.into_inner();
     let notice = told
         .iter()
-        .find(|message| message["method"] == USAGE_NOTIFICATION)
-        .expect("a notice");
+        .find(|message| {
+            message["method"] == USAGE_NOTIFICATION
+                && message["params"]["report"]["buckets"]
+                    .as_array()
+                    .is_some_and(|buckets| buckets.len() >= 2)
+        })
+        .expect("a notice with both buckets");
     let report = &notice["params"]["report"];
     assert_eq!(report["account"], "work", "{report}");
     assert!(
@@ -777,7 +782,12 @@ fn connections_of_an_entry_with_profiles_never_answer_from_each_others_readings(
     while !told.get() && std::time::Instant::now() < until {
         first.tick(|message| {
             let notice: Value = serde_json::from_slice(message).expect("JSON");
-            told.set(told.get() || notice["params"]["report"]["buckets"] != json!([]));
+            told.set(
+                told.get()
+                    || notice["params"]["report"]["buckets"]
+                        .as_array()
+                        .is_some_and(|buckets| buckets.len() >= 2),
+            );
             Ok(())
         });
         std::thread::sleep(Duration::from_millis(100));
