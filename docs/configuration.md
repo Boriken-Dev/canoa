@@ -386,12 +386,19 @@ installs them with the overlay:
 
 `canoa` itself fetches nothing: it delivers a skill the app fetched, after the same checks, and reports the others.
 
-### Loadout
+### The Store
 
-**Loadout** in the left column (and **Loadout…** in Settings → Profiles) is where an agent's overlays, skills and MCP
-servers are found, installed and chosen. It has three sections, **Overlays**, **Skills** and **MCPs**, each with
-**Installed** and **Discover** and a count on its tab. Every card says where it comes from (the catalog's label, the
-repository, the commit and digest it is pinned to), and everything is shown before it is installed.
+**Store** in the left column (and **Store…** in Settings → Profiles) is where an agent's programs, overlays, skills and
+MCP servers are found, installed and chosen. It has four types, **Agents** (where the host grants programs),
+**Overlays**, **Skills** and **MCPs**, behind one toolbar: the type tabs with a count each (a badge on Agents when a
+program has a newer version), **Installed** and **Discover**, a search, **Refresh**, **Store settings** and a line that
+says how old the catalogs' index is ("Cached · updated 3 min ago", "Stale" when a source could not be refreshed). Each
+type keeps its own query, switch and place in the list while you read an entry's details. Every card says where it comes
+from (the catalog's label, the repository, the commit and digest it is pinned to), what it needs, and whether it is
+installed, and opens its details: what it holds (skills, MCP servers), what it requires, the hooks and environment scripts
+it carries (which stay off until you allow them at their digest), and technical details with the digests. Everything is
+shown before it is installed. **Store settings** holds the catalogs: each one's source and what it said, and the form that
+adds one.
 
 - **Overlays.** Installed: each overlay's icon, summary, source, pin, what it applies (environment variables, skills, MCP
   servers, context) and what Canoa does not apply yet, a switch for whether **new sessions** start with it, an update
@@ -441,7 +448,7 @@ digest = "sha256:..."         # of the server.json that was shown
 
 ### The overlay store
 
-Loadout, Overlays, Discover lists the overlays of the catalogs `[catalogs]` names, to search, read about and
+Store, Overlays, Discover lists the overlays of the catalogs `[catalogs]` names, to search, read about and
 install. A catalog is an [AOS catalog](https://github.com/Boriken-Dev/agent-overlay-spec/blob/main/spec/v0/catalog.md):
 a file in a git repository, TOML, JSON (or, with any other name, `overlay.cfg`'s rule), listing overlays by name and
 source, with a summary, an icon, tags and the like for each. Canoa fetches it as it fetches an overlay (git objects at
