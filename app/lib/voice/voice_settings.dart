@@ -5,16 +5,21 @@ import 'package:flutter/material.dart';
 import '../config/canoa_config.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_row.dart';
+import 'host_speech.dart';
+import 'host_speech_settings.dart';
 import 'speech_backend.dart';
 
 /// Settings > Voice: where speech is turned into text, said before anything is recorded, and a short test of the microphone.
 class VoiceSection extends StatefulWidget {
-  const VoiceSection({super.key, required this.controller, required this.backends});
+  const VoiceSection({super.key, required this.controller, required this.backends, this.host});
 
   final SettingsController controller;
 
   /// The speech services this build has; none says "No speech service here".
   final List<SpeechBackend> backends;
+
+  /// The speech providers of the host this app reaches, offered beside [backends]; null when there is no host to ask.
+  final HostSpeechCatalog? host;
 
   @override
   State<VoiceSection> createState() => _VoiceSectionState();
@@ -32,8 +37,10 @@ class _VoiceSectionState extends State<VoiceSection> {
   SpeechBackend? _loadedFor;
   Future<_Choices>? _choices;
 
+  List<SpeechBackend> get _all => [...widget.backends, ...?widget.host?.backends];
+
   SpeechBackend? _backend(VoiceSettings voice) {
-    for (final backend in widget.backends) {
+    for (final backend in _all) {
       if (backend.id == voice.backend) return backend;
     }
     return null;
@@ -54,10 +61,16 @@ class _VoiceSectionState extends State<VoiceSection> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.controller,
+    listenable: Listenable.merge([widget.controller, ?widget.host]),
     builder: (context, _) {
       final voice = widget.controller.config.voice;
-      if (widget.backends.isEmpty) return const _NoSpeechService();
+      final host = widget.host;
+      if (_all.isEmpty) {
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const _NoSpeechService(),
+          if (host != null) HostProvidersGroup(catalog: host),
+        ]);
+      }
       final backend = _backend(voice);
       if (backend != null && !identical(backend, _loadedFor)) {
         _loadedFor = backend;
@@ -72,7 +85,7 @@ class _VoiceSectionState extends State<VoiceSection> {
             fieldKey: const Key('voice-backend'),
             value: backend?.id ?? voice.backend,
             choices: [
-              for (final each in widget.backends) (each.id, each.name),
+              for (final each in _all) (each.id, each.name),
               if (backend == null) (voice.backend, '${voice.backend} (not available here)'),
             ],
             // The microphone stays off while the choice is made; a choice never starts a capture.
@@ -165,6 +178,7 @@ class _VoiceSectionState extends State<VoiceSection> {
               ]);
             },
           ),
+        if (host != null) HostProvidersGroup(catalog: host),
       ]);
     },
   );

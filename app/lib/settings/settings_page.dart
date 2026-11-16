@@ -10,6 +10,7 @@ import '../profile/profiles_panel.dart' show ProfilesPanel;
 import '../selectable.dart';
 import '../sources/sources.dart';
 import '../store/programs.dart';
+import '../voice/host_speech.dart';
 import '../voice/speech_backend.dart';
 import '../voice/voice_settings.dart';
 import 'agent_sections.dart';
@@ -72,6 +73,7 @@ class SettingsPage extends StatefulWidget {
     this.accounts,
     this.usageSection = false,
     this.voiceBackends = const [],
+    this.hostSpeech,
     this.version = '',
   });
 
@@ -126,6 +128,9 @@ class SettingsPage extends StatefulWidget {
 
   /// The speech services this build offers for dictation; none makes Voice say so.
   final List<SpeechBackend> voiceBackends;
+
+  /// The speech providers of the host this app reaches, offered beside [voiceBackends].
+  final HostSpeechCatalog? hostSpeech;
 
   /// The app's version, for About.
   final String version;
@@ -226,7 +231,7 @@ class SettingsPageState extends State<SettingsPage> {
       'general' => GeneralSection(controller: controller, ledger: widget.ledger, workspacePreview: widget.workspacePreview, hostWorkspacePreview: widget.hostWorkspacePreview),
       'appearance' => AppearanceSection(controller: controller),
       'notifications' => NotificationsSection(controller: controller, onAllowNotifications: widget.onAllowNotifications),
-      'voice' => VoiceSection(controller: controller, backends: widget.voiceBackends),
+      'voice' => VoiceSection(controller: controller, backends: widget.voiceBackends, host: widget.hostSpeech),
       'shortcuts' => const ShortcutsSection(),
       'sources' => SourcesSection(
         controller: controller, presets: widget.presets, hosted: widget.hosted, checkSource: widget.checkSource, programs: widget.programs),

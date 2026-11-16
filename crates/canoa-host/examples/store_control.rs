@@ -6,7 +6,8 @@
 //! serves until standard input closes.
 //!
 //! Usage: `store_control <directory>`; the directory holds the host's home, the programs folder and the user's folders, and is
-//! the caller's to remove.
+//! the caller's to remove. Its `canoa.cfg`, when there is one, is the host's configuration file for `config/*` and `speech/*`, so
+//! a test that defines a speech provider there reaches it over the same links.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -85,8 +86,10 @@ fn serve(dir: &Path) -> Result<(), String> {
     let identity = home.identity(None).map_err(|error| error.to_string())?;
     let store = home.store().map_err(|error| error.to_string())?;
     let stores = Arc::new(programs(dir.join("programs"), dir.join("user")));
+    // A canoa.cfg in the directory is the file `config/*` and `speech/*` read and write, when the caller made one.
     let options = ServeOptions::new(sibling("canoa").to_string_lossy().into_owned())
-        .with_programs(stores, vec!["echo_store".to_owned()]);
+        .with_programs(stores, vec!["echo_store".to_owned()])
+        .with_config_file(dir.join("canoa.cfg"));
     let serving =
         Serving::bind(&config, identity, store, &options).map_err(|error| error.to_string())?;
     let local = serving.local();

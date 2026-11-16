@@ -7,6 +7,7 @@ import 'package:canoa/settings/settings_page.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/store/programs.dart';
 import 'package:canoa/theme/look.dart';
+import 'package:canoa/voice/host_speech.dart';
 import 'package:canoa/voice/speech_backend.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -41,6 +42,7 @@ Future<SettingsHarness> openSettings(
   String version = '',
   AccountsController? accounts,
   List<SpeechBackend> voiceBackends = const [],
+  HostSpeechCatalog? hostSpeech,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -70,6 +72,7 @@ Future<SettingsHarness> openSettings(
       version: version,
       accounts: accounts,
       voiceBackends: voiceBackends,
+      hostSpeech: hostSpeech,
     ),
   ));
   await tester.pumpAndSettle();

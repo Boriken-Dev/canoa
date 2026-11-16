@@ -132,6 +132,7 @@ import 'worktree/close_dialog.dart';
 import 'worktree/host.dart';
 import 'worktree/worktree.dart';
 import 'selectable.dart';
+import 'voice/host_speech.dart';
 import 'voice/system_speech.dart';
 
 /// The folder [file] is in, else null.
@@ -572,6 +573,7 @@ class _CanoaAppState extends State<CanoaApp> {
       accounts: _accounts,
       usageSection: _usage != null,
       voiceBackends: _speech,
+      hostSpeech: _hostSpeech,
       version: const String.fromEnvironment('CANOA_VERSION'),
     );
 
@@ -864,6 +866,9 @@ class _CanoaAppState extends State<CanoaApp> {
   bool get _hasProfiles => config.overlays.isNotEmpty || !config.profile.isEmpty || config.agentProfiles.isNotEmpty;
 
   late final HostControl? _control = widget.served?.control ?? (widget.host == null ? null : HostControl(widget.host!));
+
+  /// The speech providers of the host this app reaches, which run what a page or a platform without a speech service of its own records.
+  late final HostSpeechCatalog? _hostSpeech = _control == null ? null : HostSpeechCatalog(_control);
 
   late final HostFiles? _hostFiles = widget.served?.files ?? (_control == null ? null : HostFiles(_control));
 

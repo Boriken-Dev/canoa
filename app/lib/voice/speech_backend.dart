@@ -43,9 +43,13 @@ final class SpeechChoice {
 
 /// What a backend has heard so far. A provisional transcript is replaced by the next one; a final one ends a phrase.
 final class Transcript {
-  const Transcript(this.text, {required this.isFinal});
+  const Transcript(this.text, {required this.isFinal, this.frontMatter = const {}});
   final String text;
   final bool isFinal;
+
+  /// What the service knows about the speech besides the words (language detected, confidence, anything it wants the next model
+  /// to know); empty when it says nothing.
+  final Map<String, Object?> frontMatter;
 }
 
 /// Why a capture ended without a result the person asked for. [message] says it in words and never holds the audio or a key.

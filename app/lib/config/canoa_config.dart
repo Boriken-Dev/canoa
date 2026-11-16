@@ -1067,7 +1067,7 @@ final class CanoaConfig {
     final readFrom = ConfigSource(format: own.format, marked: own.marked, layers: below, own: own.data);
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults', 'sources', 'attachments', 'usage', 'voice', 'connections'}
+            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults', 'sources', 'attachments', 'usage', 'voice', 'speech', 'connections'}
           .contains(name)) {
         throw FormatException('canoa.cfg: unknown table $name');
       }
@@ -1276,6 +1276,8 @@ final class CanoaConfig {
         if (agentTables.isNotEmpty) 'agents': agentTables,
         'catalogs': ?data['catalogs'],
         'connections': ?data['connections'],
+        // The host's speech providers: programs and keys the app does not edit here but must write back as it found them.
+        'speech': ?data['speech'],
         'skill_pins': ?data['skill_pins'],
         'loadouts': ?data['loadouts'],
         'defaults': ?data['defaults'],

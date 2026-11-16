@@ -5,72 +5,16 @@
 @Timeout(Duration(minutes: 2))
 library;
 
-import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/desktop/control_client.dart';
-import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/sources/readiness.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/store/programs.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/control_process.dart';
 import 'fixtures/examples.dart';
-
-/// The example's standard streams, shared by the links it serves: a line is a link's number, a space and a message.
-final class _Process {
-  _Process(this.process) {
-    process.stderr.listen((_) {});
-    process.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
-      final at = line.indexOf(' ');
-      if (at > 0) _inbox[line.substring(0, at)]?.add(line.substring(at + 1));
-    });
-  }
-
-  final Process process;
-  final _inbox = <String, StreamController<String>>{};
-  int _next = 0;
-  Future<void> _written = Future.value();
-
-  /// One line to the example, after the ones before: a sink takes one flush at a time.
-  Future<void> write(String line) => _written = _written.then((_) async {
-    process.stdin.writeln(line);
-    await process.stdin.flush();
-  });
-
-  /// A new link to `@control`.
-  HostLink open() {
-    final name = '${++_next}';
-    _inbox[name] = StreamController<String>.broadcast();
-    return _ProcessLink(this, name);
-  }
-}
-
-final class _ProcessLink implements HostLink {
-  _ProcessLink(this._shared, this._name);
-
-  final _Process _shared;
-  final String _name;
-
-  @override
-  Stream<String> get messages => _shared._inbox[_name]!.stream;
-
-  @override
-  Future<void> send(String message) async {
-    await _shared.write('$_name $message');
-  }
-
-  @override
-  Future<void> close() async {
-    try {
-      await _shared.write('$_name close');
-    } on Object {
-      // The example is gone already.
-    }
-    await _shared._inbox[_name]?.close();
-  }
-}
 
 const _echo = AgentSource.hosted('Echo', harness: 'echo', local: true);
 
@@ -79,7 +23,7 @@ void main() {
 
   group('the real host', skip: skip, () {
     late Directory dir;
-    late _Process example;
+    late ControlProcess example;
     late ControlClient client;
     late ProgramStores programs;
     final links = <ControlClient>[];
@@ -87,7 +31,7 @@ void main() {
     setUp(() async {
       dir = await Directory.systemTemp.createTemp('canoa-store-host');
       final process = await Process.start(exampleBinary('store_control')!, [dir.path]);
-      example = _Process(process);
+      example = ControlProcess(process);
       client = ControlClient(example.open(), timeout: const Duration(seconds: 60));
       links.add(client);
       programs = ProgramStores(
