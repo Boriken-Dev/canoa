@@ -42,6 +42,8 @@ coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-acc
 # coqui-transport-web's rustls; each already in the graph at these versions.
 httparse = { version = "1.10", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3", default-features = false, features = ["std"] }
+# The include and exclude filters of a knowledge index; already in the graph.
+globset = { version = "0.4", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 # Downloads of the programs a store installs: a blocking client, TLS by rustls with ring and, by default, the operating system's certificate
 # verifier (so a TLS-intercepting proxy the system trusts works); webpki's roots stay a choice.

@@ -14,6 +14,7 @@ pub mod harness;
 mod history;
 pub mod home;
 mod inproc;
+pub mod kb;
 mod kind;
 mod local;
 mod loopback;

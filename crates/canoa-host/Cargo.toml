@@ -74,6 +74,8 @@ url.workspace = true
 if-addrs.workspace = true
 indexmap.workspace = true
 percent-encoding.workspace = true
+# The include and exclude filters of a knowledge index.
+globset.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
