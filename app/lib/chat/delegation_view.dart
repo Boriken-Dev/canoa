@@ -2,6 +2,7 @@ import 'package:coqui_acp_chat/coqui_acp_chat.dart' show Compaction, MessageRole
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/widgets.dart';
 
+import '../acp/delegate.dart' show TaskUsage;
 import '../session_store.dart';
 import 'delegation_row.dart';
 import 'session_views.dart' show SessionEntries;
@@ -36,6 +37,7 @@ final class ChildView {
     this.lost = false,
     this.asks,
     this.updated,
+    this.usage,
   });
 
   final String id;
@@ -66,6 +68,9 @@ final class ChildView {
 
   /// What its agent asks of the person, when it waits for an answer; null otherwise.
   final String? asks;
+
+  /// What its own session spent, where the host said; null when nobody reported it.
+  final TaskUsage? usage;
 
   /// When the app last heard of it.
   final DateTime? updated;
@@ -118,6 +123,7 @@ final class ChildView {
   static ChildView of(DelegateTask task, {String? parent, int depth = 0, bool waitingForTask = false, String? asks}) => ChildView(
     id: task.id, title: task.title, source: task.source, phase: task.phase, started: task.started, ended: task.ended, message: task.message, native: task.native,
     parent: parent, depth: depth, waitingForTask: waitingForTask, lost: task.lost, asks: asks, updated: task.updated ?? task.ended ?? task.started,
+    usage: task.usage,
   );
 }
 
@@ -333,3 +339,11 @@ Widget? drawDelegation(BuildContext context, ChatEntryData entry) =>
 
 /// Canoa's own content kinds for the conversation's renderer registry.
 const ChatRenderers delegationRenderers = ChatRenderers(entry: [drawDelegation]);
+
+/// A child's tokens in one line, each counter it reported and "Not reported" for the rest, so a missing counter is never read as 0:
+/// "Input 120 · Output 30 · Cache read Not reported · Cache write Not reported". A child that reported none says only that.
+String tokensLine(TaskUsage? usage) {
+  if (usage == null) return 'Not reported';
+  String of(int? count) => count == null ? 'Not reported' : compactCount(count);
+  return 'Input ${of(usage.input)} · Output ${of(usage.output)} · Cache read ${of(usage.cacheRead)} · Cache write ${of(usage.cacheWrite)}';
+}

@@ -228,6 +228,22 @@ void main() {
       expect(find.byKey(const Key('subagents-list')), findsOneWidget);
     });
 
+    testWidgets('a child shows the tokens the host reported for it, and Not reported for what nobody did', (tester) async {
+      final scene = await openScene(tester, size: const Size(1100, 1000));
+      await scene.fourChildren();
+      await scene.say(taskNotice('c0', taskEvent('c0', 'COMPLETED', title: 'Share link API tests', source: 'claude', usage: {'input': 120, 'output': 30, 'cacheRead': 4200})));
+      await _openSurface(tester);
+      await tester.tap(find.byKey(const Key('subagent-c0')));
+      await _frames(tester);
+      expect(find.byKey(const Key('child-tokens')), findsOneWidget);
+      expect(find.text('Input 120 · Output 30 · Cache read 4.2k · Cache write Not reported'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('subagent-back')));
+      await _frames(tester);
+      await tester.tap(find.byKey(const Key('subagent-c1')));
+      await _frames(tester);
+      expect(find.text('Not reported'), findsOneWidget);
+    });
+
     testWidgets('a native child shows the task it was given, its result, and that no progress was reported', (tester) async {
       final scene = await openScene(tester, size: const Size(1100, 1000));
       await scene.nativeChildren('subagents');

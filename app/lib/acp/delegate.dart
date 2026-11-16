@@ -48,6 +48,26 @@ enum TaskPhase {
   bool get waitingOnPerson => this == inputRequired || this == authRequired;
 }
 
+/// What a task's own session spent, as the host's usage log has it; a counter the agent never reported is null. The sessions the
+/// task started are not in it: they have figures of their own, so a sum over the tasks counts each once.
+final class TaskUsage {
+  const TaskUsage({this.input, this.output, this.cacheRead, this.cacheWrite, this.costMicroUsd});
+
+  /// Reads the host's `usage` metadata; null when it holds no counter.
+  static TaskUsage? parse(Object? raw) {
+    if (raw is! Map) return null;
+    int? n(String key) {
+      final value = raw[key];
+      return value is int && value >= 0 ? value : null;
+    }
+
+    final usage = TaskUsage(input: n('input'), output: n('output'), cacheRead: n('cacheRead'), cacheWrite: n('cacheWrite'), costMicroUsd: n('costMicroUsd'));
+    return usage.input == null && usage.output == null && usage.cacheRead == null && usage.cacheWrite == null ? null : usage;
+  }
+
+  final int? input, output, cacheRead, cacheWrite, costMicroUsd;
+}
+
 /// One task a session handed to a source, as the host's events built it.
 final class DelegateTask {
   DelegateTask(this.id, this.order);
@@ -59,6 +79,9 @@ final class DelegateTask {
   String title = '';
   String source = '';
   String? folder;
+
+  /// What the task's own session spent, once the host has said; null while it has not, or the agent reported none.
+  TaskUsage? usage;
 
   /// Whether the task runs on another machine, whose agent's questions are the person's alone: no remembered rule, allowance or
   /// Bypass answers for it, since none of them was written with that agent in mind.
@@ -320,6 +343,7 @@ final class DelegateTasks {
         task.source = _text(metadata['source']) ?? task.source;
         task.folder = _text(metadata['folder'], 1000) ?? task.folder;
         if (metadata['remote'] == true) task.remote = true;
+        task.usage = TaskUsage.parse(metadata['usage']) ?? task.usage;
         task.parent = _text(metadata['parentTaskId']) ?? task.parent;
       }
       _status(task, whole['status']);

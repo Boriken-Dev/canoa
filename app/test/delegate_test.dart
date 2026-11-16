@@ -33,6 +33,21 @@ void main() {
       expect([for (final task in tasks.live) task.id], ['b', 'a']);
     });
 
+    test('a task\'s own figures come from the host\'s metadata, with no counter made up for one it did not give', () {
+      final tasks = DelegateTasks();
+      tasks.apply(taskNotice('a', taskEvent('a', 'WORKING'))['params']);
+      expect(tasks['a']!.usage, isNull);
+      tasks.apply(taskNotice('a', taskEvent('a', 'COMPLETED', usage: {'input': 120, 'output': 30, 'cacheRead': -1}))['params']);
+      final usage = tasks['a']!.usage!;
+      expect([usage.input, usage.output], [120, 30]);
+      expect([usage.cacheRead, usage.cacheWrite, usage.costMicroUsd], [null, null, null], reason: 'a counter that was not reported is not 0');
+      // A later event that says nothing of them takes nothing away, and an empty report is no report.
+      tasks.apply(taskNotice('a', taskEvent('a', 'COMPLETED'))['params']);
+      expect(tasks['a']!.usage!.input, 120);
+      tasks.apply(taskNotice('b', taskEvent('b', 'COMPLETED', usage: {}))['params']);
+      expect(tasks['b']!.usage, isNull);
+    });
+
     test('a duplicate changes nothing, a late state cannot reopen an ended task, and a missing end time is no end time', () {
       final tasks = DelegateTasks();
       final first = taskNotice('a', taskEvent('a', 'SUBMITTED'))['params'];

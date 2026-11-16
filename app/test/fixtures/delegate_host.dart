@@ -21,11 +21,12 @@ Map<String, Object?> taskEvent(
   String source = 'codex',
   String? at,
   bool remote = false,
+  Map<String, Object?>? usage,
 }) => {
   'task': {
     'id': id,
     'status': {'state': 'TASK_STATE_$state', 'timestamp': ?at},
-    'metadata': {'title': title, 'source': source, 'folder': '/work', if (remote) 'remote': true},
+    'metadata': {'title': title, 'source': source, 'folder': '/work', if (remote) 'remote': true, 'usage': ?usage},
   },
 };
 

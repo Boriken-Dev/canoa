@@ -102,6 +102,7 @@ class ChildFacts extends StatelessWidget {
           const Key('child-tools'),
         ),
       if (task.result != null && (full || bare)) part('Result', Text(task.result!, maxLines: 12, overflow: TextOverflow.ellipsis), const Key('child-result')),
+      if (full) part('Tokens', Text(tokensLine(task.usage), style: muted), const Key('child-tokens')),
       if (failure != null) part('Error', Text(failure, style: TextStyle(color: look.danger, fontSize: 13)), const Key('child-error')),
       if (bare) Text('Live progress not reported', key: const Key('child-not-reported'), style: muted),
     ];
