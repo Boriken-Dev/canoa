@@ -6,6 +6,7 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
+import '../profile/aos_support.dart' show holdsPassword;
 import '../profile/overlays.dart';
 import '../profile/profile.dart';
 import '../profile/skill_copies.dart';
@@ -16,10 +17,11 @@ import '../profile/skill_copies.dart';
 /// same [OverlayManager] the desktop's own store implements.
 ///
 /// [installed] answers from what [refresh] last read, since a page cannot read the host's disk in a call that is not a request.
-/// Skills fetched from elsewhere are not part of it: the host fetches none for a page.
+/// Skills fetched from elsewhere go the same way (`skill/*`): the host fetches them with git and keeps their files, and the review
+/// of what was fetched stays this app's.
 ///
 /// A desktop app, whose host shares its disk, passes [local]: the same work is then done by the host while it is up, and by
-/// [local] while it is not, and what only this computer's files answer ([installed], [directoryOf], the skills) is [local]'s.
+/// [local] while it is not, and what only this computer's files answer ([installed], [directoryOf]) is [local]'s.
 final class ControlOverlayManager implements OverlayManager {
   ControlOverlayManager(this._control, {this.root = 'overlays', this.local, this.hostUp});
 
@@ -151,20 +153,72 @@ final class ControlOverlayManager implements OverlayManager {
     await _call('catalog/remove', {'label': label});
   }
 
-  @override
-  Future<Map<String, SkillCopy>> skillCopies() async => local?.skillCopies() ?? const {};
+  /// What the host holds of each skill fetched from elsewhere. A skill's files are read once for each digest that checks out, so a
+  /// refresh asks for the records and for no file it already has.
+  final _skillFiles = <String, Map<String, List<int>>>{};
 
   @override
-  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source) =>
-      local?.fetchSkillFiles(source) ?? (throw const OverlayException('This host fetches no skills for a web page'));
+  Future<Map<String, SkillCopy>> skillCopies() async {
+    if (_instead case final other?) return other.skillCopies();
+    final answer = await _call('skill/list', const {});
+    final out = <String, SkillCopy>{};
+    for (final MapEntry(:key, :value) in (answer['skills'] as Map<Object?, Object?>? ?? const {}).entries) {
+      if (key is! String || value is! Map) continue;
+      try {
+        final json = value.cast<String, dynamic>();
+        final digest = json['digest'] as String;
+        var files = _skillFiles[digest];
+        if (files == null) {
+          final read = await _call('skill/read', {'name': json['name']});
+          files = {
+            for (final MapEntry(:key, :value) in (read['files'] as Map<Object?, Object?>? ?? const {}).entries)
+              '$key': base64Decode('$value'),
+          };
+          if (_checksOut(json['name'] as String, files, digest)) _skillFiles[digest] = files;
+        }
+        out[key] = SkillCopy.fromJson(json, files);
+      } on OverlayException {
+        rethrow;
+      } on Object {
+        // A record this app cannot read is no skill it can offer.
+      }
+    }
+    return out;
+  }
+
+  static bool _checksOut(String name, Map<String, List<int>> files, String digest) {
+    try {
+      aos.readFetchedSkill(name, [for (final MapEntry(:key, :value) in files.entries) (key, Uint8List.fromList(value))], digest, skillLimits);
+      return true;
+    } on aos.AosError {
+      return false;
+    }
+  }
 
   @override
-  Future<void> saveSkill(SkillCopy copy) =>
-      local?.saveSkill(copy) ?? (throw const OverlayException('This host keeps no skills for a web page'));
+  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source) async {
+    if (_instead case final other?) return other.fetchSkillFiles(source);
+    if (source.kind != 'git') throw const OverlayException('Canoa fetches skills from git only, and this source is not git');
+    if (holdsPassword(source.location)) throw const OverlayException('A skill source holds a password, which none may');
+    final answer = await _call('skill/fetch', {'repo': source.location, 'ref': source.reference, 'path': source.path ?? ''});
+    final files = answer['files'] as Map<Object?, Object?>? ?? const {};
+    return [for (final MapEntry(:key, :value) in files.entries) ('$key', base64Decode('$value'))];
+  }
 
   @override
-  Future<void> removeSkill(String name) =>
-      local?.removeSkill(name) ?? (throw const OverlayException('This host keeps no skills for a web page'));
+  Future<void> saveSkill(SkillCopy copy) async {
+    if (_instead case final other?) return other.saveSkill(copy);
+    await _call('skill/save', {
+      ...copy.toJson(),
+      'files': {for (final MapEntry(:key, :value) in copy.files.entries) key: base64Encode(value)},
+    });
+  }
+
+  @override
+  Future<void> removeSkill(String name) async {
+    if (_instead case final other?) return other.removeSkill(name);
+    await _call('skill/remove', {'name': name});
+  }
 
   static Map<String, Object?> _sourceOf(GitOverlay source) => {
     'repo': source.repo,
