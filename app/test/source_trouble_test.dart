@@ -4,7 +4,6 @@
 import 'dart:convert';
 import 'dart:io' show Directory;
 
-import 'package:canoa/accounts/accounts_controller.dart';
 import 'package:canoa/accounts/add_account_dialog.dart';
 import 'package:canoa/chat/composer.dart';
 import 'package:canoa/chat/source_trouble.dart';
