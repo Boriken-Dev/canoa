@@ -1377,7 +1377,8 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     final scratch = draft.kind == SessionKind.chat;
     if (!scratch && noFolder) throw StateError('Choose its workspace first');
-    final folder = scratch ? _scratchOf(draft) : draft.cwd;
+    // A served page's host makes the chat's folder itself, from the stand-in the kit names.
+    final folder = scratch ? _kit.scratchFolder?.call(draft) : draft.cwd;
     if (folder == null) throw StateError('A chat cannot be started here; choose a workspace instead');
     var madeFolder = false;
     // The served page's own chat: the host makes and names the folder in its answer to `session/new`.
