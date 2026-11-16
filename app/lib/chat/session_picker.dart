@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../accounts/account_models.dart';
 import '../accounts/accounts_controller.dart';
+import '../accounts/add_account_dialog.dart';
 import '../accounts/usage_view.dart' show windowSummary;
 import '../session_store.dart';
 import '../sources/source_icons.dart';
@@ -45,6 +46,17 @@ Future<void> showSessionPicker(
             ),
     ),
   );
+}
+
+/// What the login the agent has where it runs is called.
+const machineLoginLabel = "This machine's login";
+
+/// The account for [entry]'s session named [account], or null when it runs on the login the agent has where it runs: the person's
+/// own choice of that, else the entry's first listed account, else that login too.
+AccountInfo? chosenAccount(AccountsController accounts, String entry, String? account) {
+  if (account == machineLogin) return null;
+  final named = accounts.availableTo(entry).where((each) => each.name == account).firstOrNull;
+  return named ?? accounts.offeredBy(entry).firstOrNull;
 }
 
 /// One row of the model list: a model of the chosen agent, or, under Favourites, of any agent whose models are held.
@@ -447,10 +459,11 @@ class _SessionPickerState extends State<SessionPicker> {
     final accounts = kit.accounts;
     final entry = session.source?.hostEntry ?? session.agent;
     if (accounts == null) return const SizedBox.shrink();
-    final offered = accounts.offeredBy(entry);
-    if (offered.isEmpty) return const SizedBox.shrink();
+    final harness = accounts.harnessOf(entry);
+    if (harness == null) return const SizedBox.shrink();
+    final offered = accounts.availableTo(entry);
     final look = context.chatLook;
-    final chosen = offered.where((each) => each.name == session.account).firstOrNull ?? offered.first;
+    final chosen = chosenAccount(accounts, entry, session.account);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -458,19 +471,19 @@ class _SessionPickerState extends State<SessionPicker> {
         Text('Account', style: TextStyle(fontSize: 11.5, color: look.muted)),
         const SizedBox(height: 2),
         Wrap(spacing: 6, runSpacing: 6, children: [
-          for (final account in offered) _accountTile(context, accounts, account, chosen: account.name == chosen.name, now: now),
-          if (draft && kit.onAccountSettings != null)
-            ActionChip(
-              key: const Key('account-add'),
-              avatar: const Icon(Icons.add, size: 16),
-              label: const Text('Add account…'),
-              onPressed: () {
-                _close();
-                kit.onAccountSettings!();
-              },
-            ),
+          _accountTile(context, accounts, null, chosen: chosen == null, now: now),
+          for (final account in offered) _accountTile(context, accounts, account, chosen: account.name == chosen?.name, now: now),
+          ActionChip(
+            key: const Key('account-add'),
+            avatar: const Icon(Icons.add, size: 16),
+            label: const Text('Add account…'),
+            onPressed: () async {
+              await showDialog<AccountInfo>(context: context, builder: (_) => AddAccountDialog(accounts: accounts, harness: harness));
+              unawaited(accounts.refresh());
+            },
+          ),
         ]),
-        if (_accountBlock(accounts) case final block? when offered.length > 1)
+        if (_accountBlock(accounts) case final block? when offered.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(block, key: const Key('picker-account-note'), style: TextStyle(fontSize: 11.5, color: look.muted)),
@@ -485,27 +498,34 @@ class _SessionPickerState extends State<SessionPicker> {
     return store.accountSwitchBlock(session);
   }
 
-  Widget _accountTile(BuildContext context, AccountsController accounts, AccountInfo account, {required bool chosen, required int now}) {
+  /// One account's tile, or, for a null [account], the login the agent has where it runs, which every agent that takes accounts can
+  /// start on.
+  Widget _accountTile(BuildContext context, AccountsController accounts, AccountInfo? account, {required bool chosen, required int now}) {
     final look = context.chatLook;
-    final holder = accounts.heldBy(account.name);
-    final usable = account.usable && holder == null;
+    final name = account?.name ?? machineLoginLabel;
+    final holder = account == null ? null : accounts.heldBy(account.name);
+    final usable = (account?.usable ?? true) && holder == null;
     final block = _accountBlock(accounts);
-    final canMove = !draft && !chosen && block == null && kit.switchAccount != null;
+    final canMove = account != null && !draft && !chosen && block == null && kit.switchAccount != null;
     final enabled = usable && (draft || canMove);
-    final state = !draft && chosen ? 'This conversation' : holder == null ? account.statusLabel : 'In use by "$holder"';
-    final summary = windowSummary(accounts.usageOf(account), now);
+    final state = !draft && chosen
+        ? 'This conversation'
+        : account == null
+            ? 'The login on this computer'
+            : holder == null ? account.statusLabel : 'In use by "$holder"';
+    final summary = account == null ? null : windowSummary(accounts.usageOf(account), now);
     return Tooltip(
       message: draft || chosen || block == null ? state : block,
       child: InkWell(
-        key: Key('account-choice ${account.name}'),
+        key: account == null ? const Key('account-machine') : Key('account-choice ${account.name}'),
         borderRadius: BorderRadius.circular(8),
         onTap: !enabled
             ? null
             : draft
-                ? () => store.setAccount(session, account.name)
+                ? () => store.setAccount(session, account?.name ?? machineLogin)
                 : () {
                     _close();
-                    unawaited(kit.switchAccount!(session, account.name));
+                    unawaited(kit.switchAccount!(session, account!.name));
                   },
         child: Container(
           constraints: const BoxConstraints(minWidth: 120),
@@ -519,10 +539,10 @@ class _SessionPickerState extends State<SessionPicker> {
             Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(chosen ? Icons.check : Icons.account_circle_outlined, size: 14, color: usable ? null : look.muted),
               const SizedBox(width: 4),
-              Text(account.name, style: TextStyle(fontSize: 13, color: usable || !draft ? null : look.muted)),
+              Text(name, style: TextStyle(fontSize: 13, color: usable || !draft ? null : look.muted)),
             ]),
             Text(state, style: TextStyle(fontSize: 11, color: usable ? look.muted : look.danger)),
-            if (summary != null) Text(summary, key: Key('account-left-summary ${account.name}'), style: TextStyle(fontSize: 11, color: look.muted)),
+            if (summary != null) Text(summary, key: Key('account-left-summary $name'), style: TextStyle(fontSize: 11, color: look.muted)),
           ]),
         ),
       ),

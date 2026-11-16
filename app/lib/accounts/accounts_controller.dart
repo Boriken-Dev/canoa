@@ -71,6 +71,21 @@ class AccountsController extends ChangeNotifier {
     for (final name in _view.hostAccountsOf(entry)) ?named(name),
   ];
 
+  /// The provider the agent entry [entry] runs, which takes accounts; null for an entry that runs a program of its own.
+  String? harnessOf(String entry) {
+    final harness = _view.hostHarnessOf(entry);
+    return harness != null && providers.contains(harness) ? harness : null;
+  }
+
+  /// Every account a session of [entry] can run on: those the entry lists, in its order, then the rest of its provider's. A key
+  /// the host trusts with accounts may choose any of its provider's, so the choice is not narrowed to what canoa.cfg lists.
+  List<AccountInfo> availableTo(String entry) {
+    final harness = harnessOf(entry);
+    if (harness == null) return const [];
+    final listed = offeredBy(entry);
+    return [...listed, for (final each in of(harness)) if (!listed.any((one) => one.name == each.name)) each];
+  }
+
   /// The agent entries that run the provider [harness], which can offer its accounts.
   List<String> entriesRunning(String harness) => _view.hostEntriesRunning(harness);
 

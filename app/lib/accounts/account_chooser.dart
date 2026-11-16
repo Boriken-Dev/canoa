@@ -26,16 +26,15 @@ class AccountChooser extends StatelessWidget {
     return ListenableBuilder(
       listenable: accounts,
       builder: (context, _) {
-        final offered = accounts.offeredBy(entry);
-        if (offered.isEmpty) return const SizedBox.shrink();
-        final chosen = offered.where((each) => each.name == session.account).firstOrNull ?? offered.first;
+        if (accounts.harnessOf(entry) == null) return const SizedBox.shrink();
+        final chosen = chosenAccount(accounts, entry, session.account);
         return InkWell(
           key: session.isDraft ? const Key('option-account') : const Key('session-account'),
           borderRadius: BorderRadius.circular(8),
           onTap: () => unawaited(showSessionPicker(context, store: store, session: session, kit: kit)),
           child: Tooltip(
             message: session.isDraft ? 'The account this session runs on' : 'The account this session runs on; another needs a new conversation',
-            child: ComposerPill(label: chosen.name, icon: Icons.account_circle_outlined),
+            child: ComposerPill(label: chosen?.name ?? machineLoginLabel, icon: Icons.account_circle_outlined),
           ),
         );
       },

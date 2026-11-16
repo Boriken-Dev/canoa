@@ -34,7 +34,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
-import 'accounts/account_models.dart' show AccountEntry, accountMeta;
+import 'accounts/account_models.dart' show AccountEntry, accountMeta, machineLogin;
 import 'accounts/accounts_controller.dart';
 import 'accounts/accounts_host.dart';
 import 'desktop/host_grants.dart';
@@ -1048,7 +1048,8 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   /// `initialize`'s `_meta` for the account a session runs on: its name, never a credential. Absent runs the entry's first.
-  Map<String, Object?> _accountMeta(String? account) => account == null ? const {} : {accountMeta: account};
+  Map<String, Object?> _accountMeta(String? account) =>
+      account == null ? const {} : {accountMeta: account == machineLogin ? null : account};
 
   /// The open session that runs on [account], which a login that rotates its credential allows only one of.
   String? _accountHolder(String account) {
@@ -1389,7 +1390,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final host = widget.host;
     final listening = host?.listening.where((listening) => listening.name == name).firstOrNull;
     if (host == null || listening == null) throw StateError('canoa is not serving $name now: open Hosting to see why');
-    if (listening.local || (_accounts?.offeredBy(name).isNotEmpty ?? false)) {
+    if (listening.local || draft.account != null || (_accounts?.offeredBy(name).isNotEmpty ?? false)) {
       draft.account ??= _accounts?.offeredBy(name).where((each) => each.usable).firstOrNull?.name;
       return _startViaLink(draft, name, folder, worktree, starting);
     }
@@ -1592,6 +1593,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final VerifiedAgent client;
     switch (place) {
       case SessionPlace.local when _hostedSources.any((source) => source.local && source.label == entryName) ||
+          account != null ||
           (_accounts?.offeredBy(entryName).isNotEmpty ?? false):
         client = await _linkAgent(entryName, {
           ..._cacheMeta((
