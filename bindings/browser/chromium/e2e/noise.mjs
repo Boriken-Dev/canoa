@@ -15,7 +15,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { lastCall, Session } from "./cdp.mjs";
+import { findCanoaWorker, lastCall, Session } from "./cdp.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extension = path.resolve(here, "..");
@@ -90,8 +90,8 @@ try {
     }
   }, 30_000);
   const targets = async () => (await fetch(`http://127.0.0.1:${debug}/json/list`)).json();
-  const worker = await waitFor("the extension's service worker", async () =>
-    (await targets()).find((target) => target.type === "service_worker" && target.url.startsWith("chrome-extension://") && target.url.endsWith("/background.js")), 20_000);
+  // Edge starts extensions of its own with a background.js too: ours is the one named Canoa.
+  const worker = await waitFor("the extension's service worker", async () => findCanoaWorker(await targets()), 20_000);
   const id = new URL(worker.url).hostname;
   // `canoa pair --origin` lets in only this extension's origin.
   side.stdin.write(`pair chrome-extension://${id}\n`);
