@@ -1115,6 +1115,71 @@ fn remove_account(path: &Path, name: &str) -> Result<(), Failed> {
     write_cfg(path, &kept.concat())
 }
 
+/// Whether the file at `path` has the agent entry `name`, in whatever format it is written.
+pub(crate) fn has_entry(path: &Path, name: &str) -> Result<bool, Failed> {
+    let _one = config_writes();
+    let text = read_cfg(path)?;
+    let value = crate::format::formats()
+        .from_slice(
+            text.as_bytes(),
+            anycfg::Options::new().name(file_name(path)),
+        )
+        .map_err(|error| Failed::run(format!("{}: {error}", path.display())))?;
+    Ok(value
+        .as_table()
+        .and_then(|table| table.get("host"))
+        .and_then(|host| host.get("agents"))
+        .and_then(|agents| agents.get(name))
+        .is_some_and(toml::Value::is_table))
+}
+
+/// Takes the agent entry `name` out of the file at `path`, whole. Refused when the file spells it with tables of their own
+/// (`[host.agents.NAME.x]`), which a caller that only means to drop a plain entry never meant.
+pub(crate) fn remove_entry(path: &Path, name: &str) -> Result<(), Failed> {
+    let _one = config_writes();
+    let text = read_cfg(path)?;
+    let format = format_of(path, &text)?;
+    if format != "toml" {
+        let edited = edit_document(path, &text, &format, |table| {
+            table
+                .get_mut("host")
+                .and_then(toml::Value::as_table_mut)
+                .and_then(|host| host.get_mut("agents"))
+                .and_then(toml::Value::as_table_mut)
+                .and_then(|agents| agents.remove(name))
+                .map(|_| ())
+                .ok_or_else(|| Failed::usage(format!("canoa.cfg has no [host.agents.{name}]")))
+        })?;
+        return write_cfg(path, &edited);
+    }
+    let header = format!("[host.agents.{name}]");
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let Some(start) = lines.iter().position(|line| line.trim() == header) else {
+        return Err(Failed::usage(format!(
+            "canoa.cfg does not spell {header} as a table of its own: change it by hand"
+        )));
+    };
+    let end = lines[start + 1..]
+        .iter()
+        .position(|line| line.trim_start().starts_with('['))
+        .map_or(lines.len(), |offset| start + 1 + offset);
+    let below = format!("[host.agents.{name}.");
+    if lines[end..]
+        .iter()
+        .any(|line| line.trim_start().starts_with(&below))
+    {
+        return Err(Failed::usage(format!(
+            "{header} has tables of its own: change canoa.cfg by hand"
+        )));
+    }
+    let mut kept: Vec<&str> = lines[..start].to_vec();
+    if kept.last().is_some_and(|line| line.trim().is_empty()) {
+        kept.pop();
+    }
+    kept.extend(&lines[end..]);
+    write_cfg(path, &kept.concat())
+}
+
 #[cfg(all(feature = "yaml", feature = "json"))]
 #[cfg(test)]
 mod format_tests {

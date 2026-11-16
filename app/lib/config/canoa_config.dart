@@ -372,8 +372,17 @@ final class CanoaConfig {
   /// Whether the agent entry [name] is open to every paired key: it names no `peers`.
   bool hostEntryIsOpen(String name) => _hostAgents[name] is Map && (_hostAgents[name] as Map)['peers'] == null;
 
-  /// The name of the entry the app makes for the accounts it adds of the provider [harness].
-  static String accountsEntryOf(String harness) => '$harness-accounts';
+  /// The entry that is the agent itself for the provider [harness]: Claude's or Codex's own source when canoa.cfg or the host names
+  /// it, else the first entry that runs the provider, else the name the host makes one with (a source's own, or the provider's with
+  /// a capital).
+  String ownEntryOf(String harness) {
+    const sources = {'claude': 'Claude', 'codex': 'Codex'};
+    final running = hostEntriesRunning(harness);
+    final source = sources[harness];
+    if (source != null && running.contains(source)) return source;
+    if (running.isNotEmpty) return running.first;
+    return source ?? '${harness[0].toUpperCase()}${harness.substring(1)}';
+  }
 
   /// This configuration as the host sees its agent entries: [entries], the host's own list, name the entries that run a provider with
   /// accounts, and what each offers is the host's to say. An entry canoa.cfg has keeps its other keys; one it has not (a built-in
@@ -393,20 +402,16 @@ final class CanoaConfig {
     return withHost(copy);
   }
 
-  /// This configuration with the account [account] offered by the agent entry [entry], or, with none named, by the entry the app
-  /// keeps for [harness]'s accounts, which is made with `peers = []`: no paired key reaches it, and only this computer's own
-  /// application, whose link ignores `peers`, runs sessions on it. An entry of the person's is never changed unless it is named.
-  /// The account is appended, so it never becomes the default of an entry that already offers others.
+  /// This configuration with the account [account] offered by the agent entry [entry], or, with none named, by the agent's own entry
+  /// for [harness] (see [ownEntryOf]); the app never makes an entry of its own for accounts. An entry the person wrote for the
+  /// provider, other than the one named, is never changed. The account is appended, so it never becomes the default of an entry that
+  /// already offers others.
   CanoaConfig withAccountOffered({required String account, required String harness, String? entry}) {
     final copy = _deepCopy(host ?? const {});
     final table = (copy['agents'] as Map<String, dynamic>?) ?? <String, dynamic>{};
-    final target = entry ?? accountsEntryOf(harness);
+    final target = entry ?? ownEntryOf(harness);
     if (table[target] == null) {
-      table[target] = <String, dynamic>{
-        'harness': harness,
-        'title': '${harness[0].toUpperCase()}${harness.substring(1)} accounts',
-        'peers': <String>[],
-      };
+      table[target] = <String, dynamic>{'harness': harness, 'title': target, 'peers': <String>[]};
     }
     final entryTable = Map<String, dynamic>.of((table[target] as Map).cast<String, dynamic>());
     final names = [...?(entryTable['accounts'] as List?)?.map((each) => '$each')];

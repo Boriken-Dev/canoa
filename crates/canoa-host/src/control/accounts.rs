@@ -81,22 +81,10 @@ fn entries_of(config: &Config, portal: bool) -> Vec<Value> {
 }
 
 /// The keys an entry made by an offer starts with. A built-in source keeps what it was (its title, its bypass, the profile it is
-/// launched with) and reaches no paired key unless the host is a portal's; any other entry the app makes is the app's own, which
-/// no paired key reaches.
-fn made_keys(
-    entry: &str,
-    harness: &str,
-    built_in: bool,
-    portal: bool,
-) -> Vec<(&'static str, toml::Value)> {
-    let title = if built_in {
-        entry.to_owned()
-    } else {
-        let mut letters = harness.chars();
-        let first = letters.next().map(|c| c.to_uppercase().collect::<String>());
-        format!("{}{} accounts", first.unwrap_or_default(), letters.as_str())
-    };
-    let mut keys = vec![("title", toml::Value::String(title))];
+/// launched with) and reaches no paired key unless the host is a portal's; any other entry made here is titled by its name and no
+/// paired key reaches it.
+fn made_keys(entry: &str, built_in: bool, portal: bool) -> Vec<(&'static str, toml::Value)> {
+    let mut keys = vec![("title", toml::Value::String(entry.to_owned()))];
     if built_in {
         keys.push(("bypass", toml::Value::Boolean(true)));
     }
@@ -109,6 +97,113 @@ fn made_keys(
         }
     }
     keys
+}
+
+/// The entry that is the agent itself for `harness`: the one canoa.cfg names that runs it (the built-in source's name first),
+/// else the built-in source's name, else the harness's name with a capital.
+fn own_entry_of(config: &Config, harness: &str, apart: &str) -> String {
+    let source = BUILT_IN_SOURCES
+        .iter()
+        .find(|(_, runs)| *runs == harness)
+        .map(|(name, _)| (*name).to_owned());
+    let named = |entry: &crate::config::Entry| {
+        entry.name != apart
+            && matches!(&entry.kind, EntryKind::Harness { harness: runs, .. } if runs == harness)
+    };
+    if let Some(source) = &source
+        && config
+            .entries
+            .iter()
+            .any(|entry| entry.name == *source && named(entry))
+    {
+        return source.clone();
+    }
+    if let Some(entry) = config.entries.iter().find(|entry| named(entry)) {
+        return entry.name.clone();
+    }
+    source.unwrap_or_else(|| {
+        let mut letters = harness.chars();
+        let first = letters.next().map(|c| c.to_uppercase().collect::<String>());
+        format!("{}{}", first.unwrap_or_default(), letters.as_str())
+    })
+}
+
+/// Whether `entry` is one an earlier version of this application made for a provider's accounts, and nothing the person wrote: named
+/// `<harness>-accounts`, titled `<Harness> accounts`, reaching no paired key, with no other setting.
+fn app_made_accounts_entry(entry: &crate::config::Entry, harness: &str) -> Option<Vec<String>> {
+    let EntryKind::Harness {
+        harness: runs,
+        origin,
+        executable,
+        options,
+        settings,
+        profiles,
+        accounts,
+    } = &entry.kind
+    else {
+        return None;
+    };
+    let mut letters = harness.chars();
+    let first = letters.next()?.to_uppercase().collect::<String>();
+    let title = format!("{first}{} accounts", letters.as_str());
+    let plain = runs == harness
+        && entry.name == format!("{harness}-accounts")
+        && entry.title.as_deref() == Some(title.as_str())
+        && entry.peers.as_ref().is_some_and(Vec::is_empty)
+        && !entry.own_profile
+        && !entry.local
+        && origin.is_none()
+        && executable.is_none()
+        && *options == crate::config::HarnessOptions::default()
+        && settings.is_none()
+        && profiles.is_empty();
+    plain.then(|| accounts.clone())
+}
+
+/// Folds the accounts of an entry an earlier version of this application made (`claude-accounts`, titled "Claude accounts") into the
+/// agent's own entry, and takes the made entry out of canoa.cfg. An entry the person wrote, or one in another layer's file, is left as it
+/// is. Returns whether the file changed.
+pub(crate) fn fold_made_entries(
+    own: &std::path::Path,
+    config: &Config,
+    portal: bool,
+) -> Result<bool, Refusal> {
+    let mut changed = false;
+    for harness in crate::config::BUILT_IN_HARNESSES {
+        let made = format!("{harness}-accounts");
+        let Some(entry) = config.entries.iter().find(|entry| entry.name == made) else {
+            continue;
+        };
+        let Some(theirs) = app_made_accounts_entry(entry, harness) else {
+            continue;
+        };
+        if !commands::has_entry(own, &made).map_err(|failed| refusal(&failed))? {
+            continue;
+        }
+        let target = own_entry_of(config, harness, &made);
+        let mut names = config
+            .entries
+            .iter()
+            .find(|each| each.name == target)
+            .and_then(|each| match &each.kind {
+                EntryKind::Harness { accounts, .. } => Some(accounts.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        for name in theirs {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        let built_in = config.entries.iter().all(|each| each.name != target)
+            && BUILT_IN_SOURCES.iter().any(|(name, _)| *name == target);
+        let keys = made_keys(&target, built_in, portal);
+        commands::set_offered(own, &target, harness, &names, &keys)
+            .map_err(|failed| refusal(&failed))?;
+        commands::remove_entry(own, &made).map_err(|failed| refusal(&failed))?;
+        changed = true;
+    }
+    Ok(changed)
 }
 
 /// `accounts/offer` `{"entry", "accounts", "harness"?}`: the entry offers exactly those accounts, in that order, which canoa.cfg
@@ -175,7 +270,7 @@ fn offer(
             return Err((BAD_PARAMS, format!("{name} is listed twice")));
         }
     }
-    let made = made_keys(entry, harness, built_in, portal);
+    let made = made_keys(entry, built_in, portal);
     commands::set_offered(own, entry, harness, &names, &made).map_err(|failed| refusal(&failed))?;
     Ok(json!({"entry": entry, "accounts": names, "restart": true}))
 }
@@ -251,6 +346,19 @@ impl Accounts {
 
     /// canoa.cfg as it is on disk now: an app's earlier sign-in wrote to it after this host started.
     fn config(&self) -> Result<Config, Refusal> {
+        let config = self.load()?;
+        // An entry an earlier version made for accounts is folded into the agent's own once, the first time this is asked.
+        match fold_made_entries(&self.layers.own, &config, self.portal) {
+            Ok(true) => self.load(),
+            Ok(false) => Ok(config),
+            Err((_, why)) => {
+                tracing::warn!("canoa.cfg's accounts entry was left as it is: {why}");
+                Ok(config)
+            }
+        }
+    }
+
+    fn load(&self) -> Result<Config, Refusal> {
         match Config::load_layers(&self.layers) {
             Err(crate::ConfigError::Read { source, .. })
                 if source.kind() == std::io::ErrorKind::NotFound =>
@@ -583,10 +691,18 @@ mod offer_tests {
     }
 
     fn offered(portal: bool, params: &Value) -> (Result<Value, Refusal>, String, Config) {
+        offered_in(ACCOUNTS, portal, params)
+    }
+
+    fn offered_in(
+        text: &str,
+        portal: bool,
+        params: &Value,
+    ) -> (Result<Value, Refusal>, String, Config) {
         let dir = scratch(if portal { "portal" } else { "plain" });
         let path = dir.join("canoa.cfg");
-        std::fs::write(&path, ACCOUNTS).expect("written");
-        let config = Config::from_str_in(ACCOUNTS, &dir).expect("parses");
+        std::fs::write(&path, text).expect("written");
+        let config = Config::from_str_in(text, &dir).expect("parses");
         let answer = offer(&path, &config, portal, params);
         let written = std::fs::read_to_string(&path).expect("read");
         let after = Config::from_str_in(&written, &dir).expect("the edited file reads");
@@ -619,15 +735,112 @@ mod offer_tests {
     }
 
     #[test]
-    fn an_entry_the_app_makes_for_accounts_is_private_and_named_for_its_provider() {
-        let params = json!({"entry": "claude-accounts", "harness": "claude", "accounts": ["w"]});
-        let (answer, written, after) = offered(true, &params);
+    fn an_offer_to_a_provider_with_no_entry_makes_the_agent_itself_not_an_accounts_entry() {
+        let params = json!({"entry": "Pi", "harness": "pi", "accounts": []});
+        let (answer, written, _) = offered(true, &params);
         answer.expect("offered");
-        let made = entry(&after, "claude-accounts");
+        assert!(!written.contains("accounts\""), "{written}");
+        let params = json!({"entry": "Pi", "harness": "pi", "accounts": ["p"]});
+        let text = format!(
+            "{ACCOUNTS}
+[host.accounts.p]
+harness = \"pi\"
+kind = \"pi-api-key\"
+id = \"id-p\"
+"
+        );
+        let (answer, written, after) = offered_in(&text, false, &params);
+        answer.expect("offered");
+        let made = entry(&after, "Pi");
         assert_eq!(made.peers.as_ref().map(Vec::len), Some(0), "{written}");
-        assert!(written.contains("title = \"Claude accounts\""), "{written}");
+        assert!(written.contains("title = \"Pi\""), "{written}");
+        assert!(!written.contains("Pi accounts"), "{written}");
         let (answer, ..) = offered(false, &json!({"entry": "nowhere", "accounts": []}));
         assert_eq!(answer.expect_err("no such entry").0, NOT_FOUND);
+    }
+
+    #[test]
+    fn offering_to_claude_edits_claude_and_makes_no_second_entry() {
+        let params = json!({"entry": "Claude", "accounts": ["w"]});
+        let (answer, written, after) = offered(false, &params);
+        answer.expect("offered");
+        assert_eq!(after.entries.len(), 1, "{written}");
+        assert!(!written.contains("claude-accounts"), "{written}");
+        assert!(!written.contains("Claude accounts"), "{written}");
+        assert!(written.contains("accounts = [\"w\"]"), "{written}");
+    }
+
+    const MADE: &str = "
+[host.agents.claude-accounts]
+harness = \"claude\"
+title = \"Claude accounts\"
+peers = []
+accounts = [\"w\", \"x\"]
+";
+
+    #[test]
+    fn an_entry_an_earlier_version_made_is_folded_into_the_agents_own_once() {
+        let text = format!(
+            "{ACCOUNTS}
+[host.accounts.x]
+harness = \"claude\"
+kind = \"anthropic-api-key\"
+id = \"id-x\"
+{MADE}"
+        );
+        let dir = scratch("fold");
+        let path = dir.join("canoa.cfg");
+        std::fs::write(&path, &text).expect("written");
+        let layers = Layers::only(path.clone());
+        let config = Config::load_layers(&layers).expect("reads");
+        assert!(fold_made_entries(&path, &config, false).expect("folds"));
+        let written = std::fs::read_to_string(&path).expect("read");
+        let after = Config::from_str_in(&written, &dir).expect("reads");
+        assert!(
+            after
+                .entries
+                .iter()
+                .all(|each| each.name != "claude-accounts"),
+            "{written}"
+        );
+        let claude = entry(&after, "Claude");
+        match &claude.kind {
+            EntryKind::Harness { accounts, .. } => assert_eq!(accounts, &["w", "x"], "{written}"),
+            _ => panic!("{written}"),
+        }
+        assert_eq!(claude.peers.as_ref().map(Vec::len), Some(0), "{written}");
+        let config = Config::load_layers(&layers).expect("reads");
+        assert!(!fold_made_entries(&path, &config, false).expect("nothing left"));
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), written);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn an_entry_of_the_persons_with_that_name_is_never_folded() {
+        // Another title, a key the app never writes, or paired keys it names: the person's own.
+        for made in [
+            MADE.replace("Claude accounts", "My work Claude"),
+            format!(
+                "{MADE}model = \"x\"
+"
+            ),
+            MADE.replace("peers = []", "peers = [\"abc\"]"),
+        ] {
+            let text = format!("{ACCOUNTS}{made}");
+            let dir = scratch("kept");
+            let path = dir.join("canoa.cfg");
+            std::fs::write(&path, &text).expect("written");
+            let Ok(config) = Config::load_layers(&Layers::only(path.clone())) else {
+                std::fs::remove_dir_all(&dir).expect("cleanup");
+                continue;
+            };
+            assert!(
+                !fold_made_entries(&path, &config, false).expect("left"),
+                "{made}"
+            );
+            assert_eq!(std::fs::read_to_string(&path).expect("read"), text);
+            std::fs::remove_dir_all(&dir).expect("cleanup");
+        }
     }
 
     #[test]

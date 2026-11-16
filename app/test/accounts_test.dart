@@ -177,13 +177,13 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('sign-in-done')), findsOneWidget);
     expect(find.textContaining(_canary), findsNothing);
-    // A made account is offered by an entry that runs its provider, which canoa.cfg then names.
+    // A made account is offered by the agent's own entry, and the app makes no second one for accounts.
     await tester.pump();
     await tester.pump();
-    expect(saved.last.hostAccountsOf('claude-accounts'), ['metered']);
-    expect(saved.last.hostHarnessOf('claude-accounts'), 'claude');
-    // No paired key reaches the entry the app made: only this computer's own application does.
-    expect(saved.last.hostEntryIsOpen('claude-accounts'), isFalse);
+    expect(saved.last.hostAccountsOf('Claude'), ['metered']);
+    expect(saved.last.hostHarnessOf('Claude'), 'claude');
+    expect(saved.last.hostEntriesRunning('claude'), ['Claude']);
+    expect(saved.last.encode(), isNot(contains('accounts"')));
   });
 
   testWidgets('Cancel gives up a sign-in: the host is told to stop and the form it asked is cancelled', (tester) async {
@@ -312,15 +312,15 @@ void main() {
   test('canoa.cfg offers an account by name only, and a removed one goes back to the harness\'s own login', () {
     const base = CanoaConfig();
     final once = base.withAccountOffered(account: 'work', harness: 'claude');
-    expect(once.hostAccountsOf('claude-accounts'), ['work']);
+    expect(once.hostAccountsOf('Claude'), ['work']);
     final twice = once.withAccountOffered(account: 'metered', harness: 'claude');
-    expect(twice.hostEntriesRunning('claude'), ['claude-accounts']);
-    expect(twice.hostAccountsOf('claude-accounts'), ['work', 'metered']);
+    expect(twice.hostEntriesRunning('claude'), ['Claude']);
+    expect(twice.hostAccountsOf('Claude'), ['work', 'metered']);
     expect(twice.encode(), isNot(contains('sk-')));
     final one = twice.withoutAccountOffered('work');
-    expect(one.hostAccountsOf('claude-accounts'), ['metered']);
+    expect(one.hostAccountsOf('Claude'), ['metered']);
     final none = one.withoutAccountOffered('metered');
-    expect(none.hostAccountsOf('claude-accounts'), isEmpty);
+    expect(none.hostAccountsOf('Claude'), isEmpty);
     expect(none.encode(), isNot(contains('accounts = ')));
   });
 
@@ -332,14 +332,22 @@ void main() {
       },
     });
 
-    test("a new account never goes to an entry of the person's, and the entry the app makes reaches no paired key", () {
+    test("a new account goes to the agent's own entry, never to another of the person's, and no entry is made for accounts", () {
       final changed = open.withAccountOffered(account: 'metered', harness: 'claude');
-      expect(changed.hostAccountsOf('Claude'), isEmpty, reason: 'an entry offering none keeps the login it runs on');
+      expect(changed.hostAccountsOf('Claude'), ['metered']);
       expect(changed.hostAccountsOf('Shared'), ['work', 'old']);
-      expect(changed.hostAccountsOf('claude-accounts'), ['metered']);
-      expect(changed.hostEntryIsOpen('claude-accounts'), isFalse);
+      expect(changed.hostEntriesRunning('claude'), ['Claude', 'Shared']);
+      expect(changed.hostEntryIsOpen('Claude'), isTrue);
       expect(changed.hostEntryIsOpen('Shared'), isTrue);
-      expect(changed.encode(), contains('peers'));
+      expect(changed.encode(), isNot(contains('claude-accounts')));
+    });
+
+    test('the agent itself is the source the host names, else the first entry that runs the provider, else a new one', () {
+      expect(open.ownEntryOf('claude'), 'Claude');
+      const only = CanoaConfig(host: {'agents': {'Work': {'harness': 'claude'}, 'Home': {'harness': 'claude'}}});
+      expect(only.ownEntryOf('claude'), 'Work');
+      expect(const CanoaConfig().ownEntryOf('codex'), 'Codex');
+      expect(const CanoaConfig().ownEntryOf('pi'), 'Pi');
     });
 
     test('an account offered to a named entry is appended, so the default stays', () {
