@@ -195,6 +195,10 @@ class ChatSession {
   /// What is written in a draft's composer, kept with it.
   String draftText = '';
 
+  /// The message a draft is sending while its agent starts: kept with the draft in place of what the composer holds, so a
+  /// crash before the agent answers loses nothing.
+  ({String text, List<Attachment> attachments})? sending;
+
   /// When this app made it. A draft's scratch folder takes its `${date}`, `${time}` and `${datetime}` from it.
   final DateTime created;
 
@@ -1024,11 +1028,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       'account': ?session.account,
       'overlays': ?session.overlays?.toList(),
       'loadout': ?session.loadout,
-      'text': session.draftText,
+      'text': session.sending?.text ?? session.draftText,
       if (!session.agentNames) 'title': session.title,
       'pending': [for (final choice in session.pending.values) choice.toJson()],
       if (session.bypass) 'bypass': true,
-    }, session.attachments);
+    }, session.sending?.attachments ?? session.attachments);
   }
 
   /// What a draft's composer holds, kept with it.
@@ -1150,6 +1154,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final taken = List.of(session.attachments);
     session.chat.holdFirst(text, attachments: [for (final item in taken) item.name]);
     session.attachments.clear();
+    session.sending = (text: text, attachments: taken);
+    _keepDraft(session);
     final named = session.agentNames && session.title == draftTitle && text.trim().isNotEmpty;
     if (named) {
       session
@@ -1165,6 +1171,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           session.status = SessionStatus.draft;
           session.chat.releaseFirst();
           session.attachments.addAll(taken);
+          if (session.draftText.isEmpty) session.draftText = text;
           if (named) {
             session
               ..title = draftTitle
@@ -1195,6 +1202,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       }
       session.chat.releaseFirst();
     } finally {
+      session.sending = null;
+      _keepDraft(session);
       _starting.remove(session.id);
       notifyListeners();
     }

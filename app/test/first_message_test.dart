@@ -112,6 +112,35 @@ void main() {
     await finish(tester);
   });
 
+  testWidgets('a first message sent while the agent starts is still on disk, and back in the composer after a crash', (tester) async {
+    final agent = OptionsAgent()..holdSessionNew = Completer<void>();
+    final backend = MemoryDraftBackend();
+    final keeper = DraftKeeper(backend);
+    final store = SessionStore(drafts: keeper);
+    await pumpApp(tester, store, linked: agent.openLink);
+    await newSession(tester);
+    await chooseSource(tester, 'Scripted');
+    final session = store.selected!;
+    expect(store.addAttachment(session, 'shot.png', [137, 80, 78, 71]), isNull);
+    await tester.pumpAndSettle();
+    await send(tester, 'Fix the failing test');
+    expect(session.remoteSessionId, isNull, reason: 'the agent has not opened its session');
+    await tester.runAsync(keeper.flush);
+
+    // The app dies here: a new one reads what the disk holds.
+    final after = SessionStore(drafts: DraftKeeper(backend));
+    await tester.runAsync(() => after.restoreDrafts((label) => label == 'Scripted' ? _source : null));
+    final back = after.sessions.single;
+    expect((back.isDraft, back.draftText), (true, 'Fix the failing test'));
+    expect(back.attachments.map((item) => item.name), ['shot.png']);
+
+    agent.holdSessionNew!.complete();
+    await until(tester, () => agent.requests.any((r) => r['method'] == 'session/prompt'), 'the prompt');
+    await tester.runAsync(keeper.flush);
+    expect(backend.records, isEmpty, reason: 'bound: nothing is kept of the draft');
+    await finish(tester);
+  });
+
   testWidgets('a start that fails takes the message out of the conversation and gives its text and attachments back', (tester) async {
     final agent = OptionsAgent(failStart: 'scripted-agent could not start: no such file');
     final store = SessionStore();
