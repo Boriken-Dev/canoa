@@ -35,6 +35,9 @@ final class _Source implements UsageSource {
     if (failure != null) throw failure!;
     return entries;
   }
+
+  @override
+  Future<Object?> summary(Map<String, Object?> params) async => const {};
 }
 
 Map<String, Object?> _window(String id, String label, int usedPermille, {required int hours, required int resetsIn}) => {

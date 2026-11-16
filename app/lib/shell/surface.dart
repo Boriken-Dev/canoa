@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../session_store.dart';
+import '../usage/spend_model.dart' show SpendRow;
 
 /// Where a surface may be shown: in the right panel beside the conversation, or in the bottom panel under it.
 enum SurfaceSlot { right, bottom }
@@ -148,15 +149,20 @@ class WorkSurfaces extends ChangeNotifier {
 
 /// What the app gives every surface: the store, and the ways to reach the conversation beside it.
 class SurfaceEnvironment extends InheritedWidget {
-  const SurfaceEnvironment({super.key, required this.store, required this.onComment, required this.onOpenChild, required super.child});
+  const SurfaceEnvironment({super.key, required this.store, required this.onComment, required this.onOpenChild, this.sessionSpend, required super.child});
 
   final SessionStore store;
+
+  /// What the host recorded a session spending, by the session's id; null where the host keeps no usage for this person.
+  final Future<SpendRow?> Function(String sessionId)? sessionSpend;
 
   /// Adds text to the message being written.
   final ValueChanged<String> onComment;
 
   /// Called after a child's thread is opened from a surface.
   final VoidCallback onOpenChild;
+
+  static SurfaceEnvironment? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<SurfaceEnvironment>();
 
   static SurfaceEnvironment of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<SurfaceEnvironment>()!;
 

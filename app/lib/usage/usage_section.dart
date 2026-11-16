@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 
 import '../settings/agent_sections.dart' show WarnFromRow;
 import '../settings/settings_row.dart' show SettingsGroup;
+import 'cost_view.dart';
 import 'limits_view.dart';
+import 'spend_model.dart';
+import 'tokens_view.dart';
 import 'usage_model.dart';
 
 /// The Usage section's index: All accounts, then each provider with its accounts. What it selects is what the page's filters show.
@@ -137,7 +140,6 @@ class _UsagePageState extends State<UsagePage> {
     listenable: _usage,
     builder: (context, _) {
       final text = Theme.of(context).textTheme;
-      final scheme = Theme.of(context).colorScheme;
       return Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
@@ -150,7 +152,7 @@ class _UsagePageState extends State<UsagePage> {
                   Expanded(child: Text('Usage', style: text.headlineSmall)),
                   IconButton(
                     key: const Key('usage-refresh'),
-                    tooltip: 'Read the limits again',
+                    tooltip: _usage.view == UsageView.limits ? 'Read the limits again' : 'Read the figures again',
                     icon: _usage.loading
                         ? const SizedBox(
                             width: 18,
@@ -160,15 +162,19 @@ class _UsagePageState extends State<UsagePage> {
                         : const Icon(Icons.refresh),
                     onPressed: _usage.loading
                         ? null
-                        : () => unawaited(_usage.refresh()),
+                        : () => unawaited(_usage.view == UsageView.limits ? _usage.refresh() : Future.wait([_usage.refresh(), _usage.refreshSpend()])),
                   ),
                 ],
               ),
-              Text(
-                'Limits',
-                style: text.titleMedium?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
+              SegmentedButton<UsageView>(
+                key: const Key('usage-view'),
+                showSelectedIcon: false,
+                segments: [
+                  for (final each in UsageView.values)
+                    ButtonSegment(value: each, label: Text(each.label), tooltip: each.label),
+                ],
+                selected: {_usage.view},
+                onSelectionChanged: (chosen) => _usage.setView(chosen.first),
               ),
               const SizedBox(height: 12),
               Wrap(
@@ -205,17 +211,25 @@ class _UsagePageState extends State<UsagePage> {
                 ],
               ),
               const SizedBox(height: 16),
-              LimitsView(controller: _usage, warnPermille: widget.warnPermille),
+              switch (_usage.view) {
+                UsageView.limits => LimitsView(
+                  controller: _usage,
+                  warnPermille: widget.warnPermille,
+                ),
+                UsageView.tokens => TokensView(controller: _usage),
+                UsageView.cost => CostView(controller: _usage),
+              },
               const SizedBox(height: 16),
-              SettingsGroup(
-                title: 'Warning',
-                children: [
-                  WarnFromRow(
-                    value: widget.warnPermille,
-                    onChanged: widget.onWarnChanged,
-                  ),
-                ],
-              ),
+              if (_usage.view == UsageView.limits)
+                SettingsGroup(
+                  title: 'Warning',
+                  children: [
+                    WarnFromRow(
+                      value: widget.warnPermille,
+                      onChanged: widget.onWarnChanged,
+                    ),
+                  ],
+                ),
               if (widget.onManageAccounts != null)
                 Align(
                   alignment: Alignment.centerLeft,

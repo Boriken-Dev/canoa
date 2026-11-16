@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../accounts/accounts_controller.dart';
 import '../desktop/host_control.dart';
+import 'spend_model.dart';
 
 /// A host that answers `usage/limits`: its name as the person knows it, and how to ask it.
 abstract interface class UsageSource {
@@ -12,6 +13,9 @@ abstract interface class UsageSource {
 
   /// The `accounts` array of the host's `usage/limits` answer.
   Future<List<Object?>> limits();
+
+  /// The host's `usage/summary` answer for [params]: from, to, group_by and the filters.
+  Future<Object?> summary(Map<String, Object?> params);
 }
 
 /// The host this app's control link reaches.
@@ -30,6 +34,10 @@ final class ControlUsageSource implements UsageSource {
     final accounts = result is Map ? result['accounts'] : null;
     return accounts is List ? accounts : const [];
   }
+
+  @override
+  Future<Object?> summary(Map<String, Object?> params) async =>
+      (await _control.ready(wait: false)).call('usage/summary', params);
 }
 
 /// The provider an account is listed under when nothing says which it is.
@@ -93,28 +101,29 @@ class UsageController extends ChangeNotifier {
     _host = host;
     _provider = provider;
     _account = account;
+    _model = _session = null;
     if (account != null) {
       final found = all.where((each) => each.id == account).firstOrNull;
       if (found != null) _provider = found.provider;
     }
-    _notify();
+    _changed();
   }
 
   void selectHost(String? host) {
     _host = host;
     _clearMissing();
-    _notify();
+    _changed();
   }
 
   void selectProvider(String? provider) {
     _provider = provider;
     _clearMissing();
-    _notify();
+    _changed();
   }
 
   void selectAccount(String? account) {
     _account = account;
-    _notify();
+    _changed();
   }
 
   // An account the other filters now leave out is dropped, so a choice made before never leaves the view empty.
@@ -207,6 +216,171 @@ class UsageController extends ChangeNotifier {
     for (final each in all)
       if (each.provider == provider) each,
   ];
+
+  // ---- Tokens and Cost: sums the hosts keep, asked for by range and filter; no record is loaded here.
+
+  UsageView _view = UsageView.limits;
+  SpendRange _range = SpendRange.week;
+  Breakdown _breakdown = Breakdown.account;
+  int? _customFrom, _customTo;
+  String? _model, _session;
+  int _spendRun = 0;
+  bool _spendLoading = false;
+  SpendSummary _byDay = const SpendSummary(), _byAccount = const SpendSummary(), _byOther = const SpendSummary();
+  final _perHost = <String, SpendRow>{};
+  final _notCovered = <String, String>{};
+
+  UsageView get view => _view;
+  SpendRange get range => _range;
+  Breakdown get breakdown => _breakdown;
+  String? get model => _model;
+  String? get session => _session;
+  bool get spendLoading => _spendLoading;
+
+  /// Everything the range holds, summed over the hosts that answered.
+  SpendRow get total => _byDay.total;
+
+  /// The zone days are cut in, as the hosts say it.
+  String get timezone => _byDay.timezone;
+
+  SpendSummary get byDay => _byDay;
+  SpendSummary get byAccount => _byAccount;
+
+  /// The hosts that answered nothing, by name, and why.
+  Map<String, String> get notCovered => Map.unmodifiable(_notCovered);
+
+  /// The groups of the chosen breakdown.
+  List<SpendRow> get rows => switch (_breakdown) {
+    Breakdown.account => _byAccount.groups,
+    Breakdown.day => _byDay.groups,
+    Breakdown.host => [for (final MapEntry(:key, :value) in _perHost.entries) value.plus(const SpendRow(), key: key)],
+    _ => _byOther.groups,
+  };
+
+  /// The range as Unix seconds, `from <= time < to`: rolling for the presets, whole days in the hosts' zone for a custom one.
+  (int, int) get span {
+    final now = clock;
+    if (_range == SpendRange.custom && _customFrom != null && _customTo != null) return (_customFrom!, _customTo!);
+    final days = _range == SpendRange.custom ? SpendRange.week.days : _range.days;
+    return (now - days * 86400, now + 1);
+  }
+
+  /// Chooses what the Limits, Tokens and Cost views show.
+  void setView(UsageView view) {
+    _view = view;
+    _changed();
+  }
+
+  void setRange(SpendRange range) {
+    _range = range;
+    _changed();
+  }
+
+  /// A custom range of whole days: [from] to [lastDay], both inclusive, as Unix seconds of each day's start.
+  void setCustom(int from, int lastDay) {
+    _range = SpendRange.custom;
+    _customFrom = from;
+    _customTo = lastDay + 86400;
+    _changed();
+  }
+
+  void setBreakdown(Breakdown breakdown) {
+    _breakdown = breakdown;
+    _changed();
+  }
+
+  void selectModel(String? model) {
+    _model = model;
+    _changed();
+  }
+
+  void selectSession(String? session) {
+    _session = session;
+    _changed();
+  }
+
+  /// An account's name as the person knows it; Unknown when no host or account list names it.
+  String accountName(String? key) {
+    if (key == null || key.isEmpty) return 'Unknown';
+    final known = all.where((each) => each.id == key).firstOrNull?.name ?? accounts?.accounts.where((each) => each.id == key).firstOrNull?.name;
+    return known ?? 'Unknown';
+  }
+
+  /// What every host recorded the session with this id spending, over all time; null when no host answered.
+  Future<SpendRow?> sessionSpend(String id) async {
+    final rows = <SpendRow>[];
+    for (final source in sources) {
+      try {
+        final answer = SpendSummary.parse(await source.summary({'session': id, 'group_by': 'day'}));
+        if (answer != null) rows.add(answer.total);
+      } on Object {
+        continue;
+      }
+    }
+    return rows.isEmpty ? null : rows.reduce((a, b) => a.plus(b));
+  }
+
+  void _changed() {
+    _notify();
+    if (_view != UsageView.limits) unawaited(refreshSpend());
+  }
+
+  /// Asks the hosts for the sums the views show: by day, by account, and by the chosen breakdown when it is another.
+  Future<void> refreshSpend() async {
+    final run = ++_spendRun;
+    _spendLoading = true;
+    _notify();
+    final (from, to) = span;
+    final base = <String, Object?>{
+      'from': from,
+      'to': to,
+      'account': ?_account,
+      'provider': ?_provider,
+      'model': ?_model,
+      'session': ?_session,
+    };
+    final other = switch (_breakdown) {
+      Breakdown.provider => 'provider',
+      Breakdown.model => 'model',
+      Breakdown.session => 'session',
+      _ => null,
+    };
+    final asked = [for (final source in sources) if (_host == null || source.name == _host) source];
+    final answers = <String, (SpendSummary, SpendSummary, SpendSummary?)>{};
+    final failed = <String, String>{};
+    Future<SpendSummary> ask(UsageSource source, String groupBy) async {
+      final answer = SpendSummary.parse(await source.summary({...base, 'group_by': groupBy}));
+      if (answer == null) throw const FormatException('the answer was not a summary');
+      return answer;
+    }
+
+    await Future.wait([
+      for (final source in asked)
+        () async {
+          try {
+            final day = await ask(source, 'day');
+            final account = await ask(source, 'account');
+            final extra = other == null ? null : await ask(source, other);
+            answers[source.name] = (day, account, extra);
+          } on Object catch (error) {
+            failed[source.name] = '$error';
+          }
+        }(),
+    ]);
+    if (run != _spendRun || _disposed) return;
+    final ok = answers.values.toList();
+    _byDay = SpendSummary.merge([for (final each in ok) each.$1]);
+    _byAccount = SpendSummary.merge([for (final each in ok) each.$2]);
+    _byOther = SpendSummary.merge([for (final each in ok) ?each.$3]);
+    _perHost
+      ..clear()
+      ..addEntries([for (final MapEntry(:key, :value) in answers.entries) MapEntry(key, value.$1.total)]);
+    _notCovered
+      ..clear()
+      ..addAll(failed);
+    _spendLoading = false;
+    _notify();
+  }
 
   void _notify() {
     if (!_disposed) notifyListeners();

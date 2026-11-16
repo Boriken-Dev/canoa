@@ -89,6 +89,7 @@ import 'shell/layout_state.dart';
 import 'shell/surface.dart';
 import 'shell/work_panel.dart';
 import 'shell/sections.dart';
+import 'usage/spend_model.dart' show SpendRow;
 import 'usage/usage_model.dart';
 import 'usage/usage_section.dart';
 import 'shell/shell.dart';
@@ -1903,7 +1904,7 @@ class _CanoaAppState extends State<CanoaApp> {
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
           layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(), loadouts: _loadoutsPage(),
           hostsIndex: _hostsIndex(), hostsPage: _hostsPage(),
-          usageIndex: _usageIndex(), usagePage: _usagePage(),
+          usageIndex: _usageIndex(), usagePage: _usagePage(), sessionSpend: _usage?.sessionSpend,
           conversation: _conversation,
           localHost: _localHost,
           grouping: _grouping,
@@ -1925,7 +1926,7 @@ class _CanoaHome extends StatelessWidget {
     this.onHosts, this.onLoadout, this.onLoadouts, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
     this.renderers = chat.ChatRenderers.none, required this.welcome, this.localHost, required this.grouping,
     required this.layout, required this.surfaces, required this.settings, required this.loadout, required this.loadouts,
-    required this.hostsIndex, required this.hostsPage, this.usageIndex, this.usagePage,
+    required this.hostsIndex, required this.hostsPage, this.usageIndex, this.usagePage, this.sessionSpend,
   });
 
   /// The extension's bridge to the Canoa on this computer; null where this is not the extension.
@@ -1943,6 +1944,7 @@ class _CanoaHome extends StatelessWidget {
 
   /// The Usage section's index and main view; none where the host does not grant usage.
   final Widget? usageIndex, usagePage;
+  final Future<SpendRow?> Function(String sessionId)? sessionSpend;
 
   final SessionStore store;
   final Widget welcome;
@@ -2095,6 +2097,7 @@ class _CanoaHome extends StatelessWidget {
               kit: kit,
               renderers: renderers,
               welcome: welcome,
+              sessionSpend: sessionSpend,
             ),
           ),
           AppSection(id: HostsController.section, label: 'Hosts', icon: Icons.lan_outlined, index: hostsIndex, main: hostsPage),
@@ -2140,10 +2143,13 @@ final class _ConversationHandle {
 class _Conversation extends StatefulWidget {
   const _Conversation({
     super.key, required this.store, required this.narrow, required this.handle, required this.layout, required this.surfaces,
-    this.kit = const ComposerKit(), this.renderers = chat.ChatRenderers.none, required this.welcome,
+    this.kit = const ComposerKit(), this.renderers = chat.ChatRenderers.none, required this.welcome, this.sessionSpend,
   });
 
   final Widget welcome;
+
+  /// What the host recorded a session spending, for the inspector; null where the host does not grant usage.
+  final Future<SpendRow?> Function(String sessionId)? sessionSpend;
   final _ConversationHandle handle;
   final ComposerKit kit;
   final chat.ChatRenderers renderers;
@@ -2513,6 +2519,7 @@ class _ConversationState extends State<_Conversation> {
       child: conversation,
       wrap: (panels) => SurfaceEnvironment(
         store: widget.store,
+        sessionSpend: widget.sessionSpend,
         onComment: _addToComposer,
         onOpenChild: () {
           if (widget.narrow) widget.layout.setRightOpen(false);

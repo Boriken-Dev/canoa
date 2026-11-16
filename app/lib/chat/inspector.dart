@@ -6,6 +6,9 @@ import '../acp/pipe_channel.dart' show isPipeUrl;
 import '../session_store.dart';
 import '../sources/source_icons.dart' show SourceMark;
 import '../theme/look.dart';
+import '../shell/surface.dart' show SurfaceEnvironment;
+import '../usage/spend_model.dart' show SpendRow;
+import '../usage/tokens_view.dart' show tokenColumns;
 import 'delegation_row.dart' show Ticking, stateColor, timeWord;
 import 'delegation_view.dart' show ChildView, lineage;
 import 'git_changes.dart';
@@ -119,6 +122,7 @@ class _SessionInspectorPanelState extends State<SessionInspectorPanel> {
         session: widget.session,
         scopes: scopes,
         scope: scope,
+        sessionSpend: SurfaceEnvironment.maybeOf(context)?.sessionSpend,
         onScope: (chosen) => setState(() => _scope = chosen),
         onOpenDiff: () => setState(() => _diff = scope),
         onClose: widget.onClose,
@@ -145,10 +149,14 @@ class SessionInspector extends StatelessWidget {
     required this.onOpenDiff,
     required this.onClose,
     this.onOpenChild,
+    this.sessionSpend,
     this.embedded = false,
   });
 
   final bool embedded;
+
+  /// What the host recorded this session spending; null where the host keeps no usage for this person.
+  final Future<SpendRow?> Function(String sessionId)? sessionSpend;
   final SessionStore store;
   final ChatSession session;
   final List<ChangeScope> scopes;
@@ -213,6 +221,12 @@ class SessionInspector extends StatelessWidget {
             Text('Context', style: heading),
             const SizedBox(height: 6),
             _ContextMeter(usage: session.usage),
+            if (sessionSpend != null && session.remoteSessionId != null) ...[
+              const SizedBox(height: 16),
+              Text('Tokens spent', style: heading),
+              const SizedBox(height: 6),
+              _SessionTokens(sessionId: session.remoteSessionId!, load: sessionSpend!, revision: session.usage.used),
+            ],
             if (children.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text(live > 0 ? 'Lineage · $live running' : 'Lineage', style: heading),
@@ -339,6 +353,58 @@ class _ContextMeter extends StatelessWidget {
       const SizedBox(height: 4),
       Text('${compactCount(used)} of ${compactCount(size)} tokens', style: TextStyle(color: look.muted, fontSize: 12)),
     ]);
+  }
+}
+
+/// The tokens the host recorded this session spending: what it was billed for, which is not how full its context is.
+class _SessionTokens extends StatefulWidget {
+  const _SessionTokens({required this.sessionId, required this.load, required this.revision});
+
+  final String sessionId;
+  final Future<SpendRow?> Function(String sessionId) load;
+
+  /// Changes when the agent reports again, which is when the figures are read again.
+  final Object? revision;
+
+  @override
+  State<_SessionTokens> createState() => _SessionTokensState();
+}
+
+class _SessionTokensState extends State<_SessionTokens> {
+  late Future<SpendRow?> _row = widget.load(widget.sessionId);
+
+  @override
+  void didUpdateWidget(_SessionTokens old) {
+    super.didUpdateWidget(old);
+    if (old.sessionId != widget.sessionId || old.revision != widget.revision) _row = widget.load(widget.sessionId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final look = context.chatLook;
+    final muted = TextStyle(color: look.muted, fontSize: 12);
+    return FutureBuilder<SpendRow?>(
+      future: _row,
+      builder: (context, snapshot) {
+        final row = snapshot.data;
+        if (snapshot.connectionState != ConnectionState.done) return Text('Reading…', key: const ValueKey('tokens loading'), style: muted);
+        if (row == null || row.records == 0) return Text('Nothing recorded yet.', key: const ValueKey('tokens none'), style: muted);
+        return Column(
+          key: const ValueKey('tokens spent'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final column in tokenColumns)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(children: [
+                  Expanded(child: Tooltip(message: column.help, child: Text(column.label, style: muted))),
+                  Text(column.text(row), key: ValueKey('tokens ${column.label}'), style: TextStyle(fontSize: 13, color: column.of(row) == null ? look.muted : null)),
+                ]),
+              ),
+          ],
+        );
+      },
+    );
   }
 }
 
