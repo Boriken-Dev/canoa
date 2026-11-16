@@ -101,6 +101,7 @@ import 'sources/sources.dart';
 import 'loadout/loadout_editor.dart' show LoadoutDraft;
 import 'loadout/loadouts_section.dart';
 import 'loadout/registry_fetch.dart';
+import 'store/contents_storage_platform.dart';
 import 'store/store_index_view.dart';
 import 'store/store_section.dart';
 import 'store/store_selection.dart';
@@ -663,6 +664,7 @@ class _CanoaAppState extends State<CanoaApp> {
     key: _loadoutKey,
     embedded: true,
     selection: _storeSelection,
+    contentsStorage: platformContentsStorage(_home?.configDir),
     config: config,
     home: _home,
     onSave: _saveLoadout,

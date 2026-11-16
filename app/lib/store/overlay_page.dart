@@ -9,6 +9,7 @@ import '../profile/profile.dart';
 import '../profile/profile_home.dart';
 import '../profile/skill_copies.dart';
 import '../profile/profiles_panel.dart' show EffectiveTable, OverlayReportView, visible;
+import 'contents_store.dart';
 import 'entry_details.dart';
 import 'links.dart';
 import 'skills.dart';
@@ -30,7 +31,7 @@ const shownTags = 40;
 /// overlay itself says and would do, from its own manifest and files; then install, update or remove.
 class OverlayPage extends StatefulWidget {
   const OverlayPage({super.key, required this.listed, required this.catalog, required this.config,
-      required this.home, required this.onSave, this.catalogs = const []});
+      required this.home, required this.onSave, this.catalogs = const [], this.contents});
 
   final ListedEntry listed;
   final LoadedCatalog catalog;
@@ -40,6 +41,9 @@ class OverlayPage extends StatefulWidget {
 
   /// The catalogs read, through which a skill named without a source is resolved.
   final List<(String, aos.Catalog)> catalogs;
+
+  /// What reading the catalogs ahead found of each entry; the page shows what the overlay provides from it, and fetches nothing.
+  final ContentsStore? contents;
 
   @override
   State<OverlayPage> createState() => OverlayPageState();
@@ -211,11 +215,19 @@ class OverlayPageState extends State<OverlayPage> {
           children: [
             _claims(text),
             const SizedBox(height: 12),
-            EntryFactsView(
-              facts: widget.catalog.facts['overlay:${entry.name}'],
-              technical: {
-                if (entry.pin != null) 'Pin': entry.pin!,
-                if (widget.catalog.commit != null) 'Catalog commit': widget.catalog.commit!,
+            ListenableBuilder(
+              listenable: widget.contents ?? ChangeNotifier(),
+              builder: (context, _) {
+                final id = contentsId(widget.listed.label, 'overlay', entry.name);
+                return EntryFactsView(
+                  facts: widget.catalog.facts['overlay:${entry.name}'],
+                  read: widget.contents?.of(id),
+                  reading: widget.contents?.isReading(id) ?? false,
+                  technical: {
+                    if (entry.pin != null) 'Pin': entry.pin!,
+                    if (widget.catalog.commit != null) 'Catalog commit': widget.catalog.commit!,
+                  },
+                );
               },
             ),
             const Divider(height: 32),
@@ -236,7 +248,7 @@ class OverlayPageState extends State<OverlayPage> {
                 child: FilledButton.tonal(
                   key: const Key('store-fetch'),
                   onPressed: busy != null ? null : _fetch,
-                  child: Text(state == EntryState.installed ? 'Fetch and show what an update changes' : 'Fetch and show what it would do'),
+                  child: Text(state == EntryState.installed ? 'Review what an update changes' : 'Review what installing it does'),
                 ),
               )
             else ...[

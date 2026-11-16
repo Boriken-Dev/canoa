@@ -77,6 +77,7 @@ void main() {
     config = CanoaConfig.parse(text);
     await tester.pumpWidget(MaterialApp(
       home: StoreSection(
+        readAhead: false,
         config: config,
         home: MemoryHome(overlays),
         index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last),

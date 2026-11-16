@@ -496,6 +496,7 @@ catalog_max_icons = 256       # distinct icon files read for one catalog, each o
 icon_max_bytes = 524288       # an icon's size, 512 KiB
 icon_max_width = 1024         # the width and height its header may give
 icon_max_height = 1024
+contents_ttl_seconds = 300    # how long what was read of every entry stays current; the Store's refresh forces it, 0 reads at every refresh
 ```
 
 A label is yours, a valid overlay name unique among your catalogs; it never comes from the catalog. Each `[store]`

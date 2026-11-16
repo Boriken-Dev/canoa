@@ -82,6 +82,7 @@ void main() {
     final config = CanoaConfig.parse(text);
     await tester.pumpWidget(MaterialApp(
       home: StoreSection(
+        readAhead: false,
         config: config,
         home: MemoryHome(overlays),
         now: () => clock,

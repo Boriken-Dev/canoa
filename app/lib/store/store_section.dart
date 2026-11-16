@@ -16,6 +16,7 @@ import 'programs_view.dart';
 import 'store_catalogs.dart';
 import 'store_index.dart';
 import 'store_mcps.dart';
+import 'contents_storage.dart';
 import 'store.dart' show LoadedCatalog;
 import 'store_overlays.dart';
 import 'store_selection.dart';
@@ -40,6 +41,8 @@ class StoreSection extends StatefulWidget {
     this.index,
     this.now,
     this.selection,
+    this.contentsStorage,
+    this.readAhead = true,
   });
 
   /// Whether the page is a section of the shell, which never pops: what it changes is saved as it is changed.
@@ -71,6 +74,12 @@ class StoreSection extends StatefulWidget {
   /// The store the section's index chose, which Overlays and Skills are scoped to; none where the section has no index.
   final StoreSelection? selection;
 
+  /// Where what was read of every entry is kept between runs; none keeps it only while the app runs.
+  final ContentsStorage? contentsStorage;
+
+  /// Whether the catalogs' entries are read for what they provide when the catalogs are read.
+  final bool readAhead;
+
   @override
   State<StoreSection> createState() => StoreSectionState();
 }
@@ -85,6 +94,9 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     fetch: widget.fetchRegistry,
     findProgram: widget.findProgram,
     index: widget.index,
+    contentsStorage: widget.contentsStorage,
+    now: widget.now,
+    readAhead: widget.readAhead,
   )..addListener(_changed);
   final views = {for (final type in StoreType.values) type: StoreView(type)};
   late List<StoreType> types = _typesFor(widget.programs);

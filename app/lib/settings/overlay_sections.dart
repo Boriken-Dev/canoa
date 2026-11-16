@@ -57,6 +57,7 @@ class _CatalogsSectionState extends State<CatalogsSection> {
     ('icon_max_bytes', 'Largest icon', 'Bytes of one icon file'),
     ('icon_max_width', 'Widest icon', 'Pixels'),
     ('icon_max_height', 'Tallest icon', 'Pixels'),
+    ('contents_ttl_seconds', 'Contents kept for', 'Seconds what was read of every entry stays current; 0 reads again at every refresh'),
   ];
 
   int _value(StoreSettings s, String key) => switch (key) {
@@ -66,6 +67,7 @@ class _CatalogsSectionState extends State<CatalogsSection> {
     'catalog_max_icons' => s.catalogMaxIcons,
     'icon_max_bytes' => s.iconMaxBytes,
     'icon_max_width' => s.iconMaxWidth,
+    'contents_ttl_seconds' => s.contentsTtlSeconds,
     _ => s.iconMaxHeight,
   };
 

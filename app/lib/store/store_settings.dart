@@ -11,6 +11,7 @@ final class StoreSettings {
     this.iconMaxHeight = defaultIconMaxSide,
     this.catalogMaxEntries = defaultCatalogMaxEntries,
     this.catalogMaxIcons = defaultCatalogMaxIcons,
+    this.contentsTtlSeconds = defaultContentsTtlSeconds,
   });
 
   static const defaultCatalogMaxBytes = 4 * 1024 * 1024;
@@ -19,15 +20,19 @@ final class StoreSettings {
   static const defaultIconMaxSide = 1024;
   static const defaultCatalogMaxEntries = 2000;
   static const defaultCatalogMaxIcons = 256;
+  static const defaultContentsTtlSeconds = 300;
 
   /// The keys `[store]` takes.
   static const keys = {'catalog_max_bytes', 'catalog_max_depth', 'catalog_max_entries', 'catalog_max_icons',
-      'icon_max_bytes', 'icon_max_width', 'icon_max_height'};
+      'icon_max_bytes', 'icon_max_width', 'icon_max_height', 'contents_ttl_seconds'};
 
   final int catalogMaxBytes, catalogMaxDepth, iconMaxBytes, iconMaxWidth, iconMaxHeight;
 
   /// The most entries one catalog lists, and the most distinct icon files read for one catalog.
   final int catalogMaxEntries, catalogMaxIcons;
+
+  /// How long what was read of every entry stays current, in seconds; 0 reads again at every refresh.
+  final int contentsTtlSeconds;
 
   /// These limits with the one named by [key] (a key of `[store]`) set to [value].
   StoreSettings withLimit(String key, int value) => StoreSettings(
@@ -38,6 +43,7 @@ final class StoreSettings {
     iconMaxHeight: key == 'icon_max_height' ? value : iconMaxHeight,
     catalogMaxEntries: key == 'catalog_max_entries' ? value : catalogMaxEntries,
     catalogMaxIcons: key == 'catalog_max_icons' ? value : catalogMaxIcons,
+    contentsTtlSeconds: key == 'contents_ttl_seconds' ? value : contentsTtlSeconds,
   );
 
   /// What a catalog is read within: its size and nesting.
@@ -78,6 +84,7 @@ final class StoreSettings {
       iconMaxHeight: read('icon_max_height', defaultIconMaxSide),
       catalogMaxEntries: read('catalog_max_entries', defaultCatalogMaxEntries),
       catalogMaxIcons: read('catalog_max_icons', defaultCatalogMaxIcons),
+      contentsTtlSeconds: read('contents_ttl_seconds', defaultContentsTtlSeconds),
     );
   }
 }

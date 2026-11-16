@@ -374,6 +374,7 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(MaterialApp(
         home: StoreSection(
+        readAhead: false,
           config: CanoaConfig.parse('[catalogs]\nmain = "https://example.invalid/catalog.git@main#catalog.toml"\n'),
           home: MemoryHome(overlays),
           index: standInIndex(overlays, () => CanoaConfig.parse('[catalogs]\nmain = "https://example.invalid/catalog.git@main#catalog.toml"\n')),

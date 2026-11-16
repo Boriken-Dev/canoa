@@ -31,6 +31,7 @@ void main() {
           debugShowCheckedModeBanner: false,
           theme: themeFor(LookId.canoa, Brightness.dark),
           home: StoreSection(
+        readAhead: false,
             config: CanoaConfig.parse(text),
             home: MemoryHome(overlays),
             index: standInIndex(overlays, () => CanoaConfig.parse(text)),

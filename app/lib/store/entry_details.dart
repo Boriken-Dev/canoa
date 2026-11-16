@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../profile/profiles_panel.dart' show visible;
 import 'links.dart';
+import 'contents_store.dart';
+import 'overlay_contents.dart';
 import 'overlay_page.dart' show oneLine;
 import 'store.dart' show EntryFacts;
 
@@ -9,7 +11,13 @@ import 'store.dart' show EntryFacts;
 /// environment scripts it carries, and the technical details with their digests. All of it is what the entry's catalog or
 /// manifest says; nothing here ran.
 class EntryFactsView extends StatelessWidget {
-  const EntryFactsView({super.key, required this.facts, this.requirements = const [], this.technical = const {}});
+  const EntryFactsView({super.key, required this.facts, this.requirements = const [], this.technical = const {}, this.read, this.reading = false});
+
+  /// What reading the entry ahead found of what it provides; null before anything has been read.
+  final EntryContents? read;
+
+  /// Whether the entry is being read now.
+  final bool reading;
 
   /// The index's facts of the entry, or null when the host has none (an entry listed by hand).
   final EntryFacts? facts;
@@ -24,12 +32,21 @@ class EntryFactsView extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final facts = this.facts;
-    final needs = [...?facts?.requirements, ...requirements];
+    final provided = read?.contents;
+    final needs = [...?facts?.requirements, ...requirements, ...?provided?.requirements];
+    if (provided != null) return _provided(context, provided, needs);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('Contents', style: text.titleSmall),
-      if (facts == null || !facts.hasContents)
+      if (read?.problem case final problem?)
+        Text('It could not be read: ${oneLine(problem)}', key: const Key('details-contents-failed'),
+            style: TextStyle(color: Theme.of(context).colorScheme.error))
+      else if (reading)
+        const Text('Reading what it provides…', key: Key('details-contents-reading')),
+      if (read?.problem != null || reading)
+        const SizedBox.shrink()
+      else if (facts == null || !facts.hasContents)
         const Text(
-          'Not read yet. What it holds is in its own files, which are fetched only when you ask.',
+          'Not read yet. It is read with the store\'s catalog, and the refresh reads it again.',
           key: Key('details-contents-unread'),
         )
       else ...[
@@ -76,6 +93,77 @@ class EntryFactsView extends StatelessWidget {
           ),
         ),
       ],
+    ]);
+  }
+
+  Widget _provided(BuildContext context, OverlayContents provided, List<String> needs) {
+    final text = Theme.of(context).textTheme;
+    Widget section(String title, List<Widget> rows, Key key) => rows.isEmpty
+        ? const SizedBox.shrink()
+        : Padding(
+            key: key,
+            padding: const EdgeInsets.only(top: 12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: text.titleSmall), ...rows]),
+          );
+    Widget line(String value, {Key? key}) =>
+        Padding(padding: const EdgeInsets.only(top: 2), child: SelectableText(oneLine(value), key: key));
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('What it provides', style: text.titleSmall),
+      Text('From its own ${provided.generated ? 'files, with an overlay.cfg Canoa generated' : 'overlay.cfg and files'}. '
+          'Nothing of it has run.', key: const Key('details-provided-note')),
+      if (provided.isEmpty) const Text('It provides nothing Canoa lists.', key: Key('details-provided-nothing')),
+      section('Skills', [
+        for (final skill in provided.skills)
+          line(skill.description == null ? skill.name : '${skill.name}: ${skill.description}', key: Key('details-skill-${skill.name}')),
+      ], const Key('details-skills')),
+      section('Rules', [for (final path in provided.rules) line(path)], const Key('details-rules')),
+      section('Context', [for (final path in provided.context) line(path)], const Key('details-context')),
+      section('Knowledge', [
+        for (final file in provided.knowledge) line('${file.path}: ${file.served ? 'served on request' : 'put in the context'}'),
+      ], const Key('details-knowledge')),
+      section('Hooks (off until you allow them at their digest)', [for (final hook in provided.hooks) line(hook)], const Key('details-hooks')),
+      section('Environment scripts and setup', [
+        for (final script in provided.envScripts) line('env script $script'),
+        for (final script in provided.setup) line('setup $script'),
+      ], const Key('details-env-scripts')),
+      section('MCP servers (off until allowed)', [for (final server in provided.mcpServers) line(server)], const Key('details-mcp-servers')),
+      section('Commands on its PATH', [for (final command in provided.bin) line(command)], const Key('details-bin')),
+      const SizedBox(height: 12),
+      Text('Requirements', style: text.titleSmall),
+      if (needs.isEmpty)
+        const Text('None listed.', key: Key('details-requirements-none'))
+      else
+        for (final need in needs) Text(oneLine(need), key: const Key('details-requirement')),
+      if (provided.issues.isNotEmpty)
+        section('Fields of its manifest that are not valid, and left out', [for (final issue in provided.issues) line(issue)],
+            const Key('details-issues')),
+      if (provided.generated && provided.manifest != null)
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            key: const Key('details-generated'),
+            tilePadding: EdgeInsets.zero,
+            expandedCrossAxisAlignment: CrossAxisAlignment.start,
+            title: Text('The overlay.cfg generated for it', style: text.titleSmall),
+            children: [SelectableText(provided.manifest!, style: const TextStyle(fontFamily: 'monospace'))],
+          ),
+        ),
+      if (provided.digest != null)
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            key: const Key('details-technical'),
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(bottom: 8),
+            expandedCrossAxisAlignment: CrossAxisAlignment.start,
+            title: Text('Technical details', style: text.titleSmall),
+            children: [
+              if (facts != null) _field('Index id', facts!.id),
+              _field('Tree digest read', provided.digest!),
+              for (final MapEntry(:key, :value) in technical.entries) _field(key, value),
+            ],
+          ),
+        ),
     ]);
   }
 

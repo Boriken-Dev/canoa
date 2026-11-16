@@ -141,6 +141,7 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(MaterialApp(
         home: StoreSection(
+        readAhead: false,
           config: CanoaConfig.parse('[catalogs]\nteam = "https://example.invalid/team.git@main#catalog.toml"\n'),
           home: MemoryHome(overlays),
           index: index,

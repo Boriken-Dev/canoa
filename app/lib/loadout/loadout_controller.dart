@@ -16,6 +16,8 @@ import '../profile/overlays.dart' show FetchedTree, OverlayException;
 import '../profile/profile_home.dart';
 import '../profile/profile_layers.dart';
 import '../profile/skill_copies.dart';
+import '../store/contents_storage.dart';
+import '../store/contents_store.dart';
 import '../store/overlay_page.dart' show SaveConfig;
 import '../store/skills.dart';
 import '../store/store.dart';
@@ -71,7 +73,15 @@ class LoadoutController extends ChangeNotifier {
     this.fetch,
     this.findProgram,
     this.index,
-  }) : _config = config;
+    ContentsStorage? contentsStorage,
+    DateTime Function()? now,
+    bool readAhead = true,
+  }) : _config = config {
+    final home = this.home;
+    if (home != null && index != null && readAhead) {
+      contents = ContentsStore(overlays: home.overlays, os: home.os, storage: contentsStorage, now: now)..addListener(notifyListeners);
+    }
+  }
 
   final ProfileHome? home;
   final SaveConfig save;
@@ -85,6 +95,12 @@ class LoadoutController extends ChangeNotifier {
   final String registry;
   final RegistryFetch? fetch;
   final FindProgram? findProgram;
+
+  /// What every entry of the catalogs provides, read ahead whenever the catalogs are read; none without a host to read them.
+  ContentsStore? contents;
+
+  /// The reading ahead in progress or last finished, which a refresh starts.
+  Future<void> readingAhead = Future.value();
 
   CanoaConfig _config;
   CanoaConfig get config => _config;
@@ -116,6 +132,7 @@ class LoadoutController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    contents?.dispose();
     super.dispose();
   }
 
@@ -143,6 +160,11 @@ class LoadoutController extends ChangeNotifier {
     loaded = found;
     listing = StoreListing(found);
     loadingCatalogs = false;
+    // Discovery reads what every entry provides, so that opening one asks for nothing; a refresh the person asked for reads it
+    // all again.
+    if (contents case final store?) {
+      readingAhead = store.readAhead(found, ttl: Duration(seconds: config.store.contentsTtlSeconds), force: again);
+    }
     await refresh();
   }
 

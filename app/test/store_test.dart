@@ -520,7 +520,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: themeFor(LookId.canoa, Brightness.dark),
-        home: StoreSection(config: config, home: MemoryHome(overlays), index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last), onSave: (changed) async {
+        home: StoreSection(readAhead: false, config: config, home: MemoryHome(overlays), index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last), onSave: (changed) async {
           saved.add(changed);
           return changed;
         }),
@@ -677,7 +677,7 @@ path = "s\u202Eh.sh"
       final byHand = CanoaConfig.parse('[catalogs]\nteam = "$teamRepo@main#catalog.toml"\npublic = "$publicRepo@main#catalog.json"\n'
           '[overlays]\ndocs-tools = "$teamRepo@main#overlays/docs-tools"\n');
       await tester.pumpWidget(MaterialApp(
-        home: StoreSection(config: byHand, home: MemoryHome(overlays), index: standInIndex(overlays, () => byHand), onSave: (changed) async => changed),
+        home: StoreSection(readAhead: false, config: byHand, home: MemoryHome(overlays), index: standInIndex(overlays, () => byHand), onSave: (changed) async => changed),
       ));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('overlays-discover')));

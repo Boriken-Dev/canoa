@@ -758,6 +758,7 @@ final class CanoaConfig {
       if (limits.iconMaxBytes != d.iconMaxBytes) 'icon_max_bytes': limits.iconMaxBytes,
       if (limits.iconMaxWidth != d.iconMaxWidth) 'icon_max_width': limits.iconMaxWidth,
       if (limits.iconMaxHeight != d.iconMaxHeight) 'icon_max_height': limits.iconMaxHeight,
+      if (limits.contentsTtlSeconds != d.contentsTtlSeconds) 'contents_ttl_seconds': limits.contentsTtlSeconds,
     };
     return _withTable('store', {...table, ...?_storeExtrasTable()});
   }
