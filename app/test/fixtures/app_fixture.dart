@@ -3,6 +3,7 @@
 import 'dart:io' show Directory;
 import 'dart:typed_data';
 
+import 'package:canoa/shell/hosts/host_status.dart' show ConnectionProbe;
 import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/accounts/accounts_host.dart';
 import 'package:canoa/acp/agent_commands.dart';
@@ -97,6 +98,7 @@ Future<List<CanoaConfig>> pumpApp(
   ServedApp? served,
   Future<CanoaConfig> Function()? readConfig,
   ShellLayout? layout,
+  ConnectionProbe? probe,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -138,6 +140,7 @@ Future<List<CanoaConfig>> pumpApp(
     accountsHost: accountsHost,
     served: served,
     layout: layout,
+    probe: probe,
   ));
   await tester.pumpAndSettle();
   return written;

@@ -5,8 +5,10 @@ import 'package:canoa/acp/client.dart' show VerifiedAgent;
 import 'package:coqui_acp/coqui_acp.dart';
 import 'package:coqui_acp/page.dart';
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/auth/peer_proof.dart';
-import 'package:canoa/connect_dialog.dart';
+import 'package:canoa/connect_dialog.dart' show UseBrowserAgents;
+import 'package:canoa/shell/hosts/hosts_controller.dart';
+import 'package:canoa/shell/hosts/hosts_section.dart';
+import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/desktop/desktop_shell.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/main.dart';
@@ -36,40 +38,50 @@ void main() {
 
   group('agents from the browser', () {
     Future<void> open(WidgetTester tester, Future<AcpPage?> provider, UseBrowserAgents use) async {
-      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
-        onPressed: () => showCanoaConnectDialog(context, (_) async {}, browserProvider: provider, onUseBrowserAgents: use),
-        child: const Text('open'),
-      ))));
-      await tester.tap(find.text('open'));
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: HostsIndex(controller: HostsController(
+        layout: ShellLayout(backend: MemoryLayoutBackend()),
+        save: (_) async {},
+        sessions: () => const [],
+        browserProvider: provider,
+        useBrowserAgents: use,
+      )))));
       await tester.pump();
       await tester.pump();
     }
 
     const label = 'Use an agent from this browser';
 
+    Future<void> useIt(WidgetTester tester) async {
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Use'));
+      await tester.pump();
+      await tester.pump();
+    }
+
     testWidgets('no provider, no button', (tester) async {
       await open(tester, Future.value(null), (_, {required cwd, required title}) async {});
       expect(find.text(label), findsNothing);
     });
 
-    testWidgets('a provider offers it, and the dialog closes once the agents are in', (tester) async {
+    testWidgets('a provider offers it, and the agents are used in the workspace the person names', (tester) async {
       AcpPage? used;
+      String? where;
       final provider = _FakeProvider();
-      await open(tester, Future.value(provider), (acp, {required cwd, required title}) async => used = acp);
-      await tester.tap(find.text(label));
-      await tester.pump();
-      await tester.pump();
+      await open(tester, Future.value(provider), (acp, {required cwd, required title}) async {
+        used = acp;
+        where = cwd;
+      });
+      await useIt(tester);
       expect(used, same(provider));
-      expect(find.text(label), findsNothing);
+      expect(where, '/');
     });
 
-    testWidgets('a refusal stays in the dialog and says so', (tester) async {
+    testWidgets('a refusal says so', (tester) async {
       await open(tester, Future.value(_FakeProvider()), (_, {required cwd, required title}) async {
         throw const AcpPageFailure('NotAllowedError', 'this page may not do that');
       });
-      await tester.tap(find.text(label));
-      await tester.pump();
-      await tester.pump();
+      await useIt(tester);
       expect(find.textContaining('NotAllowedError'), findsOneWidget);
     });
   });
@@ -120,34 +132,6 @@ void main() {
     });
   });
 
-  testWidgets('an agent added by hand connects only once the person names the method its host proves by', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(900, 1200));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final targets = <ConnectTarget>[];
-    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
-      onPressed: () => showCanoaConnectDialog(context, (target) async => targets.add(target),
-        methodUnavailable: (_) async => null, localPeerId: (method) async => 'sha256:own-${method.id}'),
-      child: const Text('open'),
-    ))));
-    await tester.tap(find.text('open'));
-    await tester.pump();
-    await tester.pump();
-    await tester.enterText(find.widgetWithText(TextField, 'WebSocket WSS endpoint'), 'wss://agent.example/acp');
-    await tester.enterText(find.widgetWithText(TextField, 'Pinned server peer ID'), 'sha256:${'a' * 64}');
-    await tester.tap(find.text('Connect'));
-    await tester.pump();
-    expect(find.text('Choose the method the host proves by: canoa serve prints it.'), findsOneWidget);
-    expect(targets, isEmpty, reason: 'no method is assumed');
-
-    await tester.tap(find.text('WebCrypto'));
-    await tester.pump();
-    await tester.tap(find.text('Connect'));
-    await tester.pump();
-    await tester.pump();
-    expect(targets.single.method, PeerMethod.webcrypto);
-    expect(targets.single.peerId, 'sha256:${'a' * 64}');
-  });
-
   group('agents in canoa.cfg', () {
     test('survive a round trip, with names that need quoting', () {
       const config = CanoaConfig(agents: [AgentCommand(label: 'My "agent"', program: r'C:\tools\agent.exe', args: ['--acp', 'a b'])]);
@@ -174,7 +158,7 @@ void main() {
     expect(shell.beforeQuit, isNull);
   });
 
-  testWidgets('the rail opens settings and hosting, and quitting stops the host', (tester) async {
+  testWidgets('the selector opens Settings and Hosts, and quitting stops the host', (tester) async {
     final tool = FakeTool();
     final host = HostSupervisor(tool);
     final shell = _FakeShell();
@@ -188,9 +172,9 @@ void main() {
     expect(find.text('Save'), findsNothing);
     await tester.tap(find.byTooltip('Conversations'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Hosting'));
+    await tester.tap(find.byTooltip('Hosts'));
     await tester.pumpAndSettle();
-    expect(find.text('Agents this computer hosts'), findsOneWidget, reason: 'Hosting is a section of Settings');
+    expect(find.text('Agents this computer hosts'), findsOneWidget, reason: 'Hosting is part of Local\'s overview');
     await tester.tap(find.byTooltip('Conversations'));
     await tester.pumpAndSettle();
 
@@ -257,10 +241,8 @@ void _staleDialogs() {
       writeConfig: (changed) async => written.add(changed),
     ));
 
-    // Settings from the tray, then Hosting in it: the agent removed there stays removed when another setting changes.
-    settings.value++;
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('settings-nav-hosting')));
+    // Hosting from the tray, in Local's overview: the agent removed there stays removed when a setting changes.
+    hosting.value++;
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Stop hosting old'));
     await tester.pumpAndSettle();
@@ -268,6 +250,8 @@ void _staleDialogs() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
     expect(written.last.hostEntries, isEmpty);
+    settings.value++;
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('settings-nav-appearance')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('settings-brightness')));
@@ -278,7 +262,7 @@ void _staleDialogs() {
     expect(written.last.hostEntries, isEmpty, reason: 'Settings wrote its own copy of [host] back');
 
     // A look chosen there stays when Hosting adds an agent.
-    await tester.tap(find.byKey(const Key('settings-nav-hosting')));
+    hosting.value++;
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add an agent'));
     await tester.pumpAndSettle();
@@ -296,7 +280,10 @@ void _staleDialogs() {
     expect(written.last.hostEntries.map((entry) => entry.name), ['new']);
     expect(written.last.brightness, 'light', reason: 'Hosting saved its own copy of the look back');
 
-    // One Settings at a time.
+    // One view at a time: Settings from the tray leaves Hosts, and Hosting brings it back.
+    settings.value++;
+    await tester.pumpAndSettle();
+    expect(find.text('Agents this computer hosts'), findsNothing);
     hosting.value++;
     await tester.pumpAndSettle();
     expect(find.text('Agents this computer hosts'), findsOneWidget);

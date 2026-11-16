@@ -3,7 +3,10 @@
 import 'dart:math';
 
 import 'package:canoa/auth/peer_proof.dart' show PeerMethod;
-import 'package:canoa/connect_dialog.dart';
+import 'package:canoa/config/connection.dart';
+import 'package:canoa/connect_dialog.dart' show ConnectTarget;
+import 'package:canoa/shell/hosts/host_status.dart';
+import 'package:canoa/shell/hosts/start_session_dialog.dart';
 import 'package:canoa/ledger/ledger_list.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
@@ -169,31 +172,41 @@ void main() {
     });
   });
 
-  testWidgets('the connect dialog asks for a worktree for an agent elsewhere when asked', (tester) async {
-    final asked = <bool>[];
+  testWidgets('a new session on a Canoa host asks for a worktree when asked, and a direct agent offers none', (tester) async {
+    const peer = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const host = Connection(name: 'Desk', kind: ConnectionKind.canoa, address: 'https://desk:7800/', peer: peer, method: 'webcrypto');
+    const agent = Connection(name: 'One', kind: ConnectionKind.acp, address: 'wss://agent.example/acp', peer: peer, method: 'noise');
+    final targets = <ConnectTarget?>[];
     await tester.binding.setSurfaceSize(const Size(1280, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
-      onPressed: () => showCanoaConnectDialog(
-        context,
-        (target) async => asked.add(target.worktree),
-        methodUnavailable: (method) async => null,
-        localPeerId: (method) async => 'sha256:own-${method.id}',
-        method: PeerMethod.webcrypto,
-      ),
-      child: const Text('open'),
-    ))));
-    await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
+    Future<void> open(Connection connection, HostStatus status) async {
+      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => TextButton(
+        onPressed: () async => targets.add(await showStartSessionDialog(context, connection: connection, status: status)),
+        child: const Text('open'),
+      ))));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    await open(host, const HostStatus(HostState.online, agents: [HostAgent('Claude', 'wss://desk:7801/claude')]));
     final box = find.byKey(const ValueKey('worktree'));
     expect(tester.widget<CheckboxListTile>(box).value, isFalse, reason: 'off unless asked');
     await tester.ensureVisible(box);
     await tester.tap(box);
     await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, 'WebSocket WSS endpoint'), 'wss://agent.example/acp');
-    await tester.enterText(find.widgetWithText(TextField, 'Pinned server peer ID'), 'sha256:${'a' * 64}');
-    await tester.tap(find.text('Connect'));
+    await tester.enterText(find.byKey(const ValueKey('start-workspace')), '/work/repo');
+    await tester.tap(find.byKey(const ValueKey('start-session')));
     await tester.pumpAndSettle();
-    expect(asked, [true]);
+    expect(targets.single!.worktree, isTrue);
+    expect(targets.single!.webSocket, 'wss://desk:7801/claude', reason: 'the agent the host listed, not the host\'s page');
+    expect(targets.single!.cwd, '/work/repo');
+    expect(targets.single!.method, PeerMethod.webcrypto);
+
+    await open(agent, const HostStatus.unchecked());
+    expect(find.byKey(const ValueKey('worktree')), findsNothing, reason: 'nothing at a direct endpoint can make one');
+    await tester.tap(find.byKey(const ValueKey('start-session')));
+    await tester.pumpAndSettle();
+    expect(targets.last!.worktree, isFalse);
+    expect(targets.last!.webSocket, 'wss://agent.example/acp');
   });
 }

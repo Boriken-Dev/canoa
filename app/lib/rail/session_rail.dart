@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatf
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../connect_dialog.dart';
 import '../ledger/ledger_list.dart';
 import '../ledger/session_ledger.dart';
 import '../selectable.dart';
@@ -15,7 +14,6 @@ import '../theme/canoa_mark.dart';
 import '../theme/look.dart';
 import 'session_groups.dart';
 
-import 'package:coqui_acp/page.dart' show findAcp;
 
 /// The Conversations index: the wordmark, entries for what the person starts or opens, the sessions grouped by what they have
 /// for the person, and the conversations the ledger keeps. On a phone it is in the drawer, beside the section selector.
@@ -23,12 +21,9 @@ class SessionRail extends StatefulWidget {
   const SessionRail({
     super.key,
     required this.store,
-    required this.onConnect,
-    required this.onUseBrowserAgents,
     required this.onNewSession,
     required this.onSearch,
     required this.onClose,
-    this.onHosting,
     this.onReopen,
     this.grouping,
     this.initialScroll = 0,
@@ -38,8 +33,6 @@ class SessionRail extends StatefulWidget {
   });
 
   final SessionStore store;
-  final Future<void> Function(ConnectTarget) onConnect;
-  final UseBrowserAgents onUseBrowserAgents;
   final VoidCallback onNewSession;
 
   /// Opens the palette on the sessions.
@@ -47,7 +40,6 @@ class SessionRail extends StatefulWidget {
 
   /// Ends a conversation here, asking first about anything it made.
   final Future<void> Function(ChatSession) onClose;
-  final VoidCallback? onHosting;
   final Future<void> Function(LedgerEntry)? onReopen;
 
   /// Where the list starts, and what hears it scroll: the offset, and whether the scrolling has ended.
@@ -136,24 +128,6 @@ class _SessionRailState extends State<SessionRail> {
             listenable: Listenable.merge([store, _grouping]),
             builder: (context, _) => _list(context),
           ),
-        ),
-        const Divider(height: 1),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(children: [
-            _NavEntry(
-              icon: Icons.link_rounded,
-              label: 'Connect',
-              tooltip: 'Connect to verified agent',
-              onTap: () => showCanoaConnectDialog(
-                context,
-                widget.onConnect,
-                browserProvider: findAcp(timeout: const Duration(milliseconds: 300)),
-                onUseBrowserAgents: widget.onUseBrowserAgents,
-              ),
-            ),
-            if (widget.onHosting != null) _NavEntry(icon: Icons.dns_outlined, label: 'Hosting', onTap: widget.onHosting!),
-          ]),
         ),
       ]),
     );
@@ -256,18 +230,18 @@ class _GroupingBar extends StatelessWidget {
 String chordLabel(String key) => defaultTargetPlatform == TargetPlatform.macOS ? '⌘$key' : 'Ctrl+$key';
 
 class _NavEntry extends StatelessWidget {
-  const _NavEntry({required this.icon, required this.label, required this.onTap, this.hint, this.tooltip});
+  const _NavEntry({required this.icon, required this.label, required this.onTap, this.hint});
 
   final IconData icon;
   final String label;
-  final String? hint, tooltip;
+  final String? hint;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final look = context.chatLook;
     return Tooltip(
-      message: tooltip ?? label,
+      message: label,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8),
         child: ListTile(

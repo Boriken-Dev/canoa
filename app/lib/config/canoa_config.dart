@@ -7,6 +7,7 @@ import 'package:toml/toml.dart';
 import '../accounts/account_models.dart' show AccountEntry;
 import '../acp/agent_commands.dart';
 import 'config_layers.dart';
+import 'connection.dart';
 import '../chat/modes.dart' show modeOrder;
 import '../ledger/session_ledger.dart';
 import '../profile/aos_support.dart' show holdsPassword;
@@ -769,6 +770,28 @@ final class CanoaConfig {
         if (table.isNotEmpty) name: table,
       });
 
+  /// `[connections.NAME]`: the hosts and agents elsewhere the person saved, in name order.
+  List<Connection> get connections => _connections(tables['connections']);
+
+  static List<Connection> _connections(Object? raw) {
+    if (raw == null) return const [];
+    if (raw is! Map) throw const FormatException('canoa.cfg: connections must be a table');
+    return [for (final MapEntry(:key, :value) in raw.entries) Connection.read('$key', value)]..sort((a, b) => a.name.compareTo(b.name));
+  }
+
+  /// This configuration with [connection] saved, taking the place of the one named [replacing] when that is given.
+  CanoaConfig withConnection(Connection connection, {String? replacing}) {
+    final raw = _deepCopy((tables['connections'] as Map?) ?? const {});
+    if (replacing != null) raw.remove(replacing);
+    if (raw.containsKey(connection.name)) throw FormatException('A connection named ${connection.name} is already saved.');
+    raw[connection.name] = connection.toTable();
+    return _withTable('connections', raw);
+  }
+
+  /// This configuration without the connection [name].
+  CanoaConfig withoutConnection(String name) =>
+      _withTable('connections', _deepCopy((tables['connections'] as Map?) ?? const {})..remove(name));
+
   /// This configuration with the catalog [spec] labelled [label] in `[catalogs]`. Throws [FormatException].
   CanoaConfig withCatalog(String label, String spec) {
     final raw = _deepCopy((tables['catalogs'] as Map?) ?? const {})..[label] = spec;
@@ -856,7 +879,7 @@ final class CanoaConfig {
     final readFrom = ConfigSource(format: own.format, marked: own.marked, layers: below, own: own.data);
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadout', 'sources', 'attachments', 'usage'}
+            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadout', 'sources', 'attachments', 'usage', 'connections'}
           .contains(name)) {
         throw FormatException('canoa.cfg: unknown table $name');
       }
@@ -1016,6 +1039,7 @@ final class CanoaConfig {
     final rawProfile = data['profile'];
     if (rawProfile != null && rawProfile is! Map) throw const FormatException('canoa.cfg: profile must be a table');
     _catalogs(data['catalogs']);
+    _connections(data['connections']);
     _skillPins(data['skill_pins']);
     _loadout(data['loadout']);
     _agentMcp(agentTables);
@@ -1037,6 +1061,7 @@ final class CanoaConfig {
         'profile': ?rawProfile,
         if (agentTables.isNotEmpty) 'agents': agentTables,
         'catalogs': ?data['catalogs'],
+        'connections': ?data['connections'],
         'skill_pins': ?data['skill_pins'],
         'loadout': ?data['loadout'],
         'store': ?rawStore,

@@ -102,11 +102,11 @@ void main() {
       expect(find.textContaining('Agent connections and sync'), findsNothing);
     });
 
-    testWidgets('the wordmark keeps to one line, with Hosting named under it, at the default window width', (tester) async {
+    testWidgets('the wordmark keeps to one line, with Hosts in the selector, at the default window width', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.windows;
       try {
         await _shown(tester, const Size(1280, 720), host: HostSupervisor(null));
-        expect(find.byTooltip('Hosting'), findsOneWidget);
+        expect(find.byTooltip('Hosts'), findsOneWidget);
         // One line of its 22-point type is shorter than two.
         expect(tester.getSize(find.text('Canoa')).height, lessThan(2 * 22));
       } finally {

@@ -1,7 +1,5 @@
 import 'package:canoa/accounts/accounts_controller.dart';
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/desktop/host_supervisor.dart';
-import 'package:canoa/desktop/hosting_panel.dart' show SaveHosting;
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/profile/profile_home.dart';
@@ -36,8 +34,6 @@ Future<SettingsHarness> openSettings(
   Future<bool> Function()? onAllowNotifications,
   ProfileHome? home,
   VoidCallback? onLoadout,
-  HostSupervisor? supervisor,
-  SaveHosting? saveHosting,
   ThemeData? theme,
   String version = '',
   AccountsController? accounts,
@@ -66,8 +62,6 @@ Future<SettingsHarness> openSettings(
       onAllowNotifications: onAllowNotifications,
       home: home,
       onLoadout: onLoadout,
-      supervisor: supervisor,
-      saveHosting: saveHosting,
       version: version,
       accounts: accounts,
     ),

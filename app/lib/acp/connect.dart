@@ -10,7 +10,7 @@ WebEndpoints chatEndpoints({
   bool preferWebTransport = true,
 }) => WebEndpoints(
   webTransport: preferWebTransport && webTransport.isNotEmpty ? Uri.parse(webTransport) : null,
-  webSocket: Uri.parse(webSocket),
+  webSocket: webSocket.isEmpty ? null : Uri.parse(webSocket),
   allowLocalPlainWebSocket: true,
 );
 

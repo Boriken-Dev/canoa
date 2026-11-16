@@ -1,4 +1,4 @@
-// The app's shell: Conversations, Store and Settings are sections of one selector, a message being written survives a visit to
+// The app's shell: Conversations, Hosts, Store and Settings are sections of one selector, a message being written survives a visit to
 // another section, Ctrl+B hides only the conversations index, and the layout comes back after a restart.
 import 'dart:io' show Directory;
 
@@ -45,9 +45,9 @@ SessionStore _busy() {
 void main() {
   setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/shell_app_test.dart')));
 
-  testWidgets('the selector offers Conversations, Store and Settings, and Settings is no longer a page over the app', (tester) async {
+  testWidgets('the selector offers Conversations, Hosts, Store and Settings, and Settings is no longer a page over the app', (tester) async {
     await pumpApp(tester, SessionStore());
-    for (final name in const ['Conversations', 'Store', 'Canoa settings']) {
+    for (final name in const ['Conversations', 'Hosts', 'Store', 'Canoa settings']) {
       expect(find.byTooltip(name), findsOneWidget);
     }
     expect(find.text('Settings'), findsNothing);

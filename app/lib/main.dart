@@ -77,6 +77,10 @@ import 'profile/approval_dialog.dart';
 import 'profile/report.dart';
 import 'settings/settings_page.dart';
 import 'rail/session_groups.dart';
+import 'desktop/hosting_panel.dart' show HostingPanel;
+import 'shell/hosts/host_status.dart' show ConnectionProbe, probeConnection;
+import 'shell/hosts/hosts_controller.dart';
+import 'shell/hosts/hosts_section.dart';
 import 'shell/layout_backend.dart';
 import 'shell/layout_controls.dart';
 import 'shell/layout_state.dart';
@@ -214,11 +218,15 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.served, this.layout, this.surfaces,
+    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.served, this.layout, this.surfaces, this.probe,
   });
 
   /// Which section is shown and how each section's index is sized, kept across runs; the app keeps its own when none is given.
   final ShellLayout? layout;
+
+  /// How the Hosts section looks at a saved connection; the app's own reads the host's list or connects.
+  @visibleForTesting
+  final ConnectionProbe? probe;
 
   /// The views the work panel can show; the app's own (details and changes) when none are given.
   @visibleForTesting
@@ -382,8 +390,11 @@ class _CanoaAppState extends State<CanoaApp> {
   late final ShellLayout _layout = widget.layout ?? ShellLayout();
   late final WorkSurfaces _surfaces = WorkSurfaces(widget.surfaces ?? builtInSurfaces());
 
-  /// Hosting is a section of Settings.
-  Future<void> _showHosting() => _showSettings(section: 'hosting');
+  /// Hosting is part of Local's overview, in the Hosts section.
+  Future<void> _showHosting() async {
+    _hosts.select('local');
+    _layout.select(HostsController.section);
+  }
 
   /// Saves canoa.cfg once canoa finds nothing wrong with it, then serves it.
   /// Only [host] comes from the dialog: the rest is what the app has now, which Settings may have changed meanwhile.
@@ -416,6 +427,58 @@ class _CanoaAppState extends State<CanoaApp> {
     _layout.select('settings');
   }
 
+  /// The Hosts section: this computer, the host that served this page, and the connections saved.
+  late final HostsController _hosts = HostsController(
+    layout: _layout,
+    probe: widget.probe ?? probeConnection,
+    save: (changed) async {
+      await _write(changed);
+      if (mounted) setState(() => config = changed);
+      _settingsKey.currentState?.controller.adopt(changed);
+    },
+    sessions: () => store.sessions,
+    nearby: _control == null ? null : () async => nearbyOf(await _control.ready(wait: false)),
+    local: widget.host == null || widget.served != null
+        ? null
+        : () => HostSummary.ofSupervisor(widget.host!, grants: _grants?.held),
+    servedName: widget.served == null ? null : (Uri.base.authority.isEmpty ? 'Serving host' : Uri.base.authority),
+    servedSummary: widget.served == null
+        ? null
+        : () => HostSummary(
+            state: 'Serving this page',
+            peer: widget.served!.host.peer,
+            method: widget.served!.host.method.id,
+            agents: [for (final entry in widget.served!.host.entries) if (entry.kind == 'agent') entry.title ?? entry.name],
+            capabilities: _grants?.held == null ? const [] : HostSummary.capabilitiesOf(_grants!.held!),
+          ),
+    // A page whose host keeps canoa.cfg for it saves only the tables the host lets it, which do not include connections.
+    canSave: widget.served == null,
+    start: _connect,
+    browserProvider: kIsWeb ? _provider : null,
+    useBrowserAgents: _useBrowserAgents,
+  );
+
+  /// The Hosts section's index and main view, built from what the app holds now.
+  Widget _hostsIndex() {
+    _hosts.adopt(config);
+    return HostsIndex(controller: _hosts);
+  }
+
+  Widget _hostsPage() {
+    _hosts.adopt(config);
+    return HostsOverview(
+      controller: _hosts,
+      localDetail: widget.host == null || widget.served != null
+          ? null
+          : (context) => HostingPanel(
+              key: const Key('hosts-hosting-panel'),
+              supervisor: widget.host!,
+              config: config,
+              onSave: _saveHosting,
+            ),
+    );
+  }
+
   /// Settings as the section shows it.
   Widget _settingsPage() => SettingsPage(
       key: _settingsKey,
@@ -445,9 +508,7 @@ class _CanoaAppState extends State<CanoaApp> {
         return changed;
       },
       onLoadout: _showLoadout,
-      supervisor: widget.served == null ? widget.host : null,
       accounts: _accounts,
-      saveHosting: _saveHosting,
       version: const String.fromEnvironment('CANOA_VERSION'),
     );
 
@@ -1497,13 +1558,14 @@ class _CanoaAppState extends State<CanoaApp> {
       webTransport: target.webTransport,
       preferWebTransport: config.preferWebTransport,
     );
-    final ws = endpoints.webSocket!;
+    final ws = endpoints.webSocket;
     final wt = target.webTransport.isEmpty ? null : Uri.parse(target.webTransport);
+    final primary = wt ?? ws!;
     final pinnedPeerId = target.peerId.toLowerCase();
     final place = widget.host?.peerId?.toLowerCase() == pinnedPeerId ? SessionPlace.host : SessionPlace.peer;
     // The host makes it inside its working roots, before any agent starts, and says where.
     final worktrees = target.worktree
-        ? _worktrees(place, endpoint: (wt ?? ws).toString(), fallback: wt == null ? null : ws.toString(),
+        ? _worktrees(place, endpoint: primary.toString(), fallback: wt == null ? null : ws?.toString(),
             peerId: pinnedPeerId, method: target.method.id)
         : null;
     if (target.worktree && worktrees == null) throw StateError('Canoa cannot ask this agent\'s host for a worktree');
@@ -1531,7 +1593,7 @@ class _CanoaAppState extends State<CanoaApp> {
         agent: pinnedPeerId.substring(0, 22),
         peerId: pinnedPeerId,
         remoteSessionId: remoteId,
-        endpoint: wt ?? ws,
+        endpoint: primary,
         websocketFallback: wt == null ? null : ws,
         place: place,
         method: target.method.id,
@@ -1745,10 +1807,11 @@ class _CanoaAppState extends State<CanoaApp> {
       home: AnimatedBuilder(
         animation: Listenable.merge([store, _popout]),
         builder: (context, _) => _CanoaHome(
-          store: store, onConnect: _connect, onUseBrowserAgents: _useBrowserAgents, onNewSession: _newSession, onSettings: _showSettings,
-          onHosting: widget.host == null || widget.served != null ? null : _showHosting, onLoadout: _showLoadout, onReopen: _reopen,
+          store: store, onNewSession: _newSession, onSettings: _showSettings,
+          onHosts: () => _layout.select(HostsController.section), onLoadout: _showLoadout, onReopen: _reopen,
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
           layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(),
+          hostsIndex: _hostsIndex(), hostsPage: _hostsPage(),
           conversation: _conversation,
           localHost: _localHost,
           grouping: _grouping,
@@ -1766,10 +1829,11 @@ class _CanoaAppState extends State<CanoaApp> {
 
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
-    required this.store, required this.onConnect, required this.onUseBrowserAgents, required this.onNewSession, required this.onSettings,
-    this.onHosting, this.onLoadout, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
+    required this.store, required this.onNewSession, required this.onSettings,
+    this.onHosts, this.onLoadout, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
     this.renderers = chat.ChatRenderers.none, required this.welcome, this.localHost, required this.grouping,
     required this.layout, required this.surfaces, required this.settings, required this.loadout,
+    required this.hostsIndex, required this.hostsPage,
   });
 
   /// The extension's bridge to the Canoa on this computer; null where this is not the extension.
@@ -1782,29 +1846,23 @@ class _CanoaHome extends StatelessWidget {
   /// The main views of the Settings and Loadouts sections.
   final Widget settings, loadout;
 
+  /// The Hosts section's index and main view.
+  final Widget hostsIndex, hostsPage;
+
   final SessionStore store;
   final Widget welcome;
-  final Future<void> Function(ConnectTarget) onConnect;
-  final UseBrowserAgents onUseBrowserAgents;
 
   /// Opens a new session's empty view.
   final VoidCallback onNewSession;
   final ComposerKit kit;
   final chat.ChatRenderers renderers;
   final VoidCallback onSettings;
-  final VoidCallback? onHosting;
+  final VoidCallback? onHosts;
   final VoidCallback? onLoadout;
   final String? account;
   final Future<void> Function()? onSignOut;
   final Future<void> Function(LedgerEntry)? onReopen;
   final _ConversationHandle conversation;
-
-  void _connect(BuildContext context) => unawaited(showCanoaConnectDialog(
-    context,
-    onConnect,
-    browserProvider: findAcp(timeout: const Duration(milliseconds: 300)),
-    onUseBrowserAgents: onUseBrowserAgents,
-  ));
 
   /// The session [step] places from the one chosen, going round the list.
   void _step(int step) {
@@ -1830,8 +1888,8 @@ class _CanoaHome extends StatelessWidget {
 
   /// The rail as the window shows it: beside the conversation, or in the drawer.
   Widget _rail(BuildContext context) => SessionRail(
-    store: store, onConnect: onConnect, onUseBrowserAgents: onUseBrowserAgents, onNewSession: onNewSession,
-    onHosting: onHosting, onReopen: onReopen, grouping: grouping,
+    store: store, onNewSession: onNewSession,
+    onReopen: onReopen, grouping: grouping,
     initialScroll: layout.of(ShellLayout.conversations).scroll,
     onScroll: (offset, {required end}) {
       layout.setScroll(ShellLayout.conversations, offset);
@@ -1850,13 +1908,12 @@ class _CanoaHome extends StatelessWidget {
           PaletteItem('Go to ${other.title}', () => store.select(other.id), detail: other.agent, icon: Icons.chat_bubble_outline),
       ] : [
         PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
-        PaletteItem('Connect to an agent', () => _connect(context), icon: Icons.link_rounded),
         if (session != null && conversation.showChanges != null && (changeTotals(session) != null))
           PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
         if (session?.status == SessionStatus.working) PaletteItem('Stop the turn', _stop, icon: Icons.stop_circle_outlined),
         PaletteItem('Settings', onSettings, icon: Icons.settings_outlined),
         if (onLoadout != null) PaletteItem('Store', onLoadout!, icon: Icons.storefront_outlined),
-        if (onHosting != null) PaletteItem('Hosting', onHosting!, icon: Icons.dns_outlined),
+        if (onHosts != null) PaletteItem('Hosts', onHosts!, detail: 'Local, saved connections and Hosting', icon: Icons.lan_outlined),
         PaletteItem('Keyboard shortcuts', () => unawaited(showShortcutHelp(context)), icon: Icons.keyboard_outlined),
         for (final other in store.sessions)
           if (other.id != store.selectedId)
@@ -1939,6 +1996,7 @@ class _CanoaHome extends StatelessWidget {
               welcome: welcome,
             ),
           ),
+          AppSection(id: HostsController.section, label: 'Hosts', icon: Icons.lan_outlined, index: hostsIndex, main: hostsPage),
           AppSection(id: 'store', label: 'Store', icon: Icons.storefront_outlined, main: loadout),
           AppSection(id: 'settings', label: 'Settings', tooltip: 'Canoa settings', icon: Icons.settings_outlined, main: settings, atFoot: true),
         ],

@@ -20,6 +20,9 @@ final class HostGrants extends ChangeNotifier {
   /// Whether the host said this key holds [grant]; false until it has said.
   bool may(String grant) => _held?.contains(grant) ?? false;
 
+  /// The grants the host said, or null before it has said.
+  Set<String>? get held => _held == null ? null : Set.unmodifiable(_held!);
+
   /// Whether the host has answered.
   bool get known => _held != null;
 

@@ -40,10 +40,7 @@ Future<List<String>> _show(WidgetTester tester, SessionStore store,
     home: Scaffold(
       body: SessionRail(
         store: store,
-        onConnect: (_) async {},
-        onUseBrowserAgents: (_, {required cwd, required title}) async {},
         onNewSession: () => asked.add('new'),
-        onHosting: () => asked.add('hosting'),
         onSearch: () => asked.add('search'),
         onClose: (session) async => asked.add('close ${session.title}'),
         now: () => _now,
@@ -509,30 +506,30 @@ void main() {
   });
 
   group('the entries', () {
-    testWidgets('New session, Search, Connect and Hosting are named, with the keys of the first two', (tester) async {
+    testWidgets('New session and Search are named, with their keys, and Connect and Hosting moved to the Hosts section', (tester) async {
       final store = SessionStore();
       final asked = await _show(tester, store);
-      for (final label in const ['New session', 'Search', 'Connect', 'Hosting']) {
+      for (final label in const ['New session', 'Search']) {
         expect(find.text(label), findsOneWidget);
+      }
+      for (final label in const ['Connect', 'Hosting']) {
+        expect(find.text(label), findsNothing, reason: '$label moved to the Hosts section');
       }
       expect(find.text('Ctrl+N'), findsOneWidget);
       expect(find.text('Ctrl+K'), findsOneWidget);
       await tester.tap(find.text('New session'));
       await tester.tap(find.text('Search'));
-      await tester.tap(find.text('Hosting'));
-      expect(asked, ['new', 'search', 'hosting']);
+      expect(asked, ['new', 'search']);
       expect(find.text('Settings'), findsNothing, reason: 'Settings is a section of the selector');
       expect(find.text('Loadout'), findsNothing);
-      expect(find.text('Agents on other machines need a verified ACP peer.'), findsNothing, reason: 'that note is Connect\'s');
       store.dispose();
     });
 
     testWidgets('the entries keep their tooltips', (tester) async {
       final store = SessionStore();
       await _show(tester, store);
-      for (final tip in const ['New session', 'Hosting', 'Connect to verified agent']) {
-        expect(find.byTooltip(tip), findsOneWidget);
-      }
+      expect(find.byTooltip('New session'), findsOneWidget);
+      expect(find.byTooltip('Connect to verified agent'), findsNothing);
       store.dispose();
     });
   });

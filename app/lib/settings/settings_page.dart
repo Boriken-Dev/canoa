@@ -3,9 +3,6 @@ import 'package:flutter/material.dart';
 import '../accounts/accounts_controller.dart';
 import '../accounts/accounts_section.dart';
 import '../config/canoa_config.dart';
-import '../desktop/host_supervisor.dart';
-import '../desktop/hosting_panel.dart' show HostingPanel, SaveHosting;
-import '../desktop/host_tool.dart' show freeLoopbackPort;
 import '../ledger/session_ledger.dart';
 import '../permissions/permission_rules.dart';
 import '../profile/profile_home.dart';
@@ -44,7 +41,6 @@ const _sections = [
   SettingsSection(id: 'permissions', group: 'Agents', title: 'Permissions', icon: Icons.shield_outlined, keywords: 'bypass mode allow once remembered rules protected paths log revoke full access'),
   SettingsSection(id: 'accounts', group: 'Agents', title: 'Accounts', icon: Icons.manage_accounts_outlined, keywords: 'login sign in api key subscription claude codex grok credentials add remove several'),
   SettingsSection(id: 'usage', group: 'Agents', title: 'Usage', icon: Icons.speed, keywords: 'limit warn percent quota'),
-  SettingsSection(id: 'hosting', group: 'Agents', title: 'Hosting', icon: Icons.dns_outlined, keywords: 'serve browsers keys pair pin host listen'),
   SettingsSection(id: 'catalogs', group: 'Overlays', title: 'Catalogs', icon: Icons.storefront_outlined, keywords: 'store limits catalog sources icons size'),
   SettingsSection(id: 'about', group: 'About', title: 'About', icon: Icons.info_outline, keywords: 'version canoa boriken licence'),
 ];
@@ -69,10 +65,7 @@ class SettingsPage extends StatefulWidget {
     this.home,
     this.onPin,
     this.onLoadout,
-    this.supervisor,
     this.accounts,
-    this.saveHosting,
-    this.freePort = freeLoopbackPort,
     this.version = '',
   });
 
@@ -116,13 +109,8 @@ class SettingsPage extends StatefulWidget {
   /// Opens the Store.
   final VoidCallback? onLoadout;
 
-  /// The host this app runs, for the Hosting section; none where the app runs none.
-  final HostSupervisor? supervisor;
-
   /// The accounts of this computer's host, for the Accounts section; none where the app runs no host.
   final AccountsController? accounts;
-  final SaveHosting? saveHosting;
-  final Future<int> Function() freePort;
 
   /// The app's version, for About.
   final String version;
@@ -138,7 +126,7 @@ class SettingsPageState extends State<SettingsPage> {
 
   List<SettingsSection> get _available => [
     for (final section in _sections)
-      if ((section.id != 'hosting' || widget.supervisor != null) && (section.id != 'accounts' || widget.accounts != null)) section,
+      if (section.id != 'accounts' || widget.accounts != null) section,
   ];
 
   @override
@@ -238,13 +226,6 @@ class SettingsPageState extends State<SettingsPage> {
       'permissions' => PermissionsSection(controller: controller, rules: widget.rules, sources: widget.profileAgents),
       'accounts' => AccountsSection(controller: widget.accounts!),
       'usage' => UsageSection(controller: controller),
-      'hosting' => HostingPanel(
-        key: const Key('settings-hosting-panel'),
-        supervisor: widget.supervisor!,
-        config: config,
-        onSave: widget.saveHosting!,
-        freePort: widget.freePort,
-      ),
       'catalogs' => CatalogsSection(controller: controller),
       _ => AboutSection(version: widget.version),
     };

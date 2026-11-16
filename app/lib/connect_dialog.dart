@@ -5,12 +5,13 @@ import 'package:flutter/services.dart';
 import 'package:coqui_acp/page.dart';
 
 import 'acp/browser_connect.dart';
-import 'acp/served_host.dart';
 import 'auth/browser_peer.dart';
+import 'config/connection.dart';
 import 'selectable.dart';
+import 'shell/hosts/hosts_controller.dart' show NearbyCandidate, NearbyResult, NearbySearch;
 
-/// Explicit, out-of-band connection configuration for a pinned peer.
-/// No trust-on-first-use is performed from the connection dialog.
+/// What a session on a pinned peer needs to start: where, which key, and the workspace and title it starts with.
+/// No trust-on-first-use is performed: the id is the one the person saved or verified out of band.
 class ConnectTarget {
   const ConnectTarget({
     required this.webSocket,
@@ -47,125 +48,82 @@ typedef PairByPin = Future<String> Function(Uri url, String pin);
 /// Uses the agents a person grants through the browser's provider, asking them in the provider's own window.
 typedef UseBrowserAgents = Future<void> Function(AcpPage acp, {required String cwd, required String title});
 
-Future<void> showCanoaConnectDialog(
-  BuildContext context,
-  Future<void> Function(ConnectTarget) onConnect, {
-  Future<AcpPage?>? browserProvider,
-  UseBrowserAgents? onUseBrowserAgents,
+/// Adds a saved connection: the Hosts section's Add. Nothing is ticked and nothing is saved until the person names it, checks the id
+/// against what the other end shows, and adds it; the proof at connect then decides whether that end holds the id. A candidate found
+/// nearby only fills the fields: it is a claim.
+Future<void> showAddConnectionDialog(
+  BuildContext context, {
+  required Future<void> Function(Connection) onAdd,
+  NearbySearch? nearby,
   MethodCheck methodUnavailable = browserMethodUnavailable,
   LocalPeerId localPeerId = localBrowserPeerId,
   PairByPin pair = pairBrowserAcp,
-  PeerMethod? method,
   bool inBrowser = kIsWeb,
-  Future<ServedHost?> Function() servedHost = loadServedHost,
 }) => showSelectableDialog<void>(
   context: context,
-  builder: (_) => _ConnectDialog(
-    onConnect: onConnect,
-    browserProvider: browserProvider,
-    onUseBrowserAgents: onUseBrowserAgents,
+  builder: (_) => _AddConnectionDialog(
+    onAdd: onAdd,
+    nearby: nearby,
     methodUnavailable: methodUnavailable,
     localPeerId: localPeerId,
     pair: pair,
-    method: method,
     inBrowser: inBrowser,
-    servedHost: servedHost,
   ),
 );
 
-/// The entries the host that served this page lists, one chosen for the endpoint, and what is still needed to connect.
-class _ServedEntries extends StatelessWidget {
-  const _ServedEntries({required this.host, required this.chosen, required this.onChoose});
-
-  final ServedHost host;
-  final String chosen;
-  final ValueChanged<String>? onChoose;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 12),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('From the canoa that served this page:', style: Theme.of(context).textTheme.bodySmall),
-      Wrap(spacing: 8, children: [
-        for (final entry in host.entries)
-          ChoiceChip(
-            label: Text(entry.name),
-            tooltip: '${entry.kind} at ${entry.url}',
-            selected: entry.url == chosen,
-            onSelected: onChoose == null ? null : (_) => onChoose!(entry.url),
-          ),
-      ]),
-      Text(
-        host.user != null
-            ? 'Signed in as ${host.user}. This page introduces this browser\'s key to your host itself; connecting then proves '
-                'the host holds the pinned id below.'
-            : 'The pinned id below is what this page says: compare it with the one canoa id prints, or Hosting shows. '
-                'Connecting then proves the host holds it. Until this browser\'s key is accepted there, the host turns it away: '
-                'run canoa accept with your id above.',
-        style: Theme.of(context).textTheme.bodySmall,
-      ),
-    ]),
-  );
-}
-
-class _ConnectDialog extends StatefulWidget {
-  const _ConnectDialog({
-    required this.onConnect,
+class _AddConnectionDialog extends StatefulWidget {
+  const _AddConnectionDialog({
+    required this.onAdd,
     required this.methodUnavailable,
     required this.localPeerId,
     required this.pair,
-    this.browserProvider,
-    this.onUseBrowserAgents,
-    this.method,
-    this.inBrowser = kIsWeb,
-    this.servedHost = loadServedHost,
+    required this.inBrowser,
+    this.nearby,
   });
+
+  final Future<void> Function(Connection) onAdd;
+  final NearbySearch? nearby;
+  final MethodCheck methodUnavailable;
+  final LocalPeerId localPeerId;
+  final PairByPin pair;
 
   /// Whether this app is a web page, whose key and identity are the browser's; otherwise they are this app's own.
   final bool inBrowser;
 
-  /// What the `canoa` that served this page lists, which fills the fields; asked only in a web page.
-  final Future<ServedHost?> Function() servedHost;
-
-  /// The method an agent's record or its host named, prefilled; null for an agent typed in by hand.
-  final PeerMethod? method;
-  final MethodCheck methodUnavailable;
-  final LocalPeerId localPeerId;
-  final PairByPin pair;
-  final Future<void> Function(ConnectTarget) onConnect;
-  final Future<AcpPage?>? browserProvider;
-  final UseBrowserAgents? onUseBrowserAgents;
-
   @override
-  State<_ConnectDialog> createState() => _ConnectDialogState();
+  State<_AddConnectionDialog> createState() => _AddConnectionDialogState();
 }
 
-class _ConnectDialogState extends State<_ConnectDialog> {
-  final ws = TextEditingController();
-  final wt = TextEditingController();
+class _AddConnectionDialogState extends State<_AddConnectionDialog> {
+  final name = TextEditingController();
+  final address = TextEditingController();
   final pinned = TextEditingController();
-  final cwd = TextEditingController(text: '/');
-  final title = TextEditingController();
   final pairUrl = TextEditingController();
   final pin = TextEditingController();
-  late PeerMethod? method = widget.method;
-  late Future<(String?, String?)>? own = switch (method) {
-    final PeerMethod method => _own(method),
-    null => null,
-  };
+  ConnectionKind kind = ConnectionKind.canoa;
+  ConnectionTransport transport = ConnectionTransport.websocket;
+  PeerMethod? method;
+  Future<(String?, String?)>? own;
   late final Future<String?> noiseUnavailable = widget.methodUnavailable(PeerMethod.noise);
   bool busy = false;
   String? error;
   String? paired;
 
-  /// Whether the session starts in a new git worktree of its workspace, on its own branch.
-  bool worktree = false;
+  /// What a search nearby found, once one has run: null before.
+  NearbyResult? found;
+  bool looking = false;
+  NearbyCandidate? chosen;
 
-  /// This browser's id under [method], or why it has none: (id, null) or (null, why).
+  /// This app's id under [method], or why it has none: (id, null) or (null, why).
   Future<(String?, String?)> _own(PeerMethod method) async {
     final why = await widget.methodUnavailable(method);
     if (why != null) return (null, why);
     return (await widget.localPeerId(method), null);
+  }
+
+  void _choose(PeerMethod? chosen) {
+    method = chosen;
+    own = chosen == null ? null : _own(chosen);
   }
 
   /// This page's origin, which `pair-accept` lets in by `--origin`; null where the app is no web page.
@@ -176,42 +134,46 @@ class _ConnectDialogState extends State<_ConnectDialog> {
         : null;
   }
 
-  void _choose(PeerMethod? chosen) {
-    method = chosen;
-    own = chosen == null ? null : _own(chosen);
-  }
-
-  /// What the host that served this page lists, once read; null until then, and in an app that is no web page.
-  ServedHost? served;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.inBrowser) {
-      widget.servedHost().then((host) {
-        if (!mounted || host == null || host.entries.isEmpty) return;
-        setState(() {
-          served = host;
-          // Only fields the person has not filled, and a method they have not named.
-          if (ws.text.isEmpty) ws.text = host.entries.first.url;
-          if (pinned.text.isEmpty) pinned.text = host.peer;
-          if (method == null) _choose(host.method);
-        });
-      });
-    }
-  }
-
   @override
   void dispose() {
-    ws.dispose();
-    wt.dispose();
+    name.dispose();
+    address.dispose();
     pinned.dispose();
-    cwd.dispose();
-    title.dispose();
     pairUrl.dispose();
     pin.dispose();
     super.dispose();
   }
+
+  Future<void> _look() async {
+    final search = widget.nearby;
+    if (search == null || looking) return;
+    setState(() {
+      looking = true;
+      chosen = null;
+    });
+    try {
+      final result = await search();
+      if (mounted) setState(() => found = result);
+    } on Object catch (problem) {
+      if (mounted) setState(() => found = NearbyResult(const [], problem: '$problem'));
+    } finally {
+      if (mounted) setState(() => looking = false);
+    }
+  }
+
+  /// Fills the fields from a candidate. What it says is a claim: the person still names the connection and adds it, and the
+  /// first connection is what proves the key.
+  void _take(NearbyCandidate candidate, bool on) => setState(() {
+    chosen = on ? candidate : null;
+    if (!on) return;
+    kind = ConnectionKind.acp;
+    transport = ConnectionTransport.websocket;
+    address.text = candidate.url;
+    pinned.text = candidate.peer;
+    if (name.text.isEmpty) name.text = candidate.label;
+    final named = PeerMethod.values.where((each) => each.id == candidate.method).firstOrNull;
+    if (named != null) _choose(named);
+  });
 
   Future<void> _pair() async {
     if (busy) return;
@@ -228,7 +190,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       setState(() {
         pinned.text = peer;
         _choose(PeerMethod.noise);
-        paired = 'Paired under Noise. Enter its agent\'s endpoint, then connect.';
+        paired = 'Paired under Noise. Enter its address, then add it.';
       });
     } catch (e) {
       if (mounted) setState(() => error = 'Pairing failed: $e. A PIN is good for one try: ask for a new one.');
@@ -243,6 +205,16 @@ class _ConnectDialogState extends State<_ConnectDialog> {
 
   Future<void> _submit() async {
     if (busy) return;
+    final label = name.text.trim();
+    if (!Connection.isName(label)) {
+      setState(() => error = 'Name it: 1 to 64 characters.');
+      return;
+    }
+    final problem = Connection.addressProblem(kind, transport, address.text);
+    if (problem != null) {
+      setState(() => error = problem);
+      return;
+    }
     final peer = pinned.text.trim().toLowerCase();
     if (!RegExp(r'^sha256:[0-9a-f]{64}$').hasMatch(peer)) {
       setState(() => error = 'Enter the verified server peer ID (sha256:64 hex).');
@@ -253,45 +225,26 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       setState(() => error = 'Choose the method the host proves by: canoa serve prints it.');
       return;
     }
-    final request = ConnectTarget(
-      webSocket: ws.text.trim(),
-      webTransport: wt.text.trim(),
-      peerId: peer,
-      cwd: cwd.text.trim(),
-      title: title.text.trim(),
-      method: method,
-      worktree: worktree,
-    );
     setState(() {busy = true; error = null;});
-    final why = await widget.methodUnavailable(request.method);
+    final why = await widget.methodUnavailable(method);
     if (why != null) {
-      if (mounted) setState(() {busy = false; error = '${request.method.label} is unavailable in $_here: $why';});
+      if (mounted) setState(() {busy = false; error = '${method.label} is unavailable in $_here: $why';});
       return;
     }
     try {
-      await widget.onConnect(request);
+      await widget.onAdd(Connection(
+        name: label,
+        kind: kind,
+        address: address.text.trim(),
+        peer: peer,
+        method: method.id,
+        transport: kind == ConnectionKind.acp ? transport : ConnectionTransport.websocket,
+      ));
       if (mounted) Navigator.of(context).pop();
+    } on FormatException catch (problem) {
+      if (mounted) setState(() => error = problem.message);
     } catch (e) {
-      if (mounted) setState(() => error = 'Connection refused: $e');
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  /// No await before the provider's request: it needs the click's user activation.
-  Future<void> _useBrowser(AcpPage acp) async {
-    if (busy) return;
-    if (worktree) {
-      setState(() => error = 'A worktree is made on this computer or by canoa, not by the browser\'s provider.');
-      return;
-    }
-    final asked = widget.onUseBrowserAgents!(acp, cwd: cwd.text.trim(), title: title.text.trim());
-    setState(() {busy = true; error = null;});
-    try {
-      await asked;
-      if (mounted) Navigator.of(context).pop();
-    } catch (e) {
-      if (mounted) setState(() => error = 'Connection refused: $e');
+      if (mounted) setState(() => error = 'That was not saved: $e');
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -300,62 +253,122 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   /// What holds the key a peer pins: the browser for a web page, this app otherwise.
   String get _here => widget.inBrowser ? 'this browser' : 'this app';
 
+  Widget _nearby(BuildContext context) {
+    final text = Theme.of(context).textTheme.bodySmall;
+    final result = found;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 12),
+      Row(children: [
+        Expanded(child: Text('Nearby', style: Theme.of(context).textTheme.titleSmall)),
+        if (widget.nearby != null)
+          TextButton.icon(
+            key: const ValueKey('nearby-look'),
+            onPressed: looking || busy ? null : _look,
+            icon: looking
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.radar, size: 18),
+            label: Text(result == null ? 'Look nearby' : 'Look again'),
+          ),
+      ]),
+      if (widget.nearby == null)
+        Text(
+          'Looking nearby needs the Canoa on this computer, which browses for agents; none is reachable from here.',
+          key: const ValueKey('nearby-needs-host'),
+          style: text,
+        )
+      else if (result == null)
+        Text('Agents on this computer and on the link announce themselves. What they say is a claim: nothing is added until you add it.', style: text)
+      else ...[
+        if (result.problem != null) Text(result.problem!, key: const ValueKey('nearby-problem'), style: text),
+        if (result.candidates.isEmpty && result.problem == null) Text('Nothing announced itself.', key: const ValueKey('nearby-none'), style: text),
+        for (final candidate in result.candidates)
+          CheckboxListTile(
+            key: ValueKey('nearby ${candidate.url}'),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            value: identical(chosen, candidate),
+            onChanged: busy ? null : (on) => _take(candidate, on ?? false),
+            title: Text(candidate.label),
+            subtitle: Text(
+              '${candidate.url}${candidate.offers.isEmpty ? '' : '\nOffers ${candidate.offers.join(', ')}'}\nIts claim: ${candidate.peer}',
+              style: text,
+            ),
+          ),
+      ],
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
-    // An agent on this computer starts from a new session's view; this dialog is for one elsewhere, or the browser's.
-    final intro = Text(
-      'The server must be explicitly paired with $_here. '
-      'Only enter a fingerprint verified out of band. '
-      'Canoa never trusts the first key it sees.',
-    );
-    final titleField = TextField(controller: title,
-      decoration: const InputDecoration(labelText: 'Session title (optional)'));
-    final cwdField = Column(mainAxisSize: MainAxisSize.min, children: [
-      TextField(controller: cwd,
-        decoration: const InputDecoration(
-          labelText: 'Agent workspace (absolute path)',
-        )),
-      CheckboxListTile(
-        key: const ValueKey('worktree'),
-        contentPadding: EdgeInsets.zero,
-        dense: true,
-        controlAffinity: ListTileControlAffinity.leading,
-        value: worktree,
-        onChanged: busy ? null : (on) => setState(() => worktree = on ?? false),
-        title: const Text('In a new git worktree, on its own branch'),
-        subtitle: const Text('Of the repository at the workspace. Closing the session asks whether to keep it.'),
-      ),
-    ]);
+    final text = Theme.of(context).textTheme.bodySmall;
     return AlertDialog(
-      title: const Text('Connect to verified agent'),
+      title: const Text('Add connection'),
       content: SizedBox(
-        width: 440,
+        width: 460,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              intro,
+              Text(
+                'The other end must be explicitly paired with $_here. Only enter a fingerprint verified out of band. '
+                'Canoa never trusts the first key it sees, and keeps no key or password here: only where to connect and the id to expect.',
+              ),
               const SizedBox(height: 12),
-              if (widget.onUseBrowserAgents != null)
-                FutureBuilder<AcpPage?>(
-                  future: widget.browserProvider,
-                  builder: (context, snapshot) {
-                    final acp = snapshot.data;
-                    if (acp == null) return const SizedBox.shrink();
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: FilledButton.icon(
-                        onPressed: busy ? null : () => _useBrowser(acp),
-                        icon: const Icon(Icons.extension_rounded),
-                        label: const Text('Use an agent from this browser'),
-                      ),
-                    );
+              TextField(key: const ValueKey('connection-name'), controller: name, decoration: const InputDecoration(labelText: 'Name')),
+              const SizedBox(height: 12),
+              Text('What it is', style: text),
+              const SizedBox(height: 4),
+              SegmentedButton<ConnectionKind>(
+                key: const ValueKey('connection-kind'),
+                segments: [for (final each in ConnectionKind.values) ButtonSegment(value: each, label: Text(each.label))],
+                selected: {kind},
+                showSelectedIcon: false,
+                onSelectionChanged: busy ? null : (chosen) => setState(() => kind = chosen.first),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                kind == ConnectionKind.canoa
+                    ? 'It lists its agents and what it can do; its address is the one canoa serve prints, such as https://host:port/.'
+                    : 'It offers a session and nothing else: no folder browsing, files or management.',
+                style: text,
+              ),
+              if (kind == ConnectionKind.acp) ...[
+                const SizedBox(height: 8),
+                SegmentedButton<ConnectionTransport>(
+                  key: const ValueKey('connection-transport'),
+                  segments: const [
+                    ButtonSegment(value: ConnectionTransport.websocket, label: Text('WebSocket')),
+                    ButtonSegment(value: ConnectionTransport.webtransport, label: Text('WebTransport')),
+                  ],
+                  selected: {transport},
+                  showSelectedIcon: false,
+                  onSelectionChanged: busy ? null : (chosen) => setState(() => transport = chosen.first),
+                ),
+              ],
+              TextField(
+                key: const ValueKey('connection-address'),
+                controller: address,
+                decoration: InputDecoration(
+                  labelText: 'Address',
+                  hintText: switch ((kind, transport)) {
+                    (ConnectionKind.canoa, _) => 'https://host:port/',
+                    (_, ConnectionTransport.webtransport) => 'https://agent.example:4433/acp',
+                    _ => 'wss://agent.example/acp',
                   },
                 ),
-              Text('Method the host proves by', style: Theme.of(context).textTheme.bodySmall),
+              ),
+              TextField(
+                key: const ValueKey('connection-peer'),
+                controller: pinned,
+                decoration: const InputDecoration(labelText: 'Pinned peer ID', hintText: 'sha256:…'),
+              ),
+              const SizedBox(height: 12),
+              Text('Method the other end proves by', style: text),
               const SizedBox(height: 4),
               SegmentedButton<PeerMethod>(
+                key: const ValueKey('connection-method'),
                 segments: [for (final each in PeerMethod.values) ButtonSegment(value: each, label: Text(each.label))],
                 selected: {?method},
                 emptySelectionAllowed: true,
@@ -384,7 +397,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                   }
                   return Row(children: [
                     Expanded(child: SelectableText('${widget.inBrowser ? 'Your browser' : 'This app\'s'} peer ID under ${method!.label}:\n$peer',
-                      style: Theme.of(context).textTheme.bodySmall)),
+                      style: text)),
                     IconButton(
                       tooltip: 'Copy your peer ID for pairing',
                       icon: const Icon(Icons.copy),
@@ -411,8 +424,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                       const SizedBox(height: 12),
                       const Text('Or pair by the PIN the other machine shows, under Noise:'),
                       if (_pageOrigin case final origin?)
-                        SelectableText('There, run: coqui-acp-bridge pair-accept --method noise --origin $origin',
-                          style: Theme.of(context).textTheme.bodySmall),
+                        SelectableText('There, run: coqui-acp-bridge pair-accept --method noise --origin $origin', style: text),
                       TextField(controller: pairUrl,
                         decoration: const InputDecoration(
                           labelText: 'Where it waits to pair',
@@ -429,56 +441,24 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                   );
                 },
               ),
-              titleField,
-              if (served case final host?) _ServedEntries(host: host, chosen: ws.text, onChoose: busy ? null : (url) => setState(() => ws.text = url)),
-              TextField(controller: wt,
-                decoration: const InputDecoration(
-                  labelText: 'WebTransport HTTPS endpoint (optional)',
-                  hintText: 'https://agent.example:4433/acp',
-                )),
-              TextField(controller: ws,
-                decoration: const InputDecoration(
-                  labelText: 'WebSocket WSS endpoint',
-                  hintText: 'wss://agent.example/acp',
-                )),
-              TextField(controller: pinned,
-                decoration: const InputDecoration(
-                  labelText: 'Pinned server peer ID',
-                  hintText: 'sha256:…',
-                )),
-              cwdField,
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(
-                  // An agent this app runs is its own child, and only one elsewhere is reached as a peer.
-                  widget.inBrowser
-                      ? 'Agent connections and sync require verified ACP peers.'
-                      : 'Agents on other machines need a verified ACP peer.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
+              _nearby(context),
               if (error != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
-                  child: Text(error!, style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                  )),
+                  child: Text(error!, key: const ValueKey('connection-error'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
                 ),
             ],
           ),
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: busy ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
+        TextButton(onPressed: busy ? null : () => Navigator.of(context).pop(), child: const Text('Cancel')),
         FilledButton(
+          key: const ValueKey('connection-add'),
           onPressed: busy ? null : _submit,
           child: busy
-              ? const SizedBox(width: 18, height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('Connect'),
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Add'),
         ),
       ],
     );
