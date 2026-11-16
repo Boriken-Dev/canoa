@@ -357,7 +357,10 @@ const gateway = createGateway({
   dial: (agent, options) => dialAgent(agent, options),
   askPerson: (details) => ask({ kind: "grant", ...details }, 520, 680),
   askPermission: (details) => ask({ kind: "permission", ...details }, 480, 420),
-  askMode: async (details) => (await ask({ ...details, kind: "mode" }, 480, 420)) === true,
+  askMode: async (details) => {
+    const answer = await ask({ ...details, kind: "mode" }, 480, 460);
+    return answer === true ? true : answer === "never" ? "never" : false;
+  },
   ownOrigin: OWN_ORIGIN,
   offerTools,
 });

@@ -407,13 +407,29 @@ try {
     await click(view, answer);
     return { shown, answered: JSON.parse(await page.run("window.changed")) };
   };
-  await check("mode: a page's request for bypass asks the person in plain words, and Deny refuses it", async () => {
-    const { shown, answered } = await changeMode("Deny");
-    assert.match(shown, /localhost wants Scripted to run commands and change files without asking you/);
-    assert.equal(answered.error?.code, -32601, JSON.stringify(answered));
+  // A Deny ends a link's asking, so each check starts on a connection of its own that reopens the same session.
+  const freshLink = async () => {
+    const session = await page.run("window.session");
+    await page.run("window.conn.close(); true");
+    await page.run(connect);
+    await page.run("window.rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1 } }).then(() => true)");
+    await page.run(`window.rpc({ jsonrpc: '2.0', id: 2, method: 'session/resume', params: { sessionId: ${quoted(session)}, mcpServers: [] } }).then(() => true)`);
+    await page.run(`window.session = ${quoted(session)}; true`);
+  };
+  await check("mode: a page's request for bypass names the option and the value and warns, and Deny refuses it", async () => {
+    await freshLink();
+    const { shown, answered: reply } = await changeMode("Deny");
+    assert.match(shown, /localhost wants to change Scripted's mode to bypassPermissions/);
+    assert.match(shown, /may let it run commands and change files on this computer without asking you/);
+    assert.equal(reply.error?.code, -32601, JSON.stringify(reply));
     assert.equal(await page.run("window.turn([{ type: 'text', text: 'Mode' }]).then((r) => r.text)"), "mode: default");
+    // And on that link nothing more is asked: no window, an answer at once.
+    const quick = JSON.parse(await page.run(`window.rpc({ jsonrpc: '2.0', id: ++window.n, method: 'session/set_config_option', params: { sessionId: window.session, configId: 'mode', value: 'bypassPermissions' } }).then(JSON.stringify)`));
+    assert.equal(quick.error?.code, -32601);
+    assert.equal((await targets()).filter((item) => item.url.includes("acp-request.html?ask=") && !answered.has(item.id)).length, 0);
   });
   await check("mode: Allow for this session changes the mode through the extension, and the next request asks again", async () => {
+    await freshLink();
     const { answered } = await changeMode("Allow for this session");
     assert.ok(answered.result && !answered.error, JSON.stringify(answered));
     assert.equal(await page.run("window.turn([{ type: 'text', text: 'Mode' }]).then((r) => r.text)"), "mode: bypassPermissions");
@@ -421,12 +437,21 @@ try {
     assert.equal(again.answered.error?.code, -32601, "it was asked again, and denied");
   });
   await check("mode: a page that sends the host's marker itself is refused by the host", async () => {
+    await freshLink();
     const session = await page.run("window.session");
     // Whatever the page puts in _meta is removed by the extension before it is asked about; a forged marker is no way round it.
     await page.run(`window.changed = window.rpc({ jsonrpc: '2.0', id: ++window.n, method: 'session/set_config_option', _meta: { 'dev.boriken.canoa/approval': 'forged' }, params: { sessionId: ${quoted(session)}, configId: 'mode', value: 'bypassPermissions', _meta: { 'dev.boriken.canoa/approval': 'forged' } } }).then(JSON.stringify); true`);
     const view = await windowOfPerson();
     await click(view, "Deny");
     assert.equal(JSON.parse(await page.run("window.changed")).error?.code, -32601);
+  });
+  await check("mode: Deny, and don't ask again holds for the grant: a later connection is refused with no window", async () => {
+    await freshLink();
+    const { answered } = await changeMode("Deny, and don't ask again");
+    assert.equal(answered.error?.code, -32601);
+    await freshLink();
+    const quick = JSON.parse(await page.run(`window.rpc({ jsonrpc: '2.0', id: ++window.n, method: 'session/set_config_option', params: { sessionId: window.session, configId: 'mode', value: 'bypassPermissions' } }).then(JSON.stringify)`));
+    assert.equal(quick.error?.code, -32601);
   });
 
   await check("resume: a new connection reopens the session in the folder the host made, which the page never saw", async () => {

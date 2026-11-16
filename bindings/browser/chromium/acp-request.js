@@ -336,27 +336,32 @@ function permissionView(details) {
   holdClicks();
 }
 
-/** A mode that stops the agent asking, by the names agents give theirs. */
-const NO_ASKING = /bypass|danger|full[-_ ]?access|yolo|never|auto/i;
+/** The modes of the agents that still ask the person, by the names the host holds a site's sessions to. Any other value is warned about. */
+const MODES_THAT_ASK = new Set(["plan", "manual", "default", "accept_edits", "acceptEdits", "dontAsk"]);
 
 /**
  * A page asks to change the mode of a session on an agent that runs on this computer. Only the person decides, here, for this
- * session alone: nothing is remembered, and a page cannot answer.
+ * session alone: nothing is remembered, and a page cannot answer. The option and the value are shown by the agent's own names.
  */
 function modeView(details) {
   const site = clean(details.site, 120);
-  const mode = clean(details.value, 100);
   const label = clean(details.label, 80);
+  const value = clean(details.value, 100);
+  const option = clean(details.optionName ?? details.option ?? "Mode", 80);
+  const valueName = details.valueName ? clean(details.valueName, 100) : "";
+  const shown = valueName !== "" && valueName !== value ? `${valueName} (${value})` : value;
   const allow = element("button", { type: "button", textContent: "Allow for this session" });
   const deny = element("button", { type: "button", className: "quiet", textContent: "Deny" });
+  const never = element("button", { type: "button", className: "quiet", textContent: "Deny, and don't ask again for this site" });
   allow.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: true }));
   deny.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: null }));
+  never.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: "never" }));
   answerKeys(null, deny);
-  const what = NO_ASKING.test(mode)
-    ? [element("p", {}, element("span", { className: "site", textContent: site }), ` wants ${label} to run commands and change files without asking you.`),
-      element("p", { className: "warn", textContent: `The mode is "${mode}". It runs on this computer as you, with your files and tools.` })]
-    : [element("p", {}, element("span", { className: "site", textContent: site }), ` wants to change how ${label} works in this conversation to "${mode}".`)];
-  main.replaceChildren(...what, element("p", { textContent: "Only this conversation. It asks again next time." }), allow, deny);
+  const what = MODES_THAT_ASK.has(details.value)
+    ? [element("p", {}, element("span", { className: "site", textContent: site }), ` wants to change ${label}'s ${option} to ${shown} in this conversation.`)]
+    : [element("p", {}, element("span", { className: "site", textContent: site }), ` wants to change ${label}'s ${option} to ${shown}.`),
+      element("p", { className: "warn", textContent: "That may let it run commands and change files on this computer without asking you." })];
+  main.replaceChildren(...what, element("p", { textContent: "Only this conversation. It asks again next time." }), allow, deny, never);
   holdClicks();
 }
 

@@ -17,6 +17,8 @@ const MAX_LINKS_PER_ORIGIN = 8;
 const APPROVAL_META = "dev.boriken.canoa/approval";
 const OPEN_CATEGORIES = new Set(["model", "thought_level"]);
 const MAX_MODE_TEXT = 100;
+// Where the names of the modes of `session/set_mode` are kept among the names of options.
+const MODE_KEY = "\0mode";
 // Windows waiting to ask the person about one connection. Past this an agent is refused without asking: it has no way to make
 // one person read more than one at a time, and a request of its own making costs it nothing.
 const MAX_WAITING_PERMISSIONS = 8;
@@ -50,13 +52,28 @@ function siteOf(origin) {
   }
 }
 
-/** An agent reached on a loopback address, which runs on this computer. */
+/** Whether an address is this computer's: all of 127/8, 0.0.0.0, ::1, ::, localhost and what ends in .localhost. */
+export function hereAddress(hostname) {
+  const host = String(hostname).toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || host === "[::]") return true;
+  const parts = host.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^[0-9]{1,3}$/.test(part))) return false;
+  const [a] = parts.map(Number);
+  return a === 127 || host === "0.0.0.0";
+}
+
+/** An agent reached on this computer's own address. */
 function loopbackAgent(agent) {
   try {
-    return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(agent.url).hostname);
+    return hereAddress(new URL(agent.url).hostname);
   } catch {
     return false;
   }
+}
+
+/** An agent that runs on this computer as the person: the host's entries and what was found on a descriptor or a local address. */
+function runsHere(agent) {
+  return agent.local === true || agent.source === "local" || loopbackAgent(agent);
 }
 
 function list(value) {
@@ -106,6 +123,8 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
   const asking = new Set();
   // Dials in progress for each origin.
   const dialing = new Map();
+  // Origins with a window open about a mode: one at a time, as for a request, so a page cannot raise window after window.
+  const modeAsking = new Set();
 
   async function publicId(origin, key) {
     return hash(`${await store.secret()}\0${origin}\0${key}`);
@@ -199,7 +218,7 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
         // The Canoa on this computer makes a page's folder itself, from the site; the person names none and the page cannot.
         const folder = agent.local === true && !own;
         // Agents on this computer, the host's entries and those found on a loopback address alike, run as the person.
-        const onThisComputer = folder || (!own && (agent.source === "local" || loopbackAgent(agent)));
+        const onThisComputer = folder || (!own && runsHere(agent));
         const grant = {
           origin,
           agent: key,
@@ -263,10 +282,10 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       const folders = new Map(placedByHost ? Object.entries(grant.folders ?? {}) : []);
       // Whatever the stored grant says, a site cannot approve for the agents on this computer.
       // Canoa's own pages are the one grant that may pass more than a page does in a session request.
-      const scope = new Scope({ ...grant, folder: placedByHost ? "provider" : undefined, own: origin === ownOrigin, permissions: placedByHost ? false : grant.permissions, sessions }, origin);
+      const scope = new Scope({ ...grant, folder: placedByHost ? "provider" : undefined, own: origin === ownOrigin, permissions: origin !== ownOrigin && (placedByHost || runsHere(agent)) ? false : grant.permissions, sessions }, origin);
       const conn = entry.nextConn++;
       const link = {
-        conn, entry, channel, scope, grant, sessions, site, placedByHost, folders, label: agent.label, categories: new Map(), approval: undefined,
+        conn, entry, channel, scope, grant, sessions, site, placedByHost, folders, label: agent.label, categories: new Map(), names: new Map(), approval: undefined, initId: undefined, denied: false,
         known: sessions.size, knownFolders: folders.size, waiting: 0, asking: Promise.resolve(), outgoing: Promise.resolve(),
       };
       if (channel.proven && channel.mux !== undefined) link.tools = offerTools({ mux: channel.mux, peer: agent.peer, label: agent.label });
@@ -370,7 +389,7 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
    * connection's approval token, which options are of which category) and the page is told none of the host's own words.
    */
   function scrub(link, text) {
-    if (!text.includes("dev.boriken.") && !text.includes("configOptions")) return text;
+    if (!text.includes("dev.boriken.") && !text.includes("configOptions") && !text.includes("availableModes")) return text;
     let message;
     try {
       message = JSON.parse(text);
@@ -379,14 +398,30 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
     }
     for (const options of [message?.result?.configOptions, message?.params?.update?.configOptions]) {
       for (const option of Array.isArray(options) ? options : []) {
-        if (typeof option?.id === "string" && typeof option.category === "string" && link.categories.size < 256) link.categories.set(option.id, option.category);
+        if (typeof option?.id !== "string" || link.categories.size >= 256) continue;
+        if (typeof option.category === "string") link.categories.set(option.id, option.category);
+        const values = new Map();
+        for (const choice of (Array.isArray(option.options) ? option.options : []).slice(0, 64)) {
+          if (typeof choice?.value === "string" && typeof choice.name === "string") values.set(choice.value, choice.name);
+        }
+        link.names.set(option.id, { name: typeof option.name === "string" ? option.name : undefined, values });
       }
+    }
+    // The modes of the older shape: `modes.availableModes` of the answer to session/new.
+    const modes = message?.result?.modes?.availableModes;
+    if (Array.isArray(modes)) {
+      const values = new Map();
+      for (const mode of modes.slice(0, 64)) {
+        if (typeof mode?.id === "string" && typeof mode.name === "string") values.set(mode.id, mode.name);
+      }
+      link.names.set(MODE_KEY, { name: "Mode", values });
     }
     const meta = message?.result?._meta;
     if (meta === null || typeof meta !== "object") return text;
     const ours = Object.keys(meta).filter((key) => key.startsWith("dev.boriken."));
     if (ours.length === 0) return text;
-    if (typeof meta[APPROVAL_META] === "string") link.approval = meta[APPROVAL_META];
+    // The token is taken from the answer to this side's own first initialize, once, and from nothing else.
+    if (typeof meta[APPROVAL_META] === "string" && link.approval === undefined && link.initId !== undefined && message.id === link.initId) link.approval = meta[APPROVAL_META];
     const placed = meta[SITE_META];
     const session = message.result.sessionId;
     if (link.placedByHost && typeof session === "string" && typeof placed?.folder === "string" && placed.folder.length <= MAX_FOLDER) {
@@ -427,19 +462,38 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       msg: JSON.stringify({ jsonrpc: "2.0", id: change.id ?? null, error: { code: -32601, message: "the person did not allow that" } }),
     });
     const text = change.value;
+    const origin = link.grant.origin;
     if (change.id === undefined || change.id === null) return;
-    if (typeof text !== "string" || text.length === 0 || text.length > MAX_MODE_TEXT || link.approval === undefined || link.waiting >= MAX_WAITING_PERMISSIONS) {
+    // No window for a value that is not text, where the host gave no token, after a Deny on this link or a "do not ask again" for
+    // this site, or while another is open for this origin: a page that cannot make the person click cannot make windows either.
+    if (typeof text !== "string" || text.length === 0 || text.length > MAX_MODE_TEXT || link.approval === undefined
+      || link.denied || link.grant.noModes === true || modeAsking.has(origin)) {
       refuse();
       return;
     }
-    link.waiting += 1;
-    link.asking = link.asking
-      .then(() => (live.has(link) ? askMode({ origin: link.grant.origin, site: link.site, label: link.label, kind: change.kind, option: typeof change.option === "string" ? change.option : undefined, value: text }) : false))
+    modeAsking.add(origin);
+    const known = link.names.get(change.kind === "mode" ? MODE_KEY : change.option);
+    Promise.resolve()
+      .then(() => (live.has(link) ? askMode({
+        origin,
+        site: link.site,
+        label: link.label,
+        kind: change.kind,
+        option: typeof change.option === "string" ? change.option : undefined,
+        optionName: known?.name,
+        value: text,
+        valueName: known?.values.get(text),
+      }) : false))
       .catch(() => false)
-      .then((allowed) => {
-        link.waiting -= 1;
+      .then((answer) => {
+        modeAsking.delete(origin);
         if (!live.has(link)) return;
-        if (allowed !== true) {
+        if (answer === "never") {
+          link.grant.noModes = true;
+          store.saveGrant(link.grant);
+        }
+        if (answer !== true) {
+          link.denied = true;
           refuse();
           return;
         }
@@ -457,6 +511,14 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       if (message.op === "close") {
         finish(link, "page", false);
       } else if (typeof message.msg === "string") {
+        if (link.initId === undefined && message.msg.includes("initialize")) {
+          try {
+            const sent = JSON.parse(message.msg);
+            if (sent?.method === "initialize" && (typeof sent.id === "number" || typeof sent.id === "string")) link.initId = sent.id;
+          } catch {
+            // Not JSON: the scope refuses it below.
+          }
+        }
         const change = link.placedByHost ? modeChange(link, message.msg) : null;
         if (change !== null) {
           askModeChange(link, change);

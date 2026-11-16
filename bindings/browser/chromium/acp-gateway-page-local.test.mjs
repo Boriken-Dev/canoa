@@ -226,7 +226,8 @@ async function withSession(options) {
   world.say(conn, newSession(2));
   await settle();
   world.reply({ jsonrpc: "2.0", id: 2, result: { sessionId: "s1", configOptions: [
-    { id: "mode", category: "mode", type: "select" }, { id: "model", category: "model", type: "select" }] } });
+    { id: "mode", name: "Permission mode", category: "mode", type: "select", options: [{ value: "bypassPermissions", name: "Bypass permissions" }] },
+    { id: "model", category: "model", type: "select" }], modes: { availableModes: [{ id: "auto", name: "Automatic" }] } } });
   await settle();
   world.sent.length = 0;
   world.told = () => world.received.filter((message) => message.conn === conn).map((message) => JSON.parse(message.msg));
@@ -245,7 +246,7 @@ test("a page's bypass request asks the person, naming the site and the mode; All
   const { say, conn, sent, told } = await withSession({ askMode: async (details) => { asked.push(details); return true; } });
   say(conn, bypass(7));
   for (let tries = 0; tries < 40 && sent.length === 0; tries += 1) await settle();
-  assert.deepEqual(asked, [{ origin: "http://localhost:8080", site: "localhost", label: "Claude", kind: "option", option: "mode", value: "bypassPermissions" }]);
+  assert.deepEqual(asked, [{ origin: "http://localhost:8080", site: "localhost", label: "Claude", kind: "option", option: "mode", optionName: "Permission mode", value: "bypassPermissions", valueName: "Bypass permissions" }]);
   assert.deepEqual(sent, [{ jsonrpc: "2.0", id: 7, method: "session/set_config_option", params: { sessionId: "s1", configId: "mode", value: "bypassPermissions", _meta: { [APPROVAL]: TOKEN } } }]);
   assert.ok(!JSON.stringify(told()).includes(TOKEN));
 });
@@ -255,22 +256,85 @@ test("set_mode asks the same way", async () => {
   const { say, conn, sent } = await withSession({ askMode: async (details) => { asked.push(details); return true; } });
   say(conn, { jsonrpc: "2.0", id: 8, method: "session/set_mode", params: { sessionId: "s1", modeId: "auto" } });
   for (let tries = 0; tries < 40 && sent.length === 0; tries += 1) await settle();
-  assert.equal(asked[0].kind, "mode");
+  assert.deepEqual([asked[0].kind, asked[0].optionName, asked[0].valueName], ["mode", "Mode", "Automatic"]);
   assert.equal(sent[0].params.modeId, "auto");
   assert.equal(sent[0].params._meta[APPROVAL], TOKEN);
 });
 
-test("Deny, or no answer, is a refusal and nothing reaches the host; and it asks again each time", async () => {
+test("Deny is a refusal, and later requests on that link are refused without asking; an Allow is asked again each time", async () => {
   let asks = 0;
-  const { say, conn, sent, told } = await withSession({ askMode: async () => { asks += 1; return asks === 3; } });
-  for (const id of [7, 8]) say(conn, bypass(id));
-  for (let tries = 0; tries < 60 && told().filter((message) => message.error).length < 2; tries += 1) await settle();
-  assert.deepEqual(told().filter((message) => message.error).map((message) => [message.id, message.error.code]), [[7, -32601], [8, -32601]]);
-  assert.deepEqual(sent, []);
-  say(conn, bypass(9));
-  for (let tries = 0; tries < 40 && sent.length === 0; tries += 1) await settle();
+  const denying = await withSession({ askMode: async () => { asks += 1; return false; } });
+  for (const id of [7, 8]) denying.say(denying.conn, bypass(id));
+  for (let tries = 0; tries < 60 && denying.told().filter((message) => message.error).length < 2; tries += 1) await settle();
+  assert.deepEqual(denying.told().filter((message) => message.error).map((message) => [message.id, message.error.code]).sort(), [[7, -32601], [8, -32601]]);
+  assert.equal(asks, 1, "the second was refused without a window");
+  assert.deepEqual(denying.sent, []);
+  const allowing = await withSession({ askMode: async () => { asks += 1; return true; } });
+  for (const id of [7, 8]) {
+    allowing.say(allowing.conn, bypass(id));
+    for (let tries = 0; tries < 40 && allowing.sent.length < id - 6; tries += 1) await settle();
+  }
+  assert.equal(allowing.sent.length, 2);
   assert.equal(asks, 3, "each request is asked, nothing is remembered");
-  assert.equal(sent.length, 1);
+});
+
+test("Deny, and don't ask again holds for the life of the grant: a new connection is refused without a window", async () => {
+  let asks = 0;
+  const first = await withSession({ askMode: async () => { asks += 1; return "never"; } });
+  first.say(first.conn, bypass(7));
+  for (let tries = 0; tries < 40 && !first.told().some((message) => message.error); tries += 1) await settle();
+  assert.equal(first.held[0].noModes, true);
+  assert.ok(first.saved.some((grant) => grant.noModes === true), "the grant keeps it");
+  assert.equal(asks, 1);
+});
+
+test("one mode window at a time for an origin, and no window raised on every link", async () => {
+  let asks = 0;
+  const release = [];
+  const world = pageWith({ askMode: () => new Promise((resolve) => { asks += 1; release.push(resolve); }) });
+  const [agent] = (await world.ask(1, "agents", [])).result;
+  const links = [];
+  for (const id of [10, 11]) {
+    const conn = (await world.ask(id, "connect", { id: agent.id })).result.conn;
+    world.say(conn, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+    await settle();
+    world.reply({ jsonrpc: "2.0", id: 1, result: { protocolVersion: 1, _meta: { [APPROVAL]: TOKEN } } });
+    world.say(conn, newSession(2));
+    await settle();
+    world.reply({ jsonrpc: "2.0", id: 2, result: { sessionId: "s1" } });
+    await settle();
+    links.push(conn);
+  }
+  world.sent.length = 0;
+  world.say(links[0], bypass(7));
+  await settle();
+  world.say(links[1], bypass(8));
+  for (let tries = 0; tries < 40 && !world.received.some((message) => message.conn === links[1] && message.msg.includes("error")); tries += 1) await settle();
+  assert.equal(asks, 1, "the second link raised no window");
+  assert.ok(world.received.some((message) => message.conn === links[1] && message.msg.includes("-32601")), "it was refused at once");
+  release[0](true);
+  for (let tries = 0; tries < 40 && world.sent.length === 0; tries += 1) await settle();
+  assert.equal(world.sent.length, 1);
+});
+
+test("the host's token is taken from the answer to this side's own initialize, once, and from nothing else", async () => {
+  let asks = 0;
+  const world = pageWith({ askMode: async () => { asks += 1; return true; } });
+  const conn = await world.open();
+  // A token in an answer to something the page asked, before any initialize of this side's, is not taken.
+  world.say(conn, newSession(2));
+  await settle();
+  world.reply({ jsonrpc: "2.0", id: 2, result: { sessionId: "s1", _meta: { [APPROVAL]: "early" } } });
+  world.say(conn, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+  await settle();
+  world.reply({ jsonrpc: "2.0", id: 99, result: { _meta: { [APPROVAL]: "wrong-id" } } });
+  world.reply({ jsonrpc: "2.0", id: 1, result: { protocolVersion: 1, _meta: { [APPROVAL]: TOKEN } } });
+  world.reply({ jsonrpc: "2.0", id: 1, result: { protocolVersion: 1, _meta: { [APPROVAL]: "again" } } });
+  world.sent.length = 0;
+  world.say(conn, bypass(7));
+  for (let tries = 0; tries < 40 && world.sent.length === 0; tries += 1) await settle();
+  assert.equal(world.sent[0].params._meta[APPROVAL], TOKEN);
+  assert.ok(!JSON.stringify(world.received).includes("early") && !JSON.stringify(world.received).includes("again"));
 });
 
 test("a page that puts the marker in its own message gets no further than a page without it", async () => {
@@ -359,4 +423,24 @@ test("what the host says of itself is taken out of every page link, one the host
   const told = world.received.find((message) => message.conn === conn).msg;
   assert.ok(!told.includes("secret-skill"));
   assert.deepEqual(JSON.parse(told).result._meta, { kept: 1 });
+});
+
+test("this computer's own addresses are all of 127/8, 0.0.0.0, ::1, :: and localhost", async () => {
+  const { hereAddress } = await import("./acp-gateway.js");
+  for (const host of ["127.0.0.1", "127.200.3.4", "0.0.0.0", "[::1]", "[::]", "localhost", "App.LOCALHOST"]) assert.equal(hereAddress(host), true, host);
+  for (const host of ["128.0.0.1", "10.0.0.1", "example.com", "127.0.0", "1270.0.0.1", "[::2]"]) assert.equal(hereAddress(host), false, host);
+});
+
+test("a stored grant with permissions on an agent at 127.x gets none when it connects", async () => {
+  const loop = { key: "loop", label: "Loop", source: "manual", peer: "sha256:l", url: "ws://127.4.5.6:9/acp", proven: true };
+  const world = pageWith({ agents: [loop], grant: { agent: "loop", folder: undefined, cwd: "/w", peer: undefined, permissions: true } });
+  const conn = await world.open();
+  world.say(conn, newSession(2));
+  await settle();
+  world.reply({ jsonrpc: "2.0", id: 2, result: { sessionId: "s1" } });
+  await settle();
+  world.sent.length = 0;
+  world.say(conn, { jsonrpc: "2.0", id: 9, method: "session/set_mode", params: { sessionId: "s1", modeId: "auto" } });
+  for (let tries = 0; tries < 40 && !world.received.some((message) => message.conn === conn && message.msg.includes("error")); tries += 1) await settle();
+  assert.deepEqual(world.sent, []);
 });
