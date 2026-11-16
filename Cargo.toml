@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/canoa-antigravity", "crates/canoa-claude", "crates/canoa-codex", "crates/canoa-ffi", "crates/canoa-grok", "crates/canoa-host", "crates/canoa-launch", "crates/canoa-pi"]
+members = ["crates/canoa", "crates/canoa-antigravity", "crates/canoa-claude", "crates/canoa-codex", "crates/canoa-ffi", "crates/canoa-foundry", "crates/canoa-grok", "crates/canoa-host", "crates/canoa-launch", "crates/canoa-pi"]
 
 [workspace.package]
 version = "0.0.0-alpha.0"
@@ -40,6 +40,8 @@ coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access"
 coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
 # The web app's server: requests parsed by tungstenite's own parser, request paths percent-decoded by url's, TLS by
 # coqui-transport-web's rustls; each already in the graph at these versions.
+foundry-local-sdk = "2.4"
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "sync"] }
 httparse = { version = "1.10", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3", default-features = false, features = ["std"] }
 # The include and exclude filters of a knowledge index; already in the graph.
@@ -125,6 +127,7 @@ canoa = { path = "crates/canoa" }
 canoa-host = { path = "crates/canoa-host" }
 canoa-antigravity = { path = "crates/canoa-antigravity" }
 canoa-claude = { path = "crates/canoa-claude" }
+canoa-foundry = { path = "crates/canoa-foundry" }
 canoa-codex = { path = "crates/canoa-codex" }
 canoa-grok = { path = "crates/canoa-grok" }
 canoa-pi = { path = "crates/canoa-pi" }

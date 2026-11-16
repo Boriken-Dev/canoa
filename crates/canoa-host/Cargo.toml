@@ -26,6 +26,9 @@ yaml = ["dep:serde-saphyr"]
 json = []
 # The web app built in: the site CANOA_WEB_DIST names at build time, served when [host.web] names no directory.
 web = []
+# Foundry Local's SDK, to run a model in this program's own process: it brings an HTTP client with the system's TLS library (OpenSSL on
+# Linux), so it is asked for. Without it an account's model runs in the Foundry Local service the person runs.
+foundry = ["canoa-foundry/sdk"]
 # `canoa portal`: sign users in through the operating system's accounts and give each their own host, as themselves. Unix only;
 # it links the system's libpam.
 portal = ["dep:coqui-access", "dep:coqui-access-system", "dep:coqui-access-signin", "dep:coqui-access-kit", "dep:coqui-peer-tls", "dep:qrcode", "dep:tungstenite"]
@@ -44,6 +47,7 @@ canoa = { workspace = true, features = ["store"] }
 canoa-antigravity.workspace = true
 canoa-claude.workspace = true
 canoa-codex.workspace = true
+canoa-foundry.workspace = true
 canoa-grok.workspace = true
 canoa-pi.workspace = true
 clap.workspace = true

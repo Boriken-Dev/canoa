@@ -1,0 +1,133 @@
+{
+ "method": "POST",
+ "path": "/v1/messages?beta=true",
+ "headers": {
+  "Accept": "application/json",
+  "Content-Type": "application/json",
+  "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,context-management-2025-06-27,mid-conversation-tool-changes-2026-07-01,thinking-token-count-2026-05-13,effort-2025-11-24",
+  "anthropic-version": "2023-06-01"
+ },
+ "body": {
+  "model": "qwen3-14b-generic-gpu:2",
+  "messages": [
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "stand-in text of 1393 characters"
+     },
+     {
+      "type": "text",
+      "text": "stand-in text of 699 characters"
+     },
+     {
+      "type": "text",
+      "text": "read secret.txt and tell me what it says"
+     }
+    ]
+   },
+   {
+    "role": "system",
+    "content": [
+     {
+      "type": "text",
+      "text": "stand-in text of 1519 characters",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   }
+  ],
+  "system": [
+   {
+    "type": "text",
+    "text": "stand-in text of 74 characters"
+   },
+   {
+    "type": "text",
+    "text": "stand-in text of 62 characters",
+    "cache_control": {
+     "type": "ephemeral"
+    }
+   },
+   {
+    "type": "text",
+    "text": "stand-in text of 5426 characters",
+    "cache_control": {
+     "type": "ephemeral"
+    }
+   }
+  ],
+  "tools": [
+   {
+    "name": "DeferredToolPlaceholder",
+    "description": "stand-in description",
+    "input_schema": {
+     "type": "object",
+     "properties": {}
+    },
+    "defer_loading": true
+   },
+   {
+    "name": "Read",
+    "description": "stand-in description",
+    "input_schema": {
+     "$schema": "https://json-schema.org/draft/2020-12/schema",
+     "type": "object",
+     "properties": {
+      "file_path": {
+       "description": "stand-in description",
+       "type": "string"
+      },
+      "offset": {
+       "description": "stand-in description",
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 9007199254740991
+      },
+      "limit": {
+       "description": "stand-in description",
+       "type": "integer",
+       "exclusiveMinimum": 0,
+       "maximum": 9007199254740991
+      },
+      "pages": {
+       "description": "stand-in description",
+       "type": "string"
+      },
+      "allow_large": {
+       "description": "stand-in description",
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "file_path"
+     ],
+     "additionalProperties": false
+    }
+   }
+  ],
+  "metadata": {
+   "stand_in": "x"
+  },
+  "max_tokens": 32000,
+  "thinking": {
+   "type": "adaptive",
+   "display": "omitted"
+  },
+  "context_management": {
+   "edits": [
+    {
+     "type": "clear_thinking_20251015",
+     "keep": "all"
+    }
+   ]
+  },
+  "output_config": {
+   "effort": "high"
+  },
+  "stream": true
+ }
+}

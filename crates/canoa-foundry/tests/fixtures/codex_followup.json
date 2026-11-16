@@ -1,0 +1,270 @@
+{
+ "method": "POST",
+ "path": "/v1/responses",
+ "headers": {
+  "accept": "text/event-stream",
+  "content-type": "application/json",
+  "originator": "codex_exec"
+ },
+ "body": {
+  "model": "qwen3-14b-generic-gpu:2",
+  "stream": true,
+  "input": [
+   {
+    "type": "message",
+    "id": "msg_a40dfe8b-762b-57a1-b41e-eef6d8e8317a",
+    "role": "developer",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "stand-in text of 17174 characters"
+     }
+    ]
+   },
+   {
+    "type": "message",
+    "id": "msg_01a1e397-5c06-7a00-8c56-271e17da5568",
+    "role": "developer",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "stand-in text of 6852 characters"
+     },
+     {
+      "type": "input_text",
+      "text": "stand-in text of 342 characters"
+     }
+    ]
+   },
+   {
+    "type": "message",
+    "id": "msg_01a1e397-5c06-7a00-8c56-272a8bf61a86",
+    "role": "user",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "stand-in text of 32885 characters"
+     },
+     {
+      "type": "input_text",
+      "text": "stand-in text of 526 characters"
+     }
+    ]
+   },
+   {
+    "type": "message",
+    "id": "msg_01a1e397-5c13-74a2-8839-d0f187eb339f",
+    "role": "user",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "read secret.txt and tell me what it says"
+     }
+    ]
+   },
+   {
+    "type": "function_call",
+    "status": "completed",
+    "id": "fc_1",
+    "name": "exec_command",
+    "arguments": "{\"command\": \"type secret.txt\"}",
+    "call_id": "call_1"
+   },
+   {
+    "type": "function_call_output",
+    "id": "fco_01a1e397-5c62-7053-89e8-1c894e086bf6",
+    "call_id": "call_1",
+    "output": "stand-in text of 75 characters"
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "name": "exec_command",
+    "description": "stand-in description",
+    "strict": false,
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "cmd": {
+       "type": "string",
+       "description": "stand-in description"
+      },
+      "justification": {
+       "type": "string",
+       "description": "stand-in description"
+      },
+      "login": {
+       "type": "boolean",
+       "description": "stand-in description"
+      },
+      "max_output_tokens": {
+       "type": "number",
+       "description": "stand-in description"
+      },
+      "prefix_rule": {
+       "type": "array",
+       "description": "stand-in description",
+       "items": {
+        "type": "string"
+       }
+      },
+      "sandbox_permissions": {
+       "type": "string",
+       "description": "stand-in description",
+       "enum": [
+        "use_default",
+        "require_escalated"
+       ]
+      },
+      "shell": {
+       "type": "string",
+       "description": "stand-in description"
+      },
+      "tty": {
+       "type": "boolean",
+       "description": "stand-in description"
+      },
+      "workdir": {
+       "type": "string",
+       "description": "stand-in description"
+      },
+      "yield_time_ms": {
+       "type": "number",
+       "description": "stand-in description"
+      }
+     },
+     "required": [
+      "cmd"
+     ],
+     "additionalProperties": false
+    }
+   },
+   {
+    "type": "function",
+    "name": "write_stdin",
+    "description": "stand-in description",
+    "strict": false,
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "chars": {
+       "type": "string",
+       "description": "stand-in description"
+      },
+      "max_output_tokens": {
+       "type": "number",
+       "description": "stand-in description"
+      },
+      "session_id": {
+       "type": "number",
+       "description": "stand-in description"
+      },
+      "yield_time_ms": {
+       "type": "number",
+       "description": "stand-in description"
+      }
+     },
+     "required": [
+      "session_id"
+     ],
+     "additionalProperties": false
+    }
+   },
+   {
+    "type": "function",
+    "name": "request_user_input",
+    "description": "stand-in description",
+    "strict": false,
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "questions": {
+       "type": "array",
+       "description": "stand-in description",
+       "items": {
+        "type": "object",
+        "properties": {
+         "header": {
+          "type": "string",
+          "description": "stand-in description"
+         },
+         "id": {
+          "type": "string",
+          "description": "stand-in description"
+         },
+         "options": {
+          "type": "array",
+          "description": "stand-in description",
+          "items": {
+           "type": "object",
+           "properties": {
+            "description": "stand-in description",
+            "label": {
+             "type": "string",
+             "description": "stand-in description"
+            }
+           },
+           "required": [
+            "label",
+            "description"
+           ],
+           "additionalProperties": false
+          }
+         },
+         "question": {
+          "type": "string",
+          "description": "stand-in description"
+         }
+        },
+        "required": [
+         "id",
+         "header",
+         "question",
+         "options"
+        ],
+        "additionalProperties": false
+       }
+      }
+     },
+     "required": [
+      "questions"
+     ],
+     "additionalProperties": false
+    }
+   },
+   {
+    "type": "function",
+    "name": "view_image",
+    "description": "stand-in description",
+    "strict": false,
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "path": {
+       "type": "string",
+       "description": "stand-in description"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "additionalProperties": false
+    }
+   }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "reasoning": {
+   "summary": "auto"
+  },
+  "store": false,
+  "include": [
+   "reasoning.encrypted_content"
+  ],
+  "prompt_cache_key": "session",
+  "client_metadata": {
+   "stand_in": "x"
+  }
+ }
+}

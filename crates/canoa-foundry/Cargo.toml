@@ -1,0 +1,37 @@
+[package]
+name = "canoa-foundry"
+description = "Foundry Local for Canoa: the OpenAI and Anthropic APIs over a local model, translated to chat completions, and the engine that runs them"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["agent", "canoa", "local-models"]
+categories = ["development-tools"]
+exclude = [".*", "*.local.*"]
+# The Foundry Local SDK it runs on is a registry crate, but Canoa itself is not published yet.
+publish = false
+
+[features]
+default = ["daemon"]
+# The engine over the Foundry Local service the person runs, by loopback HTTP.
+daemon = ["dep:ureq"]
+# The engine over the Foundry Local Rust SDK, in this process. It brings the SDK's own dependencies (an async runtime and an HTTP
+# client with the system's TLS library: OpenSSL on Linux), which the translations do not need.
+sdk = ["dep:foundry-local-sdk", "dep:tokio"]
+
+[dependencies]
+serde_json.workspace = true
+ureq = { workspace = true, optional = true }
+foundry-local-sdk = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"
