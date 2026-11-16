@@ -419,7 +419,12 @@ adds one.
   start with, it writes a loadout named `Default` that holds that. The old `[loadout]` table (`off`, `skills`,
   `registries`, `mcp`) is not read: `registries` and the notes on installed servers are `[store] registries` and
   `[store.mcp.NAME]` now.
-- **The choice per session.** The composer's Overlays control changes the loadout's overlays for this session alone.
+- **Editing loadouts.** The Loadouts section lists them (what each holds and whether it can start), and edits, duplicates and deletes
+  them, makes one the default and starts a session with one. Its editor adds installed overlays, skills and servers from a
+  searchable list, and leads to the Store for more without losing what was typed. Overlays stay whole: nothing there switches
+  an item inside one.
+- **The choice per session.** The composer's loadout control names the loadout a session starts with, sent as
+  `_meta["dev.boriken.canoa/loadout"]`, and changes its overlays for this session alone.
   What a session started with is kept with it in the session list and asked for again when it is opened, so turning a
   default off reaches new sessions only. The app tells its host through `initialize`'s
   `_meta["dev.boriken.canoa/overlays"]`, which takes the place of the loadout's overlays; the host applies only those
