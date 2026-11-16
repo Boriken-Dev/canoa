@@ -1,7 +1,10 @@
 import 'dart:async';
 
+import 'package:coqui_acp/secret.dart' show AcpSecretCancelled, AcpSecretRequestReply, acpSecretRequestMethod;
 import 'package:flutter/foundation.dart';
 
+import '../accounts/accounts_host.dart' show SignInAsk, openSealedAsk;
+import '../acp/link_secret.dart' show LinkSecretIdentity;
 import '../desktop/control_client.dart';
 
 // The program Store as the host's control channel carries it: what each store's extension reports of its program (found, which
@@ -314,7 +317,7 @@ final class ProgramPlan {
   }
 }
 
-/// A question an install puts to the person: the form's title and its JSON schema.
+/// A form's title and its JSON schema, for the fields of a question that carries no secret.
 final class ProgramAsk {
   const ProgramAsk(this.title, this.schema);
 
@@ -351,9 +354,9 @@ final class ProgramRun extends ChangeNotifier {
   /// The latest progress, as a fraction of 0 to 1 when the host gave one.
   double? fraction;
 
-  /// The question waiting for the person, if any.
-  ProgramAsk? asking;
-  Completer<Map<String, Object?>>? _answer;
+  /// The question waiting for the person, if any: a form the host sealed to this link's key, as a sign-in's is.
+  SignInAsk? asking;
+  Completer<AcpSecretRequestReply>? _answer;
   ControlClient? _client;
   bool _cancelled = false;
   bool _finished = false;
@@ -364,13 +367,13 @@ final class ProgramRun extends ChangeNotifier {
   /// How it ended: the version and folder it applied, or a [ControlFailed], a [ProgramCancelled] or another error.
   late final Future<Map<String, Object?>> done;
 
-  /// Answers the question waiting: [values] for its fields and [secrets] for its sensitive ones.
-  void answer(Map<String, Object?> values, Map<String, Object?> secrets) {
+  /// Answers the question waiting with [reply], which the form sealed: the host is told once.
+  void answer(AcpSecretRequestReply reply) {
     final waiting = _answer;
-    if (waiting == null) return;
+    if (waiting == null || waiting.isCompleted) return;
     _answer = null;
     asking = null;
-    waiting.complete({'values': values, 'secrets': secrets});
+    waiting.complete(reply);
     notifyListeners();
   }
 
@@ -378,7 +381,7 @@ final class ProgramRun extends ChangeNotifier {
   Future<void> cancel() async {
     if (_finished) return;
     _cancelled = true;
-    if (_answer case final waiting? when !waiting.isCompleted) waiting.completeError(const ProgramCancelled());
+    if (_answer case final waiting? when !waiting.isCompleted) waiting.complete(const AcpSecretCancelled());
     await _client?.close();
   }
 
@@ -399,13 +402,15 @@ final class ProgramRun extends ChangeNotifier {
 
   bool _lastWasProgress = false;
 
-  Future<Object?> _asked(String method, Map<String, Object?> params) {
-    if (method != 'store/ask') throw StateError('the caller answers no $method');
-    final waiting = Completer<Map<String, Object?>>();
+  Future<Object?> _asked(LinkSecretIdentity? secrets, String method, Map<String, Object?> params) async {
+    if (method != acpSecretRequestMethod) throw StateError('the caller answers no $method');
+    final asked = await openSealedAsk(secrets, params, () => DateTime.now().millisecondsSinceEpoch ~/ 1000);
+    if (asked == null || _cancelled) return const AcpSecretCancelled().toJson();
+    final waiting = Completer<AcpSecretRequestReply>();
     _answer = waiting;
-    asking = ProgramAsk(_text(params['title']) ?? '', _map(params['schema']));
+    asking = asked;
     notifyListeners();
-    return waiting.future;
+    return (await waiting.future).toJson();
   }
 }
 
@@ -543,10 +548,11 @@ class ProgramStores extends ChangeNotifier {
           await client.close();
           throw const ProgramCancelled();
         }
+        final secrets = await client.linkSecrets();
         final result = await client.call(
           'store/apply',
           {'provider': plan.provider, 'plan': plan.raw},
-          ControlListener(onNotification: run._heard, onRequest: run._asked),
+          ControlListener(onNotification: run._heard, onRequest: (method, params) => run._asked(secrets, method, params)),
           applyWait,
         );
         changed = _map(result)['applied'] != false;

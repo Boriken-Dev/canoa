@@ -3,9 +3,13 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:canoa/acp/link_secret.dart' show LinkSecretIdentity, linkSecretIdentity;
 import 'package:canoa/desktop/control_client.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/store/programs.dart';
+import 'package:coqui_acp/secret.dart';
+
+import 'fake_accounts.dart' show linkEnds, linkSecret;
 
 /// What an apply in progress can do: tell the person, ask them, and notice the link closing.
 final class FakeApply {
@@ -23,13 +27,33 @@ final class FakeApply {
 
   void progress(String text, double fraction) => _link._notify({'id': id, 'text': text, 'fraction': fraction});
 
-  /// Puts a question to the person and gives the answer (`{values, secrets}`).
-  Future<Map<String, Object?>> ask(String title, Map<String, Object?> schema) {
-    final ask = 'ask-${++_asked}';
-    final answer = Completer<Map<String, Object?>>();
+  /// Puts a question to the person the way the real host does: sealed to the key the link was proved by, as a sign-in's is. Gives
+  /// what the host reads once it opens the answer (`{values, secrets}`), or `{cancelled: true}` when the person did not answer.
+  Future<Map<String, Object?>> ask(String title, Map<String, Object?> schema) async {
+    final ask = 'canoa-secret-${++_asked}';
+    final ends = await linkEnds();
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final text = jsonEncode(schema);
+    final context = AcpSecretContext(sessionId: 'accounts', requestId: ask, message: title, schema: text);
+    final receiver = await AcpSecretReceiver.create(AcpSecretMethod.request, context, ends.host, ends.app.identity.prover.id, now);
+    final properties = schema['properties'] is Map ? (schema['properties'] as Map).cast<String, Object?>() : const <String, Object?>{};
+    bool secret(String name) => properties[name] is Map && (properties[name] as Map)['writeOnly'] == true;
+    final answer = Completer<Object?>();
     _link._questions[ask] = answer;
-    _link._emit({'jsonrpc': '2.0', 'id': ask, 'method': 'store/ask', 'params': {'title': title, 'schema': schema}});
-    return answer.future;
+    _link._emit({
+      'jsonrpc': '2.0',
+      'id': ask,
+      'method': acpSecretRequestMethod,
+      'params': AcpSecretRequestParams(context: context, recipient: receiver.recipient).toJson(),
+    });
+    final given = await answer.future;
+    final reply = AcpSecretRequestReply.fromJson(given, secret);
+    if (reply is! AcpSecretAccepted) return {'cancelled': true};
+    final opened = await receiver.openValues(ends.hostVerifier, ends.app.identity.prover.id, reply.plain, reply.sealed, reply.auth, now);
+    return {
+      'values': opened.plain,
+      'secrets': {for (final MapEntry(:key, :value) in opened.secrets.entries) key: value.text},
+    };
   }
 }
 
@@ -62,6 +86,9 @@ final class FakeStoreHost {
   FakeStoreHost(this.stores);
 
   final List<FakeStore> stores;
+
+  /// Every line the app sent on any link, whole, to look for what must never be in one.
+  final wire = <String>[];
 
   /// Every request as `method provider`, in the order they came.
   final calls = <String>[];
@@ -144,16 +171,19 @@ final class FakeStoreHost {
   }
 }
 
-final class _FakeLink implements HostLink {
+final class _FakeLink implements HostLink, HostLinkBinding {
   _FakeLink(this._host);
 
   final FakeStoreHost _host;
   final _out = StreamController<String>(sync: false);
   final closed = Completer<void>();
-  final _questions = <String, Completer<Map<String, Object?>>>{};
+  final _questions = <String, Completer<Object?>>{};
 
   @override
   Stream<String> get messages => _out.stream;
+
+  @override
+  Future<LinkSecretIdentity?> secretBinding() => linkSecretIdentity(linkSecret);
 
   void _emit(Map<String, Object?> message) {
     if (!_out.isClosed) _out.add(jsonEncode(message));
@@ -164,14 +194,13 @@ final class _FakeLink implements HostLink {
   @override
   Future<void> send(String message) async {
     if (closed.isCompleted) throw StateError('the link has ended');
+    _host.wire.add(message);
     final request = jsonDecode(message) as Map<String, Object?>;
     final method = request['method'];
     if (method == null) {
       // An answer to a question the apply asked.
       final waiting = _questions.remove(request['id']);
-      if (waiting != null && request['result'] is Map) {
-        waiting.complete({for (final MapEntry(:key, :value) in (request['result'] as Map).entries) '$key': value});
-      }
+      if (waiting != null && request['result'] is Map) waiting.complete(request['result']);
       return;
     }
     final id = request['id'];

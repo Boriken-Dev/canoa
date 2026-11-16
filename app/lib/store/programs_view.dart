@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretRequestCard;
 import 'package:flutter/material.dart';
 
 import '../desktop/control_client.dart';
@@ -335,7 +336,6 @@ class ProgressDialog extends StatefulWidget {
 class _ProgressDialogState extends State<ProgressDialog> {
   Map<String, Object?>? _result;
   Object? _failure;
-  bool _asking = false;
   final _scroll = ScrollController();
 
   @override
@@ -360,27 +360,9 @@ class _ProgressDialogState extends State<ProgressDialog> {
   void _changed() {
     if (!mounted) return;
     setState(() {});
-    if (widget.run.asking != null && !_asking) {
-      _asking = true;
-      unawaited(_ask(widget.run.asking!));
-    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
     });
-  }
-
-  Future<void> _ask(ProgramAsk question) async {
-    final answered = await showSelectableDialog<({Map<String, Object?> values, Map<String, Object?> secrets})>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => AskDialog(question: question),
-    );
-    _asking = false;
-    if (answered == null) {
-      await widget.run.cancel();
-    } else {
-      widget.run.answer(answered.values, answered.secrets);
-    }
   }
 
   @override
@@ -394,7 +376,7 @@ class _ProgressDialogState extends State<ProgressDialog> {
       title: Text(widget.title),
       content: SizedBox(
         width: 480,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           if (!ended) LinearProgressIndicator(key: const Key('program-bar'), value: run.fraction),
           const SizedBox(height: 8),
           ConstrainedBox(
@@ -406,6 +388,15 @@ class _ProgressDialogState extends State<ProgressDialog> {
               children: [for (final line in run.lines) Text(line, style: text.bodySmall?.copyWith(fontFamily: 'monospace'))],
             ),
           ),
+          // A question the install asks is a form the host sealed to this app's key: what is typed goes to the host and nowhere else.
+          if (run.asking case final asking?)
+            SecretRequestCard(
+              key: ValueKey('program-ask ${asking.request.context.requestId}'),
+              request: asking.request,
+              environment: asking.environment,
+              agent: 'Canoa',
+              onReply: run.answer,
+            ),
           if (_result case final result?) ...[
             const SizedBox(height: 8),
             Text(
@@ -425,7 +416,7 @@ class _ProgressDialogState extends State<ProgressDialog> {
               style: cancelled ? null : TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ],
-        ]),
+        ])),
       ),
       actions: [
         if (!ended)
@@ -437,7 +428,8 @@ class _ProgressDialogState extends State<ProgressDialog> {
   }
 }
 
-/// A question an install puts to the person, as a form from the schema it gave. Pops the values and the secrets, or null.
+/// A question put to the person in a dialog, as a form from the schema it gave, for the plain inputs a sign-in takes before it runs. Pops the
+/// values and the secrets, or null.
 class AskDialog extends StatefulWidget {
   const AskDialog({super.key, required this.question});
 

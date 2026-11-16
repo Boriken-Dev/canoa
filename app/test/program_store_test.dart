@@ -302,18 +302,17 @@ void main() {
       expect(tester.widget<Text>(find.byKey(const Key('program-done'))).data, contains('Nothing to do'));
     });
 
-    testWidgets('a question the install asks is answered in a dialog, secrets apart from values', (tester) async {
+    testWidgets('a question the install asks is a form sealed to the host, and the secret is in no line the app sent', (tester) async {
       final host = installable();
       Map<String, Object?>? answered;
       host.onApply = (apply) async {
         apply.say('Waiting for you');
         answered = await apply.ask('Sign in to continue', {
           'type': 'object',
-          'required': ['user'],
+          'required': ['user', 'token'],
           'properties': {
             'user': {'type': 'string', 'title': 'User name'},
             'token': {'type': 'string', 'title': 'Token', 'writeOnly': true, 'x-sensitive': true},
-            'telemetry': {'type': 'boolean', 'title': 'Share usage', 'default': false},
           },
         });
         apply.say('Thank you');
@@ -322,24 +321,24 @@ void main() {
       await _page(tester, host.programs());
       await _tap(tester, 'program-install-one_store');
       await tester.tap(find.byKey(const Key('plan-confirm')));
-      await _until(tester, find.byKey(const Key('program-ask')));
+      await _until(tester, find.byKey(const ValueKey('secret-token')));
       expect(find.text('Sign in to continue'), findsOneWidget);
-      expect(tester.widget<TextField>(find.byKey(const Key('ask-field-token'))).obscureText, isTrue);
+      expect(tester.widget<TextField>(find.byKey(const ValueKey('secret-token'))).obscureText, isTrue);
 
-      await tester.tap(find.byKey(const Key('ask-submit')));
+      await tester.enterText(find.byKey(const ValueKey('question-user')), 'ada');
+      await tester.enterText(find.byKey(const ValueKey('secret-token')), 's3cret-CANARY');
       await tester.pump();
-      expect(find.byKey(const Key('ask-problem')), findsOneWidget, reason: 'the user name is required');
-      await tester.enterText(find.byKey(const Key('ask-field-user')), 'ada');
-      await tester.enterText(find.byKey(const Key('ask-field-token')), 's3cret');
-      await tester.tap(find.byKey(const Key('ask-field-telemetry')));
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('ask-submit')));
+      await tester.tap(find.text('Send sealed'));
       await _until(tester, find.byKey(const Key('program-done')));
+      // The host opened the answer: the plain field as plain, the secret as it was typed.
       expect(answered, {
-        'values': {'user': 'ada', 'telemetry': true},
-        'secrets': {'token': 's3cret'},
+        'values': {'user': 'ada'},
+        'secrets': {'token': 's3cret-CANARY'},
       });
       expect(find.text('Thank you'), findsOneWidget);
+      // What the app put on the link holds the secret only sealed.
+      expect(host.wire.where((line) => line.contains('s3cret-CANARY')), isEmpty);
+      expect(host.wire.where((line) => line.contains('"action":"accept"')), hasLength(1));
     });
 
     testWidgets('Cancel closes the install\'s link, which is how the host is told to stop', (tester) async {
@@ -381,9 +380,9 @@ void main() {
       await _page(tester, host.programs());
       await _tap(tester, 'program-install-one_store');
       await tester.tap(find.byKey(const Key('plan-confirm')));
-      await _until(tester, find.byKey(const Key('program-ask')));
+      await _until(tester, find.byKey(const ValueKey('question-user')));
       final before = host.closedLinks;
-      await tester.tap(find.byKey(const Key('ask-cancel')));
+      await tester.tap(find.byKey(const Key('program-cancel')));
       await _until(tester, find.byKey(const Key('program-cancelled')));
       expect(host.closedLinks, before + 1);
     });

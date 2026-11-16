@@ -234,23 +234,31 @@ final class ControlAccountsHost implements AccountsHost {
 
   Future<Object?> _asked(SignIn run, LinkSecretIdentity? secrets, String method, Map<String, Object?> params) async {
     if (method != acpSecretRequestMethod) throw StateError('the caller answers no $method');
-    // A link with no secret to bind by cannot take a typed secret: nothing is asked.
-    if (secrets == null) return const AcpSecretCancelled().toJson();
-    final request = AcpSecretRequestParams.fromJson(params);
-    secrets.identity.verifier.trust(secrets.host);
-    final environment = SecretCardEnvironment(
-      prover: secrets.identity.prover,
-      verifier: secrets.identity.verifier,
-      expected: secrets.host,
-      host: 'Canoa',
-      now: () => _now().millisecondsSinceEpoch ~/ 1000,
-    );
-    try {
-      // A key that is not bound to the host this link proved is never drawn as a form.
-      await environment.verifier.collector(environment.expected, AcpSecretMethod.request, request.context, request.recipient, environment.seconds);
-    } on AcpSecretException {
-      return const AcpSecretCancelled().toJson();
-    }
-    return (await run.ask(request, environment)).toJson();
+    final asked = await openSealedAsk(secrets, params, () => _now().millisecondsSinceEpoch ~/ 1000);
+    if (asked == null) return const AcpSecretCancelled().toJson();
+    return (await run.ask(asked.request, asked.environment)).toJson();
   }
+}
+
+/// Checks a form the host sealed to the key this link was proved by and readies the app's answer to it: what the person types is
+/// sealed to the host and goes nowhere else. Null, which answers the host with a cancel, where the link has no secret to bind by
+/// (nothing is asked) or the request is not bound to the host this link proved (it is never drawn as a form). A sign-in and a
+/// program install put their questions to the person this way and no other.
+Future<SignInAsk?> openSealedAsk(LinkSecretIdentity? secrets, Map<String, Object?> params, int Function() seconds) async {
+  if (secrets == null) return null;
+  final request = AcpSecretRequestParams.fromJson(params);
+  secrets.identity.verifier.trust(secrets.host);
+  final environment = SecretCardEnvironment(
+    prover: secrets.identity.prover,
+    verifier: secrets.identity.verifier,
+    expected: secrets.host,
+    host: 'Canoa',
+    now: seconds,
+  );
+  try {
+    await environment.verifier.collector(environment.expected, AcpSecretMethod.request, request.context, request.recipient, environment.seconds);
+  } on AcpSecretException {
+    return null;
+  }
+  return SignInAsk(request, environment);
 }
