@@ -2,11 +2,12 @@
 //! passes: the browser and the host prove their keys to each other through it, and what follows is sealed in their session.
 
 use alloc::sync::Arc;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use core::time::Duration;
 use std::io::{self, Read, Write};
 use std::sync::{Mutex, PoisonError};
 use std::thread;
+use std::time::Instant;
 
 use coqui_transport::{Channel, Failure};
 use tungstenite::protocol::{Role, WebSocketConfig};
@@ -51,14 +52,20 @@ pub fn upgrade_answer(key: &str) -> String {
     )
 }
 
+/// Pings sent with nothing back from the browser, past which the link is closed.
+const UNANSWERED: u32 = 2;
+
 /// Carries messages, at most `max_message` bytes each, between the browser's WebSocket, already upgraded, and `channel` until
 /// either ends, the session `alive` no longer stands, or `stopped` is set. Returns when both directions have ended.
+/// Every `ping` (never when zero) the browser is pinged, so a proxy that cuts a silent connection keeps the link; one that
+/// sends nothing in answer to `UNANSWERED` pings in a row is closed.
 pub fn run(
     conn: &Conn,
     channel: PipeChannel,
     alive: &(dyn Fn() -> bool + Sync),
     stopped: &AtomicBool,
     max_message: usize,
+    ping: Duration,
 ) {
     let config = WebSocketConfig::default()
         .max_message_size(Some(max_message))
@@ -77,14 +84,34 @@ pub fn run(
     let mut reader = WebSocket::from_raw_socket(ReadHalf(conn.clone()), Role::Server, Some(config));
     let channel = Arc::new(channel);
     let done = Arc::new(AtomicBool::new(false));
+    // Pings sent since the browser last sent anything.
+    let unanswered = Arc::new(AtomicU32::new(0));
     let pump = {
-        let (writer, channel, done) =
-            (Arc::clone(&writer), Arc::clone(&channel), Arc::clone(&done));
+        let (writer, channel, done, unanswered) = (
+            Arc::clone(&writer),
+            Arc::clone(&channel),
+            Arc::clone(&done),
+            Arc::clone(&unanswered),
+        );
         let conn = conn.clone();
         thread::Builder::new()
             .name("canoa-relay".to_owned())
             .spawn(move || {
+                let mut last_ping = Instant::now();
                 while !done.load(Ordering::SeqCst) {
+                    if !ping.is_zero() && last_ping.elapsed() >= ping {
+                        if unanswered.fetch_add(1, Ordering::SeqCst) >= UNANSWERED {
+                            break;
+                        }
+                        last_ping = Instant::now();
+                        let sent = writer
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .send(Message::Ping(Vec::new().into()));
+                        if sent.is_err() {
+                            break;
+                        }
+                    }
                     match channel.receive(Some(PUMP_WAIT)) {
                         Ok(Some(message)) => {
                             let sent = writer
@@ -108,7 +135,12 @@ pub fn run(
         return;
     };
     while !done.load(Ordering::SeqCst) && !stopped.load(Ordering::SeqCst) && alive() {
-        match reader.read() {
+        let read = reader.read();
+        // Any frame from the browser, a pong most of all, shows the link carries traffic both ways.
+        if read.is_ok() {
+            unanswered.store(0, Ordering::SeqCst);
+        }
+        match read {
             Ok(Message::Binary(message)) => {
                 if channel.send(&message).is_err() {
                     break;

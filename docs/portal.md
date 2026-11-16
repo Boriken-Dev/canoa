@@ -38,7 +38,8 @@ browser ──HTTPS──> proxy ──HTTP over a Unix socket──> canoa port
   own person.
 - **Introduces the browser's own key to that host.** The host still proves itself to the browser and the browser to the host by
   key, through the portal, which relays each message (at most `max_message_bytes`) without opening it: a sign-in is not a
-  pairing.
+  pairing. The portal pings each channel every `ping_seconds` (20) so a proxy that cuts a silent connection keeps it, and closes
+  one that has answered none of two pings in a row.
 - **Serves the web app** from `site` to signed-in browsers only.
 
 The portal never reads a person's files and holds no key of theirs. But **its account can start a host as any account the
@@ -323,6 +324,7 @@ max_sessions_per_user = 8
 idle_seconds = 1800
 max_hosts = 64
 max_message_bytes = 4194304
+ping_seconds = 20                      # a ping on each relayed channel this often (0: none); two unanswered close it
 max_failures_per_pair = 3
 max_failures_per_address = 10
 slow_after_user_failures = 4

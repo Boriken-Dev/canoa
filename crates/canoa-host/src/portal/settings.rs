@@ -137,6 +137,9 @@ pub struct Settings {
     pub max_relays_per_user: usize,
     /// `max_message_bytes`: the largest message a channel carries either way.
     pub max_message: usize,
+    /// `ping_seconds`: how often a relayed channel is pinged, so a proxy that cuts a silent connection keeps it; a channel that
+    /// has not answered two pings in a row is closed. 0 sends none.
+    pub ping: Duration,
     /// `request_seconds`: how long a request has to arrive.
     pub request: Duration,
     /// `keep_alive_seconds`: how long an idle connection is kept.
@@ -184,6 +187,7 @@ impl Default for Settings {
             max_hosts: 64,
             max_relays_per_user: 16,
             max_message: 4 * 1024 * 1024,
+            ping: Duration::from_secs(20),
             request: Duration::from_secs(10),
             keep_alive: Duration::from_secs(30),
             max_requests: 1000,
@@ -247,6 +251,7 @@ struct Raw {
     max_hosts: Option<usize>,
     max_relays_per_user: Option<usize>,
     max_message_bytes: Option<usize>,
+    ping_seconds: Option<u64>,
     request_seconds: Option<u64>,
     keep_alive_seconds: Option<u64>,
     max_requests: Option<usize>,
@@ -343,6 +348,7 @@ impl Settings {
         settings.failure_floor = seconds(raw.failure_floor_seconds, settings.failure_floor);
         settings.request = seconds(raw.request_seconds, settings.request);
         settings.keep_alive = seconds(raw.keep_alive_seconds, settings.keep_alive);
+        settings.ping = seconds(raw.ping_seconds, settings.ping);
         let count = |value: Option<usize>, now: usize| value.unwrap_or(now);
         settings.max_failures_per_pair =
             count(raw.max_failures_per_pair, settings.max_failures_per_pair);
@@ -491,6 +497,24 @@ mod tests {
         assert_eq!(settings.max_hosts, 3);
         assert_eq!(settings.max_failures_per_pair, 3);
         assert!(settings.socket.is_some());
+    }
+
+    #[test]
+    fn a_channel_is_pinged_every_twenty_seconds_unless_the_file_says_otherwise() {
+        assert_eq!(Settings::default().ping.as_secs(), 20);
+        assert_eq!(
+            Settings::from_toml("ping_seconds = 5")
+                .unwrap()
+                .ping
+                .as_secs(),
+            5
+        );
+        assert!(
+            Settings::from_toml("ping_seconds = 0")
+                .unwrap()
+                .ping
+                .is_zero()
+        );
     }
 
     #[test]

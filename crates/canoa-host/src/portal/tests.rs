@@ -1103,7 +1103,18 @@ fn open_channel(
     cookie: &str,
     origin: &str,
 ) -> Result<tungstenite::WebSocket<TcpStream>, u16> {
-    let stream = TcpStream::connect(rig.addr).unwrap();
+    open_channel_via(rig, rig.addr, path, cookie, origin)
+}
+
+/// [`open_channel`] reaching the portal at `via`, a proxy in front of it, still naming the portal in `Host`.
+fn open_channel_via(
+    rig: &Rig,
+    via: SocketAddr,
+    path: &str,
+    cookie: &str,
+    origin: &str,
+) -> Result<tungstenite::WebSocket<TcpStream>, u16> {
+    let stream = TcpStream::connect(via).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
@@ -1234,6 +1245,118 @@ fn a_message_over_the_limit_ends_the_channel() {
         socket.read().is_err()
     });
     assert!(ended, "a message over the limit was carried");
+}
+
+/// A proxy in front of `target` that cuts a connection which has carried no byte either way for `idle`, as one with a short
+/// client timeout does. Returns its address.
+fn idle_cutting_proxy(target: SocketAddr, idle: Duration) -> SocketAddr {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        while let Ok((client, _)) = listener.accept() {
+            let Ok(server) = TcpStream::connect(target) else {
+                continue;
+            };
+            let last = Arc::new(Mutex::new(std::time::Instant::now()));
+            for (mut from, mut to) in [
+                (client.try_clone().unwrap(), server.try_clone().unwrap()),
+                (server, client),
+            ] {
+                let last = Arc::clone(&last);
+                thread::spawn(move || {
+                    from.set_read_timeout(Some(Duration::from_millis(50)))
+                        .unwrap();
+                    let mut buffer = [0u8; 4096];
+                    loop {
+                        match from.read(&mut buffer) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                *last.lock().unwrap() = std::time::Instant::now();
+                                if to.write_all(&buffer[..n]).is_err() {
+                                    break;
+                                }
+                            }
+                            Err(error)
+                                if matches!(
+                                    error.kind(),
+                                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                                ) =>
+                            {
+                                if last.lock().unwrap().elapsed() >= idle {
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                    let _ = from.shutdown(std::net::Shutdown::Both);
+                    let _ = to.shutdown(std::net::Shutdown::Both);
+                });
+            }
+        }
+    });
+    addr
+}
+
+/// Reads and answers whatever arrives for `span`, as a browser does by itself.
+fn stay_for(socket: &mut tungstenite::WebSocket<TcpStream>, span: Duration) {
+    socket
+        .get_mut()
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .unwrap();
+    let until = std::time::Instant::now() + span;
+    while std::time::Instant::now() < until {
+        match socket.read() {
+            Ok(_) | Err(tungstenite::Error::Io(_)) => {}
+            Err(error) => panic!("the channel ended: {error}"),
+        }
+        let _ = socket.flush();
+    }
+    socket
+        .get_mut()
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+}
+
+#[test]
+fn a_proxy_that_cuts_a_silent_connection_keeps_a_channel_the_portal_pings() {
+    let rig = rig(|settings| settings.ping = Duration::from_millis(200), 0);
+    let cookie = signed_in(&rig, "canoatesta");
+    let proxy = idle_cutting_proxy(rig.addr, Duration::from_millis(1000));
+    let mut socket =
+        open_channel_via(&rig, proxy, "/portal/ws/control", &cookie, &origin(&rig)).unwrap();
+    assert_eq!(exchange(&mut socket, b"one"), "canoatesta/control:one");
+    stay_for(&mut socket, Duration::from_millis(3000));
+    assert_eq!(exchange(&mut socket, b"two"), "canoatesta/control:two");
+}
+
+#[test]
+fn a_channel_that_answers_no_ping_is_closed_after_two() {
+    let rig = rig(|settings| settings.ping = Duration::from_millis(200), 0);
+    let cookie = signed_in(&rig, "canoatesta");
+    let mut socket = open_channel(&rig, "/portal/ws/control", &cookie, &origin(&rig)).unwrap();
+    // Read the bytes raw, so no pong is ever sent.
+    let raw = socket.get_mut();
+    raw.set_read_timeout(Some(Duration::from_millis(100)))
+        .unwrap();
+    let mut buffer = [0u8; 256];
+    let began = std::time::Instant::now();
+    let ended = loop {
+        match raw.read(&mut buffer) {
+            Ok(0) => break true,
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(_) => break true,
+        }
+        if began.elapsed() > Duration::from_secs(5) {
+            break false;
+        }
+    };
+    assert!(ended, "a channel that answered no ping stayed open");
 }
 
 #[test]

@@ -1712,6 +1712,7 @@ fn upgrade(inner: &Inner, conn: &mut Conn, request: &Request) {
         &|| inner.sessions.alive(id),
         &inner.stopped,
         max_message,
+        inner.settings.ping,
     );
     drop(lease);
 }
