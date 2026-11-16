@@ -1,4 +1,4 @@
-# coqui-transport-guatiao/. at f09bf2dca4bba2555d4d97ee93f7b05a9a109702, with what it inherits written out.
+# coqui-transport-guatiao/. at 7df18c14c1bffe752e6ddd98745545c598671a58, with what it inherits written out.
 example = [{ name = "pipe_library", crate-type = ["cdylib"], required-features = ["pipe"] }]
 test = [{ name = "macro", required-features = ["contract"] }, { name = "pipe", required-features = ["pipe", "contract"] }, { name = "library", required-features = ["pipe", "contract"] }, { name = "websocket", required-features = ["websocket", "contract"] }]
 [package]
@@ -42,16 +42,16 @@ rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
 features = ["derive"]
 [dependencies.coqui-transport]
 git = "https://github.com/Boriken-Dev/coqui-transport"
-rev = "1283116a22de6a8918faa3d0ebd78b8b6777ff0a"
+rev = "2601da58de9cac8f635060e4746864e9b238c6c5"
 default-features = false
 [dependencies.coqui-transport-pipe]
 git = "https://github.com/Boriken-Dev/coqui-transport-pipe"
-rev = "1bf161f4d9349e9821d384859d3acdfb58aeae94"
+rev = "76d97671d87372be5d29263a98198a08fea5eaed"
 features = ["channel"]
 optional = true
 [dependencies.coqui-transport-web]
 git = "https://github.com/Boriken-Dev/coqui-transport-web"
-rev = "c8df84264ff8e60907f5cedf269104e91d5add22"
+rev = "df5be67b3a18e23b2d0073eb0f795a49a4221c93"
 optional = true
 [dependencies.url]
 version = "2.5"

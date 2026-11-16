@@ -1,0 +1,362 @@
+# `coqui-access-kit` — API header
+
+Header-file-style reference for the `coqui-access-kit` crate: every public item with its
+signature, contract and gotchas, so the crate can be used without reading its source. It
+ships inside the package and is self-contained. Development documentation lives with the
+source at <https://github.com/Boriken-Dev/coqui-access>.
+
+| Feature | Adds | Default |
+| --- | --- | --- |
+| `file` | module `file`: `FileTable`, `Codec`, `Source`, private writes; `serde` and `guatiao-serde` with no format feature | no |
+| `cache` | module `cache`: `Cached`, `CacheOptions`, `CacheSetting`; `moka` (`sync` only) | no |
+
+MSRV Rust 1.89. A default build depends on `coqui-access` (for guatiao), `coqui-builder`, `argon2`, `data-encoding`,
+`getrandom`, `sha2` and `subtle`. No feature adds a format crate: a caller supplies its own codec. No
+`unsafe` code. Public modules: `table`, `hash`, `secret`, `file` (feature `file`); the main
+items of the first three are re-exported at the root. Table errors are `SourceError`; codecs
+answer `CodecError`; helpers elsewhere return plain `String`s. None contains file contents or
+secrets.
+
+## Secrets (`coqui_access_kit::secret`)
+
+```rust
+pub const SECRET_CHARS: usize = 43;
+pub fn generate(prefix: &str) -> Result<String, String>;
+pub fn identifier() -> Result<String, String>;
+pub fn hash(secret: &str, domain: Option<&str>) -> String;
+pub fn same(a: &str, b: &str) -> bool;
+pub fn is_hash(value: &str) -> bool;
+```
+
+- `generate` returns `prefix` plus 32 random bytes as 43 base64url characters. Errors only
+  when the OS random source is unavailable.
+- `identifier` returns 128 random bits as 32 lowercase hex characters.
+- `hash` is SHA-256 as 64 lowercase hex characters. With a `domain` the digest covers the
+  domain, a zero byte, then the secret, so a digest kept for one purpose cannot be presented
+  for another.
+- `same` compares in time independent of where the strings differ. `is_hash` checks the
+  64-lowercase-hex shape.
+
+## Picking an account (`coqui_access_kit::pick`)
+
+```rust
+pub const IP_FIELD: &str = "san.ip"; pub const DNS_IP_FIELD: &str = "san.dns.ip";
+pub struct Pick { pub field: String, pub by: String, pub domain: Option<String>, pub ip_in_dns: bool }
+    // non_exhaustive; coqui_builder::Describe, ip_in_dns defaulting to true
+impl Pick { pub fn new(field, by) -> Self; pub fn domain(self, impl Into<String>) -> Self; pub fn ip_in_dns(self, bool) -> Self;
+            pub fn check(&self) -> Result<(), &'static str>; }   // Err for a `by` of "filter" or "claims"; pick() ignores such a pick
+pub enum Picked { Absent, Ambiguous, Found { by: String, value: String } }   // non_exhaustive
+pub fn pick(fields: &BTreeMap<String, Vec<String>>, order: &[Pick]) -> Picked;
+```
+
+- `fields` is a credential's named fields, as coqui-peer-tls's `CertificateFields::to_map`
+  writes them. Picks are tried in order: the first finding one distinct value decides
+  (`Found { by, value }`, answered as `Lookup { by, value }`); one finding two different values
+  is `Ambiguous`; none finding a value is `Absent`.
+- `domain` keeps values ending `@<domain>` (ASCII case-insensitive) and yields the part before.
+- `san.ip` also reads `san.dns.ip` (a DNS name that is an IP literal) unless `ip_in_dns` is
+  false; addresses compare in one spelling (IPv6 compressed, IPv4-mapped as IPv4), so the
+  same address in both kinds of name is one value.
+
+## Matching claims to an account (`coqui_access_kit::matcher`)
+
+```rust
+pub const MAX_CANDIDATES: usize = 16;
+pub struct MatchRule { pub by: String, pub template: String, pub pins: Option<String>, pub domain: Option<String> }
+    // non_exhaustive; Describe, deny_unknown_fields; MatchRule::new(by, template), .pins(source_name), .domain(realm)
+pub fn default_rules() -> Vec<MatchRule>;    // name {san.upn}; email {san.email}; not the common name
+pub struct MatcherConfig { pub rule: Vec<MatchRule> }   // non_exhaustive; Describe; Default = default_rules(); an empty list matches nobody
+pub struct MatcherError;                                 // Display, Error, From -> ProviderError (bad value); never quotes a template
+pub enum Match { Found(Person), NotFound, Ambiguous }    // non_exhaustive
+pub struct Matched { pub result: Match, pub notes: Vec<String> }
+pub struct MatcherBuilder;   // Matcher::builder(config).pin_source(name, Arc<dyn PinSource>).build()
+pub struct Matcher;          // Default = the default rules
+impl Matcher {
+    pub fn new(config: MatcherConfig) -> Result<Self, MatcherError>;
+    pub fn builder(config: MatcherConfig) -> MatcherBuilder;
+    pub fn resolve(&self, lookup: &Lookup, directory: &dyn Directory) -> Result<Matched, ProviderError>;
+}
+pub fn escape_filter_value(value: &str) -> String;
+```
+
+- A `Lookup` with `by: "claims"` and claims is matched; with no claims, `NotFound`; `by: "filter"`
+  (raw text handed in) is `NotFound` and never reaches the directory; any other `by` is looked up as
+  it is. Rules are tried in order. A rule renders its template once per
+  combination of the values of the claims it names (at most `MAX_CANDIDATES`, else an `Err`) and
+  asks the directory for each: a claim that is missing, or whose value is empty, or whose `domain`
+  has no `@`, makes no candidate. `by` is `name`, `email` or `id` (the lookup `{by, value}`) or
+  `filter` (`{by: "filter", value: <filter>}`, a directory that supports it, such as ldap).
+- A rule using `local` must name `domain` (a realm: only claim values ending `@<domain>`, any case,
+  count for it) or `pins`; `Matcher::new` refuses it otherwise, as it does a `domain` without `local`,
+  or one that is empty or holds `@` or whitespace. Stripping the realm loses what ties a name to it.
+- Templates: `{claim}` and `{claim|filter|...}` (`lower`, `upper`, `local` = before the last `@`,
+  `domain` = after), `{{` and `}}` for braces, claim names lowercase words with `.`, `_`, `-`. A
+  template names at least one claim. A `filter` template is one balanced parenthesised group.
+- **In a `filter` rule every substituted value is escaped** with `escape_filter_value`: `*`, `(`,
+  `)`, `\`, NUL, controls and every byte of a non-ASCII character become `\xx` (lowercase hex).
+  The template's own text is the filter's structure and is never escaped. Names, emails and ids are
+  substituted as they are.
+- A rule that finds the same account (`Person::id`) through several candidates found one. Exactly one
+  account ends the walk with `Found`; more than one, or a directory answering `error::ambiguous`,
+  ends it with `Ambiguous`; none goes on to the next rule. A directory `Err` is returned, never
+  skipped. A rule with `pins` asks the named source about the one account it found and counts
+  `PinCheck::Holds` as a find; `Absent` and `Refused` (whose reason is added to `notes`) go on.
+- `build`/`new` refuse: a `by` other than the four, an unmatched brace, a claim name or filter that
+  is not valid, a template naming no claim (it would be one account for everybody), a `filter`
+  that is not one group, a rule naming a pin source that was not given.
+
+## Pin sources (`coqui_access_kit::pins`)
+
+```rust
+pub struct PinSet { pub fingerprint: Option<String>, pub key: Option<String> }  // non_exhaustive; `sha256:<hex>` lowercase
+impl PinSet { pub fn from_claims(&Claims) -> Self; pub fn is_empty(&self) -> bool; }   // claims `fingerprint`, `spki`
+pub enum PinCheck { Holds, Absent, Refused(String) }     // non_exhaustive
+pub trait PinSource: Send + Sync { fn check(&self, person: &Person, pins: &PinSet) -> Result<PinCheck, ProviderError>; }
+pub fn pin_matches(text: &str, wanted: &PinSet) -> Option<bool>;   // None: not a pin line
+pub struct AccountPin { pub name: String, pub pin: String }        // non_exhaustive; Keyed; Debug redacted
+pub struct TablePins;   // PinSource over a Table<AccountPin>: TablePins::new(Arc<dyn Table<AccountPin>>) -> Result<Self, SourceError>
+// pins::authorized
+pub const MAX_FILE_BYTES: u64 = 64 * 1024;  pub const MAX_PIN_LINES: usize = 1024;
+pub enum FileRead { Text(String), Missing }               // non_exhaustive
+pub struct ReadFailure;                                    // new(reason), reason(); Error
+pub trait PinFileReader: Send + Sync { fn read(&self, account: &Person, path: &Path) -> Result<FileRead, ReadFailure>; }
+pub struct DirectReader;                                   // the default reader; Clone, Default; DirectReader::new(), .timeout(Duration) (default READ_TIMEOUT 2 s), .max_waiting(usize) (default MOST_WAITING 8)
+pub const READ_TIMEOUT: Duration = 2 s;  pub const MOST_WAITING: usize = 8;
+pub struct AuthorizedFile;   // AuthorizedFile::new(path_template) -> Result<Self, TemplateError>; .reader(Arc<dyn PinFileReader>); PinSource
+```
+
+- A source is asked about **one account a rule already named**, never to scan. It answers
+  `Holds`, `Absent`, or `Refused(reason)` (counted as no pins and reported); `Err` is "could not
+  find out" and ends the match with that error.
+- **`AuthorizedFile`**: the file is one pin per line, `sha256:<hex>` (fingerprint) or
+  `spki-sha256:<hex>` (public key), then optional whitespace and a comment; blank lines and lines
+  starting `#` are ignored; a line that is not a pin is skipped and, when no pin is held, counted in
+  the refusal reason; more than `MAX_PIN_LINES` lines is a refusal. The path template takes `{home}`
+  (the person's `home` attribute, absolute), `{name}` and `{id}` (each one safe path component: not
+  empty, `.`, `..`, with no `/`, `\` or control character, else a refusal before any read); the
+  rendered path must be absolute with no `..`. A missing `home` is a refusal; a file that is not
+  there is `Absent`.
+- **The reader contract.** The reader is the only thing that touches the file system. It receives the
+  account (with `home` and `uid` attributes as the directory gave them) and the rendered path, and
+  returns the text, `Missing`, or a `ReadFailure` with the reason it would not. The library parses what
+  a reader returns and reports a refusal as no pins; it does not repeat any check it cannot see. A
+  consumer whose process cannot read homes (it reads through a helper running as root) supplies its
+  own reader and makes the checks below wherever it has access.
+- **`DirectReader`** (Unix; elsewhere it refuses everything): needs the account's `uid` and `home`
+  attributes and a path under the home. It walks from the real home down one component at a time with
+  `symlink_metadata`: no component (the file included) may be a symlink or on another device than the
+  home, directories must be directories, and the home, each directory and the file must be owned by the
+  uid or root and not writable by group or others. It then opens the file with `O_NOFOLLOW |
+  O_NONBLOCK` (the `libc` constants, Unix only), and checks the opened file again: a regular file, the
+  same device and inode the walk saw, at most `MAX_FILE_BYTES`. The whole walk and read runs on a thread
+  the reader waits for at most its `timeout` (a file system that never answers is a refusal "timed out");
+  the thread stays stuck until the file system answers; one read waits per account (a hung home stops that account only), at most `max_waiting` (8) in all per
+  reader, before further reads are refused unseen; the place is given back by a drop guard, even on a panic. A directory above the file swapped by its owner
+  between the walk and the open is the gap no portable call closes.
+- `MtlsAccounts` implements `PinSource` over its own records (`coqui-access-mtls`).
+
+## Record limits (`coqui_access_kit::record`; `RecordLimits` re-exported at the root)
+
+```rust
+pub struct RecordLimits { pub groups: Limit, pub field_bytes: Limit, pub email_bytes: Limit,
+                          pub display_name_bytes: Limit }
+    // non_exhaustive, Copy; coqui_builder::Describe (each key defaulting; a bound is a count or `none`); Default = DEFAULT
+impl RecordLimits {
+    pub const DEFAULT: Self;     // 256 groups, 256-byte id/name/group, 320-byte email, 1 024-byte display name
+    pub const UNBOUNDED: Self;
+    pub const fn groups(self, Limit) -> Self; pub const fn field_bytes(self, Limit) -> Self;
+    pub const fn email_bytes(self, Limit) -> Self; pub const fn display_name_bytes(self, Limit) -> Self;
+    pub fn allows_field(&self, &str) -> bool; pub fn allows_groups(&self, &[String]) -> bool;
+    pub fn allows_email(&self, &str) -> bool; pub fn allows_display_name(&self, &str) -> bool;
+}
+```
+
+- Every check is also `check_field`'s: not empty, no control character. The bounds are
+  resources, not trust: lifting one is not reported.
+
+## Caches (`coqui_access_kit::cache`, feature `cache`; re-exported at the root)
+
+```rust
+pub const DEFAULT_TTL: Duration = 5 s; pub const DEFAULT_NEGATIVE_TTL: Duration = 1 s;
+pub const DEFAULT_MAX_ENTRIES: u64 = 10_000;
+pub struct CacheOptions { pub ttl: Duration, pub negative_ttl: Duration, pub max_entries: u64 }
+    // non_exhaustive, Copy; coqui_builder::Describe (a duration reads `5`, `1.5`, `5s`, `250ms`; each key defaulting)
+impl CacheOptions {
+    pub const fn off() -> Self;                         // keeps nothing
+    pub const fn ttl(self, Duration) -> Self; pub const fn negative_ttl(self, Duration) -> Self;
+    pub const fn max_entries(self, u64) -> Self;
+    pub fn exceeds_default(&self) -> bool;              // a ttl above the defaults: report it
+}
+impl Default for CacheOptions;                          // 5 s, 1 s, 10 000
+pub enum CacheSetting { Enabled(bool), Tuned(CacheOptions) }   // coqui_builder::Describe, untagged: `cache = true`, `false` or a table; in the environment `APP_CACHE=false` or `APP_CACHE__TTL=30s` (not both); Default Enabled(true)
+impl CacheSetting { pub fn options(&self) -> CacheOptions; }
+pub struct Cached<T: ?Sized>;                           // Debug: options and counts only
+impl<T: ?Sized> Cached<T> {
+    pub fn new(inner: Arc<T>, options: CacheOptions) -> Self;
+    pub fn inner(&self) -> &Arc<T>; pub fn options(&self) -> CacheOptions;
+    pub fn invalidate(&self, lookup: &Lookup); pub fn invalidate_all(&self);
+}
+impl<T: Directory + ?Sized> Directory for Cached<T>;    // keyed by (by, value)
+impl<T: Authorizer + ?Sized> Authorizer for Cached<T>;  // keyed by person id, name, sorted groups, action, resource, ancestors
+impl<T: Accounts + ?Sized> Accounts for Cached<T>;      // delegates; put/remove clear everything kept
+```
+
+- A found person and a grant are kept `ttl`; "not found" (`None`) and a denial
+  `negative_ttl`; errors never. At most `max_entries` of each kind. Not an `Authenticator`:
+  a credential is always checked at the source.
+- Revocation window: after a change at the source, a removed account or a withdrawn
+  permission can still pass a cached lookup or decision for up to `ttl`, and a new one can be
+  refused for up to `negative_ttl`, unless `invalidate`/`invalidate_all` is called.
+- No background thread: moka expires entries as the cache is used.
+
+## Files (`coqui_access_kit::file`, feature `file`)
+
+```rust
+pub const DEFAULT_MAX_BYTES: usize = 1024 * 1024;
+pub struct CodecError;                  // non_exhaustive, Copy, Error; CodecError::new()
+pub trait Codec: Send + Sync {
+    fn name(&self) -> &'static str;                                  // "TOML", for errors
+    fn presentation(&self) -> guatiao_serde::Presentation;           // default Presentation::new()
+    fn write<D: Serialize + ?Sized>(&self, document: &D) -> Result<String, CodecError>;
+    fn read<'de, S: DeserializeSeed<'de>>(&self, text: &'de str, seed: S) -> Result<S::Value, CodecError>;
+}
+pub struct FileTable<T, C>;             // Debug (path, section, format name)
+impl<T, C> FileTable<T, C> {
+    pub fn new(path: impl Into<PathBuf>, section: impl Into<String>, codec: C) -> Self;
+    pub fn max_bytes(self, max: usize) -> Self;                      // default DEFAULT_MAX_BYTES
+    pub fn path(&self) -> &Path;
+}
+impl<T: Keyed + Clone + Send + Walk + FromWalk, C: Codec> Table<T> for FileTable<T, C>;
+pub struct Source<F> { pub file: Option<FileSource<F>> }             // coqui_builder::Describe, F: Describe
+pub struct FileSource<F> { pub path: String, pub format: F, pub max_bytes: Option<u32> }
+    // coqui_builder::Describe; format required; max_bytes absent is the provider's default (DEFAULT_MAX_BYTES unless it sizes one)
+impl<F> Source<F> {
+    pub fn file(path: impl Into<String>, format: F) -> Self;
+    pub fn max_bytes(self, max: u32) -> Self;                        // the file's bound, in bytes
+    pub fn max_bytes_unless_set(self, max: u32) -> Self;             // a provider's sized default; the configuration wins
+    pub fn sibling(&self, suffix: &str) -> Self where F: Clone;      // "<path>.<suffix>", same format
+    pub fn open<T>(&self, section: &str) -> Result<Arc<dyn Table<T>>, SourceError>
+        where F: Codec + Clone + 'static, T: Keyed + Clone + Send + Walk + FromWalk + 'static;
+}
+pub struct Stamp;                       // Debug, Clone, Copy, PartialEq, Eq
+pub fn stamp(path: &Path) -> Result<Option<Stamp>, String>;
+pub fn read_bounded(path: &Path, max_bytes: usize) -> Result<Option<String>, String>;
+pub fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String>;
+```
+
+- `stamp` identifies a writing of a file by modification time, length and (Unix) inode;
+  `None` when the file is absent.
+- `read_bounded` returns `None` for a missing file; errors for unreadable, longer than
+  `max_bytes`, or non-UTF-8 content.
+- `write_private` writes `bytes` to a fresh file beside `path` (created new, `0600` on Unix),
+  syncs, and renames over `path`. The directory must exist.
+- `FileTable` writes `{ <section>: [record, ..] }` through `C::write` and reads it back
+  through `C::read` with a seed of its own; each record crosses with guatiao-serde's
+  `Walked` and `from_deserializer`, so `T` needs `#[derive(ToValue, FromValue)]` (which also
+  stream). Every read compares the file's stamp, so another process's write is a new
+  revision. A missing file is empty. Over `max_bytes` (read, or about to be written), an
+  unknown top-level key, a refused record or a document the codec refuses is a `SourceError`
+  in the kit's own words (`file has an unknown top-level key`, `a record in the file is
+  invalid`, `file is not a valid <name> table`): a codec's error, which may quote the
+  document, is never shown. A read-modify-write (`put`, `remove`, `update`) holds an exclusive
+  operating-system lock (`File::lock`, Rust 1.89) on a file beside the table, `<path>.lock`, from the
+  read to the write, in this and every other process: no update is lost, and `update` computes its
+  change from the records it replaces. The lock file is created with the table's owner-only mode and
+  left in place. Reads take no lock (the file is replaced whole). On a filesystem whose locks are
+  advisory or unsupported (some network mounts) the guarantee is the filesystem's.
+- A codec reads with `seed.deserialize(..)` and should refuse trailing text (serde_json's
+  `Deserializer::end`). Through a self-describing format's `deserialize_any` a byte string is
+  only what the codec's `Presentation` spells; the providers' records hold no bytes.
+- `Source::open` is `Invalid` for no kind or a blank path, and reads nothing yet.
+
+## Tables (`coqui_access_kit::table`)
+
+```rust
+pub enum SourceError { ReadOnly, Invalid(String), Unavailable(String) }   // non_exhaustive, Error
+impl SourceError {
+    pub fn invalid(reason: impl Into<String>) -> Self; pub fn unavailable(reason: impl Into<String>) -> Self;
+    pub fn reading(&self, table: &str) -> ProviderError;   // always GUATIAO_ERR_INTERNAL, "<table>: <reason>"
+    pub fn writing(&self, table: &str) -> ProviderError;   // ReadOnly UNSUPPORTED, Invalid BAD_VALUE, else INTERNAL
+}
+pub struct Revision;                    // Copy, Eq, Ord, Default; Revision::new(u64), .get()
+pub trait Keyed { fn key(&self) -> Cow<'_, str>; }   // borrowed when held as text, owned when written from a value
+pub struct Snapshot<T> { pub revision: Revision, pub records: Vec<T> }     // non_exhaustive; Snapshot::new
+pub trait Table<T>: Send + Sync {
+    fn load(&self) -> Result<Snapshot<T>, SourceError>;
+    fn changes_since(&self, since: Revision) -> Result<Option<Snapshot<T>>, SourceError>;  // default: load + compare
+    fn put(&self, record: T) -> Result<(), SourceError>;        // default Err(ReadOnly); same key replaces
+    fn remove(&self, key: &str) -> Result<bool, SourceError>;   // default Err(ReadOnly); true when it was there
+    fn update(&self, make: &mut Update<'_, T>) -> Result<(), SourceError>;   // default: load, make, put
+}
+pub type Update<'a, T> = dyn FnMut(&[T]) -> Result<Option<T>, SourceError> + 'a;   // records read -> the record to put, or None
+pub struct MemoryTable<T>;              // Table<T> for T: Keyed + Clone + Send
+impl<T> MemoryTable<T> { pub fn new() -> Self; pub fn from_records(impl IntoIterator<Item = T>) -> Self; }
+pub struct Reloading<T>;                // Debug
+impl<T: Keyed + Clone> Reloading<T> {
+    pub fn new(table: Arc<dyn Table<T>>, validate: impl Fn(&[T]) -> Result<(), SourceError> + Send + Sync + 'static) -> Result<Self, SourceError>;
+    pub fn read<R>(&self, read: impl FnOnce(&[T]) -> R) -> Result<R, SourceError>;
+    pub fn put_with<R>(&self, make: impl FnOnce(&[T]) -> Result<(T, R), SourceError>) -> Result<R, SourceError>;
+        // `make` runs against the records the table read for this update (through `Table::update`)
+    pub fn remove(&self, key: &str) -> Result<bool, SourceError>;
+}
+pub fn check_keys<T: Keyed>(records: &[T], max: usize) -> Result<(), SourceError>;
+pub fn check_field(value: &str, max_bytes: usize) -> bool;   // non-empty, <= max_bytes, no control characters
+pub fn unix_now() -> i64;                                    // whole seconds since the epoch; 0 before 1970
+```
+
+- A `Table` is any source: memory, a file with a codec, SQL, an HTTP API. The caller
+  implements it for the storage it picks; the kit supplies no codec. A table that implements
+  only `load` is a read-only source.
+- `MemoryTable` revision counts its changes; `from_records` keeps the last of a repeated key.
+- `Reloading` calls `changes_since` on every use, so it must be cheap. Every snapshot is
+  checked with `validate`; a table that has become unreadable or invalid is an error, never a
+  stale answer. `put_with` validates the records as they would be with the new one before
+  putting it, so a refused change leaves the table alone. `make` is run through `Table::update`,
+  against the records the table read for that update: a `FileTable` reads them under its lock, so
+  `put_with` is atomic across processes sharing the file; `MemoryTable::update` holds its own lock from the
+  read to the write; a table that does not override `update` is atomic within the one `Reloading` only.
+- `check_keys` refuses more than `max` records or a repeated key; providers call it first.
+- A provider maps a table error with `reading` where it only reads (a table it cannot read
+  means "could not find out", never "no") and with `writing` where it puts, removes or opens
+  a table from configuration.
+
+## Hashing (`coqui_access_kit::hash`) - use these with your own data
+
+```rust
+pub const DEFAULT_MAX_PASSWORD_BYTES: Limit = Limit::at(4096);   // coqui_access::Limit
+pub struct Argon2Params;                // Copy, coqui_builder::Describe; Default = 19456 KiB, 2 passes, 1 lane
+impl Argon2Params { pub fn new(memory_kib: u32, iterations: u32, parallelism: u32) -> Result<Self, String>;
+                    pub fn memory_kib(&self) -> u32; pub fn iterations(&self) -> u32; pub fn parallelism(&self) -> u32; }
+pub enum KeyHash { Sha256 /* default */, Argon2id(Argon2Params) }          // non_exhaustive
+// coqui_builder::Describe, tagged: { "algorithm": "sha256" } | { "algorithm": "argon2id", <Argon2Params keys> }
+impl KeyHash { pub fn argon2id() -> Self; pub fn hash(&self, secret: &str) -> Result<String, String>; }
+pub fn verify_key(stored: &str, presented: &[u8]) -> bool;
+pub fn is_key_hash(stored: &str) -> bool;
+pub fn generate_key(prefix: &str) -> Result<String, String>;
+pub struct PasswordHasher;              // Clone; Default = default costs
+impl PasswordHasher {
+    pub fn new(params: Argon2Params) -> Result<Self, String>;
+    pub fn params(&self) -> Argon2Params;
+    pub fn max_password_bytes(self, most: Limit) -> Self;            // default DEFAULT_MAX_PASSWORD_BYTES
+    pub fn hash(&self, password: &str) -> Result<String, String>;
+    pub fn verify(&self, stored: Option<&str>, presented: &str) -> bool;
+}
+pub fn verify_password(stored: &str, presented: &str) -> bool;
+pub fn is_password_hash(stored: &str) -> bool;
+```
+
+- Stored strings name their algorithm: `sha256:<64 lowercase hex>` or `$argon2id$v=19$...`
+  (PHC). A table may mix both. A bare digest or any other prefix never verifies.
+- `KeyHash::hash` is `Err` only for Argon2id (RNG or parameters). `verify_key` branches only on
+  the stored prefix; SHA-256 digests are compared in constant time and Argon2id runs in full.
+  Argon2id keys cost one verification per Argon2id record they are tried against.
+- `Argon2Params::new` rejects what Argon2 refuses (memory under 8 KiB per lane, zero counts).
+  Stored hashes verify with the costs they carry.
+- As configuration `Argon2Params` is `{ memory_kib, iterations, parallelism }`, every key
+  optional with the default above. Reading does not check the combination: one Argon2 refuses
+  is found by `new`, `PasswordHasher::new` and `KeyHash::hash`, with `argon2 parameters are out of
+  range`.
+- `PasswordHasher::new` makes a dummy hash with the same costs; `verify(None, ..)` does the
+  same work and answers `false`, so an unknown name costs what a wrong password does.
+  `hash` rejects empty and over-long passwords; `verify_password` ignores them.
+

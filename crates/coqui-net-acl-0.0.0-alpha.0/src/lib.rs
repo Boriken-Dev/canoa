@@ -19,6 +19,11 @@ use core::str::FromStr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
+#[cfg_attr(
+    feature = "describe",
+    derive(coqui_builder::Leaf),
+    map(rename_all = "lowercase")
+)]
 pub enum Action {
     /// Let the connection through.
     Permit,
@@ -186,22 +191,34 @@ impl fmt::Display for PortRange {
 ///
 /// `source` is matched against the connecting address; `destination`, `port` and `fingerprint`
 /// narrow the rule and are ignored when absent.
+///
+/// With the `describe` feature a rule is described field by field: `source`, `destination` and `port` are
+/// their text forms, and every key but `action` is optional.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "describe",
+    derive(coqui_builder::Describe),
+    map(deny_unknown_fields)
+)]
 pub struct Rule {
     /// What to do on a match.
     pub action: Action,
     /// The connecting address.
+    #[cfg_attr(feature = "describe", map(default, as_text))]
     pub source: IpNet,
     /// The local address connected to (a host with several, or a routed setup). `None` is
     /// any.
+    #[cfg_attr(feature = "describe", map(as_text))]
     pub destination: Option<IpNet>,
     /// The local port.
+    #[cfg_attr(feature = "describe", map(as_text))]
     pub port: Option<PortRange>,
     /// The peer's certificate fingerprint in canonical text (for example
     /// `sha256:<hex>`), compared case-insensitively. A rule with one is decided only after
     /// the handshake.
     pub fingerprint: Option<String>,
     /// A hint, returned in the decision, that a host should log a match.
+    #[cfg_attr(feature = "describe", map(default))]
     pub log: bool,
 }
 
@@ -268,24 +285,22 @@ pub struct BindDecision {
 }
 
 /// An ordered rule list and the action when none matches.
+///
+/// With the `describe` feature a list is described in the shape of its serde text form: a
+/// `default` action and the rules under the key `rule`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(
+    feature = "describe",
+    derive(coqui_builder::Describe),
+    map(deny_unknown_fields)
+)]
 pub struct Acl {
     /// Rules, top to bottom.
+    #[cfg_attr(feature = "describe", map(default, rename = "rule"))]
     pub rules: Vec<Rule>,
     /// The action when no rule matches. [`Action::Deny`] unless set.
+    #[cfg_attr(feature = "describe", map(default))]
     pub default: Action,
-}
-
-/// A setting looser than the strictest, as plain data.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Weakening {
-    /// The setting's name.
-    pub setting: String,
-    /// Its current value.
-    pub value: String,
-    /// The strict value.
-    pub strict: String,
 }
 
 impl Acl {
@@ -447,19 +462,6 @@ impl Acl {
         BindDecision {
             permitted: self.default == Action::Permit,
             rule_index: None,
-        }
-    }
-
-    /// The settings looser than a default deployment, as plain data: a `permit` default.
-    pub fn weakened(&self) -> Vec<Weakening> {
-        if self.default == Action::Permit {
-            vec![Weakening {
-                setting: "acl.default".to_owned(),
-                value: "permit".to_owned(),
-                strict: "deny".to_owned(),
-            }]
-        } else {
-            Vec::new()
         }
     }
 }
@@ -824,7 +826,7 @@ mod tests {
     }
 
     #[test]
-    fn the_listing_reads_like_a_router_and_weakening_is_plain_data() {
+    fn the_listing_reads_like_a_router() {
         let mut named = Rule::new(Action::Permit, net("10.6.0.0/16"));
         named.port = Some("443".parse().unwrap());
         named.log = true;
@@ -836,14 +838,6 @@ mod tests {
             list.to_string(),
             "10 permit 10.6.0.0/16 port 443 log\n20 deny any\ndefault deny\n"
         );
-        assert!(list.weakened().is_empty());
-        let open = Acl {
-            default: Action::Permit,
-            ..Acl::default()
-        };
-        assert_eq!(open.weakened()[0].setting, "acl.default");
-        assert_eq!(open.weakened()[0].value, "permit");
-        assert_eq!(open.weakened()[0].strict, "deny");
     }
 
     #[cfg(feature = "serde")]
