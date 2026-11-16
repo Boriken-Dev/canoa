@@ -93,7 +93,7 @@ void main() {
         ));
         await tester.pumpAndSettle();
         for (final (id, mark) in [('claude', 'claude'), ('codex', 'codex'), ('grok', 'grok'), ('pi', 'pi'), ('antigravity', 'antigravity')]) {
-          expect(_markAt(tester, find.byKey(Key('program-mark-${id}_store'))), mark, reason: '$id');
+          expect(_markAt(tester, find.byKey(Key('program-mark-${id}_store'))), mark, reason: id);
         }
         expect(_markAt(tester, find.byKey(const Key('program-mark-other_store'))), isNull, reason: 'a program with no mark here keeps the generic icon');
         expect(tester.takeException(), isNull);
