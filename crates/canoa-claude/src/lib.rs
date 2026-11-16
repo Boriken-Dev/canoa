@@ -10,17 +10,18 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 
 pub use coqui_acp_claude as acp;
-pub use coqui_acp_claude::ClaudeProvider;
 
 use canoa::preset::SourcePreset;
+use canoa::store::recipe::{Part, Recipe, Release};
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
-    MANAGER_UNKNOWN, MANAGER_WINGET, Part, Platform, Recipe, Release, Serves, StoreInfo, Updatable,
+    MANAGER_UNKNOWN, MANAGER_WINGET, Platform, Serves, StoreInfo, Updatable,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
 use canoa::store::recipe::{
-    bad_value, dotted, get_json, internal, measured_platforms, path_has, pinned, spell, unsupported,
+    bad_value_error, dotted, get_json, internal_error, measured_platforms, path_has, pinned, spell,
+    unsupported_error,
 };
 
 const BASE: &str = "https://downloads.claude.ai/claude-code-releases";
@@ -40,7 +41,11 @@ impl ClaudeRecipe {
         let name = match channel.unwrap_or("latest") {
             "latest" => "latest",
             "stable" => "stable",
-            other => return Err(bad_value(format!("Claude Code has no channel {other:?}"))),
+            other => {
+                return Err(bad_value_error(format!(
+                    "Claude Code has no channel {other:?}"
+                )));
+            }
         };
         let text = tools.fetch_text(&format!("{BASE}/{name}"), 256)?;
         pinned(text.trim())
@@ -152,29 +157,29 @@ impl Recipe for ClaudeRecipe {
                 ("macos", "darwin"),
             ],
         )
-        .ok_or_else(|| unsupported("Claude Code is not published for this system"))?;
+        .ok_or_else(|| unsupported_error("Claude Code is not published for this system"))?;
         let arch = spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")])
-            .ok_or_else(|| unsupported("Claude Code is not published for this processor"))?;
+            .ok_or_else(|| unsupported_error("Claude Code is not published for this processor"))?;
         let key = format!("{os}-{arch}");
         let manifest = get_json(tools, &format!("{BASE}/{version}/manifest.json"))?;
         if manifest["version"].as_str() != Some(version.as_str()) {
-            return Err(internal("the manifest is for another version"));
+            return Err(internal_error("the manifest is for another version"));
         }
-        let entry = manifest["platforms"]
-            .get(&key)
-            .ok_or_else(|| unsupported(format!("version {version} has no build for {key}")))?;
+        let entry = manifest["platforms"].get(&key).ok_or_else(|| {
+            unsupported_error(format!("version {version} has no build for {key}"))
+        })?;
         let binary = entry["binary"].as_str().unwrap_or(if os == "win32" {
             "claude.exe"
         } else {
             "claude"
         });
         if binary.contains(['/', '\\']) || binary.contains("..") {
-            return Err(internal("the manifest names a binary with a path"));
+            return Err(internal_error("the manifest names a binary with a path"));
         }
         let checksum = entry["checksum"]
             .as_str()
             .filter(|c| c.len() == 64 && c.bytes().all(|b| b.is_ascii_hexdigit()))
-            .ok_or_else(|| internal("the manifest gives no SHA-256 for this build"))?;
+            .ok_or_else(|| internal_error("the manifest gives no SHA-256 for this build"))?;
         let download = Download::new(
             format!("{BASE}/{version}/{key}/{binary}"),
             entry["size"].as_u64(),

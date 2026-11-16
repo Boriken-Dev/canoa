@@ -9,15 +9,16 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 
 use canoa::preset::SourcePreset;
+use canoa::store::recipe::{Part, Recipe, Release};
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_NATIVE, MANAGER_UNKNOWN, MANAGER_WINGET,
-    Part, Platform, Recipe, Release, StoreInfo, Updatable,
+    Platform, StoreInfo, Updatable,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
 use canoa::store::recipe::{
-    bad_value, dotted, exe_suffix, measured_platforms, path_has, pinned, serves_when, spell,
-    unsupported,
+    bad_value_error, dotted, exe_suffix, measured_platforms, path_has, pinned, serves_when, spell,
+    unsupported_error,
 };
 
 const BASE: &str = "https://x.ai/cli";
@@ -38,7 +39,7 @@ impl GrokRecipe {
     ) -> Result<String, ProviderError> {
         let name = match channel.unwrap_or("stable") {
             name @ ("stable" | "alpha" | "enterprise") => name,
-            other => return Err(bad_value(format!("Grok has no channel {other:?}"))),
+            other => return Err(bad_value_error(format!("Grok has no channel {other:?}"))),
         };
         let text = tools.fetch_text(&format!("{BASE}/{name}"), 256)?;
         pinned(text.trim())
@@ -130,12 +131,12 @@ impl Recipe for GrokRecipe {
             None => Self::newest(channel, tools)?,
         };
         let os = spell(&platform.os, &[("windows", "windows"), ("linux", "linux")])
-            .ok_or_else(|| unsupported("Grok is not published for this system"))?;
+            .ok_or_else(|| unsupported_error("Grok is not published for this system"))?;
         let arch = spell(
             &platform.arch,
             &[("x86_64", "x86_64"), ("aarch64", "aarch64")],
         )
-        .ok_or_else(|| unsupported("Grok is not published for this processor"))?;
+        .ok_or_else(|| unsupported_error("Grok is not published for this processor"))?;
         let suffix = exe_suffix(&platform.os);
         let download = Download::new(
             format!("{BASE}/grok-{version}-{os}-{arch}{suffix}"),

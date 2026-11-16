@@ -2,9 +2,9 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-One Cargo feature, `store` (the `program_store` kind, which needs `coqui-acp-api`); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
+One Cargo feature, `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
-Everything but the `store` feature is imported from the crate root.
+The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`).
 
 No `unsafe` code (`#![forbid(unsafe_code)]`).
 
@@ -157,25 +157,80 @@ instance's configuration. Constructors: every `#[non_exhaustive]` model has `new
 
 ### `canoa::store::recipe` (feature `store`)
 
-What a crate that packages one agent implements and uses; the host's engine runs it.
+What a crate that packages one agent implements and uses; the host's engine runs it. Each item is public at this path only. The kind's
+own models (`StoreInfo`, `Download`, `Launch`, ...) stay in `canoa::store`.
 
 ```rust
-pub trait Recipe: Send + Sync + 'static { /* info, names, dirs, version_args, parse_version, classify, self_updates,
-    launch_environment, latest, release, launch, version_command, finish */ }
-pub struct Release { pub version, pub parts: Vec<Part>, pub launch, pub steps, pub notices, pub facts, pub changes }  // #[non_exhaustive]; Release::new(version, launch, parts)
-pub struct Part { pub download, pub path, pub unpack: Option<UnpackStep>, pub executable }  // Part::new(download, path), .executable(), .unpacked(step)
-pub struct UnpackStep { pub format, pub into, pub strip, pub skip_links }  // UnpackStep::new(format, into, strip, skip_links)
-pub struct Finish<'a> { pub staging, pub release, pub run: &'a dyn StepRunner, pub tools }  // Finish::new(...)
+pub trait Recipe: Send + Sync + 'static {
+    // required
+    fn info(&self) -> StoreInfo;                       // who the program is
+    fn names(&self) -> &'static [&'static str];        // file names to look for; `.exe` is tried too on Windows
+    fn dirs(&self) -> &'static [&'static str];         // places beside PATH where a publisher's installer puts it
+    fn version_args(&self) -> &'static [&'static str]; // arguments that make it print its version
+    fn parse_version(&self, line: &str) -> Option<String>;
+    fn classify(&self, path: &str) -> (&'static str, Updatable);   // a MANAGER_* and who can update the copy
+    fn launch_environment(&self) -> BTreeMap<String, String>;      // variables that turn its own updater off; never a credential
+    fn latest(&self, channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport;
+    fn release(&self, version: Option<&str>, channel: Option<&str>, platform: &Platform,
+               tools: &Object<dyn InstallTools>) -> Result<Release, ProviderError>;
+    // provided
+    fn self_updates(&self) -> bool { false }
+    fn launch(&self, path: &str, staging: &str, release: &Release) -> Launch;  // default: `Launch::new(path)`, `executable_settings(path)`, `launch_environment()`
+    fn version_command(&self, path: &str, staging: &str, release: &Release) -> (String, Vec<String>);  // default: `(path, version_args)`
+    fn finish(&self, finish: &Finish<'_>) -> Result<(), ProviderError> { Ok(()) } // the step after the files are placed
+}
+pub struct Release { pub version: String, pub parts: Vec<Part>, pub launch: String, pub steps: Vec<String>,
+                     pub notices: Vec<String>, pub facts: BTreeMap<String, String>, pub changes: Vec<Change> }  // #[non_exhaustive]
+impl Release { pub fn new(version: impl Into<String>, launch: impl Into<String>, parts: Vec<Part>) -> Self }
+pub struct Part { pub download: Download, pub path: String, pub unpack: Option<UnpackStep>, pub executable: bool }  // #[non_exhaustive]
+impl Part { pub fn new(download: Download, path: impl Into<String>) -> Self; pub const fn executable(self) -> Self; pub fn unpacked(self, step: UnpackStep) -> Self }
+pub struct UnpackStep { pub format: &'static str, pub into: String, pub strip: u32, pub skip_links: bool }  // #[non_exhaustive]; format is `zip`, `tar` or `tar.gz`
+impl UnpackStep { pub fn new(format: &'static str, into: impl Into<String>, strip: u32, skip_links: bool) -> Self }
+pub struct Finish<'a> { pub staging: &'a str, pub release: &'a Release, pub run: &'a dyn StepRunner, pub tools: &'a Object<dyn InstallTools> }  // #[non_exhaustive]
 pub trait StepRunner { fn exec(&self, program: &str, args: &[&str], extra: &[(&str, &str)]) -> Result<Output, ProviderError>; }
-pub struct Output { pub code: Option<i64>, pub text: String }
+pub struct Output { pub code: Option<i64>, pub text: String }  // #[non_exhaustive]; Output::new(code, text)
 ```
 
-`Recipe`, `Release`, `Part`, `UnpackStep`, `Finish`, `StepRunner` and `Output` are also exported from `canoa::store`. The module's free functions are
-the helpers recipes share: `measured_platforms`, `serves_when`, `executable_settings`, `unsupported`/`internal`/`bad_value` (provider errors),
-`get_json` (a JSON document fetched through `InstallTools`), `valid_version`, `pinned`, `dotted`, `path_has`, `spell`, `exe_suffix`.
+`Release.facts` is what the recipe needs again at `finish` or `version_command`; `changes` is everything the install changes outside the
+version's folder (none, for a store that downloads and places). `StepRunner::exec` is the host's runner: it keeps the person's cancel and
+the apply's deadline, strips credential variables and ones that steer an install (npm's configuration, Node's options, the ssh agent), and
+answers `GONE` (`install cancelled` or `install timed out`) after killing the program's whole tree.
+
+Helpers, free functions of the same module:
+
+```rust
+pub fn measured_platforms() -> Vec<Platform>;                     // windows and linux, x86_64 and aarch64
+pub fn serves_when(provider: &str, key: &str, value: &str) -> Serves;   // takes the program when the provider's settings say key = value
+pub fn executable_settings(path: &str) -> Value;                  // {"executable": path}, which hands a copy to a harness provider
+pub fn get_json(tools: &Object<dyn InstallTools>, url: &str) -> Result<serde_json::Value, ProviderError>;  // fetch_text capped at 4 MiB; INTERNAL when not JSON
+pub fn valid_version(version: &str) -> bool;                      // 1 to 64 bytes of ASCII letters, digits and . - _ +
+pub fn pinned(version: &str) -> Result<String, ProviderError>;    // the version when valid, else BAD_VALUE
+pub fn dotted(line: &str) -> Option<String>;                      // the first word shaped digits.digits.digits... (a valid version), punctuation trimmed
+pub fn path_has(path: &str, needle: &str) -> bool;                // contains, ignoring case and the direction of slashes
+pub fn spell(value: &str, table: &[(&str, &str)]) -> Option<String>;   // the publisher's spelling from (ours, theirs) pairs
+pub const fn exe_suffix(os: &str) -> &'static str;                // ".exe" for exactly "windows", else ""
+pub fn unsupported_error(why: impl AsRef<str>) -> ProviderError; // status UNSUPPORTED
+pub fn internal_error(why: impl AsRef<str>) -> ProviderError;    // status INTERNAL
+pub fn bad_value_error(why: impl AsRef<str>) -> ProviderError;   // status BAD_VALUE
+```
+
+A recipe fetches only through the `InstallTools` it is handed and starts no process of its own: a test in `canoa-host` scans every crate that holds a recipe for `std::process::Command`.
 
 ## `canoa::preset::SourcePreset`
 
-`#[non_exhaustive]`, `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`. How the host starts one coding agent it knows about when canoa.cfg does not name it.
-Fields (`name`, `harness: Option<&str>`, `program`, `args`, `requires`, `search`, `usage`, `managed`) are public; build one in a `const` with
-`SourcePreset::new(name, program)` and `.harness(..)`, `.args(..)`, `.search(..)`, `.usage(..)`, `.managed(..)`. Not behind a feature.
+`#[non_exhaustive]`, `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`. How the host starts one coding agent it knows about when canoa.cfg does not name it. Not behind a feature.
+
+```rust
+pub struct SourcePreset { pub name: &'static str, pub harness: Option<&'static str>, pub program: &'static str,
+    pub args: &'static [&'static str], pub requires: &'static [&'static str], pub search: &'static [&'static str],
+    pub usage: Option<&'static str>, pub managed: Option<&'static str> }
+impl SourcePreset {
+    pub const fn new(name: &'static str, program: &'static str) -> Self;   // no harness, no arguments, nothing else
+    pub const fn harness(self, harness: &'static str) -> Self;             // `claude`, `codex` or `pi`: run in process
+    pub const fn args(self, args: &'static [&'static str]) -> Self;
+    pub const fn requires(self, requires: &'static [&'static str]) -> Self; // other programs it needs, offered only when found
+    pub const fn search(self, search: &'static [&'static str]) -> Self;     // `~` is the home directory, `%NAME%` an environment variable
+    pub const fn usage(self, usage: &'static str) -> Self;
+    pub const fn managed(self, store: &'static str) -> Self;               // the program store whose managed copy runs in place of one found
+}
+```

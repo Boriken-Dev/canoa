@@ -1,7 +1,7 @@
 //! [`Engine`]: the plan, apply and find that every built-in store shares, driven by a [`Recipe`] that holds what is specific
 //! to one program: where it is published, how its download is checked, and how its version is read.
 //!
-//! A recipe describes a release as [`Part`](canoa::store::Part)s: files to fetch into the version's folder, each perhaps unpacked, and a path
+//! A recipe describes a release as [`Part`](canoa::store::recipe::Part)s: files to fetch into the version's folder, each perhaps unpacked, and a path
 //! the program starts from. The engine never runs an installer the publisher wrote: it downloads, checks, places and reads
 //! the version back.
 #![allow(
@@ -17,11 +17,12 @@ use std::path::Path;
 use std::time::Instant;
 
 use canoa::store::recipe::executable_settings;
+use canoa::store::recipe::{Finish, Recipe, Release};
 use canoa::store::{
-    Action, ApplyOutcome, ApplyRequest, Check, FetchRequest, FindRequest, Finish, InstallPlan,
+    Action, ApplyOutcome, ApplyRequest, Check, FetchRequest, FindRequest, InstallPlan,
     InstallPrompter, InstallTools, LatestQuery, LatestReport, Launch, MANAGER_CANOA,
     PROBE_TIMEOUT_MS, PlanRequest, Platform, ProgramCopy, ProgramQuery, ProgramReport, Progress,
-    Recipe, Release, StoreInfo, StoreSettings, UnpackRequest, Updatable,
+    StoreInfo, StoreSettings, UnpackRequest, Updatable,
 };
 use coqui_acp_api::Environment;
 use coqui_acp_api::ProcessSpawner;

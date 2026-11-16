@@ -15,7 +15,8 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use super::protect::{Protected, RECOMMENDED_VARIABLES};
-use canoa::store::{InstallPrompter, Output, StepRunner};
+use canoa::store::InstallPrompter;
+use canoa::store::recipe::{Output, StepRunner};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Secret, Status};
 use coqui_acp_api::{

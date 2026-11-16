@@ -307,19 +307,19 @@ pub fn serves_when(provider: &str, key: &str, value: &str) -> Serves {
 
 /// An error with status `GUATIAO_ERR_UNSUPPORTED`.
 #[must_use]
-pub fn unsupported(why: impl AsRef<str>) -> ProviderError {
+pub fn unsupported_error(why: impl AsRef<str>) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, why.as_ref())
 }
 
 /// An error with status `GUATIAO_ERR_INTERNAL`.
 #[must_use]
-pub fn internal(why: impl AsRef<str>) -> ProviderError {
+pub fn internal_error(why: impl AsRef<str>) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, why.as_ref())
 }
 
 /// An error with status `GUATIAO_ERR_BAD_VALUE`.
 #[must_use]
-pub fn bad_value(why: impl AsRef<str>) -> ProviderError {
+pub fn bad_value_error(why: impl AsRef<str>) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why.as_ref())
 }
 
@@ -329,7 +329,7 @@ pub fn get_json(
     url: &str,
 ) -> Result<serde_json::Value, ProviderError> {
     let text = tools.fetch_text(url, 4 << 20)?;
-    serde_json::from_str(&text).map_err(|e| internal(format!("{url} is not JSON: {e}")))
+    serde_json::from_str(&text).map_err(|e| internal_error(format!("{url} is not JSON: {e}")))
 }
 
 /// Whether `version` is a plain version name a URL can carry.
@@ -346,7 +346,7 @@ pub fn pinned(version: &str) -> Result<String, ProviderError> {
     if valid_version(version) {
         Ok(version.to_owned())
     } else {
-        Err(bad_value(format!("{version:?} is not a version")))
+        Err(bad_value_error(format!("{version:?} is not a version")))
     }
 }
 
@@ -381,12 +381,11 @@ pub fn spell(value: &str, table: &[(&str, &str)]) -> Option<String> {
         .map(|(_, theirs)| (*theirs).to_owned())
 }
 
-/// The suffix of a program file on `os`.
+/// The suffix of a program file on `os`: `.exe` for `windows`, nothing for any other name.
+#[must_use]
 pub const fn exe_suffix(os: &str) -> &'static str {
-    // `str` equality is not const; the two names are compared by length and first byte.
-    if os.len() == 7 && os.as_bytes()[0] == b'w' {
-        ".exe"
-    } else {
-        ""
+    match os.as_bytes() {
+        b"windows" => ".exe",
+        _ => "",
     }
 }

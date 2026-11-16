@@ -1,5 +1,5 @@
 //! The stores built into this binary, registered like the built-in harness providers, and the macro that makes a provider of
-//! a [`Recipe`](canoa::store::Recipe).
+//! a [`Recipe`](canoa::store::recipe::Recipe).
 
 /// A `program_store` provider `$name`, id `$id`, over the recipe `$recipe` (a type with `Default`).
 macro_rules! store_provider {

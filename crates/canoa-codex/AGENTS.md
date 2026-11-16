@@ -1,22 +1,30 @@
 # `canoa-codex` — API header
 
-Header-file-style reference for `canoa-codex`: everything Canoa offers for Codex in one crate, so it can be used without reading the source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
+Header-file-style reference for `canoa-codex`: everything Canoa offers for Codex in one crate, so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `coqui-acp-codex`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No Cargo features. `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `serde_json`, `coqui-acp-codex`.
 
 ## Exports
 
-| Item | Type | What it is |
-| --- | --- | --- |
-| `PRESET` | `canoa::preset::SourcePreset` | `SourcePreset::new("Codex", "codex").harness("codex")`: run in process as the `codex` harness |
-| `CodexRecipe` | `canoa::store::Recipe` | Codex's Store recipe: the `codex-package` tar.gz from the release site, SHA-256 from the release's checksums and the channel's digest; no setting stops its own updater |
-| `CodexProvider` | the `acp_harness` provider | re-exported from `coqui-acp-codex`, never redefined |
-| `acp` | the `coqui-acp-codex` crate | re-exported whole, for the harness code that drives Codex directly |
+```rust
+pub const PRESET: SourcePreset;
+// = SourcePreset::new("Codex", "codex").harness("codex")
 
-`CodexRecipe` is `Debug`, `Default`, `Clone`, `Copy`. It implements `canoa::store::Recipe`; nothing runs it alone. The host's engine (`canoa_host::store::engine::Engine`) plays it, and `canoa-host` wraps it as the guatiao provider `codex_store` (provider ids are the host's, in `canoa_host::store::registry`).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct CodexRecipe;
+impl canoa::store::recipe::Recipe for CodexRecipe { /* every required method, and `self_updates` */ }
 
-## Behaviour that is easy to get wrong
+pub use coqui_acp_codex as acp;   // the provider crate, whole: `acp::CodexProvider` is the `acp_harness` provider, never redefined here
+```
 
-- The recipe only describes: where the publisher serves the program, how a download is checked and how its version is read. It never runs a publisher's installer and changes nothing outside the version's folder; the engine downloads, checks, places and reads the version back.
-- A recipe fetches only through the `InstallTools` it is handed, so a download is bounded and checked by the host.
-- The preset's name and program are what a client lists and what the host looks for on `PATH`; a name `canoa.cfg` already uses is left to the config.
+- `PRESET`: how the host starts Codex when `canoa.cfg` does not name it: run in process as the `codex` harness.
+- `CodexRecipe`: Codex's Store recipe: the `codex-package` tar.gz from the release site, SHA-256 from the release's checksums and the channel's digest; no setting stops its own updater.
+- `acp`: the `coqui-acp-codex` crate re-exported whole, so a host reaches the provider and its history helpers through this crate and needs no direct dependency. It is the only path to them.
+
+Each item is public at this one path. `CodexRecipe` is not a Store provider: `canoa-host` wraps it in its engine as the guatiao provider `codex_store`.
+
+## Gotchas
+
+- The recipe only describes: where the publisher serves the program, how a download is checked and how its version is read. It never runs a publisher's installer and changes nothing outside the version's folder; the host's engine downloads, checks, places and reads the version back.
+- A recipe fetches only through the `InstallTools` it is handed, so a download is bounded and checked by the host, and starts no process of its own (a test in `canoa-host` scans this crate for `std::process::Command`).
+- The preset's name is what a client lists; a name `canoa.cfg` already uses is left to the config. Its program is `CodexRecipe`'s first name, which a test keeps true.

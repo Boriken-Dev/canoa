@@ -14,9 +14,9 @@ use alloc::vec::Vec;
 use core::fmt;
 use std::path::Path;
 
-use canoa_claude::ClaudeProvider;
-use canoa_codex::CodexProvider;
-use canoa_pi::PiProvider;
+use canoa_claude::acp::ClaudeProvider;
+use canoa_codex::acp::CodexProvider;
+use canoa_pi::acp::PiProvider;
 use coqui_acp_api::guatiao::Value;
 use coqui_acp_api::guatiao::library::Object;
 use coqui_acp_api::guatiao::library::Registry;

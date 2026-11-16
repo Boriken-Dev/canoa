@@ -53,6 +53,13 @@ impl SourcePreset {
         self
     }
 
+    /// Offered only when each of `requires` is found as well.
+    #[must_use]
+    pub const fn requires(mut self, requires: &'static [&'static str]) -> Self {
+        self.requires = requires;
+        self
+    }
+
     /// Looked for in `search` when `PATH` has no copy.
     #[must_use]
     pub const fn search(mut self, search: &'static [&'static str]) -> Self {

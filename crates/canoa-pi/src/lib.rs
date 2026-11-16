@@ -13,18 +13,19 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 
 pub use coqui_acp_pi as acp;
-pub use coqui_acp_pi::PiProvider;
 
 use canoa::preset::SourcePreset;
+use canoa::store::recipe::{Finish, Part, Recipe, Release, UnpackStep};
 use canoa::store::{
-    Check, Download, Finish, InstallTools, LatestReport, Launch, MANAGER_NATIVE, MANAGER_NPM,
-    MANAGER_UNKNOWN, Part, Platform, Recipe, Release, Serves, StoreInfo, UnpackStep, Updatable,
+    Check, Download, InstallTools, LatestReport, Launch, MANAGER_NATIVE, MANAGER_NPM,
+    MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, Value};
 
 use canoa::store::recipe::{
-    bad_value, dotted, get_json, internal, measured_platforms, path_has, pinned, spell, unsupported,
+    bad_value_error, dotted, get_json, internal_error, measured_platforms, path_has, pinned, spell,
+    unsupported_error,
 };
 
 /// The Node this store installs Pi with: Pi needs 22.19 or newer.
@@ -114,7 +115,7 @@ impl Recipe for PiRecipe {
             doc["version"]
                 .as_str()
                 .map(str::to_owned)
-                .ok_or_else(|| internal("the registry names no version"))
+                .ok_or_else(|| internal_error("the registry names no version"))
         }) {
             Ok(version) => LatestReport::known(version),
             Err(error) => LatestReport::unknown(error.message().to_owned()),
@@ -135,14 +136,14 @@ impl Recipe for PiRecipe {
                 pinned(
                     doc["version"]
                         .as_str()
-                        .ok_or_else(|| internal("the registry names no version"))?,
+                        .ok_or_else(|| internal_error("the registry names no version"))?,
                 )?
             }
         };
         let os = spell(&platform.os, &[("windows", "win"), ("linux", "linux")])
-            .ok_or_else(|| unsupported("Node is not published for this system"))?;
+            .ok_or_else(|| unsupported_error("Node is not published for this system"))?;
         let arch = spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")])
-            .ok_or_else(|| unsupported("Node is not published for this processor"))?;
+            .ok_or_else(|| unsupported_error("Node is not published for this processor"))?;
         let windows = platform.os == "windows";
         let archive = format!(
             "node-v{NODE_VERSION}-{os}-{arch}.{}",
@@ -156,7 +157,7 @@ impl Recipe for PiRecipe {
             .find(|(_, name)| name.trim() == archive)
             .map(|(hex, _)| hex.trim().to_ascii_lowercase())
             .filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
-            .ok_or_else(|| bad_value(format!("Node {NODE_VERSION} lists no {archive}")))?;
+            .ok_or_else(|| bad_value_error(format!("Node {NODE_VERSION} lists no {archive}")))?;
         let download = Download::new(
             format!("{base}/{archive}"),
             None,
@@ -226,7 +227,7 @@ impl Recipe for PiRecipe {
         // Empty files: no user or project `.npmrc` is read.
         for path in ["npmrc-user", "npmrc-global"] {
             std::fs::write(staging.join(path), b"")
-                .map_err(|e| internal(format!("npm config: {e}")))?;
+                .map_err(|e| internal_error(format!("npm config: {e}")))?;
         }
         let user = staging.join("npmrc-user").to_string_lossy().into_owned();
         let global = staging.join("npmrc-global").to_string_lossy().into_owned();
@@ -259,7 +260,7 @@ impl Recipe for PiRecipe {
             ],
         )?;
         if output.code != Some(0) {
-            return Err(internal("npm could not install Pi"));
+            return Err(internal_error("npm could not install Pi"));
         }
         Ok(())
     }

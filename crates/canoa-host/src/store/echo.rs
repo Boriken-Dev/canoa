@@ -22,7 +22,7 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use sha2::{Digest, Sha256};
 
 use super::contract::{Fixture, Variant, World, standin_bytes};
-use canoa::store::{Finish, Part, Recipe, Release, UnpackStep};
+use canoa::store::recipe::{Finish, Part, Recipe, Release, UnpackStep};
 
 /// The one origin the echo program is published at.
 pub const ORIGIN: &str = "https://echo.example.test";

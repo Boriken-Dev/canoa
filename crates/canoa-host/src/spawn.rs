@@ -638,7 +638,7 @@ mod tests {
             ("coqui-acp-pi/gate.rs", "icacls"),
             ("coqui-acp-harness/antigravity/ports.rs", "netstat"),
         ];
-        const CRATES: [&str; 9] = [
+        const CRATES: [&str; 15] = [
             "coqui-acp",
             "coqui-acp-secrets",
             "coqui-acp-harness",
@@ -648,6 +648,12 @@ mod tests {
             "coqui-acp-pi",
             "coqui-acp-provider",
             "coqui-acp-history",
+            "canoa",
+            "canoa-antigravity",
+            "canoa-claude",
+            "canoa-codex",
+            "canoa-grok",
+            "canoa-pi",
         ];
         fn scan(
             dir: &Path,
@@ -780,9 +786,18 @@ mod tests {
                 }
             }
         }
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        // The host's own source, the recipe contract and the crates that hold each agent's recipe: a recipe fetches and runs
+        // only through the host's tools.
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut roots = vec![base.join("src"), base.join("../canoa/src/store")];
+        for vendor in ["antigravity", "claude", "codex", "grok", "pi"] {
+            roots.push(base.join(format!("../canoa-{vendor}/src")));
+        }
         let mut found = Vec::new();
-        scan(&root, &root, &mut found);
+        for root in &roots {
+            assert!(root.is_dir(), "{} is a source directory", root.display());
+            scan(root, root, &mut found);
+        }
         assert!(found.is_empty(), "std starts a process here: {found:#?}");
     }
 }
