@@ -203,8 +203,8 @@ fn a_job_freed_is_gone_for_good() {
     assert_eq!(canoa_ffi_job_stop(job), STATUS_UNKNOWN_JOB);
 }
 
-/// The job that asks a source's choices needs no session and no program: an entry that runs a program on standard streams
-/// says it lists its models only once it has started.
+/// The job that asks a source's choices needs no session: an entry whose program is not on the machine says so, with no
+/// models.
 #[test]
 fn a_job_asks_a_sources_choices_with_no_session() {
     let scratch = Scratch::new();
@@ -212,7 +212,7 @@ fn a_job_asks_a_sources_choices_with_no_session() {
     std::fs::write(
         &config,
         "[host.agents.Plain]
-program = \"agy\"
+program = \"canoa-test-no-such-agent\"
 args = [\"acp\"]
 ",
     )
@@ -225,6 +225,7 @@ args = [\"acp\"]
     assert_eq!(said.exit, Some(0), "{said:?}");
     let choices: Value = serde_json::from_str(&said.out[0]).expect("one JSON object");
     assert_eq!(choices["known"], false);
+    assert_eq!(choices["unknown_kind"], "not_installed", "{choices}");
     assert_eq!(choices["models"], json!([]));
     assert_eq!(canoa_ffi_job_free(job), STATUS_OK);
 }
