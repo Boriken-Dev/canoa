@@ -23,6 +23,7 @@ use super::{BAD_PARAMS, NO_METHOD, POLL, REFUSED, error_line};
 use crate::secrets::ask::{Asked, Asker};
 use crate::store::programs::{Event, Programs, Sink, StoreError};
 use crate::store::registry::BUILT_IN;
+use crate::store::runtimes::RUNTIMES;
 use crate::store::shelf::Shelf;
 
 /// Nothing was found under that name.
@@ -33,12 +34,15 @@ const NOT_FOUND: i32 = -32003;
 pub(crate) struct Stores {
     programs: Arc<Programs>,
     providers: Vec<String>,
+    /// The stores of the Runtimes type, listed by `store/list` only when asked for.
+    runtimes: Vec<String>,
 }
 
 impl core::fmt::Debug for Stores {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Stores")
             .field("providers", &self.providers)
+            .field("runtimes", &self.runtimes)
             .finish_non_exhaustive()
     }
 }
@@ -49,7 +53,14 @@ impl Stores {
         Self {
             programs,
             providers,
+            runtimes: Vec::new(),
         }
+    }
+
+    /// The same, also keeping the runtimes the stores named `runtimes` install.
+    pub(crate) fn with_runtimes(mut self, runtimes: Vec<String>) -> Self {
+        self.runtimes = runtimes;
+        self
     }
 
     /// The built-in stores over this user's programs folder.
@@ -60,7 +71,8 @@ impl Stores {
         Ok(Self::new(
             Arc::new(Programs::new(shelf, registry)),
             BUILT_IN.iter().map(|id| (*id).to_owned()).collect(),
-        ))
+        )
+        .with_runtimes(RUNTIMES.iter().map(|id| (*id).to_owned()).collect()))
     }
 }
 
@@ -101,7 +113,12 @@ impl Stores {
         params: &Value,
     ) -> Result<(String, Arc<dyn canoa::store::ProgramStore>), Failed> {
         let provider = text(params, "provider")?;
-        if !self.providers.iter().any(|known| known == provider) {
+        if !self
+            .providers
+            .iter()
+            .chain(&self.runtimes)
+            .any(|known| known == provider)
+        {
             return Err((NOT_FOUND, format!("this host has no store {provider}")));
         }
         let store = self
@@ -119,7 +136,14 @@ impl Stores {
         owner: Option<&str>,
     ) -> Result<Value, Failed> {
         if method == "store/list" {
-            let ids: Vec<&str> = self.providers.iter().map(String::as_str).collect();
+            // The Agents type's stores, or with `{"kind": "runtimes"}` the Runtimes type's.
+            let kind = params.get("kind").and_then(Value::as_str);
+            let of = match kind {
+                None | Some("agents") => &self.providers,
+                Some("runtimes") => &self.runtimes,
+                Some(_) => return Err((BAD_PARAMS, "kind is agents or runtimes".to_owned())),
+            };
+            let ids: Vec<&str> = of.iter().map(String::as_str).collect();
             let listed = self.programs.list(&ids).map_err(|error| refusal(&error))?;
             let mut stores = Vec::new();
             for each in &listed {
@@ -500,5 +524,72 @@ impl Stores {
         };
         let _ = worker.join();
         answer
+    }
+}
+
+#[cfg(test)]
+mod runtimes_tests {
+    use super::*;
+
+    fn stores() -> (Stores, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!("canoa-runtime-list-{}", std::process::id()));
+        let programs = Programs::new(
+            Shelf::unchecked(&root),
+            crate::store::registry::built_in().expect("the built-in stores"),
+        );
+        let stores = Stores::new(
+            Arc::new(programs),
+            BUILT_IN.iter().map(|id| (*id).to_owned()).collect(),
+        )
+        .with_runtimes(RUNTIMES.iter().map(|id| (*id).to_owned()).collect());
+        (stores, root)
+    }
+
+    fn programs_of(listed: &Value) -> Vec<(String, String)> {
+        listed["stores"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|store| {
+                (
+                    store["provider"].as_str().expect("provider").to_owned(),
+                    store["program"].as_str().expect("program").to_owned(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn runtimes_are_listed_apart_from_agents_and_both_are_asked_through_the_same_calls() {
+        let (stores, root) = stores();
+        let agents = stores
+            .read("store/list", &json!({}), None)
+            .expect("the agents");
+        let agents = programs_of(&agents);
+        assert!(agents.iter().any(|(_, program)| program == "claude"));
+        assert!(
+            agents
+                .iter()
+                .all(|(_, program)| program != "node" && program != "python"),
+            "the Agents type does not list runtimes: {agents:?}"
+        );
+        let runtimes = stores
+            .read("store/list", &json!({"kind": "runtimes"}), None)
+            .expect("the runtimes");
+        assert_eq!(
+            programs_of(&runtimes),
+            [
+                ("node_store".to_owned(), "node".to_owned()),
+                ("python_store".to_owned(), "python".to_owned())
+            ]
+        );
+        let bad = stores.read("store/list", &json!({"kind": "toys"}), None);
+        assert_eq!(bad.expect_err("refused").0, BAD_PARAMS);
+        // Nothing is installed: a report asks the shelf and the search path, and a runtime's store answers it.
+        let report = stores.read("store/report", &json!({"provider": "node_store"}), None);
+        assert!(report.is_ok(), "{report:?}");
+        let unknown = stores.read("store/report", &json!({"provider": "bun_store"}), None);
+        assert_eq!(unknown.expect_err("unknown").0, NOT_FOUND);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

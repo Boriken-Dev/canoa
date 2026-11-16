@@ -189,9 +189,10 @@ impl Registry {
     }
 }
 
-/// `host/which` `{"names"}` -> `{"found": {name: path|null}}`: where each program is on this host's `PATH`, which only reads
+/// `host/which` `{"names"}` -> `{"found": {name: path|null}}`: where each program is on this host's `PATH`, or in the folder of
+/// a runtime the Store installed (`runtimes`, searched after `PATH`, so the person's own copy comes first). It only reads
 /// directories and starts nothing.
-pub(crate) fn which(params: &Value) -> Outcome {
+pub(crate) fn which(params: &Value, runtimes: &[PathBuf]) -> Outcome {
     let names = params
         .get("names")
         .and_then(Value::as_array)
@@ -200,6 +201,8 @@ pub(crate) fn which(params: &Value) -> Outcome {
         return Err(bad(&format!("at most {MAX_NAMES} names at once")));
     }
     let path = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(std::env::split_paths(&path).chain(runtimes.iter().cloned()))
+        .unwrap_or(path);
     let pathext = std::env::var("PATHEXT").unwrap_or_default();
     let mut found = serde_json::Map::new();
     for name in names {

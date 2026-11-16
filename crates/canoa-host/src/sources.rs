@@ -136,6 +136,21 @@ fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
     Some((meta.len(), meta.modified().ok()?))
 }
 
+/// The folders of the runtimes the Store installed on `shelf` (Node, Python): where each one's launch file is, for a copy that
+/// is as it was installed. A copy that changed since adds nothing, so nothing unchecked reaches a search path.
+pub(crate) fn runtime_dirs_in(shelf: &Shelf) -> Vec<PathBuf> {
+    crate::store::runtimes::RUNTIME_PROGRAMS
+        .iter()
+        .filter_map(|program| managed_program_in(shelf, program))
+        .filter_map(|(path, _)| path.parent().map(Path::to_path_buf))
+        .collect()
+}
+
+/// [`runtime_dirs_in`] over this user's programs folder.
+pub(crate) fn runtime_dirs() -> Vec<PathBuf> {
+    Shelf::default_root().map_or_else(Vec::new, |root| runtime_dirs_in(&Shelf::unchecked(root)))
+}
+
 /// [`managed_program_in`] over this user's programs folder.
 pub(crate) fn managed_program(program: &str) -> Option<(PathBuf, Vec<(String, String)>)> {
     Shelf::default_root().and_then(|root| managed_program_in(&Shelf::unchecked(root), program))
@@ -699,6 +714,22 @@ mod tests {
         assert_eq!(managed_program_in(&shelf, "codex"), None);
         std::fs::write(&binary, b"changed since the install").expect("written");
         assert_eq!(managed_program_in(&shelf, "claude"), None);
+    }
+
+    #[test]
+    fn the_folders_of_installed_runtimes_come_from_checked_copies_only() {
+        let root = scratch("runtime-dirs");
+        assert!(runtime_dirs_in(&Shelf::unchecked(&root)).is_empty());
+        let (shelf, binary) = shelf_with_binary(&root, "node");
+        assert_eq!(
+            runtime_dirs_in(&shelf),
+            vec![binary.parent().expect("a folder").to_path_buf()]
+        );
+        // A program that is not a runtime adds nothing, and a copy changed since the install adds nothing.
+        let (other, _) = shelf_with_binary(&scratch("runtime-dirs-other"), "claude");
+        assert!(runtime_dirs_in(&other).is_empty());
+        std::fs::write(&binary, b"changed since the install").expect("written");
+        assert!(runtime_dirs_in(&shelf).is_empty());
     }
 
     #[test]

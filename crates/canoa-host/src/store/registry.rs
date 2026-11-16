@@ -11,8 +11,9 @@ use alloc::sync::Arc;
 use coqui_acp_api::guatiao::library::Registry;
 
 use super::builtin::store_provider;
+use super::runtimes::{NodeStore, PythonStore};
 
-/// The provider ids of the built-in stores, in the order the app lists them.
+/// The provider ids of the built-in agent stores, in the order the app lists them; the runtimes are `runtimes::RUNTIMES`.
 pub const BUILT_IN: [&str; 5] = [
     "claude_store",
     "codex_store",
@@ -45,7 +46,15 @@ store_provider!(
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-built-in-stores",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [ClaudeStore, CodexStore, GrokStore, AgyStore, PiStore]
+    providers = [
+        ClaudeStore,
+        CodexStore,
+        GrokStore,
+        AgyStore,
+        PiStore,
+        NodeStore,
+        PythonStore
+    ]
 );
 
 /// A registry holding the built-in stores.

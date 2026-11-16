@@ -12,6 +12,7 @@ pub(crate) mod mcp;
 pub mod programs;
 pub mod protect;
 pub mod registry;
+pub mod runtimes;
 pub mod shelf;
 pub(crate) mod text;
 pub mod tools;

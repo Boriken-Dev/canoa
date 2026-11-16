@@ -663,9 +663,8 @@ impl Control {
                     .and_then(|()| self.registry.contents(caller, &params)),
                 Some("store/contents_put") => allow(caller, Grant::OverlayRead)
                     .and_then(|()| self.registry.put_contents(caller, &params)),
-                Some("host/which") => {
-                    allow(caller, Grant::StoreRead).and_then(|()| registry::which(&params))
-                }
+                Some("host/which") => allow(caller, Grant::StoreRead)
+                    .and_then(|()| registry::which(&params, &crate::sources::runtime_dirs())),
                 Some("host/restart") => {
                     allow(caller, Grant::HostRestart).and_then(|()| self.restart_now())
                 }

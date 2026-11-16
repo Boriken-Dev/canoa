@@ -229,6 +229,32 @@ fn which_finds_a_runnable_file_in_an_absolute_directory_of_path_only() {
 }
 
 #[test]
+fn which_looks_in_the_folders_of_installed_runtimes_after_path() {
+    let root = crate::control::overlays_tests::dir("which-runtime");
+    let name = if cfg!(windows) {
+        "runtime-tool-x.cmd"
+    } else {
+        "runtime-tool-x"
+    };
+    let file = root.join(name);
+    fs::write(&file, "echo").expect("file");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).expect("mode");
+    }
+    let asked = json!({"names": ["runtime-tool-x"]});
+    let without = which(&asked, &[]).expect("answers");
+    assert_eq!(without["found"]["runtime-tool-x"], Value::Null);
+    let with = which(&asked, std::slice::from_ref(&root)).expect("answers");
+    assert_eq!(
+        with["found"]["runtime-tool-x"],
+        Value::String(file.display().to_string())
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn which_answers_names_it_is_given_and_refuses_paths() {
     let control = Control::open(None, 10, 1024, Vec::new()).expect("opens");
     let key = peer("k", &[Grant::StoreRead]);
