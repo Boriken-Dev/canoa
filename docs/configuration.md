@@ -404,13 +404,26 @@ adds one.
   servers, context) and what Canoa does not apply yet, a switch for whether **new sessions** start with it, an update
   check and Remove (for one the store installed). Discover: the overlays of the catalogs below, filterable by catalog,
   tag and text. With no catalog it offers a known one and a spec to paste.
-- **The choice per session.** A new session starts with every overlay `[overlays]` names except those `[loadout] off`
-  lists; the composer's Overlays control changes that for this session alone. What a session started with is kept with
-  it in the session list and asked for again when it is opened, so turning a default off reaches new sessions only. The
-  app tells its host through `initialize`'s `_meta["dev.boriken.canoa/overlays"]`; the host applies only those of the
-  profile's overlays, and its report names each one left out ("not chosen for this session").
+- **Loadouts.** A loadout is a named collection a session starts with: whole overlays, skills you chose, and MCP
+  servers of `[profile.mcp]`, written as `[loadouts.NAME]` (`description`, `overlays`, `skills`, `mcp`; a name has 1
+  to 64 letters, digits, `-` or `_`). `[defaults] loadout` names the one a session that names none starts with. A
+  session names its own in `initialize`'s `_meta["dev.boriken.canoa/loadout"]`; the host resolves it once, when the
+  session starts, so editing a loadout reaches new sessions only and ends none that is open. A name that
+  `[loadouts]` does not hold is refused, with the name. Overlays apply whole, in the order `[overlays]` composes
+  them: a loadout cannot reorder them, and one it names that `[overlays]` no longer lists is reported, not applied.
+  The person's own `[profile.mcp]` servers a loadout does not name are off for the session (an overlay's servers come
+  with the overlay); a name it gives that `[profile.mcp]` lacks is reported. With no `[defaults] loadout`, a session
+  starts with every overlay and every server, as before loadouts: the first time the app changes what new sessions
+  start with, it writes a loadout named `Default` that holds that. The old `[loadout]` table (`off`, `skills`,
+  `registries`, `mcp`) is not read: `registries` and the notes on installed servers are `[store] registries` and
+  `[store.mcp.NAME]` now.
+- **The choice per session.** The composer's Overlays control changes the loadout's overlays for this session alone.
+  What a session started with is kept with it in the session list and asked for again when it is opened, so turning a
+  default off reaches new sessions only. The app tells its host through `initialize`'s
+  `_meta["dev.boriken.canoa/overlays"]`, which takes the place of the loadout's overlays; the host applies only those
+  of the profile's overlays, and its report names each one left out ("not chosen for this session").
 - **Skills.** Installed: the skills fetched, with the overlays that name each or that you chose it, source and pin; one
-  you chose has a switch for new sessions, which adds or takes away its name in `[loadout] skills`. The host delivers
+  you chose has a switch for new sessions, which adds or takes away its name in the starting loadout's `skills`. The host delivers
   such a skill from its record at each session, only when the record says you chose it and its files have the digest the
   record names (and the pin in `[skill_pins]`, if any); otherwise it is left out and the session's report says why. Discover: the skills your catalogs list, and a spec to paste (`<repository>@<ref>#<skill directory>`). A
   skill is an [Agent Skills](https://agentskills.io/specification) directory: a `SKILL.md` with YAML front matter whose
@@ -423,23 +436,30 @@ adds one.
   and what it needs from your environment: a secret is a `from_env` reference, never written to canoa.cfg. A package
   whose runtime (`npx`, `uvx`, `docker`) is not on this computer, a bundle, a package of another registry type, a
   remote over plain `http` and anything else Canoa does not run is refused with the reason. An installed server is
-  written to `[profile.mcp.NAME]`, noted in `[loadout.mcp.NAME]` (`registry`, `server`, `version`, `digest`) and turned
+  written to `[profile.mcp.NAME]`, noted in `[store.mcp.NAME]` (`registry`, `server`, `version`, `digest`) and turned
   off for every agent in `[agents.NAME.mcp]`, so nothing starts until you allow it.
   A team's own servers can be listed by another registry that serves the same API, added by its `https` address (or
   `http` on the loopback address), or by a git repository holding a JSON file in the API's list shape, added as
-  `<repository>@<ref>#<file>`; they are kept in `[loadout] registries` and chosen beside the official one in Discover.
+  `<repository>@<ref>#<file>`; they are kept in `[store] registries` and chosen beside the official one in Discover.
   A git list is fetched at its ref like a catalog and read as one page.
 - **Applying a change.** The host reads canoa.cfg's layers again when each session of its own sources starts, so a
   change to `[overlays]`, `[profile]` or `[agents.*.mcp]` reaches the next session and ends none that is open. A file
   that no longer parses is refused and the profile stays as the last good file gave it.
 
 ```toml
-[loadout]
-off = ["review"]              # overlays new sessions start without
-skills = ["audit"]            # skills you chose that new sessions start with
+[loadouts.review]
+description = "Reading and reviewing code"
+overlays = ["review"]         # whole overlays, applied in the order [overlays] composes them
+skills = ["audit"]            # skills you chose
+mcp = ["files"]               # servers of [profile.mcp]
+
+[defaults]
+loadout = "review"            # what a session that names no loadout starts with
+
+[store]
 registries = ["https://registry.team.example", "https://git.team.example/lists.git@main#servers.json"]
 
-[loadout.mcp.files]           # where an MCP server the store installed came from
+[store.mcp.files]             # where an MCP server the store installed came from
 registry = "https://registry.modelcontextprotocol.io"
 server = "io.github.ana/files"
 version = "1.2.0"
