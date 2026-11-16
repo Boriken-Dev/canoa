@@ -30,7 +30,7 @@ function gatewayWith(asked) {
     dial: async () => ({ proven: true, send: async () => {}, onMessage: () => {}, onClose: () => {}, close: () => {} }),
     askPerson: async (details) => {
       asked.push(details);
-      return { allow: ["hand", "local:claude"], lifetime: "once", cwd: "/w" };
+      return { allow: ["hand", "local:claude"], lifetime: "once", cwd: "/w", permissions: true, mcpOrigins: ["http://insecure.example", "https://ok.example"] };
     },
     askPermission: async () => null,
     ownOrigin: OWN,
@@ -70,6 +70,12 @@ test("a page's window is offered the local host's agents beside the others, and 
   // The person typed a directory for the others; it is not the local host's, whose folder the host makes.
   assert.equal(local.cwd, null);
   assert.equal(local.folder, "provider");
+  assert.equal(local.peer, "sha256:c", "the grant is for the host whose key was paired");
+  // A site cannot approve for the agents on this computer, whatever was ticked for the others.
+  assert.equal(hand.permissions, true);
+  assert.equal(local.permissions, false);
+  // Only https origins are kept.
+  assert.deepEqual(local.mcpOrigins, ["https://ok.example"]);
 });
 
 test("Canoa's own chat is offered them", async () => {

@@ -253,7 +253,7 @@ try {
     await waitFor("its contents", () => view.run("(document.querySelector('#main')?.childElementCount ?? 0) > 0"));
     // It has asked the host what it is doing, and its buttons answer only after a moment.
     await waitFor("what it says of Canoa", () => view.run("![...document.querySelectorAll('p')].some((p) => p.textContent.startsWith('Looking for Canoa'))"));
-    await waitFor("its buttons", () => view.run("![...document.querySelectorAll('button')].some((button) => button.disabled)"));
+    await waitFor("its buttons", () => view.run("![...document.querySelectorAll('button, input[type=checkbox]')].some((control) => control.disabled)"));
     return view;
   };
   const click = (view, startsWith) => view.run(`[...document.querySelectorAll('button')].find((b) => b.textContent.startsWith(${quoted(startsWith)})).click()`, { gesture: true }).catch(() => {});
@@ -281,6 +281,10 @@ try {
     const text = await view.run("document.querySelector('#main').textContent");
     assert.ok(text.includes(mcpOrigin), "the person is told which server the page may name");
     assert.match(text, /makes its own/, "no directory is asked for the host's entry");
+    assert.ok(text.includes(`${mcpOrigin} (this computer or a private network)`), "an origin on this computer is marked as one");
+    assert.match(text, /tell these agents what to do/);
+    assert.match(text, /can read your files/);
+    assert.match(text, /does not apply to Canoa on this computer/);
     await click(view, "Refuse");
     assert.equal(await page.run("window.asked"), "NotAllowedError");
     assert.equal(await page.run("document.acp.agents().then((a) => a.length)"), 0);
@@ -290,14 +294,19 @@ try {
     await requested(page, { purpose: "testing", acpVersions: [1], mcpOrigins: [mcpOrigin], permissions: false });
     const view = await windowOfPerson();
     await waitFor("the host's entry", () => scriptedRow(view));
-    await view.run("[...document.querySelectorAll('label.pick')].find((label) => label.textContent.startsWith('Scripted')).querySelector('input').click(); true");
-    await waitFor("its buttons", () => view.run("![...document.querySelectorAll('button')].some((button) => button.disabled)"));
+    await waitFor("it to settle", () => view.run("![...document.querySelectorAll('button, input[type=checkbox]')].some((control) => control.disabled)"));
+    // The person also ticks "this site can approve", which cannot reach the host's agents.
+    await view.run(`(() => {
+      [...document.querySelectorAll('label.pick')].find((label) => label.textContent.startsWith('Scripted')).querySelector('input').click();
+      [...document.querySelectorAll('label.pick')].find((label) => label.textContent.includes('approve what the agent does')).querySelector('input').click();
+    })()`);
     await click(view, "Allow");
     assert.equal(await page.run("window.asked"), 1);
     const said = JSON.parse(await page.run("JSON.stringify({ label: window.agent.label, source: window.agent.source, identity: window.agent.identity, scope: window.agent.scope, keys: Object.keys(window.agent).sort() })"));
     assert.equal(said.label, "Scripted");
     assert.equal(said.source, "local");
-    assert.equal(said.identity.peer, hostPeer);
+    assert.match(said.identity.peer, /^sha256:[0-9a-f]{64}$/);
+    assert.notEqual(said.identity.peer, hostPeer, "the page is told a name of its own for the host's key");
     assert.equal(said.identity.verified, true);
     assert.deepEqual(said.scope.mcpOrigins, [mcpOrigin]);
     assert.equal(said.scope.permissions, false);

@@ -21,18 +21,23 @@ const clean = (value, limit = 300) => String(value ?? "").replace(/\p{Cf}|\p{Cc}
  * Nothing here answers for the first moment it can be seen, or after it comes to the front: a page can time a window to land under
  * a click meant for something else. Buttons added later are the person's own doing.
  */
+let holdTimer;
+let held = [];
+let holdListening = false;
 function holdClicks() {
-  let timer;
-  const hold = () => {
-    const buttons = [...main.querySelectorAll("button")];
-    for (const button of buttons) button.disabled = true;
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      for (const button of buttons) button.disabled = false;
-    }, 500);
-  };
-  window.addEventListener("focus", hold);
-  hold();
+  // Buttons and tick boxes alike: a click meant for something else must not tick or answer. What was already off stays off.
+  for (const control of held) control.disabled = false;
+  held = [...main.querySelectorAll("button, input[type=checkbox]")].filter((control) => !control.disabled);
+  for (const control of held) control.disabled = true;
+  clearTimeout(holdTimer);
+  holdTimer = setTimeout(() => {
+    for (const control of held) control.disabled = false;
+    held = [];
+  }, 500);
+  if (!holdListening) {
+    holdListening = true;
+    window.addEventListener("focus", holdClicks);
+  }
 }
 
 let keyHandler = null;
@@ -153,11 +158,27 @@ function searchButton(onFound) {
 
 const WHERE = { "dns-sd": "says it is on this network", local: "on this machine", manual: "added by hand" };
 
+/** Whether an origin names this computer or a private network, which an agent on this computer can reach and a stranger cannot. */
+function onThisComputer(origin) {
+  let host;
+  try {
+    host = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || !host.includes(".") ) return true;
+  if (host.startsWith("[")) return host === "[::1]" || /^\[(fc|fd|fe80)/.test(host);
+  const parts = host.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
+  const [a, b] = parts;
+  return a === 10 || a === 127 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+}
+
 /** What the window tells of Canoa on this computer, in the person's words; the page has no say in any of it. */
 function localSaid(view, count) {
   if (view.state === "running" && view.paired) {
     return count > 0
-      ? "These run on this computer. Canoa makes a folder for this site for each conversation: the site does not choose one."
+      ? "This site can tell these agents what to do. They run on this computer as you, with your settings and tools, and can read your files. Canoa gives each conversation a folder of its own for this site, which is not a limit on what they can reach. You are asked only about what the agents' own settings ask about."
       : "Canoa on this computer serves no agents.";
   }
   if (view.state === "running") {
@@ -209,19 +230,10 @@ function grantView(details) {
   if (details.agents.filter((agent) => !agent.local).length === 0) picks.append(element("p", { textContent: "No other agents yet. Add one below." }));
 
   const cwd = element("input", { type: "text", placeholder: "An absolute path on the agent's machine" });
-  const weighty = element("p", { className: "warn" });
-  const warnAboutApproving = () => {
-    const ticked = choices.querySelector("input[data-local=yes]:checked") !== null;
-    weighty.textContent = ticked && approve.checked
-      ? "On this computer that lets the site decide whether the agent may run commands and change files here."
-      : "";
-  };
   const lifetime = element("select", {},
     element("option", { value: "once", textContent: "Until this tab closes" }),
     element("option", { value: "always", textContent: "Until I revoke it" }));
   const approve = element("input", { type: "checkbox" });
-  approve.addEventListener("change", () => warnAboutApproving());
-  choices.addEventListener("change", () => warnAboutApproving());
   const allow = element("button", { type: "button", textContent: "Allow" });
   const refuse = element("button", { type: "button", className: "quiet", textContent: "Refuse" });
   allow.addEventListener("click", () => {
@@ -248,7 +260,7 @@ function grantView(details) {
   if (details.purpose) asked.push(element("p", { className: "theirs", textContent: `In its own words: ${details.purpose}` }));
   asked.push(element("p", { textContent: "It will be able to start conversations and read the answers. It will see the peer id of each agent you choose. It sees nothing about the others." }));
   if (details.mcpOrigins.length > 0) {
-    asked.push(element("p", { className: "warn", textContent: `It may also connect them to: ${details.mcpOrigins.join(", ")}` }));
+    asked.push(element("p", { className: "warn", textContent: `It may also connect them to: ${details.mcpOrigins.map((origin) => (onThisComputer(origin) ? `${origin} (this computer or a private network)` : origin)).join(", ")}` }));
   }
   const hereStatus = element("p", { textContent: "Looking for Canoa on this computer…" });
   const start = element("button", { type: "button", className: "quiet", textContent: "Start Canoa" });
@@ -292,7 +304,8 @@ function grantView(details) {
     element("label", { textContent: "Working directory for its sessions (for agents added by hand; Canoa on this computer makes its own)" }), cwd,
     element("label", { textContent: "For how long" }), lifetime,
     ...(details.own ? [] : [element("label", { className: "pick" }, approve,
-      element("span", { className: "warn", textContent: "This site can approve what the agent does for me" })), weighty]),
+      element("span", { className: "warn", textContent: "This site can approve what the agent does for me" })),
+      element("p", { textContent: "That does not apply to Canoa on this computer: its agents ask you themselves, and a site cannot answer for them." })]),
     allow, refuse);
   holdClicks();
 }

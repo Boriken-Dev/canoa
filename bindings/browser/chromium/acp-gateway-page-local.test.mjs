@@ -10,9 +10,9 @@ const SITE = "dev.boriken.canoa/site";
 const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
 const FOLDER = "/docs/Canoa/scratch/localhost/0000-1111";
 
-function pageWith({ origin = "http://localhost:8080", grant = {}, agents, dialFails = false } = {}) {
+function pageWith({ origin = "http://localhost:8080", grant = {}, agents, dialFails = false, onDial = () => {} } = {}) {
   const local = { key: "local:claude", label: "Claude", source: "local", native: { entry: "claude" }, peer: "sha256:c", proven: true, local: true };
-  const held = [{ origin, agent: local.key, lifetime: "always", cwd: null, folder: "provider", permissions: false, mcpOrigins: [], sessions: [], folders: {}, ...grant }];
+  const held = [{ origin, agent: local.key, lifetime: "always", cwd: null, folder: "provider", peer: "sha256:c", permissions: false, mcpOrigins: [], sessions: [], folders: {}, ...grant }];
   const saved = [];
   const sent = [];
   let fromAgent = () => {};
@@ -30,6 +30,7 @@ function pageWith({ origin = "http://localhost:8080", grant = {}, agents, dialFa
   const gateway = createGateway({
     store,
     dial: async () => {
+      onDial();
       if (dialFails) throw new Error("the host is not there");
       return {
         proven: true,
@@ -161,4 +162,51 @@ test("a host that is stopped is an unreachable agent to a page holding a grant o
 test("a page with no grant on a local agent sees nothing of it", async () => {
   const { ask } = pageWith({ origin: "https://other.example", grant: { origin: "https://mcp.example" } });
   assert.deepEqual((await ask(1, "agents", [])).result, []);
+});
+
+test("a page is told a name of its own for the host's key, the same each time and different for each site", async () => {
+  const peers = [];
+  for (const origin of ["http://localhost:8080", "https://mcp.example", "https://mcp.example"]) {
+    const { ask } = pageWith({ origin });
+    const [agent] = (await ask(1, "agents", [])).result;
+    peers.push(agent.identity.peer);
+  }
+  assert.ok(peers.every((peer) => /^sha256:[0-9a-f]{64}$/.test(peer) && peer !== "sha256:c"));
+  assert.notEqual(peers[0], peers[1]);
+});
+
+test("a grant made for another host's key holds nothing of this one", async () => {
+  const { ask } = pageWith({ grant: { peer: "sha256:other" } });
+  assert.deepEqual((await ask(1, "agents", [])).result, []);
+  const { ask: without } = pageWith({ grant: { peer: undefined } });
+  assert.deepEqual((await without(1, "agents", [])).result, []);
+});
+
+test("nothing the host says about itself in an answer reaches the page", async () => {
+  const { say, reply, open, received } = pageWith();
+  const conn = await open();
+  say(conn, newSession(5));
+  await settle();
+  reply({ jsonrpc: "2.0", id: 5, result: { sessionId: "s1", _meta: { "dev.boriken.canoa/profile": { items: ["secret-skill"] }, "dev.boriken.canoa/site": { folder: FOLDER }, other: 1 } } });
+  for (let tries = 0; tries < 40 && !received.some((message) => message.conn === conn); tries += 1) await settle();
+  const told = received.find((message) => message.conn === conn).msg;
+  assert.ok(!told.includes("secret-skill") && !told.includes("scratch") && !told.includes("dev.boriken"));
+  assert.deepEqual(JSON.parse(told).result._meta, { other: 1 });
+});
+
+test("one origin holds only so many connections", async () => {
+  const many = pageWith();
+  const [one] = (await many.ask(1, "agents", [])).result;
+  const results = [];
+  for (let count = 0; count < 10; count += 1) results.push((await many.ask(10 + count, "connect", { id: one.id })).error?.name ?? "ok");
+  assert.deepEqual(results.filter((name) => name === "ok").length, 8);
+  assert.deepEqual(results.slice(8), ["NotAllowedError", "NotAllowedError"]);
+});
+
+test("a site that cannot be named is refused before anything is dialled", async () => {
+  let dials = 0;
+  const { ask } = pageWith({ origin: "null", grant: { origin: "null" }, onDial: () => { dials += 1; } });
+  const [agent] = (await ask(1, "agents", [])).result;
+  assert.equal((await ask(2, "connect", { id: agent.id })).error.name, "NotAllowedError");
+  assert.equal(dials, 0);
 });

@@ -9,6 +9,9 @@ const SITE_META = "dev.boriken.canoa/site";
 // How many sessions' folders a grant keeps for resuming, and the longest folder it keeps.
 const MAX_FOLDERS = 256;
 const MAX_FOLDER = 1024;
+// Connections one origin may hold or be dialling at once: each dial is a native-host process and a proof, and a page costs the person
+// nothing to ask for them.
+const MAX_LINKS_PER_ORIGIN = 8;
 // Windows waiting to ask the person about one connection. Past this an agent is refused without asking: it has no way to make
 // one person read more than one at a time, and a request of its own making costs it nothing.
 const MAX_WAITING_PERMISSIONS = 8;
@@ -25,7 +28,7 @@ function origins(value) {
   return list(value).filter((item) => {
     try {
       const url = new URL(item);
-      return url.origin === item && (url.protocol === "https:" || url.protocol === "http:");
+      return url.origin === item && url.protocol === "https:";
     } catch {
       return false;
     }
@@ -86,9 +89,17 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
   const live = new Set();
   // One window per origin: a person's one click lasts a few seconds, and a page could otherwise open as many as it likes in them.
   const asking = new Set();
+  // Dials in progress for each origin.
+  const dialing = new Map();
 
   async function publicId(origin, key) {
     return hash(`${await store.secret()}\0${origin}\0${key}`);
+  }
+
+  /** The key of the Canoa on this computer is the same everywhere, so each site is told a name of its own for it. */
+  async function peerFor(origin, agent) {
+    if (agent.local !== true || origin === ownOrigin || typeof agent.peer !== "string") return agent.peer ?? null;
+    return `sha256:${await hash(`${await store.secret()}\0${origin}\0peer\0${agent.peer}`)}`;
   }
 
   async function describe(origin, grant, agent) {
@@ -97,7 +108,7 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       label: agent.label,
       source: agent.source,
       identity: {
-        peer: agent.peer ?? null,
+        peer: await peerFor(origin, agent),
         verified: agent.proven === true,
         method: agent.proven === true ? (agent.method === "noise" ? "dev.boriken.coqui.peer-noise/v1" : "dev.boriken.coqui.peer-webcrypto/v1") : null,
       },
@@ -112,7 +123,10 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
     const pairs = [];
     for (const grant of await store.grants(origin)) {
       const agent = agents.find((candidate) => candidate.key === grant.agent);
-      if (agent !== undefined) pairs.push({ grant, agent });
+      if (agent === undefined) continue;
+      // A grant on the host's entry is for the host whose key was paired when it was made: another Canoa under that name has none.
+      if (agent.local === true && origin !== ownOrigin && grant.peer !== agent.peer) continue;
+      pairs.push({ grant, agent });
     }
     return pairs;
   }
@@ -175,9 +189,11 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
           tabId,
           lifetime: decision.lifetime === "always" ? "always" : "once",
           cwd: !folder && typeof decision.cwd === "string" ? decision.cwd : null,
-          ...(folder ? { folder: "provider" } : {}),
+          ...(folder ? { folder: "provider", peer: agent.peer } : {}),
           // The chat is where a person answers, so it needs no separate say.
-          permissions: decision.permissions === true || own,
+          // The chat is where a person answers, so it needs no separate say. Nobody else can answer for the agents on this computer,
+          // which run as the person: a site cannot approve what they do, or put them in a mode that does not ask.
+          permissions: own || (decision.permissions === true && !folder),
           mcpOrigins: origins(decision.mcpOrigins),
           sessions: earlier?.sessions ?? [],
           ...(folder ? { folders: earlier?.folders ?? {} } : {}),
@@ -193,20 +209,27 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
     async connect(entry, { id } = {}) {
       const { origin, port } = entry;
       const { grant, agent } = await find(origin, id);
-      // Only where both hold: a page's connection has no streams at all, and an agent that names no link would read one as ACP.
-      const options = { link: origin === ownOrigin && offerTools !== undefined && agent.offers?.includes(OFFER) === true };
-      const channel = await dialRecord(store, dial, agent, options);
-      if (channel.proven) await store.markProven(agent.key);
-      const sessions = new Set(grant.sessions ?? []);
-      // A page's session with a local entry is placed by the host, in a folder for the site the browser reported.
+      // A page's session with a local entry is placed by the host, in a folder for the site the browser reported. That is settled,
+      // and the origin's share of connections is checked, before anything is dialled.
       const placedByHost = grant.folder === "provider" || (agent.local === true && origin !== ownOrigin);
       const site = placedByHost ? siteOf(origin) : grant.site;
-      if (placedByHost && site === undefined) {
-        channel.close();
-        throw NOT_ALLOWED();
+      if (placedByHost && site === undefined) throw NOT_ALLOWED();
+      const holding = [...live].filter((held) => held.grant.origin === origin).length + (dialing.get(origin) ?? 0);
+      if (holding >= MAX_LINKS_PER_ORIGIN) throw NOT_ALLOWED();
+      dialing.set(origin, (dialing.get(origin) ?? 0) + 1);
+      // Only where both hold: a page's connection has no streams at all, and an agent that names no link would read one as ACP.
+      const options = { link: origin === ownOrigin && offerTools !== undefined && agent.offers?.includes(OFFER) === true };
+      let channel;
+      try {
+        channel = await dialRecord(store, dial, agent, options);
+      } finally {
+        dialing.set(origin, dialing.get(origin) - 1);
       }
+      if (channel.proven) await store.markProven(agent.key);
+      const sessions = new Set(grant.sessions ?? []);
       const folders = new Map(placedByHost ? Object.entries(grant.folders ?? {}) : []);
-      const scope = new Scope({ ...grant, folder: placedByHost ? "provider" : undefined, sessions }, origin);
+      // Whatever the stored grant says, a site cannot approve for the agents on this computer.
+      const scope = new Scope({ ...grant, folder: placedByHost ? "provider" : undefined, permissions: placedByHost ? false : grant.permissions, sessions }, origin);
       const conn = entry.nextConn++;
       const link = {
         conn, entry, channel, scope, grant, sessions, site, placedByHost, folders,
@@ -306,15 +329,18 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       return text;
     }
     const meta = message?.result?._meta;
-    if (meta === null || typeof meta !== "object" || !Object.hasOwn(meta, SITE_META)) return text;
+    if (meta === null || typeof meta !== "object") return text;
     const placed = meta[SITE_META];
+    // What the host reports about itself (its folder, its profile) is for this side; the page is told none of it.
+    const ours = Object.keys(meta).filter((key) => key.startsWith("dev.boriken."));
+    if (ours.length === 0) return text;
     const session = message.result.sessionId;
     if (typeof session === "string" && typeof placed?.folder === "string" && placed.folder.length <= MAX_FOLDER) {
       link.folders.delete(session);
       link.folders.set(session, placed.folder);
       while (link.folders.size > MAX_FOLDERS) link.folders.delete(link.folders.keys().next().value);
     }
-    delete meta[SITE_META];
+    for (const key of ours) delete meta[key];
     if (Object.keys(meta).length === 0) delete message.result._meta;
     return JSON.stringify(message);
   }
