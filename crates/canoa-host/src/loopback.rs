@@ -147,10 +147,12 @@ fn accept<S: Service>(listener: &TcpListener, service: &Arc<S>, stop: &AtomicBoo
 pub(crate) fn ours(peer: SocketAddr, local: SocketAddr) -> bool {
     #[cfg(target_os = "linux")]
     {
-        let table = std::fs::read_to_string("/proc/net/tcp").unwrap_or_default();
-        let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
-        let owner = owned_by(&table, peer, local);
-        owner.is_some() && owner == own_uid(&status)
+        let read = |path| std::fs::read_to_string(path).unwrap_or_default();
+        // A client on a dual-stack socket reaches this IPv4 port from the IPv6 table.
+        let owner = owned_by(&read("/proc/net/tcp"), peer, local)
+            .or_else(|| owned_by_mapped(&read("/proc/net/tcp6"), peer, local));
+        // The kernel stamps a socket with its process's effective user.
+        owner == Some(rustix::process::geteuid().as_raw())
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -159,34 +161,45 @@ pub(crate) fn ours(peer: SocketAddr, local: SocketAddr) -> bool {
     }
 }
 
-/// The user id in a `/proc/PID/status`: its real one.
-#[cfg(any(target_os = "linux", test))]
-fn own_uid(status: &str) -> Option<u32> {
-    status
-        .lines()
-        .find_map(|line| line.strip_prefix("Uid:"))
-        .and_then(|ids| ids.split_whitespace().next())
-        .and_then(|uid| uid.parse().ok())
-}
-
 /// The user that owns the socket in `/proc/net/tcp` whose local end is `peer` and remote end `local`: the connecting side.
 #[cfg(any(target_os = "linux", test))]
 fn owned_by(table: &str, peer: SocketAddr, local: SocketAddr) -> Option<u32> {
     let (SocketAddr::V4(peer), SocketAddr::V4(local)) = (peer, local) else {
         return None;
     };
-    // The kernel writes an address as its four bytes in memory order, as one hex number.
-    let hex = |addr: std::net::SocketAddrV4| {
-        format!(
-            "{:08X}:{:04X}",
-            u32::from_ne_bytes(addr.ip().octets()),
-            addr.port()
-        )
+    owner_in(table, &kernel_v4(peer), &kernel_v4(local))
+}
+
+/// Like [`owned_by`], in `/proc/net/tcp6`, where an IPv4 peer of a dual-stack socket is an IPv4-mapped address.
+#[cfg(any(target_os = "linux", test))]
+fn owned_by_mapped(table: &str, peer: SocketAddr, local: SocketAddr) -> Option<u32> {
+    let (SocketAddr::V4(peer), SocketAddr::V4(local)) = (peer, local) else {
+        return None;
     };
-    let (near, far) = (hex(peer), hex(local));
+    let mapped = |addr| format!("0000000000000000FFFF0000{}", kernel_v4(addr));
+    owner_in(table, &mapped(peer), &mapped(local))
+}
+
+/// An address as the kernel writes it: its four bytes in memory order, as one hex number, then the port.
+#[cfg(any(target_os = "linux", test))]
+fn kernel_v4(addr: std::net::SocketAddrV4) -> String {
+    format!(
+        "{:08X}:{:04X}",
+        u32::from_ne_bytes(addr.ip().octets()),
+        addr.port()
+    )
+}
+
+/// The user of the row of `table` with local end `near` and remote end `far`. A row of a closed connection (time-wait, or
+/// orphaned) reads user 0 and inode 0, which would pass for root: only a socket with an inode, established or half closed by
+/// its client, is a live client's.
+#[cfg(any(target_os = "linux", test))]
+fn owner_in(table: &str, near: &str, far: &str) -> Option<u32> {
     table.lines().skip(1).find_map(|line| {
         let fields: Vec<&str> = line.split_whitespace().collect();
-        (fields.get(1) == Some(&near.as_str()) && fields.get(2) == Some(&far.as_str()))
+        let live = matches!(fields.get(3), Some(&("01" | "04" | "05")))
+            && fields.get(9).is_some_and(|inode| *inode != "0");
+        (live && fields.get(1) == Some(&near) && fields.get(2) == Some(&far))
             .then(|| fields.get(7)?.parse().ok())
             .flatten()
     })
@@ -342,10 +355,13 @@ fn request<S: Service>(
     if length > service.body_limit() {
         return Err(Refusal::Status(413, "Content Too Large"));
     }
-    while buffer.len() < body_start + length {
+    let Some(end) = body_start.checked_add(length) else {
+        return Err(Refusal::Status(413, "Content Too Large"));
+    };
+    while buffer.len() < end {
         read_more(stream, &mut buffer, body_by)?;
     }
-    let body = &buffer[body_start..body_start + length];
+    let body = &buffer[body_start..end];
     let Ok(message) = serde_json::from_slice::<Value>(body) else {
         return Ok(json_reply(&error(
             &Value::Null,
@@ -482,12 +498,24 @@ mod tests {
     const TABLE: &str = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
             0: 0100007F:C350 0100007F:1F90 01 00000000:00000000 00:00000000 00000000  1000        0 11111 1 0
             1: 0100007F:C351 0100007F:1F90 01 00000000:00000000 00:00000000 00000000     0        0 22222 1 0
+            2: 0100007F:C352 0100007F:1F90 06 00000000:00000000 03:00000000 00000000     0        0 0 1 0
+            3: 0100007F:C353 0100007F:1F90 06 00000000:00000000 03:00000000 00000000  1000        0 33333 1 0
+            4: 0100007F:C354 0100007F:1F90 04 00000000:00000000 00:00000000 00000000  1000        0 44444 1 0
+            5: 0100007F:C355 0100007F:1F90 05 00000000:00000000 00:00000000 00000000  1000        0 55555 1 0
 ";
+
+    const TABLE6: &str = "  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0000000000000000FFFF00000100007F:C360 0000000000000000FFFF00000100007F:1F90 01 00000000:00000000 00:00000000 00000000  1000        0 66666 1 0
+   1: 0000000000000000FFFF00000100007F:C361 0000000000000000FFFF00000100007F:1F90 06 00000000:00000000 03:00000000 00000000     0        0 0 1 0
+";
+
+    fn at(port: u16) -> SocketAddr {
+        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)
+    }
 
     #[test]
     fn the_owner_of_the_connecting_socket_is_read_from_the_kernels_table() {
-        let local: SocketAddr = "127.0.0.1:8080".parse().expect("an address");
-        let at = |port: u16| SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
+        let local = at(8080);
         assert_eq!(owned_by(TABLE, at(0xC350), local), Some(1000));
         assert_eq!(owned_by(TABLE, at(0xC351), local), Some(0));
         assert_eq!(
@@ -495,22 +523,101 @@ mod tests {
             None,
             "a socket it cannot place"
         );
-        assert_eq!(
-            own_uid(
-                "Name:	x
-Uid:	1000	1000	1000	1000
+    }
+
+    #[test]
+    fn a_closed_connections_leftover_row_is_credited_to_no_one() {
+        let local = at(8080);
+        // Time-wait and orphaned rows read uid 0 and inode 0, which would pass for root.
+        assert_eq!(owned_by(TABLE, at(0xC352), local), None);
+        assert_eq!(owned_by(TABLE, at(0xC353), local), None, "not established");
+        // A client that shut its side down is still its owner's.
+        assert_eq!(owned_by(TABLE, at(0xC354), local), Some(1000));
+        assert_eq!(owned_by(TABLE, at(0xC355), local), Some(1000));
+    }
+
+    #[test]
+    fn a_dual_stack_client_is_found_in_the_ipv6_table() {
+        let local = at(8080);
+        assert_eq!(owned_by_mapped(TABLE6, at(0xC360), local), Some(1000));
+        assert_eq!(owned_by_mapped(TABLE6, at(0xC361), local), None);
+        assert_eq!(owned_by_mapped(TABLE6, at(0xC362), local), None);
+    }
+
+    /// A server that knows no bearer, to see who is answered.
+    struct Nobody;
+
+    struct Anyone(AtomicUsize);
+
+    impl Caller for Anyone {
+        fn calls(&self) -> &AtomicUsize {
+            &self.0
+        }
+    }
+
+    impl Service for Nobody {
+        type Caller = Anyone;
+        const NAME: &'static str = "canoa-test";
+        const MAX_PER_CALLER: usize = 1;
+
+        fn caller(&self, token: &str) -> Option<Arc<Anyone>> {
+            (token == "t").then(|| Arc::new(Anyone(AtomicUsize::new(0))))
+        }
+
+        fn body_limit(&self) -> usize {
+            usize::MAX
+        }
+
+        fn answer(self: &Arc<Self>, _: &Arc<Anyone>, _: &Value) -> Answer {
+            Answer::Accepted
+        }
+    }
+
+    fn ask(stream: &mut TcpStream, port: u16, headers: &str, length: usize) -> String {
+        let request = format!(
+            "POST /mcp HTTP/1.1
+Host: 127.0.0.1:{port}
+{headers}Content-Length: {length}
+
 "
-            ),
-            Some(1000)
         );
-        // A different user is not this one; one that cannot be told is refused as well.
-        assert_ne!(
-            owned_by(TABLE, at(0xC351), local),
-            own_uid(
-                "Uid:	1000	1000
-"
-            )
+        stream.write_all(request.as_bytes()).expect("writes");
+        let mut said = String::new();
+        let _ = stream.read_to_string(&mut said);
+        said
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_client_of_this_user_is_answered_over_ipv4_and_over_a_dual_stack_socket() {
+        let server = Listener::start(&Arc::new(Nobody)).expect("the server starts");
+        let port = server.addr().port();
+        let mut plain = TcpStream::connect(("127.0.0.1", port)).expect("connects");
+        let said = ask(&mut plain, port, "", 0);
+        assert!(said.starts_with("HTTP/1.1 401"), "over IPv4: {said}");
+        let Ok(mut mapped) = TcpStream::connect(format!("[::ffff:127.0.0.1]:{port}")) else {
+            eprintln!("skipped the dual-stack client: no IPv6 sockets here");
+            return;
+        };
+        let said = ask(&mut mapped, port, "", 0);
+        assert!(
+            said.starts_with("HTTP/1.1 401"),
+            "over a dual-stack socket: {said}"
         );
-        assert_eq!(own_uid("nothing"), None);
+    }
+
+    #[test]
+    fn a_body_length_that_overflows_is_too_large() {
+        let server = Listener::start(&Arc::new(Nobody)).expect("the server starts");
+        let port = server.addr().port();
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connects");
+        let said = ask(
+            &mut stream,
+            port,
+            "Authorization: Bearer t
+",
+            usize::MAX,
+        );
+        assert!(said.starts_with("HTTP/1.1 413"), "{said}");
     }
 }
