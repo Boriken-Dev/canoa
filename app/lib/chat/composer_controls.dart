@@ -401,7 +401,7 @@ class OverlaysChooser extends StatelessWidget {
             key: const Key('overlays-loadout'),
             leadingIcon: const Icon(Icons.tune, size: 18),
             onPressed: kit.onLoadout,
-            child: const Text('Manage in Loadout'),
+            child: const Text('Manage in the Store'),
           ),
         ],
       ],

@@ -7,6 +7,8 @@ import '../desktop/control_client.dart';
 import '../selectable.dart';
 import '../sources/source_icons.dart';
 import 'programs.dart';
+import 'store_cards.dart';
+import 'store_view.dart';
 
 // The Store's programs on screen: each extension's program with the version found and whether a newer one exists, and the
 // buttons that plan, confirm, run and stream an install, update, roll back or removal. Everything shown is what the host
@@ -552,4 +554,66 @@ class _AskDialogState extends State<AskDialog> {
       FilledButton(key: const Key('ask-submit'), onPressed: _submit, child: const Text('Answer')),
     ],
   );
+}
+
+/// The Agents type of the Store: the programs the host can run, those found on it under Installed and the others under
+/// Discover, with the same tiles and buttons as the programs list. Opening it asks the host for the copies and, at most once an
+/// hour, the publishers for the newest versions.
+class AgentsBody extends StatefulWidget {
+  const AgentsBody({super.key, required this.programs, required this.view});
+
+  final ProgramStores programs;
+  final StoreView view;
+
+  @override
+  State<AgentsBody> createState() => _AgentsBodyState();
+}
+
+class _AgentsBodyState extends State<AgentsBody> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(widget.programs.refresh(latest: true));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return ListenableBuilder(
+      listenable: widget.programs,
+      builder: (context, _) {
+        final programs = widget.programs;
+        final view = widget.view;
+        final shown = [
+          for (final status in programs.statuses)
+            if (status.installed != view.discover &&
+                (view.discover || !view.updatesOnly || status.updateAvailable) &&
+                view.matches('${status.info.title}\n${status.info.publisher}\n${status.info.provider}'))
+              status,
+        ];
+        return CardList(
+          header: [
+            Text(
+              view.discover
+                  ? 'The agent programs Canoa can run and that are not on this computer yet. Nothing is installed until you ask.'
+                  : 'The agent programs found on this computer. Nothing is updated until you ask.',
+            ),
+            if (programs.loading) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
+            if (programs.problem case final problem?)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(problem, key: const Key('programs-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+            const SizedBox(height: 8),
+            if (!programs.loading && shown.isEmpty)
+              Text(view.discover ? 'Every program is installed.' : 'No program is installed.', key: const Key('agents-nothing')),
+          ],
+          cards: [for (final status in shown) ProgramTile(programs: programs, status: status)],
+        );
+      },
+    );
+  }
 }

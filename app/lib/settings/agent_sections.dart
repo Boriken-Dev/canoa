@@ -282,7 +282,7 @@ class _McpSectionState extends State<McpSection> {
         ScopeBar(label: 'agent', value: agent, choices: widget.agents, onChanged: (picked) => setState(() => _agent = picked)),
         SettingsGroup(title: 'Your servers', children: [
           if (servers.isEmpty)
-            const SettingsRow(title: 'None of your own', description: 'Find and install some in Loadout'),
+            const SettingsRow(title: 'None of your own', description: 'Find and install some in the Store'),
           for (final (name, server) in servers)
             SwitchRow(
               key: Key('mcp-$name'),
@@ -297,7 +297,7 @@ class _McpSectionState extends State<McpSection> {
         if (widget.onLoadout != null)
           Align(
             alignment: Alignment.centerLeft,
-            child: TextButton(key: const Key('mcp-loadout'), onPressed: widget.onLoadout, child: const Text('Loadout…')),
+            child: TextButton(key: const Key('mcp-loadout'), onPressed: widget.onLoadout, child: const Text('Store…')),
           ),
       ]);
     },

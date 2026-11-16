@@ -78,7 +78,7 @@ class _CatalogsSectionState extends State<CatalogsSection> {
       final store = c.config.store;
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         SettingsGroup(title: 'Catalogs', children: [
-          if (catalogs.isEmpty) const SettingsRow(title: 'No catalog', description: 'Loadout lists what the catalogs offer; add one below'),
+          if (catalogs.isEmpty) const SettingsRow(title: 'No catalog', description: 'The Store lists what the catalogs offer; add one below'),
           for (final MapEntry(key: label, value: source) in catalogs.entries)
             SettingsRow(
               key: Key('catalog-$label'),

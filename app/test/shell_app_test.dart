@@ -1,4 +1,4 @@
-// The app's shell: Conversations, Loadouts and Settings are sections of one selector, a message being written survives a visit to
+// The app's shell: Conversations, Store and Settings are sections of one selector, a message being written survives a visit to
 // another section, Ctrl+B hides only the conversations index, and the layout comes back after a restart.
 import 'dart:io' show Directory;
 
@@ -45,9 +45,9 @@ SessionStore _busy() {
 void main() {
   setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/shell_app_test.dart')));
 
-  testWidgets('the selector offers Conversations, Loadouts and Settings, and Settings is no longer a page over the app', (tester) async {
+  testWidgets('the selector offers Conversations, Store and Settings, and Settings is no longer a page over the app', (tester) async {
     await pumpApp(tester, SessionStore());
-    for (final name in const ['Conversations', 'Loadouts', 'Canoa settings']) {
+    for (final name in const ['Conversations', 'Store', 'Canoa settings']) {
       expect(find.byTooltip(name), findsOneWidget);
     }
     expect(find.text('Settings'), findsNothing);
@@ -56,21 +56,21 @@ void main() {
     expect(find.byKey(const Key('settings-search')), findsOneWidget);
     expect(find.byType(SectionRail), findsOneWidget, reason: 'the selector stays beside it');
     expect(find.byType(SessionRail), findsNothing, reason: 'Settings has no conversations index');
-    await tester.tap(find.byTooltip('Loadouts'));
+    await tester.tap(find.byTooltip('Store'));
     await frames(tester);
-    expect(find.byKey(const Key('loadout-tabs')), findsOneWidget);
+    expect(find.byKey(const Key('store-tabs')), findsOneWidget);
     await tester.tap(find.byTooltip('Conversations'));
     await frames(tester);
     expect(find.byType(SessionRail), findsOneWidget);
   });
 
-  testWidgets('a message being written is still there after a visit to Settings and to Loadouts', (tester) async {
+  testWidgets('a message being written is still there after a visit to Settings and to the Store', (tester) async {
     await pumpApp(tester, SessionStore());
     await newSession(tester);
     await tester.enterText(_composer, 'fix the build');
     await tester.tap(find.byTooltip('Canoa settings'));
     await frames(tester);
-    await tester.tap(find.byTooltip('Loadouts'));
+    await tester.tap(find.byTooltip('Store'));
     await frames(tester);
     await tester.tap(find.byTooltip('Conversations'));
     await frames(tester);

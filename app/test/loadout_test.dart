@@ -6,7 +6,7 @@ library;
 import 'dart:convert';
 
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/loadout/loadout_page.dart';
+import 'package:canoa/store/store_section.dart';
 import 'package:canoa/loadout/mcp_registry.dart' show RegistryRefusal;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -76,7 +76,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     config = CanoaConfig.parse(text);
     await tester.pumpWidget(MaterialApp(
-      home: LoadoutPage(
+      home: StoreSection(
         config: config,
         home: MemoryHome(overlays),
         index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last),
@@ -107,7 +107,7 @@ void main() {
   }
 
   Future<void> openTab(WidgetTester tester, String name) async {
-    await tester.tap(find.byKey(Key('loadout-tab-$name')));
+    await tester.tap(find.byKey(Key('store-tab-$name')));
     await tester.pumpAndSettle();
   }
 
@@ -122,15 +122,15 @@ void main() {
 
   testWidgets('each tab counts what is installed, and Discover counts what the catalogs offer', (tester) async {
     await open(tester);
-    expect(tabText(tester, 'loadout-tab-overlays'), 'Overlays 0');
-    expect(tabText(tester, 'loadout-tab-skills'), 'Skills 0');
-    expect(tabText(tester, 'loadout-tab-mcps'), 'MCPs 0');
+    expect(tabText(tester, 'store-tab-overlays'), 'Overlays 0');
+    expect(tabText(tester, 'store-tab-skills'), 'Skills 0');
+    expect(tabText(tester, 'store-tab-mcps'), 'MCPs 0');
     expect(find.text('Discover 1'), findsOneWidget, reason: 'the catalog offers one overlay');
 
     await installReview(tester);
-    expect(tabText(tester, 'loadout-tab-overlays'), 'Overlays 1');
+    expect(tabText(tester, 'store-tab-overlays'), 'Overlays 1');
     expect(find.text('Installed 1'), findsOneWidget);
-    expect(tabText(tester, 'loadout-tab-mcps'), 'MCPs 1', reason: 'the overlay brings one MCP server');
+    expect(tabText(tester, 'store-tab-mcps'), 'MCPs 1', reason: 'the overlay brings one MCP server');
     expect(saved.last.overlays.keys, ['review']);
   });
 
@@ -216,7 +216,7 @@ void main() {
     expect(overlays.skillFetches, isEmpty, reason: 'nothing is fetched before the yes');
     await tapKey(tester, 'store-skill-install-confirm');
     expect(overlays.skills.keys, ['pdf']);
-    expect(tabText(tester, 'loadout-tab-skills'), 'Skills 1');
+    expect(tabText(tester, 'store-tab-skills'), 'Skills 1');
     expect(saved.last.loadoutSkills, {'pdf'});
     expect(saved.last.profile.skills, isEmpty);
 
@@ -253,7 +253,7 @@ void main() {
     Future<void> review(WidgetTester tester, String name) async {
       await openTab(tester, 'mcps');
       await tapKey(tester, 'mcps-discover');
-      await tapKey(tester, 'mcp-entry-$name');
+      await tapKey(tester, 'mcp-install-$name');
     }
 
     testWidgets('the registry\'s servers are listed with where they come from, and a server is reviewed in full before it is written', (tester) async {
@@ -264,6 +264,11 @@ void main() {
       expect(tester.widget<Text>(find.descendant(of: card, matching: find.byKey(const Key('provenance')))).data,
           allOf(contains('registry.modelcontextprotocol.io'), contains('io.github.ana/files 1.2.0'), contains('https://github.com/ana/files')));
       await tapKey(tester, 'mcp-entry-io.github.ana/files');
+      expect(find.byKey(const Key('mcp-details-io.github.ana/files')), findsOneWidget, reason: 'the card opens its details');
+      expect(find.byKey(const Key('details-technical')), findsOneWidget);
+      expect(find.textContaining('Registry: registry.modelcontextprotocol.io'), findsOneWidget);
+      expect(find.byKey(const Key('mcp-install-dialog')), findsNothing, reason: 'looking is not installing');
+      await tapKey(tester, 'entry-details-action');
       expect(find.byKey(const Key('mcp-install-dialog')), findsOneWidget);
       expect(find.textContaining('server.json digest sha256:'), findsOneWidget);
       expect(find.textContaining('Starts npx -y @ana/files-mcp@1.2.0'), findsOneWidget);
@@ -280,7 +285,7 @@ void main() {
       expect(changed.agentMcp, {'Claude': {'files': false}, 'Codex': {'files': false}});
       expect(changed.loadoutMcp['files']!.server, 'io.github.ana/files');
       expect(changed.loadoutMcp['files']!.digest, startsWith('sha256:'));
-      expect(tabText(tester, 'loadout-tab-mcps'), 'MCPs 1');
+      expect(tabText(tester, 'store-tab-mcps'), 'MCPs 1');
       expect(find.textContaining('Off for every agent'), findsOneWidget);
       expect(find.textContaining('from the registry registry.modelcontextprotocol.io'), findsOneWidget);
 

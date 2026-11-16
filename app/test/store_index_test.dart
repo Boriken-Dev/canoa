@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/control_client.dart';
-import 'package:canoa/loadout/loadout_page.dart';
+import 'package:canoa/store/store_section.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/store/store.dart';
 import 'package:canoa/store/store_index.dart';
@@ -140,7 +140,7 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1280, 1600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(MaterialApp(
-        home: LoadoutPage(
+        home: StoreSection(
           config: CanoaConfig.parse('[catalogs]\nteam = "https://example.invalid/team.git@main#catalog.toml"\n'),
           home: MemoryHome(overlays),
           index: index,
@@ -174,7 +174,7 @@ void main() {
         asked.add(refresh);
         return catalogsFromIndex(answer());
       });
-      await tester.tap(find.byKey(const Key('loadout-refresh')));
+      await tester.tap(find.byKey(const Key('store-refresh')));
       await tester.pumpAndSettle();
       expect(asked, [false, true]);
     });

@@ -63,7 +63,7 @@ final class ComposerKit {
   /// The overlays a new session starts with: Loadout's defaults, which are `overlays` when null.
   final List<String>? defaultOverlays;
 
-  /// Opens Loadout, where an overlay is installed and turned on or off by default; null where there is none.
+  /// Opens the Store, where an overlay is installed and turned on or off by default; null where there is none.
   final VoidCallback? onLoadout;
 
   /// The sources Settings has, in its order.
@@ -363,7 +363,7 @@ class SessionComposer extends StatelessWidget {
       ComposerAction(name: 'mode', description: 'Switch to the next mode', run: () => unawaited(store.cycleMode(session))),
     if (kit.onSettings != null) ComposerAction(name: 'settings', description: 'Open Settings', run: kit.onSettings!),
     if (kit.onSourceSettings != null) ComposerAction(name: 'sources', description: 'Open the source settings', run: kit.onSourceSettings!),
-    if (kit.onLoadout != null) ComposerAction(name: 'loadout', description: 'Open Loadout', run: kit.onLoadout!),
+    if (kit.onLoadout != null) ComposerAction(name: 'loadout', description: 'Open the Store', run: kit.onLoadout!),
     if (kit.onProfile != null && session.profile != null)
       ComposerAction(name: 'profile', description: 'Show what this session was given', run: () => kit.onProfile!(session)),
   ];

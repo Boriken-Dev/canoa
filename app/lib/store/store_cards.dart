@@ -1,0 +1,157 @@
+import 'package:flutter/material.dart';
+
+import 'overlay_page.dart' show oneLine;
+import 'store_icon.dart';
+
+/// The width of the Store's body from which cards sit two to a row.
+const twoColumnsFrom = 900.0;
+
+/// A scrolling list of [header] widgets, then [cards] in rows of two when the body is wide and of one when it is narrow, then
+/// [footer]. Rows are built as they scroll in, so a catalog of thousands of entries costs what is on screen.
+class CardList extends StatelessWidget {
+  const CardList({super.key, this.header = const [], this.cards = const [], this.footer = const []});
+
+  final List<Widget> header;
+  final List<Widget> cards;
+  final List<Widget> footer;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) {
+      final columns = box.maxWidth >= twoColumnsFrom ? 2 : 1;
+      final rows = (cards.length + columns - 1) ~/ columns;
+      return ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        itemCount: header.length + rows + footer.length,
+        itemBuilder: (context, index) {
+          if (index < header.length) return header[index];
+          index -= header.length;
+          if (index >= rows) return footer[index - rows];
+          if (columns == 1) return cards[index];
+          final first = index * 2;
+          return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: cards[first]),
+            const SizedBox(width: 8),
+            Expanded(child: first + 1 < cards.length ? cards[first + 1] : const SizedBox.shrink()),
+          ]);
+        },
+      );
+    },
+  );
+}
+
+/// An installed item's card: an icon, a title, lines under it, and what the person can do.
+class LoadoutCard extends StatelessWidget {
+  const LoadoutCard({super.key, required this.leading, required this.title, this.lines = const [], this.provenance,
+      this.trailing, this.footer, this.onTap});
+
+  final Widget leading;
+  final String title;
+  final List<String> lines;
+
+  /// Where it comes from, in one line, under the others.
+  final String? provenance;
+  final Widget? trailing;
+  final Widget? footer;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              leading,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(oneLine(title), style: text.titleSmall),
+                  for (final line in lines) Text(oneLine(line), style: text.bodyMedium),
+                  if (provenance != null)
+                    Text(oneLine(provenance!), key: const Key('provenance'),
+                        style: text.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                ]),
+              ),
+              if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+            ]),
+            if (footer != null) ...[const SizedBox(height: 8), footer!],
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// A Discover card: icon, name, a two-line summary, where it comes from, what it needs, whether it is here, and one labelled
+/// action. The card opens the entry's details; the action goes on from there, or straight to the review.
+class StoreCard extends StatelessWidget {
+  const StoreCard({super.key, required this.leading, required this.title, required this.source, required this.actionLabel,
+      required this.onAction, this.onOpen, this.summary, this.compatibility, this.state, this.actionKey});
+
+  final Widget leading;
+  final String title;
+  final String? summary;
+
+  /// Where it comes from, one line.
+  final String source;
+
+  /// What it needs of this computer or the agent, one line; null when nothing is said.
+  final String? compatibility;
+
+  /// `Installed` and the like; null when it is not here.
+  final String? state;
+  final String actionLabel;
+  final Key? actionKey;
+  final VoidCallback? onAction;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final quiet = text.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: onOpen ?? onAction,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            leading,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(oneLine(title), style: text.titleSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
+                if (summary != null) Text(oneLine(summary!), style: text.bodyMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
+                Text(oneLine(source), key: const Key('provenance'), style: quiet, maxLines: 1, overflow: TextOverflow.ellipsis),
+                if (compatibility != null)
+                  Text(oneLine(compatibility!), key: const Key('compatibility'), style: quiet, maxLines: 1, overflow: TextOverflow.ellipsis),
+                if (state != null) Text(oneLine(state!), key: const Key('card-state'), style: text.labelMedium),
+              ]),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.tonal(key: actionKey, onPressed: onAction, child: Text(actionLabel)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// A letter on a disc, for a card with no icon of its own.
+class LoadoutMark extends StatelessWidget {
+  const LoadoutMark({super.key, required this.name, this.icon});
+  final String name;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) => icon != null
+      ? CircleAvatar(radius: 16, child: Icon(icon, size: 18))
+      : OverlayPlaceholder(name: name, size: 32);
+}

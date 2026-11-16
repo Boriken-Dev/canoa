@@ -9,6 +9,7 @@ import '../profile/profile.dart';
 import '../profile/profile_home.dart';
 import '../profile/skill_copies.dart';
 import '../profile/profiles_panel.dart' show EffectiveTable, OverlayReportView, visible;
+import 'entry_details.dart';
 import 'links.dart';
 import 'skills.dart';
 import 'store.dart';
@@ -209,6 +210,14 @@ class OverlayPageState extends State<OverlayPage> {
           padding: const EdgeInsets.all(16),
           children: [
             _claims(text),
+            const SizedBox(height: 12),
+            EntryFactsView(
+              facts: widget.catalog.facts['overlay:${entry.name}'],
+              technical: {
+                if (entry.pin != null) 'Pin': entry.pin!,
+                if (widget.catalog.commit != null) 'Catalog commit': widget.catalog.commit!,
+              },
+            ),
             const Divider(height: 32),
             if (_refusal case final why?)
               Text(visible(why), key: const Key('store-refusal'), style: TextStyle(color: Theme.of(context).colorScheme.error))

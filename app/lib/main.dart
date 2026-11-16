@@ -88,8 +88,8 @@ import 'rail/session_rail.dart';
 import 'session_store.dart';
 import 'sources/readiness.dart';
 import 'sources/sources.dart';
-import 'loadout/loadout_page.dart';
 import 'loadout/registry_fetch.dart';
+import 'store/store_section.dart';
 import 'store/programs.dart';
 import 'store/store_index.dart';
 import 'welcome/welcome_view.dart';
@@ -374,7 +374,7 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   final _settingsKey = GlobalKey<SettingsPageState>();
-  final _loadoutKey = GlobalKey<LoadoutPageState>();
+  final _loadoutKey = GlobalKey<StoreSectionState>();
 
   /// The section Settings opens at when it is first shown.
   String? _settingsFirst;
@@ -529,17 +529,17 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Where overlays install and catalogs are fetched: the host that served this page, else beside canoa.cfg.
   ProfileHome? get _home => widget.served?.home ?? platformProfileHome(configPath: _configPath);
 
-  /// Shows Loadout: overlays, skills and MCP servers, installed and to discover.
+  /// Shows the Store: agents, overlays, skills and MCP servers, installed and to discover.
   Future<void> _showLoadout() async {
     // What the host has installed changes without this page, and the store shows it from what was last read.
     if (widget.served case final served?) await served.refreshOverlays();
     if (!mounted) return;
-    _layout.select('loadouts');
+    _layout.select('store');
     if (_loadoutKey.currentState case final page?) unawaited(page.controller.adopt(config));
   }
 
-  /// Loadout as the section shows it.
-  Widget _loadoutPage() => LoadoutPage(
+  /// The Store as the section shows it.
+  Widget _loadoutPage() => StoreSection(
     key: _loadoutKey,
     embedded: true,
     config: config,
@@ -1855,7 +1855,7 @@ class _CanoaHome extends StatelessWidget {
           PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
         if (session?.status == SessionStatus.working) PaletteItem('Stop the turn', _stop, icon: Icons.stop_circle_outlined),
         PaletteItem('Settings', onSettings, icon: Icons.settings_outlined),
-        if (onLoadout != null) PaletteItem('Loadout', onLoadout!, icon: Icons.tune),
+        if (onLoadout != null) PaletteItem('Store', onLoadout!, icon: Icons.storefront_outlined),
         if (onHosting != null) PaletteItem('Hosting', onHosting!, icon: Icons.dns_outlined),
         PaletteItem('Keyboard shortcuts', () => unawaited(showShortcutHelp(context)), icon: Icons.keyboard_outlined),
         for (final other in store.sessions)
@@ -1939,7 +1939,7 @@ class _CanoaHome extends StatelessWidget {
               welcome: welcome,
             ),
           ),
-          AppSection(id: 'loadouts', label: 'Loadouts', icon: Icons.tune, main: loadout),
+          AppSection(id: 'store', label: 'Store', icon: Icons.storefront_outlined, main: loadout),
           AppSection(id: 'settings', label: 'Settings', tooltip: 'Canoa settings', icon: Icons.settings_outlined, main: settings, atFoot: true),
         ],
       ));

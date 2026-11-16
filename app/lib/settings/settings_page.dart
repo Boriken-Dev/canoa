@@ -113,7 +113,7 @@ class SettingsPage extends StatefulWidget {
   /// Pins the overlay [name] in canoa.cfg to the tree digest just installed, and gives the configuration saved.
   final Future<CanoaConfig?> Function(String name, String digest)? onPin;
 
-  /// Opens Loadout.
+  /// Opens the Store.
   final VoidCallback? onLoadout;
 
   /// The host this app runs, for the Hosting section; none where the app runs none.

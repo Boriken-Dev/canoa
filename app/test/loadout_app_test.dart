@@ -77,7 +77,7 @@ void main() {
     final first = store.selected!;
     expect(first.overlays, {'a', 'b'});
 
-    await tester.tap(find.byTooltip('Loadouts'));
+    await tester.tap(find.byTooltip('Store'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('overlay-default-b')));
     await tester.pumpAndSettle();

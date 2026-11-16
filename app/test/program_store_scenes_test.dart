@@ -4,7 +4,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/loadout/loadout_page.dart';
+import 'package:canoa/store/store_section.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -64,27 +64,44 @@ Future<FakeStoreHost> _open(WidgetTester tester, Size size) async {
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(MaterialApp(
-    home: LoadoutPage(config: const CanoaConfig(), home: MemoryHome(MemoryOverlays()), onSave: (changed) async => changed, programs: host.programs()),
+    home: StoreSection(config: const CanoaConfig(), home: MemoryHome(MemoryOverlays()), onSave: (changed) async => changed, programs: host.programs()),
   ));
   await tester.pumpAndSettle();
-  // The programs are on a page of their own, reached from Loadout's menu.
-  await tester.tap(find.byKey(const Key('loadout-programs')));
-  await tester.pumpAndSettle();
   return host;
+}
+
+/// The programs not found on this computer, which is where an install starts.
+Future<void> _toDiscover(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('agents-discover')));
+  await tester.pumpAndSettle();
 }
 
 void main() {
   setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/program_store_scenes_test.dart')));
 
   for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
-    testWidgets('the Store page lists the programs at $label width', (tester) async {
+    testWidgets('the Store lists the installed programs at $label width', (tester) async {
       await _open(tester, size);
+      expect(find.byKey(const Key('program-one_store')), findsOneWidget);
+      expect(find.byKey(const Key('program-three_store')), findsOneWidget);
+      expect(find.byKey(const Key('program-two_store')), findsNothing, reason: 'not found on this computer: it is in Discover');
+      expect(find.byKey(const Key('store-updates-badge')), findsOneWidget, reason: 'one program has a newer version');
       expect(tester.takeException(), isNull);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/store_programs_$label.png'));
     });
 
+    testWidgets('the Store lists the programs to install in Discover at $label width', (tester) async {
+      await _open(tester, size);
+      await _toDiscover(tester);
+      expect(find.byKey(const Key('program-two_store')), findsOneWidget);
+      expect(find.byKey(const Key('program-one_store')), findsNothing);
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/store_programs_discover_$label.png'));
+    });
+
     testWidgets('an install\'s plan draws at $label width', (tester) async {
       await _open(tester, size);
+      await _toDiscover(tester);
       await tester.ensureVisible(find.byKey(const Key('program-install-two_store')));
       await tester.tap(find.byKey(const Key('program-install-two_store')));
       await tester.pumpAndSettle();
@@ -95,6 +112,7 @@ void main() {
 
     testWidgets('an install in progress draws at $label width', (tester) async {
       final host = await _open(tester, size);
+      await _toDiscover(tester);
       final release = Completer<void>();
       host.onApply = (apply) async {
         apply.say('Fetching two-windows-arm64.zip');

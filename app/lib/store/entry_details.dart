@@ -1,0 +1,184 @@
+import 'package:flutter/material.dart';
+
+import '../profile/profiles_panel.dart' show visible;
+import 'links.dart';
+import 'overlay_page.dart' show oneLine;
+import 'store.dart' show EntryFacts;
+
+/// What an entry's index facts say it holds, shown before anything is fetched: its contents, what it requires, the hooks and
+/// environment scripts it carries, and the technical details with their digests. All of it is what the entry's catalog or
+/// manifest says; nothing here ran.
+class EntryFactsView extends StatelessWidget {
+  const EntryFactsView({super.key, required this.facts, this.requirements = const [], this.technical = const {}});
+
+  /// The index's facts of the entry, or null when the host has none (an entry listed by hand).
+  final EntryFacts? facts;
+
+  /// Requirements from another source than the manifest, such as the runtime a registry package needs.
+  final List<String> requirements;
+
+  /// Details for someone who checks: label to value, each shown whole.
+  final Map<String, String> technical;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final facts = this.facts;
+    final needs = [...?facts?.requirements, ...requirements];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('Contents', style: text.titleSmall),
+      if (facts == null || !facts.hasContents)
+        const Text(
+          'Not read yet. What it holds is in its own files, which are fetched only when you ask.',
+          key: Key('details-contents-unread'),
+        )
+      else ...[
+        _list('Skills', facts.skills, const Key('details-skills')),
+        _list('MCP servers (off until allowed)', facts.mcpServers, const Key('details-mcp-servers')),
+        if (facts.skills.isEmpty && facts.mcpServers.isEmpty) const Text('No skills and no MCP servers.'),
+      ],
+      const SizedBox(height: 12),
+      Text('Requirements', style: text.titleSmall),
+      if (needs.isEmpty)
+        const Text('None listed.', key: Key('details-requirements-none'))
+      else
+        for (final need in needs) Text(oneLine(need), key: const Key('details-requirement')),
+      const SizedBox(height: 12),
+      Text('Hooks and environment scripts it carries', style: text.titleSmall),
+      if (facts == null || !facts.hasContents)
+        const Text('Not read yet.', key: Key('details-carried-unread'))
+      else if (facts.hooks.isEmpty && facts.envScripts.isEmpty)
+        const Text('None.', key: Key('details-carried-none'))
+      else ...[
+        _list('Hooks, by event', facts.hooks, const Key('details-hooks')),
+        _list('Environment scripts', facts.envScripts, const Key('details-env-scripts')),
+        const Text('They stay off until you allow them at their digest.', key: Key('details-carried-off')),
+      ],
+      if (facts?.problem case final problem?) ...[
+        const SizedBox(height: 12),
+        Text(oneLine(problem), key: const Key('details-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+      ],
+      if (technical.isNotEmpty || facts != null) ...[
+        const SizedBox(height: 4),
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            key: const Key('details-technical'),
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(bottom: 8),
+            expandedCrossAxisAlignment: CrossAxisAlignment.start,
+            title: Text('Technical details', style: text.titleSmall),
+            children: [
+              if (facts != null) _field('Index id', facts.id),
+              if (facts?.version case final version?) _field('Version', version),
+              for (final MapEntry(:key, :value) in technical.entries) _field(key, value),
+            ],
+          ),
+        ),
+      ],
+    ]);
+  }
+
+  static Widget _list(String label, List<String> names, Key key) => names.isEmpty
+      ? const SizedBox.shrink()
+      : Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: SelectableText.rich(key: key, TextSpan(children: [
+            TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w600)),
+            TextSpan(text: names.map(oneLine).join(', ')),
+          ])),
+        );
+
+  static Widget _field(String label, String value) => Padding(
+    padding: const EdgeInsets.only(top: 4),
+    child: SelectableText.rich(TextSpan(children: [
+      TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w600)),
+      TextSpan(text: oneLine(value)),
+    ])),
+  );
+}
+
+/// One entry's page, for a skill or an MCP server: what its catalog or registry says, where it comes from, what it holds, and
+/// the one labelled action that goes on to the review before anything is installed. An overlay's own page is
+/// `OverlayPage`, which shows the same facts and goes on to its dry run.
+class EntryDetails extends StatelessWidget {
+  const EntryDetails({
+    super.key,
+    required this.title,
+    required this.leading,
+    required this.from,
+    this.summary,
+    this.state,
+    this.overview = const {},
+    this.source = const {},
+    this.facts,
+    this.requirements = const [],
+    this.technical = const {},
+    this.action,
+  });
+
+  final String title;
+  final Widget leading;
+
+  /// Whose claim this is, such as `the catalog main` or `the registry registry.example`.
+  final String from;
+  final String? summary;
+
+  /// `Installed`, or null.
+  final String? state;
+
+  /// Overview fields: label to value. A Homepage or Repository that is a plain web address opens when tapped.
+  final Map<String, String> overview;
+
+  /// Source and version fields: label to value.
+  final Map<String, String> source;
+  final EntryFacts? facts;
+  final List<String> requirements;
+  final Map<String, String> technical;
+
+  /// The labelled button that goes on, such as `Review and install…`; null when nothing can be done.
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Scaffold(
+      appBar: AppBar(title: Text(oneLine(title))),
+      body: ListView(
+        key: const Key('entry-details'),
+        padding: const EdgeInsets.all(16),
+        children: [
+          Row(children: [
+            leading,
+            const SizedBox(width: 12),
+            Expanded(child: Text(oneLine(title), style: text.titleLarge)),
+            if (state != null) Chip(key: const Key('details-state'), label: Text(state!)),
+          ]),
+          const SizedBox(height: 12),
+          Text('Overview', style: text.titleSmall),
+          Text('What $from says', style: text.bodySmall),
+          if (summary != null) Padding(padding: const EdgeInsets.only(top: 4), child: SelectableText(visible(summary!))),
+          for (final MapEntry(:key, :value) in overview.entries) _fieldOrLink(key, value),
+          const SizedBox(height: 12),
+          Text('Source and version', style: text.titleSmall),
+          for (final MapEntry(:key, :value) in source.entries) _fieldOrLink(key, value),
+          const SizedBox(height: 12),
+          EntryFactsView(facts: facts, requirements: requirements, technical: technical),
+          if (action != null) ...[const SizedBox(height: 16), Align(alignment: Alignment.centerLeft, child: action)],
+        ],
+      ),
+    );
+  }
+
+  static Widget _fieldOrLink(String label, String value) {
+    final uri = label == 'Homepage' || label == 'Repository' ? webLink(value) : null;
+    if (uri != null) return LinkField(key: Key('details-link-${label.toLowerCase()}'), label: label, uri: uri, shown: oneLine(value));
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: SelectableText.rich(TextSpan(children: [
+        TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w600)),
+        TextSpan(text: oneLine(value)),
+      ])),
+    );
+  }
+}

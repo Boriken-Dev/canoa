@@ -1,6 +1,6 @@
 // A catalog entry's homepage and repository are links a person may open, and only when they are plain web addresses.
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/loadout/loadout_page.dart';
+import 'package:canoa/store/store_section.dart';
 import 'package:canoa/store/links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -41,7 +41,7 @@ about = { summary = "Docs.", homepage = "https://example.org/docs", repository =
     await tester.binding.setSurfaceSize(const Size(1280, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(MaterialApp(
-      home: LoadoutPage(
+      home: StoreSection(
         config: CanoaConfig.parse('[catalogs]\nteam = "$repo@main#catalog.toml"\n'),
         home: MemoryHome(overlays),
         index: standInIndex(overlays, () => CanoaConfig.parse('[catalogs]\nteam = "$repo@main#catalog.toml"\n')),

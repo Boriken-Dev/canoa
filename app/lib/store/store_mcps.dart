@@ -2,90 +2,82 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../loadout/loadout_controller.dart';
+import '../loadout/mcp_registry.dart';
 import '../profile/profile.dart';
 import '../profile/profiles_panel.dart' show visible;
 import '../selectable.dart';
-import '../store/overlay_page.dart' show oneLine;
-import 'loadout_controller.dart';
-import 'loadout_page.dart';
-import 'mcp_registry.dart';
+import 'entry_details.dart';
+import 'overlay_page.dart' show oneLine;
+import 'store_cards.dart';
+import 'store_view.dart';
 
-/// The MCPs section: the MCP servers the profile defines, and the servers a registry lists.
+/// The MCPs type: the MCP servers the profile defines, and the servers a registry lists.
 ///
 /// A registry is the MCP Registry's API (modelcontextprotocol/registry): each server is a `server.json`. Installing one writes a
 /// server into the person's own profile and turns it off for every agent, so nothing starts until it is allowed here; what it
 /// would write, and the digest of the `server.json` that was shown, are in front of the person before they say yes.
-class McpsSection extends StatefulWidget {
-  const McpsSection({super.key, required this.controller});
+class McpsBody extends StatefulWidget {
+  const McpsBody({super.key, required this.controller, required this.view});
   final LoadoutController controller;
+  final StoreView view;
 
   @override
-  State<McpsSection> createState() => _McpsSectionState();
+  State<McpsBody> createState() => _McpsBodyState();
 }
 
-class _McpsSectionState extends State<McpsSection> with AutomaticKeepAliveClientMixin {
-  bool discover = false;
-  final query = TextEditingController();
-
+class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin {
   LoadoutController get c => widget.controller;
+  StoreView get view => widget.view;
+  bool get discover => view.discover;
 
   @override
   bool get wantKeepAlive => true;
 
   @override
   void dispose() {
-    query.dispose();
     address.dispose();
     super.dispose();
-  }
-
-  void _toDiscover(bool value) {
-    setState(() => discover = value);
-    if (value && !c.registryRead && !c.loadingRegistry) unawaited(c.loadRegistry());
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return ListenableBuilder(
-      listenable: c,
-      builder: (context, _) => ListView(padding: const EdgeInsets.all(16), children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: InstalledOrDiscover(
-            section: 'mcps',
-            discover: discover,
-            installedCount: c.installedMcp().length,
-            discoverCount: c.registryRead ? c.registryEntries.length : null,
-            onChanged: _toDiscover,
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (c.problem != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(visible(c.problem!), key: const Key('mcps-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
-          ),
-        if (discover) ..._discover(context) else ..._installed(context),
-      ]),
-    );
+    final problem = c.problem == null
+        ? const <Widget>[]
+        : [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(visible(c.problem!), key: const Key('mcps-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
+          ];
+    return discover ? _discover(context, problem) : _installed(context, problem);
   }
 
-  List<Widget> _installed(BuildContext context) {
+  Widget _installed(BuildContext context, List<Widget> head) {
     final servers = c.installedMcp();
     if (servers.isEmpty) {
-      return [
+      return CardList(header: [
+        ...head,
         const Text('No MCP servers yet. An MCP server gives an agent tools; none starts until you allow it.', key: Key('mcps-none')),
         const SizedBox(height: 8),
-        FilledButton.tonal(key: const Key('mcps-to-discover'), onPressed: () => _toDiscover(true), child: const Text('Discover MCP servers')),
-      ];
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.tonal(key: const Key('mcps-to-discover'), onPressed: () => view.discover = true, child: const Text('Discover MCP servers')),
+        ),
+      ]);
     }
-    return [
-      const Text('The servers your profile and your overlays define. One of yours starts only for an agent it is allowed for; an '
-          'overlay\'s asks you when a session starts.'),
-      const SizedBox(height: 8),
-      for (final server in servers) _installedCard(context, server),
-    ];
+    final shown = [for (final server in servers) if (view.matches('${server.name}\n${_describe(server.server)}')) server];
+    return CardList(
+      header: [
+        ...head,
+        const Text('The servers your profile and your overlays define. One of yours starts only for an agent it is allowed for; an '
+            'overlay\'s asks you when a session starts.'),
+        const SizedBox(height: 8),
+        if (shown.isEmpty) const Text('No installed server matches.', key: Key('mcps-installed-nothing')),
+      ],
+      cards: [for (final server in shown) _installedCard(context, server)],
+    );
   }
 
   static String _describe(McpServer server) => switch (server) {
@@ -135,38 +127,31 @@ class _McpsSectionState extends State<McpsSection> with AutomaticKeepAliveClient
 
   static String _short(String digest) => digest.length > 19 ? '${digest.substring(0, 19)}…' : digest;
 
-  List<Widget> _discover(BuildContext context) {
+  Widget _discover(BuildContext context, List<Widget> head) {
     final host = registryShown(c.selectedRegistry);
-    return [
-      _registryRow(context),
-      Row(children: [
-        Expanded(
-          child: TextField(
-            key: const Key('mcps-search'),
-            controller: query,
-            decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Search the registry'),
-            onSubmitted: (_) => unawaited(c.loadRegistry(search: query.text)),
+    return CardList(
+      header: [
+        ...head,
+        _registryRow(context),
+        Text('Listed by $host. A registry\'s listing is its publishers\' claim: what installing would write is shown from the server\'s '
+            'own description, and nothing runs until you allow it. Search asks the registry when you press Enter.',
+            style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 8),
+        if (c.loadingRegistry) const LinearProgressIndicator(),
+        if (c.registryProblem case final problem?)
+          Text(visible(problem), key: const Key('mcps-registry-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        if (c.registryRead && !c.loadingRegistry && c.registryProblem == null && c.registryEntries.isEmpty)
+          const Text('The registry lists nothing for that.', key: Key('mcps-nothing')),
+      ],
+      cards: [for (final entry in c.registryEntries) _entryCard(context, entry, host)],
+      footer: [
+        if (c.registryNext != null && !c.loadingRegistry)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(key: const Key('mcps-more'), onPressed: () => unawaited(c.loadRegistry(more: true)), child: const Text('Show more')),
           ),
-        ),
-        const SizedBox(width: 8),
-        FilledButton.tonal(key: const Key('mcps-search-go'), onPressed: c.loadingRegistry ? null : () => unawaited(c.loadRegistry(search: query.text)), child: const Text('Search')),
-      ]),
-      const SizedBox(height: 4),
-      Text('Listed by $host. A registry\'s listing is its publishers\' claim: what installing would write is shown from the server\'s '
-          'own description, and nothing runs until you allow it.', style: Theme.of(context).textTheme.bodySmall),
-      const SizedBox(height: 8),
-      if (c.loadingRegistry) const LinearProgressIndicator(),
-      if (c.registryProblem case final problem?)
-        Text(visible(problem), key: const Key('mcps-registry-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
-      if (c.registryRead && !c.loadingRegistry && c.registryProblem == null && c.registryEntries.isEmpty)
-        const Text('The registry lists nothing for that.', key: Key('mcps-nothing')),
-      for (final entry in c.registryEntries) _entryCard(context, entry, host),
-      if (c.registryNext != null && !c.loadingRegistry)
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(key: const Key('mcps-more'), onPressed: () => unawaited(c.loadRegistry(more: true)), child: const Text('Show more')),
-        ),
-    ];
+      ],
+    );
   }
 
   final address = TextEditingController();
@@ -224,18 +209,50 @@ class _McpsSectionState extends State<McpsSection> with AutomaticKeepAliveClient
 
   Widget _entryCard(BuildContext context, McpRegistryEntry entry, String host) {
     final installed = c.installedMcp().any((server) => server.origin?.server == entry.name);
-    return LoadoutCard(
+    final runtimes = {for (final option in optionsOf(entry.server)) ?option.runtime};
+    return StoreCard(
       key: Key('mcp-entry-${entry.name}'),
       leading: const LoadoutMark(name: 'mcp', icon: Icons.hub_outlined),
       title: entry.title,
-      lines: [if (entry.description.isNotEmpty) entry.description, if (installed) 'Installed'],
-      provenance: 'from the registry $host · ${entry.name} ${entry.version}${entry.repositoryUrl == null ? '' : ' · ${entry.repositoryUrl}'}',
-      onTap: () => unawaited(_review(entry)),
+      summary: entry.description.isEmpty ? null : entry.description,
+      source: 'from the registry $host · ${entry.name} ${entry.version}${entry.repositoryUrl == null ? '' : ' · ${entry.repositoryUrl}'}',
+      compatibility: runtimes.isEmpty ? null : 'Needs ${(runtimes.toList()..sort()).join(' or ')}',
+      state: installed ? 'Installed' : null,
+      actionLabel: 'Install…',
+      actionKey: Key('mcp-install-${entry.name}'),
+      onAction: () => unawaited(_review(entry)),
+      onOpen: () => unawaited(_details(entry, host, installed)),
     );
   }
 
+  Future<void> _details(McpRegistryEntry entry, String host, bool installed) async {
+    final runtimes = {for (final option in optionsOf(entry.server)) ?option.runtime};
+    await Navigator.of(context).push<void>(selectablePage(
+      builder: (_) => EntryDetails(
+        key: Key('mcp-details-${entry.name}'),
+        title: entry.title,
+        leading: const LoadoutMark(name: 'mcp', icon: Icons.hub_outlined),
+        from: 'the registry $host',
+        summary: entry.description.isEmpty ? null : entry.description,
+        state: installed ? 'Installed' : null,
+        overview: {
+          'Homepage': ?entry.websiteUrl,
+          'Repository': ?entry.repositoryUrl,
+        },
+        source: {'Registry': host, 'Server': entry.name, 'Version': entry.version},
+        requirements: [for (final runtime in runtimes.toList()..sort()) 'The runtime $runtime, which Canoa does not install'],
+        technical: {'server.json digest': entry.digest},
+        action: FilledButton.tonal(
+          key: const Key('entry-details-action'),
+          onPressed: () => unawaited(_review(entry, fromDetails: true)),
+          child: const Text('Review and install…'),
+        ),
+      ),
+    ));
+  }
+
   /// Shows what installing would write, from the `server.json` fetched, and writes it only on a yes.
-  Future<void> _review(McpRegistryEntry entry) async {
+  Future<void> _review(McpRegistryEntry entry, {bool fromDetails = false}) async {
     final options = optionsOf(entry.server);
     final found = <String, bool>{};
     for (final option in options) {
@@ -258,7 +275,9 @@ class _McpsSectionState extends State<McpsSection> with AutomaticKeepAliveClient
     await c.run('Installing ${entry.title}', () async {
       await c.installMcp(entry, picked.$1, picked.$2);
     });
-    if (mounted) setState(() => discover = false);
+    if (!mounted) return;
+    if (fromDetails) Navigator.of(context).pop();
+    view.discover = false;
   }
 }
 
@@ -358,8 +377,8 @@ class _McpInstallDialogState extends State<McpInstallDialog> {
             ],
             const SizedBox(height: 8),
             Text(widget.agents.isEmpty
-                ? 'It is written to your profile, and off until you allow it in Loadout.'
-                : 'It is written to your profile and turned off for ${widget.agents.join(', ')}: nothing starts until you allow it in Loadout.',
+                ? 'It is written to your profile, and off until you allow it in the Store.'
+                : 'It is written to your profile and turned off for ${widget.agents.join(', ')}: nothing starts until you allow it in the Store.',
                 key: const Key('mcp-off-note')),
           ]),
         ),

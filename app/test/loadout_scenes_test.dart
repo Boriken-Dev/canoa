@@ -7,7 +7,7 @@ library;
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/loadout/loadout_page.dart';
+import 'package:canoa/store/store_section.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -29,7 +29,7 @@ void main() {
         await tester.pumpWidget(MaterialApp(
           debugShowCheckedModeBanner: false,
           theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
-          home: LoadoutPage(
+          home: StoreSection(
             config: CanoaConfig.parse(text),
             home: MemoryHome(overlays),
             index: standInIndex(overlays, () => CanoaConfig.parse(text)),
@@ -87,7 +87,7 @@ void main() {
 
       testWidgets('what the catalog offers as skills, each with its source and pin', (tester) async {
         await open(tester);
-        await tester.tap(find.byKey(const Key('loadout-tab-skills')));
+        await tester.tap(find.byKey(const Key('store-tab-skills')));
         await tester.pumpAndSettle();
         await tap(tester, 'skills-discover');
         await golden(tester, 'skills_discover');
@@ -95,7 +95,7 @@ void main() {
 
       testWidgets('a skill chosen, fetched at its pin and on for new sessions', (tester) async {
         await open(tester);
-        await tester.tap(find.byKey(const Key('loadout-tab-skills')));
+        await tester.tap(find.byKey(const Key('store-tab-skills')));
         await tester.pumpAndSettle();
         await tap(tester, 'skills-discover');
         await tap(tester, 'store-skill-install-main-pdf');
@@ -105,7 +105,7 @@ void main() {
 
       testWidgets('MCP servers: what the registry lists', (tester) async {
         await open(tester);
-        await tester.tap(find.byKey(const Key('loadout-tab-mcps')));
+        await tester.tap(find.byKey(const Key('store-tab-mcps')));
         await tester.pumpAndSettle();
         await tap(tester, 'mcps-discover');
         await golden(tester, 'mcps_discover');
@@ -113,7 +113,7 @@ void main() {
 
       testWidgets('the review of an MCP server before anything is written', (tester) async {
         await open(tester);
-        await tester.tap(find.byKey(const Key('loadout-tab-mcps')));
+        await tester.tap(find.byKey(const Key('store-tab-mcps')));
         await tester.pumpAndSettle();
         await tap(tester, 'mcps-discover');
         await tap(tester, 'mcp-entry-io.github.ana/files');

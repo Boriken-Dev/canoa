@@ -62,6 +62,7 @@ List<LoadedCatalog> catalogsFromIndex(Object? answer) {
     final skills = <String, aos.CatalogEntry>{};
     final refused = <(String, String)>[];
     final icons = <String, CatalogIcon>{};
+    final facts = <String, EntryFacts>{};
     for (final entry in mine) {
       final name = entry['name'];
       if (name is! String) continue;
@@ -86,6 +87,19 @@ List<LoadedCatalog> catalogsFromIndex(Object? answer) {
       }
       final from = aos.Source('${origin['kind']}', '${origin['location']}', origin['ref'] as String?, origin['path'] as String?);
       final pin = entry['pin'] as String?;
+      final contents = entry['contents'];
+      List<String> named(Object? list) => [if (list is List<Object?>) for (final each in list) '$each'];
+      facts['${entry['kind'] == 'skill' ? 'skill' : 'overlay'}:$name'] = EntryFacts(
+        id: '${entry['id']}',
+        version: entry['version'] is String ? entry['version']! as String : null,
+        requirements: named(entry['requirements']),
+        hasContents: contents is Map<Object?, Object?>,
+        skills: contents is Map<Object?, Object?> ? named(contents['skills']) : const [],
+        hooks: contents is Map<Object?, Object?> ? named(contents['hooks']) : const [],
+        envScripts: contents is Map<Object?, Object?> ? named(contents['env_scripts']) : const [],
+        mcpServers: contents is Map<Object?, Object?> ? named(contents['mcp_servers']) : const [],
+        problem: entry['problem'] is String ? entry['problem']! as String : null,
+      );
       if (entry['kind'] == 'skill') {
         skills[name] = aos.CatalogEntry(source: from, pin: pin, description: null, about: about.isEmpty ? null : about);
       } else {
@@ -111,6 +125,12 @@ List<LoadedCatalog> catalogsFromIndex(Object? answer) {
               ignored: const [],
             ),
       icons: icons,
+      checked: each['checked'] is int && (each['checked']! as int) > 0
+          ? DateTime.fromMillisecondsSinceEpoch(each['checked']! as int)
+          : null,
+      stale: each['stale'] == true,
+      staleBecause: problem is String && !failed ? problem : null,
+      facts: facts,
     ));
   }
   return found;

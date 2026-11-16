@@ -11,7 +11,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/loadout/loadout_page.dart';
+import 'package:canoa/store/store_overlays.dart';
+import 'package:canoa/store/store_section.dart';
 import 'package:canoa/profile/aos_support.dart';
 import 'package:canoa/profile/overlay_layer.dart';
 import 'package:canoa/profile/overlay_store_io.dart';
@@ -518,7 +519,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: ThemeData(brightness: Brightness.dark),
-        home: LoadoutPage(config: config, home: MemoryHome(overlays), index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last), onSave: (changed) async {
+        home: StoreSection(config: config, home: MemoryHome(overlays), index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last), onSave: (changed) async {
           saved.add(changed);
           return changed;
         }),
@@ -534,12 +535,13 @@ void main() {
       expect(find.text('team/docs-tools'), findsOneWidget);
       expect(find.text('public/Docs_Tools'), findsOneWidget);
       expect(find.text('lint'), findsOneWidget, reason: 'one catalog alone offers it');
-      await tester.ensureVisible(find.byKey(const Key('catalogs-manage')));
-      await tester.tap(find.byKey(const Key('catalogs-manage')));
+      await tester.tap(find.byKey(const Key('store-settings')));
       await tester.pumpAndSettle();
       expect(find.textContaining('refused elsewhere: local-source'), findsOneWidget);
       expect(find.textContaining('icon of review refused: icon-format'), findsOneWidget);
       expect(find.textContaining('icon of huge refused: icon-dimensions'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
       expect(find.descendant(of: find.byKey(const Key('store-entry-team-review')), matching: find.byKey(const Key('overlay-placeholder'))),
           findsOneWidget, reason: 'a refused icon shows the placeholder');
       expect(find.descendant(of: find.byKey(const Key('store-entry-team-docs-tools')), matching: find.byType(RawImage)),
@@ -562,7 +564,7 @@ void main() {
         await open(tester, size);
         // The list builds what is near the screen: scroll to the entry first.
         await tester.scrollUntilVisible(find.byKey(const Key('store-entry-team-review')), 200,
-            scrollable: find.descendant(of: find.byType(OverlaysSection), matching: find.byType(Scrollable)).first);
+            scrollable: find.descendant(of: find.byType(OverlaysBody), matching: find.byType(Scrollable)).first);
         for (final key in const ['store-entry-team-review', 'store-fetch']) {
           await tester.ensureVisible(find.byKey(Key(key)));
           await tester.pumpAndSettle();
@@ -632,8 +634,7 @@ path = "s\u202Eh.sh"
 ''',
       });
       await open(tester, const Size(1280, 2400));
-      await tester.ensureVisible(find.byKey(const Key('catalogs-manage')));
-      await tester.tap(find.byKey(const Key('catalogs-manage')));
+      await tester.tap(find.byKey(const Key('store-settings')));
       await tester.pumpAndSettle();
       String all() => [
         for (final widget in tester.widgetList(find.byWidgetPredicate((w) => w is Text || w is SelectableText)))
@@ -641,6 +642,8 @@ path = "s\u202Eh.sh"
               widget.textSpan!.toPlainText(),
       ].join('\n');
       expect(all(), contains('bad<U+000A>At commit forged'));
+      await tester.pageBack();
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('store-entry-team-x')));
       await tester.pumpAndSettle();
       final description = find.byKey(const Key('store-claim-description'));
@@ -673,7 +676,7 @@ path = "s\u202Eh.sh"
       final byHand = CanoaConfig.parse('[catalogs]\nteam = "$teamRepo@main#catalog.toml"\npublic = "$publicRepo@main#catalog.json"\n'
           '[overlays]\ndocs-tools = "$teamRepo@main#overlays/docs-tools"\n');
       await tester.pumpWidget(MaterialApp(
-        home: LoadoutPage(config: byHand, home: MemoryHome(overlays), index: standInIndex(overlays, () => byHand), onSave: (changed) async => changed),
+        home: StoreSection(config: byHand, home: MemoryHome(overlays), index: standInIndex(overlays, () => byHand), onSave: (changed) async => changed),
       ));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('overlays-discover')));

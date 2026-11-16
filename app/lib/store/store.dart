@@ -43,6 +43,26 @@ final class CatalogEntry {
   final Map<String, Object> about;
 }
 
+/// What the host's index read of one entry besides the catalog's own fields: the facts of its manifest when it lives in the
+/// catalog's repository, otherwise only the catalog's claim.
+final class EntryFacts {
+  const EntryFacts({required this.id, this.version, this.requirements = const [], this.hasContents = false,
+      this.skills = const [], this.hooks = const [], this.envScripts = const [], this.mcpServers = const [],
+      this.problem});
+
+  /// The index's name for the entry, `<catalog>:<kind>:<name>`.
+  final String id;
+  final String? version;
+  final List<String> requirements;
+
+  /// Whether the entry's manifest was read; false means the lists below are unknown, not empty.
+  final bool hasContents;
+  final List<String> skills, hooks, envScripts, mcpServers;
+
+  /// Why the entry's manifest could not be read, or the catalog refused it.
+  final String? problem;
+}
+
 /// A catalog as the store keeps it: its entries by name, in byte order of their names.
 final class StoreCatalog {
   const StoreCatalog({required this.entries, required this.refused, required this.ignored, this.name, this.description,
@@ -64,10 +84,20 @@ final class StoreCatalog {
 /// One catalog as the store read it, or why it could not.
 final class LoadedCatalog {
   const LoadedCatalog({required this.label, required this.source, this.commit, this.catalog, this.problem,
-      this.icons = const {}, this.leftOut = 0});
+      this.icons = const {}, this.leftOut = 0, this.checked, this.stale = false, this.staleBecause,
+      this.facts = const {}});
 
   /// How many entries past `[store] catalog_max_entries` were left out.
   final int leftOut;
+
+  /// When the host last asked this source, and whether what it answers is older than its time to live (it is being
+  /// refreshed) or could not be refreshed ([staleBecause]).
+  final DateTime? checked;
+  final bool stale;
+  final String? staleBecause;
+
+  /// What the index says of each entry beyond what the catalog lists, by `kind:name`.
+  final Map<String, EntryFacts> facts;
 
   final String label;
   final GitOverlay source;

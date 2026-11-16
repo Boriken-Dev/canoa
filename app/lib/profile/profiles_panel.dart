@@ -39,7 +39,7 @@ class ProfilesPanel extends StatefulWidget {
   /// Pins the overlay [name] in canoa.cfg to the tree digest just installed, and gives the configuration saved.
   final Future<CanoaConfig?> Function(String name, String digest)? onPin;
 
-  /// Opens Loadout, where overlays are found, installed and chosen; without it there is nowhere to.
+  /// Opens the Store, where overlays are found, installed and chosen; without it there is nowhere to.
   final VoidCallback? onLoadout;
 
   @override
@@ -191,10 +191,10 @@ class ProfilesPanelState extends State<ProfilesPanel> {
               TextButton(
                 key: const Key('profile-store'),
                 onPressed: busy != null ? null : open,
-                child: const Text('Loadout…'),
+                child: const Text('Store…'),
               ),
           ]),
-          if (config.overlays.isEmpty) const Text('None yet: find some in Loadout.'),
+          if (config.overlays.isEmpty) const Text('None yet: find some in the Store.'),
           for (final MapEntry(key: name, value: source) in config.overlays.entries) _overlayRow(name, source),
           for (final report in found?.effective.overlays ?? const <OverlayReport>[]) OverlayReportView(report: report),
           if (home != null && home.trust.projects.isNotEmpty) ...[

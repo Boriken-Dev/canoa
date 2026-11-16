@@ -5,7 +5,7 @@ library;
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/loadout/loadout_page.dart';
+import 'package:canoa/store/store_section.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -78,7 +78,7 @@ void main() {
         await tester.pumpWidget(MaterialApp(
           debugShowCheckedModeBanner: false,
           theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
-          home: LoadoutPage(
+          home: StoreSection(
             config: current,
             home: MemoryHome(overlays),
             index: standInIndex(overlays, () => current),

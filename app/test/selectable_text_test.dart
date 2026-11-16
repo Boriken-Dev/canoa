@@ -3,7 +3,8 @@
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/session_store.dart';
 import 'package:coqui_acp/coqui_acp.dart' show AcpSessionUpdate;
-import 'package:canoa/loadout/loadout_page.dart';
+import 'package:canoa/selectable.dart';
+import 'package:canoa/store/store_section.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -131,13 +132,15 @@ void main() {
   testWidgets('a page over the screen selects and copies', (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: Builder(builder: (context) => TextButton(
-        onPressed: () => showLoadout(context, config: const CanoaConfig(), home: MemoryHome(MemoryOverlays()), onSave: (changed) async => changed),
-        child: const Text('open Loadout'),
+        onPressed: () => Navigator.of(context).push<CanoaConfig>(selectablePage(
+          builder: (_) => StoreSection(config: const CanoaConfig(), home: MemoryHome(MemoryOverlays()), onSave: (changed) async => changed),
+        )),
+        child: const Text('open the Store'),
       )),
     ));
-    await tester.tap(find.text('open Loadout'));
+    await tester.tap(find.text('open the Store'));
     await tester.pumpAndSettle();
-    expect(await _dragAndCopy(tester, find.text('Loadout')), 'Loadout');
+    expect(await _dragAndCopy(tester, find.text('Store')), 'Store');
     await tester.tap(find.byKey(const Key('overlays-discover')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('catalogs-empty')), findsOneWidget);
