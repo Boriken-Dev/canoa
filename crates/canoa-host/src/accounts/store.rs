@@ -428,6 +428,22 @@ fn sync_dir(dir: &Path) {
     let _ = dir;
 }
 
+/// Reads a file that `put` may be renaming over. Windows refuses a read of a name at the moment another rename takes it
+/// ("access denied"), and the file is whole a moment later, so that one kind is read again a few times; a file that is
+/// really unreadable still says so.
+fn read_over_a_rewrite(path: &Path) -> io::Result<Vec<u8>> {
+    let mut tries = 0;
+    loop {
+        match fs::read(path) {
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied && tries < 20 => {
+                tries += 1;
+                std::thread::sleep(core::time::Duration::from_millis(5));
+            }
+            other => return other,
+        }
+    }
+}
+
 impl FileStore {
     pub(crate) fn new(dir: impl Into<PathBuf>) -> Self {
         Self { dir: dir.into() }
@@ -500,7 +516,7 @@ impl SecretStore for FileStore {
     }
 
     fn get(&self, id: &str) -> Result<Option<Vec<u8>>, StoreError> {
-        let sealed = match fs::read(self.path_of(id)) {
+        let sealed = match read_over_a_rewrite(&self.path_of(id)) {
             Ok(sealed) => sealed,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(failed("the account could not be read", error)),

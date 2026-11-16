@@ -391,3 +391,48 @@ fn directories_made_at_the_same_moment_are_different() {
     let distinct: std::collections::HashSet<_> = made.iter().collect();
     assert_eq!(distinct.len(), made.len(), "two directories got one name");
 }
+
+/// A read of a stored account while another thread writes it over never fails and never finds it gone.
+#[test]
+fn a_file_account_read_while_it_is_written_over_is_always_there() {
+    const READERS: usize = 4;
+    const WRITES: usize = 2_000;
+    let dir = Dir::new();
+    let store = FileStore::new(&dir.0);
+    store.put("one", b"first").expect("written");
+    let writing = std::sync::atomic::AtomicBool::new(true);
+    let failures = std::sync::Mutex::new(Vec::new());
+    let reads = AtomicU64::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..READERS {
+            scope.spawn(|| {
+                while writing.load(Ordering::Relaxed) {
+                    reads.fetch_add(1, Ordering::Relaxed);
+                    match store.get("one") {
+                        Ok(Some(_)) => {}
+                        other => failures
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .push(format!("{other:?}")),
+                    }
+                }
+            });
+        }
+        for round in 0..WRITES {
+            store
+                .put("one", format!("round {round}").as_bytes())
+                .expect("written");
+        }
+        writing.store(false, Ordering::Relaxed);
+    });
+    let failures = failures
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert!(
+        failures.is_empty(),
+        "{} of {} reads failed, first: {:?}",
+        failures.len(),
+        reads.load(Ordering::Relaxed),
+        failures.first()
+    );
+}
