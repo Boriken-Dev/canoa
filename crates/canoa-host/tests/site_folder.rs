@@ -395,3 +395,32 @@ fn the_desktop_app_the_web_app_and_the_own_chat_still_choose_bypass() {
     })
     .expect("a paired key is served");
 }
+
+#[test]
+fn the_served_app_chat_with_no_folder_gets_one_the_host_made_and_reopens_in_it() {
+    let (host, documents) = host_with_documents();
+    let client = support::key();
+    host.pair(&client);
+    with_link(host.url("Agent"), &client, host.peer, |rpc| {
+        rpc.initialize().expect("initialize is answered");
+        let marked = json!({"site": "app", "own": true});
+        let opened = rpc
+            .request("session/new", json!({"cwd": "/", "mcpServers": [], "_meta": {SITE: marked}}))
+            .expect("the app's chat opens with no folder of its own");
+        let told = &opened["_meta"][SITE];
+        let folder = PathBuf::from(told["folder"].as_str().expect("the answer says which folder"));
+        let id = told["id"].as_str().expect("and its id");
+        assert_eq!(folder, documents.join("Canoa").join("scratch").join("app").join(id));
+        assert!(folder.is_dir(), "made by the host");
+        assert!(told.get("own").is_none(), "the mark is not echoed");
+        let session = opened["sessionId"].as_str().expect("an id").to_owned();
+        let again = rpc
+            .request(
+                "session/load",
+                json!({"sessionId": session, "cwd": folder, "mcpServers": [], "_meta": {SITE: marked}}),
+            )
+            .expect("it reopens in the folder it had");
+        assert!(again.is_object());
+    })
+    .expect("a paired key is served");
+}

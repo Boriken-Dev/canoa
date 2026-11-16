@@ -12,6 +12,9 @@ const siteStandInFolder = '/';
 /// what it holds a webpage's (a page's own request reaches the host by way of the extension, which removes this mark).
 AcpSessionSetup siteSetup(String site) => AcpSessionSetup(meta: {siteMeta: {'site': site, 'own': true}});
 
+/// The site name a served page's own chats go under: the host makes `<Documents>/Canoa/scratch/app/<id>` for each.
+const servedSite = 'app';
+
 /// The folder the host made for a webpage's session and its id, from the answer to `session/new`; null when it said none.
 ({String id, String folder})? madeFolder(Map<String, dynamic> answer) {
   final meta = answer['_meta'];

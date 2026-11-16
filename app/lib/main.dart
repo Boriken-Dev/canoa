@@ -1378,7 +1378,9 @@ class _CanoaAppState extends State<CanoaApp> {
     final folder = scratch ? _scratchOf(draft) : draft.cwd;
     if (folder == null) throw StateError('A chat cannot be started here; choose a workspace instead');
     var madeFolder = false;
-    if (scratch) {
+    // The served page's own chat: the host makes and names the folder in its answer to `session/new`.
+    final hostMakes = scratch && widget.served != null;
+    if (scratch && !hostMakes) {
       try {
         madeFolder = await makeFolder(folder);
       } on Object catch (error) {
@@ -1390,7 +1392,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final starting = _Starting();
     _inFlight.add(starting);
     try {
-      await _startHosted(draft, source.hostEntry!, folder, worktree, starting);
+      await _startHosted(draft, source.hostEntry!, folder, worktree, starting, hostMakes: hostMakes);
     } catch (_) {
       if (madeFolder) await removeEmptyFolder(folder);
       rethrow;
@@ -1450,7 +1452,8 @@ class _CanoaAppState extends State<CanoaApp> {
     return name != null && config.loadouts.containsKey(name) ? {loadoutMeta: name} : const {};
   }
 
-  Future<void> _startHosted(ChatSession draft, String name, String folder, bool worktree, _Starting starting) async {
+  Future<void> _startHosted(ChatSession draft, String name, String folder, bool worktree, _Starting starting,
+      {bool hostMakes = false}) async {
     final host = widget.host;
     final listening = host?.listening.where((listening) => listening.name == name).firstOrNull;
     if (host == null || listening == null) throw StateError('canoa is not serving $name now: open Hosting to see why');
@@ -1490,9 +1493,16 @@ class _CanoaAppState extends State<CanoaApp> {
             );
       starting.client = client;
       if (_quitting) throw StateError('Canoa is quitting');
-      final opened = await client.openSession(cwd: where);
+      final opened = await client.openSession(cwd: where, setup: hostMakes ? siteSetup(servedSite) : AcpSessionSetup.none);
+      final placed = hostMakes ? madeFolder(opened.raw) : null;
+      if (hostMakes && placed == null) throw StateError('The host did not say which workspace it made for this chat');
       if (!mounted || _quitting) throw StateError('Canoa UI closed');
-      store.bindDraft(draft, client, opened, cwd: where, worktree: made, place: SessionPlace.host, endpoint: endpoint,
+      if (placed != null) {
+        draft
+          ..site = servedSite
+          ..workspaceId = placed.id;
+      }
+      store.bindDraft(draft, client, opened, cwd: placed?.folder ?? where, worktree: made, place: SessionPlace.host, endpoint: endpoint,
           method: method.id);
       _ownedClients.add(client);
     } catch (_) {
@@ -1942,7 +1952,8 @@ class _CanoaAppState extends State<CanoaApp> {
     recentFolders: _recentFolders,
     inGitRepository: widget.isGitRepository ?? inGitRepository,
     pickFolder: widget.pickFolder ?? (widget.served != null ? _pickHostFolder : canRunLocalAgents ? () => getDirectoryPath() : null),
-    scratchFolder: hasWorkspaceFolders && canRunLocalAgents ? _scratchOf : null,
+    // A served page has no file system: the host makes a chat's folder when the session opens.
+    scratchFolder: widget.served != null ? (_) => siteStandInFolder : hasWorkspaceFolders && canRunLocalAgents ? _scratchOf : null,
     pickFiles: widget.pickFiles ?? () => openFiles(),
     statFile: widget.statFile ?? (canRunLocalAgents ? localFileSize : null),
     uploadFile: widget.served == null ? null : _upload,
