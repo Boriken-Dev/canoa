@@ -104,6 +104,8 @@ import 'drafts/draft_store.dart';
 import 'theme/look.dart';
 import 'auth/browser_peer.dart' show verifyBrowserPeer;
 import 'workspace/documents.dart' show hasWorkspaceFolders, homeFolder, makeFolder, removeEmptyFolder;
+import 'workspace/open_in.dart';
+import 'workspace/open_in_ui.dart';
 import 'workspace/scratch.dart';
 import 'workspace/site_meta.dart';
 import 'workspace/workspace_template.dart' show exampleSessionId;
@@ -1951,6 +1953,11 @@ class _CanoaHome extends StatelessWidget {
         if (session != null && conversation.showChanges != null && (changeTotals(session) != null))
           PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
         if (session?.status == SessionStatus.working) PaletteItem('Stop the turn', _stop, icon: Icons.stop_circle_outlined),
+        if (session != null)
+          if (workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint).target case final target?)
+            for (final action in workspaceOpener.actionsFor(WorkspaceContext.palette, target))
+              PaletteItem(action.label, () => unawaited(runWorkspaceAction(context, action, target)),
+                  detail: target.path, icon: action.icon),
         PaletteItem('Settings', onSettings, icon: Icons.settings_outlined),
         if (onLoadout != null) PaletteItem('Store', onLoadout!, icon: Icons.storefront_outlined),
         if (onHosts != null) PaletteItem('Hosts', onHosts!, detail: 'Local, saved connections and Hosting', icon: Icons.lan_outlined),
@@ -2262,6 +2269,16 @@ class _ConversationState extends State<_Conversation> {
     }
   }
 
+  /// The header's entry for opening [session]'s folder on this computer, or null where nothing can be started.
+  (String, IconData, VoidCallback)? _workspaceEntry(ChatSession? session) {
+    if (session == null) return null;
+    final workspace = workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint);
+    if (workspace.target == null && workspace.reason == null) return null;
+    return ('Open the workspace', Icons.folder_open, () => unawaited(showWorkspaceActions(
+      context, opener: workspaceOpener, target: workspace.target, reason: workspace.reason,
+    )));
+  }
+
   /// What the header offers for [session], beside closing it: as buttons, or under one menu where two or more would crowd a phone.
   List<Widget> _headerActions(ChatSession? session, {bool tight = false}) {
     final actions = <(String, IconData, VoidCallback)>[
@@ -2275,6 +2292,7 @@ class _ConversationState extends State<_Conversation> {
           ('Bring back from its own window', Icons.close_fullscreen, () => unawaited(widget.handle.popout!.dockBack(session)))
         else
           ('Open in its own window', Icons.open_in_new, () => unawaited(_popOut(session))),
+      ?_workspaceEntry(session),
       if (session?.profile case final report?)
         ('Profile', Icons.tune, () => unawaited(showSelectableDialog<void>(
           context: context,
