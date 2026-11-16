@@ -187,6 +187,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   before this needs `git add --renormalize .` or a fresh clone.
 
 ### Fixed
+- **The secret tools' server refuses a connection another user owns on Linux.** Delegation's and the Store's servers already did; the secrets server answered any local user who held a bearer, such as one read from an agent's command line. The three now share one server.
 - **The web app starts with no service worker, and draws every glyph.** A browser that had visited an earlier build kept its service worker, and Flutter's loader registered the build's own and waited up to 4 seconds for it ("prepareServiceWorker took more than 4000ms") before starting the app. The app now registers none, drops one an earlier build left, and its build no longer publishes `flutter_service_worker.js`. The fallback fonts the engine asks for when Roboto lacks a glyph (symbols, arrows, emoji, CJK, every script) were looked for beside the page and never put there, so each fetch failed; `build.py` now copies all 724 of them (20.7 MiB), pinned by SHA-256 in `tools/fallback_fonts.sha256`, from the deps branch's mirror, which `tools/mirror_deps.py` fills. The build reaches no network and stops when one is missing or changed.
 - `host/restart` ends the host as soon as the answer is sent, from the connection that sent it, instead of from a thread that slept 300 ms.
 - `catalog/fetch` refuses a network share as a source, as `overlay/check` does, before git is started; `overlay/check` tests it once.
