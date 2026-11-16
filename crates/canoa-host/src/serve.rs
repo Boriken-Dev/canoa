@@ -1789,7 +1789,7 @@ impl Serving {
                 })
             })
             .collect();
-        let hello = serde_json::json!({
+        let mut hello = serde_json::json!({
             "name": "Canoa",
             "version": env!("CARGO_PKG_VERSION"),
             "peer": self.peer().to_string(),
@@ -1797,6 +1797,16 @@ impl Serving {
             "entries": entries,
             "control": true,
         });
+        if let (Some(claim), Some(names)) = (
+            hello.as_object_mut(),
+            crate::native::this_computer().as_object(),
+        ) {
+            claim.extend(
+                names
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
+        }
         let control = Arc::new(Served {
             name: control::NAME.to_owned(),
             restricted: false,

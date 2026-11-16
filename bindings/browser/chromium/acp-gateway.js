@@ -52,10 +52,14 @@ function siteOf(origin) {
   }
 }
 
-/** Whether an address is this computer's: all of 127/8, 0.0.0.0, ::1, ::, localhost and what ends in .localhost. */
-export function hereAddress(hostname) {
+/**
+ * Whether an address is this computer's: all of 127/8, 0.0.0.0, ::1, ::, localhost and what ends in .localhost, and a name or address
+ * the host said this computer has (`names`, lower case, an IPv6 address bare), compared whole.
+ */
+export function hereAddress(hostname, names = []) {
   const host = String(hostname).toLowerCase();
   if (host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || host === "[::]") return true;
+  if (names.includes(host.replace(/^\[|\]$/g, ""))) return true;
   const parts = host.split(".");
   if (parts.length !== 4 || parts.some((part) => !/^[0-9]{1,3}$/.test(part))) return false;
   const [a] = parts.map(Number);
@@ -63,17 +67,17 @@ export function hereAddress(hostname) {
 }
 
 /** An agent reached on this computer's own address. */
-function loopbackAgent(agent) {
+function loopbackAgent(agent, names) {
   try {
-    return hereAddress(new URL(agent.url).hostname);
+    return hereAddress(new URL(agent.url).hostname, names);
   } catch {
     return false;
   }
 }
 
 /** An agent that runs on this computer as the person: the host's entries and what was found on a descriptor or a local address. */
-function runsHere(agent) {
-  return agent.local === true || agent.source === "local" || loopbackAgent(agent);
+function runsHere(agent, names) {
+  return agent.local === true || agent.source === "local" || loopbackAgent(agent, names);
 }
 
 function list(value) {
@@ -211,6 +215,7 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       const keys = [...(decision.allow ?? []), ...added.map((agent) => agent.key)];
       const agents = await store.agents();
       const granted = [];
+      const names = (await store.thisComputer?.()) ?? [];
       for (const key of keys) {
         const agent = agents.find((candidate) => candidate.key === key);
         if (agent === undefined) continue;
@@ -218,7 +223,7 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
         // The Canoa on this computer makes a page's folder itself, from the site; the person names none and the page cannot.
         const folder = agent.local === true && !own;
         // Agents on this computer, the host's entries and those found on a loopback address alike, run as the person.
-        const onThisComputer = folder || (!own && runsHere(agent));
+        const onThisComputer = folder || (!own && runsHere(agent, names));
         const grant = {
           origin,
           agent: key,
@@ -281,8 +286,9 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       const sessions = new Set(grant.sessions ?? []);
       const folders = new Map(placedByHost ? Object.entries(grant.folders ?? {}) : []);
       // Whatever the stored grant says, a site cannot approve for the agents on this computer.
+      const names = (await store.thisComputer?.()) ?? [];
       // Canoa's own pages are the one grant that may pass more than a page does in a session request.
-      const scope = new Scope({ ...grant, folder: placedByHost ? "provider" : undefined, own: origin === ownOrigin, permissions: origin !== ownOrigin && (placedByHost || runsHere(agent)) ? false : grant.permissions, sessions }, origin);
+      const scope = new Scope({ ...grant, folder: placedByHost ? "provider" : undefined, own: origin === ownOrigin, permissions: origin !== ownOrigin && (placedByHost || runsHere(agent, names)) ? false : grant.permissions, sessions }, origin);
       const conn = entry.nextConn++;
       const link = {
         conn, entry, channel, scope, grant, sessions, site, placedByHost, folders, label: agent.label, categories: new Map(), names: new Map(), approval: undefined, initId: undefined, denied: false,

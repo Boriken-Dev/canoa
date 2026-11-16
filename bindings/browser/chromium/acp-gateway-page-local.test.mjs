@@ -371,9 +371,10 @@ test("a mode value that is not text is refused without asking", async () => {
   assert.deepEqual(sent, []);
 });
 
-async function requestAs(origin, agents, decision) {
+async function requestAs(origin, agents, decision, names) {
   const grants = [];
   const store = {
+    thisComputer: names === undefined ? undefined : async () => names,
     agents: async () => agents, addAgent: async (agent) => agent, markProven: async () => {},
     grants: async () => decision.earlier ?? [], saveGrant: async (grant) => { grants.push(grant); }, deleteGrant: async () => {}, secret: async () => "s",
   };
@@ -443,4 +444,29 @@ test("a stored grant with permissions on an agent at 127.x gets none when it con
   world.say(conn, { jsonrpc: "2.0", id: 9, method: "session/set_mode", params: { sessionId: "s1", modeId: "auto" } });
   for (let tries = 0; tries < 40 && !world.received.some((message) => message.conn === conn && message.msg.includes("error")); tries += 1) await settle();
   assert.deepEqual(world.sent, []);
+});
+
+test("an agent at this computer's host name or network address is on this computer, as the host says them", async () => {
+  const named = { key: "named", label: "Named", source: "manual", peer: "sha256:n", url: "wss://Desk-One.local:9/acp" };
+  const lan = { key: "lan", label: "Lan", source: "dns-sd", peer: "sha256:a", url: "wss://192.0.2.2:9/acp" };
+  const v6 = { key: "six", label: "Six", source: "dns-sd", peer: "sha256:6", url: "wss://[2001:db8::2]:9/acp" };
+  const other = { key: "other", label: "Other", source: "manual", peer: "sha256:o", url: "wss://192.0.2.3:9/acp" };
+  const decision = { allow: ["named", "lan", "six", "other"], lifetime: "once", cwd: "/w", permissions: true };
+  const names = ["desk-one", "desk-one.local", "192.0.2.2", "2001:db8::2"];
+  const told = await requestAs("https://p.example", [named, lan, v6, other], decision, names);
+  assert.deepEqual(told.map((grant) => [grant.agent, grant.permissions]), [["named", false], ["lan", false], ["six", false], ["other", true]]);
+  // Said by nobody, the same agents are only what they were.
+  const unsaid = await requestAs("https://p.example", [named, lan, v6, other], decision);
+  assert.deepEqual(unsaid.map((grant) => grant.permissions), [true, true, true, true]);
+});
+
+test("a name that is no host's is not this computer's", async () => {
+  const { hereAddress } = await import("./acp-gateway.js");
+  assert.equal(hereAddress("desk-one.local", ["desk-one.local"]), true);
+  assert.equal(hereAddress("DESK-ONE.LOCAL", ["desk-one.local"]), true);
+  assert.equal(hereAddress("[2001:db8::2]", ["2001:db8::2"]), true);
+  assert.equal(hereAddress("desk-one.local.evil.example", ["desk-one.local"]), false);
+  assert.equal(hereAddress("evil-desk-one.local", ["desk-one.local"]), false);
+  assert.equal(hereAddress("example.com", ["desk-one.local"]), false);
+  assert.equal(hereAddress("example.com", undefined), false);
 });

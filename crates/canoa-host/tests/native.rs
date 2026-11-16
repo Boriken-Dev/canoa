@@ -256,6 +256,27 @@ fn hello_lists_the_entries_and_says_the_host_runs() {
 }
 
 #[test]
+fn hello_names_this_computer_and_its_network_addresses() {
+    let host = host();
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let reply = relay.ask(&json!({ "op": "hello" }));
+    let name = reply["hostname"].as_str().expect("a host name");
+    assert!(!name.is_empty() && name == name.to_lowercase(), "{reply}");
+    let addresses = reply["addresses"].as_array().expect("a list of addresses");
+    assert!(addresses.len() <= 16, "{reply}");
+    for address in addresses {
+        let address: std::net::IpAddr = address
+            .as_str()
+            .and_then(|text| text.parse().ok())
+            .unwrap_or_else(|| panic!("an address: {reply}"));
+        assert!(
+            !address.is_loopback() && !address.is_unspecified(),
+            "{address}"
+        );
+    }
+}
+
+#[test]
 fn no_host_running_answers_that_it_is_not() {
     let scratch = Scratch::new();
     let relay = Relay::start(&scratch.0.join("home"), ORIGIN);

@@ -104,6 +104,8 @@ const store = {
     const local = live.length > 0 || !stale ? live : stoppedAgents(state, pinned, await read("local", LOCAL_ENTRIES, null));
     return [...(await read("local", AGENTS, [])), ...local];
   },
+  /** The names the running host says this computer has: what an agent there is held to, as one on a loopback address is. */
+  thisComputer: async () => (await lastLocal()).host?.thisComputer ?? [],
   addAgent: (details) => oneAtATime(() => addAgent(details)),
   removeAgent: (key) => oneAtATime(async () => {
     await write("local", AGENTS, (await store.stored()).filter((agent) => agent.key !== key));

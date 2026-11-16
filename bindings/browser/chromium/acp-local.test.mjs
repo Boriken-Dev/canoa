@@ -52,6 +52,19 @@ test("a running host's entries are what a panel lists, as a claim cut down to si
   assert.ok(claim.entries.every((entry) => entry.label.length <= 80 && !entry.name.startsWith("@") && entry.kind !== "tool"));
 });
 
+test("the names a host gives this computer are kept as names and addresses, bounded", () => {
+  const claim = readHello(runningReply({ hostname: "Desk-One", addresses: ["192.0.2.2", "2001:db8::2", "not an address", "192.0.2.2.5", 7, "x".repeat(60), ...Array.from({ length: 40 }, (_, n) => `10.0.0.${n}`)] }));
+  assert.equal(claim.hostname, "desk-one");
+  assert.deepEqual(claim.thisComputer.slice(0, 4), ["desk-one", "desk-one.local", "192.0.2.2", "2001:db8::2"]);
+  assert.ok(claim.thisComputer.length <= 18);
+  assert.equal(claim.thisComputer.includes("not an address"), false);
+  for (const hostname of ["", "a b", "evil.example/x", "x".repeat(300), 5, "-bad", "bad-"]) {
+    const kept = readHello(runningReply({ hostname }));
+    assert.deepEqual(kept.thisComputer, [], String(hostname));
+  }
+  assert.deepEqual(readHello(runningReply({})).thisComputer, []);
+});
+
 test("a reply that is not a host's is no claim", () => {
   assert.equal(readHello(undefined), null);
   assert.equal(readHello(runningReply({ peer: "me" })), null);

@@ -22,6 +22,31 @@ const MAX_NAME = 128;
 
 const clean = (value, max) => (typeof value === "string" ? value.replace(/\p{Cf}|\p{Cc}/gu, "").trim().slice(0, max) : "");
 
+const HOSTNAME = /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/;
+const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
+const IPV6 = /^[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}$/;
+const MAX_ADDRESSES = 16;
+
+/**
+ * The names the host says this computer has, as text a URL's host can be compared with: its host name (and that name in the local
+ * network's `.local`) and its network addresses. A claim, and one that only narrows: an agent at one of these names is held to what
+ * an agent on this computer is.
+ */
+function computerNames(reply) {
+  const names = [];
+  const hostname = typeof reply.hostname === "string" ? reply.hostname.trim().toLowerCase() : "";
+  if (HOSTNAME.test(hostname)) names.push(hostname, ...(hostname.includes(".") ? [] : [`${hostname}.local`]));
+  let addresses = 0;
+  for (const item of Array.isArray(reply.addresses) ? reply.addresses.slice(0, MAX_ADDRESSES * 2) : []) {
+    const address = typeof item === "string" ? item.trim().toLowerCase() : "";
+    if (!(IPV4.test(address) || (address.length <= 45 && IPV6.test(address))) || names.includes(address)) continue;
+    names.push(address);
+    addresses += 1;
+    if (addresses === MAX_ADDRESSES) break;
+  }
+  return names;
+}
+
 /**
  * What the host's `hello` claims, kept to what a person can be shown and what can be dialed: entries that speak ACP, bounded,
  * with names and labels stripped of anything that reorders or hides text. A reply that is not a host's gives null.
@@ -44,6 +69,8 @@ export function readHello(reply) {
     version: clean(reply.version, 32),
     entries,
     control: reply.control === true,
+    hostname: HOSTNAME.test(typeof reply.hostname === "string" ? reply.hostname.trim().toLowerCase() : "") ? reply.hostname.trim().toLowerCase() : undefined,
+    thisComputer: computerNames(reply),
   };
 }
 

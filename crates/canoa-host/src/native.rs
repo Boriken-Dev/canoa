@@ -257,6 +257,70 @@ fn running(home: &Home) -> bool {
     matches!(home.probe(), Err(LockError::Held { .. }))
 }
 
+/// The most addresses `hello` names.
+const MAX_HELLO_ADDRESSES: usize = 16;
+
+/// This computer's name, as the system keeps it.
+fn computer_name() -> Option<String> {
+    #[cfg(unix)]
+    let name = Some(
+        rustix::system::uname()
+            .nodename()
+            .to_string_lossy()
+            .into_owned(),
+    );
+    #[cfg(windows)]
+    let name = std::env::var("COMPUTERNAME").ok();
+    #[cfg(not(any(unix, windows)))]
+    let name: Option<String> = None;
+    name.map(|name| name.trim().to_ascii_lowercase())
+        .filter(|name| !name.is_empty())
+}
+
+/// The addresses this computer is reached at from its network, in the order the system lists its interfaces: not loopback, not
+/// link-local (nothing names a link-local address without a zone), not multicast or unspecified.
+fn lan_addresses() -> Vec<String> {
+    let Ok(interfaces) = if_addrs::get_if_addrs() else {
+        return Vec::new();
+    };
+    let mut found: Vec<String> = Vec::new();
+    for interface in interfaces {
+        let address = interface.ip();
+        let wanted = match address {
+            std::net::IpAddr::V4(v4) => {
+                !v4.is_loopback()
+                    && !v4.is_link_local()
+                    && !v4.is_multicast()
+                    && !v4.is_unspecified()
+            }
+            std::net::IpAddr::V6(v6) => {
+                !v6.is_loopback()
+                    && !v6.is_multicast()
+                    && !v6.is_unspecified()
+                    && (v6.segments()[0] & 0xffc0) != 0xfe80
+            }
+        };
+        let text = address.to_string();
+        if wanted && !found.contains(&text) {
+            found.push(text);
+        }
+        if found.len() == MAX_HELLO_ADDRESSES {
+            break;
+        }
+    }
+    found
+}
+
+/// What `hello` says of the computer the host runs on, so the extension counts an agent at one of these names as on this computer:
+/// `{"hostname"?, "addresses": [...]}`. A claim, like the rest of `hello`, and one that only narrows what a page may do.
+pub(crate) fn this_computer() -> Value {
+    let mut claim = json!({ "addresses": lan_addresses() });
+    if let Some(name) = computer_name() {
+        claim["hostname"] = name.into();
+    }
+    claim
+}
+
 /// What a relay answers to `hello`: the host's claim of itself, with `running`. A claim: nothing pins a key from it.
 fn hello(home: &Home, origin: &str) -> Value {
     let claim = match knock(home.dir(), origin, HELLO) {
