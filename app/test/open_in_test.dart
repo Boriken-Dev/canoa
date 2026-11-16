@@ -136,18 +136,23 @@ void main() {
     });
 
     test('a path is a local, absolute, existing folder or it is refused', () async {
-      final system = _System(HostOs.windows, folders: {r'C:\work', r'C:\work\a'});
+      final system = _System(HostOs.windows, folders: {r'C:\work', r'C:\work\a', r'\\filer\team\work', r'\\?\D:\Profiles\ana\work', r'D:\Profiles\ana\work:s'});
       final opener = WorkspaceOpener(system);
       final run = _action(opener, 'file_manager').run;
       for (final bad in [
-        r'work', r'..\work', r'C:\work\..\x', r'\\server\share', r'\\?\C:\work', r'\\.\pipe\x', r'C:work', r'C:\work:stream',
-        'C:\\work\u0000', 'C:\\work\nx', '', r'C:\missing',
+        r'work', r'..\work', r'C:\work\..\x', r'C:work', r'\\', r'\\\x', 'C:\\work\u0000', 'C:\\work\nx', '', r'C:\missing', r'\\filer\team\missing',
       ]) {
         await expectLater(run(WorkspaceTarget(bad)), throwsA(isA<OpenInFailure>()), reason: bad);
       }
       expect(system.started, isEmpty);
       await run(const WorkspaceTarget('C:/work/a/'));
       expect(system.started.single.arguments, [r'C:\work\a'], reason: 'normalised, one argument');
+      // What the system's own file manager opens is opened: a share, a verbatim path, a name with a stream.
+      system.started.clear();
+      for (final path in [r'\\filer\team\work', r'\\?\D:\Profiles\ana\work', r'D:\Profiles\ana\work:s']) {
+        await run(WorkspaceTarget(path));
+      }
+      expect([for (final plan in system.started) plan.arguments.single], [r'\\filer\team\work', r'\\?\D:\Profiles\ana\work', r'D:\Profiles\ana\work:s']);
 
       final posix = WorkspaceOpener(_System(HostOs.linux, folders: {'/home/ana'}));
       for (final bad in ['home/ana', '/home/ana/../root', '-n', '/home/ana\n', '/nowhere']) {

@@ -99,14 +99,14 @@ final class WorkspaceAction {
 const _vsCodeBundle = 'com.microsoft.VSCode';
 const _appPaths = r'\Software\Microsoft\Windows\CurrentVersion\App Paths\Code.exe';
 
-/// The path as the system's file manager and editor take it, or null when it is not an absolute path to a local file or folder:
-/// relative, with a `..` part, a control character, or on Windows a network share, device or stream name.
+/// The path as the system's file manager and editor take it, or null when it cannot be a file or folder they open: relative, with a
+/// `..` part, or holding a control character. Whatever the system's own file manager opens is opened, a network share included.
 String? localPathOf(String path, HostOs os) {
   if (path.isEmpty || path.length > 4096) return null;
   if (path.codeUnits.any((unit) => unit < 0x20 || unit == 0x7f)) return null;
   if (os == HostOs.windows) {
-    if (!RegExp(r'^[A-Za-z]:[\\/]').hasMatch(path)) return null;
-    if (path.substring(2).contains(':')) return null;
+    // A drive path, or one that starts with two separators: a share, or a verbatim or device path.
+    if (!RegExp(r'^([A-Za-z]:[\\/]|[\\/][\\/][^\\/])').hasMatch(path)) return null;
     final windows = path.replaceAll('/', r'\');
     if (windows.split(r'\').contains('..')) return null;
     return windows.length > 3 && windows.endsWith(r'\') ? windows.substring(0, windows.length - 1) : windows;
@@ -236,13 +236,15 @@ final class WorkspaceOpener {
     _ => 'file manager',
   };
 
-  /// [target]'s path as this system takes it, when it is a local folder (or, for an item, a local file or folder); throws
+  /// [target]'s path as this system takes it, when it is a folder this system finds (or, for an item, a file or folder); throws
   /// [OpenInFailure] otherwise.
   String checked(WorkspaceTarget target) {
     final os = system.os;
     if (os == null) throw OpenInFailure('This page cannot open programs on the computer it is served from.');
     final path = localPathOf(target.path, os);
-    if (path == null) throw OpenInFailure('That is not a folder of this computer: ${target.path}');
+    if (path == null) {
+      throw OpenInFailure('That is not a path this computer can open (it is absolute, with no ".." and no control character): ${target.path}');
+    }
     final exists = target.item ? system.isDirectory(path) || system.isFile(path) : system.isDirectory(path);
     if (!exists) throw OpenInFailure(target.item ? 'It is not there any more: $path' : 'The folder is not there: $path');
     return path;
