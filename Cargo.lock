@@ -667,6 +667,7 @@ dependencies = [
  "flate2",
  "getrandom 0.4.3",
  "guatiao",
+ "guatiao-intake",
  "guatiao-serde",
  "hmac 0.13.0",
  "httparse",

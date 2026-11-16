@@ -121,12 +121,19 @@ pub enum Grant {
     /// computer, as this user, with output pushed back on the same link as `terminal/output`. It is a shell, so it is as much as
     /// access to the agent and to everything else this user can do here; a delegated child connection never holds it.
     Terminal,
+    /// `speech/providers`, `speech/open`, `speech/push`, `speech/finish` and `speech/cancel`: audio goes to a speech provider the person
+    /// set up on this host, which may run a program of theirs or send it to an address of theirs, and the text comes back. A key
+    /// reaches only its own recordings, and no read answers a provider's key.
+    Voice,
+    /// `speech/configure`: defines or removes a speech provider in canoa.cfg, which names a program this host runs as this user or
+    /// an address it sends audio to: as much as access to the agent.
+    VoiceSetup,
 }
 
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 18] {
+    pub fn all() -> [Self; 20] {
         [
             Self::LedgerRead,
             Self::LedgerWrite,
@@ -146,6 +153,8 @@ impl Grant {
             Self::Usage,
             Self::Files,
             Self::Terminal,
+            Self::Voice,
+            Self::VoiceSetup,
         ]
     }
 
@@ -171,6 +180,8 @@ impl Grant {
             Self::Usage => "usage",
             Self::Files => "files",
             Self::Terminal => "terminal",
+            Self::Voice => "voice",
+            Self::VoiceSetup => "voice.setup",
         }
     }
 
@@ -288,6 +299,8 @@ pub(crate) struct Control {
     files: Files,
     /// The shells this host runs for the person.
     terminals: Terminals,
+    /// The speech providers canoa.cfg defines, and the recordings open on them.
+    speech: speech::Speech,
     overlays: Arc<Overlays>,
     /// Registry reads and the cache of what catalogs provide.
     registry: Registry,
@@ -390,6 +403,7 @@ impl Control {
             entries,
             files: Files::default(),
             terminals: Terminals::default(),
+            speech: speech::Speech::default(),
             overlays: Arc::new(Overlays::default()),
             registry: Registry::default(),
             index: Arc::new(crate::store::index::StoreIndex::default()),
@@ -422,6 +436,12 @@ impl Control {
     pub(crate) fn with_terminals(mut self, terminals: Terminals) -> Self {
         self.terminals = terminals;
         self
+    }
+
+    /// Makes the open speech recordings look `by` older.
+    #[cfg(test)]
+    pub(crate) fn age_recordings(&self, by: Duration) {
+        self.speech.age(by);
     }
 
     /// The terminals this host runs.
@@ -733,6 +753,9 @@ impl Control {
                     .and_then(|accounts| choices::call(accounts, caller, &params)),
                 Some("discover/nearby") => {
                     allow(caller, Grant::Discover).and_then(|()| discover::nearby(&params))
+                }
+                Some(method) if method.starts_with("speech/") => {
+                    self.speech.call(caller, &self.files, method, &params)
                 }
                 Some("host/grants") => Ok(caller.grants_json()),
                 Some(method) if method.starts_with("terminal/") => allow(caller, Grant::Terminal)
@@ -1227,6 +1250,9 @@ mod import;
 #[cfg(test)]
 mod import_tests;
 mod index;
+mod speech;
+#[cfg(test)]
+mod speech_tests;
 mod usage_read;
 pub(crate) use index::ToolsBackend;
 mod account_move;

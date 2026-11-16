@@ -453,6 +453,29 @@ impl Files {
         self.config.as_deref()
     }
 
+    /// One table of canoa.cfg that no page edits through `config/set` (the host's own, such as the speech providers, which name
+    /// programs and hold keys): `None` when the file or the table is not there.
+    pub(crate) fn hidden_section(&self, section: &str) -> Result<Option<Value>, (i32, String)> {
+        let path = self.config_path()?;
+        let (text, _) = read_cfg(path)?;
+        let table = parse(path, &text)?;
+        Ok(table
+            .get(section)
+            .and_then(|value| serde_json::to_value(value).ok()))
+    }
+
+    /// [`Files::config_update`] for a table `config/set` does not offer, under the same lock.
+    pub(crate) fn hidden_update(
+        &self,
+        section: &str,
+        change: impl FnOnce(Value) -> Result<Value, String>,
+    ) -> Result<(), (i32, String)> {
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        let current = self.hidden_section(section)?.unwrap_or(Value::Null);
+        let next = change(current).map_err(|why| (REFUSED, why))?;
+        self.write_section(section, &next).map(|_| ())
+    }
+
     fn config_set_held(&self, params: &Value, guarded: bool) -> Outcome {
         let section = section_of(params)?;
         if GUARDED_SECTIONS.contains(&section) && !guarded {
@@ -461,8 +484,11 @@ impl Files {
                 format!("{section} takes the grant config.write.sessions"),
             ));
         }
+        self.write_section(section, params.get("value").unwrap_or(&Value::Null))
+    }
+
+    fn write_section(&self, section: &str, value: &Value) -> Outcome {
         let path = self.config_path()?;
-        let value = params.get("value").unwrap_or(&Value::Null);
         if !(value.is_null() || value.is_object()) {
             return Err(bad("value is an object, or null to remove the section"));
         }

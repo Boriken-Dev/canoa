@@ -2101,10 +2101,11 @@ fn native_of(raw: RawNative) -> Result<NativeConfig, ConfigError> {
                         | crate::control::Grant::HostRestart
                         | crate::control::Grant::Upload
                         | crate::control::Grant::Terminal
+                        | crate::control::Grant::VoiceSetup
                 )
             }) {
                 return Err(refused(
-                    "control cannot hold config.write.sessions, overlay.write, host.restart, upload or terminal: a browser key does not get them through the door",
+                    "control cannot hold config.write.sessions, overlay.write, host.restart, upload, terminal or voice.setup: a browser key does not get them through the door",
                 ));
             }
             set

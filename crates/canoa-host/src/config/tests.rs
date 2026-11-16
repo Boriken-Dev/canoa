@@ -1886,6 +1886,7 @@ fn host_native_is_on_with_a_narrow_control_by_default_and_takes_a_list_that_neve
         ),
         ("[host.native]\ncontrol = [\"upload\"]\n", "host.native"),
         ("[host.native]\ncontrol = [\"terminal\"]\n", "host.native"),
+        ("[host.native]\ncontrol = [\"voice.setup\"]\n", "host.native"),
         ("[host.native]\ncontrol = [\"nonsense\"]\n", "host.native"),
         ("[host.native]\nlisten = \"x\"\n", "native"),
     ] {
