@@ -1,0 +1,267 @@
+#![allow(
+    clippy::std_instead_of_core,
+    clippy::std_instead_of_alloc,
+    reason = "tests name what they use from std"
+)]
+
+use coqui_acp_api::{Bucket, ModelSpend};
+
+use super::*;
+
+/// 2026-11-16T12:00:00Z.
+const NOW: i64 = 1_794_830_400;
+const DAY: i64 = SECONDS_A_DAY;
+
+fn folder(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("canoa-usage-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    dir
+}
+
+fn spend(session: &str, input: u64, output: u64, cost: Option<u64>) -> Spend {
+    let mut spend = Spend::new(session);
+    spend.input = input;
+    spend.output = output;
+    spend.cost_micro_usd = cost;
+    spend
+}
+
+fn turn<'a>(account: &'a str, session: &'a str) -> Turn<'a> {
+    Turn {
+        account,
+        harness: "claude",
+        session,
+        parent: None,
+        model: Some("opus"),
+    }
+}
+
+fn lines(dir: &Path, name: &str) -> Vec<Value> {
+    fs::read_to_string(dir.join(name))
+        .map(|text| {
+            text.lines()
+                .map(|line| serde_json::from_str(line).expect("a JSON line"))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_cumulative_report_becomes_one_delta_a_turn() {
+    let dir = folder("delta");
+    let log = UsageLog::open(dir.clone(), 400, NOW);
+    log.record(&turn("work", "s1"), &spend("s1", 100, 20, Some(5_000)), NOW);
+    log.record(
+        &turn("work", "s1"),
+        &spend("s1", 250, 70, Some(12_000)),
+        NOW + 60,
+    );
+    let rows = lines(&dir, "2026-11.jsonl");
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert_eq!(rows[0]["input"], 100);
+    assert_eq!(rows[1]["input"], 150);
+    assert_eq!(rows[1]["output"], 50);
+    assert_eq!(rows[1]["cost_micro_usd"], 7_000);
+    assert_eq!(rows[1]["account"], "work");
+    assert_eq!(rows[1]["harness"], "claude");
+    assert_eq!(rows[1]["model"], "opus");
+    assert_eq!(rows[1]["session_id"], "s1");
+    assert_eq!(rows[1]["time"], NOW + 60);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_report_seen_again_adds_nothing_even_after_the_host_restarts() {
+    let dir = folder("again");
+    let log = UsageLog::open(dir.clone(), 400, NOW);
+    log.record(&turn("work", "s1"), &spend("s1", 100, 20, None), NOW);
+    log.record(&turn("work", "s1"), &spend("s1", 100, 20, None), NOW + 1);
+    assert_eq!(lines(&dir, "2026-11.jsonl").len(), 1);
+    drop(log);
+    // A session loaded again after a restart reports its whole total.
+    let log = UsageLog::open(dir.clone(), 400, NOW + 10);
+    log.record(&turn("work", "s1"), &spend("s1", 100, 20, None), NOW + 10);
+    assert_eq!(lines(&dir, "2026-11.jsonl").len(), 1);
+    log.record(&turn("work", "s1"), &spend("s1", 130, 20, None), NOW + 20);
+    let rows = lines(&dir, "2026-11.jsonl");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1]["input"], 30);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_counter_the_agent_never_moved_and_a_cost_it_never_gave_stay_absent() {
+    let dir = folder("absent");
+    let log = UsageLog::open(dir.clone(), 400, NOW);
+    log.record(&turn("work", "s1"), &spend("s1", 10, 4, None), NOW);
+    let rows = lines(&dir, "2026-11.jsonl");
+    let row = rows[0].as_object().expect("an object");
+    for absent in [
+        "cache_read",
+        "cache_write",
+        "cost_micro_usd",
+        "parent_session_id",
+    ] {
+        assert!(!row.contains_key(absent), "{absent} in {row:?}");
+    }
+    assert_eq!(row["input"], 10);
+    // A report of nothing at all is no line.
+    log.record(&turn("work", "s2"), &spend("s2", 0, 0, None), NOW);
+    assert_eq!(lines(&dir, "2026-11.jsonl").len(), 1);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_total_that_falls_is_a_counter_that_started_over() {
+    let dir = folder("reset");
+    let log = UsageLog::open(dir.clone(), 400, NOW);
+    log.record(&turn("work", "s1"), &spend("s1", 500, 100, None), NOW);
+    log.record(&turn("work", "s1"), &spend("s1", 40, 10, None), NOW + 1);
+    let rows = lines(&dir, "2026-11.jsonl");
+    assert_eq!(
+        (rows[1]["input"].clone(), rows[1]["output"].clone()),
+        (json!(40), json!(10))
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_report_that_names_its_models_gives_each_its_own_line() {
+    let dir = folder("models");
+    let log = UsageLog::open(dir.clone(), 400, NOW);
+    let mut report = spend("s1", 30, 6, Some(900));
+    let mut opus = ModelSpend::new("opus");
+    opus.input = 20;
+    opus.output = 4;
+    let mut haiku = ModelSpend::new("haiku");
+    haiku.input = 10;
+    haiku.output = 2;
+    haiku.cost_micro_usd = Some(900);
+    report.by_model = vec![opus, haiku];
+    log.record(&turn("work", "s1"), &report, NOW);
+    let rows = lines(&dir, "2026-11.jsonl");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["model"], "opus");
+    assert!(rows[0].get("cost_micro_usd").is_none());
+    assert_eq!(rows[1]["model"], "haiku");
+    assert_eq!(rows[1]["cost_micro_usd"], 900);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_summary_groups_by_day_and_by_account_and_filters() {
+    let dir = folder("summary");
+    let log = UsageLog::open(dir.clone(), 400, NOW);
+    log.record(&turn("work", "s1"), &spend("s1", 100, 10, Some(1_000)), NOW);
+    log.record(
+        &turn("work", "s1"),
+        &spend("s1", 150, 30, Some(1_500)),
+        NOW + 60,
+    );
+    log.record(&turn("home", "s2"), &spend("s2", 7, 1, None), NOW + 70);
+    log.record(&turn("work", "s3"), &spend("s3", 11, 2, None), NOW - DAY);
+    let by_day = log
+        .summary(&json!({"from": NOW - 2 * DAY, "to": NOW + DAY, "group_by": "day"}))
+        .expect("answers");
+    assert_eq!(by_day["timezone"], "UTC");
+    let groups = by_day["groups"].as_array().expect("groups");
+    assert_eq!(groups.len(), 2, "{by_day}");
+    assert_eq!(groups[0]["key"], "2026-11-15");
+    assert_eq!(groups[0]["input"], 11);
+    assert_eq!(groups[1]["key"], "2026-11-16");
+    assert_eq!(groups[1]["input"], 157);
+    assert_eq!(groups[1]["sessions"], 2);
+    assert_eq!(groups[1]["records"], 3);
+    assert_eq!(by_day["total"]["input"], 168);
+    let by_account = log
+        .summary(&json!({"group_by": "account"}))
+        .expect("answers");
+    let groups = by_account["groups"].as_array().expect("groups");
+    let home = groups
+        .iter()
+        .find(|group| group["key"] == "home")
+        .expect("home");
+    let work = groups
+        .iter()
+        .find(|group| group["key"] == "work")
+        .expect("work");
+    assert_eq!(home["input"], 7);
+    assert!(
+        home.get("cost_micro_usd").is_none(),
+        "no cost was reported: {home}"
+    );
+    assert_eq!(work["input"], 161);
+    assert_eq!(work["cost_micro_usd"], 1_500);
+    let only_home = log
+        .summary(&json!({"group_by": "session", "account": "home"}))
+        .expect("answers");
+    assert_eq!(only_home["groups"].as_array().map(Vec::len), Some(1));
+    let none_of_it = log
+        .summary(&json!({"provider": "codex", "host": "elsewhere"}))
+        .expect("answers");
+    assert_eq!(none_of_it["groups"], json!([]));
+    // The end of the range is exclusive.
+    let before = log
+        .summary(&json!({"from": 0, "to": NOW, "group_by": "account"}))
+        .expect("answers");
+    assert_eq!(before["total"]["input"], 11);
+    assert!(log.summary(&json!({"group_by": "host"})).is_err());
+    assert!(log.summary(&json!({"from": "yesterday"})).is_err());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn files_older_than_keep_days_are_removed_at_start_and_newer_ones_stay() {
+    let dir = folder("retention");
+    fs::create_dir_all(&dir).expect("made");
+    for name in [
+        "2024-01.jsonl",
+        "2025-09.jsonl",
+        "2026-10.jsonl",
+        "2026-11.jsonl",
+        "notes.txt",
+    ] {
+        fs::write(dir.join(name), "{}\n").expect("written");
+    }
+    // 400 days before 2026-11-16 is 2025-10-12: September 2025 ended before it, October 2026 did not.
+    let _log = UsageLog::open(dir.clone(), 400, NOW);
+    let mut left: Vec<String> = fs::read_dir(&dir)
+        .expect("read")
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect();
+    left.sort();
+    assert_eq!(left, ["2026-10.jsonl", "2026-11.jsonl", "notes.txt"]);
+    let _ = UsageLog::open(dir.clone(), 10, NOW);
+    assert!(
+        !dir.join("2026-10.jsonl").exists(),
+        "ended 2026-11-01, more than 10 days back"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_latest_allowances_are_kept_for_each_account_and_survive_a_restart() {
+    let dir = folder("limits");
+    let log = UsageLog::open(dir.clone(), 400, NOW);
+    let mut report = UsageReport::new();
+    report.observed_at = NOW - 5;
+    report.buckets = vec![Bucket::new("five_hour")];
+    log.note_report("work", &report, NOW);
+    let bare = UsageReport::new();
+    log.note_report("home", &bare, NOW);
+    let kept = log.limits();
+    assert_eq!(kept["accounts"].as_array().map(Vec::len), Some(1), "{kept}");
+    assert_eq!(kept["accounts"][0]["account"], "work");
+    assert_eq!(kept["accounts"][0]["updated_at"], NOW);
+    assert_eq!(kept["accounts"][0]["observed_at"], NOW - 5);
+    // The same reading again keeps when the host first read it.
+    log.note_report("work", &report, NOW + 30);
+    assert_eq!(log.limits()["accounts"][0]["updated_at"], NOW);
+    drop(log);
+    let log = UsageLog::open(dir.clone(), 400, NOW + 100);
+    assert_eq!(log.limits()["accounts"][0]["account"], "work");
+    // Nothing of the allowances is appended to the history.
+    assert!(lines(&dir, "2026-11.jsonl").is_empty());
+    let _ = fs::remove_dir_all(&dir);
+}

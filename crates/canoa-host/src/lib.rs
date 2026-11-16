@@ -35,6 +35,7 @@ pub mod spawn;
 pub mod store;
 pub mod tool;
 mod transport;
+mod usage_log;
 mod usage_splice;
 pub mod web;
 mod worktree;

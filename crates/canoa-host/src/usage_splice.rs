@@ -34,11 +34,15 @@ use coqui_acp_harness::antigravity::AcpModel;
 use coqui_transport::Failure;
 use serde_json::{Value, json};
 
+use crate::usage_log::UsageLog;
+
 mod agy;
 mod members;
+mod tap;
 
 pub(crate) use agy::{Antigravity, Quota, Starter};
 use agy::{Link, Reading};
+use tap::Tap;
 
 /// JSON-RPC's code for a message the receiver cannot place.
 const INTERNAL_ERROR: i64 = -32603;
@@ -343,6 +347,8 @@ pub(crate) struct Splice {
     quota: Option<Arc<Quota>>,
     /// Held while a notice is built, sent and noted as told, so notices go out in order.
     notifying: Mutex<()>,
+    /// What this connection tells the host's usage log, when the host keeps one.
+    tap: Option<Tap>,
 }
 
 impl Drop for Splice {
@@ -379,7 +385,19 @@ impl Splice {
             reading: None,
             quota,
             notifying: Mutex::new(()),
+            tap: None,
         }
+    }
+
+    /// This connection recording the spend its agent reports in `log`, as `harness`, under its account. A splice with no
+    /// account records nothing: a line belongs to an account.
+    #[must_use]
+    pub(crate) fn recording(mut self, log: Arc<UsageLog>, harness: String) -> Self {
+        self.tap = self
+            .account
+            .clone()
+            .map(|account| Tap::new(log, account, harness));
+        self
     }
 
     /// This connection's agent is the process `pid`, which is where its quota is read from, if the entry reads one.
@@ -405,6 +423,9 @@ impl Splice {
     /// Reads a message from the client: it goes on to the agent, stops here with this host's own answer, or stops here with
     /// its answer to come once a reading ends.
     pub(crate) fn read_client(&self, message: &[u8]) -> Client {
+        if let Some(tap) = &self.tap {
+            tap.heard_client(message);
+        }
         self.client(message).unwrap_or(Client::Forward)
     }
 
@@ -757,6 +778,9 @@ impl Splice {
         message: &[u8],
         send: impl Fn(&[u8]) -> Result<(), Failure>,
     ) -> Result<(), Failure> {
+        if let Some(tap) = &self.tap {
+            tap.heard_agent(message);
+        }
         if !self.inference.active() {
             return send(message);
         }

@@ -103,12 +103,15 @@ pub enum Grant {
     /// `discover/nearby`: the agents this host finds on the computer and the link it is on, for a client that cannot search itself.
     /// It makes the host send multicast queries and tells the key what answered; it starts and changes nothing.
     Discover,
+    /// `usage/summary` and `usage/limits`: what the agents on this host spent, by account, harness, model and session, and the
+    /// allowances they last reported. It reads the host's records and changes nothing; a delegated child connection never holds it.
+    Usage,
 }
 
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 15] {
+    pub fn all() -> [Self; 16] {
         [
             Self::LedgerRead,
             Self::LedgerWrite,
@@ -125,6 +128,7 @@ impl Grant {
             Self::StorePrograms,
             Self::Accounts,
             Self::Discover,
+            Self::Usage,
         ]
     }
 
@@ -147,6 +151,7 @@ impl Grant {
             Self::StorePrograms => "store.programs",
             Self::Accounts => "accounts",
             Self::Discover => "discover",
+            Self::Usage => "usage",
         }
     }
 
@@ -236,6 +241,8 @@ pub(crate) struct Control {
     history: Option<Moves>,
     /// The owner's accounts, once the host knows where canoa.cfg is.
     accounts: Option<accounts::Accounts>,
+    /// What the agents spent, once the host has a home to keep it in.
+    usage: Option<Arc<crate::usage_log::UsageLog>>,
     /// The paired keys, so a key can take itself out.
     trust: Option<Arc<TrustStore>>,
     entries: Vec<EntryRoots>,
@@ -335,6 +342,7 @@ impl Control {
             stores: OnceLock::new(),
             history: None,
             accounts: None,
+            usage: None,
             trust: None,
             entries,
             files: Files::default(),
@@ -428,6 +436,24 @@ impl Control {
     pub(crate) fn with_accounts(mut self, accounts: accounts::Accounts) -> Self {
         self.accounts = Some(accounts);
         self
+    }
+
+    /// Answers `usage/*` from this log.
+    #[must_use]
+    pub(crate) fn with_usage(mut self, usage: Arc<crate::usage_log::UsageLog>) -> Self {
+        self.usage = Some(usage);
+        self
+    }
+
+    fn usage_call(&self, method: &str, params: &Value) -> Result<Value, (i32, String)> {
+        let log = self
+            .usage
+            .as_ref()
+            .ok_or((REFUSED, "this host keeps no usage records".to_owned()))?;
+        match method {
+            "usage/summary" => log.summary(params).map_err(|what| bad(&what)),
+            _ => Ok(log.limits()),
+        }
     }
 
     fn accounts(&self) -> Result<&accounts::Accounts, (i32, String)> {
@@ -572,6 +598,9 @@ impl Control {
                 ) => allow(caller, Grant::Accounts)
                     .and_then(|()| self.accounts())
                     .and_then(|accounts| accounts.call(method, &params)),
+                Some(method @ ("usage/summary" | "usage/limits")) => {
+                    allow(caller, Grant::Usage).and_then(|()| self.usage_call(method, &params))
+                }
                 Some("discover/nearby") => {
                     allow(caller, Grant::Discover).and_then(|()| discover::nearby(&params))
                 }

@@ -721,3 +721,67 @@ fn a_key_on_a_connection_is_refused_a_sign_in_without_the_accounts_grant() {
         assert_ne!(answer["error"]["code"], DENIED, "{answer}");
     }
 }
+
+#[test]
+fn usage_answers_a_key_holding_the_grant_and_the_owner_and_no_other() {
+    let dir = std::env::temp_dir().join(format!("canoa-control-usage-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let log = Arc::new(crate::usage_log::UsageLog::open(dir.clone(), 400, 0));
+    let mut spend = coqui_acp_api::Spend::new("s1");
+    spend.input = 12;
+    log.record(
+        &crate::usage_log::Turn {
+            account: "work",
+            harness: "claude",
+            session: "s1",
+            parent: None,
+            model: None,
+        },
+        &spend,
+        crate::usage_splice::unix_now(),
+    );
+    let control = memory().with_usage(log);
+    let granted = peer("sha256:aa", &[Grant::Usage]);
+    let answer = ask(
+        &control,
+        &granted,
+        "usage/summary",
+        json!({"group_by": "account"}),
+    );
+    assert_eq!(answer["result"]["groups"][0]["key"], "work", "{answer}");
+    assert_eq!(answer["result"]["groups"][0]["input"], 12);
+    let answer = ask(&control, &granted, "usage/limits", json!({}));
+    assert_eq!(answer["result"]["accounts"], json!([]), "{answer}");
+    let owner = ask(&control, &Caller::Owner, "usage/summary", json!({}));
+    assert_eq!(owner["result"]["total"]["input"], 12);
+    for caller in [
+        peer("sha256:bb", &[]),
+        peer(
+            "sha256:cc",
+            &[Grant::Accounts, Grant::StoreRead, Grant::LedgerRead],
+        ),
+    ] {
+        for method in ["usage/summary", "usage/limits"] {
+            let answer = ask(&control, &caller, method, json!({}));
+            assert_eq!(answer["error"]["code"], DENIED, "{method}: {answer}");
+        }
+    }
+    let answer = ask(
+        &control,
+        &granted,
+        "usage/summary",
+        json!({"group_by": "nonsense"}),
+    );
+    assert_eq!(answer["error"]["code"], BAD_PARAMS, "{answer}");
+    assert_eq!(Grant::named("usage"), Some(Grant::Usage));
+    let told = ask(&control, &granted, "host/grants", json!({}));
+    assert_eq!(told["result"]["grants"], json!(["usage"]));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_host_with_no_home_keeps_no_usage_and_says_so() {
+    let control = memory();
+    let answer = ask(&control, &Caller::Owner, "usage/summary", json!({}));
+    assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
+}

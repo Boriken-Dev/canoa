@@ -1158,6 +1158,14 @@ impl Serving {
                 }
             })?)
         };
+        // The spend the agents report, kept in the home; a host with no home keeps none.
+        let usage_log = options.state_dir.as_ref().map(|home| {
+            Arc::new(crate::usage_log::UsageLog::open(
+                crate::usage_log::dir_of(home),
+                config.usage.keep_days,
+                crate::usage_splice::unix_now(),
+            ))
+        });
         let agents = Arc::new(Mutex::new(Agents::default()));
         let mut registry = Registry::new();
         let mut listeners = Vec::new();
@@ -1205,9 +1213,15 @@ impl Serving {
                             args: args.clone(),
                         },
                         scope: {
+                            let harness = std::path::Path::new(program)
+                                .file_stem()
+                                .map_or_else(String::new, |stem| {
+                                    stem.to_string_lossy().into_owned()
+                                });
                             let scope = Scope::new(entry.working_roots.clone())
                                 .account(entry.name.clone())
-                                .limit_phrases(config.limit_phrases.clone());
+                                .limit_phrases(config.limit_phrases.clone())
+                                .usage_log(usage_log.clone(), &harness);
                             match usage {
                                 Some(UsageSource::Antigravity) => scope.antigravity(Antigravity {
                                     program: program.clone(),
@@ -1354,7 +1368,8 @@ impl Serving {
                             agent: Agent::Harness(provider),
                             scope: Scope::new(entry.working_roots.clone())
                                 .account(entry.name.clone())
-                                .limit_phrases(config.limit_phrases.clone()),
+                                .limit_phrases(config.limit_phrases.clone())
+                                .usage_log(usage_log.clone(), harness),
                             offer: hosted::offer(
                                 profiles,
                                 &config.profiles,
@@ -1603,6 +1618,10 @@ impl Serving {
                             },
                         ));
                     let kept = kept.with_trust(Arc::clone(&trust));
+                    let kept = match &usage_log {
+                        Some(log) => kept.with_usage(Arc::clone(log)),
+                        None => kept,
+                    };
                     let kept = kept.with_history(control::Moves {
                         store: recorded,
                         targets: movers,

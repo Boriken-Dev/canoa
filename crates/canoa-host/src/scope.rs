@@ -23,6 +23,7 @@ use serde_json::{Map, Value, json};
 use crate::config::plain_absolute;
 use crate::share;
 use crate::site::Sites;
+use crate::usage_log::UsageLog;
 use crate::usage_splice::{Antigravity, Client, Inference, Splice};
 use crate::worktree::Worktrees;
 
@@ -46,6 +47,8 @@ pub(crate) struct Scope {
     usage: Arc<Inference>,
     /// The Documents folder a webpage session's scratch folder is made in; `None` asks the system.
     documents: Option<PathBuf>,
+    /// The host's usage log and the harness this entry runs, which its connections record the agent's spend in.
+    log: Option<(Arc<UsageLog>, String)>,
 }
 
 /// What becomes of one message from the client.
@@ -69,7 +72,15 @@ impl Scope {
             account: None,
             usage: Arc::new(Inference::default()),
             documents: None,
+            log: None,
         }
+    }
+
+    /// This scope's connections recording the spend their agent reports in `log`, as `harness`; with none, they record nothing.
+    #[must_use]
+    pub(crate) fn usage_log(mut self, log: Option<Arc<UsageLog>>, harness: &str) -> Self {
+        self.log = log.map(|log| (log, harness.to_owned()));
+        self
     }
 
     /// This scope reading failed turns of an agent that reports no usage with `phrases`: `None` for coqui-acp's defaults, a
@@ -102,7 +113,11 @@ impl Scope {
 
     /// One connection's share in the entry's inferred usage.
     pub(crate) fn splice(&self) -> Splice {
-        Splice::new(Arc::clone(&self.usage), self.account.clone())
+        let splice = Splice::new(Arc::clone(&self.usage), self.account.clone());
+        match &self.log {
+            Some((log, harness)) => splice.recording(Arc::clone(log), harness.clone()),
+            None => splice,
+        }
     }
 
     /// This scope with `account` as the id usage is reported under.

@@ -65,6 +65,8 @@ pub struct Config {
     pub native: NativeConfig,
     /// `[host.history]`: whether the host records the sessions it serves, and how much it keeps.
     pub history: HistoryConfig,
+    /// `[host.usage]`: how long the host keeps the spend it records.
+    pub usage: UsageConfig,
     /// `[agents.NAME]` with a `program`: the person's own agent commands, as entries reached over [`crate::Local`] only (each has
     /// [`Entry::local`] set), in the file's order. They are served when the host serves its own sources.
     pub local_agents: Vec<Entry>,
@@ -268,6 +270,23 @@ impl Default for HistoryConfig {
             max_session_bytes: crate::history::DEFAULT_MAX_SESSION_BYTES,
             max_sessions: crate::history::DEFAULT_MAX_SESSIONS,
             max_total_bytes: crate::history::DEFAULT_MAX_TOTAL_BYTES,
+        }
+    }
+}
+
+/// `[host.usage]`: the host records the spend each agent reports, by turn, in its home (`usage/`), and answers `usage/summary` and
+/// `usage/limits` from it. This is not `[usage]`, the app's and the limit phrases' table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct UsageConfig {
+    /// `keep_days`: how many days of records the host keeps; a month's file is removed at start once all of it is older.
+    pub keep_days: u32,
+}
+
+impl Default for UsageConfig {
+    fn default() -> Self {
+        Self {
+            keep_days: crate::usage_log::DEFAULT_KEEP_DAYS,
         }
     }
 }
@@ -1047,6 +1066,7 @@ struct RawHost {
     control: Option<RawControl>,
     native: Option<RawNative>,
     history: Option<RawHistory>,
+    usage: Option<RawHostUsage>,
     store: Option<RawStore>,
     delegate: Option<RawDelegate>,
 }
@@ -1057,6 +1077,13 @@ struct RawHost {
 struct RawNative {
     enabled: Option<bool>,
     control: Option<Vec<String>>,
+}
+
+/// `[host.usage]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawHostUsage {
+    keep_days: Option<u32>,
 }
 
 /// `[host.history]`.
@@ -1675,6 +1702,19 @@ impl Config {
             .map(history_of)
             .transpose()?
             .unwrap_or_default();
+        let usage = match host.usage {
+            None => UsageConfig::default(),
+            Some(raw) => {
+                let keep_days = raw.keep_days.unwrap_or(UsageConfig::default().keep_days);
+                if keep_days == 0 {
+                    return Err(ConfigError::Invalid {
+                        entry: None,
+                        what: "host.usage: keep_days is at least 1".to_owned(),
+                    });
+                }
+                UsageConfig { keep_days }
+            }
+        };
         if let Some(listen) = control.as_ref().and_then(|control| control.listen.as_ref())
             && listen.is_fixed()
             && entries.iter().any(|entry| &entry.listen == listen)
@@ -1703,6 +1743,7 @@ impl Config {
             control,
             native,
             history,
+            usage,
             store,
             delegate,
             skill_pins,

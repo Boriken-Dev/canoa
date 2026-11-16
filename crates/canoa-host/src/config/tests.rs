@@ -1849,3 +1849,20 @@ fn the_store_index_takes_a_ttl_in_seconds_and_a_byte_budget() {
     assert_eq!(set.store.index_cache_bytes, Some(1024));
     assert!(parse("[host.store]\nindex_ttl = \"5m\"\n").is_err());
 }
+
+#[test]
+fn host_usage_keeps_four_hundred_days_unless_told_and_refuses_zero_and_the_unknown() {
+    let none = Config::from_str_in("", &base()).expect("parses");
+    assert_eq!(none.usage, UsageConfig::default());
+    assert_eq!(none.usage.keep_days, 400);
+    let set = Config::from_str_in("[host.usage]\nkeep_days = 30\n", &base()).expect("parses");
+    assert_eq!(set.usage.keep_days, 30);
+    // The app's own `[usage]` table is another table and is let go.
+    assert!(Config::from_str_in("[usage]\nwarn_permille = 800\n", &base()).is_ok());
+    for bad in ["keep_days = 0", "keep_days = -1", "unknown = 1"] {
+        assert!(
+            Config::from_str_in(&format!("[host.usage]\n{bad}\n"), &base()).is_err(),
+            "{bad}"
+        );
+    }
+}

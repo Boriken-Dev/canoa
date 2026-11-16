@@ -1214,3 +1214,172 @@ fn no_private_agent_starts_while_a_session_of_the_entry_is_opening() {
         .expect("the private reading ends");
     let _ = std::fs::remove_dir_all(&state);
 }
+
+mod recording {
+    use coqui_acp_api::Spend;
+
+    use super::*;
+    use crate::usage_log::UsageLog;
+
+    fn folder(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("canoa-tap-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn recording(log: &Arc<UsageLog>) -> Splice {
+        // No limit phrases: the host infers nothing, and the agent speaks for itself.
+        Splice::new(
+            Arc::new(Inference::new(Some(Vec::new()))),
+            Some("work".to_owned()),
+        )
+        .recording(Arc::clone(log), "claude".to_owned())
+    }
+
+    fn report(session: &str, input: u64, output: u64, cost: Option<u64>) -> Value {
+        let mut spend = Spend::new(session);
+        spend.input = input;
+        spend.output = output;
+        spend.cost_micro_usd = cost;
+        let mut report = UsageReport::new();
+        report.spend = Some(spend);
+        json!({"jsonrpc": "2.0", "method": USAGE_NOTIFICATION,
+            "params": {"sessionId": session, "report": serde_json::to_value(&report).expect("JSON")}})
+    }
+
+    fn turn(splice: &Splice, id: u64, session: &str, spent: Option<Value>) {
+        prompt(splice, id, session);
+        if let Some(spent) = spent {
+            from_agent(splice, &spent);
+        }
+        from_agent(
+            splice,
+            &json!({"id": id, "result": {"stopReason": "end_turn"}}),
+        );
+    }
+
+    fn rows(dir: &std::path::Path) -> Vec<Value> {
+        let month = std::fs::read_dir(dir)
+            .expect("the folder")
+            .flatten()
+            .find(|entry| entry.file_name().to_string_lossy().ends_with(".jsonl"));
+        month
+            .and_then(|entry| std::fs::read_to_string(entry.path()).ok())
+            .map(|text| {
+                text.lines()
+                    .map(|line| serde_json::from_str(line).expect("JSON"))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn two_turns_reporting_running_totals_record_two_deltas_when_each_ends() {
+        let dir = folder("two");
+        let log = Arc::new(UsageLog::open(dir.clone(), 400, unix_now()));
+        let splice = recording(&log);
+        initialize(&splice, true, plain_answer());
+        prompt(&splice, 1, "s1");
+        from_agent(&splice, &report("s1", 100, 20, Some(4_000)));
+        assert!(rows(&dir).is_empty(), "a turn is recorded when it ends");
+        from_agent(
+            &splice,
+            &json!({"id": 1, "result": {"stopReason": "end_turn"}}),
+        );
+        turn(&splice, 2, "s1", Some(report("s1", 260, 70, Some(11_000))));
+        let rows = rows(&dir);
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert_eq!(rows[0]["input"], 100);
+        assert_eq!(rows[0]["cost_micro_usd"], 4_000);
+        assert_eq!(rows[1]["input"], 160);
+        assert_eq!(rows[1]["output"], 50);
+        assert_eq!(rows[1]["cost_micro_usd"], 7_000);
+        assert_eq!(rows[1]["account"], "work");
+        assert_eq!(rows[1]["harness"], "claude");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_reconnect_that_reports_the_same_totals_does_not_double_them() {
+        let dir = folder("reconnect");
+        let log = Arc::new(UsageLog::open(dir.clone(), 400, unix_now()));
+        let first = recording(&log);
+        initialize(&first, true, plain_answer());
+        turn(&first, 1, "s1", Some(report("s1", 100, 20, None)));
+        drop(first);
+        // The client comes back, loads the session, and the agent reports what it had all along.
+        let second = recording(&log);
+        initialize(&second, true, plain_answer());
+        assert!(
+            read_client(
+                &second,
+                &json!({"id": 7, "method": "session/load", "params": {"sessionId": "s1"}})
+            )
+            .is_none()
+        );
+        from_agent(&second, &report("s1", 100, 20, None));
+        from_agent(&second, &json!({"id": 7, "result": {}}));
+        turn(&second, 2, "s1", Some(report("s1", 100, 20, None)));
+        assert_eq!(rows(&dir).len(), 1);
+        turn(&second, 3, "s1", Some(report("s1", 130, 25, None)));
+        let rows = rows(&dir);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1]["input"], 30);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_agent_that_reports_no_spend_leaves_no_fields_and_no_lines() {
+        let dir = folder("none");
+        let log = Arc::new(UsageLog::open(dir.clone(), 400, unix_now()));
+        let splice = recording(&log);
+        initialize(&splice, true, plain_answer());
+        let mut bare = UsageReport::new();
+        bare.revision = 1;
+        let bare = json!({"jsonrpc": "2.0", "method": USAGE_NOTIFICATION,
+            "params": {"sessionId": "s1", "report": serde_json::to_value(&bare).expect("JSON")}});
+        turn(&splice, 1, "s1", Some(bare));
+        turn(&splice, 2, "s1", None);
+        assert!(rows(&dir).is_empty());
+        // And a report that gives tokens but no cost has no cost field.
+        turn(&splice, 3, "s1", Some(report("s1", 5, 1, None)));
+        let rows = rows(&dir);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].get("cost_micro_usd").is_none());
+        assert!(rows[0].get("cache_read").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_model_a_session_runs_on_is_the_lines_model() {
+        let dir = folder("model");
+        let log = Arc::new(UsageLog::open(dir.clone(), 400, unix_now()));
+        let splice = recording(&log);
+        initialize(&splice, true, plain_answer());
+        assert!(
+            read_client(
+                &splice,
+                &json!({"id": 3, "method": "session/new", "params": {"cwd": "/w"}})
+            )
+            .is_none()
+        );
+        from_agent(
+            &splice,
+            &json!({"id": 3, "result": {"sessionId": "s1", "models": {"currentModelId": "opus"}}}),
+        );
+        turn(&splice, 4, "s1", Some(report("s1", 9, 3, None)));
+        assert!(
+            read_client(
+                &splice,
+                &json!({"id": 5, "method": "session/set_model",
+                    "params": {"sessionId": "s1", "modelId": "haiku"}})
+            )
+            .is_none()
+        );
+        turn(&splice, 6, "s1", Some(report("s1", 19, 8, None)));
+        let rows = rows(&dir);
+        assert_eq!(rows[0]["model"], "opus");
+        assert_eq!(rows[1]["model"], "haiku");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
