@@ -327,6 +327,7 @@ command); the host keeps who the accounts are, their credentials, who holds one,
 ```toml
 [host]
 account_store = "os"            # the default; "file" for a host with no operating system credential store
+shell = "pwsh"                  # the program a terminal starts; absent, your own ($SHELL, else pwsh or powershell on Windows)
 
 # What a program store's install is held to, as gitignore-style lists (see the host's AGENTS.md); absent, the recommended lists apply.
 [host.store]
