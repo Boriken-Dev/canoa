@@ -310,3 +310,34 @@ fn documents_is_found_as_the_desktop_app_finds_it() {
     );
     assert_eq!(documents_in(none, None, None), None);
 }
+
+#[test]
+fn the_approval_token_is_in_the_answer_to_initialize_and_in_no_other() {
+    let sites = Sites::new(None);
+    let initialize = serde_json::to_vec(
+        &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
+    )
+    .expect("JSON");
+    sites.note_initialize(&initialize);
+    let answer = |id: u64, meta: Value| {
+        serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "result": {"_meta": meta}}))
+            .expect("JSON")
+    };
+    let told = |bytes: Cow<'_, [u8]>| serde_json::from_slice::<Value>(&bytes).expect("JSON");
+    // Another answer carrying one, written by the agent or anyone, loses it; the answer to initialize carries the real one, once.
+    let other = told(sites.annotate(&answer(
+        2,
+        json!({APPROVAL_META: "agent-wrote-this", "kept": 1}),
+    )));
+    assert_eq!(other["result"]["_meta"], json!({"kept": 1}));
+    let first = told(sites.annotate(&answer(1, json!({}))));
+    assert_eq!(
+        first["result"]["_meta"][APPROVAL_META],
+        json!(sites.approval)
+    );
+    let again = told(sites.annotate(&answer(1, json!({APPROVAL_META: "copied"}))));
+    assert!(
+        again["result"]["_meta"].get(APPROVAL_META).is_none(),
+        "{again}"
+    );
+}

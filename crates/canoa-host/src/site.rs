@@ -328,8 +328,13 @@ impl Sites {
             .windows(SITE_META.len())
             .any(|window| window == SITE_META.as_bytes());
         let options = message.windows(13).any(|window| window == b"configOptions");
+        // A token anywhere but the answer to `initialize` is not the host's: whoever wrote it, it goes no further.
+        let token = message
+            .windows(APPROVAL_META.len())
+            .any(|window| window == APPROVAL_META.as_bytes());
         if !named
             && !options
+            && !token
             && lock(&self.pending).is_empty()
             && lock(&self.initializing).is_empty()
         {
@@ -378,6 +383,9 @@ impl Sites {
         }
         if let Some(meta) = result.get_mut("_meta").and_then(Value::as_object_mut) {
             changed |= meta.remove(SITE_META).is_some();
+            if !initialized {
+                changed |= meta.remove(APPROVAL_META).is_some();
+            }
         }
         if let Some((_, told)) = told {
             let meta = result
