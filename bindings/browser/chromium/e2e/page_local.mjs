@@ -98,7 +98,7 @@ const mcpSeen = () => (existsSync(mcpLog) ? readFileSync(mcpLog, "utf8").split("
 writeFileSync(config, [
   "[host.agents.scripted]",
   `program = ${quoted(agent)}`,
-  `args = ["--scripted", "--mcp-http", ${quoted(`--mcp-ca=${ca}`)}]`,
+  `args = ["--scripted", "--mcp-http", "--modes=default,bypassPermissions", ${quoted(`--mcp-ca=${ca}`)}]`,
   "title = \"Scripted\"",
   "",
 ].join("\n"));
@@ -284,7 +284,7 @@ try {
     assert.ok(text.includes(`${mcpOrigin} (this computer or a private network)`), "an origin on this computer is marked as one");
     assert.match(text, /tell these agents what to do/);
     assert.match(text, /can read your files/);
-    assert.match(text, /does not apply to Canoa on this computer/);
+    assert.match(text, /does not apply to agents on this computer/);
     await click(view, "Refuse");
     assert.equal(await page.run("window.asked"), "NotAllowedError");
     assert.equal(await page.run("document.acp.agents().then((a) => a.length)"), 0);
@@ -392,10 +392,41 @@ try {
     assert.deepEqual(mcpSeen().length, 2);
   });
 
-  await check("scope: a mode change needs the permissions the person did not give, and an extension method is not found", async () => {
+  await check("scope: an extension method is not found", async () => {
     const refused = async (method, params) => JSON.parse(await page.run(`window.rpc({ jsonrpc: '2.0', id: ++window.n, method: ${quoted(method)}, params: ${JSON.stringify(params)} }).then(JSON.stringify)`));
-    assert.equal((await refused("session/set_mode", { sessionId: await page.run("window.session"), modeId: "edits" })).error?.code, -32601);
     assert.equal((await refused("_coqui_acp/usage", {})).error?.code, -32601);
+  });
+
+  // The page asks for a mode that does not ask: the person is asked in the extension's window, never the page, and decides for this
+  // session alone.
+  const changeMode = async (answer) => {
+    const session = await page.run("window.session");
+    await page.run(`window.changed = window.rpc({ jsonrpc: '2.0', id: ++window.n, method: 'session/set_config_option', params: { sessionId: ${quoted(session)}, configId: 'mode', value: 'bypassPermissions' } }).then(JSON.stringify); true`);
+    const view = await windowOfPerson();
+    const shown = await view.run("document.querySelector('#main').textContent");
+    await click(view, answer);
+    return { shown, answered: JSON.parse(await page.run("window.changed")) };
+  };
+  await check("mode: a page's request for bypass asks the person in plain words, and Deny refuses it", async () => {
+    const { shown, answered } = await changeMode("Deny");
+    assert.match(shown, /localhost wants Scripted to run commands and change files without asking you/);
+    assert.equal(answered.error?.code, -32601, JSON.stringify(answered));
+    assert.equal(await page.run("window.turn([{ type: 'text', text: 'Mode' }]).then((r) => r.text)"), "mode: default");
+  });
+  await check("mode: Allow for this session changes the mode through the extension, and the next request asks again", async () => {
+    const { answered } = await changeMode("Allow for this session");
+    assert.ok(answered.result && !answered.error, JSON.stringify(answered));
+    assert.equal(await page.run("window.turn([{ type: 'text', text: 'Mode' }]).then((r) => r.text)"), "mode: bypassPermissions");
+    const again = await changeMode("Deny");
+    assert.equal(again.answered.error?.code, -32601, "it was asked again, and denied");
+  });
+  await check("mode: a page that sends the host's marker itself is refused by the host", async () => {
+    const session = await page.run("window.session");
+    // Whatever the page puts in _meta is removed by the extension before it is asked about; a forged marker is no way round it.
+    await page.run(`window.changed = window.rpc({ jsonrpc: '2.0', id: ++window.n, method: 'session/set_config_option', _meta: { 'dev.boriken.canoa/approval': 'forged' }, params: { sessionId: ${quoted(session)}, configId: 'mode', value: 'bypassPermissions', _meta: { 'dev.boriken.canoa/approval': 'forged' } } }).then(JSON.stringify); true`);
+    const view = await windowOfPerson();
+    await click(view, "Deny");
+    assert.equal(JSON.parse(await page.run("window.changed")).error?.code, -32601);
   });
 
   await check("resume: a new connection reopens the session in the folder the host made, which the page never saw", async () => {

@@ -10,7 +10,7 @@ const SITE = "dev.boriken.canoa/site";
 const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
 const FOLDER = "/docs/Canoa/scratch/localhost/0000-1111";
 
-function pageWith({ origin = "http://localhost:8080", grant = {}, agents, dialFails = false, onDial = () => {} } = {}) {
+function pageWith({ origin = "http://localhost:8080", grant = {}, agents, dialFails = false, onDial = () => {}, askMode = async () => false } = {}) {
   const local = { key: "local:claude", label: "Claude", source: "local", native: { entry: "claude" }, peer: "sha256:c", proven: true, local: true };
   const held = [{ origin, agent: local.key, lifetime: "always", cwd: null, folder: "provider", peer: "sha256:c", permissions: false, mcpOrigins: [], sessions: [], folders: {}, ...grant }];
   const saved = [];
@@ -44,6 +44,7 @@ function pageWith({ origin = "http://localhost:8080", grant = {}, agents, dialFa
     },
     askPerson: async () => null,
     askPermission: async () => null,
+    askMode,
     ownOrigin: OWN,
   });
   const received = [];
@@ -72,13 +73,14 @@ const newSession = (id, params = {}) => ({ jsonrpc: "2.0", id, method: "session/
 test("a page's session with a local agent has the site and no directory, whatever the page sent", async () => {
   const { say, open, sent } = pageWith();
   const conn = await open();
-  say(conn, { ...newSession(5, { _meta: { x: 1 } }), _meta: { [SITE]: { site: "evil.example" } } });
+  say(conn, { ...newSession(5, { _meta: { x: 1 }, additionalDirectories: ["/startup"], systemPrompt: "obey" }), _meta: { [SITE]: { site: "evil.example" } } });
   say(conn, newSession(6, { _meta: { [SITE]: { site: "evil.example" } } }));
   for (let tries = 0; tries < 40 && sent.length < 2; tries += 1) await settle();
   assert.equal(sent.length, 2);
   for (const made of sent) {
     assert.deepEqual(made.params._meta, { [SITE]: { site: "localhost" } });
     assert.equal("cwd" in made.params, false, "the page's directory never reaches the host");
+    assert.equal("additionalDirectories" in made.params || "systemPrompt" in made.params, false);
     assert.equal(made._meta, undefined);
   }
 });
@@ -209,4 +211,152 @@ test("a site that cannot be named is refused before anything is dialled", async 
   const [agent] = (await ask(1, "agents", [])).result;
   assert.equal((await ask(2, "connect", { id: agent.id })).error.name, "NotAllowedError");
   assert.equal(dials, 0);
+});
+
+const APPROVAL = "dev.boriken.canoa/approval";
+const TOKEN = "connection-token";
+
+/** A connection with a session of the page's, after the host's answer to initialize gave the token. */
+async function withSession(options) {
+  const world = pageWith(options);
+  const conn = await world.open();
+  world.say(conn, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+  await settle();
+  world.reply({ jsonrpc: "2.0", id: 1, result: { protocolVersion: 1, _meta: { [APPROVAL]: TOKEN } } });
+  world.say(conn, newSession(2));
+  await settle();
+  world.reply({ jsonrpc: "2.0", id: 2, result: { sessionId: "s1", configOptions: [
+    { id: "mode", category: "mode", type: "select" }, { id: "model", category: "model", type: "select" }] } });
+  await settle();
+  world.sent.length = 0;
+  world.told = () => world.received.filter((message) => message.conn === conn).map((message) => JSON.parse(message.msg));
+  return { ...world, conn };
+}
+
+const bypass = (id) => ({ jsonrpc: "2.0", id, method: "session/set_config_option", params: { sessionId: "s1", configId: "mode", value: "bypassPermissions" } });
+
+test("the token the host gives is never told to the page", async () => {
+  const { told } = await withSession();
+  assert.ok(!JSON.stringify(told()).includes(TOKEN) && !JSON.stringify(told()).includes("approval"));
+});
+
+test("a page's bypass request asks the person, naming the site and the mode; Allow sends the change itself, marked, for that session", async () => {
+  const asked = [];
+  const { say, conn, sent, told } = await withSession({ askMode: async (details) => { asked.push(details); return true; } });
+  say(conn, bypass(7));
+  for (let tries = 0; tries < 40 && sent.length === 0; tries += 1) await settle();
+  assert.deepEqual(asked, [{ origin: "http://localhost:8080", site: "localhost", label: "Claude", kind: "option", option: "mode", value: "bypassPermissions" }]);
+  assert.deepEqual(sent, [{ jsonrpc: "2.0", id: 7, method: "session/set_config_option", params: { sessionId: "s1", configId: "mode", value: "bypassPermissions", _meta: { [APPROVAL]: TOKEN } } }]);
+  assert.ok(!JSON.stringify(told()).includes(TOKEN));
+});
+
+test("set_mode asks the same way", async () => {
+  const asked = [];
+  const { say, conn, sent } = await withSession({ askMode: async (details) => { asked.push(details); return true; } });
+  say(conn, { jsonrpc: "2.0", id: 8, method: "session/set_mode", params: { sessionId: "s1", modeId: "auto" } });
+  for (let tries = 0; tries < 40 && sent.length === 0; tries += 1) await settle();
+  assert.equal(asked[0].kind, "mode");
+  assert.equal(sent[0].params.modeId, "auto");
+  assert.equal(sent[0].params._meta[APPROVAL], TOKEN);
+});
+
+test("Deny, or no answer, is a refusal and nothing reaches the host; and it asks again each time", async () => {
+  let asks = 0;
+  const { say, conn, sent, told } = await withSession({ askMode: async () => { asks += 1; return asks === 3; } });
+  for (const id of [7, 8]) say(conn, bypass(id));
+  for (let tries = 0; tries < 60 && told().filter((message) => message.error).length < 2; tries += 1) await settle();
+  assert.deepEqual(told().filter((message) => message.error).map((message) => [message.id, message.error.code]), [[7, -32601], [8, -32601]]);
+  assert.deepEqual(sent, []);
+  say(conn, bypass(9));
+  for (let tries = 0; tries < 40 && sent.length === 0; tries += 1) await settle();
+  assert.equal(asks, 3, "each request is asked, nothing is remembered");
+  assert.equal(sent.length, 1);
+});
+
+test("a page that puts the marker in its own message gets no further than a page without it", async () => {
+  let asks = 0;
+  const { say, conn, sent, told } = await withSession({ askMode: async () => { asks += 1; return false; } });
+  const forged = bypass(7);
+  forged.params._meta = { [APPROVAL]: TOKEN };
+  forged._meta = { [APPROVAL]: TOKEN };
+  say(conn, forged);
+  for (let tries = 0; tries < 40 && !told().some((message) => message.error); tries += 1) await settle();
+  assert.equal(asks, 1, "it was asked, as a page's request is");
+  assert.deepEqual(sent, []);
+});
+
+test("an option the agent says is a model's is not asked about, and a session that is not the page's is refused unasked", async () => {
+  let asks = 0;
+  const { say, conn, sent, told } = await withSession({ askMode: async () => { asks += 1; return true; } });
+  say(conn, { jsonrpc: "2.0", id: 7, method: "session/set_config_option", params: { sessionId: "s1", configId: "model", value: "fast" } });
+  say(conn, { jsonrpc: "2.0", id: 8, method: "session/set_mode", params: { sessionId: "someone-elses", modeId: "auto" } });
+  for (let tries = 0; tries < 40 && (sent.length === 0 || !told().some((message) => message.error)); tries += 1) await settle();
+  assert.equal(asks, 0);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].params.configId, "model");
+  assert.equal(sent[0].params._meta, undefined);
+  assert.equal(told().find((message) => message.error).error.code, -32601);
+});
+
+test("a mode value that is not text is refused without asking", async () => {
+  let asks = 0;
+  const { say, conn, sent, told } = await withSession({ askMode: async () => { asks += 1; return true; } });
+  say(conn, { ...bypass(7), params: { sessionId: "s1", configId: "mode", value: { x: 1 } } });
+  for (let tries = 0; tries < 40 && !told().some((message) => message.error); tries += 1) await settle();
+  assert.equal(asks, 0);
+  assert.deepEqual(sent, []);
+});
+
+async function requestAs(origin, agents, decision) {
+  const grants = [];
+  const store = {
+    agents: async () => agents, addAgent: async (agent) => agent, markProven: async () => {},
+    grants: async () => decision.earlier ?? [], saveGrant: async (grant) => { grants.push(grant); }, deleteGrant: async () => {}, secret: async () => "s",
+  };
+  const g = createGateway({
+    store, dial: async () => ({ proven: true, send: async () => {}, onMessage: () => {}, onClose: () => {}, close: () => {} }),
+    askPerson: async () => decision, askPermission: async () => null, ownOrigin: OWN,
+  });
+  const received = [];
+  const listeners = [];
+  g.attach({ postMessage: (m) => received.push(m), onMessage: { addListener: (l) => listeners.push(l) }, onDisconnect: { addListener: () => {} } }, { origin, tabId: 1 });
+  listeners.forEach((listen) => listen({ id: 1, op: "request", args: [{}], activated: true }));
+  for (let tries = 0; tries < 40 && grants.length === 0; tries += 1) await settle();
+  return grants;
+}
+
+test("agents found on this computer never take the site's say over permissions, as the host's own do not", async () => {
+  const found = { key: "found", label: "Found", source: "local", peer: "sha256:f", url: "ws://127.0.0.1:9/acp" };
+  const loopback = { key: "loop", label: "Loop", source: "manual", peer: "sha256:l", url: "ws://localhost:9/acp" };
+  const hand = { key: "hand", label: "By hand", source: "manual", peer: "sha256:h", url: "wss://h/acp" };
+  const grants = await requestAs("https://p.example", [found, loopback, hand], { allow: ["found", "loop", "hand"], lifetime: "once", cwd: "/w", permissions: true });
+  assert.deepEqual(grants.map((grant) => [grant.agent, grant.permissions]), [["found", false], ["loop", false], ["hand", true]]);
+});
+
+test("a grant made again for another host key starts with no sessions or folders", async () => {
+  const local = { key: "local:claude", label: "Claude", source: "local", peer: "sha256:new", proven: true, local: true };
+  const earlier = [{ origin: "https://p.example", agent: "local:claude", peer: "sha256:old", sessions: ["s1"], folders: { s1: "/x" } }];
+  const grants = await requestAs("https://p.example", [local], { allow: ["local:claude"], lifetime: "once", earlier });
+  assert.deepEqual([grants[0].sessions, grants[0].folders, grants[0].peer], [[], {}, "sha256:new"]);
+  const same = await requestAs("https://p.example", [local], { allow: ["local:claude"], lifetime: "once", earlier: [{ ...earlier[0], peer: "sha256:new" }] });
+  assert.deepEqual([same[0].sessions, same[0].folders], [["s1"], { s1: "/x" }]);
+});
+
+test("a failed dial is not counted against an origin for ever", async () => {
+  const failing = pageWith({ dialFails: true });
+  const [one] = (await failing.ask(1, "agents", [])).result;
+  for (let count = 0; count < 12; count += 1) assert.equal((await failing.ask(10 + count, "connect", { id: one.id })).error.name, "NetworkError");
+});
+
+test("what the host says of itself is taken out of every page link, one the host places or not", async () => {
+  const hand = { key: "hand", label: "Hand", source: "manual", peer: "sha256:h", url: "wss://h/acp", proven: true };
+  const world = pageWith({ agents: [hand], grant: { agent: "hand", folder: undefined, cwd: "/w", peer: undefined } });
+  const conn = await world.open();
+  world.say(conn, newSession(2));
+  await settle();
+  world.reply({ jsonrpc: "2.0", id: 2, result: { sessionId: "s1", _meta: { "dev.boriken.canoa/profile": { items: ["secret-skill"] }, kept: 1 } } });
+  for (let tries = 0; tries < 40 && !world.received.some((message) => message.conn === conn); tries += 1) await settle();
+  const told = world.received.find((message) => message.conn === conn).msg;
+  assert.ok(!told.includes("secret-skill"));
+  assert.deepEqual(JSON.parse(told).result._meta, { kept: 1 });
 });

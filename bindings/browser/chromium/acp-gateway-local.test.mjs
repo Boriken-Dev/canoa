@@ -119,10 +119,11 @@ test("a session of a local agent is told to run in a folder the host makes, and 
   const [agent] = (await ask(1, "agents", [])).result;
   const opened = await ask(2, "connect", { id: agent.id });
   const conn = opened.result.conn;
-  listeners.forEach((listen) => listen({ conn, msg: JSON.stringify({ jsonrpc: "2.0", id: 5, method: "session/new", _meta: { "dev.boriken.canoa/site": { site: "evil.example" } }, params: { cwd: "/etc", mcpServers: [], _meta: { x: 1 } } }) }));
+  listeners.forEach((listen) => listen({ conn, msg: JSON.stringify({ jsonrpc: "2.0", id: 5, method: "session/new", _meta: { "dev.boriken.canoa/site": { site: "evil.example" } }, params: { cwd: "/etc", additionalDirectories: ["/mine"], mcpServers: [], _meta: { x: 1 } } }) }));
   for (let tries = 0; tries < 40 && sent.length === 0; tries += 1) await settle();
   const made = sent.find((message) => message.method === "session/new");
-  assert.deepEqual(made.params._meta, { "dev.boriken.canoa/site": { site: "canoa-extension" } });
+  assert.deepEqual(made.params._meta, { "dev.boriken.canoa/site": { site: "canoa-extension", own: true } });
   assert.equal(made._meta, undefined);
+  assert.deepEqual(made.params.additionalDirectories, ["/mine"], "Canoa's own chat adds its own directories");
   assert.equal(made.params.cwd, "/");
 });

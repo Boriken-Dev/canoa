@@ -12,6 +12,11 @@ const MAX_FOLDER = 1024;
 // Connections one origin may hold or be dialling at once: each dial is a native-host process and a proof, and a page costs the person
 // nothing to ask for them.
 const MAX_LINKS_PER_ORIGIN = 8;
+// The host's own words, which a page is told none of: an answer to initialize carries this connection's approval token under the
+// second, and a mode change the person allowed carries it back, so only this side can send one.
+const APPROVAL_META = "dev.boriken.canoa/approval";
+const OPEN_CATEGORIES = new Set(["model", "thought_level"]);
+const MAX_MODE_TEXT = 100;
 // Windows waiting to ask the person about one connection. Past this an agent is refused without asking: it has no way to make
 // one person read more than one at a time, and a request of its own making costs it nothing.
 const MAX_WAITING_PERMISSIONS = 8;
@@ -42,6 +47,15 @@ function siteOf(origin) {
     return hostname === "" ? undefined : hostname;
   } catch {
     return undefined;
+  }
+}
+
+/** An agent reached on a loopback address, which runs on this computer. */
+function loopbackAgent(agent) {
+  try {
+    return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(agent.url).hostname);
+  } catch {
+    return false;
   }
 }
 
@@ -80,11 +94,12 @@ export async function dialRecord(store, dial, agent, options) {
  * @param dial (agent) => a proven channel: { send(text), onMessage(fn), onClose(fn), close() }
  * @param askPerson (details) => { allow: agent keys, add: new agents, cwd, permissions, lifetime } or null, in the provider's window
  * @param askPermission (details) => an option id, or null
+ * @param askMode ({ origin, site, label, kind, option, value }) => true when the person allows that session's mode to change, in the provider's window
  * @param ownOrigin Canoa's own chat, the one origin whose sessions get the browser's tools. A page's never do: it could steer an agent
  *   into driving the browser.
  * @param offerTools ({ mux, peer, label }) => what gives a link's sessions those tools, from acp-tools.js
  */
-export function createGateway({ store, dial, askPerson, askPermission, ownOrigin, offerTools }) {
+export function createGateway({ store, dial, askPerson, askPermission, askMode = async () => false, ownOrigin, offerTools }) {
   const ports = new Set();
   const live = new Set();
   // One window per origin: a person's one click lasts a few seconds, and a page could otherwise open as many as it likes in them.
@@ -183,6 +198,8 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
         const earlier = (await store.grants(origin)).find((grant) => grant.agent === key);
         // The Canoa on this computer makes a page's folder itself, from the site; the person names none and the page cannot.
         const folder = agent.local === true && !own;
+        // Agents on this computer, the host's entries and those found on a loopback address alike, run as the person.
+        const onThisComputer = folder || (!own && (agent.source === "local" || loopbackAgent(agent)));
         const grant = {
           origin,
           agent: key,
@@ -190,13 +207,13 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
           lifetime: decision.lifetime === "always" ? "always" : "once",
           cwd: !folder && typeof decision.cwd === "string" ? decision.cwd : null,
           ...(folder ? { folder: "provider", peer: agent.peer } : {}),
-          // The chat is where a person answers, so it needs no separate say.
           // The chat is where a person answers, so it needs no separate say. Nobody else can answer for the agents on this computer,
           // which run as the person: a site cannot approve what they do, or put them in a mode that does not ask.
-          permissions: own || (decision.permissions === true && !folder),
+          permissions: own || (decision.permissions === true && !onThisComputer),
           mcpOrigins: origins(decision.mcpOrigins),
-          sessions: earlier?.sessions ?? [],
-          ...(folder ? { folders: earlier?.folders ?? {} } : {}),
+          // A grant made again for another key starts empty: its sessions were another computer's.
+          sessions: (folder && earlier?.peer !== agent.peer ? undefined : earlier?.sessions) ?? [],
+          ...(folder ? { folders: (earlier?.peer === agent.peer ? earlier.folders : undefined) ?? {} } : {}),
         };
         await store.saveGrant(grant);
         granted.push(await describe(origin, grant, agent));
@@ -215,34 +232,52 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       const site = placedByHost ? siteOf(origin) : grant.site;
       if (placedByHost && site === undefined) throw NOT_ALLOWED();
       const holding = [...live].filter((held) => held.grant.origin === origin).length + (dialing.get(origin) ?? 0);
-      if (holding >= MAX_LINKS_PER_ORIGIN) throw NOT_ALLOWED();
+      if (origin !== ownOrigin && holding >= MAX_LINKS_PER_ORIGIN) throw NOT_ALLOWED();
+      // Counted until the connection is in `live`, or it failed: a dial is not free.
       dialing.set(origin, (dialing.get(origin) ?? 0) + 1);
-      // Only where both hold: a page's connection has no streams at all, and an agent that names no link would read one as ACP.
-      const options = { link: origin === ownOrigin && offerTools !== undefined && agent.offers?.includes(OFFER) === true };
+      let counted = true;
+      const release = () => {
+        if (counted) dialing.set(origin, dialing.get(origin) - 1);
+        counted = false;
+      };
       let channel;
       try {
-        channel = await dialRecord(store, dial, agent, options);
+        return await connected();
+      } catch (error) {
+        try {
+          channel?.close();
+        } catch {
+          // Already over.
+        }
+        throw error;
       } finally {
-        dialing.set(origin, dialing.get(origin) - 1);
+        release();
       }
+
+      async function connected() {
+      // Only where both hold: a page's connection has no streams at all, and an agent that names no link would read one as ACP.
+      const options = { link: origin === ownOrigin && offerTools !== undefined && agent.offers?.includes(OFFER) === true };
+      channel = await dialRecord(store, dial, agent, options);
       if (channel.proven) await store.markProven(agent.key);
       const sessions = new Set(grant.sessions ?? []);
       const folders = new Map(placedByHost ? Object.entries(grant.folders ?? {}) : []);
       // Whatever the stored grant says, a site cannot approve for the agents on this computer.
-      const scope = new Scope({ ...grant, folder: placedByHost ? "provider" : undefined, permissions: placedByHost ? false : grant.permissions, sessions }, origin);
+      // Canoa's own pages are the one grant that may pass more than a page does in a session request.
+      const scope = new Scope({ ...grant, folder: placedByHost ? "provider" : undefined, own: origin === ownOrigin, permissions: placedByHost ? false : grant.permissions, sessions }, origin);
       const conn = entry.nextConn++;
       const link = {
-        conn, entry, channel, scope, grant, sessions, site, placedByHost, folders,
+        conn, entry, channel, scope, grant, sessions, site, placedByHost, folders, label: agent.label, categories: new Map(), approval: undefined,
         known: sessions.size, knownFolders: folders.size, waiting: 0, asking: Promise.resolve(), outgoing: Promise.resolve(),
       };
       if (channel.proven && channel.mux !== undefined) link.tools = offerTools({ mux: channel.mux, peer: agent.peer, label: agent.label });
       entry.links.set(conn, link);
       live.add(link);
+      release();
       channel.onMessage((message) => {
         if (!live.has(link)) return;
         link.tools?.fromAgent(message);
         const step = scope.fromAgent(message);
-        if (placedByHost && step.forward !== undefined) step.forward = learnFolder(link, step.forward);
+        if (origin !== ownOrigin && step.forward !== undefined) step.forward = scrub(link, step.forward);
         saveSessions(link);
         if (step.forward !== undefined) port.postMessage({ conn, msg: step.forward });
         if (step.reply !== undefined) channel.send(step.reply);
@@ -263,7 +298,15 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
         }
       });
       channel.onClose(() => finish(link, "agent"));
-      return { conn, agent: await describe(origin, grant, { ...agent, proven: channel.proven }) };
+      let told;
+      try {
+        told = await describe(origin, grant, { ...agent, proven: channel.proven });
+      } catch (error) {
+        finish(link, "failed", false);
+        throw error;
+      }
+      return { conn, agent: told };
+      }
     },
 
     async revoke({ origin }, { id } = {}) {
@@ -312,7 +355,9 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       return text;
     }
     if (!["session/new", "session/load", "session/resume"].includes(message?.method)) return text;
-    const params = { ...message.params, _meta: { [SITE_META]: { site: link.site } } };
+    // Canoa's own pages say so, which no page can: its sessions are the person's own, not a site's.
+    const own = link.entry.origin === ownOrigin;
+    const params = { ...message.params, _meta: { [SITE_META]: own ? { site: link.site, own: true } : { site: link.site } } };
     if (link.placedByHost && message.method !== "session/new") {
       const folder = link.folders.get(params.sessionId);
       if (typeof folder === "string") params.cwd = folder;
@@ -320,22 +365,31 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
     return JSON.stringify({ ...message, params });
   }
 
-  /** Keeps the folder the host made for a new session, and takes it out of what the page is told. */
-  function learnFolder(link, text) {
+  /**
+   * What the host says to a page's link passes through here: this side keeps what is for it (the folder of a new session, the
+   * connection's approval token, which options are of which category) and the page is told none of the host's own words.
+   */
+  function scrub(link, text) {
+    if (!text.includes("dev.boriken.") && !text.includes("configOptions")) return text;
     let message;
     try {
       message = JSON.parse(text);
     } catch {
       return text;
     }
+    for (const options of [message?.result?.configOptions, message?.params?.update?.configOptions]) {
+      for (const option of Array.isArray(options) ? options : []) {
+        if (typeof option?.id === "string" && typeof option.category === "string" && link.categories.size < 256) link.categories.set(option.id, option.category);
+      }
+    }
     const meta = message?.result?._meta;
     if (meta === null || typeof meta !== "object") return text;
-    const placed = meta[SITE_META];
-    // What the host reports about itself (its folder, its profile) is for this side; the page is told none of it.
     const ours = Object.keys(meta).filter((key) => key.startsWith("dev.boriken."));
     if (ours.length === 0) return text;
+    if (typeof meta[APPROVAL_META] === "string") link.approval = meta[APPROVAL_META];
+    const placed = meta[SITE_META];
     const session = message.result.sessionId;
-    if (typeof session === "string" && typeof placed?.folder === "string" && placed.folder.length <= MAX_FOLDER) {
+    if (link.placedByHost && typeof session === "string" && typeof placed?.folder === "string" && placed.folder.length <= MAX_FOLDER) {
       link.folders.delete(session);
       link.folders.set(session, placed.folder);
       while (link.folders.size > MAX_FOLDERS) link.folders.delete(link.folders.keys().next().value);
@@ -343,6 +397,56 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
     for (const key of ours) delete meta[key];
     if (Object.keys(meta).length === 0) delete message.result._meta;
     return JSON.stringify(message);
+  }
+
+  /** A mode change by a page on a link the host places sessions on, or an option that could be one; null for any other message. */
+  function modeChange(link, text) {
+    let message;
+    try {
+      message = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    const params = message?.params;
+    if (params === null || typeof params !== "object" || typeof params.sessionId !== "string" || !link.sessions.has(params.sessionId)) return null;
+    if (message.method === "session/set_mode") return { id: message.id, method: message.method, params, kind: "mode", option: undefined, value: params.modeId };
+    if (message.method !== "session/set_config_option") return null;
+    // An option the agent never described is taken to be a mode's.
+    if (OPEN_CATEGORIES.has(link.categories.get(params.configId))) return null;
+    return { id: message.id, method: message.method, params, kind: "option", option: params.configId, value: params.value };
+  }
+
+  /**
+   * The person decides a page's mode change, in the provider's window and not the page: Allow sends the change itself, marked with
+   * the connection's token (which the page was never told and cannot send), for that session only and not remembered; anything
+   * else, and no answer, is a refusal.
+   */
+  function askModeChange(link, change) {
+    const refuse = () => link.entry.port.postMessage({
+      conn: link.conn,
+      msg: JSON.stringify({ jsonrpc: "2.0", id: change.id ?? null, error: { code: -32601, message: "the person did not allow that" } }),
+    });
+    const text = change.value;
+    if (change.id === undefined || change.id === null) return;
+    if (typeof text !== "string" || text.length === 0 || text.length > MAX_MODE_TEXT || link.approval === undefined || link.waiting >= MAX_WAITING_PERMISSIONS) {
+      refuse();
+      return;
+    }
+    link.waiting += 1;
+    link.asking = link.asking
+      .then(() => (live.has(link) ? askMode({ origin: link.grant.origin, site: link.site, label: link.label, kind: change.kind, option: typeof change.option === "string" ? change.option : undefined, value: text }) : false))
+      .catch(() => false)
+      .then((allowed) => {
+        link.waiting -= 1;
+        if (!live.has(link)) return;
+        if (allowed !== true) {
+          refuse();
+          return;
+        }
+        const { sessionId, modeId, configId, value } = change.params;
+        const params = change.method === "session/set_mode" ? { sessionId, modeId } : { sessionId, configId, value };
+        forward(link, JSON.stringify({ jsonrpc: "2.0", id: change.id, method: change.method, params: { ...params, _meta: { [APPROVAL_META]: link.approval } } }));
+      });
   }
 
   function fromPage(entry, message) {
@@ -353,6 +457,11 @@ export function createGateway({ store, dial, askPerson, askPermission, ownOrigin
       if (message.op === "close") {
         finish(link, "page", false);
       } else if (typeof message.msg === "string") {
+        const change = link.placedByHost ? modeChange(link, message.msg) : null;
+        if (change !== null) {
+          askModeChange(link, change);
+          return;
+        }
         const step = link.scope.fromPage(message.msg);
         if (step.forward !== undefined) forward(link, link.site === undefined ? step.forward : inSite(link, step.forward));
         if (step.reply !== undefined) entry.port.postMessage({ conn: link.conn, msg: step.reply });

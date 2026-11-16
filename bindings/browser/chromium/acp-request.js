@@ -166,12 +166,15 @@ function onThisComputer(origin) {
   } catch {
     return false;
   }
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || !host.includes(".") ) return true;
-  if (host.startsWith("[")) return host === "[::1]" || /^\[(fc|fd|fe80)/.test(host);
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || !host.includes(".")) return true;
+  if (host.startsWith("[")) {
+    // An IPv4 address in IPv6 clothes (`::ffff:127.0.0.1`, which the URL parser writes in hex) is the IPv4 address.
+    return host === "[::1]" || host === "[::]" || /^\[(fc|fd|fe80)/.test(host) || /^\[::ffff:/.test(host);
+  }
   const parts = host.split(".").map(Number);
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
   const [a, b] = parts;
-  return a === 10 || a === 127 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+  return a === 10 || a === 127 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
 }
 
 /** What the window tells of Canoa on this computer, in the person's words; the page has no say in any of it. */
@@ -305,7 +308,7 @@ function grantView(details) {
     element("label", { textContent: "For how long" }), lifetime,
     ...(details.own ? [] : [element("label", { className: "pick" }, approve,
       element("span", { className: "warn", textContent: "This site can approve what the agent does for me" })),
-      element("p", { textContent: "That does not apply to Canoa on this computer: its agents ask you themselves, and a site cannot answer for them." })]),
+      element("p", { textContent: "That does not apply to agents on this computer, Canoa's among them: they ask you themselves, and a site cannot answer for them." })]),
     allow, refuse);
   holdClicks();
 }
@@ -330,6 +333,30 @@ function permissionView(details) {
     element("p", {}, element("strong", { textContent: details.label }), " wants to use a tool, in a conversation started by ",
       element("span", { className: "site", textContent: details.origin }), "."),
     element("p", { textContent: title }), ...buttons, cancel);
+  holdClicks();
+}
+
+/** A mode that stops the agent asking, by the names agents give theirs. */
+const NO_ASKING = /bypass|danger|full[-_ ]?access|yolo|never|auto/i;
+
+/**
+ * A page asks to change the mode of a session on an agent that runs on this computer. Only the person decides, here, for this
+ * session alone: nothing is remembered, and a page cannot answer.
+ */
+function modeView(details) {
+  const site = clean(details.site, 120);
+  const mode = clean(details.value, 100);
+  const label = clean(details.label, 80);
+  const allow = element("button", { type: "button", textContent: "Allow for this session" });
+  const deny = element("button", { type: "button", className: "quiet", textContent: "Deny" });
+  allow.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: true }));
+  deny.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: null }));
+  answerKeys(null, deny);
+  const what = NO_ASKING.test(mode)
+    ? [element("p", {}, element("span", { className: "site", textContent: site }), ` wants ${label} to run commands and change files without asking you.`),
+      element("p", { className: "warn", textContent: `The mode is "${mode}". It runs on this computer as you, with your files and tools.` })]
+    : [element("p", {}, element("span", { className: "site", textContent: site }), ` wants to change how ${label} works in this conversation to "${mode}".`)];
+  main.replaceChildren(...what, element("p", { textContent: "Only this conversation. It asks again next time." }), allow, deny);
   holdClicks();
 }
 
@@ -439,6 +466,7 @@ if (params.has("manage")) {
   const details = await send({ acp: "details", ask: askId });
   if (details === null) main.textContent = "This request has ended.";
   else if (details.kind === "permission") permissionView(details);
+  else if (details.kind === "mode") modeView(details);
   else if (details.kind === "browser") browserView(details);
   else grantView(details);
 }
