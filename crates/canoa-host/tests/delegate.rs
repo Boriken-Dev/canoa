@@ -849,6 +849,95 @@ fn a_client_that_opted_in_is_told_each_state_of_a_task_and_what_its_agent_said_a
     host.stop();
 }
 
+/// The lines of the host's usage log, in the order they were written.
+fn usage_rows(home: &Path) -> Vec<Value> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(home.join("usage"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .collect();
+    files.sort();
+    files
+        .iter()
+        .flat_map(|file| {
+            std::fs::read_to_string(file)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|line| serde_json::from_str(line).ok())
+                .collect::<Vec<Value>>()
+        })
+        .collect()
+}
+
+fn usage_of(events: &[Value], task: &str) -> Option<Value> {
+    events
+        .iter()
+        .filter(|event| event["taskId"] == task)
+        .find_map(|event| event.pointer("/event/task/metadata/usage").cloned())
+}
+
+#[test]
+fn each_child_is_recorded_under_its_parent_once_and_its_figures_reach_the_client() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let config = format!(
+        "{}{}{}",
+        agent("parent", "default", ", \"--usage\""),
+        agent("first", "default", ", \"--usage\""),
+        agent("second", "default", ", \"--usage\"")
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+
+    convo.prompt(&session, "spend 1000 100");
+    let a = convo.delegate(&session, "first", "spend 120 30");
+    let b = convo.delegate(&session, "second", "spend 50 10 7");
+    for task in [&a, &b] {
+        assert_eq!(convo.status(&session, task, 20_000)["state"], "completed");
+    }
+    until("both children's figures arrived", || {
+        convo.status(&session, &a, 0);
+        usage_of(&convo.events, &a).is_some() && usage_of(&convo.events, &b).is_some()
+    });
+    let first = usage_of(&convo.events, &a).expect("figures");
+    assert_eq!(first, json!({"input": 120, "output": 30}), "{first}");
+    // A counter the agent never moved is absent, never 0.
+    let second = usage_of(&convo.events, &b).expect("figures");
+    assert_eq!(
+        second,
+        json!({"input": 50, "output": 10, "cacheRead": 7}),
+        "{second}"
+    );
+
+    let rows = usage_rows(&host.scratch.0.join("home"));
+    let of = |account: &str| -> Vec<&Value> {
+        rows.iter()
+            .filter(|row| row["account"] == account)
+            .collect()
+    };
+    let [own] = of("parent")[..] else {
+        panic!("one line for the parent: {rows:?}");
+    };
+    assert!(own.get("parent_session_id").is_none(), "{own}");
+    assert_eq!(own["session_id"], session.as_str());
+    for (account, input) in [("first", 120), ("second", 50)] {
+        let [row] = of(account)[..] else {
+            panic!("one line for {account}: {rows:?}");
+        };
+        assert_eq!(row["parent_session_id"], session.as_str(), "{row}");
+        assert_eq!(row["input"], input, "{row}");
+    }
+    // Every figure is in one line: the whole is the parent's and its children's, each once.
+    let total: u64 = rows.iter().filter_map(|row| row["input"].as_u64()).sum();
+    assert_eq!(total, 1170);
+    drop(link);
+    host.stop();
+}
+
 #[test]
 fn history_and_stop_reach_only_the_tasks_of_the_session_and_connection_that_ask() {
     let dir = Scratch::new();

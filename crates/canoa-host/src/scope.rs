@@ -49,6 +49,8 @@ pub(crate) struct Scope {
     documents: Option<PathBuf>,
     /// The host's usage log and the harness this entry runs, which its connections record the agent's spend in.
     log: Option<(Arc<UsageLog>, String)>,
+    /// The session a delegated task's connection was started from.
+    parent: Option<String>,
 }
 
 /// What becomes of one message from the client.
@@ -73,6 +75,21 @@ impl Scope {
             usage: Arc::new(Inference::default()),
             documents: None,
             log: None,
+            parent: None,
+        }
+    }
+
+    /// The host's id for the account this scope's agent runs on, when it names one.
+    pub(crate) fn account_id(&self) -> Option<&str> {
+        self.account.as_deref()
+    }
+
+    /// This scope for a task started from the session `parent`: the spend its connections record names it.
+    #[must_use]
+    pub(crate) fn child_of(&self, parent: Option<String>) -> Self {
+        Self {
+            parent,
+            ..self.clone()
         }
     }
 
@@ -115,7 +132,9 @@ impl Scope {
     pub(crate) fn splice(&self) -> Splice {
         let splice = Splice::new(Arc::clone(&self.usage), self.account.clone());
         match &self.log {
-            Some((log, harness)) => splice.recording(Arc::clone(log), harness.clone()),
+            Some((log, harness)) => splice
+                .recording(Arc::clone(log), harness.clone())
+                .child_of(self.parent.clone()),
             None => splice,
         }
     }

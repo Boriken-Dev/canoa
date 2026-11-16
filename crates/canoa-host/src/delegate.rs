@@ -106,6 +106,8 @@ pub(crate) struct ChildContext {
     pub(crate) principal: Principal,
     pub(crate) roots: Vec<PathBuf>,
     pub(crate) depth: usize,
+    /// The session of the agent that started the task, which what the task spends is recorded under.
+    pub(crate) parent_session: Option<String>,
 }
 
 /// What the delegation needs of the host it runs in.
@@ -117,6 +119,12 @@ pub(crate) trait Host: Send + Sync {
     /// What kind of agent `source` is: equal for entries that run the same provider or program, so that a mode id means the same
     /// in both. `None` when it is not known.
     fn kind(&self, source: &str) -> Option<String>;
+    /// What the session `session` of the agent `source` has spent, as the host's usage log keeps it: `input`, `output`, `cache_read`, `cache_write` and
+    /// `cost_micro_usd`, each present only when the agent reported it. `None` when it reported nothing, or no log is kept.
+    fn usage_of(&self, _source: &str, _session: &str) -> Option<Value> {
+        None
+    }
+
     /// A connection to `source` for a task.
     fn open(&self, source: &str, context: ChildContext) -> Result<Link, LocalError>;
     /// This host's own identity, set to prove itself to `peer` and to accept no other key from it.

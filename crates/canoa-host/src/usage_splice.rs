@@ -400,6 +400,13 @@ impl Splice {
         self
     }
 
+    /// This connection's agent is a task of the session `parent`: what it spends is recorded as that session's child's.
+    #[must_use]
+    pub(crate) fn child_of(mut self, parent: Option<String>) -> Self {
+        self.tap = self.tap.take().map(|tap| tap.child_of(parent));
+        self
+    }
+
     /// This connection's agent is the process `pid`, which is where its quota is read from, if the entry reads one.
     #[must_use]
     pub(crate) fn agent(mut self, pid: u32) -> Self {

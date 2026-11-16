@@ -867,6 +867,7 @@ struct DelegationHost {
     served: Vec<Arc<Served>>,
     agents: Vec<delegate::Source>,
     identity: Identity,
+    usage: Option<Arc<crate::usage_log::UsageLog>>,
 }
 
 impl delegate::Host for DelegationHost {
@@ -914,6 +915,16 @@ impl delegate::Host for DelegationHost {
             } => Some(format!("program:{}", program.to_string_lossy())),
             _ => None,
         }
+    }
+
+    fn usage_of(&self, source: &str, session: &str) -> Option<serde_json::Value> {
+        let served = self.served.iter().find(|served| served.name == source)?;
+        let Run::Agent { scope, .. } = &served.run else {
+            return None;
+        };
+        self.usage
+            .as_ref()?
+            .session_usage(scope.account_id()?, session)
     }
 
     fn prover(&self, peer: &PeerId) -> Result<Proof, String> {
@@ -1713,7 +1724,7 @@ impl Serving {
                 &serving.shared.control,
             ))));
         serving.door = serving.open_door(config, options);
-        serving.attach_delegation(&config.remote_agents, dialer);
+        serving.attach_delegation(&config.remote_agents, dialer, usage_log.clone());
 
         if let Some(sockets) = &options.portal {
             let peer = serving.shared.method.peer_id().to_string();
@@ -1806,7 +1817,12 @@ impl Serving {
     }
 
     /// Gives the delegation the agents this host serves and the way to open one for a task.
-    fn attach_delegation(&self, remote: &[crate::config::RemoteAgent], identity: Identity) {
+    fn attach_delegation(
+        &self,
+        remote: &[crate::config::RemoteAgent],
+        identity: Identity,
+        usage: Option<Arc<crate::usage_log::UsageLog>>,
+    ) {
         let Some(delegation) = &self.shared.delegation else {
             return;
         };
@@ -1846,6 +1862,7 @@ impl Serving {
             served,
             agents,
             identity,
+            usage,
         }));
     }
 
@@ -2266,6 +2283,15 @@ fn give_agent<C: Channel>(
             };
             return control::serve(&shared.control, &caller, channel);
         }
+    };
+    // A task's connection records what its agent spends as the child of the session that started it.
+    let child_scope;
+    let scope = match context.and_then(|context| context.parent_session.clone()) {
+        Some(parent) => {
+            child_scope = scope.child_of(Some(parent));
+            &child_scope
+        }
+        None => scope,
     };
     // What lets this connection's sessions hand tasks to other sources: for a task's own connection, what the host bounded it by.
     let conn = shared
@@ -2892,6 +2918,7 @@ mod tests {
             principal: delegate::Principal::Owner,
             roots: Vec::new(),
             depth: 1,
+            parent_session: None,
         };
         assert!(reaches_control(control::NAME, None));
         assert!(!reaches_control(control::NAME, Some(&task)));

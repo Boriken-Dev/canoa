@@ -395,6 +395,45 @@ impl UsageLog {
         self.replace(LIMITS_FILE, &bytes);
     }
 
+    /// What one session of `account` has spent so far, over every model it ran, as the running totals the log keeps. A counter
+    /// the agent never moved is absent; `None` when the session spent nothing the agent reported. A session's own figures only:
+    /// the sessions it started are counted in theirs.
+    pub(crate) fn session_usage(&self, account: &str, session: &str) -> Option<Value> {
+        let state = lock(&self.state);
+        let mut sum = Sum::default();
+        for ((who, id, _), (totals, _)) in &state.seen {
+            if id != session || who != account {
+                continue;
+            }
+            let counter = |total: u64| (total > 0).then_some(total);
+            sum.add(&Row {
+                time: 0,
+                account: String::new(),
+                harness: String::new(),
+                model: None,
+                session_id: id.clone(),
+                parent_session_id: None,
+                input: counter(totals.input),
+                output: counter(totals.output),
+                cache_read: counter(totals.cache_read),
+                cache_write: counter(totals.cache_write),
+                cost_micro_usd: totals.cost_micro_usd.filter(|cost| *cost > 0),
+            });
+        }
+        let object = sum.json(None);
+        // A sum with no counter is a session that reported none.
+        [
+            "input",
+            "output",
+            "cache_read",
+            "cache_write",
+            "cost_micro_usd",
+        ]
+        .iter()
+        .any(|name| object.get(*name).is_some())
+        .then_some(object)
+    }
+
     /// `usage/limits`: the allowances last reported for each account.
     pub(crate) fn limits(&self) -> Value {
         let state = lock(&self.state);

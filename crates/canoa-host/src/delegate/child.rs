@@ -240,6 +240,7 @@ fn run(job: Job) {
         link.close();
     }
     settle(&session, &child, outcome);
+    tell_usage(&engine, &session, &child);
     if let Some(key) = session.peer().filter(|_| session.is_remote()) {
         let state = session
             .store
@@ -297,6 +298,47 @@ fn chosen(params: &Value, answer: Option<Value>) -> Value {
         Some(option) => json!({"outcome": {"outcome": "selected", "optionId": option}}),
         None => json!({"outcome": {"outcome": "cancelled"}}),
     }
+}
+
+/// Tells the client what the task's own session spent, in the task's metadata, as the usage log has it. Its own figures only:
+/// a task that started others has theirs under them, so a sum over the lineage counts each once. Nothing is told for a task whose
+/// agent reported none, which the client reads as not reported.
+fn tell_usage(engine: &Engine, session: &Session, child: &Child) {
+    let (Some(conn), Some(parent), Some(own), Some(host)) = (
+        session.conn(),
+        session.session_id(),
+        lock(&child.session).clone(),
+        engine.host(),
+    ) else {
+        return;
+    };
+    let Some(spent) = host.usage_of(&child.source, &own) else {
+        return;
+    };
+    let Some(mut task) = session
+        .store
+        .snapshot(&child.task)
+        .and_then(|task| serde_json::to_value(task).ok())
+    else {
+        return;
+    };
+    let mut usage = serde_json::Map::new();
+    for (from, to) in [
+        ("input", "input"),
+        ("output", "output"),
+        ("cache_read", "cacheRead"),
+        ("cache_write", "cacheWrite"),
+        ("cost_micro_usd", "costMicroUsd"),
+    ] {
+        if let Some(value) = spent.get(from) {
+            usage.insert(to.to_owned(), value.clone());
+        }
+    }
+    task["metadata"]["usage"] = Value::Object(usage);
+    conn.notify(
+        json!({"sessionId": parent, "taskId": child.task, "event": {"task": task}}),
+        false,
+    );
 }
 
 fn note(text: &str) -> Message {
@@ -366,6 +408,7 @@ fn drive(
         principal: conn.principal().clone(),
         roots: conn.roots().to_vec(),
         depth: conn.depth() + 1,
+        parent_session: session.session_id(),
     };
     let link = match host.open(&child.source, context) {
         Ok(link) => Arc::new(link),

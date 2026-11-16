@@ -212,6 +212,8 @@ struct UsageState {
     revision: u64,
     used: Option<u64>,
     exhausted: bool,
+    /// What `spend INPUT OUTPUT` prompts have added up to: input, output and cache read.
+    spent: (u64, u64, u64),
 }
 
 const USAGE_CAPABILITY: &str = "dev.boriken.coqui.acp/usage";
@@ -854,6 +856,33 @@ impl Shared {
                     "params": {"sessionId": session, "report": usage.report()}}));
             }
             self.say(session, &format!("quota {used}"));
+            return "end_turn";
+        }
+        // `spend INPUT OUTPUT [CACHE_READ]`: adds to the running totals of the session's spend and reports them with the answer
+        // whether or not the client asked, as an agent that always reports does.
+        if let Some(usage) = &self.usage
+            && let Some(counts) = text.strip_prefix("spend ")
+        {
+            let counts: Vec<u64> = counts
+                .split_whitespace()
+                .filter_map(|n| n.parse().ok())
+                .collect();
+            let report = {
+                let mut state = lock(&usage.state);
+                state.spent.0 += counts.first().copied().unwrap_or(0);
+                state.spent.1 += counts.get(1).copied().unwrap_or(0);
+                state.spent.2 += counts.get(2).copied().unwrap_or(0);
+                state.revision += 1;
+                let (input, output, cache_read) = state.spent;
+                drop(state);
+                let mut report = usage.report();
+                report["spend"] = json!({"session_id": session, "input": input, "output": output,
+                    "cache_read": cache_read, "cache_write": 0});
+                report
+            };
+            self.send(json!({"method": "_coqui_acp/usage_update",
+                "params": {"sessionId": session, "report": report}}));
+            self.say(session, "spent");
             return "end_turn";
         }
         if let Some(said) = text.strip_prefix("refuse ") {

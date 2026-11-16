@@ -38,6 +38,8 @@ pub(crate) struct Tap {
     log: Arc<UsageLog>,
     account: String,
     harness: String,
+    /// The session this connection's sessions were started from, when the connection is a delegated task's.
+    parent: Option<String>,
     open: Mutex<Open>,
 }
 
@@ -47,8 +49,15 @@ impl Tap {
             log,
             account,
             harness,
+            parent: None,
             open: Mutex::new(Open::default()),
         }
+    }
+
+    /// This connection's spend recorded as that of sessions started from `parent`.
+    pub(crate) fn child_of(mut self, parent: Option<String>) -> Self {
+        self.parent = parent;
+        self
     }
 
     /// Reads a message from the client: which session a prompt is for, which model a session was given.
@@ -212,7 +221,7 @@ impl Tap {
                 account: &self.account,
                 harness: &self.harness,
                 session,
-                parent: None,
+                parent: self.parent.as_deref(),
                 model: model.as_deref(),
             },
             spend,

@@ -265,3 +265,62 @@ fn the_latest_allowances_are_kept_for_each_account_and_survive_a_restart() {
     assert!(lines(&dir, "2026-11.jsonl").is_empty());
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_parent_and_its_two_children_sum_once_and_each_child_names_its_parent() {
+    let dir = folder("children");
+    let log = UsageLog::open(dir.clone(), 400, NOW);
+    let child = |session| Turn {
+        parent: Some("parent"),
+        ..turn("helper", session)
+    };
+    log.record(
+        &turn("work", "parent"),
+        &spend("parent", 1000, 100, None),
+        NOW,
+    );
+    log.record(&child("c1"), &spend("c1", 120, 30, None), NOW + 1);
+    log.record(&child("c2"), &spend("c2", 50, 10, None), NOW + 2);
+    // A child's report seen again, as a reconnect would show it, adds nothing.
+    log.record(&child("c1"), &spend("c1", 120, 30, None), NOW + 3);
+
+    let rows = lines(&dir, "2026-11.jsonl");
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    assert!(rows[0].get("parent_session_id").is_none());
+    assert_eq!(rows[1]["parent_session_id"], "parent");
+    assert_eq!(rows[2]["parent_session_id"], "parent");
+    let summary = log.summary(&json!({"from": NOW - 10})).expect("a summary");
+    assert_eq!(summary["total"]["input"], 1170);
+    assert_eq!(summary["total"]["output"], 140);
+    assert_eq!(summary["total"]["sessions"], 3);
+}
+
+#[test]
+fn a_sessions_own_figures_leave_out_the_ones_it_started_and_absent_counters_stay_absent() {
+    let dir = folder("own");
+    let log = UsageLog::open(dir, 400, NOW);
+    log.record(
+        &turn("work", "parent"),
+        &spend("parent", 1000, 100, None),
+        NOW,
+    );
+    log.record(
+        &Turn {
+            parent: Some("parent"),
+            ..turn("helper", "child")
+        },
+        &spend("child", 7, 0, None),
+        NOW + 1,
+    );
+    assert_eq!(
+        log.session_usage("work", "parent"),
+        Some(json!({"records": 1, "sessions": 1, "input": 1000, "output": 100}))
+    );
+    assert_eq!(
+        log.session_usage("helper", "child"),
+        Some(json!({"records": 1, "sessions": 1, "input": 7}))
+    );
+    // Another account's session of the same id, and a session that reported nothing, have no figures.
+    assert_eq!(log.session_usage("work", "child"), None);
+    assert_eq!(log.session_usage("work", "none"), None);
+}
