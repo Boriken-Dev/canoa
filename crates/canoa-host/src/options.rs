@@ -15,7 +15,7 @@ use std::sync::mpsc;
 
 use coqui_acp_api::{
     AccountKeeper as _, AcpHarness, CacheLifetime, ModelInfo, ModelListing, ModelsRequest,
-    ProcessSpawner as _,
+    ProcessSpawner as _, UnknownKind,
 };
 use coqui_acp_harness::LocalSpawner;
 use serde_json::{Map, Value, json};
@@ -40,6 +40,11 @@ pub struct Choices {
     pub known: bool,
     /// Why it could not list them.
     pub unknown_because: Option<String>,
+    /// What kind of reason that is, when the provider could not be started: `not_installed` or `failed`; `None` for a source
+    /// that lists its models only in its session.
+    pub unknown_kind: Option<&'static str>,
+    /// Whether the provider listed its models and says nobody is signed in on the machine's own login.
+    pub signed_out: bool,
     /// The models in the provider's order, each with its own efforts.
     pub models: Vec<ModelInfo>,
     /// The program the source runs, as the provider names it.
@@ -58,6 +63,8 @@ impl Choices {
         Self {
             known: false,
             unknown_because: Some(why.into()),
+            unknown_kind: None,
+            signed_out: false,
             models: Vec::new(),
             program: None,
             program_version: None,
@@ -66,7 +73,16 @@ impl Choices {
         }
     }
 
-    /// The choices as one JSON object: `known`, `unknown_because` when not known, `program`, `program_version`,
+    /// A source that could not be asked at all: `failed`, with the reason.
+    fn failed(why: impl Into<String>) -> Self {
+        Self {
+            unknown_kind: Some("failed"),
+            ..Self::unknown(why)
+        }
+    }
+
+    /// The choices as one JSON object: `known`, `unknown_because` and `unknown_kind` (`not_installed` or `failed`) when
+    /// not known, `signed_out` when true, `program`, `program_version`,
     /// `cache_lifetime` (the provider's sentence on what it does with the prompt-cache lifetime) and
     /// `models`, each `{id, name?, description?, resolved?, version?, efforts, default_effort?, is_default?}`.
     #[must_use]
@@ -83,6 +99,12 @@ impl Choices {
         put("program_version", &self.program_version);
         put("cache_lifetime", &self.cache_lifetime);
         put("cache_lifetime_setting", &self.configured_cache_lifetime);
+        if let Some(kind) = self.unknown_kind {
+            out.insert("unknown_kind".into(), json!(kind));
+        }
+        if self.signed_out {
+            out.insert("signed_out".into(), json!(true));
+        }
         out.insert(
             "models".into(),
             Value::Array(self.models.iter().map(model_json).collect()),
@@ -132,7 +154,7 @@ pub fn preset(harness: Harness, executable: Option<&OsStr>) -> Choices {
     }
     let registry = match kind::registry(None) {
         Ok(registry) => Arc::new(registry),
-        Err(error) => return Choices::unknown(error.to_string()),
+        Err(error) => return Choices::failed(error.to_string()),
     };
     match kind::Harness::new(
         &registry,
@@ -145,7 +167,7 @@ pub fn preset(harness: Harness, executable: Option<&OsStr>) -> Choices {
             .connection(None, None, CacheLifetime::Default)
             .harness
             .as_ref()),
-        Err(error) => Choices::unknown(error.to_string()),
+        Err(error) => Choices::failed(error.to_string()),
     }
 }
 
@@ -172,7 +194,7 @@ pub fn entry(config: &Config, name: &str) -> Option<Choices> {
             );
             let registry = match kind::registry(origin.as_ref()) {
                 Ok(registry) => Arc::new(registry),
-                Err(error) => return Some(Choices::unknown(error.to_string())),
+                Err(error) => return Some(Choices::failed(error.to_string())),
             };
             match kind::Harness::new(&registry, harness, &configured, false, Vec::new()) {
                 Ok(built) => {
@@ -185,7 +207,7 @@ pub fn entry(config: &Config, name: &str) -> Option<Choices> {
                         .map(|lifetime| cache_lifetime_name(lifetime).to_owned());
                     choices
                 }
-                Err(error) => Choices::unknown(error.to_string()),
+                Err(error) => Choices::failed(error.to_string()),
             }
         }
         EntryKind::Agent { .. } | EntryKind::Provider { .. } | EntryKind::Tool { .. } => {
@@ -202,12 +224,17 @@ fn ask(harness: &dyn AcpHarness) -> Choices {
             LocalSpawner::new().into_object(),
             NoAccounts.into_object(),
         )
-        .unwrap_or_else(|error| ModelListing::unknown(error.message()));
+        .unwrap_or_else(|error| ModelListing::unavailable(UnknownKind::Failed, error.message()));
     let program = harness.program().ok().flatten();
     let program_version = program.as_deref().and_then(version_of);
     Choices {
         known: listing.known,
         unknown_because: listing.unknown_because,
+        unknown_kind: listing.unknown_kind.map(|kind| match kind {
+            UnknownKind::NotInstalled => "not_installed",
+            _ => "failed",
+        }),
+        signed_out: listing.signed_out,
         models: listing.models,
         program,
         program_version,

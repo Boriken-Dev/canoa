@@ -8,6 +8,8 @@
 //! number its login's access token ends with, never a credential.
 //!
 //! `STANDIN_VERSION` is the version Claude Code's `initialize` and its first message report, and the prompt `die` ends the process at once.
+//! With `STANDIN_SIGNED_OUT` set, Claude Code's `initialize` names no account's token or key and Codex's `account/read` answers that nobody is
+//! signed in; unset, Claude Code names no account and Codex has one.
 //!
 //! Each prompt asks one permission, a file write for Claude Code and a command for Codex, then answers `Done: <prompt>`
 //! when it was allowed, writing `standin.txt` in its directory, or `Refused: <prompt>`. When `STANDIN_RECORD` names a file,
@@ -25,6 +27,11 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
+
+/// Whether the stand-in plays a program nobody is signed in to: `STANDIN_SIGNED_OUT` is set.
+fn signed_out() -> bool {
+    std::env::var_os("STANDIN_SIGNED_OUT").is_some()
+}
 
 /// The version Claude Code reports: `STANDIN_VERSION` when set, else one coqui-acp's translator was tested with.
 fn version() -> String {
@@ -201,6 +208,7 @@ fn claude(args: &[String]) {
                 record(&json!({"control": subtype, "request": message["request"]}));
                 let response = if subtype == "initialize" {
                     json!({"claude_code_version": version(),
+                        "account": signed_out().then(|| json!({"tokenSource": "none", "apiProvider": "firstParty"})),
                         "commands": [{"name": "standin", "description": "A stand-in's command", "argumentHint": ""}],
                         "models": [{"value": "standin-small", "resolvedModel": "claude-standin-1-2", "displayName": "Small",
                             "description": "A stand-in model", "supportsEffort": true,
@@ -360,6 +368,13 @@ fn codex(args: &[String]) {
                         );
                         waiting = Some((request, text));
                     }
+                    "account/read" if signed_out() => {
+                        answer(&id, json!({"account": null, "requiresOpenaiAuth": true}));
+                    }
+                    "account/read" => answer(
+                        &id,
+                        json!({"account": {"type": "chatgpt", "email": "stand-in@example.invalid"}, "requiresOpenaiAuth": true}),
+                    ),
                     "turn/interrupt" => answer(&id, json!({})),
                     _ => answer(&id, json!({})),
                 }

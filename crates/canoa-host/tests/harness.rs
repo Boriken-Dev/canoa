@@ -879,12 +879,18 @@ fn an_entrys_setting_sources_reach_claude_code_and_a_bad_one_is_refused() {
 /// What `canoa options` prints for a built-in harness: the provider's models with each one's efforts, asked of the
 /// command line with no session and no turn.
 fn options_of(args: &[&str], scratch: &Scratch) -> Value {
+    options_with(args, scratch, &[])
+}
+
+/// [`options_of`] with more variables in the environment of `canoa options`, which its stand-in program inherits.
+fn options_with(args: &[&str], scratch: &Scratch, more: &[(&str, &str)]) -> Value {
     let (record, env) = env_of(scratch);
     let output = std::process::Command::new(host_binary())
         .arg("options")
         .args(args)
         .args(["--format", "json"])
         .envs(env)
+        .envs(more.iter().copied())
         .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
         .output()
         .expect("canoa runs");
@@ -922,6 +928,42 @@ fn options_lists_claudes_models_with_versions_and_efforts_and_no_turn() {
     assert_eq!(model["resolved"], "claude-standin-1-2");
     assert_eq!(model["version"], "Standin 1.2");
     assert_eq!(model["efforts"], json!(["low", "high"]));
+}
+
+/// A program that is not there is `not_installed` by kind, with the reason kept; one that is there lists, signed in or not,
+/// and says when nobody is.
+#[test]
+fn options_says_why_a_source_cannot_list_and_whether_anyone_is_signed_in() {
+    let scratch = Scratch::new();
+    for harness in ["claude", "codex"] {
+        let missing = scratch.0.join(format!("no-such-{harness}"));
+        let answer = options_of(
+            &[harness, "--executable", &missing.to_string_lossy()],
+            &scratch,
+        );
+        assert_eq!(answer["known"], false, "{answer}");
+        assert_eq!(answer["unknown_kind"], "not_installed", "{answer}");
+        assert!(answer["unknown_because"].is_string(), "{answer}");
+        assert!(answer.get("signed_out").is_none(), "{answer}");
+
+        let program = standin(&scratch, harness);
+        let args = [harness, "--executable", &program.to_string_lossy()];
+        let signed_in = options_of(&args, &scratch);
+        assert_eq!(signed_in["known"], true, "{harness}: {signed_in}");
+        assert!(
+            signed_in.get("signed_out").is_none(),
+            "{harness}: {signed_in}"
+        );
+        assert!(
+            signed_in.get("unknown_kind").is_none(),
+            "{harness}: {signed_in}"
+        );
+
+        let out = options_with(&args, &scratch, &[("STANDIN_SIGNED_OUT", "1")]);
+        assert_eq!(out["known"], true, "{harness}: {out}");
+        assert_eq!(out["signed_out"], true, "{harness}: {out}");
+        assert_eq!(out["models"][0]["id"], "standin-small", "{harness}: {out}");
+    }
 }
 
 #[test]

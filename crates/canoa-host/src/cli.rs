@@ -1450,6 +1450,9 @@ fn options(args: &OptionsArgs, front: &dyn Front) -> Result<(), Failed> {
             if let Some(why) = &choices.unknown_because {
                 print(front, &format!("unknown: {why}"))?;
             }
+            if choices.signed_out {
+                print(front, "signed out")?;
+            }
             for model in &choices.models {
                 print(
                     front,
