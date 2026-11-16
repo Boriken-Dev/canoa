@@ -20,7 +20,8 @@ use canoa_ffi::exports::{
 };
 use serde_json::{Value, json};
 
-const WAIT: Duration = Duration::from_secs(20);
+/// How long a job may take to say what a test waits for: it starts a host process, which a loaded machine runs slowly.
+const WAIT: Duration = Duration::from_secs(90);
 
 struct Scratch(PathBuf);
 

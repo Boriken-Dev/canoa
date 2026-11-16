@@ -596,7 +596,7 @@ impl<R: Recipe> Engine<R> {
                 } else {
                     refuse(
                         Status::GUATIAO_ERR_INTERNAL,
-                        "the downloaded program will not run",
+                        &format!("the downloaded program will not run: {error}"),
                     )
                 }
             })?;

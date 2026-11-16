@@ -23,7 +23,9 @@ use coqui_transport_web::websocket::{self, Frames};
 use coqui_transport_web::{Kind, Limits};
 use serde_json::{Value, json};
 
-pub const WAIT: Duration = Duration::from_secs(20);
+/// How long the host or a link may take to answer: every wait is on an event, and this only ends one that never comes, so it
+/// is long enough for a machine running a whole suite at once.
+pub const WAIT: Duration = Duration::from_secs(60);
 const MAX: usize = 16 * 1024 * 1024;
 
 /// The default limits with one message size.

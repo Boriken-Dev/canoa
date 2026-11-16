@@ -268,3 +268,10 @@ Future<void> finish(WidgetTester tester) async {
   await tester.pump(const Duration(seconds: 10));
   await tester.pump(const Duration(seconds: 10));
 }
+
+/// Closes [session], ending its agent: that takes real input and output, so it runs outside the test's clock, where a plain
+/// `await store.close(...)` in a widget test never finishes.
+Future<void> closeSession(WidgetTester tester, SessionStore store, ChatSession session) async {
+  await tester.runAsync(() => store.close(session));
+  await frames(tester);
+}
