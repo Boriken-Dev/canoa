@@ -1146,6 +1146,9 @@ cache_lifetime = "long"
 [host.agents.Default]
 harness = "claude"
 cache_lifetime = "default"
+[host.agents.Off]
+harness = "claude"
+cache_lifetime = "off"
 [host.agents.Outside]
 harness = "x"
 library = "l"
@@ -1161,6 +1164,7 @@ cache_lifetime = "short"
     assert_eq!(lifetime("Short"), Some(CacheLifetime::Short));
     assert_eq!(lifetime("Long"), Some(CacheLifetime::Long));
     assert_eq!(lifetime("Default"), Some(CacheLifetime::Default));
+    assert_eq!(lifetime("Off"), Some(CacheLifetime::Off));
     assert_eq!(lifetime("Outside"), Some(CacheLifetime::Short));
     for text in [
         "[host.agents.a]\nharness = \"claude\"\ncache_lifetime = \"forever\"\n",

@@ -216,7 +216,7 @@ impl Harness {
             .get("lifetime")
             .and_then(serde_json::Value::as_str)
             .and_then(cache_lifetime_named)
-            .ok_or_else(|| "the cache lifetime is default, short or long".to_owned())?;
+            .ok_or_else(|| "the cache lifetime is default, off, short or long".to_owned())?;
         let chosen = match meta.get("chosen") {
             None => true,
             Some(serde_json::Value::Bool(chosen)) => *chosen,
@@ -323,7 +323,7 @@ impl Harness {
         account: Option<&Held>,
         lifetime: CacheLifetime,
     ) -> Connection {
-        let mut request = StartRequest::builder().cache_lifetime(lifetime);
+        let mut request = StartRequest::builder();
         for root in &self.roots {
             request = request.working_root(root.clone());
         }
@@ -341,6 +341,7 @@ impl Harness {
             }
             None => Arc::clone(&self.plain),
         };
+        request = request.cache_lifetime(honoured(harness.as_ref(), lifetime));
         let (spawner, keeper) = match (account, &self.accounts) {
             (Some(held), Some(_)) => {
                 request = request.account(held.grant());
@@ -373,6 +374,24 @@ impl Harness {
                 .map(|d| (d.setting, d.value, d.default)),
         );
         all
+    }
+}
+
+/// `lifetime` as `harness` can take it: Off goes only to a provider that lists it, since one that predates the value
+/// refuses it, and is otherwise the default.
+fn honoured(harness: &dyn AcpHarness, lifetime: CacheLifetime) -> CacheLifetime {
+    if lifetime != CacheLifetime::Off {
+        return lifetime;
+    }
+    let offered = harness.describe().is_ok_and(|info| {
+        info.cache_choices
+            .iter()
+            .any(|choice| choice.lifetime == lifetime)
+    });
+    if offered {
+        lifetime
+    } else {
+        CacheLifetime::Default
     }
 }
 

@@ -93,6 +93,9 @@ const CLAUDE_TTL_VARIABLES: [&str; 2] = [
     "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
 ];
 
+/// The variable that turns Claude Code's prompt cache off, for `off`.
+const CLAUDE_CACHE_OFF: &str = "DISABLE_PROMPT_CACHING";
+
 /// What Codex's app server does with a cache lifetime, as its provider words it.
 pub(crate) const CODEX_IGNORES_LIFETIME: &str =
     "Codex's app server has no setting for how long its prompt cache lives";
@@ -191,6 +194,11 @@ impl AgentOptions {
             CacheLifetime::Long => Some("1h"),
             _ => None,
         };
+        if self.cache_lifetime == CacheLifetime::Off {
+            launch
+                .env
+                .insert(OsString::from(CLAUDE_CACHE_OFF), OsString::from("1"));
+        }
         if let Some(ttl) = ttl {
             launch.env.extend(
                 CLAUDE_TTL_VARIABLES

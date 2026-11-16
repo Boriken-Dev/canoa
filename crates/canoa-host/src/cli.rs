@@ -2296,6 +2296,17 @@ mod tests {
         );
         assert_eq!(ttl("long")[0].1, "1h");
         assert!(ttl("default").is_empty(), "default leaves the environment");
+        assert!(
+            ttl("off").is_empty(),
+            "off sets the switch, not the lifetimes"
+        );
+        let off = agent_options(&["claude", "--cache-lifetime", "off"]).claude_launch();
+        assert!(
+            off.env
+                .iter()
+                .any(|(name, value)| name == "DISABLE_PROMPT_CACHING" && value == "1"),
+            "off turns the cache off"
+        );
         assert_eq!(
             agent_options(&["codex"]).cache_lifetime,
             CacheLifetime::Default

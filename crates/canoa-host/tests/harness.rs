@@ -1013,10 +1013,17 @@ args = [\"acp\"]
 
 const TTL: &str = "CLAUDE_CODE_PROMPT_CACHE_TTL";
 const SUBAGENT_TTL: &str = "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL";
+const CACHE_OFF: &str = "DISABLE_PROMPT_CACHING";
 
 /// The two cache variables a Claude Code stand-in was started with, for an entry with `keys` and a client whose
 /// `initialize` carries `meta` under the cache key; `Err` is why the host turned the client away.
 fn cache_variables(keys: &str, meta: Option<Value>) -> Result<(Value, Value), Value> {
+    let env = cache_environment(keys, meta)?;
+    Ok((env[TTL].clone(), env[SUBAGENT_TTL].clone()))
+}
+
+/// The cache variables, with the one that turns the cache off, as the stand-in saw them.
+fn cache_environment(keys: &str, meta: Option<Value>) -> Result<Value, Value> {
     let scratch = Scratch::new();
     let claude = standin(&scratch, "claude");
     let record = scratch.0.join("record.jsonl");
@@ -1024,7 +1031,7 @@ fn cache_variables(keys: &str, meta: Option<Value>) -> Result<(Value, Value), Va
         ("STANDIN_RECORD", record.clone().into_os_string()),
         (
             "STANDIN_ENV",
-            OsString::from(format!("{TTL},{SUBAGENT_TTL}")),
+            OsString::from(format!("{TTL},{SUBAGENT_TTL},{CACHE_OFF}")),
         ),
     ];
     let config = format!(
@@ -1046,10 +1053,7 @@ fn cache_variables(keys: &str, meta: Option<Value>) -> Result<(Value, Value), Va
     })
     .expect("a paired key is served")?;
     let started = records(&record);
-    Ok((
-        started[0]["env"][TTL].clone(),
-        started[0]["env"][SUBAGENT_TTL].clone(),
-    ))
+    Ok(started[0]["env"].clone())
 }
 
 /// What the stand-in sees when the host sets neither variable: the test's own environment.
@@ -1071,6 +1075,21 @@ fn a_session_starts_claude_code_with_the_cache_lifetime_its_client_chose() {
         unchosen,
         inherited(),
         "a client that says nothing leaves the harness's own"
+    );
+}
+
+#[test]
+fn off_turns_claude_codes_prompt_cache_off_and_leaves_its_lifetime_variables() {
+    let off = cache_environment("", Some(json!({"lifetime": "off"}))).expect("served");
+    assert_eq!(off[CACHE_OFF], json!("1"));
+    assert_eq!((off[TTL].clone(), off[SUBAGENT_TTL].clone()), inherited());
+    let entry = cache_environment("cache_lifetime = \"off\"\n", None).expect("served");
+    assert_eq!(entry[CACHE_OFF], json!("1"), "an entry can say it too");
+    let long = cache_environment("", Some(json!({"lifetime": "long"}))).expect("served");
+    assert_eq!(
+        long[CACHE_OFF],
+        json!(std::env::var(CACHE_OFF).ok()),
+        "another lifetime does not set it"
     );
 }
 
@@ -1139,4 +1158,35 @@ fn a_codex_entry_says_its_provider_ignores_the_cache_lifetime() {
     assert_eq!(said["cache_lifetime_setting"], "short", "{said}");
     let preset = options_of(&["codex"], &scratch);
     assert!(preset["cache_lifetime"].is_string(), "{preset}");
+    assert!(
+        said.get("cache_choices").is_none(),
+        "no lifetime, Off included, is offered: {said}"
+    );
+    assert!(preset.get("cache_choices").is_none(), "{preset}");
+}
+
+#[test]
+fn a_claude_entry_offers_off_and_the_two_lifetimes_under_the_providers_names() {
+    let scratch = Scratch::new();
+    let claude = standin(&scratch, "claude");
+    let config = scratch.0.join("canoa.cfg");
+    std::fs::write(
+        &config,
+        format!(
+            "[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\n",
+            quoted(&claude.to_string_lossy())
+        ),
+    )
+    .expect("written");
+    let config = config.to_string_lossy().into_owned();
+    let said = options_of(&["Claude", "--entry", "--config", &config], &scratch);
+    assert_eq!(
+        said["cache_choices"],
+        json!([
+            {"id": "off", "label": "Off"},
+            {"id": "short", "label": "5 minutes"},
+            {"id": "long", "label": "1 hour"},
+        ]),
+        "{said}"
+    );
 }

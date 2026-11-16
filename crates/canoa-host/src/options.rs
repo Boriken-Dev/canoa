@@ -54,6 +54,8 @@ pub struct Choices {
     /// What the provider does with a start request's cache lifetime, in its own sentence (`ignored: ...` when it has no
     /// control for it); `None` when it did not say.
     pub cache_lifetime: Option<String>,
+    /// The lifetimes beyond the default the provider honours, each with its own label: the only ones a session may ask.
+    pub cache_choices: Vec<(CacheLifetime, String)>,
     /// The entry's own `cache_lifetime`, when canoa.cfg sets one: what its sessions ask unless the person chooses.
     pub configured_cache_lifetime: Option<String>,
 }
@@ -69,6 +71,7 @@ impl Choices {
             program: None,
             program_version: None,
             cache_lifetime: None,
+            cache_choices: Vec::new(),
             configured_cache_lifetime: None,
         }
     }
@@ -83,7 +86,8 @@ impl Choices {
 
     /// The choices as one JSON object: `known`, `unknown_because` and `unknown_kind` (`not_installed` or `failed`) when
     /// not known, `signed_out` when true, `program`, `program_version`,
-    /// `cache_lifetime` (the provider's sentence on what it does with the prompt-cache lifetime) and
+    /// `cache_lifetime` (the provider's sentence on what it does with the prompt-cache lifetime),
+    /// `cache_choices` (`[{id, label}]`, the lifetimes it honours beyond the default; absent when none) and
     /// `models`, each `{id, name?, description?, resolved?, version?, efforts, default_effort?, is_default?}`.
     #[must_use]
     pub fn to_json(&self) -> Value {
@@ -99,6 +103,19 @@ impl Choices {
         put("program_version", &self.program_version);
         put("cache_lifetime", &self.cache_lifetime);
         put("cache_lifetime_setting", &self.configured_cache_lifetime);
+        if !self.cache_choices.is_empty() {
+            out.insert(
+                "cache_choices".into(),
+                Value::Array(
+                    self.cache_choices
+                        .iter()
+                        .map(|(lifetime, label)| {
+                            json!({"id": cache_lifetime_name(*lifetime), "label": label})
+                        })
+                        .collect(),
+                ),
+            );
+        }
         if let Some(kind) = self.unknown_kind {
             out.insert("unknown_kind".into(), json!(kind));
         }
@@ -225,6 +242,7 @@ fn ask(harness: &dyn AcpHarness) -> Choices {
             NoAccounts.into_object(),
         )
         .unwrap_or_else(|error| ModelListing::unavailable(UnknownKind::Failed, error.message()));
+    let info = harness.describe().ok();
     let program = harness.program().ok().flatten();
     let program_version = program.as_deref().and_then(version_of);
     Choices {
@@ -238,7 +256,15 @@ fn ask(harness: &dyn AcpHarness) -> Choices {
         models: listing.models,
         program,
         program_version,
-        cache_lifetime: harness.describe().ok().and_then(|info| info.cache_lifetime),
+        cache_lifetime: info.as_ref().and_then(|info| info.cache_lifetime.clone()),
+        cache_choices: info
+            .map(|info| {
+                info.cache_choices
+                    .into_iter()
+                    .map(|choice| (choice.lifetime, choice.label))
+                    .collect()
+            })
+            .unwrap_or_default(),
         configured_cache_lifetime: None,
     }
 }

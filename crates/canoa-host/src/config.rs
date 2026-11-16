@@ -844,20 +844,21 @@ pub struct HarnessOptions {
     /// names them. Unset, a client may choose the mode the entry's own settings amount to and every stricter one, so it
     /// cannot loosen what canoa.cfg set; naming modes widens that, and Bypass still needs `bypass = true`.
     pub modes: Option<Vec<coqui_acp_harness::Mode>>,
-    /// How long the provider's prompt cache should live for this entry's sessions (`cache_lifetime = "default" | "short" |
-    /// "long"`), when the harness has such a control. A client's own choice for one session wins; unset leaves the client's
+    /// How long the provider's prompt cache should live for this entry's sessions (`cache_lifetime = "default" | "off" |
+    /// "short" | "long"`), when the harness has such a control. A client's own choice for one session wins; unset leaves the client's
     /// default for its kind of session (the chat asks `long`), and the harness's own where it names none.
     pub cache_lifetime: Option<CacheLifetime>,
 }
 
 /// The values of `cache_lifetime`, in canoa.cfg and on `canoa agent`.
-pub const CACHE_LIFETIMES: &[&str] = &["default", "short", "long"];
+pub const CACHE_LIFETIMES: &[&str] = &["default", "off", "short", "long"];
 
 /// The lifetime `name` stands for, one of [`CACHE_LIFETIMES`].
 #[must_use]
 pub fn cache_lifetime_named(name: &str) -> Option<CacheLifetime> {
     match name {
         "default" => Some(CacheLifetime::Default),
+        "off" => Some(CacheLifetime::Off),
         "short" => Some(CacheLifetime::Short),
         "long" => Some(CacheLifetime::Long),
         _ => None,
@@ -868,6 +869,7 @@ pub fn cache_lifetime_named(name: &str) -> Option<CacheLifetime> {
 #[must_use]
 pub const fn cache_lifetime_name(lifetime: CacheLifetime) -> &'static str {
     match lifetime {
+        CacheLifetime::Off => "off",
         CacheLifetime::Short => "short",
         CacheLifetime::Long => "long",
         _ => "default",

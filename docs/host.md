@@ -674,14 +674,14 @@ Auto, Bypass, loosest last), so it cannot loosen what canoa.cfg set: an entry wi
 "accept_edits"]` names the modes it may choose instead, which widens that, and is logged at `info` as configuration. Bypass
 follows `bypass` alone.
 
-`cache_lifetime = "default" | "short" | "long"` sets how long the provider's prompt cache lives for the entry's sessions, where
+`cache_lifetime = "default" | "off" | "short" | "long"` sets how long the provider's prompt cache lives for the entry's sessions, where
 the harness has a control for it. Claude Code has: `short` is a 5-minute cache and `long` a 1-hour one (it sets
-`CLAUDE_CODE_PROMPT_CACHE_TTL` and `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`), and `default` leaves the environment's. On a
+`CLAUDE_CODE_PROMPT_CACHE_TTL` and `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`), `off` sets `DISABLE_PROMPT_CACHING`, and `default` leaves the environment's. On a
 subscription a 1-hour cache write costs twice the input price against 1.25 times for 5 minutes, so a one-shot or background
 run is better with `short`, and a session someone is active in with `long`. Codex's app server has no such setting, and
-`canoa options NAME --entry` prints each provider's own sentence on it as `cache_lifetime`. The key is the entry's default: the
+`canoa options NAME --entry` prints each provider's own sentence on it as `cache_lifetime` and the lifetimes it honours as `cache_choices`; `off` goes only to a provider that lists it (a client's `off` for Codex is the default). The key is the entry's default: the
 chat asks `long` for a session when the entry says nothing, and the person can choose another for one session in the
-new-session view, which wins. A value other than the three is refused naming `cache_lifetime`. `canoa agent claude|codex`
+new-session view, which wins. A value other than the four is refused naming `cache_lifetime`. `canoa agent claude|codex`
 takes the same as `--cache-lifetime`.
 
 `bypass` is off by default and the only thing that lets a paired client put a session in Bypass: a key paired to someone else
