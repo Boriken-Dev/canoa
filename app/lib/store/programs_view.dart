@@ -389,14 +389,23 @@ class _ProgressDialogState extends State<ProgressDialog> {
             ),
           ),
           // A question the install asks is a form the host sealed to this app's key: what is typed goes to the host and nowhere else.
-          if (run.asking case final asking?)
+          if (run.asking case final asking?) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 4),
+              child: Text(
+                'What you send is sealed so only Canoa\'s host can read it, and the host gives it to the install of ${run.askedBy}.',
+                key: const Key('program-ask-note'),
+                style: text.bodySmall,
+              ),
+            ),
             SecretRequestCard(
               key: ValueKey('program-ask ${asking.request.context.requestId}'),
               request: asking.request,
               environment: asking.environment,
-              agent: 'Canoa',
+              agent: run.askedBy,
               onReply: run.answer,
             ),
+          ],
           if (_result case final result?) ...[
             const SizedBox(height: 8),
             Text(

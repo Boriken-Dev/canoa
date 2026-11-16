@@ -323,6 +323,10 @@ void main() {
       await tester.tap(find.byKey(const Key('plan-confirm')));
       await _until(tester, find.byKey(const ValueKey('secret-token')));
       expect(find.text('Sign in to continue'), findsOneWidget);
+      // The form says whose install it goes to, not that Canoa asks: the host hands the value to that install.
+      expect(find.textContaining('Program One asks'), findsOneWidget);
+      expect(find.textContaining('Canoa asks'), findsNothing);
+      expect(tester.widget<Text>(find.byKey(const Key('program-ask-note'))).data, contains('install of Program One'));
       expect(tester.widget<TextField>(find.byKey(const ValueKey('secret-token'))).obscureText, isTrue);
 
       await tester.enterText(find.byKey(const ValueKey('question-user')), 'ada');
@@ -366,6 +370,27 @@ void main() {
       await tester.tap(find.byKey(const Key('program-close')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('program-install-one_store')), findsOneWidget, reason: 'nothing was installed');
+    });
+
+    testWidgets('a question still open when the install ends is taken back, so the card does not outlive it', (tester) async {
+      final host = installable();
+      final end = Completer<void>();
+      host.onApply = (apply) async {
+        unawaited(apply.ask('Sign in', {
+          'type': 'object',
+          'properties': {'user': {'type': 'string'}},
+        }).then<void>((_) {}, onError: (Object _) {}));
+        await end.future;
+        throw const ControlFailed(-32002, 'the person gave no answer');
+      };
+      await _page(tester, host.programs());
+      await _tap(tester, 'program-install-one_store');
+      await tester.tap(find.byKey(const Key('plan-confirm')));
+      await _until(tester, find.byKey(const ValueKey('question-user')));
+      end.complete();
+      await _until(tester, find.byKey(const Key('program-error')));
+      expect(find.byKey(const ValueKey('question-user')), findsNothing, reason: 'the install is over, so is its question');
+      expect(find.byKey(const Key('program-ask-note')), findsNothing);
     });
 
     testWidgets('Cancel at a question stops the install too', (tester) async {

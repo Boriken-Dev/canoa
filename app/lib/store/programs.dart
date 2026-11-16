@@ -343,10 +343,13 @@ final class ProgramCancelled implements Exception {
 /// An install or update running on a link of its own: what it says, what it asks, and how it ended. Closing the link is how
 /// the host is told to stop, so [cancel] does only that.
 final class ProgramRun extends ChangeNotifier {
-  ProgramRun._(this.provider, this.plan);
+  ProgramRun._(this.provider, this.plan, this.askedBy);
 
   final String provider;
   final ProgramPlan plan;
+
+  /// The store whose install runs here: the one a question it asks is named after, since the value typed goes to its install code.
+  final String askedBy;
 
   /// What the install said, line by line (progress with a fraction replaces the last line that had one).
   final lines = <String>[];
@@ -385,6 +388,17 @@ final class ProgramRun extends ChangeNotifier {
     await _client?.close();
   }
 
+  /// Takes a question back once the install is over, so the card does not outlive it.
+  void _endQuestion() {
+    final waiting = _answer;
+    _answer = null;
+    if (waiting != null && !waiting.isCompleted) waiting.complete(const AcpSecretCancelled());
+    if (asking != null) {
+      asking = null;
+      notifyListeners();
+    }
+  }
+
   void _heard(String method, Map<String, Object?> params) {
     if (method != 'store/progress') return;
     final said = _text(params['text']);
@@ -414,7 +428,7 @@ final class ProgramRun extends ChangeNotifier {
   }
 }
 
-/// How long an install may run before the app gives up on its answer: the host ends one that nobody answers after ten minutes
+/// How long an install may run before the app gives up on its answer: the host ends one that nobody answers after four minutes
 /// of a question, and downloads take as long as they take.
 const Duration applyWait = Duration(minutes: 30);
 
@@ -539,7 +553,7 @@ class ProgramStores extends ChangeNotifier {
   /// Carries [plan] out on a link of its own. The run reports as it goes; [ProgramRun.done] ends it. The statuses are read
   /// again once it ends, whatever way.
   ProgramRun apply(ProgramPlan plan) {
-    final run = ProgramRun._(plan.provider, plan);
+    final run = ProgramRun._(plan.provider, plan, _status[plan.provider]?.info.title ?? plan.provider);
     var changed = false;
     run.done = (() async {
       try {
@@ -562,6 +576,7 @@ class ProgramStores extends ChangeNotifier {
         rethrow;
       } finally {
         run._finished = true;
+        run._endQuestion();
         unawaited(run._client?.close());
         // Readiness is read again before the run is over, so whoever awaits it sees the program as it now is.
         await _afterChange(plan.provider);

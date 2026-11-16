@@ -141,7 +141,7 @@ abstract interface class AccountsHost {
   SignIn signIn({required String name, required String harness, String? method, Map<String, String> inputs = const {}, bool again = false});
 }
 
-/// How long a sign-in may wait for the person: the host gives up on a question after ten minutes.
+/// How long a sign-in may wait for the person: the host gives up on a question after four minutes.
 const Duration signInWait = Duration(minutes: 11);
 
 /// The host's accounts over its control channel: management is local, so only this process's own link asks.
