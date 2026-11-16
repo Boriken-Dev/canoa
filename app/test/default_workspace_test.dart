@@ -94,7 +94,41 @@ void main() {
     expect(first.workspaceId, isNot(second.workspaceId));
   });
 
-  testWidgets('a workspace needs a folder chosen, and then the scratch folder is not made', (tester) async {
+  testWidgets('a fresh page with no workspace chosen sends as a chat, in a scratch folder', (tester) async {
+    final documents = _documents();
+    final store = SessionStore();
+    final started = _Agent();
+    await pumpApp(tester, store, documents: documents.path, linked: started.openLink);
+    await newSession(tester);
+    final draft = store.selected!;
+    await chooseSource(tester, 'Scripted');
+    expect(draft.kind, SessionKind.chat);
+    await send(tester, 'hello');
+    await until(tester, () => draft.remoteSessionId != null, 'the session to start');
+    expect(find.textContaining('Choose its workspace first'), findsNothing);
+    expect(started.folders, [_scratch(documents, draft)]);
+    await finish(tester);
+  });
+
+  testWidgets('Workspace chosen and no folder picked is still not a block: it starts as a chat', (tester) async {
+    final documents = _documents();
+    final store = SessionStore();
+    final started = _Agent();
+    await pumpApp(tester, store, documents: documents.path, linked: started.openLink);
+    await newSession(tester);
+    final draft = store.selected!;
+    await chooseSource(tester, 'Scripted');
+    await chooseWorkspace(tester);
+    await send(tester, 'hello');
+    await send(tester, 'hello');
+    await until(tester, () => draft.remoteSessionId != null, 'the session to start');
+    expect(draft.kind, SessionKind.chat);
+    expect(started.folders, [_scratch(documents, draft)]);
+    expect(find.textContaining('Choose its workspace first'), findsNothing);
+    await finish(tester);
+  });
+
+  testWidgets('a folder chosen makes it a workspace, and then the scratch folder is not made', (tester) async {
     final documents = _documents();
     final store = SessionStore();
     final started = _Agent();
@@ -108,12 +142,6 @@ void main() {
     expect(draft.kind, SessionKind.workspace);
     expect(draft.cwd, isNull, reason: 'Workspace holds no folder until one is chosen');
     expect(find.text('Choose a workspace'), findsOneWidget);
-    await send(tester, 'hello');
-    expect(draft.remoteSessionId, isNull, reason: 'nothing starts without a workspace');
-    expect(find.textContaining('Choose its workspace first'), findsWidgets);
-    expect(started.folders, isEmpty);
-    expect(Directory('${documents.path}${_sep}Canoa').existsSync(), isFalse);
-
     await openFolder(tester);
     expect(draft.cwd, work.path);
     expect(find.text('Worktree'), findsOneWidget, reason: 'a workspace offers a worktree');
@@ -122,13 +150,12 @@ void main() {
     expect(started.folders, [work.path]);
     expect(Directory('${documents.path}${_sep}Canoa').existsSync(), isFalse);
 
-    // The next new session begins as this one did, a workspace, with the folder just used one click away.
+    // The next new session is a chat again, whatever the last one was.
     await newSession(tester);
     final next = store.selected!;
     expect(next, isNot(draft));
-    expect(next.kind, SessionKind.workspace);
+    expect(next.kind, SessionKind.chat);
     expect(next.cwd, isNull);
-    expect(await menuOf(tester, 'new-session-folder'), contains(work.path));
 
     // Chat takes it back to a folder of Canoa's own, and shows none.
     final other = store.createDraft(source: _source, cwd: work.path);
