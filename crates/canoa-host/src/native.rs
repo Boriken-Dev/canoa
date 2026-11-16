@@ -261,7 +261,7 @@ fn running(home: &Home) -> bool {
 const MAX_HELLO_ADDRESSES: usize = 16;
 
 /// This computer's name, as the system keeps it.
-fn computer_name() -> Option<String> {
+pub(crate) fn computer_name() -> Option<String> {
     #[cfg(unix)]
     let name = Some(
         rustix::system::uname()

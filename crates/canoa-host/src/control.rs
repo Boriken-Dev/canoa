@@ -77,7 +77,11 @@ pub enum Grant {
     /// Also `host/which`: whether a program is on the host's `PATH`, which starts nothing.
     /// Installing, updating, rolling back and removing is [`Grant::StorePrograms`], which is not implied by this.
     StoreRead,
-    /// `fs/list`: the folders under the user's home and the working roots of the entries the key may use.
+    /// `fs/list`: the folders under the user's home and the working roots of the entries the key may use. Also `fs/info`,
+    /// `fs/mentions` and `fs/resolve` in the same places (whether a folder is there and in a git repository, the names an `@`
+    /// offers inside one, and one name resolved inside it), and `fs/scratch`, `fs/scratch_remove` and `fs/scratch_preview`: the
+    /// folder the person's `[sessions] workspace` makes for a chat, made, taken away again if it is empty, or worked out for a
+    /// template being edited.
     Folders,
     /// `config/get`: a named section of canoa.cfg, the app's own tables only.
     ConfigRead,
@@ -584,6 +588,26 @@ impl Control {
                 Some("fs/read") => self.fs_read(caller, &params),
                 Some("fs/list") => {
                     allow(caller, Grant::Folders).and_then(|()| self.files.list(caller, &params))
+                }
+                Some("fs/info") => {
+                    allow(caller, Grant::Folders).and_then(|()| self.files.info(caller, &params))
+                }
+                Some("fs/mentions") => allow(caller, Grant::Folders)
+                    .and_then(|()| self.files.mentions(caller, &params)),
+                Some("fs/resolve") => {
+                    allow(caller, Grant::Folders).and_then(|()| self.files.resolve(caller, &params))
+                }
+                Some(method @ ("fs/scratch" | "fs/scratch_remove" | "fs/scratch_preview")) => {
+                    allow(caller, Grant::Folders).and_then(|()| {
+                        self.files.scratch(
+                            &params,
+                            match method {
+                                "fs/scratch" => files::Scratch::Make,
+                                "fs/scratch_remove" => files::Scratch::Remove,
+                                _ => files::Scratch::Preview,
+                            },
+                        )
+                    })
                 }
                 Some("config/get") => {
                     allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(&params))
@@ -1198,6 +1222,8 @@ pub(crate) mod discover;
 mod files;
 #[cfg(test)]
 mod files_tests;
+#[cfg(test)]
+mod folders_tests;
 mod import;
 #[cfg(test)]
 mod import_tests;

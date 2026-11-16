@@ -1434,7 +1434,7 @@ fn record_of(root: &Path, name: &str) -> Option<Value> {
     .then_some(value)
 }
 
-fn find_git() -> Result<PathBuf, String> {
+pub(in crate::control) fn find_git() -> Result<PathBuf, String> {
     let names: &[&str] = if cfg!(windows) {
         &["git.exe", "git.cmd"]
     } else {

@@ -431,7 +431,7 @@ fn session_id(name: &str) -> bool {
 }
 
 /// Makes `folder` and the folders above it, private to the user on Unix.
-fn make_private(folder: &Path) -> std::io::Result<()> {
+pub(crate) fn make_private(folder: &Path) -> std::io::Result<()> {
     let mut made = std::fs::DirBuilder::new();
     made.recursive(true);
     #[cfg(unix)]
@@ -490,7 +490,7 @@ fn ipv4(text: &str) -> bool {
 }
 
 /// This machine's Documents folder as the system names it.
-fn system_documents() -> Option<PathBuf> {
+pub(crate) fn system_documents() -> Option<PathBuf> {
     let home = std::env::home_dir();
     let env = |name: &str| std::env::var(name).ok();
     let from_env = documents_in(env, home.clone(), None);

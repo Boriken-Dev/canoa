@@ -102,7 +102,12 @@ pub(crate) struct Files {
     writing: Mutex<()>,
     /// One upload step at a time, so the limits are checked and spent together.
     uploading: Mutex<()>,
+    /// The Documents folder a chat's scratch folder is made under, when it is not the system's.
+    documents: Option<PathBuf>,
 }
+
+mod folders;
+pub(crate) use folders::Scratch;
 
 impl Files {
     pub(crate) fn new(
@@ -120,7 +125,16 @@ impl Files {
             limits,
             writing: Mutex::new(()),
             uploading: Mutex::new(()),
+            documents: None,
         }
+    }
+
+    /// Makes chats' scratch folders under `documents` rather than the system's Documents folder.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_documents(mut self, documents: PathBuf) -> Self {
+        self.documents = Some(documents);
+        self
     }
 
     /// The places `caller` may browse: the whole machine for the owner, else the home and the working roots of the entries
