@@ -656,7 +656,7 @@ program, asks its host to do as the user. Each is behind its own grant, so a key
   (`appearance assets attachments catalogs connections defaults loadouts network notifications overlays permissions sessions store usage`); any other, `host`,
   `agents`, `profile`, `desktop` and `skill_pins` among them, is `-32001`, since those name programs to run or what may run. `value` is
   an object of at most `MAX_SECTION_BYTES` (256 KiB) or null, which removes the table. The text that would result is read by the host's
-  own loader first, and a file it would refuse is not written (`-32002`); the text is read back and no other table may differ; the write is beside the file first, then renamed, and through the link when canoa.cfg is one. `restart` is
+  own loader first, and a file it would refuse is not written (`-32002`); the text is read back and no other table may differ; the write is beside the file first, then put in its place keeping the mode (Unix) or access list (Windows) the file had, and through the link when canoa.cfg is one. `restart` is
   true for the sections the host itself reads at start (`permissions usage`): they apply after `host/restart`; `[overlays]`, `[profile]`, `[loadouts]` and `[defaults]` reach the next session of an entry that is the host's own or sets `own_profile`, with no restart. A host not
   started with a canoa.cfg refuses both (`-32002`).
 - `upload/put` `{"name", "data": base64, "done"?: bool}` -> `{"id", "path", "name", "size", "done"}` keeps a file in

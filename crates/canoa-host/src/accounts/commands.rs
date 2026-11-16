@@ -808,7 +808,7 @@ fn write_cfg(path: &Path, text: &str) -> Result<(), Failed> {
     }
     let beside = path.with_extension(format!("cfg.new{}", std::process::id()));
     fs::write(&beside, text)
-        .and_then(|()| fs::rename(&beside, path))
+        .and_then(|()| crate::replace::replace_file(&beside, path))
         .map_err(|error| {
             let _ = fs::remove_file(&beside);
             Failed::run(format!("{}: {error}", path.display()))
@@ -1184,6 +1184,25 @@ pub(crate) fn remove_entry(path: &Path, name: &str) -> Result<(), Failed> {
 #[cfg(test)]
 mod format_tests {
     use super::*;
+
+    /// A rewrite of canoa.cfg leaves its mode as the person set it, a file only this user reads included.
+    #[cfg(unix)]
+    #[test]
+    fn a_rewrite_of_canoa_cfg_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("canoa-accounts-mode-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("directory");
+        for mode in [0o600, 0o644] {
+            let path = dir.join(format!("{mode:o}.cfg"));
+            fs::write(&path, "[desktop]\nstart_hidden = true\n").expect("write");
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).expect("mode");
+            write_cfg(&path, "[desktop]\nstart_hidden = false\n").expect("rewritten");
+            let now = fs::metadata(&path).expect("metadata").permissions().mode() & 0o777;
+            assert_eq!(now, mode, "{mode:o} became {now:o}");
+            assert!(fs::read_to_string(&path).expect("read").contains("false"));
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[cfg(all(feature = "yaml", feature = "json"))]
     fn account() -> AccountConfig {

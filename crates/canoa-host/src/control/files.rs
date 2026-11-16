@@ -962,7 +962,7 @@ fn write_beside(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         file.write_all(bytes)?;
         file.sync_all()?;
     }
-    fs::rename(&beside, path)
+    crate::replace::replace_file(&beside, path)
 }
 
 fn private_new(path: &Path) -> std::io::Result<fs::File> {
