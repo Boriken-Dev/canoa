@@ -103,6 +103,8 @@ pub(crate) type Offered = (String, AccountConfig, AccountKindInfo);
 struct Offer {
     host: Arc<Accounts>,
     offered: Vec<Offered>,
+    /// The other accounts of the entry's provider, which only a key trusted with accounts may choose.
+    others: Vec<Offered>,
     /// Number the plain and the profiled instance's sequences, so one's are not taken for the other's.
     sources: (u64, u64),
 }
@@ -250,10 +252,17 @@ impl Harness {
     }
 
     /// This harness offering `offered`, each by name with its configuration and its kind in the catalog, kept in `host`.
-    pub(crate) fn offering(mut self, host: &Arc<Accounts>, offered: Vec<Offered>) -> Self {
+    /// `others` are the provider's other accounts, which a key trusted with accounts may choose beside them.
+    pub(crate) fn offering(
+        mut self,
+        host: &Arc<Accounts>,
+        offered: Vec<Offered>,
+        others: Vec<Offered>,
+    ) -> Self {
         self.accounts = Some(Offer {
             host: Arc::clone(host),
             offered,
+            others,
             sources: (host.source(), host.source()),
         });
         self
@@ -288,12 +297,18 @@ impl Harness {
     }
 
     /// The account the client's first message chooses for its connection, held for it: the one it names in `_meta`, else the
-    /// entry's first; `None` for an entry that offers none. `holder` says who is holding it.
+    /// entry's first; `None` for an entry that offers none. `holder` says who is holding it. With `any`, the client may also
+    /// name an account of the provider the entry does not list, or `null` for the login the program has where it runs.
     ///
     /// # Errors
     ///
     /// Why the choice is refused, for the client.
-    pub(crate) fn choose(&self, first: &[u8], holder: &str) -> Result<Option<Held>, String> {
+    pub(crate) fn choose(
+        &self,
+        first: &[u8],
+        holder: &str,
+        any: bool,
+    ) -> Result<Option<Held>, String> {
         let Some(offer) = &self.accounts else {
             return Ok(None);
         };
@@ -306,11 +321,17 @@ impl Harness {
                     .get(ACCOUNT_META)
                     .cloned()
             });
+        let listed = |name: &str| offer.offered.iter().find(|(offered, ..)| offered == name);
         let (name, config, info) = match named {
-            None => offer.offered.first(),
-            Some(serde_json::Value::String(name)) => {
-                offer.offered.iter().find(|(offered, ..)| *offered == name)
-            }
+            None => match offer.offered.first() {
+                Some(first) => Some(first),
+                None => return Ok(None),
+            },
+            Some(serde_json::Value::Null) if any => return Ok(None),
+            Some(serde_json::Value::String(name)) => listed(&name).or_else(|| {
+                any.then(|| offer.others.iter().find(|(other, ..)| *other == name))
+                    .flatten()
+            }),
             Some(_) => return Err("the account is named by its name, as text".to_owned()),
         }
         .ok_or_else(|| "this entry does not offer that account".to_owned())?;

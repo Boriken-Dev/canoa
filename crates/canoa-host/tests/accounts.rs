@@ -55,6 +55,21 @@ impl Fixture {
 
     /// As [`Fixture::bare`], with the account `work` signed in by the stand-in and offered by the entry.
     fn signed_in() -> Self {
+        let fixture = Self::unlisted();
+        let cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
+        std::fs::write(
+            &fixture.config,
+            cfg.replace(
+                "settings = { renew_poll_ms = 100 }",
+                "accounts = [\"work\"]\nsettings = { renew_poll_ms = 100 }",
+            ),
+        )
+        .expect("the entry offers the account");
+        fixture
+    }
+
+    /// As [`Fixture::signed_in`], with the entry listing no account.
+    fn unlisted() -> Self {
         let fixture = Self::bare();
         let added = fixture.canoa(
             &[
@@ -70,15 +85,6 @@ impl Fixture {
         );
         assert!(added.status.success(), "{}", text(&added.stderr));
         assert_eq!(text(&added.stdout).trim(), "added work (claude-login)");
-        let cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
-        std::fs::write(
-            &fixture.config,
-            cfg.replace(
-                "settings = { renew_poll_ms = 100 }",
-                "accounts = [\"work\"]\nsettings = { renew_poll_ms = 100 }",
-            ),
-        )
-        .expect("the entry offers the account");
         fixture
     }
 
@@ -762,4 +768,53 @@ account_store = \"file\"
         .flatten()
         .any(|entry| entry.file_name().to_string_lossy().ends_with(".sealed"));
     assert!(sealed, "the account is in a sealed file");
+}
+
+#[test]
+fn a_key_trusted_with_accounts_runs_a_session_on_an_account_the_entry_does_not_list() {
+    let (trusted, other) = (support::key(), support::key());
+    let fixture = Fixture::unlisted();
+    let mut cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
+    cfg.push_str(&format!(
+        "
+[host.control]
+grants = {{ \"{}\" = [\"accounts\"] }}
+",
+        trusted.peer_id()
+    ));
+    std::fs::write(&fixture.config, cfg).expect("canoa.cfg");
+    let (host, _log, _record, _cfg) = fixture.serve();
+    host.pair(&trusted);
+    host.pair(&other);
+    // A key with no grant for accounts is turned away, as an entry that lists none has always done.
+    let refused = with_link(host.url("Claude"), &other, host.peer, |rpc| {
+        initialize_as_work(rpc).expect_err("not listed")
+    })
+    .expect("served");
+    assert!(
+        refused["message"]
+            .as_str()
+            .is_some_and(|why| why.contains("does not offer")),
+        "{refused}"
+    );
+    // The trusted key chooses it, and the connection reports it.
+    let chosen = with_link(host.url("Claude"), &trusted, host.peer, |rpc| {
+        initialize_as_work(rpc).expect("an account of the provider")
+    })
+    .expect("served");
+    assert_eq!(
+        chosen["_meta"][ACCOUNT_META],
+        json!({"name": "work", "kind": "claude-login"}),
+        "{chosen}"
+    );
+    // It may also run on the login the program has where it runs, which `null` says.
+    let own = with_link(host.url("Claude"), &trusted, host.peer, |rpc| {
+        rpc.request(
+            "initialize",
+            json!({"protocolVersion": 1, "clientCapabilities": {}, "_meta": {ACCOUNT_META: null}}),
+        )
+        .expect("the machine's login")
+    })
+    .expect("served");
+    assert!(own["_meta"].get(ACCOUNT_META).is_none(), "{own}");
 }

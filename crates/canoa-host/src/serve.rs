@@ -1409,8 +1409,12 @@ impl Serving {
                             entry.name
                         );
                     }
-                    if let (Some(host), Some(listed)) = (&accounts, listed) {
-                        provider = provider.offering(host, listed);
+                    if let Some(host) = &accounts {
+                        let listed = listed.unwrap_or_default();
+                        let others = other_accounts(config, harness, &listed, &provider);
+                        if !listed.is_empty() || !others.is_empty() {
+                            provider = provider.offering(host, listed, others);
+                        }
                     }
                     let provider = Arc::new(provider);
                     movers.insert(entry.name.clone(), Arc::clone(&provider));
@@ -2409,7 +2413,15 @@ fn give_agent<C: Channel>(
                 shared,
                 served,
                 channel,
-                (peer, first),
+                (
+                    peer,
+                    first,
+                    // A key trusted with accounts may run a session on any account of the entry's provider, not only those the
+                    // entry lists.
+                    shared
+                        .store_grants(peer, context.is_some())
+                        .is_some_and(|grants| grants.contains(&control::Grant::Accounts)),
+                ),
                 options,
                 scope,
                 (
@@ -2800,6 +2812,38 @@ fn offered_accounts(
     Ok(listed)
 }
 
+/// The accounts of `harness` that an entry which does not list them can still run a session on, for a key trusted with
+/// accounts. One whose key reaches the agent in its environment is left out: only an entry that lists it limits the
+/// settings files a repository could use to redirect that key, so it has to be listed.
+fn other_accounts(
+    config: &Config,
+    harness: &str,
+    listed: &[kind::Offered],
+    provider: &kind::Harness,
+) -> Vec<kind::Offered> {
+    let Some(catalog) = provider.catalog() else {
+        return Vec::new();
+    };
+    let mut others = Vec::new();
+    for (name, account) in &config.accounts {
+        if account.harness != harness || listed.iter().any(|(each, ..)| each == name) {
+            continue;
+        }
+        let Some(info) = catalog.kind(&account.kind) else {
+            continue;
+        };
+        if crate::accounts::check_settings(info, account.settings.as_ref()).is_err() {
+            continue;
+        }
+        let one = (name.clone(), account.clone(), info.clone());
+        if keeps_key_in_environment(core::slice::from_ref(&one)) {
+            continue;
+        }
+        others.push(one);
+    }
+    others
+}
+
 /// What a connection's sessions are given beside the agent: its profile, and the delegation, secret and store tools.
 type Joined<'a> = (
     Option<&'a Connection>,
@@ -2817,7 +2861,7 @@ fn give_harness<C: Channel>(
     shared: &Shared,
     served: &Served,
     channel: &C,
-    (peer, first): (&PeerId, &[u8]),
+    (peer, first, any_account): (&PeerId, &[u8], bool),
     harness: &kind::Harness,
     scope: &Scope,
     (connection, conn, link, store, kb): Joined<'_>,
@@ -2838,7 +2882,11 @@ fn give_harness<C: Channel>(
         Err(why) => return turn_away(why),
     };
     // The account is chosen, and held for this connection, before anything starts.
-    let account = match harness.choose(first, &format!("a connection to {}", served.name)) {
+    let account = match harness.choose(
+        first,
+        &format!("a connection to {}", served.name),
+        any_account,
+    ) {
         Ok(account) => account,
         Err(why) => return turn_away(why),
     };
