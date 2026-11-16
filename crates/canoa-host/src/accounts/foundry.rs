@@ -123,7 +123,10 @@ pub(crate) fn extend(catalog: &mut AccountCatalog, harness: &str) {
     kind.state_dir = true;
     kind.notices = account::notices();
     // The gateway answers both wire formats, so an agent that speaks either can use the account.
-    kind.provides = vec![standard::ANTHROPIC_API.to_owned(), standard::OPENAI_API.to_owned()];
+    kind.provides = vec![
+        standard::ANTHROPIC_API.to_owned(),
+        standard::OPENAI_API.to_owned(),
+    ];
     catalog.kinds.push(kind);
     let mut method = LoginMethodInfo::new(KIND, "Use a Foundry Local model", KIND);
     method.description = "Names a model Foundry Local serves. It is not loaded or checked here: load it in Foundry Local before a session.".to_owned();
