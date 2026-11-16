@@ -117,7 +117,21 @@ impl Fixture {
             .expect("canoa runs");
         let mut stdin = child.stdin.take().expect("its input");
         if let Some(input) = input {
-            stdin.write_all(input.as_bytes()).expect("input written");
+            // A process that ends before it reads its input (it refused something first) closes the pipe: that is
+            // its answer, whose status and standard error the caller's assertion prints, not a failure to write.
+            match stdin.write_all(input.as_bytes()) {
+                Ok(()) => {}
+                Err(failure) if failure.kind() == std::io::ErrorKind::BrokenPipe => {}
+                Err(failure) => {
+                    let _ = child.kill();
+                    let ended = child.wait_with_output().expect("canoa ends");
+                    panic!(
+                        "input not written: {failure}; canoa ended {:?}: {}",
+                        ended.status,
+                        text(&ended.stderr)
+                    );
+                }
+            }
         }
         drop(stdin);
         child.wait_with_output().expect("canoa ends")
