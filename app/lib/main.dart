@@ -9,6 +9,7 @@ import 'desktop/desktop_shell.dart';
 import 'desktop/host_control.dart';
 import 'desktop/host_supervisor.dart';
 import 'desktop/host_tool.dart';
+import 'sources/control_choices.dart';
 import 'sources/source_choices.dart';
 import 'extension/composer_extension.dart';
 import 'extension/local_host.dart';
@@ -1200,6 +1201,10 @@ class _CanoaAppState extends State<CanoaApp> {
   /// [_askChoices] as the entry's account [account], which lists what that account may use; null for a source the host does not
   /// run from canoa.cfg.
   Future<SourceChoices?> _askChoicesAs(AgentSource source, String account) async {
+    if (_control case final control?) {
+      final asked = await choicesOverControl(control, source, account: account);
+      if (asked != null) return asked;
+    }
     final tool = widget.host?.tool;
     if (tool == null || source.hostEntry == null || _configPath == null) return null;
     final ran = await tool.run(['options', source.hostEntry!, '--entry', ...hostConfigArgs(_configPath!), '--account', account, '--format', 'json']);
@@ -1210,6 +1215,11 @@ class _CanoaAppState extends State<CanoaApp> {
   /// is asked by its harness, a hosted entry by its name in canoa.cfg; a program entry is asked through a short session of its own.
   Future<SourceChoices?> _askChoices(AgentSource source) async {
     if (widget.askChoices case final ask?) return ask(source);
+    // The host answers for a page that has no host of its own to run a command on, and for the desktop alike.
+    if (_control case final control?) {
+      final asked = await choicesOverControl(control, source);
+      if (asked != null) return asked;
+    }
     final tool = widget.host?.tool;
     if (tool == null) return null;
     final List<String> args;

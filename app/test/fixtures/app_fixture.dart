@@ -95,6 +95,8 @@ Future<List<CanoaConfig>> pumpApp(
   HostSupervisor? host,
   String? documents,
   ChoicesLoader? askChoices,
+  // The app asks the host for choices as it does where nothing stands in for it.
+  bool hostChoices = false,
   PopoutWindows? popoutWindows,
   AccountsHost? accountsHost,
   ServedApp? served,
@@ -137,7 +139,7 @@ Future<List<CanoaConfig>> pumpApp(
           for (final MapEntry(:key, :value) in _needs.entries)
             if (value.any(missing.contains)) key: [for (final program in value) if (missing.contains(program)) program],
         }),
-    askChoices: askChoices ?? FakeHost().call,
+    askChoices: hostChoices ? null : askChoices ?? FakeHost().call,
     popoutWindows: popoutWindows,
     accountsHost: accountsHost,
     served: served,
