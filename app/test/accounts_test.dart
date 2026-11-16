@@ -14,6 +14,7 @@ import 'package:canoa/session_store.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:coqui_acp/secret.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_accounts.dart';
@@ -97,6 +98,36 @@ void main() {
     await tester.pump();
     expect(host.inputsGiven.single, {'email': 'ana@example.org'});
     expect(host.signIns.single.method, 'sso');
+  });
+
+  testWidgets('the address, its lines and a failure can be selected, and the address copied', (tester) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String?;
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    final host = FakeAccountsHost();
+    await _show(tester, _controller(host));
+    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('add-account-name')), 'metered');
+    await tester.tap(find.byKey(const Key('login-method api-key')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('add-account-start')));
+    await tester.pump();
+    final run = host.signIns.single;
+    run.say('Opening the sign-in');
+    run.showPage(const SignInPage(url: 'https://console.example/login?state=abc'));
+    await tester.pump();
+    expect(find.widgetWithText(SelectableText, 'Opening the sign-in'), findsOneWidget);
+    expect(find.byKey(const Key('sign-in-url')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('sign-in-copy-url')));
+    await tester.pump();
+    expect(copied, 'https://console.example/login?state=abc');
+    run.fail('The link to the host has ended');
+    await tester.pump();
+    expect(find.widgetWithText(SelectableText, 'It did not sign in: The link to the host has ended'), findsOneWidget);
   });
 
   testWidgets('a page and a code are shown to open and confirm, and a key goes to the host sealed, never held here', (tester) async {

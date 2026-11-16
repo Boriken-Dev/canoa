@@ -242,7 +242,7 @@ class SignInPanel extends StatelessWidget {
       final page = run.page, asking = run.asking;
       return SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          for (final line in run.lines) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(line)),
+          for (final line in run.lines) Padding(padding: const EdgeInsets.only(bottom: 4), child: SelectableText(line)),
           if (page != null) _PageStep(page: page),
           if (asking != null)
             SecretRequestCard(
@@ -262,9 +262,9 @@ class SignInPanel extends StatelessWidget {
               ]),
             ),
           if (run.phase == SignInPhase.done)
-            Text('Added ${run.name}. Canoa offers it to new sessions of ${harnessTitle(run.harness)}.', key: const Key('sign-in-done')),
+            SelectableText('Added ${run.name}. Canoa offers it to new sessions of ${harnessTitle(run.harness)}.', key: const Key('sign-in-done')),
           if (run.phase == SignInPhase.failed)
-            Text('It did not sign in: ${run.problem}', key: const Key('sign-in-failed'), style: TextStyle(color: scheme.error)),
+            SelectableText('It did not sign in: ${run.problem}', key: const Key('sign-in-failed'), style: TextStyle(color: scheme.error)),
         ]),
       );
     },
@@ -287,9 +287,17 @@ class _PageStep extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('Open this page to sign in'),
         const SizedBox(height: 4),
-        SelectableText(page.url, key: const Key('sign-in-url')),
+        Row(children: [
+          Expanded(child: SelectableText(page.url, key: const Key('sign-in-url'))),
+          IconButton(
+            key: const Key('sign-in-copy-url'),
+            tooltip: 'Copy the link',
+            icon: const Icon(Icons.copy, size: 18),
+            onPressed: () => Clipboard.setData(ClipboardData(text: page.url)),
+          ),
+        ]),
         if (webLink(page.url) == null)
-          Text('Canoa will not open this address: it is not a plain http or https link.', key: const Key('sign-in-url-refused'), style: TextStyle(color: scheme.error)),
+          SelectableText('Canoa will not open this address: it is not a plain http or https link.', key: const Key('sign-in-url-refused'), style: TextStyle(color: scheme.error)),
         if (page.userCode case final code?) ...[
           const SizedBox(height: 8),
           const Text('and confirm this code there'),
@@ -309,11 +317,6 @@ class _PageStep extends StatelessWidget {
             key: const Key('sign-in-open'),
             onPressed: webLink(page.url) == null ? null : () => unawaited(openLink(webLink(page.url)!)),
             child: const Text('Open the page'),
-          ),
-          TextButton(
-            key: const Key('sign-in-copy-url'),
-            onPressed: () => Clipboard.setData(ClipboardData(text: page.url)),
-            child: const Text('Copy the link'),
           ),
         ]),
       ]),
