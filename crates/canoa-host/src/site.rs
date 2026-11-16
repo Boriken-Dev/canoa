@@ -4,7 +4,7 @@
 //! name that is already one safe folder name, or nothing. The host makes no other folder.
 
 use alloc::borrow::Cow;
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use std::path::{Component, Path, PathBuf};
@@ -30,11 +30,16 @@ const MAX_LABEL: usize = 63;
 const NEW: &str = "session/new";
 const REOPEN: [&str; 2] = ["session/load", "session/resume"];
 
-/// One connection's webpage sessions: the folders made for `session/new` requests the agent has not answered yet.
+/// Words in a mode or option value that name one which skips the agent's permission prompts.
+const UNPROMPTED: [&str; 5] = ["bypass", "danger", "full-access", "full_access", "yolo"];
+
+/// One connection's webpage sessions: the folders made for `session/new` requests the agent has not answered yet, and the
+/// sessions the host has placed, whose mode a client may not change to one that skips permission prompts.
 #[derive(Debug, Default)]
 pub(crate) struct Sites {
     documents: Option<PathBuf>,
     pending: Mutex<BTreeMap<String, Value>>,
+    placed: Mutex<BTreeSet<String>>,
 }
 
 /// A client message that names a site.
@@ -86,13 +91,51 @@ impl Sites {
         Self {
             documents,
             pending: Mutex::new(BTreeMap::new()),
+            placed: Mutex::new(BTreeSet::new()),
         }
+    }
+
+    /// A request to change a placed session's mode or an option to a value that skips permission prompts, refused.
+    fn unprompted_mode(&self, message: &[u8]) -> Option<Verdict> {
+        let text = core::str::from_utf8(message).ok()?;
+        if !text.contains("session/set_mode") && !text.contains("session/set_config_option") {
+            return None;
+        }
+        let value: Value = serde_json::from_str(text).ok()?;
+        let method = value.get("method")?.as_str()?;
+        if method != "session/set_mode" && method != "session/set_config_option" {
+            return None;
+        }
+        let params = value.get("params")?;
+        if !lock(&self.placed).contains(params.get("sessionId")?.as_str()?) {
+            return None;
+        }
+        let chosen = ["modeId", "value"]
+            .iter()
+            .filter_map(|key| params.get(*key).and_then(Value::as_str))
+            .map(str::to_ascii_lowercase)
+            .collect::<Vec<_>>();
+        if !chosen
+            .iter()
+            .any(|name| UNPROMPTED.iter().any(|word| name.contains(word)))
+        {
+            return None;
+        }
+        let reply = value.get("id").map(|id| {
+            let why = "a session a site opened cannot be set to a mode that skips permission prompts";
+            serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "error": {"code": INVALID_PARAMS, "message": why}}))
+                .unwrap_or_default()
+        });
+        Some(Verdict::Refuse(reply))
     }
 
     /// What becomes of a client's message: [`Scope::check`], except that a session request naming a site gets the folder the
     /// host chose as its `cwd` (a `cwd` the client sent is replaced) and the folder is made once the scope has passed it. A
     /// site that is not a plain host name, or a folder to reopen outside the site's own, fails the request, and nothing is made.
     pub(crate) fn check(&self, scope: &Scope, message: &[u8]) -> Verdict {
+        if let Some(refused) = self.unprompted_mode(message) {
+            return refused;
+        }
         let Some(request) = Request::read(message) else {
             return scope.check(message);
         };
@@ -108,6 +151,9 @@ impl Sites {
         };
         let mut value = request.value.clone();
         if let Some(params) = value.get_mut("params").and_then(Value::as_object_mut) {
+            // A site names no directories of its own, which an agent may make writable without asking; the profile's skills
+            // folders are added after this check.
+            params.remove("additionalDirectories");
             params.insert(
                 "cwd".to_owned(),
                 Value::String(placed.folder.to_string_lossy().into_owned()),
@@ -119,6 +165,14 @@ impl Sites {
         let Verdict::Forward(bytes) = scope.check(&rewritten) else {
             return scope.check(&rewritten);
         };
+        if request.method != NEW
+            && let Some(session) = request
+                .value
+                .pointer("/params/sessionId")
+                .and_then(Value::as_str)
+        {
+            lock(&self.placed).insert(session.to_owned());
+        }
         if request.method == NEW {
             let mut pending = lock(&self.pending);
             if pending.len() >= MAX_PENDING {
@@ -203,6 +257,11 @@ impl Sites {
         let Some(result) = value.get_mut("result").and_then(Value::as_object_mut) else {
             return Cow::Borrowed(message);
         };
+        if told.is_some()
+            && let Some(session) = result.get("sessionId").and_then(Value::as_str)
+        {
+            lock(&self.placed).insert(session.to_owned());
+        }
         let mut changed = false;
         if let Some(meta) = result.get_mut("_meta").and_then(Value::as_object_mut) {
             changed = meta.remove(SITE_META).is_some();

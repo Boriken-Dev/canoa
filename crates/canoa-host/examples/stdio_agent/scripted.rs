@@ -27,6 +27,7 @@
 //! whether it ended. `--marker=PATH` appends the process id
 //! to PATH each time the agent starts, so a test can tell whether one did.
 //!
+//! `Dirs` says the `additionalDirectories` its session was opened with.
 //! `Meta` says the `_meta` its session request and that prompt carried, as it received them.
 //!
 //! Any HTTP server a session is given with a bearer is kept by name: `CallOn SERVER TOOL JSON` calls its tool and `PromptOn
@@ -95,6 +96,8 @@ struct Shared {
     cwds: Mutex<HashMap<String, String>>,
     /// The `_meta` each session's `session/new` and latest prompt carried, as this agent received them.
     metas: Mutex<HashMap<String, (Value, Value)>>,
+    /// The `additionalDirectories` each session was opened with.
+    directories: Mutex<HashMap<String, Value>>,
     /// Each session's HTTP servers by name: address and bearer.
     servers: Mutex<HashMap<String, NamedServers>>,
     /// How an `https` server is reached: trusting only `--mcp-ca=`'s certificates.
@@ -732,6 +735,13 @@ impl Shared {
                 format!("blocks={count} text={text}")
             }
             "Pid" => format!("pid: {}", std::process::id()),
+            "Dirs" => format!(
+                "dirs: {}",
+                lock(&self.directories)
+                    .get(session)
+                    .cloned()
+                    .unwrap_or_default()
+            ),
             "Meta" => {
                 let (opened, prompted) =
                     lock(&self.metas).get(session).cloned().unwrap_or_default();
@@ -1087,6 +1097,8 @@ impl Shared {
                     params["cwd"].as_str().unwrap_or("").to_owned(),
                 );
                 lock(&self.metas).insert(created.clone(), (params["_meta"].clone(), Value::Null));
+                lock(&self.directories)
+                    .insert(created.clone(), params["additionalDirectories"].clone());
                 for server in params["mcpServers"].as_array().into_iter().flatten() {
                     let bearer = server["headers"]
                         .as_array()
@@ -1275,6 +1287,7 @@ pub fn run(args: &[String]) {
         cwds: Mutex::new(HashMap::new()),
         servers: Mutex::new(HashMap::new()),
         metas: Mutex::new(HashMap::new()),
+        directories: Mutex::new(HashMap::new()),
         tls: option_of(args, "mcp-ca").and_then(|file| trusting(&file)),
     });
     if let Some(marker) = option_of(args, "marker")
