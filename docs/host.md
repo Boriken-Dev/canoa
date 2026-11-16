@@ -339,6 +339,8 @@ credential_variables = ["*TOKEN", "*_API_KEY"]               # variables an inst
 [host.kb]
 embeddings = "http://127.0.0.1:60570"   # an OpenAI-compatible embeddings server; optional
 model = "qwen3-embedding-0.6b-generic-cpu:1"   # the exact id it loaded; required with embeddings
+llm_endpoint = "http://127.0.0.1:60570"       # a chat model that puts the best passages first (the llm search mode); optional
+llm_model = "qwen2.5-1.5b-instruct-generic-cpu:4"   # the exact id it loaded; required with llm_endpoint
 
 [host.agents.claude]
 harness = "claude"

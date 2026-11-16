@@ -7,9 +7,9 @@ description: Search and read the knowledge files that this session's overlays sh
 
 You have tools from the `canoa-kb` MCP server. They only read.
 
-- `kb_search` takes words and returns the passages that match best, each with its file, heading, line range and score. It returns passages, not an answer. Searching by meaning needs the host to have an embeddings server; without one it matches the words you use, so use the words the files are likely to use.
+- `kb_search` takes words and returns the passages that match best, each with its file, heading, line range and score. It returns passages, not an answer. `kb_list` says which modes the host has: `words` matches the words you use, so use the words the files are likely to use; `meaning` matches what is meant and needs an embeddings server; `llm` has the person's own model put the best passages first. Each answer says which mode answered, and why when it is not the one asked for.
 - `kb_read` reads lines of one file by the path and line range a search or list gave, for the text around a passage.
-- `kb_list` names the overlays you can search, how each is searched and their files.
+- `kb_list` names the overlays you can search, their files, the template engines the host renders and the search modes it has.
 
 ## When to use them
 

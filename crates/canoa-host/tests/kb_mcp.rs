@@ -141,7 +141,7 @@ fn work(dir: &Scratch) -> std::path::PathBuf {
 fn lists_searches_and_reads(url: &str, token: &str, by: &str) {
     let list = call(url, token, "kb_list", &json!({}));
     assert_eq!(list["overlays"][0]["overlay"], "team", "{list}");
-    assert_eq!(list["overlays"][0]["served_as_index"], true);
+    assert_eq!(list["overlays"][0]["served"], true);
     let files: Vec<&str> = list["overlays"][0]["files"]
         .as_array()
         .expect("files")
@@ -157,7 +157,7 @@ fn lists_searches_and_reads(url: &str, token: &str, by: &str) {
         &json!({"query": "when do deploys happen", "top": 2}),
     );
     let group = &found["results"][0];
-    assert_eq!(group["matched_by"], by, "{found}");
+    assert_eq!(group["mode"], by, "{found}");
     let best = &group["passages"][0];
     assert_eq!(best["path"], "kb/guide.md", "{found}");
     assert_eq!(best["heading"], "Deployments");
@@ -209,7 +209,7 @@ fn an_overlay_served_as_an_index_is_searched_and_read_and_left_out_of_the_contex
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    assert_eq!(names, ["kb_search", "kb_read", "kb_list"]);
+    assert_eq!(names, ["kb_list", "kb_read", "kb_search"]);
     assert_eq!(
         post(
             url,
@@ -281,7 +281,7 @@ fn with_a_real_embeddings_server_the_agent_finds_a_passage_by_meaning() {
     let started = std::time::Instant::now();
     let list = call(url, token, "kb_list", &json!({}));
     println!("indexed in {:?}: {list}", started.elapsed());
-    assert_eq!(list["overlays"][0]["searched_by"], "meaning and words");
+    assert_eq!(list["search"]["modes"], json!(["words", "meaning"]));
     // No word of the query is in the passage that answers it.
     let found = call(
         url,
@@ -291,8 +291,73 @@ fn with_a_real_embeddings_server_the_agent_finds_a_passage_by_meaning() {
     );
     println!("{found}");
     let group = &found["results"][0];
-    assert_eq!(group["matched_by"], "meaning");
+    assert_eq!(group["mode"], "meaning");
     assert_eq!(group["passages"][0]["path"], "kb/guide.md");
+    drop(link);
+    host.stop();
+}
+
+/// The passages of `found`'s first overlay as `path:from-to`, in the order given.
+fn order_of(found: &Value) -> Vec<String> {
+    found["results"][0]["passages"]
+        .as_array()
+        .expect("passages")
+        .iter()
+        .map(|passage| {
+            format!(
+                "{}:{}-{}",
+                passage["path"].as_str().unwrap_or_default(),
+                passage["from_line"],
+                passage["to_line"]
+            )
+        })
+        .collect()
+}
+
+#[test]
+#[ignore = "needs a chat model loaded on an OpenAI-compatible server (CANOA_TEST_LLM_URL, CANOA_TEST_LLM_MODEL)"]
+fn with_a_real_model_the_llm_mode_orders_the_passages_words_found() {
+    let url = std::env::var("CANOA_TEST_LLM_URL").expect("CANOA_TEST_LLM_URL");
+    let model = std::env::var("CANOA_TEST_LLM_MODEL").expect("CANOA_TEST_LLM_MODEL");
+    let dir = Scratch::new();
+    let work = work(&dir);
+    let more = format!(
+        "[host.kb]
+llm_endpoint = \"{url}\"
+llm_model = \"{model}\"
+llm_timeout_secs = 120
+"
+    );
+    let host = Hosted::start_with_setup(|dir| config(dir, "index", &more), &[]);
+    let link = host.local.open("agent").expect("a link");
+    let (_, bearer) = session_of(&link, true, &work);
+    let (url, token) = bearer.split_once(' ').expect("a bearer");
+    let list = call(url, token, "kb_list", &json!({}));
+    assert_eq!(list["search"]["modes"], json!(["words", "llm"]));
+    let query = "what do we do after a bad release";
+    let words = call(
+        url,
+        token,
+        "kb_search",
+        &json!({"query": query, "mode": "words", "top": 4}),
+    );
+    println!("words: {:?}", order_of(&words));
+    for round in 1..=2 {
+        let started = std::time::Instant::now();
+        let found = call(
+            url,
+            token,
+            "kb_search",
+            &json!({"query": query, "mode": "llm", "top": 4}),
+        );
+        println!(
+            "llm round {round}: {:?} in {:?}; {}",
+            order_of(&found),
+            started.elapsed(),
+            found["results"][0]["note"]
+        );
+        assert_eq!(found["results"][0]["mode"], "llm", "{found}");
+    }
     drop(link);
     host.stop();
 }

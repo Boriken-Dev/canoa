@@ -1,19 +1,22 @@
 //! The indexes the knowledge tools search: one per overlay version, made once in the background and shared by every connection
-//! that applies that version.
+//! that applies that version. The index and its embeddings client are `coqui_aos::index`'s.
 
-use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use coqui_aos::{self as aos, OverlayTree};
-
-use crate::kb::{
-    self, Corpus, Embedder, HttpEmbedder, Index, Options, Settings, index_dir, is_default_path,
-    previous_version, remove_other_versions, variant_dir,
+use coqui_aos::index::{
+    self, Corpus, Embedder, HttpEmbedder, Index, Options, index_dir, previous_version,
+    remove_other_versions, variant_dir,
 };
+use coqui_aos::{
+    self as aos, CallerFacts, Document, KnowledgeOverlay, KnowledgeSettings, KnowledgeTree,
+    OverlayTree, Renderers, TemplateFacts,
+};
+
+use super::rank::Ranker;
 
 /// An installed overlay as one connection applies it.
 #[derive(Clone, Debug)]
@@ -24,24 +27,46 @@ pub(crate) struct Source {
     pub(crate) digest: String,
     /// Its files.
     pub(crate) tree: OverlayTree,
-    /// Whether the person asked for its rules and context to be served as an index and not put in the context.
-    pub(crate) indexed: bool,
+    /// Whether its rules and context are served through the tools and not put in the context.
+    pub(crate) served: bool,
+    /// The values the person gave its declared options, which its templates read.
+    pub(crate) options: Document,
 }
 
-/// How indexes are made: where they live, with what settings and by which embeddings endpoint.
+impl Source {
+    /// The overlay as the knowledge tools take it.
+    pub(crate) fn overlay(&self) -> KnowledgeOverlay {
+        // A tree that does not read as an overlay has no knowledge to declare; what lies where overlays keep it is still served.
+        let manifest = aos::read_overlay(&self.tree, &aos::Settings::default())
+            .map(|read| read.manifest)
+            .unwrap_or_default();
+        let mut tree = KnowledgeTree::new();
+        for path in self.tree.paths() {
+            if let Some(bytes) = self.tree.bytes(path) {
+                tree.insert(path, aos::KnowledgeEntry::File(bytes.to_vec()));
+            }
+        }
+        let mut facts = TemplateFacts::new();
+        facts.options.clone_from(&self.options);
+        KnowledgeOverlay::new(&self.identity, manifest, tree)
+            .served(self.served)
+            .facts(facts)
+    }
+}
+
+/// How indexes are made: where they live, with what settings, by which embeddings endpoint, and what orders passages.
 pub(crate) struct Builder {
     pub(crate) state: PathBuf,
-    pub(crate) settings: Settings,
+    pub(crate) settings: index::Settings,
     pub(crate) embedder: Option<HttpEmbedder>,
+    pub(crate) knowledge: KnowledgeSettings,
+    pub(crate) ranker: Option<Ranker>,
 }
 
 /// An overlay version's index as the tools read it.
 pub(crate) struct Ready {
-    pub(crate) index: Index,
-    /// The files that were indexed, whole, for reading by line range.
-    pub(crate) corpus: Corpus,
-    /// What the passages are scored by: the model's id, or `None` for words.
-    pub(crate) model: Option<String>,
+    /// Where the committed index is: opened for each search, since the backend owns what it searches.
+    pub(crate) dir: PathBuf,
     /// Why the index is not what was configured, when it is not.
     pub(crate) note: Option<String>,
 }
@@ -126,50 +151,31 @@ impl Library {
     }
 }
 
-/// The files of `tree` that make up its knowledge: what its manifest declares as rules and context, and what lies where an
-/// overlay keeps knowledge by default.
-pub(crate) fn corpus_of(tree: &OverlayTree) -> Corpus {
-    let mut declared = BTreeSet::new();
-    if let Ok(read) = aos::read_overlay(tree, &aos::Settings::default()) {
-        declared.extend(aos::rules_of(&read.manifest, tree));
-        declared.extend(aos::context_of(&read.manifest, tree));
-    }
-    let mut corpus = Corpus::new();
-    for path in tree.paths() {
-        if (declared.contains(path) || is_default_path(path))
-            && let Some(bytes) = tree.bytes(path)
-        {
-            // A path the overlay's own tree holds is relative; one the index would refuse is left out.
-            let _ = corpus.insert(path, bytes.to_vec());
-        }
-    }
-    corpus
-}
-
 fn build(builder: &Builder, source: &Source) -> Result<Ready, String> {
-    let corpus = corpus_of(&source.tree);
+    // What a search finds is what `kb_read` serves with no caller: the served text of each knowledge file.
+    let corpus = Corpus::from_overlay(
+        &source.overlay(),
+        &builder.knowledge,
+        &CallerFacts::new(),
+        &Renderers::all(),
+    );
     let version = index_dir(&builder.state, &source.identity, &source.digest);
-    let mut settings = builder.settings.clone();
-    // The corpus is already what the overlay's knowledge is; the index keeps all of it.
-    settings.include = vec!["**/*".to_owned()];
-    let options = Options {
-        source: Some(source.digest.clone()),
-        ..Options::default()
-    };
+    let mut options = Options::default();
+    options.source = Some(source.digest.clone());
     let mut note = None;
     let mut made = None;
     if let Some(embedder) = &builder.embedder {
         let dir = variant_dir(&version, Some(embedder.model()));
         match refresh(
             &dir,
-            &settings,
+            &builder.settings,
             &corpus,
             Some(embedder),
             &options,
             &builder.state,
             source,
         ) {
-            Ok(()) => made = Some((dir, Some(embedder.model().to_owned()))),
+            Ok(()) => made = Some(dir),
             Err(error) => {
                 note = Some(format!(
                     "embeddings are not available ({error}); searching by words"
@@ -177,13 +183,13 @@ fn build(builder: &Builder, source: &Source) -> Result<Ready, String> {
             }
         }
     }
-    let (dir, model) = match made {
+    let dir = match made {
         Some(made) => made,
         None => {
             let dir = variant_dir(&version, None);
             refresh(
                 &dir,
-                &settings,
+                &builder.settings,
                 &corpus,
                 None,
                 &options,
@@ -191,29 +197,25 @@ fn build(builder: &Builder, source: &Source) -> Result<Ready, String> {
                 source,
             )
             .map_err(|error| error.to_string())?;
-            (dir, None)
+            dir
         }
     };
-    let index = Index::open(&dir).map_err(|error| error.to_string())?;
+    // The index is read once to know it is whole.
+    Index::open(&dir).map_err(|error| error.to_string())?;
     // Earlier versions are of no use once this one is whole; a failure to remove one is left for the next version.
     let _ = remove_other_versions(&builder.state, &source.identity, &source.digest);
-    Ok(Ready {
-        index,
-        corpus,
-        model,
-        note,
-    })
+    Ok(Ready { dir, note })
 }
 
 fn refresh(
-    dir: &std::path::Path,
-    settings: &Settings,
+    dir: &Path,
+    settings: &index::Settings,
     corpus: &Corpus,
     embedder: Option<&dyn Embedder>,
     options: &Options,
-    state: &std::path::Path,
+    state: &Path,
     source: &Source,
-) -> Result<(), kb::Error> {
+) -> Result<(), index::Error> {
     let variant = dir
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())

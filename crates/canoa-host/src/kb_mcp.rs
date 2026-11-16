@@ -1,5 +1,6 @@
 //! The `canoa-kb` MCP server: what lets an agent search, list and read the knowledge files of the overlays its session has
-//! (`kb_search`, `kb_list`, `kb_read`), by the index of `crate::kb`.
+//! (`kb_search`, `kb_list`, `kb_read`). coqui-aos answers the tools and makes the indexes; this holds what a host adds: the
+//! loopback server and its bearers, the configuration, the indexes' place and the `llm` search mode.
 //!
 //! It is offered the way `canoa-store` is. A client asks for it in `initialize` (`_meta["dev.boriken.canoa/kb"]` true), the host
 //! adds one server to each session request over loopback HTTP behind a bearer minted for that session or, for an agent that
@@ -14,6 +15,8 @@
 
 mod http;
 mod library;
+mod rank;
+mod search;
 mod tools;
 
 use core::time::Duration;
@@ -22,15 +25,17 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use coqui_aos::index::{HttpEmbedder, Settings};
+use coqui_aos::{CallerFacts, KnowledgeOverlay, KnowledgeSettings};
 use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
 pub(crate) use self::library::Source;
 use self::library::{Builder, Library, Slot};
+use self::rank::Ranker;
 use crate::config::KbConfig;
 use crate::delegate::BridgeCommand;
-use crate::kb::{Embedder, Settings};
 
 /// The `_meta` key of `initialize` that asks for the knowledge tools.
 pub(crate) const META: &str = "dev.boriken.canoa/kb";
@@ -39,10 +44,28 @@ pub(crate) const SERVER_NAME: &str = "canoa-kb";
 /// The built-in skill that says when to use the tools, delivered with a session that has them.
 pub(crate) const SKILL_NAME: &str = "canoa-kb";
 const SKILL: &str = include_str!("kb_mcp/canoa-kb.md");
+/// The most passages the model of the `llm` mode is shown, when `[host.kb]` does not say.
+const DEFAULT_CANDIDATES: usize = 10;
+/// How long the model of the `llm` mode has to order them, when `[host.kb]` does not say.
+const DEFAULT_LLM_SECS: u64 = 30;
 /// Requests the host remembers an answer for.
 const MAX_PENDING: usize = 64;
 /// Sessions of one connection that hold a bearer.
 const MAX_SESSIONS: usize = 256;
+
+/// The key held in the variable `[host.kb] <setting>` names, for the server of `what`.
+fn key_from(setting: &str, name: Option<&str>, what: &str) -> Option<String> {
+    let name = name?;
+    match std::env::var(name) {
+        Ok(key) if !key.is_empty() => Some(key),
+        _ => {
+            tracing::warn!(
+                "[host.kb] {setting} names {name}, which is not set: the {what} server is asked with no key"
+            );
+            None
+        }
+    }
+}
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -74,9 +97,40 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
+/// Who the agent is to the templates of the knowledge it reads: what the connection's profile and loadout are, and the
+/// variables the profile shares.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Caller {
+    /// The loadout the connection started with.
+    pub(crate) role: Option<String>,
+    /// The profile it applies.
+    pub(crate) profile: Option<String>,
+    /// The variables the profile shares and their values; a sensitive one is never given to a template.
+    pub(crate) env: Vec<(String, String)>,
+}
+
+impl Caller {
+    fn facts(&self) -> CallerFacts {
+        let mut facts = CallerFacts::new();
+        if let Some(role) = &self.role {
+            facts = facts.role(role);
+        }
+        if let Some(profile) = &self.profile {
+            facts = facts.profile(profile);
+        }
+        for (name, value) in &self.env {
+            facts = facts.env(name, value).allow(name);
+        }
+        facts
+    }
+}
+
 /// What one bearer may do: read the knowledge of the overlays its connection applies.
 pub(crate) struct Access {
     sources: Vec<Source>,
+    /// The sources as the knowledge tools take them, in the same order.
+    overlays: Vec<KnowledgeOverlay>,
+    caller: CallerFacts,
     builder: Arc<Builder>,
     library: Arc<Library>,
     calls: AtomicUsize,
@@ -86,14 +140,6 @@ impl Access {
     /// The index of `source`'s version, started the first time anyone asks.
     fn slot(&self, source: &Source) -> Arc<Slot> {
         self.library.slot(&self.builder, source)
-    }
-
-    /// The server's embeddings, when the person named one.
-    fn embedder(&self) -> Option<&dyn Embedder> {
-        self.builder
-            .embedder
-            .as_ref()
-            .map(|embedder| embedder as &dyn Embedder)
     }
 }
 
@@ -139,6 +185,8 @@ impl Hub {
         bridge: BridgeCommand,
     ) -> Arc<Self> {
         let mut settings = Settings::default();
+        // The knowledge of a served overlay is every file the tools serve, whatever its name.
+        settings.include = vec!["**/*".to_owned()];
         if let Some(bytes) = config.chunk_bytes {
             settings.chunk_bytes = bytes;
         }
@@ -152,22 +200,39 @@ impl Hub {
             .as_deref()
             .zip(config.model.as_deref())
             .map(|(address, model)| {
-                let mut embedder = crate::kb::HttpEmbedder::new(address, model);
-                if let Some(name) = &config.api_key_env {
-                    match std::env::var(name) {
-                        Ok(key) if !key.is_empty() => embedder = embedder.with_bearer(key),
-                        _ => tracing::warn!(
-                            "[host.kb] api_key_env names {name}, which is not set: the embeddings server is asked with no key"
-                        ),
-                    }
+                let mut embedder = HttpEmbedder::new(address, model);
+                if let Some(key) =
+                    key_from("api_key_env", config.api_key_env.as_deref(), "embeddings")
+                {
+                    embedder = embedder.with_bearer(key);
                 }
                 embedder
+            });
+        let ranker = config
+            .llm_endpoint
+            .as_deref()
+            .zip(config.llm_model.as_deref())
+            .map(|(address, model)| {
+                let mut ranker = Ranker::new(
+                    address,
+                    model,
+                    config.llm_candidates.unwrap_or(DEFAULT_CANDIDATES),
+                    Duration::from_secs(config.llm_timeout_secs.unwrap_or(DEFAULT_LLM_SECS)),
+                );
+                if let Some(key) =
+                    key_from("llm_api_key_env", config.llm_api_key_env.as_deref(), "llm")
+                {
+                    ranker = ranker.with_bearer(key);
+                }
+                ranker
             });
         let builder = state.map(|state| {
             Arc::new(Builder {
                 state,
                 settings,
                 embedder,
+                knowledge: KnowledgeSettings::default(),
+                ranker,
             })
         });
         Arc::new(Self {
@@ -192,10 +257,12 @@ impl Hub {
     }
 
     /// The knowledge tools of one connection that applies `sources`, or `None` when they are off, there is no state to keep
-    /// indexes in, or no overlay has knowledge. `asked` is whether the client's `initialize` asked for them.
+    /// indexes in, or no overlay has knowledge. `asked` is whether the client's `initialize` asked for them; `caller` is who
+    /// its templates see.
     pub(crate) fn for_connection(
         self: &Arc<Self>,
         sources: Vec<Source>,
+        caller: &Caller,
         asked: bool,
     ) -> Option<Arc<Link>> {
         let builder = self.builder.as_ref().filter(|_| self.enabled && asked)?;
@@ -205,7 +272,9 @@ impl Hub {
         Some(Arc::new(Link {
             hub: Arc::clone(self),
             access: Arc::new(Access {
+                overlays: sources.iter().map(Source::overlay).collect(),
                 sources,
+                caller: caller.facts(),
                 builder: Arc::clone(builder),
                 library: Arc::clone(&self.library),
                 calls: AtomicUsize::new(0),

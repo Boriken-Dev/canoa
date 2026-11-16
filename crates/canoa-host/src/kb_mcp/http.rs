@@ -41,9 +41,12 @@ impl Service for Served {
         if self.hub.upgrade().is_none() {
             return Answer::Unavailable;
         }
-        loopback::rpc(SERVER_NAME, message, tools::list, |name, arguments| {
-            Ok(tools::call(access, name, arguments))
-        })
+        loopback::rpc(
+            SERVER_NAME,
+            message,
+            || tools::list(access),
+            |name, arguments| Ok(tools::call(access, name, arguments)),
+        )
         .map_or(Answer::Accepted, Answer::Json)
     }
 }

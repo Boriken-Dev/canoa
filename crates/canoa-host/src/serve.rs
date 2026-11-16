@@ -2393,9 +2393,11 @@ fn give_agent<C: Channel>(
     // The overlays this connection applies, searchable by the agent when its client asked: it is then given the tools and a skill
     // that says when to use them, and an overlay set to be served as an index leaves its files out of the context.
     let kb = connection.as_ref().and_then(|connection| {
-        shared
-            .kb_tools
-            .for_connection(connection.kb_sources(), kb_mcp::asked_in(first))
+        shared.kb_tools.for_connection(
+            connection.kb_sources(),
+            &connection.kb_caller(),
+            kb_mcp::asked_in(first),
+        )
     });
     let connection = connection.map(|connection| {
         if kb.is_some() {

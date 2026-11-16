@@ -290,6 +290,9 @@ struct ReadOverlay {
     /// The digest its install record names, which the files were checked against.
     digest: String,
     tree: OverlayTree,
+    /// Whether its rules and context are served through the knowledge tools: the person's `kb` choice, else its own
+    /// `[knowledge] serve` hint.
+    serve: bool,
     /// The skills it names from elsewhere that the app fetched and that passed the checks, by the name it gives each:
     /// their files by path.
     fetched: BTreeMap<String, BTreeMap<String, Vec<u8>>>,
@@ -377,9 +380,13 @@ pub(crate) struct Connection {
     skills: private::Private,
     /// Whether the client is this process's own link, the only one the host asks to approve servers.
     in_process: bool,
-    /// Whether this connection's sessions are given the knowledge tools, so an overlay set to `kb = "index"` is served through
-    /// them and not put in the context.
+    /// Whether this connection's sessions are given the knowledge tools, so an overlay that is served through them is not
+    /// put in the context.
     kb_tools: bool,
+    /// The loadout this connection started with, the role the knowledge tools tell a template the agent is in.
+    role: Option<String>,
+    /// The variables the profile shares, with the values the host has, for the same templates.
+    shared_env: Vec<(String, String)>,
     /// The host's own program and what goes before its subcommand: how a harness's hooks run the forwarder.
     launcher: OsString,
     before: Vec<OsString>,
@@ -421,6 +428,7 @@ impl Connection {
         let resolved = listed
             .resolve_loadout(loadout)
             .map_err(|error| error.to_string())?;
+        let role = resolved.as_ref().map(|resolved| resolved.name.clone());
         // The overlays the client named win over the loadout's.
         let from_loadout: Option<Vec<String>> = resolved.as_ref().map(|resolved| {
             resolved
@@ -476,6 +484,11 @@ impl Connection {
         let chosen = read_chosen(host, &mut notes);
         let layers = layers_of(host, &overlays, &chosen, None, &mut notes);
         let effective = merge(&layers);
+        let shared_env = effective
+            .share_env
+            .keys()
+            .filter_map(|name| lookup(name).map(|value| (name.clone(), value)))
+            .collect();
         let mut hooks = Hooks::new(
             host,
             &effective.aos,
@@ -571,6 +584,8 @@ impl Connection {
             skills,
             in_process: false,
             kb_tools: false,
+            role,
+            shared_env,
             launcher: offer.launcher.clone(),
             before: offer.before.clone(),
         })
@@ -590,7 +605,7 @@ impl Connection {
     }
 
     /// The overlays this connection applies, as the knowledge tools read them: each with the digest its files were checked
-    /// against and whether the person asked for it to be served as an index.
+    /// against and whether its rules and context are served through the tools.
     pub(crate) fn kb_sources(&self) -> Vec<crate::kb_mcp::Source> {
         self.overlays
             .iter()
@@ -598,16 +613,35 @@ impl Connection {
                 identity: overlay.identity.clone(),
                 digest: overlay.digest.clone(),
                 tree: overlay.tree.clone(),
-                indexed: self.host.kb_index.contains(&overlay.identity),
+                served: overlay.serve,
+                options: self
+                    .host
+                    .options
+                    .get(&overlay.identity)
+                    .cloned()
+                    .unwrap_or_default(),
             })
             .collect()
     }
 
-    /// Whether `context` is an overlay's file that is served as an index to search and so not put in the context.
+    /// Who is asking, for the templates of the knowledge the tools serve: the profile, the loadout as the role, and the
+    /// variables the profile shares.
+    pub(crate) fn kb_caller(&self) -> crate::kb_mcp::Caller {
+        crate::kb_mcp::Caller {
+            role: self.role.clone(),
+            profile: Some(self.name.clone()),
+            env: self.shared_env.clone(),
+        }
+    }
+
+    /// Whether `context` is an overlay's file that is served through the knowledge tools and so not put in the context.
     fn served_as_index(&self, context: &Sourced<Context>) -> bool {
         self.kb_tools
             && context.layer.kind == LayerKind::Overlay
-            && self.host.kb_index.contains(&context.layer.name)
+            && self
+                .overlays
+                .iter()
+                .any(|overlay| overlay.identity == context.layer.name && overlay.serve)
             && matches!(context.value, Context::File(_) | Context::Template(_))
     }
 
@@ -694,11 +728,15 @@ fn read_overlays(host: &HostProfile, notes: &mut Vec<Item>) -> Vec<ReadOverlay> 
             }
         };
         let fetched = fetched_skills(&store, identity, &tree, &layer, &host.skill_pins, notes);
+        let serve = aos::read_overlay(&tree, &Settings::default()).is_ok_and(|read| {
+            aos::knowledge_plan(&read.manifest, &tree, host.kb_choice.get(identity).copied()).served
+        });
         out.push(ReadOverlay {
             identity: identity.clone(),
             root: root.to_string_lossy().into_owned(),
             digest: expected.to_owned(),
             tree,
+            serve,
             fetched,
         });
     }

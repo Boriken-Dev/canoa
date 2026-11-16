@@ -1358,13 +1358,16 @@ fn a_session_starts_with_exactly_the_overlays_and_servers_of_its_loadout() {
     let offer = loadout_offer(&temp, LOADOUTS);
 
     // The default loadout, when the session names none: its overlay, and the person's servers it does not name are off.
-    let (_, full) = loadout_report(&offer, None);
+    let (connection, full) = loadout_report(&offer, None);
+    // The loadout is the role the knowledge tools tell a template the agent is in.
+    assert_eq!(connection.kb_caller().role.as_deref(), Some("full"));
     assert_eq!(item(&full, "mcp.team")["state"], "off", "{full}");
     assert_ne!(item(&full, "mcp.own")["state"], "off", "{full}");
     assert_eq!(item(&full, "mcp.spare")["state"], "off", "{full}");
 
     // Another loadout by name: no overlay, so nothing of `team` applies; its own server, and one the profile lacks.
-    let (_, lean) = loadout_report(&offer, Some("lean"));
+    let (named, lean) = loadout_report(&offer, Some("lean"));
+    assert_eq!(named.kb_caller().role.as_deref(), Some("lean"));
     assert_eq!(item(&lean, "overlay")["state"], "off", "{lean}");
     assert_eq!(item(&lean, "overlay")["layer"], "overlay:team", "{lean}");
     assert!(
@@ -1647,7 +1650,7 @@ fn an_overlay_served_as_an_index_leaves_its_files_out_of_the_context_only_when_t
 
     let sources = connection.kb_sources();
     assert_eq!(sources.len(), 1);
-    assert!(sources[0].indexed);
+    assert!(sources[0].served);
     assert_eq!(sources[0].identity, "docs");
     assert_eq!(
         sources[0].digest,
@@ -1664,6 +1667,49 @@ fn an_overlay_served_as_an_index_leaves_its_files_out_of_the_context_only_when_t
             prompt_of(&parts).contains("Prefer short functions."),
             "{option}"
         );
-        assert!(!connection.kb_sources()[0].indexed);
+        assert!(!connection.kb_sources()[0].served);
     }
+}
+
+#[test]
+fn an_overlays_own_hint_serves_its_knowledge_until_the_person_says_files() {
+    let hinted = format!("{OPTIONS_MANIFEST}[knowledge]\nserve = true\n");
+    let files = [
+        ("overlay.cfg", hinted.as_str()),
+        ("rules/style.md", "Prefer short functions.\n"),
+    ];
+    // No `kb` key: the overlay's hint decides, and the tools being given is what leaves the files out.
+    let (_temp, connection, _parts) = docs_parts(&files, "");
+    assert!(connection.kb_sources()[0].served);
+    let connection = connection.with_kb_tools();
+    let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
+    assert!(!prompt_of(&parts).contains("Prefer short functions."));
+    // The person's `files` wins over the hint, and `index` over its absence.
+    let (_temp, connection, _parts) = docs_parts(&files, "kb = \"files\"");
+    assert!(!connection.kb_sources()[0].served);
+    let connection = connection.with_kb_tools();
+    let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
+    assert!(prompt_of(&parts).contains("Prefer short functions."));
+    let plain = [
+        ("overlay.cfg", OPTIONS_MANIFEST),
+        ("rules/style.md", "Prefer short functions.\n"),
+    ];
+    let (_temp, connection, _parts) = docs_parts(&plain, "");
+    assert!(!connection.kb_sources()[0].served);
+}
+
+#[test]
+fn the_knowledge_tools_are_told_the_profile_the_loadout_and_the_variables_it_shares() {
+    let files = [("overlay.cfg", OPTIONS_MANIFEST)];
+    let (_temp, connection, _parts) = docs_parts(&files, "");
+    let caller = connection.kb_caller();
+    assert_eq!(caller.profile.as_deref(), Some("main"));
+    assert_eq!(caller.role, None, "no loadout was named");
+    // `lookup` gives HOST_SECRET, the variable the profile shares.
+    assert!(
+        caller.env.iter().any(|(name, _)| name == "HOST_SECRET"),
+        "{:?}",
+        caller.env.iter().map(|(name, _)| name).collect::<Vec<_>>()
+    );
+    assert!(caller.env.iter().all(|(name, _)| name == "HOST_SECRET"));
 }

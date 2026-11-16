@@ -118,9 +118,10 @@ pub struct LocalProfiles {
     pub skill_pins: BTreeMap<String, String>,
     /// `[overlays.NAME] options`: the values the person gave an overlay's declared options, by overlay name.
     pub options: BTreeMap<String, coqui_aos::Document>,
-    /// `[overlays.NAME] kb = "index"`: the overlays whose declared rules and context files are served as an index the agent
-    /// searches (the `canoa-kb` tools) instead of being put in its context whole. `kb = "files"`, or no key, keeps them whole.
-    pub kb_index: BTreeSet<String>,
+    /// `[overlays.NAME] kb = "index" or "files"`: whether the overlay's declared rules and context files are served through the
+    /// `canoa-kb` tools instead of being put in its context whole (`true`) or kept whole (`false`). An overlay with no key follows
+    /// its own `[knowledge] serve` hint.
+    pub kb_choice: BTreeMap<String, bool>,
     /// `[loadouts.NAME]`: the named collections of overlays, skills and MCP servers a session may start with, in the file's order.
     pub loadouts: IndexMap<String, Loadout>,
     /// `[defaults] loadout`: the loadout a session starts with when it names none.
@@ -268,7 +269,7 @@ impl LocalProfiles {
             directory: self.directory.clone(),
             skill_pins: self.skill_pins.clone(),
             options: self.options.clone(),
-            kb_index: self.kb_index.clone(),
+            kb_choice: self.kb_choice.clone(),
             chosen_skills: Vec::new(),
             loadouts: self.loadouts.clone(),
             default_loadout: self.default_loadout.clone(),
@@ -440,6 +441,17 @@ pub struct KbConfig {
     pub chunk_bytes: Option<usize>,
     /// `overlap_bytes`: the most bytes of whole lines adjacent passages share (default 0).
     pub overlap_bytes: Option<usize>,
+    /// `llm_endpoint`: the address of an OpenAI-compatible server whose model orders the best passages of a search (the `llm`
+    /// mode); the passages and the query are sent to it.
+    pub llm_endpoint: Option<String>,
+    /// `llm_model`: the exact model id that server loaded; required with `llm_endpoint`.
+    pub llm_model: Option<String>,
+    /// `llm_api_key_env`: the name of a variable holding a key that server asks for, sent as a bearer.
+    pub llm_api_key_env: Option<String>,
+    /// `llm_candidates`: the most passages the model is shown (default 10, 1 to 100).
+    pub llm_candidates: Option<usize>,
+    /// `llm_timeout_secs`: how long one ordering may take before the search answers without it (default 30).
+    pub llm_timeout_secs: Option<u64>,
 }
 
 /// `[host.delegate]`: what an agent session may hand to another source, as tasks the host runs. Every limit is a setting with a
@@ -696,8 +708,8 @@ pub struct HostProfile {
     /// `[overlays.NAME] options`: the values the person gave an overlay's declared options, by overlay name. The overlay's
     /// manifest says which exist and of what type; a value of another type refuses the text that reads it.
     pub options: BTreeMap<String, coqui_aos::Document>,
-    /// `[overlays.NAME] kb = "index"`: see [`LocalProfiles::kb_index`].
-    pub kb_index: BTreeSet<String>,
+    /// `[overlays.NAME] kb = "index"`: see [`LocalProfiles::kb_choice`].
+    pub kb_choice: BTreeMap<String, bool>,
     /// The skills the session's loadout names, for the host's own sources only: each is delivered from the app's record of it
     /// when the record and the files agree. Empty until a connection resolves its loadout.
     pub chosen_skills: Vec<String>,
@@ -1253,6 +1265,11 @@ struct RawKb {
     query_prefix: Option<String>,
     chunk_bytes: Option<usize>,
     overlap_bytes: Option<usize>,
+    llm_endpoint: Option<String>,
+    llm_model: Option<String>,
+    llm_api_key_env: Option<String>,
+    llm_candidates: Option<usize>,
+    llm_timeout_secs: Option<u64>,
 }
 
 impl RawKb {
@@ -1272,6 +1289,27 @@ impl RawKb {
             }
         } else if self.model.is_some() || self.api_key_env.is_some() {
             return Err(invalid("model and api_key_env need embeddings"));
+        }
+        if let Some(address) = &self.llm_endpoint {
+            let parsed =
+                url::Url::parse(address).map_err(|_| invalid("llm_endpoint is not an address"))?;
+            if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+                return Err(invalid("llm_endpoint is an http or https address"));
+            }
+            if self.llm_model.as_deref().is_none_or(str::is_empty) {
+                return Err(invalid("llm_endpoint needs the model its server loaded"));
+            }
+        } else if self.llm_model.is_some() || self.llm_api_key_env.is_some() {
+            return Err(invalid("llm_model and llm_api_key_env need llm_endpoint"));
+        }
+        if self
+            .llm_candidates
+            .is_some_and(|count| !(1..=100).contains(&count))
+        {
+            return Err(invalid("llm_candidates is 1 to 100"));
+        }
+        if self.llm_timeout_secs == Some(0) {
+            return Err(invalid("llm_timeout_secs is at least 1"));
         }
         let chunk = self.chunk_bytes.unwrap_or(1024);
         if !(4..=65536).contains(&chunk) {
@@ -1294,6 +1332,11 @@ impl RawKb {
             query_prefix: self.query_prefix,
             chunk_bytes: self.chunk_bytes,
             overlap_bytes: self.overlap_bytes,
+            llm_endpoint: self.llm_endpoint,
+            llm_model: self.llm_model,
+            llm_api_key_env: self.llm_api_key_env,
+            llm_candidates: self.llm_candidates,
+            llm_timeout_secs: self.llm_timeout_secs,
         })
     }
 }
@@ -1541,8 +1584,8 @@ impl Config {
         local_profiles.skill_pins.clone_from(&skill_pins);
         let options = overlay_options_of(&raw.overlays)?;
         local_profiles.options.clone_from(&options);
-        let kb_index = overlay_kb_of(&raw.overlays)?;
-        local_profiles.kb_index.clone_from(&kb_index);
+        let kb_choice = overlay_kb_of(&raw.overlays)?;
+        local_profiles.kb_choice.clone_from(&kb_choice);
         local_profiles.loadouts = loadouts_of(&raw.loadouts)?;
         local_profiles.default_loadout =
             default_loadout_of(raw.defaults.as_ref(), &local_profiles.loadouts)?;
@@ -1572,7 +1615,7 @@ impl Config {
             let mut profile = profile_of(&name, table, &directory)?;
             profile.skill_pins.clone_from(&skill_pins);
             profile.options.clone_from(&options);
-            profile.kb_index.clone_from(&kb_index);
+            profile.kb_choice.clone_from(&kb_choice);
             profile.protected.clone_from(&protected_paths);
             profiles.insert(name, profile);
         }
@@ -2451,7 +2494,7 @@ fn profile_of(
         directory: directory.to_owned(),
         skill_pins: BTreeMap::new(),
         options: BTreeMap::new(),
-        kb_index: BTreeSet::new(),
+        kb_choice: BTreeMap::new(),
         chosen_skills: Vec::new(),
         loadouts: IndexMap::new(),
         default_loadout: None,
@@ -2539,7 +2582,7 @@ fn local_profiles_of(
         directory,
         skill_pins: BTreeMap::new(),
         options: BTreeMap::new(),
-        kb_index: BTreeSet::new(),
+        kb_choice: BTreeMap::new(),
         loadouts: IndexMap::new(),
         default_loadout: None,
         protected: None,
@@ -2701,21 +2744,23 @@ fn overlay_options_of(
     Ok(out)
 }
 
-/// `[overlays.NAME] kb`: `"index"` serves the overlay's knowledge as an index to search, `"files"` (the default) puts it in the
-/// context whole. The names with `"index"`.
+/// `[overlays.NAME] kb`: `"index"` serves the overlay's knowledge through the `canoa-kb` tools, `"files"` puts it in the context
+/// whole. An overlay with no key is absent: its own `[knowledge] serve` hint decides.
 fn overlay_kb_of(
     overlays: &IndexMap<String, toml::Value>,
-) -> Result<BTreeSet<String>, ConfigError> {
-    let mut out = BTreeSet::new();
+) -> Result<BTreeMap<String, bool>, ConfigError> {
+    let mut out = BTreeMap::new();
     for (name, entry) in overlays {
         let Some(choice) = entry.as_table().and_then(|entry| entry.get("kb")) else {
             continue;
         };
         match choice.as_str() {
             Some("index") => {
-                out.insert(name.clone());
+                out.insert(name.clone(), true);
             }
-            Some("files") => {}
+            Some("files") => {
+                out.insert(name.clone(), false);
+            }
             _ => {
                 return Err(ConfigError::Invalid {
                     entry: None,

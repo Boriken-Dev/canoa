@@ -54,7 +54,7 @@ coqui-acp-secrets.workspace = true
 coqui-acp-harness.workspace = true
 coqui-acp-history.workspace = true
 coqui-acp-provider.workspace = true
-coqui-aos.workspace = true
+coqui-aos = { workspace = true, features = ["index", "embeddings"] }
 coqui-a2a.workspace = true
 coqui-agentic-peer.workspace = true
 coqui-peer.workspace = true
@@ -75,7 +75,6 @@ if-addrs.workspace = true
 indexmap.workspace = true
 percent-encoding.workspace = true
 # The include and exclude filters of a knowledge index.
-globset.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
