@@ -184,6 +184,12 @@ pub fn send(link: &Link, message: &Value) {
     link.send(message.to_string().as_bytes()).expect("sent");
 }
 
+/// Like `send`, but returns the failure: a link the host turned away may already be closed.
+pub fn try_send(link: &Link, message: &Value) -> Result<(), String> {
+    link.send(message.to_string().as_bytes())
+        .map_err(|failure| failure.to_string())
+}
+
 /// The next message the agent sent, or why there is none.
 pub fn next(link: &Link) -> Result<Value, String> {
     let until = Instant::now() + WAIT;

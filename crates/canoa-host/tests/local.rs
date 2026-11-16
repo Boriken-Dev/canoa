@@ -12,7 +12,7 @@ mod support;
 use std::time::{Duration, Instant};
 
 use canoa_host::LocalError;
-use linked::{Hosted, ask, entry, next, open_session, said, send};
+use linked::{Hosted, ask, entry, next, open_session, said, try_send};
 use serde_json::json;
 use support::{WAIT, cwd, running};
 
@@ -97,11 +97,15 @@ fn entries_with_max_peers_take_no_more_links_than_they_allow() {
         .local
         .open("fixture")
         .expect("opens, then is turned away");
-    send(
+    // Under load the host may close the second link before the request is sent:
+    // a failed send is the same refusal.
+    let sent = try_send(
         &second,
         &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}}),
     );
-    assert!(next(&second).is_err(), "the second is closed");
+    if sent.is_ok() {
+        assert!(next(&second).is_err(), "the second is closed");
+    }
     drop(first);
     host.stop();
 }
