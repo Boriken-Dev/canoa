@@ -1558,6 +1558,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// The agent took a choice the person made: it is the source's default from now on.
   void _chosen(ChatSession session, OptionRole role, String value) {
+    // A switch inside a conversation is one quiet line in it; the first choices, made before the conversation began, are not.
+    if ((role == OptionRole.model || role == OptionRole.effort) && !session.isDraft && !isStarting(session) && !session.opening && session.messages.isNotEmpty) {
+      final choice = optionIn(session.options, role)?.choices.where((each) => each.value == value).firstOrNull;
+      session.chat.note('${role == OptionRole.model ? 'Model' : 'Effort'}: ${choiceLabel(role, choice ?? Choice(value, value))}');
+    }
     final source = session.source;
     if (source == null) return;
     ledger?.rememberChoice(sourceKey(source), role, value);
@@ -1689,6 +1694,76 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   void _takeHostReport(ChatSession session, AcpOpenedSession opened) {
     final meta = opened.raw['_meta'];
     session.hostReport = meta is Map ? meta[hostProfileMeta] : null;
+  }
+
+  /// Why [session] cannot go on under another account now; null when it can. [portable] is what the provider says of the kind of
+  /// account the conversation began on (null when the host has not said).
+  String? accountSwitchBlock(ChatSession session, {required bool? portable}) {
+    if (session.isDraft) return null;
+    final client = _clients[session.id];
+    if (session.status == SessionStatus.preview || session.site != null || session.place == SessionPlace.browser) {
+      return 'This conversation cannot be moved to another account.';
+    }
+    if (session.status == SessionStatus.connecting || session.opening) return 'Wait for the agent to finish starting.';
+    if (session.status == SessionStatus.working) return 'Wait for the turn to end, or stop it.';
+    if (session.needsYou) return 'Answer what the agent asked first.';
+    if (client == null || client.isClosed) return 'The agent is not connected.';
+    if (session.remoteSessionId == null || session.cwd == null || client.identity.reopenBy == null || !client.canReopenSessions) {
+      return 'The agent cannot open this conversation again, which a new account needs.';
+    }
+    if (portable == null) return 'The host has not said whether this kind of account lets a conversation move to another.';
+    if (!portable) return 'This kind of account keeps its conversations to itself. A new conversation can use another account.';
+    return null;
+  }
+
+  /// Moves the running [session] to [account]: its agent is started again for that account through [start], which is given the
+  /// session with its new account set, and the same conversation is opened on it, with the model, effort and mode it was in. The
+  /// old agent ends once nothing else uses it. On failure the conversation stays as it was, and says why. Answers whether it moved.
+  Future<bool> switchAccount(
+    ChatSession session,
+    String account, {
+    required bool? portable,
+    required Future<VerifiedAgent> Function(ChatSession session) start,
+    bool expected = false,
+  }) async {
+    final before = session.account;
+    if (before == account) return true;
+    final block = accountSwitchBlock(session, portable: portable);
+    if (block != null) {
+      session.chat.note('Account: not moved to $account. $block');
+      return false;
+    }
+    final old = _clients[session.id]!;
+    final remote = session.remoteSessionId!, cwd = session.cwd!;
+    session.account = account;
+    VerifiedAgent? client;
+    try {
+      client = await start(session);
+      for (final role in const [OptionRole.model, OptionRole.effort]) {
+        final option = optionIn(session.options, role);
+        if (option != null && option.current.isNotEmpty) session.chat.holdChoice(PendingChoice(option.id, role, option.current));
+      }
+      final keptMode = session.chat.underlyingMode ?? session.chat.mode, keptBypass = session.bypass;
+      attachVerifiedClient(session.id, client, record: false);
+      final opened = await session.chat.reopen(() => client!.reopenSession(remote, cwd: cwd, setup: session.setup), keptMode: keptMode, keptBypass: keptBypass);
+      _takeHostReport(session, opened);
+      await applyHostProfile(session, expected: expected, keptMode: keptMode);
+      _record(session, client);
+    } catch (error) {
+      session.account = before;
+      session.chat.dropChoices(where: (choice) => choice.role == OptionRole.model || choice.role == OptionRole.effort);
+      if (client != null) {
+        if (!old.isClosed) attachVerifiedClient(session.id, old, record: false);
+        await client.close();
+      }
+      session.chat.note('Account: not moved to $account: ${reasonOf(error)}. This conversation stays on ${before ?? 'its first account'}.');
+      notifyListeners();
+      return false;
+    }
+    if (!_clients.values.contains(old)) await old.close();
+    session.chat.note('Account: ${before ?? 'the first'} → $account. The agent was started again on it and picked this conversation up.');
+    notifyListeners();
+    return true;
   }
 
   /// A person's choice of one of the agent's options. It goes to the agent now when it can take it; before the agent starts, or

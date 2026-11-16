@@ -1556,54 +1556,17 @@ class _CanoaAppState extends State<CanoaApp> {
     final why = entry.whyNotReopened;
     if (why != null) throw StateError(why);
     await _findWorktree(entry);
-    final VerifiedAgent client;
-    switch (entry.place) {
-      case SessionPlace.local when _hostedSources.any((source) => source.local && source.label == entry.entry) ||
-          (_accounts?.offeredBy(entry.entry).isNotEmpty ?? false):
-        client = await _linkAgent(entry.entry, {
-          ..._cacheMeta((
-            lifetime: CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat,
-            chosen: entry.cacheLifetime != null,
-          )),
-          if (entry.overlays case final started?) overlaysMeta: _overlaysNamed(started.toSet()),
-          ..._accountMeta(entry.account),
-        });
-      case SessionPlace.local:
-        throw StateError('${entry.entry} is not one of the sources of this computer now');
-      case SessionPlace.host || SessionPlace.peer:
-        final endpoint = Uri.tryParse(entry.endpoint ?? '');
-        final method = PeerMethod.values.where((method) => method.id == entry.method).firstOrNull;
-        if (endpoint == null || method == null) throw StateError('Canoa did not note how to reach that peer');
-        final overWebTransport = endpoint.scheme == 'https';
-        final cacheMeta = {
-          ..._cacheMeta((
-            lifetime: CacheLifetime.named(entry.cacheLifetime) ?? CacheLifetime.chat,
-            chosen: entry.cacheLifetime != null,
-          )),
-          if (widget.served != null)
-            if (entry.overlays case final started?) overlaysMeta: _overlaysNamed(started.toSet()),
-        };
-        client = isPipeUrl(endpoint.toString())
-            ? await connectBrowserAcpOverPipe(
-                endpoint.toString(), pinnedPeerId: entry.peerId, method: method,
-                timeout: Duration(seconds: config.connectTimeout),
-                decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
-                initializeMeta: {...cacheMeta, ..._accountMeta(entry.account)},
-              )
-            : await connectBrowserAcp(
-                chatEndpoints(
-                  webSocket: overWebTransport ? (entry.fallback ?? '') : endpoint.toString(),
-                  webTransport: overWebTransport ? endpoint.toString() : '',
-                  preferWebTransport: config.preferWebTransport,
-                ),
-                pinnedPeerId: entry.peerId, method: method,
-                timeout: Duration(seconds: config.connectTimeout),
-                decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
-                initializeMeta: {...cacheMeta, ..._accountMeta(entry.account)},
-              );
-      case SessionPlace.browser:
-        throw StateError(why ?? 'Reopen it from Earlier conversations');
-    }
+    final VerifiedAgent client = await _agentFor(
+      place: entry.place,
+      entryName: entry.entry,
+      address: entry.endpoint,
+      fallback: entry.fallback,
+      methodId: entry.method,
+      peerId: entry.peerId,
+      cacheLifetime: entry.cacheLifetime,
+      overlays: entry.overlays,
+      account: entry.account,
+    );
     try {
       await store.reopen(entry, client, expected: _hasProfiles);
       _ownedClients.add(client);
@@ -1611,6 +1574,70 @@ class _CanoaAppState extends State<CanoaApp> {
       await client.close();
       rethrow;
     }
+  }
+
+  /// Starts or reaches the agent a session of [entryName] runs on, for [account], over the way it was begun: this computer's own
+  /// link, or the peer at [endpoint]. Opening a session again and moving a running one to another account both begin here.
+  Future<VerifiedAgent> _agentFor({
+    required SessionPlace place,
+    required String entryName,
+    String? address,
+    String? fallback,
+    String? methodId,
+    required String? peerId,
+    String? cacheLifetime,
+    List<String>? overlays,
+    String? account,
+  }) async {
+    final VerifiedAgent client;
+    switch (place) {
+      case SessionPlace.local when _hostedSources.any((source) => source.local && source.label == entryName) ||
+          (_accounts?.offeredBy(entryName).isNotEmpty ?? false):
+        client = await _linkAgent(entryName, {
+          ..._cacheMeta((
+            lifetime: CacheLifetime.named(cacheLifetime) ?? CacheLifetime.chat,
+            chosen: cacheLifetime != null,
+          )),
+          if (overlays case final started?) overlaysMeta: _overlaysNamed(started.toSet()),
+          ..._accountMeta(account),
+        });
+      case SessionPlace.local:
+        throw StateError('$entryName is not one of the sources of this computer now');
+      case SessionPlace.host || SessionPlace.peer:
+        final endpoint = Uri.tryParse(address ?? '');
+        final method = PeerMethod.values.where((each) => each.id == methodId).firstOrNull;
+        if (endpoint == null || method == null) throw StateError('Canoa did not note how to reach that peer');
+        final overWebTransport = endpoint.scheme == 'https';
+        final cacheMeta = {
+          ..._cacheMeta((
+            lifetime: CacheLifetime.named(cacheLifetime) ?? CacheLifetime.chat,
+            chosen: cacheLifetime != null,
+          )),
+          if (widget.served != null)
+            if (overlays case final started?) overlaysMeta: _overlaysNamed(started.toSet()),
+        };
+        client = isPipeUrl(endpoint.toString())
+            ? await connectBrowserAcpOverPipe(
+                endpoint.toString(), pinnedPeerId: peerId!, method: method,
+                timeout: Duration(seconds: config.connectTimeout),
+                decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
+                initializeMeta: {...cacheMeta, ..._accountMeta(account)},
+              )
+            : await connectBrowserAcp(
+                chatEndpoints(
+                  webSocket: overWebTransport ? (fallback ?? '') : endpoint.toString(),
+                  webTransport: overWebTransport ? endpoint.toString() : '',
+                  preferWebTransport: config.preferWebTransport,
+                ),
+                pinnedPeerId: peerId!, method: method,
+                timeout: Duration(seconds: config.connectTimeout),
+                decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
+                initializeMeta: {...cacheMeta, ..._accountMeta(account)},
+              );
+      case SessionPlace.browser:
+        throw StateError('Reopen it from Earlier conversations');
+    }
+    return client;
   }
 
   /// The host's entries come and go as it starts and ends, and a hosted source can run only while it serves one.
@@ -1860,6 +1887,27 @@ class _CanoaAppState extends State<CanoaApp> {
     onSettings: () => unawaited(_showSettings()),
     accounts: _accounts,
     onAccountSettings: () => unawaited(_showSettings(section: 'accounts')),
+    switchAccount: (session, account) => store.switchAccount(
+      session,
+      account,
+      portable: _accounts?.sessionHistoryPortable(session.source?.hostEntry ?? session.agent, session.account),
+      start: (moving) async {
+        final client = await _agentFor(
+          place: moving.place,
+          entryName: moving.agent,
+          address: moving.endpoint?.toString(),
+          fallback: moving.websocketFallback?.toString(),
+          methodId: moving.method,
+          peerId: moving.peerId,
+          cacheLifetime: moving.cacheLifetime?.id,
+          overlays: moving.overlays?.toList(),
+          account: moving.account,
+        );
+        _ownedClients.add(client);
+        return client;
+      },
+      expected: _hasProfiles,
+    ),
     programs: _programs,
     extension: _tabs,
     onProfile: (session) {

@@ -360,7 +360,11 @@ class _SessionPickerState extends State<SessionPicker> {
             : !known && !_stars
                 ? Padding(
                     padding: const EdgeInsets.all(12),
-                    child: Text('Its models are listed once the agent has started.', key: const Key('picker-after-start'), style: TextStyle(color: look.muted)),
+                    child: Text(
+                      draft ? 'Its models are listed once the agent has started.' : 'This agent offers no model choice in a running conversation.',
+                      key: const Key('picker-after-start'),
+                      style: TextStyle(color: look.muted),
+                    ),
                   )
                 : rows.isEmpty
                     ? Padding(
@@ -466,23 +470,44 @@ class _SessionPickerState extends State<SessionPicker> {
               },
             ),
         ]),
+        if (_accountBlock(accounts) case final block? when offered.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(block, key: const Key('picker-account-note'), style: TextStyle(fontSize: 11.5, color: look.muted)),
+          ),
       ]),
     );
+  }
+
+  /// Why a running session cannot go on under another account now; null when it can, or when it has not started.
+  String? _accountBlock(AccountsController accounts) {
+    if (draft) return null;
+    final entry = session.source?.hostEntry ?? session.agent;
+    return store.accountSwitchBlock(session, portable: accounts.sessionHistoryPortable(entry, session.account));
   }
 
   Widget _accountTile(BuildContext context, AccountsController accounts, AccountInfo account, {required bool chosen, required int now}) {
     final look = context.chatLook;
     final holder = accounts.heldBy(account.name);
     final usable = account.usable && holder == null;
-    final enabled = draft && usable;
-    final state = holder == null ? account.statusLabel : 'In use by "$holder"';
+    final block = _accountBlock(accounts);
+    final canMove = !draft && !chosen && block == null && kit.switchAccount != null;
+    final enabled = usable && (draft || canMove);
+    final state = !draft && chosen ? 'This conversation' : holder == null ? account.statusLabel : 'In use by "$holder"';
     final summary = windowSummary(accounts.usageOf(account), now);
     return Tooltip(
-      message: draft ? state : 'Another account needs a new conversation',
+      message: draft || chosen || block == null ? state : block,
       child: InkWell(
         key: Key('account-choice ${account.name}'),
         borderRadius: BorderRadius.circular(8),
-        onTap: enabled ? () => store.setAccount(session, account.name) : null,
+        onTap: !enabled
+            ? null
+            : draft
+                ? () => store.setAccount(session, account.name)
+                : () {
+                    _close();
+                    unawaited(kit.switchAccount!(session, account.name));
+                  },
         child: Container(
           constraints: const BoxConstraints(minWidth: 120),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -512,7 +537,7 @@ class _SessionPickerState extends State<SessionPicker> {
     final option = optionIn(options, OptionRole.effort);
     final pending = pendingChoice(session, OptionRole.effort);
     if (option == null && pending == null) {
-      return wrap ? const SizedBox.shrink(key: Key('option-effort')) : SizedBox(key: const Key('option-effort'), child: Text('No effort to choose for this model.', style: TextStyle(fontSize: 12, color: look.muted)));
+      return wrap ? const SizedBox.shrink(key: Key('option-effort')) : SizedBox(key: const Key('option-effort'), child: Text(draft ? 'No effort to choose for this model.' : 'This agent offers no effort choice in a running conversation.', style: TextStyle(fontSize: 12, color: look.muted)));
     }
     final current = pending?.value ?? (draft ? null : option?.current);
     Widget item(String? value, String label) {
@@ -551,7 +576,7 @@ class _SessionPickerState extends State<SessionPicker> {
     final enabled = store.canChangeMode(session) || draft;
     final note = draft
         ? null
-        : 'A different agent or account needs a new conversation. A model or effort chosen here applies from the next turn.';
+        : 'A different agent needs a new conversation.${session.status == SessionStatus.working ? ' A model or effort chosen now applies from the next turn.' : ''}';
     return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
       if (session.status != SessionStatus.preview)
         Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [

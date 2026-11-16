@@ -57,6 +57,7 @@ final class ComposerKit {
     this.onProfile,
     this.accounts,
     this.onAccountSettings,
+    this.switchAccount,
     this.programs,
     this.extension,
   });
@@ -133,6 +134,10 @@ final class ComposerKit {
 
   /// Opens Settings at Accounts.
   final VoidCallback? onAccountSettings;
+
+  /// Moves a running session to another account, ending its agent and starting one on that account that opens the same
+  /// conversation; answers whether it moved. Null where the app cannot start agents.
+  final Future<bool> Function(ChatSession session, String account)? switchAccount;
 
   /// Shows what a session was given of its profile.
   final void Function(ChatSession session)? onProfile;

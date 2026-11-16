@@ -19,7 +19,7 @@ final class OptionsAgent {
   final bool images, files;
 
   /// Why starting it fails, when it should.
-  final String? failStart;
+  String? failStart;
 
   /// While set and not completed, a new session is not opened: a slow start.
   Completer<void>? holdSessionNew;
@@ -45,6 +45,9 @@ final class OptionsAgent {
 
   /// What the host would report of a profile, put under `_meta` in the answer to `session/load`.
   Map<String, Object?>? profileMeta;
+
+  /// Whether a reopened session starts in the agent's own model and effort again, as a new process does.
+  bool resetsChoicesOnLoad = false;
 
   /// Whether it also offers `session/resume`, which a reopening then prefers to `session/load`.
   bool offersResume = false;
@@ -265,6 +268,10 @@ final class OptionsAgent {
             void answer() {
               // A reopened agent starts in its own default mode again, whatever the session was left in.
               mode = modes.isEmpty ? '' : modes.first.$1;
+              if (resetsChoicesOnLoad) {
+                model = 'default';
+                effort = 'low';
+              }
               reply(id, {'configOptions': options, if (profileMeta != null) '_meta': {hostProfileMeta: profileMeta}});
             }
             if (holdLoad) {

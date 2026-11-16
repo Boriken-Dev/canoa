@@ -88,6 +88,17 @@ class AccountsController extends ChangeNotifier {
 
   AccountCatalog? catalogIfKnown(String harness) => _catalogs[harness];
 
+  /// Whether a conversation begun on [account] can go on under another account of the provider, as the provider says of the
+  /// account's kind; null while the host has not said.
+  bool? historyPortable(AccountInfo account) => catalogIfKnown(account.harness)?.kind(account.kind)?.historyPortable;
+
+  /// [historyPortable] for the account a session of [entry] runs on: [account], else the entry's first; null with none to read.
+  bool? sessionHistoryPortable(String entry, String? account) {
+    final offered = offeredBy(entry);
+    final current = offered.where((each) => each.name == account).firstOrNull ?? offered.firstOrNull;
+    return current == null ? null : historyPortable(current);
+  }
+
   /// The title of the session holding [account], if one does.
   String? heldBy(String account) => holder?.call(account);
 
