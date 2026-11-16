@@ -60,16 +60,45 @@ String _when(DateTime at, DateTime from) {
   return '${_days[at.weekday - 1]} $part';
 }
 
+/// What the composer's account picker says of an account: the shortest window and the longest, each as `5 h 90% left`, so a person
+/// sees both what is left now and what is left for the week. Null when no bucket gives a fraction of a fixed window.
+String? windowSummary(UsageReport? report, int now) {
+  if (report == null) return null;
+  final windows = [
+    for (final bucket in report.buckets)
+      if (bucket.refill.isFixedWindow && bucket.refill.length != null && leftText(bucket, now) != null) bucket,
+  ]..sort((a, b) => a.refill.length!.compareTo(b.refill.length!));
+  if (windows.isEmpty) return null;
+  String say(UsageBucket bucket) => '${_windowName(bucket.refill.length!)} ${leftText(bucket, now)}';
+  return windows.length == 1 ? say(windows.first) : '${say(windows.first)} · ${say(windows.last)}';
+}
+
+String _windowName(Duration length) {
+  if (length >= const Duration(days: 7)) return length.inDays == 7 ? 'week' : '${length.inDays} d';
+  if (length >= const Duration(hours: 24)) return '${length.inDays} d';
+  return '${length.inHours} h';
+}
+
+/// How old a reading may be before it is said to be out of date.
+const staleAfter = Duration(minutes: 30);
+
 /// What an account's reports say: each bucket with how much is left, a bar, when it resets and the pace. The report is what the
 /// sessions on the account last heard, so a figure says when it was observed.
 class AccountUsageView extends StatelessWidget {
-  const AccountUsageView({super.key, required this.report, this.now, this.warnPermille = defaultWarnPermille});
+  const AccountUsageView({super.key, required this.report, this.now, this.warnPermille = defaultWarnPermille, this.large = false, this.readAt});
 
   final UsageReport? report;
 
   /// Unix seconds; the clock's when null.
   final int? now;
   final int warnPermille;
+
+  /// A page's view rather than a list row's: the figure big, a word for how it stands that colour does not carry, and when it was
+  /// read.
+  final bool large;
+
+  /// Unix seconds the figures were read, for a bucket that does not say; the report's own when null.
+  final int? readAt;
 
   @override
   Widget build(BuildContext context) {
@@ -89,18 +118,20 @@ class AccountUsageView extends StatelessWidget {
         Padding(
           key: Key('account-usage ${bucket.id}'),
           padding: const EdgeInsets.only(bottom: 12),
-          child: _Bucket(bucket: bucket, now: at, warnPermille: warnPermille),
+          child: _Bucket(bucket: bucket, now: at, warnPermille: warnPermille, large: large, readAt: bucket.observedAt > 0 ? bucket.observedAt : (readAt ?? report?.observedAt ?? 0)),
         ),
     ]);
   }
 }
 
 class _Bucket extends StatelessWidget {
-  const _Bucket({required this.bucket, required this.now, required this.warnPermille});
+  const _Bucket({required this.bucket, required this.now, required this.warnPermille, required this.large, required this.readAt});
 
   final UsageBucket bucket;
   final int now;
   final int warnPermille;
+  final bool large;
+  final int readAt;
 
   @override
   Widget build(BuildContext context) {
@@ -119,7 +150,8 @@ class _Bucket extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Row(children: [
         Expanded(child: Text(bucket.name, style: text.bodyMedium)),
-        if (left != null) Text(left, key: Key('account-left ${bucket.id}'), style: text.bodyMedium?.copyWith(color: colour)),
+        if (left != null)
+          Text(left, key: Key('account-left ${bucket.id}'), style: (large ? text.titleLarge : text.bodyMedium)?.copyWith(color: colour)),
       ]),
       if (used != null)
         Padding(
@@ -129,8 +161,26 @@ class _Bucket extends StatelessWidget {
             child: LinearProgressIndicator(value: (1000 - used) / 1000, minHeight: 6, color: colour, backgroundColor: scheme.surfaceContainerHighest),
           ),
         ),
+      if (large && level != UsageLevel.calm)
+        Row(key: Key('account-state ${bucket.id}'), children: [
+          Icon(level == UsageLevel.danger ? Icons.error_outline : Icons.warning_amber_rounded, size: 16, color: colour),
+          const SizedBox(width: 4),
+          Text(bucket.isExhausted ? 'Limit reached' : level == UsageLevel.danger ? 'Almost used up' : 'Running low', style: small?.copyWith(color: colour)),
+        ]),
       if (reset != null) Text(reset, key: Key('account-reset ${bucket.id}'), style: small),
       if (pace != null) Text(pace, key: Key('account-pace ${bucket.id}'), style: small?.copyWith(color: level == UsageLevel.calm ? null : colour)),
+      if (large && readAt > 0) _read(small, scheme),
     ]);
+  }
+
+  /// When the figure was read, and a warning in words once it is old enough to have changed.
+  Widget _read(TextStyle? small, ColorScheme scheme) {
+    final age = now - readAt;
+    final stale = age > staleAfter.inSeconds;
+    return Text(
+      stale ? 'Last read ${agoText(age)}; it may have changed since' : 'Read ${agoText(age)}',
+      key: Key('account-read ${bucket.id}'),
+      style: small?.copyWith(color: stale ? scheme.tertiary : null),
+    );
   }
 }

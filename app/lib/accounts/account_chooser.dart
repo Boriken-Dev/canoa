@@ -4,6 +4,7 @@ import '../chat/composer.dart' show ComposerKit;
 import '../session_store.dart';
 import 'account_models.dart';
 import 'accounts_controller.dart';
+import 'usage_view.dart' show windowSummary;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ComposerPill;
 
 /// The account a new session runs on, beside the source: the accounts the source's entry offers, each with where it stands. One that
@@ -36,6 +37,7 @@ class AccountChooser extends StatelessWidget {
           );
         }
         final scheme = Theme.of(context).colorScheme;
+        final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
         return PopupMenuButton<Object>(
           key: const Key('option-account'),
           tooltip: 'The account this session runs on',
@@ -54,10 +56,14 @@ class AccountChooser extends StatelessWidget {
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(account.name == chosen.name ? Icons.check : null, size: 18),
                   title: Text(account.name),
-                  subtitle: Text(
-                    _state(accounts, account),
-                    style: TextStyle(color: account.usable && accounts.heldBy(account.name) == null ? null : scheme.error),
-                  ),
+                  subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(
+                      _state(accounts, account),
+                      style: TextStyle(color: account.usable && accounts.heldBy(account.name) == null ? null : scheme.error),
+                    ),
+                    if (windowSummary(accounts.usageOf(account), now) case final left?)
+                      Text(left, key: Key('account-left-summary ${account.name}')),
+                  ]),
                 ),
               ),
             if (kit.onAccountSettings != null) ...[

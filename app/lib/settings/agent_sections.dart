@@ -487,28 +487,36 @@ class _PermissionsSectionState extends State<PermissionsSection> {
   );
 }
 
-/// What the app has of usage today: when its control turns to a warning.
-class UsageSection extends StatelessWidget {
-  const UsageSection({super.key, required this.controller});
+/// What the app has of usage today: when its control turns to a warning. Where the app has a Usage section the row is there instead.
+class UsageWarning extends StatelessWidget {
+  const UsageWarning({super.key, required this.controller});
 
   final SettingsController controller;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
-    builder: (context, _) {
-      final warn = controller.config.warnPermille;
-      return SettingsGroup(children: [
-        ChoiceRow<int>(
-          title: 'Warn from',
-          configKey: const ['usage', 'warn_permille'],
-          description: 'The usage control shows a warning once this share of a limit is used',
-          fieldKey: const Key('settings-warn'),
-          value: warn,
-          choices: [for (final p in {500, 600, 700, 800, 900, 950, warn}.toList()..sort()) (p, p % 10 == 0 ? '${p ~/ 10}%' : '${p / 10}%')],
-          onChanged: (v) => controller.change((c) => c.copyWith(warnPermille: v)),
-        ),
-      ]);
-    },
+    builder: (context, _) => SettingsGroup(children: [
+      WarnFromRow(value: controller.config.warnPermille, onChanged: (v) => controller.change((c) => c.copyWith(warnPermille: v))),
+    ]),
+  );
+}
+
+/// The share of a limit used from which usage is shown as a warning.
+class WarnFromRow extends StatelessWidget {
+  const WarnFromRow({super.key, required this.value, required this.onChanged});
+
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) => ChoiceRow<int>(
+    title: 'Warn from',
+    configKey: const ['usage', 'warn_permille'],
+    description: 'The usage control shows a warning once this share of a limit is used',
+    fieldKey: const Key('settings-warn'),
+    value: value,
+    choices: [for (final p in {500, 600, 700, 800, 900, 950, value}.toList()..sort()) (p, p % 10 == 0 ? '${p ~/ 10}%' : '${p / 10}%')],
+    onChanged: onChanged,
   );
 }

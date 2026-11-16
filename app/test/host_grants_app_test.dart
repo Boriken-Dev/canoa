@@ -57,6 +57,18 @@ final class _Control implements HostLink {
       },
       'accounts/offer' => {'restart': true},
       'host/restart' => {'restarting': true},
+      'usage/limits' => {
+        'accounts': [
+          {
+            'account': 'id-work',
+            'updated_at': 1,
+            'observed_at': 1,
+            'buckets': [
+              {'id': 'weekly', 'label': 'Weekly', 'unit': 'permille', 'used': 250, 'limit': 1000, 'refill': {'kind': 'unknown'}, 'status': 'ok', 'observed_at': 1, 'source': 'reported'},
+            ],
+          },
+        ],
+      },
       'fs/list' => {'path': '', 'parent': null, 'entries': <Object?>[], 'more': false},
       'store/list' => {'stores': <Object?>[]},
       'ledger/list' => {'records': <Object?>[]},
@@ -179,6 +191,28 @@ void main() {
         await _openSettings(tester);
         expect(find.byKey(const Key('settings-nav-accounts')), findsOneWidget);
         expect(control.asked, containsAll(['host/grants', 'accounts/list']));
+      });
+
+      testWidgets('$label shows the Usage section and reads the limits when the host grants usage', (tester) async {
+        final control = _Control([..._all, 'usage']);
+        await open(tester, control);
+        await tester.tap(find.byKey(const ValueKey('section usage')));
+        await frames(tester);
+        expect(find.byKey(const Key('usage-account id-work')), findsOneWidget);
+        expect(find.text('75% left'), findsOneWidget);
+        expect(control.asked, contains('usage/limits'));
+        // The warning moved into the section, so Settings does not list Usage as well.
+        await _openSettings(tester);
+        expect(find.byKey(const Key('settings-nav-usage')), findsNothing);
+      });
+
+      testWidgets('$label shows no Usage section and never asks for limits when the host does not grant it', (tester) async {
+        final control = _Control(_all);
+        await open(tester, control);
+        expect(find.byKey(const ValueKey('section usage')), findsNothing);
+        await _openSettings(tester);
+        expect(find.byKey(const Key('settings-nav-usage')), findsOneWidget);
+        expect(control.asked, isNot(contains('usage/limits')));
       });
 
       testWidgets('$label shows no Accounts and never asks for them when the host grants neither', (tester) async {

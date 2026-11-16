@@ -4,6 +4,7 @@ import 'package:canoa/accounts/account_models.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
+import 'package:coqui_acp_chat/coqui_acp_chat.dart' show UsageBucket, UsageRefill, UsageReport;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -49,6 +50,28 @@ void main() {
     expect(kept.account, 'metered');
     // Only the name travels and is kept.
     expect(agent.requests.map((request) => '$request').join(), isNot(contains('sk-ant')));
+    await finish(tester);
+  });
+
+  testWidgets('the account list says what is left of the short window and the week for an account heard from', (tester) async {
+    final agent = OptionsAgent();
+    final host = FakeAccountsHost(accounts: [account('work', kind: 'claude-login'), account('metered')]);
+    final store = _store();
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    store.accountUsage['id-work'] = UsageReport(supported: true, account: 'id-work', buckets: [
+      UsageBucket(id: 'session', used: 100, limit: 1000, refill: UsageRefill('fixed_window', length: const Duration(hours: 5), resetsAt: now + 3600)),
+      UsageBucket(id: 'weekly', used: 380, limit: 1000, refill: UsageRefill('fixed_window', length: const Duration(days: 7), resetsAt: now + 86400)),
+    ]);
+    await pumpApp(tester, store, linked: agent.openLink, config: _config, accountsHost: host);
+    await newSession(tester);
+    await chooseSource(tester, 'Claude');
+    await openFolder(tester);
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('option-account')));
+    await frames(tester);
+    expect(find.text('5 h 90% left · week 62% left'), findsOneWidget);
+    // An account nothing was heard from says nothing of limits.
+    expect(find.byKey(const Key('account-left-summary metered')), findsNothing);
     await finish(tester);
   });
 

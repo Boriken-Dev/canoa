@@ -66,6 +66,7 @@ class SettingsPage extends StatefulWidget {
     this.onPin,
     this.onLoadout,
     this.accounts,
+    this.usageSection = false,
     this.version = '',
   });
 
@@ -112,6 +113,9 @@ class SettingsPage extends StatefulWidget {
   /// The accounts of this computer's host, for the Accounts section; none where the app runs no host.
   final AccountsController? accounts;
 
+  /// Whether the app has a Usage section of its own, which then holds the usage warning.
+  final bool usageSection;
+
   /// The app's version, for About.
   final String version;
 
@@ -126,7 +130,7 @@ class SettingsPageState extends State<SettingsPage> {
 
   List<SettingsSection> get _available => [
     for (final section in _sections)
-      if (section.id != 'accounts' || widget.accounts != null) section,
+      if ((section.id != 'accounts' || widget.accounts != null) && (section.id != 'usage' || !widget.usageSection)) section,
   ];
 
   @override
@@ -225,7 +229,7 @@ class SettingsPageState extends State<SettingsPage> {
       'mcp' => McpSection(controller: controller, agents: widget.profileAgents, onLoadout: widget.onLoadout),
       'permissions' => PermissionsSection(controller: controller, rules: widget.rules, sources: widget.profileAgents),
       'accounts' => AccountsSection(controller: widget.accounts!),
-      'usage' => UsageSection(controller: controller),
+      'usage' => UsageWarning(controller: controller),
       'catalogs' => CatalogsSection(controller: controller),
       _ => AboutSection(version: widget.version),
     };

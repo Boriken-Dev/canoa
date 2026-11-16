@@ -87,6 +87,8 @@ import 'shell/layout_state.dart';
 import 'shell/surface.dart';
 import 'shell/work_panel.dart';
 import 'shell/sections.dart';
+import 'usage/usage_model.dart';
+import 'usage/usage_section.dart';
 import 'shell/shell.dart';
 import 'rail/session_rail.dart';
 import 'session_store.dart';
@@ -464,6 +466,19 @@ class _CanoaAppState extends State<CanoaApp> {
     return HostsIndex(controller: _hosts);
   }
 
+  Widget? _usageIndex() => _usage == null ? null : UsageIndex(controller: _usage!);
+
+  Widget? _usagePage() => _usage == null
+      ? null
+      : UsagePage(
+          controller: _usage!,
+          warnPermille: config.warnPermille,
+          onWarnChanged: (value) => unawaited(
+            _applySettings(config.copyWith(warnPermille: value)).then((changed) => _settingsKey.currentState?.controller.adopt(changed)),
+          ),
+          onManageAccounts: _accounts == null ? null : () => unawaited(_showSettings(section: 'accounts')),
+        );
+
   Widget _hostsPage() {
     _hosts.adopt(config);
     return HostsOverview(
@@ -509,6 +524,7 @@ class _CanoaAppState extends State<CanoaApp> {
       },
       onLoadout: _showLoadout,
       accounts: _accounts,
+      usageSection: _usage != null,
       version: const String.fromEnvironment('CANOA_VERSION'),
     );
 
@@ -953,8 +969,16 @@ class _CanoaAppState extends State<CanoaApp> {
     if (!mounted) return;
     setState(() {});
     if (_grants?.may(HostGrants.accounts) ?? false) unawaited(_accountsHeld?.refresh());
+    if (_grants?.may(HostGrants.usage) ?? false) unawaited(_usageHeld?.refresh());
     if (_programs != null && _checked) unawaited(_checkSources());
   }
+
+  /// The Usage section: the limits of the host this app reaches, which the section shows when the host grants `usage`.
+  late final UsageController? _usageHeld = _control == null
+      ? null
+      : UsageController(sources: [ControlUsageSource('This host', _control)], accounts: _accountsHeld);
+
+  UsageController? get _usage => _grants?.may(HostGrants.usage) ?? false ? _usageHeld : null;
 
   /// The accounts of the host this app reaches, for Settings and the composer's chip; none where the app reaches no host or the
   /// host does not grant them.
@@ -1815,6 +1839,7 @@ class _CanoaAppState extends State<CanoaApp> {
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
           layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(),
           hostsIndex: _hostsIndex(), hostsPage: _hostsPage(),
+          usageIndex: _usageIndex(), usagePage: _usagePage(),
           conversation: _conversation,
           localHost: _localHost,
           grouping: _grouping,
@@ -1836,7 +1861,7 @@ class _CanoaHome extends StatelessWidget {
     this.onHosts, this.onLoadout, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
     this.renderers = chat.ChatRenderers.none, required this.welcome, this.localHost, required this.grouping,
     required this.layout, required this.surfaces, required this.settings, required this.loadout,
-    required this.hostsIndex, required this.hostsPage,
+    required this.hostsIndex, required this.hostsPage, this.usageIndex, this.usagePage,
   });
 
   /// The extension's bridge to the Canoa on this computer; null where this is not the extension.
@@ -1851,6 +1876,9 @@ class _CanoaHome extends StatelessWidget {
 
   /// The Hosts section's index and main view.
   final Widget hostsIndex, hostsPage;
+
+  /// The Usage section's index and main view; none where the host does not grant usage.
+  final Widget? usageIndex, usagePage;
 
   final SessionStore store;
   final Widget welcome;
@@ -2000,6 +2028,7 @@ class _CanoaHome extends StatelessWidget {
             ),
           ),
           AppSection(id: HostsController.section, label: 'Hosts', icon: Icons.lan_outlined, index: hostsIndex, main: hostsPage),
+          if (usagePage != null) AppSection(id: 'usage', label: 'Usage', icon: Icons.speed, index: usageIndex, main: usagePage!),
           AppSection(id: 'store', label: 'Store', icon: Icons.storefront_outlined, main: loadout),
           AppSection(id: 'settings', label: 'Settings', tooltip: 'Canoa settings', icon: Icons.settings_outlined, main: settings, atFoot: true),
         ],

@@ -71,6 +71,7 @@ final class HostSummary {
     'store.read': 'Store',
     'store.programs': 'Installing agent programs',
     'accounts': 'Accounts',
+    'usage': 'Usage',
     'config.read': 'Reading settings',
     'config.write': 'Writing settings',
     'upload': 'Uploads',
