@@ -105,7 +105,12 @@ const store = {
     return [...(await read("local", AGENTS, [])), ...local];
   },
   /** The names the running host says this computer has: what an agent there is held to, as one on a loopback address is. */
-  thisComputer: async () => (await lastLocal()).host?.thisComputer ?? [],
+  thisComputer: async () => {
+    const state = await lastLocal();
+    const pinned = await pinnedHost();
+    // The key the person paired with is this computer's Canoa, whether or not it runs now, and wherever its agents are reached.
+    return { names: state.host?.thisComputer ?? state.thisComputer ?? [], peers: typeof pinned?.peer === "string" ? [pinned.peer] : [] };
+  },
   addAgent: (details) => oneAtATime(() => addAgent(details)),
   removeAgent: (key) => oneAtATime(async () => {
     await write("local", AGENTS, (await store.stored()).filter((agent) => agent.key !== key));

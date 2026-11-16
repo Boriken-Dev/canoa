@@ -460,6 +460,21 @@ test("an agent at this computer's host name or network address is on this comput
   assert.deepEqual(unsaid.map((grant) => grant.permissions), [true, true, true, true]);
 });
 
+test("the loopback address in every spelling, and a trailing dot, is this computer's", async () => {
+  const { hereAddress } = await import("./acp-gateway.js");
+  for (const host of ["[::ffff:7f00:1]", "[::ffff:7f12:3456]", "[::7f00:1]", "localhost.", "127.0.0.1.", "LOCALHOST.", "[::ffff:0:0]", "[0:0:0:0:0:ffff:7f00:1]"]) assert.equal(hereAddress(host), true, host);
+  for (const host of ["[::ffff:808:808]", "[::808:808]", "[::ffff:a00:1]", "[::2]", "localhost.example.com", "[1::7f00:1]"]) assert.equal(hereAddress(host), false, host);
+  assert.equal(hereAddress("desk-one.local.", ["desk-one.local"]), true);
+});
+
+test("an agent whose key is the pinned host's runs on this computer, wherever it is reached", async () => {
+  const same = { key: "same", label: "Same", source: "manual", peer: "sha256:pinned", url: "wss://far.example/acp" };
+  const other = { key: "other", label: "Other", source: "manual", peer: "sha256:other", url: "wss://far2.example/acp" };
+  const decision = { allow: ["same", "other"], lifetime: "once", cwd: "/w", permissions: true };
+  const told = await requestAs("https://p.example", [same, other], decision, { names: [], peers: ["sha256:pinned"] });
+  assert.deepEqual(told.map((grant) => [grant.agent, grant.permissions]), [["same", false], ["other", true]]);
+});
+
 test("a name that is no host's is not this computer's", async () => {
   const { hereAddress } = await import("./acp-gateway.js");
   assert.equal(hereAddress("desk-one.local", ["desk-one.local"]), true);

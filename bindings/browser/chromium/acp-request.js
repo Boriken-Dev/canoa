@@ -261,7 +261,7 @@ function grantView(details) {
     ? [element("p", { textContent: "Canoa's chat asks to use your agents. What they ask to do is answered in the conversation." })]
     : [element("p", {}, element("span", { className: "site", textContent: details.origin }), " asks to use your agents.")];
   if (details.purpose) asked.push(element("p", { className: "theirs", textContent: `In its own words: ${details.purpose}` }));
-  asked.push(element("p", { textContent: "It will be able to start conversations and read the answers. It will see the peer id of each agent you choose. It sees nothing about the others." }));
+  asked.push(element("p", { textContent: "It will be able to start conversations and read the answers. It will see the peer id of each agent you choose. It sees nothing about the others. What an agent's own settings let it do without asking, such as reading files or using some tools, it does for what this site tells it, and the site reads what comes back without anyone being asked." }));
   if (details.mcpOrigins.length > 0) {
     asked.push(element("p", { className: "warn", textContent: `It may also connect them to: ${details.mcpOrigins.map((origin) => (onThisComputer(origin) ? `${origin} (this computer or a private network)` : origin)).join(", ")}` }));
   }
@@ -308,7 +308,7 @@ function grantView(details) {
     element("label", { textContent: "For how long" }), lifetime,
     ...(details.own ? [] : [element("label", { className: "pick" }, approve,
       element("span", { className: "warn", textContent: "This site can approve what the agent does for me" })),
-      element("p", { textContent: "That does not apply to agents on this computer, Canoa's among them: they ask you themselves, and a site cannot answer for them." })]),
+      element("p", { textContent: "That does not apply to agents on this computer, Canoa's among them: they ask you themselves, unless their own settings allow something without asking, and a site cannot answer for them." })]),
     allow, refuse);
   holdClicks();
 }

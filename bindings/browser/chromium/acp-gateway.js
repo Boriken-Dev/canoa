@@ -52,14 +52,34 @@ function siteOf(origin) {
   }
 }
 
+/** The eight 16-bit groups of an IPv6 address written as text, or null when it is not one. */
+function ipv6Groups(text) {
+  if (!/^[0-9a-f:]+$/.test(text) || (text.match(/::/g) ?? []).length > 1) return null;
+  const [head, tail] = text.split("::");
+  const left = head === "" ? [] : head.split(":");
+  const right = tail === undefined || tail === "" ? [] : tail.split(":");
+  const missing = 8 - left.length - right.length;
+  if (tail === undefined ? missing !== 0 : missing < 1) return null;
+  const all = [...left, ...Array(tail === undefined ? 0 : missing).fill("0"), ...right];
+  if (all.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return null;
+  return all.map((group) => Number.parseInt(group, 16));
+}
+
 /**
  * Whether an address is this computer's: all of 127/8, 0.0.0.0, ::1, ::, localhost and what ends in .localhost, and a name or address
  * the host said this computer has (`names`, lower case, an IPv6 address bare), compared whole.
  */
 export function hereAddress(hostname, names = []) {
-  const host = String(hostname).toLowerCase();
+  // A name ends in a dot when it is absolute: the same name.
+  const host = String(hostname).toLowerCase().replace(/\.$/, "");
   if (host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || host === "[::]") return true;
   if (names.includes(host.replace(/^\[|\]$/g, ""))) return true;
+  const groups = host.startsWith("[") ? ipv6Groups(host.slice(1, -1)) : null;
+  if (groups !== null) {
+    // ::ffff:a.b.c.d and the deprecated ::a.b.c.d are an IPv4 address: this computer's when that is.
+    const mapped = groups.slice(0, 5).every((group) => group === 0) && (groups[5] === 0xffff || groups[5] === 0);
+    if (mapped && (groups[6] >> 8 === 127 || (groups[6] === 0 && groups[7] === 0))) return true;
+  }
   const parts = host.split(".");
   if (parts.length !== 4 || parts.some((part) => !/^[0-9]{1,3}$/.test(part))) return false;
   const [a] = parts.map(Number);
@@ -75,9 +95,16 @@ function loopbackAgent(agent, names) {
   }
 }
 
+/** What the store says this computer is: names it has, and the keys of the Canoa the person paired with here (an array is names alone). */
+async function hereOf(store) {
+  const here = (await store.thisComputer?.()) ?? [];
+  if (Array.isArray(here)) return { names: here, peers: [] };
+  return { names: Array.isArray(here.names) ? here.names : [], peers: Array.isArray(here.peers) ? here.peers : [] };
+}
+
 /** An agent that runs on this computer as the person: the host's entries and what was found on a descriptor or a local address. */
-function runsHere(agent, names) {
-  return agent.local === true || agent.source === "local" || loopbackAgent(agent, names);
+function runsHere(agent, names, peers = []) {
+  return agent.local === true || agent.source === "local" || (typeof agent.peer === "string" && peers.includes(agent.peer)) || loopbackAgent(agent, names);
 }
 
 function list(value) {
@@ -215,7 +242,7 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       const keys = [...(decision.allow ?? []), ...added.map((agent) => agent.key)];
       const agents = await store.agents();
       const granted = [];
-      const names = (await store.thisComputer?.()) ?? [];
+      const { names, peers } = await hereOf(store);
       for (const key of keys) {
         const agent = agents.find((candidate) => candidate.key === key);
         if (agent === undefined) continue;
@@ -223,7 +250,7 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
         // The Canoa on this computer makes a page's folder itself, from the site; the person names none and the page cannot.
         const folder = agent.local === true && !own;
         // Agents on this computer, the host's entries and those found on a loopback address alike, run as the person.
-        const onThisComputer = folder || (!own && runsHere(agent, names));
+        const onThisComputer = folder || (!own && runsHere(agent, names, peers));
         const grant = {
           origin,
           agent: key,
@@ -286,9 +313,9 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       const sessions = new Set(grant.sessions ?? []);
       const folders = new Map(placedByHost ? Object.entries(grant.folders ?? {}) : []);
       // Whatever the stored grant says, a site cannot approve for the agents on this computer.
-      const names = (await store.thisComputer?.()) ?? [];
+      const { names, peers } = await hereOf(store);
       // Canoa's own pages are the one grant that may pass more than a page does in a session request.
-      const scope = new Scope({ ...grant, folder: placedByHost ? "provider" : undefined, own: origin === ownOrigin, permissions: origin !== ownOrigin && (placedByHost || runsHere(agent, names)) ? false : grant.permissions, sessions }, origin);
+      const scope = new Scope({ ...grant, folder: placedByHost ? "provider" : undefined, own: origin === ownOrigin, permissions: origin !== ownOrigin && (placedByHost || runsHere(agent, names, peers)) ? false : grant.permissions, sessions }, origin);
       const conn = entry.nextConn++;
       const link = {
         conn, entry, channel, scope, grant, sessions, site, placedByHost, folders, label: agent.label, categories: new Map(), names: new Map(), approval: undefined, initId: undefined, denied: false,

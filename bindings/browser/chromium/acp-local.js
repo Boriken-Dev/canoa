@@ -26,6 +26,7 @@ const HOSTNAME = /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/;
 const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
 const IPV6 = /^[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}$/;
 const MAX_ADDRESSES = 16;
+const MAX_HOSTNAMES = 4;
 
 /**
  * The names the host says this computer has, as text a URL's host can be compared with: its host name (and that name in the local
@@ -36,6 +37,12 @@ function computerNames(reply) {
   const names = [];
   const hostname = typeof reply.hostname === "string" ? reply.hostname.trim().toLowerCase() : "";
   if (HOSTNAME.test(hostname)) names.push(hostname, ...(hostname.includes(".") ? [] : [`${hostname}.local`]));
+  // Its names in DNS too, as the machine knows them.
+  for (const item of Array.isArray(reply.hostnames) ? reply.hostnames.slice(0, MAX_HOSTNAMES * 2) : []) {
+    const name = typeof item === "string" ? item.trim().toLowerCase() : "";
+    if (HOSTNAME.test(name) && !names.includes(name)) names.push(name);
+    if (names.length >= MAX_HOSTNAMES + 2) break;
+  }
   let addresses = 0;
   for (const item of Array.isArray(reply.addresses) ? reply.addresses.slice(0, MAX_ADDRESSES * 2) : []) {
     const address = typeof item === "string" ? item.trim().toLowerCase() : "";
@@ -134,9 +141,12 @@ export function createLocalHost({
     }
     const claim = readHello(answer.reply);
     if (claim !== null) return { state: "running", host: claim };
-    if (answer.reply?.reply === "hello" && answer.reply.running === false) return { state: "stopped" };
+    // Even a stopped Canoa's native host says what this computer is called: an agent there is held as one on it.
+    const named = answer.reply?.reply === "hello" ? computerNames(answer.reply) : [];
+    const names = named.length === 0 ? {} : { thisComputer: named };
+    if (answer.reply?.reply === "hello" && answer.reply.running === false) return { state: "stopped", ...names };
     // The host holds the home with its door off, or something that is no host answered.
-    if (answer.reply?.reply === "hello" && answer.reply.running === true) return { state: "unavailable", why: "Canoa runs, but not for browsers" };
+    if (answer.reply?.reply === "hello" && answer.reply.running === true) return { state: "unavailable", why: "Canoa runs, but not for browsers", ...names };
     return { state: "unavailable", why: "the native host answered something else" };
   }
 

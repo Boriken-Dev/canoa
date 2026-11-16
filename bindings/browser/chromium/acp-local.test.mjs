@@ -65,6 +65,15 @@ test("the names a host gives this computer are kept as names and addresses, boun
   assert.deepEqual(readHello(runningReply({})).thisComputer, []);
 });
 
+test("a stopped host still says what this computer is called, and names are bounded", async () => {
+  const stopped = scripted(() => ({ reply: "hello", running: false, hostname: "Desk-One", hostnames: ["desk-one.example.net", "bad name", "x".repeat(300)], addresses: ["192.0.2.2"] }));
+  const state = await createLocalHost(stopped).hello();
+  assert.equal(state.state, "stopped");
+  assert.deepEqual(state.thisComputer, ["desk-one", "desk-one.local", "desk-one.example.net", "192.0.2.2"]);
+  const door = scripted(() => ({ reply: "hello", running: true, door: false, hostname: "desk-one" }));
+  assert.deepEqual((await createLocalHost(door).hello()).thisComputer, ["desk-one", "desk-one.local"]);
+});
+
 test("a reply that is not a host's is no claim", () => {
   assert.equal(readHello(undefined), null);
   assert.equal(readHello(runningReply({ peer: "me" })), null);
