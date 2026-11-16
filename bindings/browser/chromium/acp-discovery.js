@@ -32,7 +32,7 @@ export function sameKey(agents, peer, method) {
 /** What the person runs on a machine for its MCP clients, naming this browser's key for that machine's method; null when this browser has none. */
 export function mcpConfigCommand(ids, method) {
   const id = ids[method ?? "webcrypto"];
-  return typeof id === "string" ? `coqui-acp-bridge mcp-config --peer ${id}` : null;
+  return typeof id === "string" ? `canoa mcp-config --peer ${id}` : null;
 }
 
 /** Where WebTransport is, if the candidate gave both a port and a certificate hash to pin. */

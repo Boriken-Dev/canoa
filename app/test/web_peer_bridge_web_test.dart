@@ -4,7 +4,7 @@
 //   flutter test --platform chrome test/web_peer_bridge_web_test.dart   (CHROME_EXECUTABLE may name Edge or Chromium)
 //
 // A PIN pairing has no responder here: its desk needs a trust store on disk. The pairing runs against a real
-// `coqui-acp-bridge pair-accept` in bridge_test.dart and the real-browser drivers under bindings/browser/chromium/e2e.
+// `canoa pair` in bridge_test.dart and the real-browser drivers under bindings/browser/chromium/e2e.
 @TestOn('browser')
 library;
 

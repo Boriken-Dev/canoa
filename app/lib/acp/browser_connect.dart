@@ -44,7 +44,7 @@ Future<VerifiedAgent> connectBrowserAcpOverPipe(
   );
 }
 
-/// Pairs this browser's Noise key with the machine waiting at [url] (`coqui-acp-bridge pair-accept --method noise`) by the
+/// Pairs this browser's Noise key with the machine waiting at [url] (`canoa pair --method noise`) by the
 /// [pin] it shows, and answers that machine's id, to pin under Noise.
 Future<String> pairBrowserAcp(Uri url, String pin, {Duration timeout = const Duration(seconds: 10)}) async {
   final why = await browserMethodUnavailable(PeerMethod.noise);

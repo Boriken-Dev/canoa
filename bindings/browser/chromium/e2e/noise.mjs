@@ -1,8 +1,8 @@
 // The extension in a real browser pairing by PIN with a Noise bridge and running a turn over it, then running a turn with a
-// WebCrypto bridge, each a real coqui-acp-bridge, and behind real nginx ending TLS when one is given. The person's window is
+// WebCrypto bridge, each a real `canoa serve --program`, and behind real nginx ending TLS when one is given. The person's window is
 // the extension's own page, filled and clicked by script; the turn runs the extension's own dialing code in that page.
 //
-//   CANOA_E2E_BROWSER=path/to/chrome CANOA_E2E_BRIDGE=path/to/coqui-acp-bridge CANOA_E2E_AGENT=path/to/echo_agent \
+//   CANOA_E2E_BROWSER=path/to/chrome CANOA_E2E_HOST=path/to/canoa CANOA_E2E_AGENT=path/to/echo_agent \
 //   [CANOA_E2E_NGINX=path/to/nginx] [CANOA_E2E_WSL=distribution] node e2e/noise.mjs
 //
 // With CANOA_E2E_WSL the bridge, the agent and nginx are Linux paths run in that WSL distribution, and the browser reaches
@@ -19,8 +19,8 @@ import { lastCall, Session } from "./cdp.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extension = path.resolve(here, "..");
-const { CANOA_E2E_BROWSER: browser, CANOA_E2E_BRIDGE: bridge, CANOA_E2E_AGENT: agent, CANOA_E2E_NGINX: nginx, CANOA_E2E_WSL: wsl } = process.env;
-if (!browser || !bridge || !agent) throw new Error("set CANOA_E2E_BROWSER, CANOA_E2E_BRIDGE and CANOA_E2E_AGENT");
+const { CANOA_E2E_BROWSER: browser, CANOA_E2E_HOST: bridge, CANOA_E2E_AGENT: agent, CANOA_E2E_NGINX: nginx, CANOA_E2E_WSL: wsl } = process.env;
+if (!browser || !bridge || !agent) throw new Error("set CANOA_E2E_BROWSER, CANOA_E2E_HOST and CANOA_E2E_AGENT");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const work = mkdtempSync(path.join(tmpdir(), "canoa-noise-e2e-"));
@@ -93,7 +93,7 @@ try {
   const worker = await waitFor("the extension's service worker", async () =>
     (await targets()).find((target) => target.type === "service_worker" && target.url.startsWith("chrome-extension://") && target.url.endsWith("/background.js")), 20_000);
   const id = new URL(worker.url).hostname;
-  // pair-accept lets in only this extension's origin.
+  // `canoa pair --origin` lets in only this extension's origin.
   side.stdin.write(`pair chrome-extension://${id}\n`);
   const { pin } = await hear();
   await reachable(noiseSide.pairUrl);

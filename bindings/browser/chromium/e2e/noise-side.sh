@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# The agent side of e2e/noise.mjs, in the place the bridge and nginx run: a Noise bridge shown a PIN and serving what it pairs,
-# and on request a WebCrypto bridge allowing one key, each behind nginx ending TLS when NGINX is given.
+# The agent side of e2e/noise.mjs, in the place canoa and nginx run: a Noise agent shown a PIN and serving what it pairs,
+# and on request a WebCrypto agent allowing one key, each behind nginx ending TLS when NGINX is given.
 #
-#   bash noise-side.sh BRIDGE AGENT [NGINX]
+#   bash noise-side.sh CANOA AGENT [NGINX]
 #
-# It prints one JSON object per line: the Noise side first; a PIN after a line "pair <browser origin>", for pair-accept to let
+# It prints one JSON object per line: the Noise side first; a PIN after a line "pair <browser origin>", for `canoa pair` to let
 # that origin in; the WebCrypto side after a line "allow <peer id>". When its input ends it stops what it started, by process
 # id, and removes its directory.
 set -euo pipefail
@@ -36,7 +36,7 @@ export COQUI_AGENTIC_PEER_HOME=$work/home
 
 pair_port=$(free_port)
 noise_port=$(free_port)
-"$bridge" serve --paired --method noise --listen "127.0.0.1:$noise_port" -- "$agent" > "$work/noise.out" 2> "$work/noise.err" &
+"$bridge" serve --program --paired --method noise --listen "127.0.0.1:$noise_port" -- "$agent" > "$work/noise.out" 2> "$work/noise.err" &
 pids+=($!)
 for _ in $(seq 100); do [ -s "$work/noise.out" ] && break; sleep 0.1; done
 noise_peer=$(head -1 "$work/noise.out")
@@ -98,18 +98,18 @@ printf '{"pairUrl":"%s://%s","noiseUrl":"%s://%s","noisePeer":"%s","spki":"%s"}\
 while read -r command peer; do
   if [ "$command" = pair ]; then
     mkfifo "$work/pair.out"
-    "$bridge" pair-accept --listen "127.0.0.1:$pair_port" --method noise --origin "$peer" > "$work/pair.out" 2> "$work/pair.err" &
+    "$bridge" pair --listen "127.0.0.1:$pair_port" --method noise --origin "$peer" > "$work/pair.out" 2> "$work/pair.err" &
     pids+=($!)
     exec 3< "$work/pair.out"
-    read -r pin <&3
-    read -r _ <&3
+    read -r line <&3
+    pin=$(printf '%s' "$line" | python3 -c 'import json,sys; print(json.load(sys.stdin)["pin"])')
     for _ in $(seq 100); do (exec 9<>"/dev/tcp/127.0.0.1/$pair_port") 2>/dev/null && break; sleep 0.1; done
     printf '{"pin":"%s"}\n' "$pin"
     continue
   fi
   [ "$command" = allow ] || continue
-  "$bridge" keygen "$work/webcrypto.pem" --method webcrypto > "$work/webcrypto.peer"
-  "$bridge" serve --identity "$work/webcrypto.pem" --allow "$peer" --listen "127.0.0.1:$webcrypto_port" -- "$agent" \
+  "$bridge" id --identity "$work/webcrypto.pem" --method webcrypto > "$work/webcrypto.peer"
+  "$bridge" serve --program --identity "$work/webcrypto.pem" --allow "$peer" --listen "127.0.0.1:$webcrypto_port" -- "$agent" \
     > /dev/null 2> "$work/webcrypto.err" &
   pids+=($!)
   for _ in $(seq 100); do (exec 9<>"/dev/tcp/127.0.0.1/$webcrypto_port") 2>/dev/null && break; sleep 0.1; done

@@ -18,11 +18,11 @@ const PROOF_MS = 15_000;
  * a Noise initiator finishes before the responder decides, so this is what lets a refused key fail the dial as a WebCrypto one does.
  */
 export const NOISE_SETTLE_MS = 500;
-/** How long a pairing may take by default, from its handshake to the end of the exchange: `pair-accept --run-seconds`'s 120. */
+/** How long a pairing may take by default, from its handshake to the end of the exchange: the bridge library's `--run-seconds` default of 120. */
 export const PAIR_MS = 120_000;
 // A path that drops QUIC shows only as silence, and the WebSocket is still worth trying within the proof's time.
 const WEBTRANSPORT_OPEN_MS = 5_000;
-// What coqui-acp-bridge takes: a 16 MiB line, as a record of each method.
+// What the bridge library takes: a 16 MiB line, as a record of each method.
 const MAX_LINE = 16 * 1024 * 1024;
 const MAX_MESSAGE = Math.max(MAX_LINE + 64, recordLimit("noise", MAX_LINE));
 
@@ -377,7 +377,7 @@ async function localIdentity(method) {
 }
 
 /**
- * This browser's own peer id under `method`, which an agent's machine allows and which names it in what `coqui-acp-bridge mcp-config`
+ * This browser's own peer id under `method`, which an agent's machine allows and which names it in what `canoa mcp-config`
  * prints; null where this browser cannot run the method.
  */
 export async function ownPeerId(method = DEFAULT_METHOD) {
@@ -414,7 +414,7 @@ function queue(socket) {
 }
 
 /**
- * Pairs this browser's Noise key with the agent's machine at `url`, a `coqui-acp-bridge pair-accept --method noise`, by the PIN it
+ * Pairs this browser's Noise key with the agent's machine at `url`, a `canoa pair --method noise`, by the PIN it
  * shows, and answers the key that machine proved. A wrong PIN is spent: never try it again, and ask for a new one.
  */
 export async function pairWithPin({ url, pin, native }, {

@@ -166,7 +166,7 @@ Future<VerifiedPeer> provePeer(
 }
 
 /// Pairs this runtime's Noise key, by the [pin] a person typed, with the machine on [channel], which runs
-/// `coqui-acp-bridge pair-accept --method noise`, and answers the id that machine proved. The channel is closed after. A
+/// `canoa pair --method noise`, and answers the id that machine proved. The channel is closed after. A
 /// refused PIN is spent: ask for a new one, never try it again.
 Future<String> pairByPin(
   PeerBridge bridge,

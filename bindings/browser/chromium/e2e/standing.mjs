@@ -1,7 +1,7 @@
 // A program with no ACP session reaching the browser's tools, in a real browser through the real bridge, from what `mcp-config` prints.
 // The client is the official SDK's stdio client, unmodified. The person's window is clicked by script.
 //
-//   CANOA_E2E_BROWSER=path/to/edge CANOA_E2E_BRIDGE=path/to/coqui-acp-bridge node e2e/standing.mjs
+//   CANOA_E2E_BROWSER=path/to/edge CANOA_E2E_HOST=path/to/canoa node e2e/standing.mjs
 //
 // Needs `npm install` in e2e/. CANOA_E2E_TRANSPORTS picks websocket, webtransport or both.
 //
@@ -30,8 +30,8 @@ import { findCanoaWorker, lastCall, Session } from "./cdp.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extension = path.resolve(here, "..");
 const browser = process.env.CANOA_E2E_BROWSER;
-const bridge = process.env.CANOA_E2E_BRIDGE;
-if (!browser || !bridge) throw new Error("set CANOA_E2E_BROWSER and CANOA_E2E_BRIDGE");
+const bridge = process.env.CANOA_E2E_HOST;
+if (!browser || !bridge) throw new Error("set CANOA_E2E_BROWSER and CANOA_E2E_HOST");
 const idleMs = Number(process.env.CANOA_E2E_IDLE_MS ?? 0);
 const keepalive = process.env.CANOA_E2E_KEEPALIVE ?? "all";
 const transports = (process.env.CANOA_E2E_TRANSPORTS ?? "websocket,webtransport").split(",");
@@ -198,12 +198,12 @@ async function forTransport(transport) {
     const browserPeer = first.ids.noise;
 
     const agentKey = path.join(work, "bridge.key");
-    const bridgePeer = execFileSync(bridge, ["keygen", agentKey, "--method", "noise"], { encoding: "utf8", env }).trim();
+    const bridgePeer = execFileSync(bridge, ["id", "--identity", agentKey, "--method", "noise"], { encoding: "utf8", env }).trim();
     const port = await freeForBoth();
     const flags = transport === "webtransport" ? ["--tls-short-lived", "--webtransport-port", String(port)] : [];
     let said = "";
     const startBridge = async () => {
-      const child = spawn(bridge, ["serve", "--listen", `127.0.0.1:${port}`, "--identity", agentKey, "--allow", browserPeer, ...flags, "--mcp-offers",
+      const child = spawn(bridge, ["serve", "--program", "--listen", `127.0.0.1:${port}`, "--identity", agentKey, "--allow", browserPeer, ...flags, "--mcp-offers",
         "--advertise", "Test machine", "--", process.execPath, "--version"], { stdio: ["ignore", "ignore", "pipe"], env });
       child.stderr.on("data", (chunk) => {
         said += chunk;

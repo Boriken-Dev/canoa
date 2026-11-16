@@ -126,7 +126,7 @@ class _AddConnectionDialogState extends State<_AddConnectionDialog> {
     own = chosen == null ? null : _own(chosen);
   }
 
-  /// This page's origin, which `pair-accept` lets in by `--origin`; null where the app is no web page.
+  /// This page's origin, which `canoa pair` lets in by `--origin`; null where the app is no web page.
   static String? get _pageOrigin {
     final base = Uri.base;
     return base.scheme == 'http' || base.scheme == 'https' || base.scheme == 'chrome-extension'
@@ -424,7 +424,7 @@ class _AddConnectionDialogState extends State<_AddConnectionDialog> {
                       const SizedBox(height: 12),
                       const Text('Or pair by the PIN the other machine shows, under Noise:'),
                       if (_pageOrigin case final origin?)
-                        SelectableText('There, run: coqui-acp-bridge pair-accept --method noise --origin $origin', style: text),
+                        SelectableText('There, run: canoa pair --method noise --origin $origin', style: text),
                       TextField(controller: pairUrl,
                         decoration: const InputDecoration(
                           labelText: 'Where it waits to pair',

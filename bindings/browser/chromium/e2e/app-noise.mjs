@@ -1,10 +1,10 @@
 // The web build's peer code in a real browser: Canoa's own pairing and chat connection code, compiled from
 // app/tool/peer_page.dart, on the web build's Dart peer bridge (the Noise method is its WebAssembly module, noise/), pairing by PIN with
-// a Noise bridge and running a turn over it, then running a turn with a WebCrypto bridge. Each is a real coqui-acp-bridge, and
+// a Noise bridge and running a turn over it, then running a turn with a WebCrypto bridge. Each is a real `canoa serve --program`, and
 // behind real nginx ending TLS when one is given. Nothing of the extension runs.
 //
 //   dart compile js -O1 -o <dir>/page.js tool/peer_page.dart        (in app/)
-//   CANOA_E2E_BROWSER=path/to/chrome CANOA_E2E_BRIDGE=path/to/coqui-acp-bridge CANOA_E2E_AGENT=path/to/echo_agent \
+//   CANOA_E2E_BROWSER=path/to/chrome CANOA_E2E_HOST=path/to/canoa CANOA_E2E_AGENT=path/to/echo_agent \
 //   CANOA_E2E_APP_PAGE=<dir> [CANOA_E2E_WEB=app/build/web] [CANOA_E2E_NGINX=path/to/nginx] [CANOA_E2E_WSL=distribution] \
 //   node e2e/app-noise.mjs
 //
@@ -23,10 +23,10 @@ import { lastCall, Session } from "./cdp.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const {
-  CANOA_E2E_BROWSER: browser, CANOA_E2E_BRIDGE: bridge, CANOA_E2E_AGENT: agent, CANOA_E2E_APP_PAGE: appPage,
+  CANOA_E2E_BROWSER: browser, CANOA_E2E_HOST: bridge, CANOA_E2E_AGENT: agent, CANOA_E2E_APP_PAGE: appPage,
   CANOA_E2E_NGINX: nginx, CANOA_E2E_WSL: wsl,
 } = process.env;
-if (!browser || !bridge || !agent || !appPage) throw new Error("set CANOA_E2E_BROWSER, CANOA_E2E_BRIDGE, CANOA_E2E_AGENT and CANOA_E2E_APP_PAGE");
+if (!browser || !bridge || !agent || !appPage) throw new Error("set CANOA_E2E_BROWSER, CANOA_E2E_HOST, CANOA_E2E_AGENT and CANOA_E2E_APP_PAGE");
 const web = process.env.CANOA_E2E_WEB ?? path.resolve(here, "../../../../app/web");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const work = mkdtempSync(path.join(tmpdir(), "canoa-app-noise-e2e-"));
@@ -101,7 +101,7 @@ const watchdog = setTimeout(() => {
 try {
   const noiseSide = await hear();
   await reachable(noiseSide.noiseUrl);
-  // pair-accept lets in only this page's origin.
+  // `canoa pair --origin` lets in only this page's origin.
   side.stdin.write(`pair ${origin}\n`);
   const { pin } = await hear();
   await reachable(noiseSide.pairUrl);

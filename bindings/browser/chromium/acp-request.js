@@ -84,7 +84,7 @@ function agentForm(onAdd) {
   const add = element("button", { type: "button", className: "quiet", textContent: "Add this agent" });
   add.addEventListener("click", async () => {
     const problem = validAgent(label.value, url.value.trim(), peer.value.trim())
-      ?? (peer.value.trim() !== "" && method.value === "" ? "Choose the method the agent proves by: coqui-acp-bridge serve and canoa serve print it." : null);
+      ?? (peer.value.trim() !== "" && method.value === "" ? "Choose the method the agent proves by: canoa serve prints it." : null);
     status.textContent = problem ?? "";
     if (problem !== null) return;
     await onAdd({ label: label.value.trim(), url: url.value.trim(), peer: peer.value.trim(), method: method.value || undefined });
@@ -105,7 +105,7 @@ function pairForm(onPaired) {
   });
   const label = element("input", { type: "text", placeholder: "Name" });
   const url = element("input", { type: "text", placeholder: "wss://host/path or ws://127.0.0.1:8765" });
-  const pairUrl = element("input", { type: "text", placeholder: "where coqui-acp-bridge pair-accept --method noise waits" });
+  const pairUrl = element("input", { type: "text", placeholder: "where canoa pair --method noise waits" });
   const pin = element("input", { type: "text", placeholder: "the six digits it shows", autocomplete: "off" });
   const status = element("p", { className: "warn" });
   const pair = element("button", { type: "button", className: "quiet", textContent: "Pair" });
@@ -129,8 +129,8 @@ function pairForm(onPaired) {
     label.value = url.value = pairUrl.value = "";
     onPaired(answer.agent);
   });
-  // pair-accept refuses a browser unless it lists the browser's origin, so a page cannot spend the PIN.
-  const command = element("p", {}, "On the machine: ", element("code", { textContent: `coqui-acp-bridge pair-accept --method noise --listen 127.0.0.1:PORT --origin chrome-extension://${chrome.runtime.id}` }));
+  // `canoa pair` refuses a browser unless it lists the browser's origin, so a page cannot spend the PIN.
+  const command = element("p", {}, "On the machine: ", element("code", { textContent: `canoa pair --method noise --listen 127.0.0.1:PORT --origin chrome-extension://${chrome.runtime.id}` }));
   return element("fieldset", {}, element("legend", { textContent: "Pair with a code" }), command,
     element("label", { textContent: "Agent's name" }), label, element("label", { textContent: "Address" }), url,
     element("label", { textContent: "Pairing address" }), pairUrl, element("label", { textContent: "PIN" }), pin,

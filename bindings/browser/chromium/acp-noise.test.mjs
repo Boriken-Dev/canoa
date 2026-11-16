@@ -88,7 +88,7 @@ test("a key of one method never proves an agent of the other, and nothing falls 
   assert.match(new TextDecoder().decode(sent[0]), /"profile":"dev.boriken.coqui.peer-webcrypto\/v1"/);
 });
 
-/** A responder's side of PIN pairing, as `coqui-acp-bridge pair-accept --method noise` runs it. */
+/** A responder's side of PIN pairing, as `canoa pair --method noise` runs it. */
 async function pairingDesk() {
   const identity = await noise.generateIdentity();
   const desk = noise.createPairingDesk();
@@ -196,10 +196,10 @@ test("an added agent's method is the one named, else WebCrypto's as for a record
 
 test("the mcp-config command names this browser's key for the machine's method, and none it cannot prove by", () => {
   const ids = { noise: "sha256:n", webcrypto: "sha256:w" };
-  assert.equal(mcpConfigCommand(ids, "webcrypto"), "coqui-acp-bridge mcp-config --peer sha256:w");
-  assert.equal(mcpConfigCommand(ids, "noise"), "coqui-acp-bridge mcp-config --peer sha256:n");
+  assert.equal(mcpConfigCommand(ids, "webcrypto"), "canoa mcp-config --peer sha256:w");
+  assert.equal(mcpConfigCommand(ids, "noise"), "canoa mcp-config --peer sha256:n");
   assert.equal(mcpConfigCommand({ noise: null, webcrypto: "sha256:w" }, "noise"), null);
-  assert.equal(mcpConfigCommand(ids, undefined), "coqui-acp-bridge mcp-config --peer sha256:w");
+  assert.equal(mcpConfigCommand(ids, undefined), "canoa mcp-config --peer sha256:w");
 });
 
 /** A Noise agent that proves itself, then turns this key away by ending the connection `after` ms past the handshake. */

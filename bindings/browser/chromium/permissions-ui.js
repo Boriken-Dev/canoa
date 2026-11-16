@@ -77,7 +77,7 @@ const STANDING_SAYS={
   connecting:'Connecting to that machine.',
   connected:'On. Programs on that machine can ask for a tab.',
   unreachable:'On, but that machine cannot be reached yet, or did not prove its key. This keeps trying.',
-  refused:'On, but that machine refused: it needs coqui-acp-bridge serve --mcp-offers, allowing this browser.',
+  refused:'On, but that machine refused: it needs canoa serve --program --mcp-offers, allowing this browser.',
 };
 let standingOn=null;
 async function refreshStanding(){

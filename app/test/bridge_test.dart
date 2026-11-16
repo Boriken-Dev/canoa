@@ -1,12 +1,13 @@
-// Canoa's chat reaching agents a real coqui-acp-bridge serves under each method, through the app's own connection code: the
+// Canoa's chat reaching agents a real `canoa serve --program` serves under each method, through the app's own connection code: the
 // PIN pairing and peer proof the web build runs, its sealed channel and VerifiedAgent. The browser's side of the proof is
 // canoa-host's web_peer example, since the Dart VM has no WebCrypto.
 //
-// CANOA_TEST_BRIDGE names a built coqui-acp-bridge; CANOA_TEST_HOST a built canoa, whose stdio_agent example (in
-// examples/ beside it) is the agent served. Without both the tests are skipped.
+// CANOA_TEST_HOST names a built canoa, whose stdio_agent example (in examples/ beside it) is the agent served. Without it the
+// tests are skipped.
 @Timeout(Duration(minutes: 2))
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -18,7 +19,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/web_peer_bridge.dart';
 
-final String? _bridge = Platform.environment['CANOA_TEST_BRIDGE'];
 final String? _host = Platform.environment['CANOA_TEST_HOST'];
 
 String get _agent {
@@ -48,7 +48,7 @@ Future<void> _listening(int port) async {
 }
 
 void main() {
-  final skip = _bridge == null || _host == null ? 'CANOA_TEST_BRIDGE and CANOA_TEST_HOST name built programs' : null;
+  final skip = _host == null ? 'CANOA_TEST_HOST names a built canoa' : null;
   late Directory dir;
   late WebPeerBridge browser;
   final started = <Process>[];
@@ -56,26 +56,30 @@ void main() {
   Map<String, String> home() => {'COQUI_AGENTIC_PEER_HOME': '${dir.path}/home'};
 
   Future<Process> run(List<String> args) async {
-    final process = await Process.start(_bridge!, args, environment: home());
+    final process = await Process.start(_host!, args, environment: home());
     started.add(process);
     process.stderr.transform(utf8.decoder).listen(stderr.write);
     return process;
   }
 
-  /// `pair-accept --method noise`: its address, the PIN it shows, its id, and the process.
+  /// `canoa pair --method noise`: its address, the PIN it shows, its id, and the process.
   Future<(String, String, String, Process)> pairAccept() async {
     final port = await _freePort();
-    final process = await run(['pair-accept', '--listen', '127.0.0.1:$port', '--method', 'noise', '--timeout-seconds', '60']);
-    final lines = process.stdout.transform(utf8.decoder).transform(const LineSplitter()).take(2);
-    // It shows the PIN once it listens. A probe connection would count as a failed attempt.
-    final [pin, peer] = await lines.toList().timeout(const Duration(seconds: 30));
-    return ('ws://127.0.0.1:$port', pin.trim(), peer.trim(), process);
+    final process = await run(['pair', '--listen', '127.0.0.1:$port', '--method', 'noise', '--timeout-seconds', '60']);
+    // It shows the PIN once it listens, as one JSON line. A probe connection would count as a failed attempt.
+    final first = Completer<String>();
+    process.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+      if (!first.isCompleted) first.complete(line);
+    });
+    final line = await first.future.timeout(const Duration(seconds: 30));
+    final shown = jsonDecode(line) as Map<String, dynamic>;
+    return ('ws://127.0.0.1:$port', shown['pin'] as String, shown['peer'] as String, process);
   }
 
-  /// `serve` on a free port with [args], answering its URL.
+  /// `serve --program` on a free port with [args], answering its URL.
   Future<String> serve(List<String> args) async {
     final port = await _freePort();
-    await run(['serve', ...args, '--listen', '127.0.0.1:$port', '--', _agent]);
+    await run(['serve', '--program', ...args, '--listen', '127.0.0.1:$port', '--', _agent]);
     await _listening(port);
     return 'ws://127.0.0.1:$port';
   }
@@ -144,7 +148,7 @@ void main() {
   }, skip: skip);
 
   test('the chat reaches a WebCrypto bridge that allows the browser\'s WebCrypto key, which is not its Noise key', () async {
-    final keygen = await Process.run(_bridge!, ['keygen', '${dir.path}/webcrypto.pem', '--method', 'webcrypto'], environment: home());
+    final keygen = await Process.run(_host!, ['id', '--identity', '${dir.path}/webcrypto.pem', '--method', 'webcrypto'], environment: home());
     expect(keygen.exitCode, 0, reason: '${keygen.stderr}');
     final bridgePeer = (keygen.stdout as String).trim();
     final own = await browser.localId(PeerMethod.webcrypto);

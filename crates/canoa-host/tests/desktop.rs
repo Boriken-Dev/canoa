@@ -207,7 +207,7 @@ fn start_pairing(
     )
 }
 
-/// Joins a pairing at `url` with `pin`, as `coqui-acp-bridge pair-dial` does.
+/// Joins a pairing at `url` with `pin`, as `canoa pair --join` does.
 fn join(url: &str, identity: &Identity, pin: &str, store: &TrustStore) -> Result<String, String> {
     let channel = websocket::Dialer::builder()
         .frames(Frames::Binary)
