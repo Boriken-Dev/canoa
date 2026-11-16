@@ -39,11 +39,7 @@ fn reaches(caller: &Caller, config: &Config, name: &str, portal: bool) -> bool {
 }
 
 /// `options/choices` `{"entry", "account"?}`: the choices of the entry, as `canoa options --entry --format json` prints them.
-pub(super) fn call(
-    accounts: &Accounts,
-    caller: &Caller,
-    params: &Value,
-) -> Result<Value, Refusal> {
+pub(super) fn call(accounts: &Accounts, caller: &Caller, params: &Value) -> Result<Value, Refusal> {
     let name = text_param(params, "entry")?.ok_or_else(|| bad("entry is missing or not text"))?;
     let account = text_param(params, "account")?;
     let config = accounts.config()?;
@@ -63,11 +59,9 @@ pub(super) fn call(
                 ..crate::options::Asking::default()
             };
             if let Some(account) = account {
-                let store = crate::accounts::Accounts::open(
-                    config.account_store,
-                    accounts.home_dir(),
-                )
-                .map_err(|error| (REFUSED, error.to_string()))?;
+                let store =
+                    crate::accounts::Accounts::open(config.account_store, accounts.home_dir())
+                        .map_err(|error| (REFUSED, error.to_string()))?;
                 asking.account = Some((account.to_owned(), store));
             }
             crate::options::entry_with(&config, name, &asking)

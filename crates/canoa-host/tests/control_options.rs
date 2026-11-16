@@ -67,7 +67,11 @@ fn a_harness_entry_and_a_probed_program_list_their_models_over_the_link() {
     assert_eq!(claude["models"][0]["id"], "standin-small", "{claude}");
     let probe = call(&link, 2, "options/choices", &json!({"entry": "Probe"})).expect("asked");
     assert_eq!(probe["known"], true, "{probe}");
-    assert_eq!(model_ids(&probe), ["default", "fast", "refuse-me"], "{probe}");
+    assert_eq!(
+        model_ids(&probe),
+        ["default", "fast", "refuse-me"],
+        "{probe}"
+    );
     let missing = call(&link, 3, "options/choices", &json!({"entry": "Nobody"})).expect_err("none");
     assert_eq!(missing["code"], -32003, "{missing}");
     let bare = call(&link, 4, "options/choices", &json!({})).expect_err("no entry");
@@ -123,5 +127,39 @@ fn an_entry_is_asked_as_an_account_it_offers_and_not_as_one_it_does_not_have() {
     .expect("answered");
     assert_eq!(other["known"], false, "{other}");
     assert_eq!(other["unknown_kind"], "failed", "{other}");
+    host.stop();
+}
+
+#[test]
+fn an_account_with_no_session_is_read_on_demand_and_a_name_the_host_lacks_is_refused() {
+    let host = host();
+    let link = host.local.open("@control").expect("a link");
+    let secret = host.local.link_secret().expect("the host minted a secret");
+    let app = App::new(&secret[..]);
+    send(
+        &link,
+        &json!({"jsonrpc": "2.0", "id": 1, "method": "accounts/add",
+            "params": {"name": "work", "harness": "claude", "method": "api-key"}}),
+    );
+    let typed = Typed::Fills(&[("api_key", "sk-ant-test-0123456789")]);
+    loop {
+        let message = next(&link).expect("progress");
+        if message["method"] == "_coqui_acp/secret_request" {
+            let result = app.answer(&message["params"], &typed).expect("typed");
+            send(
+                &link,
+                &json!({"jsonrpc": "2.0", "id": message["id"], "result": result}),
+            );
+        } else if message["id"] == 1 && message.get("method").is_none() {
+            break;
+        }
+    }
+    let listed = call(&link, 2, "accounts/list", &json!({})).expect("listed");
+    let id = listed["accounts"][0]["id"].clone();
+    let read = call(&link, 3, "usage/read", &json!({"account": "work"})).expect("read");
+    assert_eq!(read["account"]["account"], id, "{read}");
+    assert!(read["account"]["supported"].is_boolean(), "{read}");
+    let missing = call(&link, 4, "usage/read", &json!({"account": "nobody"})).expect_err("none");
+    assert_eq!(missing["code"], -32003, "{missing}");
     host.stop();
 }

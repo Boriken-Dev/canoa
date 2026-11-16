@@ -15,8 +15,15 @@ fn key(id: &str) -> Caller {
 
 #[test]
 fn a_key_asks_only_what_it_may_start_a_session_on() {
-    let named = KEY.parse::<coqui_peer_webcrypto::PeerId>().expect("a key").to_string();
-    let other = "b".repeat(64).parse::<coqui_peer_webcrypto::PeerId>().expect("a key").to_string();
+    let named = KEY
+        .parse::<coqui_peer_webcrypto::PeerId>()
+        .expect("a key")
+        .to_string();
+    let other = "b"
+        .repeat(64)
+        .parse::<coqui_peer_webcrypto::PeerId>()
+        .expect("a key")
+        .to_string();
     let config = config(&format!(
         "[host.agents.open]\nprogram = \"x\"\n[host.agents.shut]\nprogram = \"x\"\npeers = []\n[host.agents.mine]\nprogram = \"x\"\npeers = [\"{KEY}\"]\n"
     ));

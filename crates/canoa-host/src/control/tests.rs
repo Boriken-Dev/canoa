@@ -785,3 +785,25 @@ fn a_host_with_no_home_keeps_no_usage_and_says_so() {
     let answer = ask(&control, &Caller::Owner, "usage/summary", json!({}));
     assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
 }
+
+#[test]
+fn usage_read_needs_the_usage_grant_and_a_host_that_manages_accounts() {
+    let control = memory();
+    for caller in [
+        peer("sha256:aa", &[]),
+        peer("sha256:bb", &[Grant::Accounts, Grant::StoreRead]),
+    ] {
+        let answer = ask(&control, &caller, "usage/read", json!({"account": "work"}));
+        assert_eq!(answer["error"]["code"], DENIED, "{answer}");
+    }
+    let granted = peer("sha256:cc", &[Grant::Usage]);
+    let answer = ask(&control, &granted, "usage/read", json!({"account": "work"}));
+    assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
+    let answer = ask(
+        &control,
+        &granted,
+        "options/choices",
+        json!({"entry": "Claude"}),
+    );
+    assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
+}

@@ -1013,6 +1013,17 @@ class _CanoaAppState extends State<CanoaApp> {
   /// host's own link holds every grant: the host is the one place that decides.
   late final HostGrants? _grants = _control == null ? null : (HostGrants(() => _control.ready(wait: false))..addListener(_grantsChanged));
 
+  StreamSubscription<void>? _reconnects;
+
+  /// The link to the host was made again after it ended (the host restarted, or the connection came back): what the page read of
+  /// it before is read once more, since an account made or a grant changed meanwhile would otherwise stay unseen until a reload.
+  Future<void> _hostCameBack() async {
+    await _grants?.refresh();
+    if (!mounted) return;
+    if (_grants?.may(HostGrants.accounts) ?? false) unawaited(_accountsHeld?.refresh());
+    if (_grants?.may(HostGrants.usage) ?? false) unawaited(_usageHeld?.refresh());
+  }
+
   /// A grant arrived or changed: what it opens is listed, and a source's readiness may now name its program.
   void _grantsChanged() {
     if (!mounted) return;
@@ -1790,6 +1801,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.gitReader = _gitReaderFor;
     store.addListener(_noteLast);
     widget.host?.addListener(_hostChanged);
+    _reconnects = _control?.reconnected.listen((_) => unawaited(_hostCameBack()));
     scheduleMicrotask(() {
       unawaited(_grants?.refresh());
       unawaited(_accounts?.refresh());
@@ -1870,6 +1882,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (identical(store.accountChoicesLoader, _askChoicesAs)) store.accountChoicesLoader = null;
     if (identical(store.gitReader, _gitReaderFor)) store.gitReader = null;
     widget.host?.removeListener(_hostChanged);
+    unawaited(_reconnects?.cancel());
     unawaited(_control?.close());
     widget.settingsSignal?.removeListener(_requestSettings);
     widget.hostingSignal?.removeListener(_requestHosting);

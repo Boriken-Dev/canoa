@@ -18,11 +18,51 @@ final class HostControl {
 
   /// How long the host has to be up before a request gives up.
   final Duration wait;
+
+  /// How long to wait before each new try at a link the host ended, the last repeated, and how many tries in all.
+  static const retryAfter = [Duration(milliseconds: 500), Duration(seconds: 1), Duration(seconds: 2), Duration(seconds: 4), Duration(seconds: 8), Duration(seconds: 15)];
+  static const retries = 20;
+
   ControlClient? _client;
   Future<ControlClient>? _opening;
   bool _waits = true;
+  bool _closed = false;
+  bool _had = false;
+  Timer? _retry;
+  final _again = StreamController<void>.broadcast();
 
-  Future<ControlClient> _connect() => _opening ??= (() async => _client = await open(wait: _waits))().whenComplete(() => _opening = null);
+  /// Fires each time a link is made after an earlier one ended: the host started again or the connection came back, so what was
+  /// read from it before (accounts, grants, limits) may have changed. While something listens, a link the host ended is tried
+  /// again with growing pauses, so a page that is only waiting still hears.
+  Stream<void> get reconnected => _again.stream;
+
+  Future<ControlClient> _connect() => _opening ??= (() async {
+    final client = _client = await open(wait: _waits);
+    _watch(client);
+    if (_had && !_closed) _again.add(null);
+    _had = true;
+    return client;
+  })().whenComplete(() => _opening = null);
+
+  void _watch(ControlClient client) {
+    unawaited(client.ended.then((_) {
+      if (_closed || !identical(_client, client)) return;
+      _client = null;
+      if (_again.hasListener) _tryAgain(0);
+    }));
+  }
+
+  void _tryAgain(int attempt) {
+    if (_closed || attempt >= retries || _client != null || _opening != null) return;
+    _retry?.cancel();
+    _retry = Timer(retryAfter[attempt < retryAfter.length ? attempt : retryAfter.length - 1], () async {
+      try {
+        await ready(wait: false);
+      } on Object {
+        _tryAgain(attempt + 1);
+      }
+    });
+  }
 
   /// A link of its own, which the caller closes: closing it ends what the host is doing for it, such as an install.
   Future<ControlClient> open({bool wait = true}) async {
@@ -52,5 +92,11 @@ final class HostControl {
     return _connect();
   }
 
-  Future<void> close() async => _client?.close();
+  Future<void> close() async {
+    _closed = true;
+    _retry?.cancel();
+    final client = _client;
+    unawaited(_again.close());
+    await client?.close();
+  }
 }

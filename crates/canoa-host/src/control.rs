@@ -664,6 +664,9 @@ impl Control {
                 Some(method @ ("usage/summary" | "usage/limits")) => {
                     allow(caller, Grant::Usage).and_then(|()| self.usage_call(method, &params))
                 }
+                Some("usage/read") => allow(caller, Grant::Usage)
+                    .and_then(|()| self.accounts())
+                    .and_then(|accounts| usage_read::call(accounts, &params)),
                 Some("options/choices") => self
                     .accounts()
                     .and_then(|accounts| choices::call(accounts, caller, &params)),
@@ -1133,10 +1136,10 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
 }
 
 pub(crate) mod accounts;
-mod choices;
 mod changes;
 #[cfg(test)]
 mod changes_tests;
+mod choices;
 pub(crate) mod discover;
 mod files;
 #[cfg(test)]
@@ -1145,6 +1148,7 @@ mod import;
 #[cfg(test)]
 mod import_tests;
 mod index;
+mod usage_read;
 pub(crate) use index::ToolsBackend;
 mod account_move;
 #[cfg(test)]

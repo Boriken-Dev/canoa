@@ -413,3 +413,72 @@ fn version_of(program: &str) -> Option<String> {
     }
     Some(line[..end].to_string())
 }
+
+/// What the provider of the account `name` reports of its allowances with no session, as one row of `usage/limits`
+/// (`account`, `observed_at`, `buckets`, `limit`); `supported: false` with a reason when the provider learns them only in a turn.
+/// Asked through an entry of the account's provider that offers it, else any that runs the provider, else the provider's own
+/// defaults.
+///
+/// # Errors
+///
+/// Why the account could not be asked: it is not in canoa.cfg, its provider could not be built, or its credential is held.
+pub(crate) fn usage_of(
+    config: &Config,
+    name: &str,
+    store: &Arc<crate::accounts::Accounts>,
+) -> Result<Value, String> {
+    let account = config
+        .accounts
+        .get(name)
+        .ok_or_else(|| format!("no account called {name}"))?;
+    let harness = account.harness.as_str();
+    let runs = |entry: &&crate::config::Entry| matches!(&entry.kind, EntryKind::Harness { harness: each, .. } if each == harness);
+    let entry = config
+        .entries
+        .iter()
+        .filter(runs)
+        .find(|entry| {
+            matches!(&entry.kind, EntryKind::Harness { accounts, .. } if accounts.iter().any(|each| each == name))
+        })
+        .or_else(|| config.entries.iter().find(runs));
+    let (origin, configured) = match entry.map(|entry| (entry, &entry.kind)) {
+        Some((
+            entry,
+            EntryKind::Harness {
+                origin,
+                executable,
+                options,
+                settings,
+                ..
+            },
+        )) => (
+            origin.as_ref(),
+            crate::serve::harness_settings(
+                entry,
+                harness,
+                executable.as_ref(),
+                options,
+                settings.as_ref(),
+            ),
+        ),
+        _ => (None, Settings::new(Map::new())),
+    };
+    let registry = Arc::new(kind::registry(origin).map_err(|error| error.to_string())?);
+    let built = kind::Harness::new(&registry, harness, &configured, false, Vec::new())
+        .map_err(|error| error.to_string())?;
+    let listed = crate::serve::offered_accounts(config, harness, &[name.to_owned()], &built)?;
+    let built = built.offering(store, listed, Vec::new());
+    let held = built
+        .hold_account(name, "usage", false)
+        .map_err(|refusal| refusal.client_reason())?;
+    let connection = built.connection(None, Some(&held), CacheLifetime::Default);
+    let report = connection
+        .harness
+        .usage(
+            coqui_acp_api::UsageQuery::new().account(held.grant()),
+            connection.spawner,
+            connection.keeper,
+        )
+        .map_err(|error| error.message().to_owned())?;
+    serde_json::to_value(&report).map_err(|error| error.to_string())
+}

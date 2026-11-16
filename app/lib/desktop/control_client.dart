@@ -43,6 +43,7 @@ final class ControlClient {
   final _listeners = <int, ControlListener>{};
   int _next = 0;
   bool _over = false;
+  final _done = Completer<void>();
 
   /// The result of [method], or a [ControlFailed] with the host's error. [listener] hears what the host says meanwhile, and
   /// [wait] replaces [timeout] for a request that takes long.
@@ -68,6 +69,9 @@ final class ControlClient {
 
   /// Whether the link has ended, so nothing more can be asked.
   bool get over => _over;
+
+  /// Completes when the link ends, whoever ended it.
+  Future<void> get ended => _done.future;
 
   /// What binds this app's sealed answers to the host's questions on this link, derived from the secret the host shares with this
   /// process (which the link hands over once and the bytes are then zeroed). Null where the link has none, so the host asks nothing.
@@ -142,6 +146,7 @@ final class ControlClient {
 
   void _ended() {
     _over = true;
+    if (!_done.isCompleted) _done.complete();
     for (final waiting in _waiting.values) {
       if (!waiting.isCompleted) waiting.completeError(StateError('the link to the host has ended'));
     }

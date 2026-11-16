@@ -70,7 +70,7 @@ class LimitsView extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(top: 2, bottom: 12),
                       child: Text(
-                        'Reported by ${each.hosts.join(', ')}',
+                        each.hosts.isEmpty ? 'Not reported yet: it shows once its provider says, or a session has run on it' : 'Reported by ${each.hosts.join(', ')}',
                         key: Key('usage-hosts ${each.id}'),
                         style: small,
                       ),

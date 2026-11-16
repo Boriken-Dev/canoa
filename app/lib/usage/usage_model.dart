@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show UsageReport;
 import 'package:flutter/foundation.dart';
 
+import '../accounts/account_models.dart';
 import '../accounts/accounts_controller.dart';
 import '../desktop/host_control.dart';
 import 'spend_model.dart';
@@ -18,8 +19,15 @@ abstract interface class UsageSource {
   Future<Object?> summary(Map<String, Object?> params);
 }
 
+/// A host that can read an account's allowances from its provider now, with no session: what [UsageController] asks of each
+/// account it lists, so an account no session has run on shows what the provider can say.
+abstract interface class UsageReader {
+  /// The row `usage/limits` would list for the account called [name], or null when the host has none.
+  Future<Object?> read(String name);
+}
+
 /// The host this app's control link reaches.
-final class ControlUsageSource implements UsageSource {
+final class ControlUsageSource implements UsageSource, UsageReader {
   ControlUsageSource(this.name, this._control);
 
   @override
@@ -38,6 +46,12 @@ final class ControlUsageSource implements UsageSource {
   @override
   Future<Object?> summary(Map<String, Object?> params) async =>
       (await _control.ready(wait: false)).call('usage/summary', params);
+
+  @override
+  Future<Object?> read(String name) async {
+    final result = await (await _control.ready(wait: false)).call('usage/read', {'account': name});
+    return result is Map ? result['account'] : null;
+  }
 }
 
 /// The provider an account is listed under when nothing says which it is.
@@ -140,6 +154,8 @@ class UsageController extends ChangeNotifier {
     _notify();
     try {
       await Future.wait([for (final source in sources) _ask(source)]);
+      _notify();
+      await _readEach();
     } finally {
       _loading = false;
       _notify();
@@ -156,15 +172,48 @@ class UsageController extends ChangeNotifier {
     }
   }
 
-  /// Every account any host reported, one for each identity, the newest reading winning, in a stable order: provider, then name.
+  /// What each host's provider said when asked of an account with no session, by the host's name and the account's identity.
+  final _read = <String, Map<String, _Heard>>{};
+
+  /// Asks each host that can for every account this computer lists, so an account no session has run on still says what its
+  /// provider can report. A provider that reports only during a turn answers nothing, and an answer that fails leaves the account
+  /// as it was.
+  Future<void> _readEach() async {
+    final listed = accounts?.accounts ?? const [];
+    await Future.wait([
+      for (final source in sources)
+        if (source is UsageReader)
+          for (final account in listed)
+            () async {
+              try {
+                final row = await (source as UsageReader).read(account.name);
+                final heard = _Heard.parse(row is Map ? {'account': account.id, ...row.cast<String, Object?>()} : null);
+                if (heard != null) (_read[source.name] ??= {})[account.id] = heard;
+              } on Object {
+                // This host cannot read it now: what the sessions reported stands.
+              }
+            }(),
+    ]);
+  }
+
+  /// Every account any host reported, and every account this computer lists that none did, one for each identity, the newest
+  /// reading winning, in a stable order: provider, then name.
   List<AccountLimits> get all {
     final byId = <String, List<(String, _Heard)>>{};
     for (final source in sources) {
       for (final heard in _heard[source.name] ?? const <_Heard>[]) {
         byId.putIfAbsent(heard.id, () => []).add((source.name, heard));
       }
+      for (final heard in (_read[source.name] ?? const <String, _Heard>{}).values) {
+        // A reading with figures stands beside what sessions heard; one with none says nothing the account's row lacks.
+        if (heard.report.buckets.isNotEmpty) byId.putIfAbsent(heard.id, () => []).add((source.name, heard));
+      }
     }
     final merged = <AccountLimits>[];
+    for (final each in accounts?.accounts ?? const <AccountInfo>[]) {
+      if (byId.containsKey(each.id)) continue;
+      merged.add(AccountLimits(id: each.id, name: each.name, provider: each.harness, hosts: const [], report: UsageReport.parse({'supported': true})!, readAt: 0));
+    }
     for (final MapEntry(:key, :value) in byId.entries) {
       var newest = value.first.$2;
       for (final (_, heard) in value) {
@@ -178,7 +227,7 @@ class UsageController extends ChangeNotifier {
           id: key,
           name: info?.name ?? key,
           provider: info?.harness ?? otherProvider,
-          hosts: [for (final (host, _) in value) host],
+          hosts: {for (final (host, _) in value) host}.toList(),
           report: newest.report,
           readAt: newest.readAt,
         ),

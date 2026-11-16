@@ -197,8 +197,19 @@ void main() {
     expect(find.byKey(const Key('usage-account id-work')), findsOneWidget);
   });
 
-  testWidgets('with nothing reported the page says why, in words', (tester) async {
+  testWidgets('an account no host reported is listed, and says it is not reported yet', (tester) async {
     final usage = await _controller([_Source('Laptop', [])]);
+    await _pump(tester, usage);
+    expect(find.byKey(const Key('usage-account id-work')), findsOneWidget);
+    expect(find.byKey(const Key('usage-account id-personal')), findsOneWidget);
+    expect(find.byKey(const Key('usage-hosts id-work')), findsOneWidget);
+    expect(find.textContaining('Not reported yet'), findsNWidgets(2));
+    expect(find.byKey(const Key('account-usage-empty')), findsNWidgets(2));
+  });
+
+  testWidgets('with no account at all the page says why nothing shows, in words', (tester) async {
+    final usage = UsageController(sources: [_Source('Laptop', [])], now: () => _noon);
+    await usage.refresh();
     await _pump(tester, usage);
     expect(find.byKey(const Key('usage-limits-empty')), findsOneWidget);
   });
@@ -240,4 +251,14 @@ void main() {
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/usage_limits_$label.png'));
     });
   }
+
+  testWidgets('Usage, Limits with an account no host has reported yet', (tester) async {
+    final usage = await _controller([
+      _Source('Laptop', [_entry('id-work', _work, readAgo: 120)]),
+    ]);
+    await _pump(tester, usage);
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('usage-account id-personal')), findsOneWidget);
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/usage_limits_unreported_desktop.png'));
+  });
 }
