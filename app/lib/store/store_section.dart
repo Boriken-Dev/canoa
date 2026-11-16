@@ -8,6 +8,7 @@ import '../loadout/loadout_controller.dart';
 import '../loadout/mcp_registry.dart';
 import '../profile/profile_home.dart';
 import '../selectable.dart';
+import '../shell/layout_controls.dart';
 import '../shell/shell.dart' show ShellScope;
 import 'overlay_page.dart' show SaveConfig, shownTags;
 import 'programs.dart';
@@ -15,7 +16,9 @@ import 'programs_view.dart';
 import 'store_catalogs.dart';
 import 'store_index.dart';
 import 'store_mcps.dart';
+import 'store.dart' show LoadedCatalog;
 import 'store_overlays.dart';
+import 'store_selection.dart';
 import 'store_skills.dart';
 import 'store_view.dart';
 
@@ -36,6 +39,7 @@ class StoreSection extends StatefulWidget {
     this.embedded = false,
     this.index,
     this.now,
+    this.selection,
   });
 
   /// Whether the page is a section of the shell, which never pops: what it changes is saved as it is changed.
@@ -63,6 +67,9 @@ class StoreSection extends StatefulWidget {
 
   /// The clock the "updated … ago" line reads; the time of day when null.
   final DateTime Function()? now;
+
+  /// The store the section's index chose, which Overlays and Skills are scoped to; none where the section has no index.
+  final StoreSelection? selection;
 
   @override
   State<StoreSection> createState() => StoreSectionState();
@@ -92,6 +99,8 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
 
   DateTime _now() => (widget.now ?? DateTime.now)();
 
+  StoreSelection? get selection => widget.selection;
+
   StoreType get type => types[tabs.index.clamp(0, types.length - 1)];
   StoreView get view => views[type]!;
 
@@ -99,15 +108,25 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
   void initState() {
     super.initState();
     unawaited(controller.load());
+    _scope(switchTab: false);
     for (final each in views.values) {
       each.addListener(_viewChanged);
     }
     widget.programs?.addListener(_changed);
+    selection?.addListener(_selectionChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _publish();
+    });
   }
 
   @override
   void didUpdateWidget(StoreSection oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.selection != widget.selection) {
+      oldWidget.selection?.removeListener(_selectionChanged);
+      widget.selection?.addListener(_selectionChanged);
+      _scope(switchTab: false);
+    }
     if (oldWidget.programs != widget.programs) {
       oldWidget.programs?.removeListener(_changed);
       widget.programs?.addListener(_changed);
@@ -128,10 +147,44 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     if (!mounted) return;
     if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) setState(() {});
+        if (mounted) {
+          setState(() {});
+          _publish();
+        }
       });
     } else {
       setState(() {});
+      _publish();
+    }
+  }
+
+  /// Tells the index which stores have been read.
+  void _publish() => selection?.publish(controller.loaded, loading: controller.loadingCatalogs);
+
+  /// The store chosen in the index scopes Overlays and Skills to it, and shows what it lists.
+  void _selectionChanged() {
+    if (!mounted) return;
+    _scope(switchTab: true);
+    setState(() {});
+  }
+
+  void _scope({required bool switchTab}) {
+    final chosen = selection?.selected;
+    for (final each in [views[StoreType.overlays]!, views[StoreType.skills]!]) {
+      final scoped = chosen == null ? const <String>{} : {chosen};
+      final same = each.catalogs.length == scoped.length && each.catalogs.containsAll(scoped);
+      if (same) continue;
+      each.catalogs
+        ..clear()
+        ..addAll(scoped);
+      // A tag is of the store it was picked in.
+      each.tags.clear();
+      if (chosen != null) each.discover = true;
+      each.changed();
+    }
+    if (chosen != null && switchTab && type != StoreType.overlays && type != StoreType.skills) {
+      final overlays = types.indexOf(StoreType.overlays);
+      if (overlays >= 0) tabs.animateTo(overlays);
     }
   }
 
@@ -145,6 +198,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
   @override
   void dispose() {
     widget.programs?.removeListener(_changed);
+    selection?.removeListener(_selectionChanged);
     controller
       ..removeListener(_changed)
       ..dispose();
@@ -194,17 +248,24 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
         if (c.index == null || c.home == null) return 'The desktop app reads the catalogs';
         if (c.config.catalogs.isEmpty) return 'No catalogs yet';
         if (c.loadingCatalogs) return 'Reading the catalogs…';
-        final times = [for (final catalog in c.loaded) ?catalog.checked];
+        final shown = _scoped;
+        final times = [for (final catalog in shown) ?catalog.checked];
         if (times.isEmpty) return 'Not read yet';
         final oldest = times.reduce((a, b) => a.isBefore(b) ? a : b);
-        final stale = c.loaded.any((catalog) => catalog.stale || catalog.staleBecause != null);
+        final stale = shown.any((catalog) => catalog.stale || catalog.staleBecause != null);
         return '${stale ? 'Stale' : 'Cached'} · updated ${ageText(_now().difference(oldest))}';
     }
   }
 
+  /// The catalogs the content is about: the chosen store, or every one.
+  List<LoadedCatalog> get _scoped {
+    final chosen = selection?.selected;
+    return chosen == null ? controller.loaded : [for (final catalog in controller.loaded) if (catalog.label == chosen) catalog];
+  }
+
   bool _staleNow(StoreType type) =>
       (type == StoreType.overlays || type == StoreType.skills) &&
-      controller.loaded.any((catalog) => catalog.stale || catalog.staleBecause != null || catalog.problem != null);
+      _scoped.any((catalog) => catalog.stale || catalog.staleBecause != null || catalog.problem != null);
 
   bool get _canRefresh => switch (type) {
     StoreType.agents => widget.programs?.loading == false,
@@ -238,6 +299,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
           leading: widget.embedded ? ShellScope.menuButton(context) : null,
           automaticallyImplyLeading: !widget.embedded,
           title: const Text('Store'),
+          actions: [?_layoutControls(context)],
           bottom: TabBar(
             key: const Key('store-tabs'),
             controller: tabs,
@@ -275,6 +337,16 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
           ),
         ]),
       ),
+    );
+  }
+
+  /// The index toggle at the header's right, where the layout controls are; none without an index or in a drawer.
+  Widget? _layoutControls(BuildContext context) {
+    final scope = ShellScope.maybeOf(context);
+    if (widget.selection == null || scope == null || scope.narrow) return null;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: LayoutControls(layout: scope.layout, section: 'store', hasIndex: true, hasRight: false, hasBottom: false, menu: false),
     );
   }
 
@@ -354,20 +426,10 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
       ));
     }
     if ((current == StoreType.overlays || current == StoreType.skills) && view.discover && controller.config.catalogs.isNotEmpty) {
-      for (final catalog in controller.loaded) {
-        chips.add(FilterChip(
-          key: Key('catalog-filter-${catalog.label}'),
-          label: Text(catalog.label),
-          selected: view.catalogs.contains(catalog.label),
-          onSelected: (on) {
-            on ? view.catalogs.add(catalog.label) : view.catalogs.remove(catalog.label);
-            view.changed();
-          },
-        ));
-      }
       if (current == StoreType.overlays) {
         if (controller.listing case final listing? when listing.tags.isNotEmpty) {
-          for (final tag in {...listing.topTags(shownTags), ...view.tags}) {
+          // The tags of the chosen store only: another store's tag would find nothing here.
+          for (final tag in {...listing.topTags(shownTags, catalogs: view.catalogs), ...view.tags}) {
             chips.add(FilterChip(
               key: Key('store-tag-$tag'),
               label: Text(tag),

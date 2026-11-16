@@ -101,7 +101,9 @@ import 'sources/sources.dart';
 import 'loadout/loadout_editor.dart' show LoadoutDraft;
 import 'loadout/loadouts_section.dart';
 import 'loadout/registry_fetch.dart';
+import 'store/store_index_view.dart';
 import 'store/store_section.dart';
+import 'store/store_selection.dart';
 import 'store/programs.dart';
 import 'store/store_index.dart';
 import 'welcome/welcome_view.dart';
@@ -655,9 +657,12 @@ class _CanoaAppState extends State<CanoaApp> {
   );
 
   /// The Store as the section shows it.
+  late final StoreSelection _storeSelection = StoreSelection(layout: _layout);
+
   Widget _loadoutPage() => StoreSection(
     key: _loadoutKey,
     embedded: true,
+    selection: _storeSelection,
     config: config,
     home: _home,
     onSave: _saveLoadout,
@@ -2024,7 +2029,7 @@ class _CanoaAppState extends State<CanoaApp> {
           onHosts: () => _layout.select(HostsController.section), onLoadout: _showLoadout, onLoadouts: _showLoadouts, onReopen: _reopen,
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
           layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(), loadouts: _loadoutsPage(),
-          hostsIndex: _hostsIndex(), hostsPage: _hostsPage(),
+          hostsIndex: _hostsIndex(), hostsPage: _hostsPage(), storeIndex: StoreIndex(selection: _storeSelection),
           usageIndex: _usageIndex(), usagePage: _usagePage(), sessionSpend: _usage?.sessionSpend,
           conversation: _conversation,
           localHost: _localHost,
@@ -2049,7 +2054,7 @@ class _CanoaHome extends StatelessWidget {
     this.onHosts, this.onLoadout, this.onLoadouts, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
     this.renderers = chat.ChatRenderers.none, required this.welcome, this.noAgent = false, this.localHost, required this.grouping,
     required this.layout, required this.surfaces, required this.settings, required this.loadout, required this.loadouts,
-    required this.hostsIndex, required this.hostsPage, this.usageIndex, this.usagePage, this.sessionSpend,
+    required this.hostsIndex, required this.hostsPage, required this.storeIndex, this.usageIndex, this.usagePage, this.sessionSpend,
   });
 
   /// The extension's bridge to the Canoa on this computer; null where this is not the extension.
@@ -2063,7 +2068,7 @@ class _CanoaHome extends StatelessWidget {
   final Widget settings, loadout, loadouts;
 
   /// The Hosts section's index and main view.
-  final Widget hostsIndex, hostsPage;
+  final Widget hostsIndex, hostsPage, storeIndex;
 
   /// The Usage section's index and main view; none where the host does not grant usage.
   final Widget? usageIndex, usagePage;
@@ -2210,6 +2215,7 @@ class _CanoaHome extends StatelessWidget {
         sections: [
           AppSection(
             id: ShellLayout.conversations,
+            ownsLayoutControls: true,
             label: 'Conversations',
             icon: Icons.chat_bubble_outline,
             index: _rail(context),
@@ -2230,7 +2236,7 @@ class _CanoaHome extends StatelessWidget {
           AppSection(id: HostsController.section, label: 'Hosts', icon: Icons.lan_outlined, index: hostsIndex, main: hostsPage),
           if (usagePage != null) AppSection(id: 'usage', label: 'Usage', icon: Icons.speed, index: usageIndex, main: usagePage!),
           AppSection(id: 'loadouts', label: 'Loadouts', icon: Icons.inventory_2_outlined, main: loadouts),
-          AppSection(id: 'store', label: 'Store', icon: Icons.storefront_outlined, main: loadout),
+          AppSection(id: 'store', label: 'Store', icon: Icons.storefront_outlined, index: storeIndex, main: loadout, ownsLayoutControls: true),
           AppSection(id: 'settings', label: 'Settings', tooltip: 'Canoa settings', icon: Icons.settings_outlined, main: settings, atFoot: true),
         ],
       ));

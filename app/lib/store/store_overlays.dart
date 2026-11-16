@@ -10,6 +10,7 @@ import '../profile/profiles_panel.dart' show OverlayIcon, OverlayUpdateDialog, v
 import '../selectable.dart';
 import 'overlay_page.dart' show OverlayPage, oneLine;
 import 'store.dart';
+import 'store_banner.dart';
 import 'store_cards.dart';
 import 'store_catalogs.dart';
 import 'store_icon.dart';
@@ -69,7 +70,9 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
     }
     final shown = [
       for (final MapEntry(key: name, value: source) in c.config.overlays.entries)
-        if (view.matches('$name\n${c.layerOf(name)?.aos?.about['summary'] ?? ''}')) (name, source),
+        if (view.matches('$name\n${c.layerOf(name)?.aos?.about['summary'] ?? ''}') &&
+            (view.catalogs.isEmpty || view.catalogs.contains(c.home?.overlays.installed(name)?.catalog)))
+          (name, source),
     ];
     return CardList(
       header: [
@@ -222,15 +225,130 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
       for (final listed in listing?.search(view.query.text, tags: view.tags) ?? const <ListedEntry>[])
         if (view.catalogs.isEmpty || view.catalogs.contains(listed.label)) listed,
     ];
+    if (view.catalogs.length == 1) {
+      final opened = c.loaded.where((loaded) => loaded.label == view.catalogs.first && loaded.catalog != null).firstOrNull;
+      if (opened != null) return _storePage(context, head, opened, shown);
+    }
     return CardList(
       header: [
         ...head,
-        ...sourceNotes(c),
+        ...sourceNotes(c, only: view.catalogs),
         if (c.loadingCatalogs) ...[const LinearProgressIndicator(), const Text('Fetching catalogs…')],
-        if (!c.loadingCatalogs && shown.isEmpty) const Text('Nothing listed matches.', key: Key('overlays-nothing')),
+        if (!c.loadingCatalogs && shown.isEmpty)
+          Text(
+            view.catalogs.isNotEmpty && view.query.text.isEmpty && view.tags.isEmpty
+                ? '${view.catalogs.first} lists no overlays.'
+                : 'Nothing listed matches.',
+            key: const Key('overlays-nothing'),
+          ),
       ],
       cards: [for (final listed in shown) _discoverCard(context, listed)],
     );
+  }
+
+  /// An opened store: its banner, then its items as tiles with a + that installs.
+  Widget _storePage(BuildContext context, List<Widget> head, LoadedCatalog catalog, List<ListedEntry> shown) {
+    final all = c.listing!.entries.where((listed) => listed.label == catalog.label).toList();
+    final text = Theme.of(context).textTheme;
+    final specs = bannersFor(
+      catalog: catalog,
+      entries: all,
+      open: (listed) => unawaited(_open(listed)),
+      showTag: (tag) {
+        view.tags
+          ..clear()
+          ..add(tag);
+        view.changed();
+      },
+    );
+    final filtered = view.tags.isNotEmpty || view.query.text.isNotEmpty;
+    return CardList(
+      header: [
+        ...head,
+        ...sourceNotes(c, only: view.catalogs),
+        if (c.loadingCatalogs) const LinearProgressIndicator(),
+        StoreBanner(specs: specs, catalog: catalog, iconLimits: c.config.store.iconLimits),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(children: [
+            Text(filtered ? 'Matching overlays' : 'Top overlays', style: text.titleMedium),
+            const SizedBox(width: 8),
+            Chip(key: const Key('store-count'), label: Text('${shown.length}'), visualDensity: VisualDensity.compact),
+            const Spacer(),
+            if (filtered)
+              TextButton(
+                key: const Key('store-show-all'),
+                onPressed: () {
+                  view.tags.clear();
+                  view.query.clear();
+                  view.changed();
+                },
+                child: const Text('Show all →'),
+              ),
+          ]),
+        ),
+        if (!c.loadingCatalogs && shown.isEmpty)
+          Text(filtered ? 'Nothing listed matches.' : '${catalog.label} lists no overlays.', key: const Key('overlays-nothing')),
+      ],
+      cards: [for (final listed in shown) _tile(context, listed, catalog)],
+    );
+  }
+
+  final _installing = <String>{};
+
+  Widget _tile(BuildContext context, ListedEntry listed, LoadedCatalog catalog) {
+    final entry = listed.entry;
+    final icon = catalog.icons[entry.name];
+    final key = '${listed.label}/${entry.name}';
+    return StoreTile(
+      key: Key('store-entry-${listed.label}-${entry.name}'),
+      leading: StillIcon(name: entry.name, path: entry.about['icon'] as String?, bytes: icon?.bytes, size: 48,
+          limits: c.config.store.iconLimits),
+      title: listed.shown,
+      summary: entry.about['summary'] as String?,
+      by: publisherOf(listed),
+      installed: isInstalled(c.config, entry),
+      busy: _installing.contains(key),
+      installKey: Key('store-entry-install-${listed.label}-${entry.name}'),
+      onOpen: () => unawaited(_open(listed)),
+      onInstall: c.home == null || c.busy != null ? null : () => unawaited(_quickInstall(listed)),
+    );
+  }
+
+  /// Installs from the tile, through the path the page takes. What needs a look first (a pin that moved or does not match,
+  /// skills to fetch, an overlay Canoa would leave out) opens the page instead, and nothing is installed.
+  Future<void> _quickInstall(ListedEntry listed) async {
+    final home = c.home!;
+    final entry = listed.entry;
+    final key = '${listed.label}/${entry.name}';
+    final String name;
+    final GitOverlay source;
+    try {
+      name = installName(entry);
+      source = installSource(entry);
+    } on StoreRefusal {
+      return _open(listed);
+    }
+    setState(() => _installing.add(key));
+    var needsLook = false;
+    try {
+      await c.run('Installing $name', () async {
+        final named = namedAs(c.config, name) ?? name;
+        final preview = await previewOverlay(home.overlays, named, source,
+            os: home.os, shared: mergeProfiles([Layer(const LayerId(LayerKind.user), c.config.profile)]).shareEnv,
+            catalogPin: entry.pin, iconLimits: c.config.store.iconLimits, catalogs: skillCatalogs(c.loaded),
+            others: await installedManifests(home, c.config, except: named), skillPins: c.config.skillPins);
+        if (!preview.installable || pinMoved(c.config, preview) != null || (preview.skills?.isEmpty == false)) {
+          needsLook = true;
+          await discardPreview(home.overlays, preview.name);
+          return;
+        }
+        await c.apply(await installPreview(home.overlays, c.config, preview, catalog: listed.label));
+      });
+    } finally {
+      if (mounted) setState(() => _installing.remove(key));
+    }
+    if (needsLook && mounted) await _open(listed);
   }
 
   Widget _discoverCard(BuildContext context, ListedEntry listed) {
@@ -283,8 +401,9 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
 
 /// One line for each catalog the host could not read now: a catalog whose last copy is shown, with why it is old, and one with
 /// no copy, with why.
-List<Widget> sourceNotes(LoadoutController c) => [
+List<Widget> sourceNotes(LoadoutController c, {Set<String> only = const {}}) => [
   for (final catalog in c.loaded)
+    if (only.isEmpty || only.contains(catalog.label))
     if (catalog.problem ?? catalog.staleBecause case final why?)
       Padding(
         key: Key('store-source-note-${catalog.label}'),

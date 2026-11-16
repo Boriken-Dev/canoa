@@ -135,7 +135,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     return CardList(
       header: [
         ...head,
-        ...sourceNotes(c),
+        ...sourceNotes(c, only: view.catalogs),
         if (c.loadingCatalogs) const LinearProgressIndicator(),
         if (offered.isEmpty && !c.loadingCatalogs)
           Text(c.config.catalogs.isEmpty

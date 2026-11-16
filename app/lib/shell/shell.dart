@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import '../chat/palette.dart' show chord;
 
 import '../theme/look.dart';
-import 'outline_icon.dart';
+import 'layout_controls.dart';
 import 'layout_state.dart';
 import 'section_rail.dart';
 import 'sections.dart';
@@ -83,30 +83,6 @@ class _AppShellState extends State<AppShell> {
     orElse: () => widget.sections.first,
   );
 
-  Widget _toggle(AppSection current) {
-    final layout = widget.layout;
-    final hidden = layout.collapsed(current.id);
-    return Tooltip(
-      message: 'Toggle section index (${shortcutLabel('B')})',
-      child: Semantics(
-        button: true,
-        toggled: !hidden,
-        label: 'Section index',
-        excludeSemantics: true,
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: IconButton(
-            key: const ValueKey('toggle-index'),
-            isSelected: !hidden,
-            icon: const WindowOutline(region: WindowRegion.left, filled: false),
-            selectedIcon: const WindowOutline(region: WindowRegion.left, filled: true),
-            onPressed: () => layout.toggleIndex(current.id),
-          ),
-        ),
-      ),
-    );
-  }
-
   void _select(String id) {
     widget.layout.select(id);
     if (widget.narrow && widget.sections.firstWhere((section) => section.id == id).index == null) {
@@ -114,11 +90,10 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  Widget _selector(AppSection current, {required bool withToggle}) => SectionRail(
+  Widget _selector(AppSection current) => SectionRail(
     sections: widget.sections,
     selected: current.id,
     onSelect: _select,
-    toggle: withToggle && current.index != null ? _toggle(current) : null,
     account: widget.account,
     onSignOut: widget.onSignOut,
   );
@@ -166,7 +141,17 @@ class _AppShellState extends State<AppShell> {
         narrow: widget.narrow,
         layout: layout,
         openNavigation: () => _scaffold.currentState?.openDrawer(),
-        child: _stack(current),
+        child: Stack(fit: StackFit.expand, children: [
+          _stack(current),
+          if (!widget.narrow && current.index != null && !current.ownsLayoutControls)
+            Positioned(
+              top: 6,
+              right: 8,
+              child: LayoutControls(layout: layout, section: current.id, hasIndex: true, hasRight: false, hasBottom: false, menu: false),
+            )
+          else
+            const SizedBox.shrink(),
+        ]),
       );
       if (widget.narrow) {
         return Scaffold(
@@ -175,7 +160,7 @@ class _AppShellState extends State<AppShell> {
             width: SectionRail.width + 304,
             child: SafeArea(
               child: Row(children: [
-                _selector(current, withToggle: false),
+                _selector(current),
                 Expanded(child: current.index ?? ColoredBox(color: context.look.rail, child: const SizedBox.expand())),
               ]),
             ),
@@ -188,7 +173,7 @@ class _AppShellState extends State<AppShell> {
         key: _scaffold,
         body: SafeArea(
           child: _under(Row(children: [
-            _selector(current, withToggle: true),
+            _selector(current),
             const VerticalDivider(width: 1),
             Expanded(
               child: current.index == null || hidden

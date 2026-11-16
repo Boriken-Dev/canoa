@@ -12,6 +12,7 @@ class AppSection {
     this.index,
     this.tooltip,
     this.atFoot = false,
+    this.ownsLayoutControls = false,
   });
 
   final String id;
@@ -28,6 +29,10 @@ class AppSection {
 
   /// What the section shows.
   final Widget main;
+
+  /// Whether the main view draws the layout controls itself, in its own header. A section that does not gets the index toggle
+  /// from the shell, at the main view's top right.
+  final bool ownsLayoutControls;
 
   /// Whether the selector puts it at its foot, with the account.
   final bool atFoot;

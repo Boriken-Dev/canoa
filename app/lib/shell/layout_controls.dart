@@ -15,6 +15,7 @@ class LayoutControls extends StatelessWidget {
     required this.hasIndex,
     required this.hasRight,
     required this.hasBottom,
+    this.menu = true,
   });
 
   final ShellLayout layout;
@@ -24,6 +25,9 @@ class LayoutControls extends StatelessWidget {
 
   /// Whether each region has a surface or an index for this view.
   final bool hasIndex, hasRight, hasBottom;
+
+  /// Whether the Layout menu follows the toggles.
+  final bool menu;
 
   Widget _toggle(BuildContext context, {
     required Key key,
@@ -87,6 +91,7 @@ class LayoutControls extends StatelessWidget {
             tooltip: 'Toggle right panel (${shortcutLabel('Alt+B')})',
             onPressed: layout.toggleRight,
           ),
+        if (menu)
         PopupMenuButton<String>(
           key: const ValueKey('layout-menu'),
           tooltip: 'Layout',

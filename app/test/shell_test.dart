@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-const _toggle = ValueKey('toggle-index');
+const _toggle = ValueKey('layout-left');
 final _divider = find.byKey(const ValueKey('divider Resize the section index'));
 
 /// Two sections with an index and one without; the first's main view holds a text field whose text must outlive a visit elsewhere.

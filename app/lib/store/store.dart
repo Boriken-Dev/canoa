@@ -202,10 +202,12 @@ final class StoreListing {
   /// Every entry, in the order [aos.listCatalogs] lists them.
   late final List<ListedEntry> entries;
 
-  /// The [count] tags the most entries carry, the most used first, then by name.
-  List<String> topTags(int count) {
+  /// The [count] tags the most entries carry, the most used first, then by name; of the entries of [catalogs] only when some
+  /// are named.
+  List<String> topTags(int count, {Set<String> catalogs = const {}}) {
     final uses = <String, int>{};
     for (final listed in entries) {
+      if (catalogs.isNotEmpty && !catalogs.contains(listed.label)) continue;
       for (final tag in _tags(listed.entry).toSet()) {
         uses.update(tag, (n) => n + 1, ifAbsent: () => 1);
       }

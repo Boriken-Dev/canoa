@@ -168,16 +168,13 @@ void main() {
     expect(find.byKey(const Key('overlays-none')), findsOneWidget);
   });
 
-  testWidgets('a Discover card says which catalog it is from and its repository, and the catalog filter narrows the list', (tester) async {
+  testWidgets('a Discover card says which catalog it is from and its repository, whatever store offers it', (tester) async {
     overlays.put('https://example.invalid/other.git', {'catalog.toml': '[overlays.lint]\nsource = "https://example.invalid/lint.git@main"\n'});
     await open(tester, text: '${withCatalog}other = "https://example.invalid/other.git@main#catalog.toml"\n');
     await tapKey(tester, 'overlays-discover');
     final card = find.byKey(const Key('store-entry-main-review'));
     expect(tester.widget<Text>(find.descendant(of: card, matching: find.byKey(const Key('provenance')))).data,
         'from the catalog main · $teamRepo@main');
-    expect(find.byKey(const Key('store-entry-other-lint')), findsOneWidget);
-    await tapKey(tester, 'catalog-filter-other');
-    expect(find.byKey(const Key('store-entry-main-review')), findsNothing);
     expect(find.byKey(const Key('store-entry-other-lint')), findsOneWidget);
   });
 

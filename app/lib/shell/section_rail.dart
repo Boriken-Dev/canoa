@@ -4,15 +4,14 @@ import '../theme/look.dart';
 import 'sections.dart';
 
 /// The vertical selector at the window's far left: an icon for each section with its name in a tooltip and for a screen reader,
-/// and at its foot the sections that sit there and the account. [toggle], when given, is the button that hides or shows the
-/// section's index.
+/// and at its foot the sections that sit there and the account. The section index is hidden or shown from the layout controls
+/// at the window's top right, never from here.
 class SectionRail extends StatelessWidget {
   const SectionRail({
     super.key,
     required this.sections,
     required this.selected,
     required this.onSelect,
-    this.toggle,
     this.account,
     this.onSignOut,
   });
@@ -24,8 +23,6 @@ class SectionRail extends StatelessWidget {
   final String selected;
   final ValueChanged<String> onSelect;
 
-  /// The index toggle, drawn at the top; none when the section has no index.
-  final Widget? toggle;
   final String? account;
   final Future<void> Function()? onSignOut;
 
@@ -69,7 +66,6 @@ class SectionRail extends StatelessWidget {
         width: width,
         child: Column(children: [
           const SizedBox(height: 10),
-          ?toggle,
           for (final section in top) _item(context, section),
           const Spacer(),
           for (final section in foot) _item(context, section),
