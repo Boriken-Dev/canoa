@@ -1,5 +1,5 @@
 // The app's speech code against the real host's `@control`: `store_control`, an example of canoa-host, serves the control channel
-// over standard streams with the canoa.cfg in its folder, and `speech_standin` is the program a provider of that file runs. A
+// over standard streams with the canoa.cfg in its folder, and `host_speech_standin` is the program a provider of that file runs. A
 // recorded WAV is streamed through the host and its transcript comes back; a provider's settings are written to canoa.cfg and read
 // back without the key. Build it first: `cargo build -p canoa-host --bin canoa --examples`. Skipped without it.
 @TestOn('vm')
@@ -61,7 +61,7 @@ final class _RecordedCapture implements AudioCapture {
 }
 
 void main() {
-  final skip = exampleMissing('store_control') ?? exampleMissing('speech_standin') ?? exampleMissing('stdio_agent') ?? exampleMissing('version_standin');
+  final skip = exampleMissing('store_control') ?? exampleMissing('host_speech_standin') ?? exampleMissing('stdio_agent') ?? exampleMissing('version_standin');
 
   group('the real host', skip: skip, () {
     late Directory dir;
@@ -72,7 +72,7 @@ void main() {
 
     setUp(() async {
       dir = await Directory.systemTemp.createTemp('canoa-speech-host');
-      final program = exampleBinary('speech_standin')!.replaceAll(r'\', '/');
+      final program = exampleBinary('host_speech_standin')!.replaceAll(r'\', '/');
       await File('${dir.path}/canoa.cfg').writeAsString(
         '[speech.says]\nprovider = "speech_command"\nprogram = "$program"\nargs = ["fixed"]\n',
       );

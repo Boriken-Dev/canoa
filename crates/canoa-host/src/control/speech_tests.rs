@@ -31,9 +31,10 @@ fn key(id: &str, grants: &[Grant]) -> Caller {
 fn standin() -> String {
     let exe = std::env::current_exe().expect("test path");
     let debug = exe.parent().expect("deps").parent().expect("debug");
-    let path = debug
-        .join("examples")
-        .join(format!("speech_standin{}", std::env::consts::EXE_SUFFIX));
+    let path = debug.join("examples").join(format!(
+        "host_speech_standin{}",
+        std::env::consts::EXE_SUFFIX
+    ));
     assert!(
         path.is_file(),
         "build the examples first: cargo build -p canoa-host --examples"

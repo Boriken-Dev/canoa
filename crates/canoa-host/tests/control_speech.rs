@@ -18,7 +18,7 @@ use support::{example, quoted};
 
 fn host() -> Hosted {
     let agent = example("stdio_agent", false);
-    let standin = example("speech_standin", false);
+    let standin = example("host_speech_standin", false);
     Hosted::start_with_setup(
         |_| {
             format!(
