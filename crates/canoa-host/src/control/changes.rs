@@ -7,6 +7,8 @@
 //! is reachable by a catalog's words, and no source comes from the agent: an entry is looked up in the sources the person listed.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
@@ -18,7 +20,9 @@ use crate::store::mcp::{Action, Change, Prepared};
 /// What names a session's plans on the host.
 const OWNER_PREFIX: &str = "canoa-store:";
 /// Files or items listed on a card before it says how many more there are.
-const LISTED: usize = 30;
+const LISTED: usize = 12;
+/// The most steps or outside changes a card can show: they are never cut, so a plan with more is not asked about.
+const NEVER_CUT: usize = 15;
 
 type Made<T> = Result<T, String>;
 
@@ -85,6 +89,25 @@ fn listed(lines: &mut Vec<String>, prefix: &str, items: impl IntoIterator<Item =
     }
 }
 
+/// Lines that are the host's own word on what a change does: all of them or no card.
+fn listed_whole(
+    lines: &mut Vec<String>,
+    prefix: &str,
+    items: impl IntoIterator<Item = String>,
+) -> Made<()> {
+    let items: Vec<String> = items.into_iter().collect();
+    if items.len() > NEVER_CUT {
+        return Err(format!(
+            "this change has {} items the person must see in full, more than a card holds: ask the person to use the Store",
+            items.len()
+        ));
+    }
+    for item in items {
+        lines.push(format!("  {prefix} {item}"));
+    }
+    Ok(())
+}
+
 fn names(value: Option<&Value>) -> Vec<String> {
     value
         .and_then(Value::as_array)
@@ -126,6 +149,7 @@ impl Control {
         session: &str,
         grants: &BTreeSet<Grant>,
         prepared: &Prepared,
+        cancel: &Arc<AtomicBool>,
     ) -> Made<Value> {
         let caller = caller_of(session, grants);
         let detail = &prepared.detail;
@@ -133,7 +157,7 @@ impl Control {
             Some("overlay-install") => self.overlay_apply(&caller, prepared),
             Some("overlay-remove") => self.overlay_removed(&caller, prepared),
             Some("loadout") => self.loadout_apply(&caller, prepared),
-            Some("program-install") => self.program_apply(&caller, prepared),
+            Some("program-install") => self.program_apply(&caller, prepared, cancel),
             Some("program-remove" | "program-rollback") => self.program_switch(&caller, prepared),
             _ => Err("the host holds nothing to apply for that".to_owned()),
         }
@@ -173,6 +197,7 @@ impl Control {
         &self,
         name: &str,
         source: &(String, String, String),
+        catalog: Option<&str>,
     ) -> Made<(Option<String>, Option<String>)> {
         let section = self.config_section("overlays");
         let Some((key, present)) = section
@@ -202,15 +227,22 @@ impl Control {
             .overlays
             .installed(&json!({"name": key}))
             .map_err(why)?;
-        if record
+        let recorded = record
             .pointer(&format!(
                 "/overlays/{}/catalog",
                 key.replace('~', "~0").replace('/', "~1")
             ))
-            .is_none()
-        {
+            .and_then(Value::as_str);
+        let Some(recorded) = recorded else {
             return Err(format!(
                 "canoa.cfg names {key} by hand: remove it there first to let the store manage it"
+            ));
+        };
+        if let Some(catalog) = catalog
+            && catalog != recorded
+        {
+            return Err(format!(
+                "{key} was installed from the catalog {recorded}, and this entry is from {catalog}: remove it first to take it from there"
             ));
         }
         Ok((
@@ -220,6 +252,20 @@ impl Control {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
         ))
+    }
+
+    /// The first of canoa.cfg and the overlays folder that is on the person's protected list, if one is.
+    fn protected_place(&self, overlays_too: bool) -> Option<String> {
+        let stores = self.stores().ok()?;
+        let mut places = vec![self.files.config_file()];
+        if overlays_too {
+            places.push(self.overlays.root_path());
+        }
+        places
+            .into_iter()
+            .flatten()
+            .find(|place| stores.protects(place))
+            .map(|place| place.display().to_string())
     }
 
     fn config_section(&self, name: &str) -> Value {
@@ -265,7 +311,7 @@ impl Control {
             }) => (repo, reference, path),
             _ => return Err("this entry's source is not a git source the host fetches".to_owned()),
         };
-        let (key, config_pin) = self.overlay_standing(name, &source)?;
+        let (key, config_pin) = self.overlay_standing(name, &source, text(entry, "catalog"))?;
         let mut params = json!({"name": name, "repo": repo, "ref": reference, "path": path});
         if let Some(pin) = text(entry, "pin") {
             params["pin"] = json!(pin);
@@ -293,6 +339,7 @@ impl Control {
                 "canoa.cfg pins {pin} for {name}, which is neither what the store installed nor what was fetched ({digest}): a pin set by hand is the person's to move, so nothing was changed"
             ));
         }
+        let protected = self.protected_place(true);
         let prepared = |nothing: Option<String>| Prepared {
             token: token.clone(),
             digest: digest.clone(),
@@ -304,7 +351,15 @@ impl Control {
                     "Install"
                 }
             ),
-            lines: self.overlay_lines(entry, &checked, &spec, name, key.is_some()),
+            lines: self.overlay_lines(
+                entry,
+                &checked,
+                &spec,
+                name,
+                key.is_some(),
+                protected.as_deref(),
+            ),
+            protected: protected.clone(),
             nothing,
             detail: json!({"do": "overlay-install", "name": name, "spec": spec,
                 "catalog": text(entry, "catalog"), "key": key}),
@@ -325,6 +380,7 @@ impl Control {
         spec: &str,
         name: &str,
         managed: bool,
+        protected: Option<&str>,
     ) -> Vec<String> {
         let digest = text(checked, "digest").unwrap_or_default();
         let mut lines = vec![
@@ -349,23 +405,6 @@ impl Control {
                 ));
             }
         }
-        let added = names(checked.get("added"));
-        let changed = names(checked.get("changed"));
-        let removed = names(checked.get("removed"));
-        let total = checked
-            .get("files")
-            .and_then(Value::as_object)
-            .map_or(0, Map::len);
-        lines.push(format!(
-            "Files: {} in all; {} added, {} changed, {} removed",
-            total,
-            added.len(),
-            changed.len(),
-            removed.len()
-        ));
-        listed(&mut lines, "+", added);
-        listed(&mut lines, "~", changed);
-        listed(&mut lines, "-", removed);
         if let Some(contents) = entry
             .get("contents")
             .filter(|contents| contents.is_object())
@@ -396,10 +435,30 @@ impl Control {
         lines.push(
             "Skills it names from other catalogs are not fetched by this change. It reaches sessions started after it; running ones keep what they have.".to_owned(),
         );
+        let added = names(checked.get("added"));
+        let changed = names(checked.get("changed"));
+        let removed = names(checked.get("removed"));
+        let total = checked
+            .get("files")
+            .and_then(Value::as_object)
+            .map_or(0, Map::len);
+        lines.push(format!(
+            "Files: {} in all; {} added, {} changed, {} removed",
+            total,
+            added.len(),
+            changed.len(),
+            removed.len()
+        ));
+        listed(&mut lines, "+", added);
+        listed(&mut lines, "~", changed);
+        listed(&mut lines, "-", removed);
         lines.push(
             "It writes the overlay's folder beside canoa.cfg and its entry in [overlays]."
                 .to_owned(),
         );
+        if let Some(place) = protected {
+            lines.push(format!("It writes a place on your protected list: {place}"));
+        }
         lines
     }
 
@@ -435,60 +494,98 @@ impl Control {
             _ => return Err("the source is not a git source the host fetches".to_owned()),
         };
         // canoa.cfg may have changed while the person decided.
-        let (key, config_pin) = self.overlay_standing(name, &source).inspect_err(|_| {
-            self.overlays.forget_plan(caller, &prepared.token);
-        })?;
+        self.overlay_standing(name, &source, text(detail, "catalog"))
+            .inspect_err(|_| {
+                self.overlays.forget_plan(caller, &prepared.token);
+            })?;
         let record = self
             .overlays
             .installed(&json!({"name": name}))
             .ok()
             .and_then(|answer| answer.pointer(&format!("/overlays/{name}")).cloned());
-        let had = record.is_some();
-        let installed_now = record.as_ref().and_then(|record| text(record, "digest"));
-        if let Some(pin) = config_pin.as_deref()
-            && !pin_may_move(pin, installed_now, &prepared.digest)
-        {
-            self.overlays.forget_plan(caller, &prepared.token);
-            return Err("canoa.cfg now pins another digest: nothing was changed".to_owned());
-        }
+        let installed_now = record
+            .as_ref()
+            .and_then(|record| text(record, "digest"))
+            .map(str::to_owned);
+        // The pin goes first, under the lock every write of canoa.cfg takes: if the files then fail to be placed the pin is put
+        // back, and a failed write of canoa.cfg leaves the files as they were.
+        let mut before: Option<(String, Option<Value>)> = None;
+        self.files
+            .config_update("overlays", true, |current| {
+                let mut table = match current {
+                    Value::Object(table) => table,
+                    _ => Map::new(),
+                };
+                let key = table
+                    .keys()
+                    .find(|key| key.eq_ignore_ascii_case(name))
+                    .cloned()
+                    .unwrap_or_else(|| name.to_owned());
+                let old = table.get(&key).cloned();
+                if let Some(pin) = old
+                    .as_ref()
+                    .and_then(|old| old.get("pin"))
+                    .and_then(Value::as_str)
+                    && !pin_may_move(pin, installed_now.as_deref(), &prepared.digest)
+                {
+                    return Err("canoa.cfg now pins another digest: nothing was changed".to_owned());
+                }
+                let mut entry = Map::new();
+                if let Some(options) = old
+                    .as_ref()
+                    .and_then(|old| old.get("options"))
+                    .and_then(Value::as_object)
+                    .filter(|options| !options.is_empty())
+                {
+                    entry.insert("options".to_owned(), Value::Object(options.clone()));
+                }
+                entry.insert("source".to_owned(), json!(spec));
+                entry.insert("pin".to_owned(), json!(prepared.digest));
+                table.insert(key.clone(), Value::Object(entry));
+                before = Some((key, old));
+                Ok(Value::Object(table))
+            })
+            .map_err(|error| {
+                self.overlays.forget_plan(caller, &prepared.token);
+                why(error)
+            })?;
         let mut params = json!({"token": prepared.token});
         if let Some(label) = text(detail, "catalog") {
             params["catalog"] = json!(label);
         }
-        let record = self.overlays.apply(caller, &params).map_err(why)?;
+        let record = match self.overlays.apply(caller, &params) {
+            Ok(record) => record,
+            Err(error) => {
+                let restored = self.files.config_update("overlays", true, |current| {
+                    let mut table = match current {
+                        Value::Object(table) => table,
+                        _ => Map::new(),
+                    };
+                    if let Some((key, old)) = before {
+                        match old {
+                            Some(old) => table.insert(key, old),
+                            None => table.remove(&key),
+                        };
+                    }
+                    Ok(if table.is_empty() {
+                        Value::Null
+                    } else {
+                        Value::Object(table)
+                    })
+                });
+                let mut message = why(error);
+                if let Err(error) = restored {
+                    message.push_str(&format!(
+                        "; canoa.cfg's entry could not be put back: {}",
+                        why(error)
+                    ));
+                }
+                return Err(message);
+            }
+        };
         let installed = text(&record, "digest")
             .unwrap_or(&prepared.digest)
             .to_owned();
-        let mut table = match self.config_section("overlays") {
-            Value::Object(table) => table,
-            _ => Map::new(),
-        };
-        let key = key.unwrap_or_else(|| name.to_owned());
-        let mut entry = Map::new();
-        let options = table
-            .get(&key)
-            .and_then(|old| old.get("options"))
-            .and_then(Value::as_object)
-            .filter(|options| !options.is_empty())
-            .cloned();
-        if let Some(options) = options {
-            entry.insert("options".to_owned(), Value::Object(options));
-        }
-        entry.insert("source".to_owned(), json!(spec));
-        entry.insert("pin".to_owned(), json!(installed));
-        table.insert(key, Value::Object(entry));
-        if let Err(error) = self.files.config_set(
-            &json!({"section": "overlays", "value": Value::Object(table)}),
-            true,
-        ) {
-            if !had {
-                let _ = self.overlays.remove(&json!({"name": name}));
-            }
-            return Err(format!(
-                "the overlay's files were written but canoa.cfg could not be: {}",
-                why(error)
-            ));
-        }
         tracing::info!(overlay = name, digest = %installed, "an overlay was installed by a store tool");
         Ok(json!({
             "overlay": name,
@@ -524,6 +621,7 @@ impl Control {
                 lines: Vec::new(),
                 nothing: Some(format!("{name} is not installed")),
                 detail: Value::Null,
+                protected: None,
             });
         };
         let spec = text(record, "source").unwrap_or_default();
@@ -539,7 +637,7 @@ impl Control {
                 ));
             }
         };
-        let (key, _) = self.overlay_standing(name, &source)?;
+        let (key, _) = self.overlay_standing(name, &source, None)?;
         if key.is_none() || text(record, "catalog").is_none() {
             return Err(format!(
                 "canoa.cfg does not name {name} as the store installed it: the store does not remove it"
@@ -550,7 +648,8 @@ impl Control {
             .get("files")
             .and_then(Value::as_object)
             .map_or(0, Map::len);
-        let lines = vec![
+        let protected = self.protected_place(true);
+        let mut lines = vec![
             format!("Remove the overlay {name}"),
             format!("Source: {spec}"),
             format!("Installed digest: {digest}"),
@@ -558,7 +657,11 @@ impl Control {
             "It deletes the overlay's folder, the history fetched for it, and its entry in [overlays].".to_owned(),
             "New sessions start without it; running sessions keep what they have. Skills fetched for it stay, listed as named by no overlay, until the person removes them in the Store.".to_owned(),
         ];
+        if let Some(place) = &protected {
+            lines.push(format!("It writes a place on your protected list: {place}"));
+        }
         Ok(Prepared {
+            protected,
             token: String::new(),
             digest: digest.clone(),
             title: format!("Remove the overlay {name}"),
@@ -593,18 +696,19 @@ impl Control {
             );
         }
         self.overlays.remove(&json!({"name": name})).map_err(why)?;
-        let mut table = match self.config_section("overlays") {
-            Value::Object(table) => table,
-            _ => Map::new(),
-        };
-        table.retain(|key, _| !key.eq_ignore_ascii_case(name));
-        let value = if table.is_empty() {
-            Value::Null
-        } else {
-            Value::Object(table)
-        };
         self.files
-            .config_set(&json!({"section": "overlays", "value": value}), true)
+            .config_update("overlays", true, |current| {
+                let mut table = match current {
+                    Value::Object(table) => table,
+                    _ => Map::new(),
+                };
+                table.retain(|key, _| !key.eq_ignore_ascii_case(name));
+                Ok(if table.is_empty() {
+                    Value::Null
+                } else {
+                    Value::Object(table)
+                })
+            })
             .map_err(|error| {
                 format!(
                     "the overlay's files were removed but its entry in canoa.cfg could not be: {}",
@@ -664,6 +768,7 @@ impl Control {
                     if on { "on" } else { "off" }
                 )),
                 detail: Value::Null,
+                protected: None,
             });
         }
         let digest = Self::loadout_digest(&section);
@@ -676,6 +781,7 @@ impl Control {
                 "It is kept in canoa.cfg's [loadout] and applies to sessions started after it; running ones keep what they have.".to_owned(),
             ],
             nothing: None,
+            protected: self.protected_place(false),
             detail: json!({"do": "loadout", "kind": change.kind, "name": name, "on": on, "list": list}),
         })
     }
@@ -687,34 +793,35 @@ impl Control {
         let list = text(detail, "list").ok_or("the host holds no list for this change")?;
         let on = detail.get("on").and_then(Value::as_bool).unwrap_or(false);
         let skill = text(detail, "kind") == Some("skill");
-        let section = self.config_section("loadout");
-        if Self::loadout_digest(&section) != prepared.digest {
-            return Err(
-                "the loadout changed since the person was shown it: nothing was changed".to_owned(),
-            );
-        }
-        let mut table = match section {
-            Value::Object(table) => table,
-            _ => Map::new(),
-        };
-        let mut items = names(table.get(list));
-        items.retain(|item| !item.eq_ignore_ascii_case(name));
-        if skill == on {
-            items.push(name.to_owned());
-        }
-        items.sort();
-        if items.is_empty() {
-            table.remove(list);
-        } else {
-            table.insert(list.to_owned(), json!(items));
-        }
-        let value = if table.is_empty() {
-            Value::Null
-        } else {
-            Value::Object(table)
-        };
         self.files
-            .config_set(&json!({"section": "loadout", "value": value}), true)
+            .config_update("loadout", true, |section| {
+                if Self::loadout_digest(&section) != prepared.digest {
+                    return Err(
+                        "the loadout changed since the person was shown it: nothing was changed"
+                            .to_owned(),
+                    );
+                }
+                let mut table = match section {
+                    Value::Object(table) => table,
+                    _ => Map::new(),
+                };
+                let mut items = names(table.get(list));
+                items.retain(|item| !item.eq_ignore_ascii_case(name));
+                if skill == on {
+                    items.push(name.to_owned());
+                }
+                items.sort();
+                if items.is_empty() {
+                    table.remove(list);
+                } else {
+                    table.insert(list.to_owned(), json!(items));
+                }
+                Ok(if table.is_empty() {
+                    Value::Null
+                } else {
+                    Value::Object(table)
+                })
+            })
             .map_err(why)?;
         Ok(json!({"name": name, "on": on, "reaches": "sessions started from now on"}))
     }
@@ -758,7 +865,8 @@ impl Control {
                         text(&plan, "version")
                             .map_or_else(String::new, |version| format!(" {version}"))
                     ),
-                    lines: program_lines(&title, &provider, &plan, managed.as_deref()),
+                    lines: program_lines(&title, &provider, &plan, managed.as_deref())?,
+                    protected: None,
                     nothing: None,
                     detail: json!({"do": "program-install", "provider": provider}),
                 };
@@ -785,9 +893,22 @@ impl Control {
                         lines: Vec::new(),
                         nothing: Some(format!("the host keeps no copy of {title}")),
                         detail: Value::Null,
+                        protected: None,
                     });
                 };
                 let remove = change.action == Action::Remove;
+                let previous = stores.previous_version(&provider).map_err(why)?;
+                if !remove && previous.is_none() {
+                    return Ok(Prepared {
+                        token: String::new(),
+                        digest: String::new(),
+                        title: String::new(),
+                        lines: Vec::new(),
+                        nothing: Some(format!("{title} has no earlier copy to go back to")),
+                        detail: Value::Null,
+                        protected: None,
+                    });
+                }
                 let lines = if remove {
                     vec![
                         format!("Remove the copy of {title} the host manages (version {version})"),
@@ -798,16 +919,21 @@ impl Control {
                 } else {
                     vec![
                         format!(
-                            "Switch {title} back to the copy it had before its last update (now {version})"
+                            "Switch {title} from version {version} back to version {}",
+                            previous.as_deref().unwrap_or_default()
                         ),
                         format!("Store: {provider}"),
                     ]
                 };
                 Ok(Prepared {
                     token: String::new(),
-                    digest: format!("copy:{version}"),
+                    digest: match (&previous, remove) {
+                        (Some(previous), false) => format!("copy:{version}->{previous}"),
+                        _ => format!("copy:{version}"),
+                    },
                     title: format!("{} {title}", if remove { "Remove" } else { "Roll back" }),
                     lines,
+                    protected: None,
                     nothing: None,
                     detail: json!({"do": if remove { "program-remove" } else { "program-rollback" }, "provider": provider}),
                 })
@@ -818,7 +944,12 @@ impl Control {
         }
     }
 
-    fn program_apply(&self, caller: &Caller, prepared: &Prepared) -> Made<Value> {
+    fn program_apply(
+        &self,
+        caller: &Caller,
+        prepared: &Prepared,
+        cancel: &Arc<AtomicBool>,
+    ) -> Made<Value> {
         need(caller, &[Grant::StorePrograms])?;
         let provider =
             text(&prepared.detail, "provider").ok_or("the host holds no store for this change")?;
@@ -834,7 +965,12 @@ impl Control {
             );
         }
         stores
-            .apply_kept(caller.owner(), provider, &prepared.token)
+            .apply_kept(
+                caller.owner(),
+                provider,
+                &prepared.token,
+                Arc::clone(cancel),
+            )
             .map_err(why)
     }
 
@@ -844,8 +980,16 @@ impl Control {
             text(&prepared.detail, "provider").ok_or("the host holds no store for this change")?;
         let stores = self.stores().map_err(why)?;
         let now = stores.managed_version(provider).map_err(why)?;
-        if now.map(|version| format!("copy:{version}")).as_deref() != Some(prepared.digest.as_str())
-        {
+        let rolling = text(&prepared.detail, "do") == Some("program-rollback");
+        let now = match (now, rolling) {
+            (Some(version), true) => {
+                let previous = stores.previous_version(provider).map_err(why)?;
+                previous.map(|previous| format!("copy:{version}->{previous}"))
+            }
+            (Some(version), false) => Some(format!("copy:{version}")),
+            (None, _) => None,
+        };
+        if now.as_deref() != Some(prepared.digest.as_str()) {
             return Err(
                 "the copy changed since the person was shown it: nothing was changed".to_owned(),
             );
@@ -862,7 +1006,12 @@ impl Control {
 }
 
 /// What a program's plan says it will do, in lines.
-fn program_lines(title: &str, provider: &str, plan: &Value, managed: Option<&str>) -> Vec<String> {
+pub(super) fn program_lines(
+    title: &str,
+    provider: &str,
+    plan: &Value,
+    managed: Option<&str>,
+) -> Made<Vec<String>> {
     let mut lines = vec![
         format!(
             "{} {title}{}",
@@ -878,6 +1027,37 @@ fn program_lines(title: &str, provider: &str, plan: &Value, managed: Option<&str
     ];
     if let Some(from) = text(plan, "from_version").or(managed) {
         lines.push(format!("Now installed: {from}"));
+    }
+    // What the plan does to the computer comes first and is shown whole: a card that cannot hold it is not shown.
+    let changes: Vec<String> = plan
+        .get("changes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|change| {
+            format!(
+                "{}: {} ({})",
+                text(change, "kind").unwrap_or_default(),
+                text(change, "target").unwrap_or_default(),
+                text(change, "detail").unwrap_or_default()
+            )
+        })
+        .collect();
+    if changes.is_empty() {
+        lines.push("It changes nothing outside the host's own folder.".to_owned());
+    } else {
+        lines.push("It changes, outside the host's own folder:".to_owned());
+        listed_whole(&mut lines, "", changes)?;
+    }
+    let steps = names(plan.get("steps"));
+    if !steps.is_empty() {
+        lines.push("It runs, as this user:".to_owned());
+        listed_whole(&mut lines, "", steps)?;
+    }
+    let notices = names(plan.get("notices"));
+    if !notices.is_empty() {
+        lines.push("Notices from the store:".to_owned());
+        listed_whole(&mut lines, "", notices)?;
     }
     if let Some(bytes) = plan.get("bytes").and_then(Value::as_u64) {
         lines.push(format!("Downloads about {bytes} bytes"));
@@ -901,33 +1081,5 @@ fn program_lines(title: &str, provider: &str, plan: &Value, managed: Option<&str
             )
         }),
     );
-    let steps = names(plan.get("steps"));
-    if !steps.is_empty() {
-        lines.push("It runs, as this user:".to_owned());
-        listed(&mut lines, "", steps);
-    }
-    let changes: Vec<String> = plan
-        .get("changes")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .map(|change| {
-            format!(
-                "{}: {} ({})",
-                text(change, "kind").unwrap_or_default(),
-                text(change, "target").unwrap_or_default(),
-                text(change, "detail").unwrap_or_default()
-            )
-        })
-        .collect();
-    if changes.is_empty() {
-        lines.push("It changes nothing outside the host's own folder.".to_owned());
-    } else {
-        lines.push("It changes, outside the host's own folder:".to_owned());
-        listed(&mut lines, "", changes);
-    }
-    for notice in names(plan.get("notices")).iter().take(LISTED) {
-        lines.push(format!("Notice from the store: {notice}"));
-    }
-    lines
+    Ok(lines)
 }

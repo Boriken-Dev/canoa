@@ -71,7 +71,10 @@ pub(super) fn call(backend: &dyn Backend, access: &Access, name: &str, args: &Va
         Ok(value) => {
             json!({"content": [{"type": "text", "text": value.to_string()}], "isError": false})
         }
-        Err(why) => json!({"content": [{"type": "text", "text": why}], "isError": true}),
+        // An error can carry text from far away (git's own, a catalog's): it is made inert like any other.
+        Err(why) => {
+            json!({"content": [{"type": "text", "text": format!("{} {NOTE}", inert(&why, MAX_TEXT))}], "isError": true})
+        }
     }
 }
 

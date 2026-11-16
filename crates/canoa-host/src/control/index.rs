@@ -195,8 +195,9 @@ impl crate::store::mcp::Backend for ToolsBackend {
         session: &str,
         grants: &std::collections::BTreeSet<Grant>,
         prepared: &crate::store::mcp::Prepared,
+        cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<Value, String> {
-        self.0.tool_commit(session, grants, prepared)
+        self.0.tool_commit(session, grants, prepared, cancel)
     }
 
     fn discard(&self, session: &str, prepared: &crate::store::mcp::Prepared) {

@@ -33,7 +33,7 @@ use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
-pub(crate) use self::approve::Card;
+pub(crate) use self::approve::{Approval, Card};
 use self::approve::{Held, Questions};
 pub(crate) use self::change::{Action, Change, Prepared};
 use crate::control::Grant;
@@ -87,6 +87,7 @@ pub(crate) trait Backend: Send + Sync {
         session: &str,
         grants: &BTreeSet<Grant>,
         prepared: &Prepared,
+        cancel: &Arc<AtomicBool>,
     ) -> Result<Value, String>;
     /// Gives up what [`Backend::prepare`] kept, when the change is not going to be applied.
     fn discard(&self, session: &str, prepared: &Prepared);
@@ -108,6 +109,10 @@ pub(crate) struct Access {
     link: Weak<Link>,
     /// One change at a time for a session, so an agent cannot pile questions on the person.
     changing: Mutex<()>,
+    /// Set when the session or the connection ends, so a change under way stops.
+    pub(crate) cancel: Arc<AtomicBool>,
+    /// Changes of this session that ended with nothing to show the person.
+    unshown: AtomicUsize,
 }
 
 impl Access {
@@ -127,7 +132,7 @@ impl Access {
 
     /// Puts `card` to the person on the client this session belongs to. Whether they allowed it; an error says why nobody could
     /// be asked, and then nothing may be applied.
-    pub(crate) fn approve(&self, card: &Card) -> Result<bool, String> {
+    pub(crate) fn approve(&self, card: &Card, ask_anyway: bool) -> Result<Approval, String> {
         let session = self
             .session()
             .ok_or("the host does not know this session yet, so no one can be asked")?;
@@ -135,7 +140,24 @@ impl Access {
             .link
             .upgrade()
             .ok_or("the person's app is gone, so no one can be asked")?;
-        link.approve(&session, card)
+        link.approve(&session, card, ask_anyway)
+    }
+
+    /// Says something in the session, in the person's view.
+    pub(crate) fn note(&self, text: &str) {
+        if let (Some(session), Some(link)) = (self.session(), self.link.upgrade()) {
+            link.note(&session, text);
+        }
+    }
+
+    /// One more change ended with nothing to show the person.
+    pub(crate) fn spend(&self) {
+        self.unshown.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Whether the session has used up its changes that end with nothing to show.
+    pub(crate) fn spent(&self) -> bool {
+        self.unshown.load(Ordering::SeqCst) >= change::MAX_UNSHOWN
     }
 }
 
@@ -318,7 +340,7 @@ impl Link {
         self.closed.store(true, Ordering::SeqCst);
         let mut state = lock(&self.state);
         for digest in state.digests.drain(..) {
-            self.hub.tokens.remove(&digest);
+            self.revoke_token(&digest);
         }
         state.sessions.clear();
         drop(state);
@@ -355,17 +377,17 @@ impl Link {
 
     /// Asks the person about a change of `session`, or lets it through when the person put the session in a mode that asks for
     /// nothing. Whether it may be applied.
-    fn approve(&self, session: &str, card: &Card) -> Result<bool, String> {
+    fn approve(&self, session: &str, card: &Card, ask_anyway: bool) -> Result<Approval, String> {
         let held = self
             .held(session)
             .ok_or("the host does not hold this session, so no one can be asked")?;
-        if held.bypass.load(Ordering::SeqCst) {
+        if held.bypass.load(Ordering::SeqCst) && !ask_anyway {
             tracing::info!(
                 session,
                 "a store change was allowed by the session's mode: {}",
                 card.title
             );
-            return Ok(true);
+            return Ok(Approval::Silent);
         }
         tracing::info!(
             session,
@@ -374,7 +396,22 @@ impl Link {
         );
         let allowed = self.questions.ask(session, card, &|| self.is_closed())?;
         tracing::info!(session, allowed, "a store change was answered");
-        Ok(allowed)
+        Ok(if allowed {
+            Approval::Allowed
+        } else {
+            Approval::Declined
+        })
+    }
+
+    /// A message in the session, from the host: a line of the agent's own stream is never forged, this is the host speaking to the
+    /// client.
+    fn note(&self, session: &str, text: &str) {
+        let update = json!({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": session,
+            "update": {"sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": format!("\n{text}\n")}},
+        }});
+        self.questions.push(update.to_string().into_bytes());
     }
 
     /// A message from the client after the scope has checked it. A session request gets the host's entry added.
@@ -407,6 +444,11 @@ impl Link {
             }
             "session/set_mode" => {
                 let params = &value["params"];
+                if let Some(held) = params["sessionId"].as_str().and_then(|id| self.held(id)) {
+                    // Whatever the client asks, the session no longer counts as one that asks for nothing until the agent
+                    // says it took a mode that does. Nothing here waits on room to remember the request.
+                    held.bypass.store(false, Ordering::SeqCst);
+                }
                 if let (Some(session), Some(mode)) =
                     (params["sessionId"].as_str(), params["modeId"].as_str())
                 {
@@ -419,6 +461,11 @@ impl Link {
             }
             "session/set_config_option" => {
                 let params = &value["params"];
+                if let Some(held) = params["sessionId"].as_str().and_then(|id| self.held(id))
+                    && held.modes.option.as_deref() == params["configId"].as_str()
+                {
+                    held.bypass.store(false, Ordering::SeqCst);
+                }
                 if let (Some(session), Some(option), Some(chosen)) = (
                     params["sessionId"].as_str(),
                     params["configId"].as_str(),
@@ -505,6 +552,8 @@ impl Link {
             session: Mutex::new(known.clone()),
             link: Arc::downgrade(self),
             changing: Mutex::new(()),
+            cancel: Arc::new(AtomicBool::new(false)),
+            unshown: AtomicUsize::new(0),
         });
         self.hub.tokens.add(digest, access);
         lock(&self.state).digests.push(digest);
@@ -626,8 +675,15 @@ impl Link {
         }
     }
 
-    fn revoke(&self, digest: &[u8; 32]) {
+    fn revoke_token(&self, digest: &[u8; 32]) {
+        if let Some(access) = self.hub.tokens.find(digest) {
+            access.cancel.store(true, Ordering::SeqCst);
+        }
         self.hub.tokens.remove(digest);
+    }
+
+    fn revoke(&self, digest: &[u8; 32]) {
+        self.revoke_token(digest);
         lock(&self.state).digests.retain(|held| held != digest);
     }
 

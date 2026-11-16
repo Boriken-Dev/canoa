@@ -236,6 +236,19 @@ impl Stores {
         self.programs.forget_plan(owner, provider, token);
     }
 
+    /// Whether `path` is on, in or holding a place of the protected list.
+    pub(crate) fn protects(&self, path: &std::path::Path) -> bool {
+        self.programs.protects_place(path)
+    }
+
+    /// The version the managed copy of `provider`'s program would go back to.
+    pub(crate) fn previous_version(&self, provider: &str) -> Result<Option<String>, Failed> {
+        let (_, store) = self.store(&json!({"provider": provider}))?;
+        self.programs
+            .previous_version(&*store)
+            .map_err(|error| refusal(&error))
+    }
+
     /// The version of the copy the host manages for `provider`'s program.
     pub(crate) fn managed_version(&self, provider: &str) -> Result<Option<String>, Failed> {
         let (_, store) = self.store(&json!({"provider": provider}))?;
@@ -250,6 +263,7 @@ impl Stores {
         owner: &str,
         provider: &str,
         token: &str,
+        cancel: Arc<AtomicBool>,
     ) -> Result<Value, Failed> {
         let (provider, store) = self.store(&json!({"provider": provider}))?;
         let plan = self.programs.kept_plan(owner, &provider, token).ok_or((
@@ -262,7 +276,7 @@ impl Stores {
             &provider,
             &plan,
             Arc::new(crate::store::programs::Recorder::default()),
-            Arc::new(AtomicBool::new(false)),
+            cancel,
         );
         applied(&done)
     }

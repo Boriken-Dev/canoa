@@ -272,6 +272,31 @@ impl Files {
     /// `config/set`: replaces one named section of the person's own canoa.cfg with an object, or removes it with null. The file
     /// is written in the format it is in, after the host has read what it would hold.
     pub(crate) fn config_set(&self, params: &Value, guarded: bool) -> Outcome {
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        self.config_set_held(params, guarded)
+    }
+
+    /// Reads one section, lets `change` make the section it should become, and writes that, all under the one lock that every
+    /// write of canoa.cfg takes, so two writers never take each other's change out.
+    pub(crate) fn config_update(
+        &self,
+        section: &str,
+        guarded: bool,
+        change: impl FnOnce(Value) -> Result<Value, String>,
+    ) -> Result<(), (i32, String)> {
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        let current = self.config_get(&json!({"section": section}))?["value"].clone();
+        let next = change(current).map_err(|why| (REFUSED, why))?;
+        self.config_set_held(&json!({"section": section, "value": next}), guarded)
+            .map(|_| ())
+    }
+
+    /// Where the person's canoa.cfg is, when this host has one a page may edit.
+    pub(crate) fn config_file(&self) -> Option<&Path> {
+        self.config.as_deref()
+    }
+
+    fn config_set_held(&self, params: &Value, guarded: bool) -> Outcome {
         let section = section_of(params)?;
         if GUARDED_SECTIONS.contains(&section) && !guarded {
             return Err((
@@ -290,7 +315,6 @@ impl Files {
                 format!("a section is at most {MAX_SECTION_BYTES} bytes"),
             ));
         }
-        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
         let _all = crate::accounts::commands::config_writes();
         let (text, existed) = read_cfg(path)?;
         let name = path

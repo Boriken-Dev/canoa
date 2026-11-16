@@ -675,6 +675,36 @@ impl Programs {
         Some(plans.remove(at).plan)
     }
 
+    /// Whether `path` is, is inside or holds a place on the protected list (`[host.store] protected`). A place that cannot be
+    /// worked out counts as protected.
+    #[must_use]
+    pub fn protects_place(&self, path: &Path) -> bool {
+        let protected = Protected::new(&self.options.protected);
+        let home = self
+            .options
+            .home
+            .as_deref()
+            .and_then(super::exec::normalize);
+        let Some(place) = super::exec::normalize(path) else {
+            return true;
+        };
+        protected.protects(&place, home.as_deref()) || protected.holds(&place, home.as_deref())
+    }
+
+    /// The version the managed copy would go back to, if it has a previous one.
+    ///
+    /// # Errors
+    ///
+    /// What the store or the shelf refuses.
+    pub fn previous_version(&self, store: &dyn ProgramStore) -> Result<Option<String>, StoreError> {
+        let info = store.describe()?;
+        let program = self.shelf.program(&info.program)?;
+        Ok(program
+            .current()?
+            .and_then(|current| current.previous)
+            .map(|previous| previous.version))
+    }
+
     /// The plan this host holds for `owner` under `token`, as it would be applied, left in place.
     #[must_use]
     pub fn kept_plan(&self, owner: &str, provider: &str, token: &str) -> Option<InstallPlan> {

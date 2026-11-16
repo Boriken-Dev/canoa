@@ -196,6 +196,11 @@ impl Overlays {
         Ok(self.root()?.join(".catalogs").join(format!("{label}.git")))
     }
 
+    /// The overlays folder, when this host has one.
+    pub(crate) fn root_path(&self) -> Option<&Path> {
+        self.root.as_deref()
+    }
+
     /// `overlay/installed` `{"name"?}` -> `{"overlays": {name: record}}`: what is installed, as its records say.
     pub(crate) fn installed(&self, params: &Value) -> Outcome {
         let root = self.root()?;

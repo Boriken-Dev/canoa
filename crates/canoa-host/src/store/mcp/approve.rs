@@ -28,6 +28,17 @@ const ALLOW: &str = "allow-once";
 /// What the question is told apart by on the client.
 const META: &str = "dev.boriken.canoa/store";
 
+/// How a change came to be allowed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Approval {
+    /// The person said yes to it.
+    Allowed,
+    /// Nobody was asked: the person put the session in a mode that asks for nothing.
+    Silent,
+    /// The person said no.
+    Declined,
+}
+
 /// What the person is asked: the change in plain words, and the digest it is bound to.
 pub(crate) struct Card {
     pub(crate) title: String,
@@ -72,6 +83,11 @@ pub(super) struct Questions {
 }
 
 impl Questions {
+    /// Adds a message of the host's own to the stream to the client.
+    pub(super) fn push(&self, message: Vec<u8>) {
+        lock(&self.outbox).push_back(message);
+    }
+
     /// What the host added to the stream to the client.
     pub(super) fn drain(&self) -> Vec<Vec<u8>> {
         lock(&self.outbox).drain(..).collect()

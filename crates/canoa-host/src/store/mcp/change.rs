@@ -7,12 +7,14 @@
 use serde_json::{Value, json};
 
 use super::tools::{MAX_NAME, MAX_TEXT, find_entry, inert, text};
-use super::{Access, Backend, Card};
+use super::{Access, Approval, Backend, Card};
 
 /// The longest line of a card.
 const MAX_LINE: usize = MAX_TEXT;
-/// The most lines of a card.
+/// The most lines of a card, the digest's included.
 const MAX_LINES: usize = 80;
+/// Changes of one session that may end with nothing to show the person before it is refused more.
+pub(super) const MAX_UNSHOWN: usize = 5;
 
 /// What a change does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +60,8 @@ pub(crate) struct Prepared {
     pub(crate) nothing: Option<String>,
     /// What the host needs to apply it, which the agent never sees or supplies.
     pub(crate) detail: Value,
+    /// Set when it writes a place on the person's protected list: the person is asked even in a mode that asks for nothing.
+    pub(crate) protected: Option<String>,
 }
 
 /// What every answer says of a result.
@@ -187,29 +191,62 @@ pub(super) fn run(
     let Some(_one) = access.begin_change() else {
         return Err("another change of this session is waiting for the person".to_owned());
     };
-    let prepared = backend.prepare(&session, &access.grants, &change)?;
+    if access.spent() {
+        return Err(format!(
+            "this session has asked for {MAX_UNSHOWN} changes that ended with nothing to show the person: ask the person to use the Store"
+        ));
+    }
+    // Working a change out fetches from a source a catalog named, before anyone is asked.
+    tracing::info!(
+        session = %session,
+        kind = %change.kind,
+        action = ?change.action,
+        "a store change is fetched before it is put to the person"
+    );
+    let prepared = match backend.prepare(&session, &access.grants, &change) {
+        Ok(prepared) => prepared,
+        Err(why) => {
+            access.spend();
+            return Err(why);
+        }
+    };
     if let Some(why) = &prepared.nothing {
+        access.spend();
         backend.discard(&session, &prepared);
         return Ok(json!({"changed": false, "why": inert(why, MAX_TEXT), "note": NOTE}));
     }
-    let card = card_of(&prepared);
-    match access.approve(&card) {
-        Ok(true) => {}
-        Ok(false) => {
+    let card = match card_of(&prepared) {
+        Ok(card) => card,
+        Err(why) => {
+            access.spend();
             backend.discard(&session, &prepared);
-            return Ok(json!({
-                "changed": false,
-                "declined": true,
-                "why": "the person did not allow it",
-                "note": NOTE,
-            }));
+            return Err(why);
         }
+    };
+    // What is written on a place the person protects is always asked about, whatever mode the session is in.
+    let how = match access.approve(&card, prepared.protected.is_some()) {
+        Ok(how) => how,
         Err(why) => {
             backend.discard(&session, &prepared);
             return Err(why);
         }
+    };
+    if how == Approval::Declined {
+        backend.discard(&session, &prepared);
+        return Ok(json!({
+            "changed": false,
+            "declined": true,
+            "why": "the person did not allow it",
+            "note": NOTE,
+        }));
     }
-    let applied = backend.commit(&session, &access.grants, &prepared)?;
+    let applied = backend.commit(&session, &access.grants, &prepared, &access.cancel)?;
+    if how == Approval::Silent {
+        access.note(&format!(
+            "Canoa applied this change without asking, because this session is in a mode that asks for nothing: {} ({})",
+            card.title, card.digest
+        ));
+    }
     Ok(json!({"changed": true, "applied": clip(&applied), "note": NOTE}))
 }
 
@@ -231,28 +268,32 @@ fn lookup(
     }
 }
 
-/// What the person reads: every line cut to length and stripped of what could hide or reorder text, and the digest last, so a
-/// line of a catalog's cannot stand in for it.
-fn card_of(prepared: &Prepared) -> Card {
+/// What the person reads: every line stripped of what could hide or reorder text, and the digest last, so a line of a catalog's
+/// cannot stand in for it. A card that would not fit whole is not shown at all: a cut could hide what the host itself says.
+pub(super) fn card_of(prepared: &Prepared) -> Result<Card, String> {
+    let too_large =
+        || "this change is too large to show in full: ask the person to use the Store".to_owned();
+    if prepared.lines.len() >= MAX_LINES
+        || prepared
+            .lines
+            .iter()
+            .chain([&prepared.title])
+            .any(|line| line.chars().count() > MAX_LINE)
+    {
+        return Err(too_large());
+    }
     let mut lines: Vec<String> = prepared
         .lines
         .iter()
-        .take(MAX_LINES)
         .map(|line| inert(line, MAX_LINE))
         .collect();
-    if prepared.lines.len() > MAX_LINES {
-        lines.push(format!(
-            "…and {} more lines",
-            prepared.lines.len() - MAX_LINES
-        ));
-    }
     let digest = inert(&prepared.digest, MAX_NAME);
     lines.push(format!("Bound to: {digest}"));
-    Card {
+    Ok(Card {
         title: inert(&prepared.title, MAX_LINE),
         text: lines.join("\n"),
         digest,
-    }
+    })
 }
 
 /// A result with every string made inert and the lists cut.
