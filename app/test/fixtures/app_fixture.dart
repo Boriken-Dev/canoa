@@ -3,6 +3,8 @@
 import 'dart:io' show Directory;
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
+
 import 'package:canoa/shell/hosts/host_status.dart' show ConnectionProbe;
 import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/accounts/accounts_host.dart';
@@ -174,8 +176,11 @@ Future<void> chooseWorkspace(WidgetTester tester) async {
 Future<void> chooseSource(WidgetTester tester, String label) async {
   await tester.tap(find.byKey(const Key('new-session-source')));
   await frames(tester);
+  // At phone width the agents are a row that scrolls.
+  await tester.ensureVisible(find.byKey(Key('source $label')).last);
   await tester.tap(find.byKey(Key('source $label')).last);
   await frames(tester);
+  await closePicker(tester);
 }
 
 /// Chooses Workspace where the new-session view offers Chat, then opens the folder menu's browse item.
@@ -208,34 +213,38 @@ Future<void> send(WidgetTester tester, String text) async {
   await settle(tester);
 }
 
-/// The items of the model pill's menu ('model-choice') or of its effort submenu ('effort-choice').
+/// The items of the picker's model list ('model-choice') or of its efforts ('effort-choice').
 Finder choiceItems(String kind) =>
     find.byWidgetPredicate((widget) => widget.key is ValueKey<String> && (widget.key as ValueKey<String>).value.startsWith('$kind='));
 
-/// Opens the model pill, and for the effort its submenu.
-Future<void> _openModelMenu(WidgetTester tester, {required bool effort}) async {
+/// Opens the model pill's picker, where the models and the efforts are both listed.
+Future<void> _openModelMenu(WidgetTester tester) async {
   await tester.tap(find.byKey(const Key('option-model')));
   await frames(tester);
-  if (effort) {
-    await tester.tap(find.byKey(const Key('option-effort')));
-    await frames(tester);
-  }
 }
 
-/// Picks [label] from the composer's control [key]. The model and effort are one pill: `option-effort` is its submenu.
+/// Picks [label] from the composer's control [key]. The model and effort are one picker: `option-effort` is its efforts, beside the models.
 Future<void> pick(WidgetTester tester, String key, String label) async {
   if (key == 'option-effort') {
-    await _openModelMenu(tester, effort: true);
+    await _openModelMenu(tester);
   } else {
     await tester.tap(find.byKey(Key(key)));
     await frames(tester);
   }
   await tester.tap(find.text(label).last);
   await settle(tester);
+  await closePicker(tester);
 }
 
-/// The labels a control's menu offers, closing it again. For `option-model` the models, for `option-effort` the efforts in its
-/// submenu; a mode's menu without its header or the descriptions under each mode.
+/// Closes the model, agent and account picker when a choice left it open (a model stays open for its effort).
+Future<void> closePicker(WidgetTester tester) async {
+  if (find.byKey(const Key('session-picker')).evaluate().isEmpty) return;
+  await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+  await frames(tester);
+}
+
+/// The labels a control's menu offers, closing it again. For `option-model` the models, for `option-effort` the efforts beside
+/// them; a mode's menu without its header or the descriptions under each mode.
 Future<List<String>> menuOf(WidgetTester tester, String key) async {
   List<String> firstTexts(Finder items) {
     final out = <String>[];
@@ -247,7 +256,7 @@ Future<List<String>> menuOf(WidgetTester tester, String key) async {
   }
   final List<String> labels;
   if (key == 'option-model' || key == 'option-effort') {
-    await _openModelMenu(tester, effort: key == 'option-effort');
+    await _openModelMenu(tester);
     final kind = key == 'option-model' ? 'model-choice' : 'effort-choice';
     labels = firstTexts(choiceItems(kind));
   } else {

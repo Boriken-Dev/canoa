@@ -453,6 +453,15 @@ class SessionLedger extends ChangeNotifier {
           if (SourceMemory.fromJson(value) case final memory?) _sources['$key'] = memory;
         }
       }
+      _favourites.clear();
+      if (decoded['favourites'] case final Map<dynamic, dynamic> stars) {
+        for (final MapEntry(:key, :value) in stars.entries) {
+          if (value is List) {
+            final ids = {for (final id in value) if (id is String) id};
+            if (ids.isNotEmpty && favourites.length < maxFavourites) _favourites['$key'] = ids;
+          }
+        }
+      }
     } on FormatException catch (error) {
       problem = '${backend.location} is not a session list (${error.message}), so the list starts empty';
     }
@@ -632,6 +641,31 @@ class SessionLedger extends ChangeNotifier {
     _changed();
   }
 
+  /// The models the person starred, by source label then model id.
+  final Map<String, Set<String>> _favourites = {};
+
+  /// How many stars are kept in all.
+  static const maxFavourites = 256;
+
+  /// Every starred model as (source label, model id), in the order starred.
+  List<(String, String)> get favourites => [
+    for (final MapEntry(:key, :value) in _favourites.entries)
+      for (final id in value) (key, id),
+  ];
+
+  bool isFavourite(String label, String model) => _favourites[label]?.contains(model) ?? false;
+
+  /// Stars [model] of the source [label], or takes the star back.
+  void toggleFavourite(String label, String model) {
+    final held = _favourites[label];
+    if (held != null && held.remove(model)) {
+      if (held.isEmpty) _favourites.remove(label);
+    } else if (favourites.length < maxFavourites) {
+      (_favourites[label] ??= {}).add(model);
+    }
+    _changed();
+  }
+
   void _boundSources() {
     while (_sources.length > maxSources) {
       final oldest = _sources.entries.reduce((a, b) => a.value.seen.isBefore(b.value.seen) ? a : b).key;
@@ -649,6 +683,7 @@ class SessionLedger extends ChangeNotifier {
     'version': 1,
     'sessions': [for (final entry in _entries) entry.toJson()],
     if (_sources.isNotEmpty) 'sources': {for (final MapEntry(:key, :value) in _sources.entries) key: value.toJson()},
+    if (_favourites.isNotEmpty) 'favourites': {for (final MapEntry(:key, :value) in _favourites.entries) key: value.toList()},
   });
 
   /// Writes what is pending now, after any write already under way.

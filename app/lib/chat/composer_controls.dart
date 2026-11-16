@@ -5,12 +5,12 @@ import 'package:flutter/material.dart';
 
 import '../session_store.dart';
 import '../sources/source_icons.dart';
-import '../sources/sources.dart';
 import 'agent_events.dart' show Choice, ConfigOption;
 import 'cache_lifetime.dart';
 import 'composer.dart' show ComposerKit;
 import 'modes.dart';
 import 'session_options.dart';
+import 'session_picker.dart';
 
 /// Where a draft's agent comes from: the sources Settings has, each saying what it needs when it cannot run here.
 class SourceChooser extends StatelessWidget {
@@ -24,32 +24,10 @@ class SourceChooser extends StatelessWidget {
   Widget build(BuildContext context) {
     final source = session.source;
     final problem = source == null ? null : kit.checks[source]?.describe(source.displayName);
-    return PopupMenuButton<Object>(
+    return InkWell(
       key: const Key('new-session-source'),
-      tooltip: 'Where its agent comes from',
-      onSelected: (chosen) => chosen is AgentSource ? store.updateDraft(session, source: chosen) : kit.onSourceSettings?.call(),
-      itemBuilder: (context) => [
-        for (final each in kit.sources)
-          PopupMenuItem(
-            key: Key('source ${each.label}'),
-            value: each,
-            child: ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: SourceMark.of(each, size: 18),
-              title: Text(each.displayName),
-              subtitle: switch (kit.checks[each]) {
-                final check? when !check.ready => Text('Needs ${_and(check.missing.isEmpty ? ['setting up'] : check.missing)}',
-                    style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                _ => null,
-              },
-            ),
-          ),
-        if (kit.onSourceSettings != null) ...[
-          const PopupMenuDivider(),
-          const PopupMenuItem(key: Key('source-settings'), value: #settings, child: Text('Sources in Settings…')),
-        ],
-      ],
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => unawaited(showSessionPicker(context, store: store, session: session, kit: kit)),
       child: Tooltip(
         message: problem ?? 'Where its agent comes from',
         child: ComposerPill(
@@ -60,9 +38,23 @@ class SourceChooser extends StatelessWidget {
       ),
     );
   }
+}
 
-  static String _and(List<String> words) =>
-      words.length < 2 ? words.join() : '${words.sublist(0, words.length - 1).join(', ')} and ${words.last}';
+/// What [role] has waiting in [session]: a choice made and not yet taken by the agent.
+PendingChoice? pendingChoice(ChatSession session, OptionRole role) =>
+    session.pending.values.where((choice) => choice.role == role).firstOrNull;
+
+/// Chooses [value] for [role] in [session]; null takes a draft's choice back, so its agent's own default holds.
+void chooseRole(SessionStore store, ChatSession session, OptionRole role, ConfigOption? option, String? value) {
+  final pending = pendingChoice(session, role);
+  if (value == null) {
+    // Default takes back the choice waiting, and sets nothing.
+    if (pending != null) {
+      unawaited(store.choose(session, ConfigOption(id: pending.id, label: option?.label ?? 'Choice', current: '', choices: const []), null));
+    }
+  } else if (option != null) {
+    unawaited(store.choose(session, option, value));
+  }
 }
 
 /// Whether a draft starts in its folder or in a new git worktree of it: Worktree only for a folder in a git repository.
@@ -116,14 +108,15 @@ String _seenLabel(DateTime? seen, String label) {
 /// the agent starts it lists what its source offered last time and says what Default is where the source knows it; after, what the
 /// agent offers. A choice waiting for the next turn says so.
 class ModelEffortChooser extends StatelessWidget {
-  const ModelEffortChooser({super.key, required this.store, required this.session, required this.options, this.seen});
+  const ModelEffortChooser({super.key, required this.store, required this.session, required this.options, required this.kit, this.seen});
 
   final SessionStore store;
   final ChatSession session;
+  final ComposerKit kit;
   final List<ConfigOption> options;
   final DateTime? seen;
 
-  PendingChoice? _pending(OptionRole role) => session.pending.values.where((choice) => choice.role == role).firstOrNull;
+  PendingChoice? _pending(OptionRole role) => pendingChoice(session, role);
 
   /// What [role] reads in the pill: its choice, else, before the agent starts, what Default is; null when nothing is known.
   String? _part(ConfigOption? option, OptionRole role, {required bool always}) {
@@ -134,24 +127,8 @@ class ModelEffortChooser extends StatelessWidget {
     return option?.defaultName ?? (always && (option != null || pending != null) ? 'Default' : null);
   }
 
-  void _choose(OptionRole role, ConfigOption? option, String? value) {
-    final pending = _pending(role);
-    if (value == null) {
-      // Default takes back the choice waiting, and sets nothing.
-      if (pending != null) {
-        unawaited(store.choose(session, ConfigOption(id: pending.id, label: option?.label ?? 'Choice', current: '', choices: const []), null));
-      }
-    } else if (option != null) {
-      unawaited(store.choose(session, option, value));
-    }
-  }
-
-  Widget _item(ConfigOption? option, OptionRole role, String? value, String label, String? current, String kind) => MenuItemButton(
-    key: ValueKey('$kind=${value ?? ''}'),
-    leadingIcon: Icon(Icons.check, size: 18, color: value == current ? null : Colors.transparent),
-    onPressed: () => _choose(role, option, value),
-    child: Text(label),
-  );
+  /// The model and effort are chosen in the one picker, which the pill opens.
+  void _open(BuildContext context) => unawaited(showSessionPicker(context, store: store, session: session, kit: kit));
 
   @override
   Widget build(BuildContext context) {
@@ -177,40 +154,14 @@ class ModelEffortChooser extends StatelessWidget {
     ].whereType<String>().toList();
     final waiting = (pendingModel != null || pendingEffort != null) && session.status == SessionStatus.working;
     final label = '${parts.isEmpty ? (draft ? 'Default' : 'Model') : parts.join(' · ')}${waiting ? ' (next turn)' : ''}';
-    final currentModel = pendingModel?.value ?? (draft ? null : model?.current);
-    final currentEffort = pendingEffort?.value ?? (draft ? null : effort?.current);
     final connecting = session.status == SessionStatus.connecting;
-    return MenuAnchor(
-      menuChildren: [
-        if (draft && (model != null || pendingModel != null))
-          _item(model, OptionRole.model, null, model?.defaultLabel ?? 'Default', currentModel, 'model-choice'),
-        for (final choice in model?.choices ?? const <Choice>[])
-          _item(model, OptionRole.model, choice.value, choiceLabel(OptionRole.model, choice), currentModel, 'model-choice'),
-        if (effort != null || pendingEffort != null) ...[
-          const Divider(height: 1),
-          SubmenuButton(
-            key: const Key('option-effort'),
-            menuChildren: [
-              if (draft) _item(effort, OptionRole.effort, null, effort?.defaultLabel ?? 'Default', currentEffort, 'effort-choice'),
-              for (final choice in effort?.choices ?? const <Choice>[])
-                _item(effort, OptionRole.effort, choice.value, choiceLabel(OptionRole.effort, choice), currentEffort, 'effort-choice'),
-            ],
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              const Text('Effort'),
-              const SizedBox(width: 24),
-              Text(_part(effort, OptionRole.effort, always: true) ?? '', style: TextStyle(color: Theme.of(context).hintColor)),
-            ]),
-          ),
-        ],
-      ],
-      builder: (context, controller, _) => InkWell(
-        key: const Key('option-model'),
-        borderRadius: BorderRadius.circular(8),
-        onTap: connecting ? null : () => controller.isOpen ? controller.close() : controller.open(),
-        child: Tooltip(
-          message: _seenLabel(draft ? seen : null, 'Model and effort'),
-          child: ComposerPill(label: label, icon: Icons.memory),
-        ),
+    return InkWell(
+      key: const Key('option-model'),
+      borderRadius: BorderRadius.circular(8),
+      onTap: connecting ? null : () => _open(context),
+      child: Tooltip(
+        message: _seenLabel(draft ? seen : null, 'Model and effort'),
+        child: ComposerPill(label: label, icon: Icons.memory),
       ),
     );
   }

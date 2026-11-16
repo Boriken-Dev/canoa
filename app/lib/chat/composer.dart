@@ -368,7 +368,7 @@ class SessionComposer extends StatelessWidget {
       ],
       trailing: [
         if (draft) SourceTroubleChip(store: store, session: session, kit: kit),
-        ModelEffortChooser(store: store, session: session, options: options, seen: seen),
+        ModelEffortChooser(store: store, session: session, options: options, kit: kit, seen: seen),
         if (options.any((option) => roleOf(option) == OptionRole.other)) MoreChooser(store: store, session: session, options: options),
         if (draft) CacheChooser(store: store, session: session),
         if (kit.overlays.isNotEmpty || kit.loadouts.isNotEmpty || session.profile != null) OverlaysChooser(store: store, session: session, kit: kit),

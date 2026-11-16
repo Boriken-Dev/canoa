@@ -133,6 +133,7 @@ void main() {
     expect(find.descendant(of: find.byKey(const Key('source Claude')), matching: find.text('Needs claude')), findsOneWidget);
     await tester.tap(find.byKey(const Key('source Claude')).last);
     await tester.pumpAndSettle();
+    await closePicker(tester);
     await tester.enterText(find.byType(TextField), 'Fix it');
     await tester.tap(find.byTooltip('Send'));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));

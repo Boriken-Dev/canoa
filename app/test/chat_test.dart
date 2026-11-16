@@ -202,6 +202,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Model B').last);
       await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
       await _settle(tester);
       final chose = agent.sent.singleWhere((message) => message['method'] == 'session/set_config_option');
       expect(chose['params'], {'sessionId': 's1', 'configId': 'model', 'value': 'b'});

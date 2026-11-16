@@ -316,6 +316,7 @@ void main() {
     await tester.tap(find.byKey(const Key('source outside')));
     await frames(tester);
     expect(store.selected!.source, const AgentSource.hosted('outside'));
+    await closePicker(tester);
 
     await tester.runAsync(host.stop);
     await settle(tester, 100);

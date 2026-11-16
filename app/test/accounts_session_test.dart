@@ -43,6 +43,7 @@ void main() {
     await frames(tester);
     await tester.tap(find.byKey(const Key('account-choice metered')));
     await frames(tester);
+    await closePicker(tester);
     await send(tester, 'Say hello');
     await settle(tester, 150);
     expect(_asked(agent), 'metered');

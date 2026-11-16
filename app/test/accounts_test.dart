@@ -273,10 +273,10 @@ void main() {
       expect(find.descendant(of: find.byKey(const Key('option-account')), matching: find.text('work')), findsOneWidget);
       await tester.tap(find.byKey(const Key('option-account')));
       await tester.pumpAndSettle();
-      expect(tester.widget<PopupMenuItem<Object>>(find.byKey(const Key('account-choice work'))).enabled, isTrue);
-      expect(tester.widget<PopupMenuItem<Object>>(find.byKey(const Key('account-choice metered'))).enabled, isFalse);
+      expect(tester.widget<InkWell>(find.byKey(const Key('account-choice work'))).onTap, isNotNull);
+      expect(tester.widget<InkWell>(find.byKey(const Key('account-choice metered'))).onTap, isNull);
       expect(find.text('In use by "Fix the build"'), findsOneWidget);
-      expect(tester.widget<PopupMenuItem<Object>>(find.byKey(const Key('account-choice old'))).enabled, isFalse);
+      expect(tester.widget<InkWell>(find.byKey(const Key('account-choice old'))).onTap, isNull);
       expect(find.text('Needs sign-in'), findsOneWidget);
       expect(find.byKey(const Key('account-add')), findsOneWidget);
       await tester.tap(find.byKey(const Key('account-choice work')));

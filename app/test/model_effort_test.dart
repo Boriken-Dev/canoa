@@ -143,24 +143,22 @@ void main() {
       return agent;
     }
 
-    testWidgets('model and effort read as one pill, and effort is a submenu of the model menu', (tester) async {
+    testWidgets('model and effort read as one pill, and the effort is beside the models in the one picker', (tester) async {
       final agent = OptionsAgent();
       await pumpApp(tester, _store(), linked: agent.openLink);
       await _draft(tester);
       await send(tester, 'Say hello');
       await pick(tester, 'option-model', 'Opus');
       await pick(tester, 'option-effort', 'High');
-      expect(_pill(tester), 'Opus \u00b7 High');
+      expect(_pill(tester), 'Opus · High');
       expect(find.byKey(const Key('option-model')), findsOneWidget);
       expect(find.text('Effort'), findsNothing, reason: 'no pill of its own');
       await tester.tap(find.byKey(const Key('option-model')));
       await frames(tester);
-      expect(find.byKey(const Key('option-effort')), findsOneWidget, reason: 'the submenu is in the model menu');
-      expect(find.descendant(of: find.byKey(const Key('option-effort')), matching: find.text('High')), findsOneWidget, reason: 'and says what it is');
-      expect(choiceItems('effort-choice'), findsNothing, reason: 'its choices come when it opens');
-      await tester.tap(find.byKey(const Key('option-effort')));
-      await frames(tester);
+      expect(find.byKey(const Key('option-effort')), findsOneWidget, reason: 'the efforts are in the picker, beside the models');
+      expect(choiceItems('model-choice'), findsWidgets, reason: 'and so are the models, at once');
       expect(choiceItems('effort-choice'), findsNWidgets(2));
+      expect(find.descendant(of: find.byKey(const Key('option-effort')), matching: find.byIcon(Icons.check)), findsOneWidget, reason: 'one effort says it is chosen');
       await tester.tapAt(const Offset(2, 2));
       await frames(tester);
       await finish(tester);
@@ -186,11 +184,9 @@ void main() {
     });
 
     for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
-      testWidgets('the pill with its menu and the effort submenu open at $label width', (tester) async {
+      testWidgets('the picker opened from the pill, with the models and the efforts, at $label width', (tester) async {
         await claudeDraft(tester, size: size);
         await tester.tap(find.byKey(const Key('option-model')));
-        await frames(tester);
-        await tester.tap(find.byKey(const Key('option-effort')));
         await frames(tester);
         expect(tester.takeException(), isNull);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/model_pill_$label.png'));
