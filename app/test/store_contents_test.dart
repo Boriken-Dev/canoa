@@ -190,7 +190,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('overlays-discover')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('store-entry-open-team-full')));
+      await tester.tap(find.byKey(const Key('store-entry-team-full')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('store-fetch')), findsOneWidget, reason: 'installing is reviewed, which is not reading');
       expect(find.byKey(const Key('details-contents-unread')), findsNothing);

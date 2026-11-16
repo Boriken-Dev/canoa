@@ -92,6 +92,8 @@ void main() {
           home: StoreSection(config: const CanoaConfig(), home: MemoryHome(MemoryOverlays()), onSave: (changed) async => changed, programs: host.programs()),
         ));
         await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('store-tab-agents')));
+        await tester.pumpAndSettle();
         for (final (id, mark) in [('claude', 'claude'), ('codex', 'codex'), ('grok', 'grok'), ('pi', 'pi'), ('antigravity', 'antigravity')]) {
           expect(_markAt(tester, find.byKey(Key('program-mark-${id}_store'))), mark, reason: id);
         }

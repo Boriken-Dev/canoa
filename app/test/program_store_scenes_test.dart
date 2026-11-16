@@ -67,6 +67,8 @@ Future<FakeStoreHost> _open(WidgetTester tester, Size size) async {
     home: StoreSection(config: const CanoaConfig(), home: MemoryHome(MemoryOverlays()), onSave: (changed) async => changed, programs: host.programs()),
   ));
   await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const Key('store-tab-agents')));
+  await tester.pumpAndSettle();
   return host;
 }
 

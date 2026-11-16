@@ -58,7 +58,7 @@ void main() {
     expect(find.byType(SessionRail), findsNothing, reason: 'Settings has no conversations index');
     await tester.tap(find.byTooltip('Store'));
     await frames(tester);
-    expect(find.byKey(const Key('store-tabs')), findsOneWidget);
+    expect(find.byKey(const Key('store-index-overlays')), findsOneWidget);
     await tester.tap(find.byTooltip('Conversations'));
     await frames(tester);
     expect(find.byType(SessionRail), findsOneWidget);

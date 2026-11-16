@@ -117,7 +117,7 @@ void main() {
     asks = [];
   });
 
-  testWidgets('the types are Agents, Overlays, Skills and MCPs, and Agents only where the host has programs', (tester) async {
+  testWidgets('the types are Overlays, Skills, Agents and MCP servers, and Agents only where the host has programs', (tester) async {
     await open(tester, programs: _programs());
     for (final id in const ['agents', 'overlays', 'skills', 'mcps']) {
       expect(find.byKey(Key('store-tab-$id')), findsOneWidget, reason: id);
@@ -133,6 +133,7 @@ void main() {
   testWidgets('Agents: the programs found are Installed, the others Discover, a search narrows both, updates are a badge and a filter',
       (tester) async {
     await open(tester, programs: _programs());
+    await tapKey(tester, 'store-tab-agents');
     expect(find.byKey(const Key('program-one_store')), findsOneWidget);
     expect(find.byKey(const Key('program-two_store')), findsNothing);
     expect(find.byKey(const Key('store-updates-badge')), findsOneWidget);
@@ -154,13 +155,13 @@ void main() {
     expect(find.byKey(const Key('program-install-two_store')), findsOneWidget);
   });
 
-  testWidgets('Overlays: Discover lists the catalogs\' entries as cards that say what they need, and a search narrows them', (tester) async {
+  testWidgets('Overlays: Discover lists the catalogs\' entries as tiles that say what they need, and a search narrows them', (tester) async {
     await open(tester);
     await tapKey(tester, 'overlays-discover');
     final card = find.byKey(const Key('store-entry-main-review'));
     expect(card, findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('Needs git')), findsOneWidget, reason: 'compatibility, from the manifest');
-    expect(find.descendant(of: card, matching: find.text('Review…')), findsOneWidget, reason: 'a labelled action');
+    expect(find.descendant(of: card, matching: find.byKey(const Key('store-entry-install-main-review'))), findsOneWidget, reason: 'the +');
     await tester.enterText(find.byKey(const Key('store-search')), 'zzz');
     await tester.pumpAndSettle();
     expect(card, findsNothing);

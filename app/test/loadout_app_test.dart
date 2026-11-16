@@ -79,6 +79,8 @@ void main() {
 
     await tester.tap(find.byTooltip('Store'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('overlays-installed')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('overlay-default-b')));
     await tester.pumpAndSettle();
     expect(written.last.defaultLoadout, 'Default', reason: 'the first change writes the loadout new sessions start with');

@@ -125,13 +125,13 @@ void main() {
     await open(tester);
     expect(tabText(tester, 'store-tab-overlays'), 'Overlays 0');
     expect(tabText(tester, 'store-tab-skills'), 'Skills 0');
-    expect(tabText(tester, 'store-tab-mcps'), 'MCPs 0');
+    expect(tabText(tester, 'store-tab-mcps'), 'MCP servers 0');
     expect(find.text('Discover 1'), findsOneWidget, reason: 'the catalog offers one overlay');
 
     await installReview(tester);
     expect(tabText(tester, 'store-tab-overlays'), 'Overlays 1');
     expect(find.text('Installed 1'), findsOneWidget);
-    expect(tabText(tester, 'store-tab-mcps'), 'MCPs 1', reason: 'the overlay brings one MCP server');
+    expect(tabText(tester, 'store-tab-mcps'), 'MCP servers 1', reason: 'the overlay brings one MCP server');
     expect(saved.last.overlays.keys, ['review']);
   });
 
@@ -175,7 +175,7 @@ void main() {
     await tapKey(tester, 'overlays-discover');
     final card = find.byKey(const Key('store-entry-main-review'));
     expect(tester.widget<Text>(find.descendant(of: card, matching: find.byKey(const Key('provenance')))).data,
-        'from the catalog main · $teamRepo@main');
+        'from https://example.invalid/review.git@main · main');
     expect(find.byKey(const Key('store-entry-other-lint')), findsOneWidget);
   });
 
@@ -208,7 +208,7 @@ void main() {
     await tapKey(tester, 'skills-discover');
     final offered = find.byKey(const Key('store-offered-skill-main-pdf'));
     expect(tester.widget<Text>(find.descendant(of: offered, matching: find.byKey(const Key('provenance')))).data,
-        contains('from the catalog main · '));
+        endsWith(' · main'));
     await tapKey(tester, 'store-skill-install-main-pdf');
     expect(find.textContaining('pinned ${pinOf('pdf', pdfFiles)}'), findsWidgets);
     expect(overlays.skillFetches, isEmpty, reason: 'nothing is fetched before the yes');
@@ -283,7 +283,7 @@ void main() {
       expect(changed.agentMcp, {'Claude': {'files': false}, 'Codex': {'files': false}});
       expect(changed.storeMcp['files']!.server, 'io.github.ana/files');
       expect(changed.storeMcp['files']!.digest, startsWith('sha256:'));
-      expect(tabText(tester, 'store-tab-mcps'), 'MCPs 1');
+      expect(tabText(tester, 'store-tab-mcps'), 'MCP servers 1');
       expect(find.textContaining('Off for every agent'), findsOneWidget);
       expect(find.textContaining('from the registry registry.modelcontextprotocol.io'), findsOneWidget);
 

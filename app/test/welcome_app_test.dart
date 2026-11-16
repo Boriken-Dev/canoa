@@ -108,7 +108,7 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('welcome-store')));
     await tester.tap(find.byKey(const Key('welcome-store')));
     await frames(tester);
-    expect(find.byKey(const Key('store-tabs')), findsOneWidget);
+    expect(find.byKey(const Key('store-index-overlays')), findsOneWidget);
     await finish(tester);
   });
 

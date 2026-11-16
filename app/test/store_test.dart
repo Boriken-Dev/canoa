@@ -683,7 +683,8 @@ path = "s\u202Eh.sh"
       await tester.tap(find.byKey(const Key('overlays-discover')));
       await tester.pumpAndSettle();
       await _decodeIcons(tester);
-      expect(find.text('Named in canoa.cfg by hand'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('store-entry-team-docs-tools')), matching: find.byIcon(Icons.check)), findsOneWidget,
+          reason: 'named in canoa.cfg by hand reads as here');
       await tester.tap(find.byKey(const Key('store-entry-team-docs-tools')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('store-by-hand')), findsOneWidget);
