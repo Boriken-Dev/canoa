@@ -6,8 +6,11 @@ import 'dart:io';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/desktop/host_control.dart';
+import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/main.dart';
+import 'package:canoa/permissions/host_paths.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
@@ -108,17 +111,49 @@ final class _Shown {
   final SessionStore store;
   final PermissionRules rules;
   final MemoryLedgerBackend backend;
+
+  /// The host the session's files are on, when a test gave it one.
+  _FileHost? host;
 }
 
 /// Links that lead nowhere else.
 String? _plain(String path) => path;
 
-Future<_Shown> _shown(WidgetTester tester, {PermissionRules? rules, MemoryLedgerBackend? backend, String mode = 'manual'}) async {
+/// A host's control channel in memory: [answer] gives each method's result, or an error when it returns a string starting `error:`.
+final class _FileHost implements HostLink {
+  _FileHost(this.answer);
+
+  final Object? Function(String method, Map<String, Object?> params) answer;
+  final asked = <(String, Map<String, Object?>)>[];
+  final _out = StreamController<String>();
+
+  @override
+  Stream<String> get messages => _out.stream;
+
+  @override
+  Future<void> send(String message) async {
+    final request = jsonDecode(message) as Map<String, Object?>;
+    final method = request['method']! as String;
+    final params = (request['params'] as Map?)?.cast<String, Object?>() ?? const {};
+    asked.add((method, params));
+    final result = answer(method, params);
+    final reply = result is String && result.startsWith('error:')
+        ? {'error': {'code': -32003, 'message': result.substring(6)}}
+        : {'result': result};
+    _out.add(jsonEncode({'jsonrpc': '2.0', 'id': request['id'], ...reply}));
+  }
+
+  @override
+  Future<void> close() => _out.close();
+}
+
+Future<_Shown> _shown(WidgetTester tester,
+    {PermissionRules? rules, MemoryLedgerBackend? backend, String mode = 'manual', bool Function(ChatSession)? pathsOnHost}) async {
   await tester.binding.setSurfaceSize(const Size(1100, 900));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final kept = backend ?? MemoryLedgerBackend();
   final list = rules ?? PermissionRules(kept, real: _plain);
-  final store = SessionStore(rules: list);
+  final store = SessionStore(rules: list)..pathsOnHost = pathsOnHost;
   final agent = _Agent();
   final session = await tester.runAsync(() => agent.start(store)) as ChatSession;
   await tester.pumpWidget(CanoaApp(store: store, config: const CanoaConfig()));
@@ -675,6 +710,108 @@ void main() {
     });
   });
 
+  group('where the host follows the links', () {
+    /// A session whose files are the host's: it says `/alias` is `/work/calc`, `/work/calc/out` leads to `/etc`, and where the home
+    /// and settings folders are; [failing] makes it answer nothing.
+    Future<_Shown> hosted(WidgetTester tester, {bool failing = false, Map<String, String?>? roots}) async {
+      final host = _FileHost((method, params) {
+        if (failing) return 'error:no';
+        switch (method) {
+          case 'fs/realpath':
+            return {
+              'paths': [
+                for (final path in params['paths']! as List<Object?>)
+                  {
+                    'path': path,
+                    'real': path.toString().startsWith('/alias')
+                        ? '/work/calc${path.toString().substring(6)}'
+                        : path.toString().startsWith('/work/calc/out')
+                            ? '/etc${path.toString().substring(14)}'
+                            : path,
+                  },
+              ],
+            };
+          case 'fs/repo_root':
+            return {
+              'folders': [
+                for (final path in params['paths']! as List<Object?>) {'path': path, 'root': roots?[path]},
+              ],
+            };
+          case 'fs/guards':
+            return {'home': '/home/me', 'config': '/home/me/.canoa'};
+        }
+        return 'error:unknown';
+      });
+      addTearDown(host.close);
+      final backend = MemoryLedgerBackend();
+      // The link is made in real time, where the host answers: one made in the test's own clock would wait on it for ever.
+      final control = HostControl.dialing(() async => host);
+      await tester.runAsync(control.ready);
+      final rules = PermissionRules(backend)..useHost(HostPaths(control), up: () => true);
+      final s = await _shown(tester, rules: rules, backend: backend, pathsOnHost: (_) => true);
+      s.session.place = SessionPlace.host;
+      s.host = host;
+      return s;
+    }
+
+    testWidgets('a file change of a session on the host is offered a rule, which covers what lies under its scope', (tester) async {
+      final s = await hosted(tester);
+      s.agent.editFile(1, '/work/calc/src/a.js');
+      await _settle(tester);
+      expect(s.session.pendingPermissions.single.subject, isA<PathSubject>());
+      expect(s.host!.asked.map((each) => each.$1), containsAll(['fs/guards', 'fs/realpath']), reason: 'the host was asked, not this disk');
+      final question = s.session.pendingPermissions.single;
+      final failed = await tester.runAsync(() => s.store.rememberHere(s.session, question, RuleType.path, '/work/calc/src'));
+      expect(failed, isNull);
+      expect(s.rules.rules.single.type, RuleType.path);
+      await _settle(tester);
+      s.agent.editFile(2, '/work/calc/src/deep/b.js');
+      s.agent.editFile(3, '/work/calc/lib/c.js');
+      await _settle(tester);
+      expect(s.agent.chose(2), 'allow-once');
+      expect(s.agent.answerTo(3), isNull, reason: 'outside the scope');
+    });
+
+    testWidgets('no rule reaches where a link of the host leads out of the folder', (tester) async {
+      final s = await hosted(tester);
+      s.agent.editFile(1, '/work/calc/out/passwd');
+      await _settle(tester);
+      final question = s.session.pendingPermissions.single;
+      final failed = await tester.runAsync(() => s.store.rememberHere(s.session, question, RuleType.path, '/work/calc/out'));
+      expect(failed, contains('link'), reason: 'the host said /work/calc/out is /etc');
+      expect(s.rules.rules, isEmpty);
+    });
+
+    testWidgets('the home and the settings of the host are guarded, which a page cannot know itself', (tester) async {
+      final s = await hosted(tester);
+      expect(s.rules.guards.home, isNull);
+      s.session.cwd = '/home/me';
+      s.agent.editFile(1, '/home/me/notes.txt');
+      await _settle(tester);
+      expect(s.rules.guards.home, '/home/me');
+      expect(s.session.pendingPermissions.single.subject, isNull, reason: 'the folder is the home folder');
+    });
+
+    testWidgets('a host that cannot say where links lead is a place with no rule for a path', (tester) async {
+      final s = await hosted(tester, failing: true);
+      s.agent.editFile(1, '/work/calc/src/a.js');
+      s.agent.run(2, 'npm test');
+      await _settle(tester);
+      final asked = s.session.pendingPermissions;
+      expect(asked.first.subject, isNull);
+      expect(asked.last.subject, isA<CommandSubject>());
+    });
+
+    testWidgets('a rule for a command is still judged beside the other rules by what the host says', (tester) async {
+      final s = await hosted(tester);
+      _add(s, type: RuleType.command, value: 'npm test');
+      s.agent.run(1, 'npm test');
+      await _settle(tester);
+      expect(s.agent.chose(1), 'allow-once');
+      expect(s.host!.asked.where((each) => each.$1 == 'fs/realpath'), isNotEmpty, reason: 'its folder was resolved by the host');
+    });
+  });
+
   group('a rule for an MCP tool', () {
     testWidgets('is made for that tool on that server', (tester) async {
       final s = await _shown(tester);
@@ -865,13 +1002,13 @@ void main() {
       await _settle(tester);
       final opened = s.session.pendingPermissions.first;
       s.store.cancelPermission(s.session);
-      expect(s.store.rememberHere(s.session, opened, RuleType.command, 'npm test'), contains('no longer waiting'));
+      expect(await s.store.rememberHere(s.session, opened, RuleType.command, 'npm test'), contains('no longer waiting'));
       expect(s.rules.rules, isEmpty);
       expect(s.agent.answerTo(2), isNull, reason: 'the second request was not answered by a rule made for the first');
       expect(s.session.pendingPermissions.single.title, 'Run a command');
       final second = s.session.pendingPermissions.single;
-      expect(s.store.rememberHere(s.session, second, RuleType.command, 'npm test'), isNotNull, reason: 'the scope is not the command asked');
-      expect(s.store.rememberHere(s.session, second, RuleType.command, 'cargo test'), isNull);
+      expect(await s.store.rememberHere(s.session, second, RuleType.command, 'npm test'), isNotNull, reason: 'the scope is not the command asked');
+      expect(await s.store.rememberHere(s.session, second, RuleType.command, 'cargo test'), isNull);
       await _settle(tester);
       expect(s.agent.chose(2), 'allow-once');
     });

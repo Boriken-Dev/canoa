@@ -192,6 +192,19 @@ typedef RepoRoot = String? Function(String folder);
 /// session on another machine, cannot, and no path rule is made there.
 typedef RealPath = String? Function(String path);
 
+/// Where links are followed and repositories found when that is another program's to do, asked of it ahead of the synchronous
+/// questions the rules put: a lookup answers from what [settle] last read, and says nothing (so no rule applies) of what it did not.
+abstract interface class PathOracle {
+  String? real(String path);
+  String? repoRoot(String folder);
+
+  /// The home folder and the folder of the settings that no rule may reach, on the computer the paths are on; null when not said.
+  Future<({String? home, String? config})?> guards();
+
+  /// Runs [probe], asks for everything it looked up and had no answer to, and runs it again until it needs nothing more.
+  Future<void> settle(void Function() probe);
+}
+
 String? _resolved(RealPath real, String cleaned) {
   final resolved = real(cleaned);
   return resolved == null ? null : cleanPath(resolved);
@@ -440,8 +453,10 @@ String redacted(RuleType type, String detail) {
 /// rule another program added is kept (and flagged) and a rule another instance revoked stops applying.
 class PermissionRules extends ChangeNotifier {
   PermissionRules(this.backend,
-      {this.log, this.guards = const PermissionGuards(), this.real, this.repoRoot, this.lockTimeout = const Duration(seconds: 2), DateTime Function()? clock, Random? random})
-      : _clock = clock ?? DateTime.now,
+      {this.log, this.guards = const PermissionGuards(), RealPath? real, RepoRoot? repoRoot, this.lockTimeout = const Duration(seconds: 2), DateTime Function()? clock, Random? random})
+      : _directReal = real,
+        _directRoot = repoRoot,
+        _clock = clock ?? DateTime.now,
         _random = random ?? Random.secure();
 
   final LedgerBackend backend;
@@ -450,11 +465,38 @@ class PermissionRules extends ChangeNotifier {
   final RuleLog? log;
   PermissionGuards guards;
 
-  /// How links are followed; null where they cannot be, and no path rule is then made.
-  final RealPath? real;
+  final RealPath? _directReal;
+  final RepoRoot? _directRoot;
+  PathOracle? _host;
+  bool Function() _hostUp = () => false;
+
+  /// How links are followed: by the host while it answers (see [useHost]), else on this computer; null where they cannot be,
+  /// and no path rule is then made.
+  RealPath? get real => _onHost ? _host!.real : _directReal;
 
   /// Where the repository of a folder starts, when that can be asked.
-  final RepoRoot? repoRoot;
+  RepoRoot? get repoRoot => _onHost ? _host!.repoRoot : _directRoot;
+
+  bool get _onHost => _host != null && _hostUp();
+
+  /// Has the host follow links and find repositories, for every session that runs on it, while [up] says it answers. Its answers
+  /// are read from what [prepare] asked it beforehand.
+  void useHost(PathOracle host, {required bool Function() up}) {
+    _host = host;
+    _hostUp = up;
+  }
+
+  /// Asks the host what [probe] needs to know of paths (links followed, repositories found), where [useHost] has it do that, so
+  /// that [probe] and what runs after it, which cannot wait, are answered from what it said. [probe] calls the synchronous
+  /// questions of these rules (`match`, `conflict`, `checkScope`, `pathsAllowedIn`) and ignores their answers.
+  Future<void> prepare(void Function() probe) async {
+    final host = _host;
+    if (host == null || !_hostUp()) return;
+    // The folders a rule may never reach are this host's own: the page knows neither.
+    final said = await host.guards();
+    if (said != null) guards = PermissionGuards(home: said.home ?? guards.home, config: said.config ?? guards.config, protected: guards.protected);
+    await host.settle(probe);
+  }
 
   /// How long a change or a read waits for the file's lock before it gives up; a read that gives up applies no rule.
   final Duration lockTimeout;

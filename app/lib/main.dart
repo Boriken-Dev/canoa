@@ -72,6 +72,7 @@ import 'history/session_move.dart';
 import 'ledger/host_ledger_backend.dart';
 import 'ledger/ledger_backend.dart';
 import 'ledger/session_ledger.dart';
+import 'permissions/host_paths.dart';
 import 'permissions/permission_rules.dart';
 import 'popout/platform.dart' as popout_platform;
 import 'popout/popout_app.dart';
@@ -908,6 +909,9 @@ class _CanoaAppState extends State<CanoaApp> {
     final direct = config.connections.where((each) => each.kind == ConnectionKind.acp && each.peer.toLowerCase() == session.peerId?.toLowerCase());
     return direct.isEmpty ? null : const TerminalRefused('This is a direct agent endpoint: it offers a session and no shell.');
   }
+  /// Whether [session]'s folder is on a computer this app can ask about links and repositories: the host it is a client of, else
+  /// this computer.
+  bool _pathsOnHost(ChatSession session) => _viaHost ? _filesOf(session) != null : !kIsWeb && session.place == SessionPlace.local;
 
   Worktrees? _localWorktrees() => _control == null ? null : controlWorktrees(_control);
 
@@ -1941,6 +1945,8 @@ class _CanoaAppState extends State<CanoaApp> {
     store.accountChoicesLoader = _askChoicesAs;
     store.defaultAccountOf = (source) => source.hostEntry == null ? null : _accounts?.offeredBy(source.hostEntry!).where((each) => each.usable).firstOrNull?.name;
     store.gitReader = _gitReaderFor;
+    store.pathsOnHost ??= _pathsOnHost;
+    if (_control case final control?) widget.rules?.useHost(HostPaths(control), up: () => _hostUp);
     store.addListener(_noteLast);
     widget.host?.addListener(_hostChanged);
     _reconnects = _control?.reconnected.listen((_) => unawaited(_hostCameBack()));
@@ -2023,6 +2029,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (identical(store.choicesLoader, _askChoices)) store.choicesLoader = null;
     if (identical(store.accountChoicesLoader, _askChoicesAs)) store.accountChoicesLoader = null;
     if (identical(store.gitReader, _gitReaderFor)) store.gitReader = null;
+    if (identical(store.pathsOnHost, _pathsOnHost)) store.pathsOnHost = null;
     widget.host?.removeListener(_hostChanged);
     unawaited(_reconnects?.cancel());
     _hostFolders?.dispose();

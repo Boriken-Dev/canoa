@@ -441,8 +441,15 @@ final class _Policy implements model.PermissionPolicy {
     // What another instance revoked since the file was read stops applying before this request is matched, and a file that could
     // not be read earlier is tried again. A read that waits too long applies no rule: the request is asked.
     final rules = store.rules;
-    if (rules != null && (rules.rules.isNotEmpty || rules.problem != null)) {
-      await rules.refresh();
+    if (rules != null && (rules.rules.isNotEmpty || rules.problem != null)) await rules.refresh();
+    // Where links lead and where a repository starts is the host's to say, and the questions put to the rules cannot wait for it.
+    final folder = session.cwd;
+    final subject = subjectOf(kind: request.kind, rawInput: request.rawInput, toolCall: request.toolCall);
+    if (rules != null && folder != null && subject != null && store._pathsHere(session)) {
+      await rules.prepare(() {
+        rules.pathsAllowedIn(folder);
+        rules.match(source: SessionStore.ruleSource(session), peer: session.peerId ?? '', folder: folder, kind: request.kind, subject: subject);
+      });
     }
   }
 
@@ -562,6 +569,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// Starts a draft's agent on its first message; set by the app. Without it a draft cannot start.
   DraftStarter? starter;
+
+  /// Whether the files of a session's folder are the ones the host the app asks about holds, so that links and repositories are
+  /// asked of it and a rule for a path can be made; set by the app. Without it only a session on this computer in an app with
+  /// files of its own can.
+  bool Function(ChatSession session)? pathsOnHost;
 
   /// Reads the repository in a session's folder through the host its agent runs on; set by the app. Null where none can.
   GitReader? Function(ChatSession session)? gitReader;
@@ -1772,8 +1784,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     return value != null && const {'manual', 'default', 'plan'}.contains(value);
   }
 
+  bool _pathsHere(ChatSession session) => pathsOnHost?.call(session) ?? (!kIsWeb && session.place == SessionPlace.local);
+
   /// What a rule could state of [request] in [session]: commands only while the mode asks about them; changes to files only for a
-  /// session on this computer, in a folder where links can be followed and that is neither home nor Canoa's settings; an MCP tool
+  /// session whose files this app can ask about (on this computer, or on the host it is a client of), in a folder where links can be
+  /// followed and that is neither home nor Canoa's settings; an MCP tool
   /// always. Null when no rule can cover it.
   RuleSubject? _ruleSubject(ChatSession session, AcpPermissionRequest request) {
     final subject = subjectOf(
@@ -1783,12 +1798,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     );
     final folder = session.cwd;
     return switch (subject) {
-      PathSubject()
-          when kIsWeb ||
-              session.place != SessionPlace.local ||
-              folder == null ||
-              !(rules?.pathsAllowedIn(folder) ?? false) =>
-        null,
+      PathSubject() when !_pathsHere(session) || folder == null || !(rules?.pathsAllowedIn(folder) ?? false) => null,
       CommandSubject() || McpSubject() when !_modeAsks(session) => null,
       _ => subject,
     };
@@ -1802,12 +1812,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// The scope the person set, as [type] and [value], for [question], the request the dialog was opened for: remembered as a rule
   /// for this source in this folder, and that request answered with the agent's allow-once answer. Returns why it cannot be made,
   /// or null once it is.
-  String? rememberHere(
-    ChatSession session,
-    PermissionQuestion question,
-    RuleType type,
-    String value,
-  ) {
+  Future<String?> rememberHere(ChatSession session, PermissionQuestion question, RuleType type, String value) async {
     final store = rules, folder = session.cwd;
     if (store == null || folder == null || folder.isEmpty) {
       return 'There is nowhere to keep a rule.';
@@ -1816,18 +1821,14 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       return 'That request is no longer waiting.';
     }
     final subject = question.subject, kind = question.kind;
-    final once = question.options
-        .where((option) => option.kind == 'allow_once')
-        .firstOrNull;
-    if (subject == null || kind == null || once == null) {
-      return 'No rule can cover this request.';
-    }
-    if (store.problem != null) {
-      return 'The rules file cannot be read, so no rule is made: ${store.problem}';
-    }
-    final problem =
-        store.checkScope(type, value, subject, folder) ??
-        store.conflict(folder, type);
+    final once = question.options.where((option) => option.kind == 'allow_once').firstOrNull;
+    if (subject == null || kind == null || once == null) return 'No rule can cover this request.';
+    if (store.problem != null) return 'The rules file cannot be read, so no rule is made: ${store.problem}';
+    // The host says where the links in the scope lead before the rule is judged; that takes a moment, in which the request may
+    // have been answered elsewhere.
+    await store.prepare(() => store.checkScope(type, value, subject, folder) ?? store.conflict(folder, type));
+    if (!session.pendingPermissions.contains(question)) return 'That request is no longer waiting.';
+    final problem = store.checkScope(type, value, subject, folder) ?? store.conflict(folder, type);
     if (problem != null) return problem;
     final rule = store.add(
       source: ruleSource(session),

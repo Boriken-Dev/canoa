@@ -51,8 +51,9 @@ class _RememberDialogState extends State<RememberDialog> {
     _ => text.text,
   };
 
-  void confirm() {
-    final failed = widget.store.rememberHere(widget.session, widget.question, type, value);
+  Future<void> confirm() async {
+    final failed = await widget.store.rememberHere(widget.session, widget.question, type, value);
+    if (!mounted) return;
     if (failed == null) {
       Navigator.pop(context, true);
     } else {
