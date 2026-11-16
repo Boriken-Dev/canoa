@@ -675,6 +675,37 @@ impl Programs {
         Some(plans.remove(at).plan)
     }
 
+    /// The plan this host holds for `owner` under `token`, as it would be applied, left in place.
+    #[must_use]
+    pub fn kept_plan(&self, owner: &str, provider: &str, token: &str) -> Option<InstallPlan> {
+        let plans = self.plans.lock().ok()?;
+        let now = Instant::now();
+        plans
+            .iter()
+            .find(|p| {
+                p.owner == owner
+                    && p.provider == provider
+                    && p.plan.token == token
+                    && now.duration_since(p.made) < self.options.plan_ttl
+            })
+            .map(|p| p.plan.clone())
+    }
+
+    /// Gives up the plan this host holds for `owner` under `token`, if it holds one.
+    pub fn forget_plan(&self, owner: &str, provider: &str, token: &str) {
+        let _ = self.take_plan(owner, provider, token);
+    }
+
+    /// The version of the copy the host manages for the program `store` offers, if it has one.
+    ///
+    /// # Errors
+    ///
+    /// What the store or the shelf refuses.
+    pub fn managed_version(&self, store: &dyn ProgramStore) -> Result<Option<String>, StoreError> {
+        let info = store.describe()?;
+        Ok(self.managed(&info)?.map(|managed| managed.version))
+    }
+
     /// The start of the managed copy, after `current.json` is checked against the digest kept outside the program's folder, the launch
     /// is found to lie inside the copy and the copy inside the programs folder, and every file of the copy is checked against what was
     /// recorded when it was installed (a file added since, one gone, one changed). Reading every file costs time in proportion to the

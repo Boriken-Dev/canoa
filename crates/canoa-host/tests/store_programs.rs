@@ -1541,3 +1541,98 @@ fn a_plan_made_only_to_be_read_is_not_kept_and_does_not_replace_the_one_the_owne
         "{refused}"
     );
 }
+
+#[test]
+fn a_kept_plan_is_seen_and_applied_only_by_its_owner_and_once() {
+    let s = setup("owners", Variant::Normal);
+    let store = s
+        .programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("store");
+    assert_eq!(s.programs.managed_version(&*store).expect("read"), None);
+    let plan = s
+        .programs
+        .plan_for(
+            "session-a",
+            "echo_store",
+            &*store,
+            Action::Install,
+            None,
+            None,
+        )
+        .expect("plan");
+    let kept = s
+        .programs
+        .kept_plan("session-a", "echo_store", &plan.token)
+        .expect("kept for its owner");
+    assert_eq!(kept, plan);
+    // Nobody else sees it, applies it or gives it up.
+    assert!(
+        s.programs
+            .kept_plan("session-b", "echo_store", &plan.token)
+            .is_none()
+    );
+    s.programs
+        .forget_plan("session-b", "echo_store", &plan.token);
+    let refused = s
+        .programs
+        .apply_store_for(
+            "session-b",
+            Arc::clone(&store),
+            "echo_store",
+            &plan,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect_err("not b's plan");
+    assert!(format!("{refused}").contains("no such plan"), "{refused}");
+    assert!(current(&s).is_none());
+    assert!(
+        s.programs
+            .kept_plan("session-a", "echo_store", &plan.token)
+            .is_some()
+    );
+    let applied = s
+        .programs
+        .apply_store_for(
+            "session-a",
+            Arc::clone(&store),
+            "echo_store",
+            &plan,
+            Arc::new(Recorder::default()),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect("applied")
+        .expect("a copy");
+    assert_eq!(
+        s.programs
+            .managed_version(&*store)
+            .expect("read")
+            .as_deref(),
+        Some(applied.current.version.as_str())
+    );
+    assert!(
+        s.programs
+            .kept_plan("session-a", "echo_store", &plan.token)
+            .is_none()
+    );
+    // A plan given up is gone.
+    let again = s
+        .programs
+        .plan_for(
+            "session-a",
+            "echo_store",
+            &*store,
+            Action::Update,
+            None,
+            Some("1.0.0".to_owned()),
+        )
+        .expect("plan");
+    s.programs
+        .forget_plan("session-a", "echo_store", &again.token);
+    assert!(
+        s.programs
+            .kept_plan("session-a", "echo_store", &again.token)
+            .is_none()
+    );
+}
