@@ -85,6 +85,9 @@ pub struct ServeOptions {
     pub program_args: Vec<OsString>,
     /// What one key may carry in each direction, in bytes; the method's own default, 2^38, when `None`.
     pub key_limit: Option<u64>,
+    /// How long a question put to the person (a sign-in's form, an install's) waits for its answer: four minutes by default, which
+    /// is how long the request stays bound, and the longest the application accepts.
+    pub ask_wait: Duration,
     /// Whether a Noise sender changes its key at the limit; WebCrypto has no key change and ends the session there.
     pub rekey: bool,
     /// Whether a configuration with no entry binds, serving nothing, rather than being refused.
@@ -123,6 +126,7 @@ impl ServeOptions {
             provider_program: provider_program.into(),
             program_args: Vec::new(),
             key_limit: None,
+            ask_wait: crate::secrets::ask::ASK_WAIT,
             rekey: true,
             nothing_to_serve: false,
             state_dir: None,
@@ -165,6 +169,13 @@ impl ServeOptions {
     #[must_use]
     pub const fn with_local_sources(mut self, on: bool) -> Self {
         self.local_sources = on;
+        self
+    }
+
+    /// Waits `wait` for the person to answer a question the host puts to them, and binds the question for as long.
+    #[must_use]
+    pub const fn with_ask_wait(mut self, wait: Duration) -> Self {
+        self.ask_wait = wait;
         self
     }
 
@@ -1622,7 +1633,8 @@ impl Serving {
                         Some(log) => kept.with_usage(Arc::clone(log)),
                         None => kept,
                     };
-                    let kept = kept.with_sealer(control::Sealer::new(Arc::clone(&secrets)));
+                    let kept = kept
+                        .with_sealer(control::Sealer::new(Arc::clone(&secrets), options.ask_wait));
                     let kept = kept.with_history(control::Moves {
                         store: recorded,
                         targets: movers,
@@ -1634,6 +1646,7 @@ impl Serving {
                                 layers.clone(),
                                 home.clone(),
                                 secrets,
+                                options.ask_wait,
                                 portal_of(options).is_some(),
                             ))
                         }

@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use canoa::store::{Action, InstallPlan, StoreSettings};
 use coqui_acp_api::guatiao::{Alloc, FromValue, ToValue};
@@ -27,9 +27,6 @@ use crate::store::shelf::Shelf;
 
 /// Nothing was found under that name.
 const NOT_FOUND: i32 = -32003;
-
-/// How long a question put to the person waits for its answer.
-const ASK_WAIT: Duration = Duration::from_secs(600);
 
 /// The stores this host offers, and the programs it keeps through them.
 #[derive(Clone)]
@@ -212,10 +209,20 @@ impl Stores {
     }
 }
 
+/// Where the person's answer to a question goes.
+type Reply = mpsc::Sender<Result<LoginAnswer, String>>;
+
+/// The question put to the person, waiting for its answer.
+struct Pending {
+    asked: Asked,
+    reply: Reply,
+    since: Instant,
+}
+
 /// What a running apply hands the link that carries it.
 enum Out {
     Event(Event),
-    Ask(LoginForm, mpsc::Sender<Result<LoginAnswer, String>>),
+    Ask(LoginForm, Reply),
     Done(Box<Result<Option<crate::store::programs::Applied>, StoreError>>),
 }
 
@@ -237,7 +244,8 @@ impl Sink for LinkSink {
             .map_err(|_| "the link is gone".to_owned())?
             .send(Out::Ask(form, reply))
             .map_err(|_| "the link is gone".to_owned())?;
-        match answer.recv_timeout(ASK_WAIT) {
+        // The link's loop answers every question, and does so once its wait is over.
+        match answer.recv() {
             Ok(Ok(answer)) => Ok(answer),
             Ok(Err(why)) => Err(why),
             Err(_) => Err("the person gave no answer".to_owned()),
@@ -283,12 +291,14 @@ impl Stores {
     /// `store/apply`: carries out a plan the host made and handed back, on `channel`, which carries `store/progress` and
     /// the form's request until the answer. A question goes to the person as the sign-in's does, sealed to the key that asked
     /// (`asker`), so a typed value never crosses the link in the clear; with no `asker` it is not asked. The link closing, or
-    /// the person giving no answer, cancels the install. Other requests on the link are answered as they come by `others`.
+    /// the person giving no answer within `wait`, a declined form or an answer bound to anything else cancels the install. Other
+    /// requests on the link are answered as they come by `others`.
     pub(crate) fn apply<C: Channel>(
         &self,
         owner: &str,
         request: &Value,
         (channel, asker): (&C, Option<&Asker>),
+        wait: Duration,
         others: &dyn Fn(&[u8]) -> Option<Vec<u8>>,
     ) -> Vec<u8> {
         let id = request.get("id").cloned().unwrap_or(Value::Null);
@@ -315,11 +325,12 @@ impl Stores {
         let programs = Arc::clone(&self.programs);
         let stop = Arc::clone(&cancel);
         let owner = owner.to_owned();
+        let session = format!("store:{provider}");
         let worker = thread::spawn(move || {
             let done = programs.apply_store_for(&owner, store, &provider, &plan, sink, stop);
             let _ = out.send(Out::Done(Box::new(done)));
         });
-        let mut asking: Option<(Asked, mpsc::Sender<Result<LoginAnswer, String>>)> = None;
+        let mut asking: Option<Pending> = None;
         let answer = loop {
             match events.recv_timeout(POLL) {
                 Ok(Out::Event(event)) => {
@@ -330,7 +341,7 @@ impl Stores {
                 Ok(Out::Ask(form, reply)) => {
                     let put = match asker {
                         _ if asking.is_some() => Err("a question is already open".to_owned()),
-                        Some(asker) => put_form(asker, &form),
+                        Some(asker) => put_form(asker, &form, &session, wait),
                         None => Err(
                             "this host has no secret to seal a typed answer with, so it cannot ask"
                                 .to_owned(),
@@ -339,7 +350,11 @@ impl Stores {
                     match put {
                         Ok((line, asked)) => {
                             if channel.send(&line).is_ok() {
-                                asking = Some((asked, reply));
+                                asking = Some(Pending {
+                                    asked,
+                                    reply,
+                                    since: Instant::now(),
+                                });
                             } else {
                                 cancel.store(true, Ordering::SeqCst);
                                 let _ = reply.send(Err("the link ended".to_owned()));
@@ -364,19 +379,35 @@ impl Stores {
                     break error_line(&id, REFUSED, "the install ended without an answer");
                 }
             }
+            if asking
+                .as_ref()
+                .is_some_and(|pending| pending.since.elapsed() > wait)
+                && let Some(pending) = asking.take()
+            {
+                cancel.store(true, Ordering::SeqCst);
+                let _ = pending
+                    .reply
+                    .send(Err("the person gave no answer".to_owned()));
+            }
             match channel.receive(Some(Duration::from_millis(1))) {
                 Ok(Some(line)) => {
                     let message: Value = serde_json::from_slice(&line).unwrap_or(Value::Null);
                     let is_answer = message.get("method").is_none();
                     if is_answer {
-                        let waiting = asking.take_if(|(asked, _)| {
-                            message.get("id").and_then(Value::as_str) == Some(asked.request_id())
+                        let waiting = asking.take_if(|pending| {
+                            message.get("id").and_then(Value::as_str)
+                                == Some(pending.asked.request_id())
                         });
-                        if let (Some((asked, reply)), Some(asker)) = (waiting, asker) {
+                        if let (Some(Pending { asked, reply, .. }), Some(asker)) = (waiting, asker)
+                        {
                             let answer = match message.get("result") {
                                 Some(result) => open_answer(asker, asked, result),
                                 None => Err("the person gave no answer".to_owned()),
                             };
+                            // A form declined, cancelled or answered under another binding ends the install, as the link closing does.
+                            if answer.is_err() {
+                                cancel.store(true, Ordering::SeqCst);
+                            }
                             let _ = reply.send(answer);
                         }
                     } else if let Some(reply) = others(&line)
@@ -388,7 +419,7 @@ impl Stores {
                 Err(Failure::Timeout) => {}
                 Ok(None) | Err(_) => {
                     cancel.store(true, Ordering::SeqCst);
-                    if let Some((_, reply)) = asking.take() {
+                    if let Some(Pending { reply, .. }) = asking.take() {
                         let _ = reply.send(Err("the link ended".to_owned()));
                     }
                 }

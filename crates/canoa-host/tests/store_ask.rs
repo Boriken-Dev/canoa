@@ -36,6 +36,11 @@ use support::{Scratch, WAIT, example, host_binary, quoted};
 /// What each install was given when it asked, as `user=… token=…`.
 static GIVEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
+/// What an install saw when its question was not answered: `asked: ...` with the host's words, and `cancelled` when the host
+/// had told the install to stop by then. The tests that read it hold [`ONE_AT_A_TIME`].
+static SAW: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
 /// The echo store, but its install asks the person for a login first and refuses to go on without it.
 #[derive(coqui_acp_api::guatiao::Provider, Debug)]
 #[provider(
@@ -109,7 +114,17 @@ impl ProgramStore for AskingStore {
             },
         });
         let schema: Gv = guatiao_serde::adapt::to_value_in(&schema, Alloc::rust()).expect("schema");
-        let answer = prompter.ask(LoginForm::new("Registry login", schema))?;
+        let answer = match prompter.ask(LoginForm::new("Registry login", schema)) {
+            Ok(answer) => answer,
+            Err(error) => {
+                let mut saw = SAW.lock().expect("not poisoned");
+                saw.push(format!("asked: {error}"));
+                if prompter.cancelled().unwrap_or(false) {
+                    saw.push("cancelled".to_owned());
+                }
+                return Err(error);
+            }
+        };
         let user = guatiao_serde::Serializable::from(&answer.values);
         let user = serde_json::to_value(user).unwrap_or(Value::Null);
         let token = answer
@@ -177,7 +192,7 @@ struct Hosted {
     host_spki: Vec<u8>,
 }
 
-fn host(key: &Identity) -> Hosted {
+fn host(key: &Identity, wait: Option<Duration>) -> Hosted {
     let scratch = Scratch::new();
     let home = Home::at(scratch.0.join("home"));
     let lock = home.lock("a test").expect("a free home");
@@ -197,16 +212,14 @@ fn host(key: &Identity) -> Hosted {
     store
         .accept_key(&key.key_material())
         .expect("the key is paired");
-    let serving = Serving::bind(
-        &config,
-        identity,
-        store,
-        &ServeOptions::new(host_binary()).with_programs(
-            Arc::new(programs(scratch.0.join("programs"), scratch.0.join("user"))),
-            vec!["asking_store".to_owned()],
-        ),
-    )
-    .expect("it binds");
+    let mut options = ServeOptions::new(host_binary()).with_programs(
+        Arc::new(programs(scratch.0.join("programs"), scratch.0.join("user"))),
+        vec!["asking_store".to_owned()],
+    );
+    if let Some(wait) = wait {
+        options = options.with_ask_wait(wait);
+    }
+    let serving = Serving::bind(&config, identity, store, &options).expect("it binds");
     let url = serving
         .listening()
         .iter()
@@ -296,6 +309,20 @@ fn token_of(typed: &Typed) -> &'static str {
     }
 }
 
+/// The form names the store that asks, not the host's own accounts.
+fn assert_asked_by_the_store(app: &App) {
+    let request = app
+        .traffic
+        .iter()
+        .find(|line| line.contains("_coqui_acp/secret_request"))
+        .expect("the form was put");
+    let request: Value = serde_json::from_str(request).expect("JSON");
+    assert_eq!(
+        request["params"]["sessionId"], "store:asking_store",
+        "{request}"
+    );
+}
+
 fn given_with(token: &str) -> Vec<String> {
     GIVEN
         .lock()
@@ -316,7 +343,7 @@ const CANARY_KEY: &str = "tok-KEY-CANARY/+=q9\"\\z-9876543210";
 #[test]
 fn a_form_an_install_asks_the_applications_own_link_is_sealed_and_its_secret_is_in_no_line() {
     let key = support::key();
-    let host = host(&key);
+    let host = host(&key, None);
     let link = host.local.open("@control").expect("a link");
     let secret = host.local.link_secret().expect("the host minted a secret");
     let mut app = App::new(&secret[..]);
@@ -342,6 +369,7 @@ fn a_form_an_install_asks_the_applications_own_link_is_sealed_and_its_secret_is_
         !app.traffic.iter().any(|line| line.contains("store/ask")),
         "nothing was asked in the clear"
     );
+    assert_asked_by_the_store(&app);
     let places: Vec<(String, Vec<u8>)> = app
         .traffic
         .iter()
@@ -365,7 +393,7 @@ fn a_form_an_install_asks_the_applications_own_link_is_sealed_and_its_secret_is_
 fn a_form_an_install_asks_a_paired_browser_key_is_sealed_to_that_key_and_its_secret_is_in_no_line()
 {
     let key = support::key();
-    let host = host(&key);
+    let host = host(&key, None);
     let mut app = App::for_key(&key, &host.host_spki);
     support::with_link(&host.url, &key, host.peer, |rpc| {
         let plan = rpc
@@ -396,6 +424,7 @@ fn a_form_an_install_asks_a_paired_browser_key_is_sealed_to_that_key_and_its_sec
         !app.traffic.iter().any(|line| line.contains("store/ask")),
         "nothing was asked in the clear"
     );
+    assert_asked_by_the_store(&app);
     let places: Vec<(String, Vec<u8>)> = app
         .traffic
         .iter()
@@ -415,7 +444,10 @@ fn a_declined_form_and_an_answer_bound_to_another_secret_give_the_install_nothin
     const DECLINED: &str = "tok-DECLINED-CANARY";
     const FORGED: &str = "tok-FORGED-CANARY";
     let key = support::key();
-    let host = host(&key);
+    let _one = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let host = host(&key, None);
     let link = host.local.open("@control").expect("a link");
     let secret = host.local.link_secret().expect("the host minted a secret");
     for (id, token, typed) in [
@@ -428,6 +460,7 @@ fn a_declined_form_and_an_answer_bound_to_another_secret_give_the_install_nothin
             )),
         ),
     ] {
+        SAW.lock().expect("not poisoned").clear();
         let mut app = App::new(&secret[..]);
         let plan = local_call(
             &link,
@@ -441,5 +474,44 @@ fn a_declined_form_and_an_answer_bound_to_another_secret_give_the_install_nothin
             .expect_err("an install that was not answered does not go on");
         assert!(refused["message"].is_string(), "{refused}");
         assert!(given_with(token).is_empty(), "{token} reached the install");
+        // The install is told to stop, as it is when the link ends, not left to carry on with nothing.
+        let saw = SAW.lock().expect("not poisoned").clone();
+        assert!(saw.contains(&"cancelled".to_owned()), "{token}: {saw:?}");
     }
+}
+
+#[test]
+fn a_question_nobody_answers_in_time_is_taken_back_and_the_install_is_told_to_stop() {
+    let _one = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    SAW.lock().expect("not poisoned").clear();
+    let key = support::key();
+    let host = host(&key, Some(Duration::from_millis(300)));
+    let link = host.local.open("@control").expect("a link");
+    let plan = local_call(
+        &link,
+        1,
+        "store/plan",
+        json!({"provider": "asking_store", "action": "install", "version": "1.0.0"}),
+    );
+    linked::send(
+        &link,
+        &json!({"jsonrpc": "2.0", "id": 90, "method": "store/apply", "params": {"provider": "asking_store", "plan": plan}}),
+    );
+    // The person never answers: the form is put, and the host gives the install up when its wait is over.
+    let mut asked = false;
+    let ended = loop {
+        let message = linked::next(&link).expect("the host ends the install");
+        if message["method"] == "_coqui_acp/secret_request" {
+            asked = true;
+        } else if message["id"] == 90 && message.get("method").is_none() {
+            break message;
+        }
+    };
+    assert!(asked, "the form was put to the app");
+    assert!(ended.get("error").is_some(), "{ended}");
+    let saw = SAW.lock().expect("not poisoned").clone();
+    assert!(saw.iter().any(|line| line.contains("no answer")), "{saw:?}");
+    assert!(saw.contains(&"cancelled".to_owned()), "{saw:?}");
 }

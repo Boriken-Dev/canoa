@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use coqui_acp::secret::{
     Context, DEFAULT_LIFETIME, IdentityId, Limits, LinkKey, LinkRole, Method, Prover, Receiver,
@@ -19,6 +19,11 @@ use zeroize::Zeroizing;
 
 /// The method the host puts the form with: the secret-prompt extension's request.
 pub(crate) const METHOD: &str = coqui_acp::secret::REQUEST_METHOD;
+
+/// How long a form put to the person waits for its answer unless the host is told otherwise. It is the lifetime the request is
+/// bound for, so an answer that comes in time is never refused as late, and the longest the application accepts (the verifier's
+/// `max_lifetime` is five minutes).
+pub(crate) const ASK_WAIT: Duration = DEFAULT_LIFETIME;
 
 /// What the host asks with and checks an answer by, for the application in this process.
 pub(crate) struct Asker {
@@ -72,7 +77,15 @@ impl Asker {
     }
 
     /// The request that puts `schema` (JSON text of a form), titled `title`, to the person, and what is needed to open the answer.
-    pub(crate) fn ask(&self, title: &str, schema: &str) -> Result<(Value, Asked), String> {
+    /// `session` names who asks (`accounts` for a sign-in, `store:PROVIDER` for an install), and the request is bound for `wait`,
+    /// the time the host waits for the answer.
+    pub(crate) fn ask(
+        &self,
+        session: &str,
+        title: &str,
+        schema: &str,
+        wait: Duration,
+    ) -> Result<(Value, Asked), String> {
         let mut random = [0_u8; 12];
         getrandom::fill(&mut random).map_err(|_| "no randomness".to_owned())?;
         let hex: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
@@ -81,7 +94,7 @@ impl Asker {
             self.next.fetch_add(1, Ordering::SeqCst)
         );
         let context = Context {
-            session_id: "accounts".to_owned(),
+            session_id: session.to_owned(),
             request_id: request_id.clone(),
             message: title.to_owned(),
             schema: schema.to_owned(),
@@ -95,7 +108,7 @@ impl Asker {
             &self.prover,
             &self.app,
             now(),
-            DEFAULT_LIFETIME,
+            wait,
         )
         .map_err(|_| "the form cannot be put to the person".to_owned())?;
         let params = RequestParams {
@@ -144,5 +157,43 @@ impl Asked {
     /// The id the application's answer carries.
     pub(crate) fn request_id(&self) -> &str {
         &self.request_id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FORM: &str = r#"{"type":"object","properties":{"token":{"type":"string","writeOnly":true}},"required":["token"]}"#;
+
+    fn asker() -> Asker {
+        let key = LinkKey::derive(&[7_u8; 32]).expect("a key");
+        Asker::new(&key).expect("an asker")
+    }
+
+    #[test]
+    fn a_request_stays_bound_for_as_long_as_the_host_waits_for_its_answer() {
+        let asker = asker();
+        for wait in [ASK_WAIT, Duration::from_secs(90)] {
+            let before = now();
+            let (params, _) = asker
+                .ask("store:echo", "Login", FORM, wait)
+                .expect("a request");
+            let expires = params["recipient"]["binding"]["expires"]
+                .as_u64()
+                .expect("an expiry");
+            let lifetime = expires - before;
+            assert!(
+                (wait.as_secs()..=wait.as_secs() + 2).contains(&lifetime),
+                "{wait:?}: bound for {lifetime} s"
+            );
+            assert_eq!(params["sessionId"], "store:echo", "{params}");
+        }
+    }
+
+    #[test]
+    fn the_default_wait_is_no_longer_than_the_request_is_bound_and_the_application_accepts() {
+        assert!(ASK_WAIT <= DEFAULT_LIFETIME);
+        assert!(ASK_WAIT <= Duration::from_secs(300));
     }
 }

@@ -29,9 +29,6 @@ use crate::provider::map_of;
 use crate::secrets::Hub;
 use crate::secrets::ask::{Asked, Asker, METHOD};
 
-/// How long a question put to the person waits for its answer.
-const ASK_WAIT: Duration = Duration::from_secs(600);
-
 type Refusal = (i32, String);
 
 /// The accounts the host's own configuration names, and what asks the person for a typed value.
@@ -39,6 +36,8 @@ pub(crate) struct Accounts {
     layers: Layers,
     home: PathBuf,
     hub: Arc<Hub>,
+    /// How long a question put to the person waits for its answer.
+    ask_wait: Duration,
     /// Whether this is the host of a portal, whose every socket only the person's own browser reaches.
     portal: bool,
 }
@@ -234,11 +233,18 @@ fn json_of<T: ToValue>(value: &T) -> Result<Value, Refusal> {
 }
 
 impl Accounts {
-    pub(crate) fn new(layers: Layers, home: PathBuf, hub: Arc<Hub>, portal: bool) -> Self {
+    pub(crate) fn new(
+        layers: Layers,
+        home: PathBuf,
+        hub: Arc<Hub>,
+        ask_wait: Duration,
+        portal: bool,
+    ) -> Self {
         Self {
             layers,
             home,
             hub,
+            ask_wait,
             portal,
         }
     }
@@ -300,7 +306,7 @@ impl Accounts {
     }
 
     /// `accounts/add` or `accounts/login` on `channel`, which carries `accounts/progress` and the form's request until the
-    /// answer. The link closing, or ten minutes with no answer to a question, cancels the sign-in. Other requests on the link
+    /// answer. The link closing, or the ask wait (four minutes) with no answer to a question, cancels the sign-in. Other requests on the link
     /// are answered as they come by `others`.
     pub(crate) fn sign_in<C: Channel>(
         &self,
@@ -390,7 +396,7 @@ impl Accounts {
                 }
                 if asking
                     .as_ref()
-                    .is_some_and(|pending| pending.since.elapsed() > ASK_WAIT)
+                    .is_some_and(|pending| pending.since.elapsed() > self.ask_wait)
                 {
                     cancel.store(true, Ordering::SeqCst);
                     if let Some(pending) = asking.take() {
@@ -455,7 +461,7 @@ impl Accounts {
                     let _ = reply.send(Err("a question is already open".to_owned()));
                     return;
                 }
-                match put_form(asker, &form) {
+                match put_form(asker, &form, "accounts", self.ask_wait) {
                     Ok((line, asked)) => {
                         if channel.send(&line).is_ok() {
                             *asking = Some(Pending {
@@ -516,12 +522,17 @@ impl Accounts {
 
 /// The request that puts `form` to the person, sealed to the key `asker` asks, as a line for the link, and what opens the answer.
 /// A control request that carries a typed value uses this and no other way to ask for it.
-pub(super) fn put_form(asker: &Asker, form: &LoginForm) -> Result<(Vec<u8>, Asked), String> {
+pub(super) fn put_form(
+    asker: &Asker,
+    form: &LoginForm,
+    session: &str,
+    wait: Duration,
+) -> Result<(Vec<u8>, Asked), String> {
     let schema = inline_refs(&form.schema)
         .ok()
         .and_then(|schema| serde_json::to_string(&guatiao_serde::Serializable::from(&schema)).ok())
         .unwrap_or_default();
-    let (params, asked) = asker.ask(&form.title, &schema)?;
+    let (params, asked) = asker.ask(session, &form.title, &schema, wait)?;
     let line = serde_json::to_vec(&json!({
         "jsonrpc": "2.0", "id": asked.request_id(), "method": METHOD, "params": params,
     }))

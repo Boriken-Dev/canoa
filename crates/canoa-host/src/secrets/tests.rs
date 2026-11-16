@@ -676,7 +676,14 @@ fn the_host_asks_a_paired_key_a_form_of_its_own_and_asks_no_other() {
             .asker_for(&paired.peer_id().to_string())
             .expect("a paired key is asked");
         let schema = r#"{"type":"object","properties":{"api_key":{"type":"string","writeOnly":true}},"required":["api_key"]}"#;
-        let (params, _) = asker.ask("Anthropic API key", schema).expect("a form");
+        let (params, _) = asker
+            .ask(
+                "accounts",
+                "Anthropic API key",
+                schema,
+                crate::secrets::ask::ASK_WAIT,
+            )
+            .expect("a form");
         assert!(params.get("recipient").is_some(), "{method:?}: {params}");
         let stranger = Identity::generate(method).expect("a key");
         assert!(

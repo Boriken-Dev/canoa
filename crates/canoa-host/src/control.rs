@@ -234,11 +234,12 @@ pub(crate) struct EntryRoots {
 
 /// The host's secrets, which make the asker of a form for whoever a request came from.
 #[derive(Clone)]
-pub(crate) struct Sealer(Arc<crate::secrets::Hub>);
+pub(crate) struct Sealer(Arc<crate::secrets::Hub>, Duration);
 
 impl Sealer {
-    pub(crate) fn new(hub: Arc<crate::secrets::Hub>) -> Self {
-        Self(hub)
+    /// `wait` is how long a question put to the person waits for its answer.
+    pub(crate) fn new(hub: Arc<crate::secrets::Hub>, wait: Duration) -> Self {
+        Self(hub, wait)
     }
 }
 
@@ -939,6 +940,9 @@ impl Control {
                     caller.owner(),
                     &request,
                     (channel, asker.as_ref()),
+                    self.sealer
+                        .as_ref()
+                        .map_or(crate::secrets::ask::ASK_WAIT, |sealer| sealer.1),
                     &|other| self.handle(caller, other),
                 )
             }
