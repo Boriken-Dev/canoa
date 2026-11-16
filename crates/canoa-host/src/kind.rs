@@ -14,6 +14,9 @@ use alloc::vec::Vec;
 use core::fmt;
 use std::path::Path;
 
+use canoa_claude::ClaudeProvider;
+use canoa_codex::CodexProvider;
+use canoa_pi::PiProvider;
 use coqui_acp_api::guatiao::Value;
 use coqui_acp_api::guatiao::library::Object;
 use coqui_acp_api::guatiao::library::Registry;
@@ -23,9 +26,6 @@ use coqui_acp_api::{
     AccountCatalog, AccountKeeper, AccountKindInfo, AcpHarness, CacheLifetime, Environment,
     HarnessNotice, ProcessSpawner, StartRequest,
 };
-use coqui_acp_claude::ClaudeProvider;
-use coqui_acp_codex::CodexProvider;
-use coqui_acp_pi::PiProvider;
 
 use crate::accounts::{ACCOUNT_META, Accounts, Held, NoAccounts};
 use crate::config::{AccountConfig, Origin, Settings, cache_lifetime_named};

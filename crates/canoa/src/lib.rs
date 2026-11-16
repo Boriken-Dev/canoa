@@ -5,6 +5,8 @@
 
 extern crate alloc;
 
+pub mod preset;
+
 #[cfg(feature = "store")]
 #[cfg_attr(docsrs, doc(cfg(feature = "store")))]
 pub mod store;

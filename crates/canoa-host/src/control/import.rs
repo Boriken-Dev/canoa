@@ -50,8 +50,8 @@ impl Homes {
     pub(crate) fn of_this_computer() -> Self {
         let none = BTreeMap::new();
         Self {
-            claude: coqui_acp_claude::config_dir(&none, false),
-            codex: coqui_acp_codex::history::codex_home(&none, false),
+            claude: canoa_claude::acp::config_dir(&none, false),
+            codex: canoa_codex::acp::history::codex_home(&none, false),
         }
     }
 
@@ -370,8 +370,8 @@ impl Moves {
         let file =
             fs::File::open(&each.path).map_err(|_| "its file could not be read".to_owned())?;
         let limit = match harness {
-            Harness::Claude => coqui_acp_claude::history::DEFAULT_MAX_BYTES,
-            Harness::Codex => coqui_acp_codex::history::DEFAULT_MAX_BYTES,
+            Harness::Claude => canoa_claude::acp::history::DEFAULT_MAX_BYTES,
+            Harness::Codex => canoa_codex::acp::history::DEFAULT_MAX_BYTES,
         };
         let mut bytes = Vec::new();
         file.take(limit.saturating_add(1))
@@ -382,9 +382,9 @@ impl Moves {
         }
         let text = String::from_utf8_lossy(&bytes);
         let mut doc: Document = match harness {
-            Harness::Claude => coqui_acp_claude::history::export(&text, &session)
+            Harness::Claude => canoa_claude::acp::history::export(&text, &session)
                 .map_err(|error| error.to_string())?,
-            Harness::Codex => coqui_acp_codex::history::export(&text, &session)
+            Harness::Codex => canoa_codex::acp::history::export(&text, &session)
                 .map_err(|error| error.to_string())?,
         };
         if !doc

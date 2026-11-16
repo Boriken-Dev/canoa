@@ -533,6 +533,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "canoa-antigravity"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+ "serde_json",
+]
+
+[[package]]
+name = "canoa-claude"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+ "coqui-acp-claude",
+]
+
+[[package]]
+name = "canoa-codex"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+ "coqui-acp-codex",
+ "serde_json",
+]
+
+[[package]]
 name = "canoa-ffi"
 version = "0.0.0-alpha.0"
 dependencies = [
@@ -551,6 +579,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "canoa-grok"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+]
+
+[[package]]
 name = "canoa-host"
 version = "0.0.0-alpha.0"
 dependencies = [
@@ -558,6 +594,11 @@ dependencies = [
  "anycfg",
  "apple-native-keyring-store",
  "canoa",
+ "canoa-antigravity",
+ "canoa-claude",
+ "canoa-codex",
+ "canoa-grok",
+ "canoa-pi",
  "clap",
  "coqui-a2a",
  "coqui-access",
@@ -570,11 +611,8 @@ dependencies = [
  "coqui-acp",
  "coqui-acp-api",
  "coqui-acp-bridge",
- "coqui-acp-claude",
- "coqui-acp-codex",
  "coqui-acp-harness",
  "coqui-acp-history",
- "coqui-acp-pi",
  "coqui-acp-provider",
  "coqui-acp-secrets",
  "coqui-agentic-peer",
@@ -636,6 +674,15 @@ dependencies = [
  "win-msgbox",
  "windows-permissions",
  "zip",
+]
+
+[[package]]
+name = "canoa-pi"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+ "coqui-acp-pi",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 //! [`Engine`]: the plan, apply and find that every built-in store shares, driven by a [`Recipe`] that holds what is specific
 //! to one program: where it is published, how its download is checked, and how its version is read.
 //!
-//! A recipe describes a release as [`Part`]s: files to fetch into the version's folder, each perhaps unpacked, and a path
+//! A recipe describes a release as [`Part`](canoa::store::Part)s: files to fetch into the version's folder, each perhaps unpacked, and a path
 //! the program starts from. The engine never runs an installer the publisher wrote: it downloads, checks, places and reads
 //! the version back.
 #![allow(
@@ -10,217 +10,26 @@
     reason = "paths and clocks are std's"
 )]
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt::Write as _;
 use std::path::Path;
 use std::time::Instant;
 
+use canoa::store::recipe::executable_settings;
 use canoa::store::{
-    Action, ApplyOutcome, ApplyRequest, Change, Check, Download, FetchRequest, FindRequest,
-    InstallPlan, InstallPrompter, InstallTools, LatestQuery, LatestReport, Launch, MANAGER_CANOA,
+    Action, ApplyOutcome, ApplyRequest, Check, FetchRequest, FindRequest, Finish, InstallPlan,
+    InstallPrompter, InstallTools, LatestQuery, LatestReport, Launch, MANAGER_CANOA,
     PROBE_TIMEOUT_MS, PlanRequest, Platform, ProgramCopy, ProgramQuery, ProgramReport, Progress,
-    StoreInfo, StoreSettings, UnpackRequest, Updatable,
+    Recipe, Release, StoreInfo, StoreSettings, UnpackRequest, Updatable,
 };
 use coqui_acp_api::Environment;
 use coqui_acp_api::ProcessSpawner;
+use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-use coqui_acp_api::guatiao::{Map, Status, Value};
 use sha2::{Digest, Sha256};
 
 use super::exec::{Run, deadline_after};
-
-/// What to unpack a fetched file with.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct UnpackStep {
-    /// `zip`, `tar` or `tar.gz`.
-    pub format: &'static str,
-    /// The folder, relative to the version's folder.
-    pub into: String,
-    /// How many leading parts to drop from each entry.
-    pub strip: u32,
-    /// Whether to leave links out.
-    pub skip_links: bool,
-}
-
-/// One file of a release.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct Part {
-    /// What is fetched.
-    pub download: Download,
-    /// Where it goes, relative to the version's folder.
-    pub path: String,
-    /// Unpacked after, and the archive then removed.
-    pub unpack: Option<UnpackStep>,
-    /// Whether to make it executable (a standalone program).
-    pub executable: bool,
-}
-
-impl Part {
-    /// A file fetched to `path`.
-    #[must_use]
-    pub fn new(download: Download, path: impl Into<String>) -> Self {
-        Self {
-            download,
-            path: path.into(),
-            unpack: None,
-            executable: false,
-        }
-    }
-
-    /// Made executable once checked.
-    #[must_use]
-    pub const fn executable(mut self) -> Self {
-        self.executable = true;
-        self
-    }
-
-    /// Unpacked after the fetch.
-    #[must_use]
-    pub fn unpacked(mut self, step: UnpackStep) -> Self {
-        self.unpack = Some(step);
-        self
-    }
-}
-
-/// A release: what to fetch and where the program starts.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct Release {
-    /// The version.
-    pub version: String,
-    /// Its files.
-    pub parts: Vec<Part>,
-    /// The path the program starts from, relative to the version's folder.
-    pub launch: String,
-    /// Extra steps in words, after the downloads.
-    pub steps: Vec<String>,
-    /// Things the person should read before confirming.
-    pub notices: Vec<String>,
-    /// What the recipe itself needs again at apply time, such as the relative path of a runtime it unpacks.
-    pub facts: BTreeMap<String, String>,
-    /// Everything it changes outside the version's folder; none, for a store that downloads and places.
-    pub changes: Vec<Change>,
-}
-
-impl Release {
-    /// A release of `version` started from `launch`.
-    #[must_use]
-    pub fn new(version: impl Into<String>, launch: impl Into<String>, parts: Vec<Part>) -> Self {
-        Self {
-            version: version.into(),
-            parts,
-            launch: launch.into(),
-            steps: Vec::new(),
-            notices: Vec::new(),
-            facts: BTreeMap::new(),
-            changes: Vec::new(),
-        }
-    }
-}
-
-/// What a recipe's extra step is given.
-#[non_exhaustive]
-pub struct Finish<'a> {
-    /// The absolute path of the version's folder.
-    pub staging: &'a str,
-    /// The release being applied.
-    pub release: &'a Release,
-    /// Runs a program in the folder, keeping the cancel and the deadline.
-    pub run: &'a Run<'a>,
-    /// The tools.
-    pub tools: &'a Object<dyn InstallTools>,
-}
-
-impl core::fmt::Debug for Finish<'_> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Finish")
-            .field("staging", &self.staging)
-            .finish_non_exhaustive()
-    }
-}
-
-/// What is specific to one program.
-pub trait Recipe: Send + Sync + 'static {
-    /// Who the program is.
-    fn info(&self) -> StoreInfo;
-
-    /// File names to look for: `claude`, and on Windows `claude.exe` is tried too.
-    fn names(&self) -> &'static [&'static str];
-
-    /// Directories beside the `PATH` where a publisher's installer puts it.
-    fn dirs(&self) -> &'static [&'static str];
-
-    /// The arguments that make it print its version.
-    fn version_args(&self) -> &'static [&'static str];
-
-    /// The version in a line of `version_args`'s output.
-    fn parse_version(&self, line: &str) -> Option<String>;
-
-    /// Who put a copy at `path` there, and who can update it.
-    fn classify(&self, path: &str) -> (&'static str, Updatable);
-
-    /// Whether a copy replaces itself and no setting stops it.
-    fn self_updates(&self) -> bool {
-        false
-    }
-
-    /// Variables that turn the program's own updater off, none of them a credential.
-    fn launch_environment(&self) -> BTreeMap<String, String>;
-
-    /// The newest version, from the publisher's own endpoint.
-    fn latest(&self, channel: Option<&str>, tools: &Object<dyn InstallTools>) -> LatestReport;
-
-    /// The release of `version`, or the newest on `channel`, for `platform`.
-    ///
-    /// # Errors
-    ///
-    /// `GUATIAO_ERR_UNSUPPORTED` with the reason for a version or a platform the publisher does not serve.
-    fn release(
-        &self,
-        version: Option<&str>,
-        channel: Option<&str>,
-        platform: &Platform,
-        tools: &Object<dyn InstallTools>,
-    ) -> Result<Release, ProviderError>;
-
-    /// How to start the staged program whose release launches at `path`: the path, the settings that hand it to a harness
-    /// provider and the variables that keep its updater off.
-    fn launch(&self, path: &str, _staging: &str, _release: &Release) -> Launch {
-        let mut launch = Launch::new(path);
-        launch.settings = executable_settings(path);
-        launch.environment = self.launch_environment();
-        launch
-    }
-
-    /// The program and arguments that print the staged copy's version: its launch path and `version_args`.
-    fn version_command(
-        &self,
-        path: &str,
-        _staging: &str,
-        _release: &Release,
-    ) -> (String, Vec<String>) {
-        (
-            path.to_owned(),
-            self.version_args()
-                .iter()
-                .map(|a| (*a).to_owned())
-                .collect(),
-        )
-    }
-
-    /// What runs after the files are placed: nothing, for a program that is one file.
-    ///
-    /// # Errors
-    ///
-    /// Whatever the step fails with.
-    fn finish(&self, _finish: &Finish<'_>) -> Result<(), ProviderError> {
-        Ok(())
-    }
-}
 
 /// A store over a recipe.
 #[derive(Debug)]
@@ -231,14 +40,6 @@ pub struct Engine<R> {
 
 fn refuse(status: Status, message: &str) -> ProviderError {
     ProviderError::new(status, message)
-}
-
-/// The `executable` setting that hands a copy to a harness provider.
-#[must_use]
-pub fn executable_settings(path: &str) -> Value {
-    let mut map = Map::new();
-    map.set("executable", Value::from(path));
-    Value::from(map)
 }
 
 fn launch_for<R: Recipe>(recipe: &R, path: &str) -> Launch {
@@ -567,12 +368,8 @@ impl<R: Recipe> Engine<R> {
             deadline,
         )
         .prompter(prompter);
-        self.recipe.finish(&Finish {
-            staging: &request.staging,
-            release: &release,
-            run: &run,
-            tools,
-        })?;
+        self.recipe
+            .finish(&Finish::new(&request.staging, &release, &run, tools))?;
         cancelled()?;
         let program = Path::new(&request.staging)
             .join(&release.launch)
@@ -612,7 +409,7 @@ impl<R: Recipe> Engine<R> {
                 "the downloaded program will not run: it printed no version",
             ));
         };
-        if !super::extensions::valid_version(&read) || read != release.version {
+        if !canoa::store::recipe::valid_version(&read) || read != release.version {
             return Err(refuse(
                 Status::GUATIAO_ERR_INTERNAL,
                 &format!("the program reports {read}, not {}", release.version),

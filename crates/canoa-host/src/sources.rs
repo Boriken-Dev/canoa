@@ -8,6 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
+use canoa::preset::SourcePreset as Preset;
+
 use crate::config::{Config, Entry};
 use crate::store::shelf::Shelf;
 
@@ -15,23 +17,6 @@ use crate::store::shelf::Shelf;
 pub(crate) struct Source {
     pub(crate) entry: Entry,
     pub(crate) missing: Vec<String>,
-}
-
-/// What one source is: a built-in harness, or a program speaking ACP on its standard streams.
-struct Preset {
-    name: &'static str,
-    /// `claude`, `codex` or `pi` for a harness; otherwise `program` and `args` run.
-    harness: Option<&'static str>,
-    program: &'static str,
-    args: &'static [&'static str],
-    /// Other programs it needs, offered only when found.
-    requires: &'static [&'static str],
-    /// Where the program's own installer leaves it, tried when `PATH` has none: `~` is the home directory and `%NAME%` an
-    /// environment variable.
-    search: &'static [&'static str],
-    usage: Option<&'static str>,
-    /// The program store whose managed copy runs in place of a program found on the computer, when it has one.
-    managed: Option<&'static str>,
 }
 
 /// A managed Pi: a Node and Pi's CLI script, which the Store's Pi extension installed and its launch names.
@@ -42,57 +27,11 @@ pub(crate) struct ManagedPi {
 }
 
 const PRESETS: &[Preset] = &[
-    Preset {
-        name: "Claude",
-        harness: Some("claude"),
-        program: "claude",
-        args: &[],
-        requires: &[],
-        search: &[],
-        usage: None,
-        managed: None,
-    },
-    Preset {
-        name: "Codex",
-        harness: Some("codex"),
-        program: "codex",
-        args: &[],
-        requires: &[],
-        search: &[],
-        usage: None,
-        managed: None,
-    },
-    Preset {
-        name: "Antigravity",
-        harness: None,
-        program: "agy",
-        args: &["acp"],
-        requires: &[],
-        search: &["%LOCALAPPDATA%/agy/bin"],
-        usage: Some("antigravity"),
-        managed: None,
-    },
-    Preset {
-        name: "Grok",
-        harness: None,
-        program: "grok",
-        args: &["agent", "stdio"],
-        requires: &[],
-        search: &["~/.grok/bin"],
-        usage: None,
-        managed: None,
-    },
-    Preset {
-        name: "Pi",
-        harness: Some("pi"),
-        program: "pi",
-        args: &[],
-        requires: &[],
-        // The places the Store's Pi extension looks beyond `PATH`.
-        search: &["~/.pi/agent/bin", "~/.local/bin"],
-        usage: None,
-        managed: Some("pi"),
-    },
+    canoa_claude::PRESET,
+    canoa_codex::PRESET,
+    canoa_antigravity::PRESET,
+    canoa_grok::PRESET,
+    canoa_pi::PRESET,
 ];
 
 /// The names of the sources, in the order they are offered.
@@ -600,17 +539,6 @@ mod tests {
             "{executable:?}"
         );
         assert_eq!(protected, None, "nothing was said of protected paths");
-    }
-
-    #[test]
-    fn pis_search_places_are_the_stores() {
-        use crate::store::engine::Recipe as _;
-        let preset = PRESETS.iter().find(|p| p.name == "Pi").expect("Pi");
-        assert_eq!(preset.search, crate::store::extensions::pi::PiRecipe.dirs());
-        assert_eq!(
-            [preset.program],
-            crate::store::extensions::pi::PiRecipe.names()
-        );
     }
 
     #[test]

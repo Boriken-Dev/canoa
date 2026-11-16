@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use super::protect::{Protected, RECOMMENDED_VARIABLES};
-use canoa::store::InstallPrompter;
+use canoa::store::{InstallPrompter, Output, StepRunner};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Secret, Status};
 use coqui_acp_api::{
@@ -242,16 +242,6 @@ impl<S: ProcessSpawner> ProcessSpawner for GuardedSpawner<S> {
     }
 }
 
-/// What a program printed and how it ended.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct Output {
-    /// Its exit code, when it exited by itself.
-    pub code: Option<i64>,
-    /// Everything it printed, standard error included.
-    pub text: String,
-}
-
 /// Runs programs for a store, keeping the person's cancel and the apply's deadline.
 #[must_use]
 pub struct Run<'a> {
@@ -360,10 +350,7 @@ impl<'a> Run<'a> {
                 break exit;
             }
         };
-        Ok(Output {
-            code: exit.code,
-            text,
-        })
+        Ok(Output::new(exit.code, text))
     }
 
     fn say(&self, line: &str) {
@@ -384,6 +371,17 @@ impl<'a> Run<'a> {
             return Some("install cancelled");
         }
         None
+    }
+}
+
+impl StepRunner for Run<'_> {
+    fn exec(
+        &self,
+        program: &str,
+        args: &[&str],
+        extra: &[(&str, &str)],
+    ) -> Result<Output, ProviderError> {
+        Run::exec(self, program, args, extra)
     }
 }
 

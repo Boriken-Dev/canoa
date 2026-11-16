@@ -1,23 +1,33 @@
 //! Antigravity CLI (`agy`): the build the publisher's manifest names for the platform, checked against the manifest's SHA-512.
 //! The publisher serves only the newest build, so a plan that pins another version is refused.
 
+#![forbid(unsafe_code)]
+
+extern crate alloc;
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 
+use canoa::preset::SourcePreset;
 use canoa::store::{
-    Check, Download, InstallTools, LatestReport, MANAGER_NATIVE, MANAGER_UNKNOWN, Platform,
-    StoreInfo, Updatable,
+    Check, Download, InstallTools, LatestReport, MANAGER_NATIVE, MANAGER_UNKNOWN, Part, Platform,
+    Recipe, Release, StoreInfo, UnpackStep, Updatable,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
-use super::{
+use canoa::store::recipe::{
     bad_value, dotted, exe_suffix, get_json, internal, measured_platforms, path_has, pinned,
     serves_when, spell, unsupported,
 };
-use crate::store::engine::{Part, Recipe, Release, UnpackStep};
 
 const MANIFESTS: &str =
     "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests";
+
+/// How the host starts Antigravity when `canoa.cfg` does not name it.
+pub const PRESET: SourcePreset = SourcePreset::new("Antigravity", "agy")
+    .args(&["acp"])
+    .search(&["%LOCALAPPDATA%/agy/bin"])
+    .usage("antigravity");
 
 /// Antigravity.
 #[derive(Debug, Default, Clone, Copy)]
@@ -143,17 +153,18 @@ impl Recipe for AgyRecipe {
             ));
         }
         // The Linux download is an archive of one file, named `antigravity`.
-        let part = Part::new(download, "agy.tar.gz").unpacked(UnpackStep {
-            format: "tar.gz",
-            into: "bin".to_owned(),
-            strip: 0,
-            skip_links: false,
-        });
+        let part =
+            Part::new(download, "agy.tar.gz").unpacked(UnpackStep::new("tar.gz", "bin", 0, false));
         Ok(Release::new(newest, "bin/antigravity", vec![part]))
     }
 }
 
-crate::store::builtin::store_provider!(
-    /// The Antigravity store.
-    AgyStore, AgyRecipe, "agy_store"
-);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_preset_starts_the_program_the_recipe_installs() {
+        assert_eq!([PRESET.program], AgyRecipe.names());
+    }
+}

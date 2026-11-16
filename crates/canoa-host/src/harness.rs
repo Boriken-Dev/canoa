@@ -10,9 +10,9 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use canoa_claude::acp::{ClaudeAgent, ClaudeLaunch};
+use canoa_codex::acp::{CodexAgent, CodexLaunch};
 use coqui_acp_api::CacheLifetime;
-use coqui_acp_claude::{ClaudeAgent, ClaudeLaunch};
-use coqui_acp_codex::{CodexAgent, CodexLaunch};
 use coqui_acp_harness::{Harness as Translator, Settings};
 
 /// A coding agent's command line that the host serves as an ACP agent itself.

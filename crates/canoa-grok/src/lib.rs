@@ -1,22 +1,31 @@
 //! Grok: one binary per platform from the publisher's own storage. The publisher gives no checksum for it, so the plan says
 //! the download is not verified and the person confirms that.
 
+#![forbid(unsafe_code)]
+
+extern crate alloc;
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 
+use canoa::preset::SourcePreset;
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_NATIVE, MANAGER_UNKNOWN, MANAGER_WINGET,
-    Platform, StoreInfo, Updatable,
+    Part, Platform, Recipe, Release, StoreInfo, Updatable,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
-use super::{
+use canoa::store::recipe::{
     bad_value, dotted, exe_suffix, measured_platforms, path_has, pinned, serves_when, spell,
     unsupported,
 };
-use crate::store::engine::{Part, Recipe, Release};
 
 const BASE: &str = "https://x.ai/cli";
+
+/// How the host starts Grok when `canoa.cfg` does not name it.
+pub const PRESET: SourcePreset = SourcePreset::new("Grok", "grok")
+    .args(&["agent", "stdio"])
+    .search(&["~/.grok/bin"]);
 
 /// Grok.
 #[derive(Debug, Default, Clone, Copy)]
@@ -144,7 +153,12 @@ impl Recipe for GrokRecipe {
     }
 }
 
-crate::store::builtin::store_provider!(
-    /// The Grok store.
-    GrokStore, GrokRecipe, "grok_store"
-);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_preset_starts_the_program_the_recipe_installs() {
+        assert_eq!([PRESET.program], GrokRecipe.names());
+    }
+}

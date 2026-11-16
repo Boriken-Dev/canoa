@@ -10,11 +10,7 @@ use alloc::sync::Arc;
 
 use coqui_acp_api::guatiao::library::Registry;
 
-use super::extensions::agy::AgyStore;
-use super::extensions::anthropic::ClaudeStore;
-use super::extensions::codex::CodexStore;
-use super::extensions::grok::GrokStore;
-use super::extensions::pi::PiStore;
+use super::builtin::store_provider;
 
 /// The provider ids of the built-in stores, in the order the app lists them.
 pub const BUILT_IN: [&str; 5] = [
@@ -24,6 +20,27 @@ pub const BUILT_IN: [&str; 5] = [
     "agy_store",
     "pi_store",
 ];
+
+store_provider!(
+    /// The Claude Code store.
+    ClaudeStore, canoa_claude::ClaudeRecipe, "claude_store"
+);
+store_provider!(
+    /// The Codex store.
+    CodexStore, canoa_codex::CodexRecipe, "codex_store"
+);
+store_provider!(
+    /// The Grok store.
+    GrokStore, canoa_grok::GrokRecipe, "grok_store"
+);
+store_provider!(
+    /// The Antigravity store.
+    AgyStore, canoa_antigravity::AgyRecipe, "agy_store"
+);
+store_provider!(
+    /// The Pi store.
+    PiStore, canoa_pi::PiRecipe, "pi_store"
+);
 
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-built-in-stores",

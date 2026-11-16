@@ -22,7 +22,7 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use sha2::{Digest, Sha256};
 
 use super::contract::{Fixture, Variant, World, standin_bytes};
-use super::engine::{Finish, Part, Recipe, Release, UnpackStep};
+use canoa::store::{Finish, Part, Recipe, Release, UnpackStep};
 
 /// The one origin the echo program is published at.
 pub const ORIGIN: &str = "https://echo.example.test";
@@ -210,12 +210,8 @@ impl Recipe for EchoArchiveRecipe {
                 value: digest.trim().to_owned(),
             },
         );
-        let part = Part::new(download, "echo.tar.gz").unpacked(UnpackStep {
-            format: "tar.gz",
-            into: "app".to_owned(),
-            strip: 0,
-            skip_links: false,
-        });
+        let part =
+            Part::new(download, "echo.tar.gz").unpacked(UnpackStep::new("tar.gz", "app", 0, false));
         let mut release = Release::new(version, format!("app/bin/{}", exe("echo")), vec![part]);
         release
             .steps

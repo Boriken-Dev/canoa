@@ -1089,7 +1089,10 @@ stores that know each program. Nothing runs at startup, and the host holds no pr
   put back only where undeclared and still what the install wrote; a value the person changed since is left and named. Installs and updates on a
   shelf run one at a time (`Shelf::apply_lock`). It refuses an elevated host (root; on Windows `is_elevated`) and an `ELEVATION` plan unless
   `Options::allow_elevated`.
-- `engine::{Engine, Recipe}` and `extensions::{anthropic, codex, grok, agy, pi}`: the five built-in stores, `registry::built_in()`. A recipe names the
+- `engine::Engine` and the five built-in stores (`registry::{ClaudeStore, CodexStore, GrokStore, AgyStore, PiStore}`, `registry::built_in()`). Each store wraps the
+  `Recipe` of one vendor crate (`canoa-claude`, `canoa-codex`, `canoa-grok`, `canoa-antigravity`, `canoa-pi`), which also carries that agent's source
+  preset (`sources.rs` lists them) and, for Claude, Codex and Pi, re-exports the coqui-acp provider `kind.rs` registers. `canoa::store::Recipe` and its
+  helpers are the contract a recipe is written against. A recipe names the
   publisher's documents and the version's shape; the engine downloads, unpacks, runs the recipe's extra step and reads the version back.
   Claude: one binary, SHA-256 from the manifest (its signature is not checked). Codex: `codex-package` tar.gz, SHA-256 from the release's
   checksums and the channel's digest; no switch stops its updater (`self_updates`). Grok: one binary, no checksum published, so `Unverified`.

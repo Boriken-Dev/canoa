@@ -8,6 +8,11 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | [`crates/canoa-host/AGENTS.md`](crates/canoa-host/AGENTS.md) | `canoa-host`: the `canoa` program, canoa.cfg's `[host]`, its command line and library |
 | [`crates/canoa-ffi/AGENTS.md`](crates/canoa-ffi/AGENTS.md) | `canoa-ffi`: the C ABI that runs the host inside an application |
 | [`crates/canoa-launch/AGENTS.md`](crates/canoa-launch/AGENTS.md) | `canoa-launch`: the portable `CanoaUI.exe` and `canoa-pack` |
+| [`crates/canoa-claude/AGENTS.md`](crates/canoa-claude/AGENTS.md) | `canoa-claude`: Claude Code's provider re-export, source preset and Store recipe |
+| [`crates/canoa-codex/AGENTS.md`](crates/canoa-codex/AGENTS.md) | `canoa-codex`: the same for Codex |
+| [`crates/canoa-grok/AGENTS.md`](crates/canoa-grok/AGENTS.md) | `canoa-grok`: Grok's source preset and Store recipe |
+| [`crates/canoa-pi/AGENTS.md`](crates/canoa-pi/AGENTS.md) | `canoa-pi`: Pi's provider re-export, source preset and Store recipe |
+| [`crates/canoa-antigravity/AGENTS.md`](crates/canoa-antigravity/AGENTS.md) | `canoa-antigravity`: Antigravity's source preset and Store recipe |
 
 ## Layout
 
@@ -17,6 +22,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | `app/native/` | The app's own plugin: builds `crates/canoa-ffi` with the desktop runner and declares its C ABI |
 | `crates/canoa/` | Registry, service descriptors and deny-by-default authorization, which the host uses |
 | `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from canoa.cfg to paired keys, on loopback, and the web app; `examples/` holds the programs the tests run (`stdio_agent`, also scripted with `--scripted`; `web_peer`, the page's peer; `mcp_server`; `harness_standin`; `store_control`, the control channel over standard streams with a stand-in program as its only Store) |
+| `crates/canoa-{claude,codex,grok,pi,antigravity}/` | One agent each: its source preset, its Store recipe and, for Claude, Codex and Pi, the coqui-acp provider re-exported; `canoa-host` depends on them and wraps each recipe as a Store provider |
 | `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI; the only crate with `unsafe`, bar one module of `canoa-host` (`usage_splice/members/win32.rs`, the Windows process table) |
 | `crates/canoa-launch/` | The Windows portable launcher: carries the built app folder, unpacks it once per version, verifies and starts it; `app/tool/portable.py` builds it and the Linux AppImage |
 | `bindings/browser/chromium/` | MV3 browser extension code and permission policy |

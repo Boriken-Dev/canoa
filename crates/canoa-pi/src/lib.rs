@@ -5,20 +5,27 @@
 //! see those bytes, and the plan says so. A copy is started by the absolute path of its Node and its script, never through a
 //! `.cmd` shim, so no `node` that a project directory could carry is ever looked up.
 
+#![forbid(unsafe_code)]
+
+extern crate alloc;
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 
+pub use coqui_acp_pi as acp;
+pub use coqui_acp_pi::PiProvider;
+
+use canoa::preset::SourcePreset;
 use canoa::store::{
-    Check, Download, InstallTools, LatestReport, Launch, MANAGER_NATIVE, MANAGER_NPM,
-    MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
+    Check, Download, Finish, InstallTools, LatestReport, Launch, MANAGER_NATIVE, MANAGER_NPM,
+    MANAGER_UNKNOWN, Part, Platform, Recipe, Release, Serves, StoreInfo, UnpackStep, Updatable,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, Value};
 
-use super::{
+use canoa::store::recipe::{
     bad_value, dotted, get_json, internal, measured_platforms, path_has, pinned, spell, unsupported,
 };
-use crate::store::engine::{Finish, Part, Recipe, Release, UnpackStep};
 
 /// The Node this store installs Pi with: Pi needs 22.19 or newer.
 pub const NODE_VERSION: &str = "24.22.2";
@@ -26,6 +33,15 @@ pub const NODE_VERSION: &str = "24.22.2";
 const PACKAGE: &str = "@earendil-works/pi-coding-agent";
 const REGISTRY: &str = "https://registry.npmjs.org";
 const NODE_ORIGIN: &str = "https://nodejs.org";
+
+/// Where Pi's own installer leaves it beyond `PATH`, which the Store's copy and the source preset both look in.
+const DIRS: &[&str] = &["~/.pi/agent/bin", "~/.local/bin"];
+
+/// How the host starts Pi when `canoa.cfg` does not name it.
+pub const PRESET: SourcePreset = SourcePreset::new("Pi", "pi")
+    .harness("pi")
+    .search(DIRS)
+    .managed("pi");
 
 /// Pi.
 #[derive(Debug, Default, Clone, Copy)]
@@ -53,7 +69,7 @@ impl Recipe for PiRecipe {
     }
 
     fn dirs(&self) -> &'static [&'static str] {
-        &["~/.pi/agent/bin", "~/.local/bin"]
+        DIRS
     }
 
     fn version_args(&self) -> &'static [&'static str] {
@@ -146,12 +162,12 @@ impl Recipe for PiRecipe {
             None,
             Check::Sha256 { value: digest },
         );
-        let part = Part::new(download, "node-archive").unpacked(UnpackStep {
-            format: if windows { "zip" } else { "tar.gz" },
-            into: "node".to_owned(),
-            strip: 1,
-            skip_links: true,
-        });
+        let part = Part::new(download, "node-archive").unpacked(UnpackStep::new(
+            if windows { "zip" } else { "tar.gz" },
+            "node",
+            1,
+            true,
+        ));
         let script = "pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js";
         let mut release = Release::new(version.clone(), script, vec![part]);
         let (node, npm) = relative(windows);
@@ -249,7 +265,17 @@ impl Recipe for PiRecipe {
     }
 }
 
-crate::store::builtin::store_provider!(
-    /// The Pi store.
-    PiStore, PiRecipe, "pi_store"
-);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_preset_starts_the_program_the_recipe_installs() {
+        assert_eq!([PRESET.program], PiRecipe.names());
+    }
+
+    #[test]
+    fn pis_search_places_are_the_stores() {
+        assert_eq!(PRESET.search, PiRecipe.dirs());
+    }
+}

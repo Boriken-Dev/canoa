@@ -3,23 +3,33 @@
 //!
 //! Codex has no setting that stops its own updater that this store could find, so a copy says it updates itself.
 
+#![forbid(unsafe_code)]
+
+extern crate alloc;
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 
+pub use coqui_acp_codex as acp;
+pub use coqui_acp_codex::CodexProvider;
+
+use canoa::preset::SourcePreset;
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
-    MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
+    MANAGER_UNKNOWN, Part, Platform, Recipe, Release, Serves, StoreInfo, UnpackStep, Updatable,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
-use super::{
+use canoa::store::recipe::{
     dotted, exe_suffix, get_json, internal, measured_platforms, path_has, pinned, spell,
     unsupported,
 };
-use crate::store::engine::{Part, Recipe, Release, UnpackStep};
 
 const ORIGIN: &str = "https://releases.openai.com";
 const LATEST: &str = "https://releases.openai.com/codex/channels/latest";
+
+/// How the host starts Codex when `canoa.cfg` does not name it.
+pub const PRESET: SourcePreset = SourcePreset::new("Codex", "codex").harness("codex");
 
 /// Codex.
 #[derive(Debug, Default, Clone, Copy)]
@@ -178,12 +188,8 @@ impl Recipe for CodexRecipe {
             Check::Sha256 { value: digest },
         );
         let launch = format!("pkg/bin/codex{}", exe_suffix(&platform.os));
-        let part = Part::new(download, "codex-package.tar.gz").unpacked(UnpackStep {
-            format: "tar.gz",
-            into: "pkg".to_owned(),
-            strip: 0,
-            skip_links: false,
-        });
+        let part = Part::new(download, "codex-package.tar.gz")
+            .unpacked(UnpackStep::new("tar.gz", "pkg", 0, false));
         let mut release = Release::new(version, launch, vec![part]);
         release.notices.push(
             "Codex has no setting that stops its own updater; this copy may replace itself."
@@ -193,7 +199,12 @@ impl Recipe for CodexRecipe {
     }
 }
 
-crate::store::builtin::store_provider!(
-    /// The Codex store.
-    CodexStore, CodexRecipe, "codex_store"
-);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_preset_starts_the_program_the_recipe_installs() {
+        assert_eq!([PRESET.program], CodexRecipe.names());
+    }
+}

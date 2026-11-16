@@ -12,12 +12,9 @@ use std::sync::Arc;
 
 use canoa::store::{Action, InstallTools, PlanRequest, Platform, ProgramStore, StoreSettings};
 use canoa_host::store::contract::{Fixture, Variant, World, WorldTransport, run, standin_bytes};
-use canoa_host::store::extensions::agy::AgyStore;
-use canoa_host::store::extensions::anthropic::ClaudeStore;
-use canoa_host::store::extensions::codex::CodexStore;
-use canoa_host::store::extensions::grok::GrokStore;
-use canoa_host::store::extensions::pi::{self, PiStore};
+use canoa_host::store::registry::{AgyStore, ClaudeStore, CodexStore, GrokStore, PiStore};
 use canoa_host::store::tools::LocalTools;
+use canoa_pi as pi;
 use coqui_acp_api::guatiao::Status;
 use sha2::{Digest, Sha256, Sha512};
 

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/canoa-ffi", "crates/canoa-host", "crates/canoa-launch"]
+members = ["crates/canoa", "crates/canoa-antigravity", "crates/canoa-claude", "crates/canoa-codex", "crates/canoa-ffi", "crates/canoa-grok", "crates/canoa-host", "crates/canoa-launch", "crates/canoa-pi"]
 
 [workspace.package]
 version = "0.0.0-alpha.0"
@@ -118,6 +118,11 @@ object = { version = "0.40", default-features = false, features = ["read_core", 
 # The member crates themselves.
 canoa = { path = "crates/canoa" }
 canoa-host = { path = "crates/canoa-host" }
+canoa-antigravity = { path = "crates/canoa-antigravity" }
+canoa-claude = { path = "crates/canoa-claude" }
+canoa-codex = { path = "crates/canoa-codex" }
+canoa-grok = { path = "crates/canoa-grok" }
+canoa-pi = { path = "crates/canoa-pi" }
 
 # coqui-acp-bridge takes coqui-peer-tls from crates.io, which names the released coqui-peer: one PeerId type across the graph
 # needs the one source coqui-acp patches it to.

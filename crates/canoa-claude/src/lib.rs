@@ -2,21 +2,31 @@
 //!
 //! The manifest's detached signature is not checked here: the plan shows the SHA-256 check only.
 
+#![forbid(unsafe_code)]
+
+extern crate alloc;
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 
+pub use coqui_acp_claude as acp;
+pub use coqui_acp_claude::ClaudeProvider;
+
+use canoa::preset::SourcePreset;
 use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
-    MANAGER_UNKNOWN, MANAGER_WINGET, Platform, Serves, StoreInfo, Updatable,
+    MANAGER_UNKNOWN, MANAGER_WINGET, Part, Platform, Recipe, Release, Serves, StoreInfo, Updatable,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
-use super::{
+use canoa::store::recipe::{
     bad_value, dotted, get_json, internal, measured_platforms, path_has, pinned, spell, unsupported,
 };
-use crate::store::engine::{Part, Recipe, Release};
 
 const BASE: &str = "https://downloads.claude.ai/claude-code-releases";
+
+/// How the host starts Claude Code when `canoa.cfg` does not name it.
+pub const PRESET: SourcePreset = SourcePreset::new("Claude", "claude").harness("claude");
 
 /// Claude Code.
 #[derive(Debug, Default, Clone, Copy)]
@@ -185,7 +195,12 @@ impl Recipe for ClaudeRecipe {
     }
 }
 
-crate::store::builtin::store_provider!(
-    /// The Claude Code store.
-    ClaudeStore, ClaudeRecipe, "claude_store"
-);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_preset_starts_the_program_the_recipe_installs() {
+        assert_eq!([PRESET.program], ClaudeRecipe.names());
+    }
+}

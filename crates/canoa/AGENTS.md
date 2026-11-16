@@ -154,3 +154,28 @@ or `max_bytes`). `InstallPrompter`: `say`, `progress`, `ask`, `cancelled`.
 
 What a host sends refuses a key it does not declare; an answer is read leniently. `StoreSettings { channel, version }` is the
 instance's configuration. Constructors: every `#[non_exhaustive]` model has `new`, and fields are set after.
+
+### `canoa::store::recipe` (feature `store`)
+
+What a crate that packages one agent implements and uses; the host's engine runs it.
+
+```rust
+pub trait Recipe: Send + Sync + 'static { /* info, names, dirs, version_args, parse_version, classify, self_updates,
+    launch_environment, latest, release, launch, version_command, finish */ }
+pub struct Release { pub version, pub parts: Vec<Part>, pub launch, pub steps, pub notices, pub facts, pub changes }  // #[non_exhaustive]; Release::new(version, launch, parts)
+pub struct Part { pub download, pub path, pub unpack: Option<UnpackStep>, pub executable }  // Part::new(download, path), .executable(), .unpacked(step)
+pub struct UnpackStep { pub format, pub into, pub strip, pub skip_links }  // UnpackStep::new(format, into, strip, skip_links)
+pub struct Finish<'a> { pub staging, pub release, pub run: &'a dyn StepRunner, pub tools }  // Finish::new(...)
+pub trait StepRunner { fn exec(&self, program: &str, args: &[&str], extra: &[(&str, &str)]) -> Result<Output, ProviderError>; }
+pub struct Output { pub code: Option<i64>, pub text: String }
+```
+
+`Recipe`, `Release`, `Part`, `UnpackStep`, `Finish`, `StepRunner` and `Output` are also exported from `canoa::store`. The module's free functions are
+the helpers recipes share: `measured_platforms`, `serves_when`, `executable_settings`, `unsupported`/`internal`/`bad_value` (provider errors),
+`get_json` (a JSON document fetched through `InstallTools`), `valid_version`, `pinned`, `dotted`, `path_has`, `spell`, `exe_suffix`.
+
+## `canoa::preset::SourcePreset`
+
+`#[non_exhaustive]`, `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`. How the host starts one coding agent it knows about when canoa.cfg does not name it.
+Fields (`name`, `harness: Option<&str>`, `program`, `args`, `requires`, `search`, `usage`, `managed`) are public; build one in a `const` with
+`SourcePreset::new(name, program)` and `.harness(..)`, `.args(..)`, `.search(..)`, `.usage(..)`, `.managed(..)`. Not behind a feature.
