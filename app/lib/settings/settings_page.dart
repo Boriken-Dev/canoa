@@ -63,6 +63,7 @@ class SettingsPage extends StatefulWidget {
     this.checkSource,
     this.programs,
     this.workspacePreview,
+    this.hostWorkspacePreview,
     this.onAllowNotifications,
     this.profileAgents = const [],
     this.home,
@@ -100,6 +101,9 @@ class SettingsPage extends StatefulWidget {
 
   /// The folder a template makes for a session, as the app would make it now; null where this build has none.
   final String? Function(String template)? workspacePreview;
+
+  /// What the host would make of a template, for a page whose chat folders are the host's.
+  final Future<String?> Function(String template)? hostWorkspacePreview;
 
   /// Asks the browser for leave to notify, where it has to be asked; true when it was given.
   final Future<bool> Function()? onAllowNotifications;
@@ -219,7 +223,7 @@ class SettingsPageState extends State<SettingsPage> {
   Widget _body(BuildContext context, SettingsSection section) {
     final config = controller.config;
     final child = switch (section.id) {
-      'general' => GeneralSection(controller: controller, ledger: widget.ledger, workspacePreview: widget.workspacePreview),
+      'general' => GeneralSection(controller: controller, ledger: widget.ledger, workspacePreview: widget.workspacePreview, hostWorkspacePreview: widget.hostWorkspacePreview),
       'appearance' => AppearanceSection(controller: controller),
       'notifications' => NotificationsSection(controller: controller, onAllowNotifications: widget.onAllowNotifications),
       'voice' => VoiceSection(controller: controller, backends: widget.voiceBackends),

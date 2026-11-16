@@ -69,33 +69,36 @@ final class SessionMentions implements ComposerMentions {
   final SessionStore store;
   final ChatSession session;
   final Future<List<String>> Function(String folder) list;
-  final InsideFile? Function(String folder, String relative) resolve;
+  final Future<InsideFile?> Function(String folder, String relative) resolve;
 
-  /// Whether [session] has a folder on this computer an `@` could name files of.
-  static bool offeredFor(ChatSession session) => session.place == SessionPlace.local && (session.cwd?.isNotEmpty ?? false);
+  /// Whether [session] has a folder an `@` could name files of: one on a computer this app reads folders of ([readable], which
+  /// is this computer's for a session started here when null).
+  static bool offeredFor(ChatSession session, {bool Function(ChatSession session)? readable}) =>
+      (readable?.call(session) ?? session.place == SessionPlace.local) && (session.cwd?.isNotEmpty ?? false);
 
+  /// Each candidate is resolved as it is offered, so what a pick attaches is what was checked, and a name that is not inside the
+  /// folder is never offered.
   @override
   Future<List<MentionCandidate>> search(String query) async {
     final folder = session.cwd;
     if (folder == null || folder.isEmpty) return const [];
     final entries = await _listingOf(folder, list);
+    final ranked = rankMentions(entries, query);
+    final found = await Future.wait([for (final entry in ranked) resolve(folder, entry)]);
     return [
-      for (final entry in rankMentions(entries, query))
-        MentionCandidate(
-          label: entry,
-          folder: entry.endsWith('/'),
-          key: entry,
-        ),
+      for (var i = 0; i < ranked.length; i++)
+        if (found[i] case final inside?)
+          MentionCandidate(label: ranked[i], folder: ranked[i].endsWith('/'), key: (ranked[i], inside)),
     ];
   }
 
   @override
   String? pick(MentionCandidate candidate) {
     final folder = session.cwd;
-    final relative = candidate.key as String? ?? candidate.label;
     if (folder == null || folder.isEmpty) return 'This session has no workspace.';
-    final found = resolve(folder, relative);
-    if (found == null) return '$relative is not in this session\'s workspace, so it is not attached.';
+    final key = candidate.key;
+    final (String relative, InsideFile found) = key is (String, InsideFile) ? key : (candidate.label, (path: '', folder: false, size: -1));
+    if (found.size < 0) return '$relative is not in this session\'s workspace, so it is not attached.';
     return store.addMention(session, relative, found.path, found.size, folder: found.folder);
   }
 }

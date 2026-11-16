@@ -122,6 +122,7 @@ import 'drafts/draft_store.dart';
 import 'theme/look.dart';
 import 'auth/browser_peer.dart' show verifyBrowserPeer;
 import 'workspace/documents.dart' show hasWorkspaceFolders, homeFolder, makeFolder, removeEmptyFolder;
+import 'workspace/host_folders.dart';
 import 'workspace/open_in.dart';
 import 'workspace/open_in_ui.dart';
 import 'workspace/scratch.dart';
@@ -543,6 +544,13 @@ class _CanoaAppState extends State<CanoaApp> {
       workspacePreview: hasWorkspaceFolders && canRunLocalAgents
           ? (template) => scratchFolder(template, exampleSessionId, source: _lastSource, documents: widget.documents)
           : null,
+      hostWorkspacePreview: _viaHost
+          ? (template) async =>
+              await _hostFolders!.preview(template, source: _lastSource?.label ?? '', handler: _lastSource == null ? '' : handlerOf(_lastSource!)) ??
+              (widget.served == null && hasWorkspaceFolders && canRunLocalAgents
+                  ? scratchFolder(template, exampleSessionId, source: _lastSource, documents: widget.documents)
+                  : null)
+          : null,
       onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
       presets: [
         for (final source in _hostedSources)
@@ -858,6 +866,16 @@ class _CanoaAppState extends State<CanoaApp> {
   late final HostControl? _control = widget.served?.control ?? (widget.host == null ? null : HostControl(widget.host!));
 
   late final HostFiles? _hostFiles = widget.served?.files ?? (_control == null ? null : HostFiles(_control));
+
+  /// The host's answers about folders: whether one is there and in a repository, an `@`'s names, a chat's scratch folder.
+  late final HostFolders? _hostFolders = _control == null ? null : (HostFolders(_control)..addListener(_foldersChanged));
+
+  void _foldersChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// Whether folders are asked of the host (a served page always, a desktop once its host runs) and not read from this disk.
+  bool get _viaHost => _hostFolders != null && _hostUp;
 
   /// The files of the host a session runs on, when this app has a channel to it: its own host, or the one that served this page.
   WorkspaceFiles? _filesOf(ChatSession session) {
@@ -1383,7 +1401,7 @@ class _CanoaAppState extends State<CanoaApp> {
     for (final entry in store.ledger?.entries ?? const <LedgerEntry>[])
       if (entry.kind == SessionKind.workspace && (entry.place == SessionPlace.local || entry.place == SessionPlace.host))
         ?(entry.worktree?.repo ?? entry.cwd),
-  }.where(widget.folderExists ?? folderExists).take(8).toList();
+  }.where(widget.folderExists ?? (_viaHost ? _hostFolders!.exists : folderExists)).take(8).toList();
 
   /// A new session with nothing started, from the source and folder chosen last; one already waiting untouched is shown
   /// instead of another.
@@ -1445,26 +1463,49 @@ class _CanoaAppState extends State<CanoaApp> {
     final scratch = draft.kind == SessionKind.chat;
     if (!scratch && noFolder) throw StateError('Choose its workspace first');
     // A served page's host makes the chat's folder itself, from the stand-in the kit names.
-    final folder = scratch ? _kit.scratchFolder?.call(draft) : draft.cwd;
-    if (folder == null) throw StateError('A chat cannot be started here; choose a workspace instead');
+    final chosen = scratch ? _kit.scratchFolder?.call(draft) : draft.cwd;
+    if (chosen == null) throw StateError('A chat cannot be started here; choose a workspace instead');
+    var folder = chosen;
     var madeFolder = false;
+    var hostMade = false;
     // The served page's own chat: the host makes and names the folder in its answer to `session/new`.
     final hostMakes = scratch && widget.served != null;
+    // A desktop whose host runs asks it to make the folder the template names, as the host does for a served page.
+    final scratchRequest = scratch && !hostMakes && _viaHost ? _scratchRequest(draft) : null;
     if (scratch && !hostMakes) {
       try {
-        madeFolder = await makeFolder(folder);
+        final made = scratchRequest == null ? null : await _scratchViaHost(scratchRequest);
+        if (made != null) {
+          folder = made.path;
+          hostMade = true;
+          madeFolder = made.made;
+        } else {
+          madeFolder = await makeFolder(folder);
+        }
       } on Object catch (error) {
         throw StateError('Cannot make its workspace $folder: ${reasonOf(error)}');
       }
     }
     // Worktree shows, and applies, only for a folder in a git repository.
-    final worktree = !scratch && draft.wantsWorktree && (widget.isGitRepository ?? inGitRepository)(folder);
+    final worktree = !scratch &&
+        draft.wantsWorktree &&
+        (widget.isGitRepository != null
+            ? widget.isGitRepository!(folder)
+            : _viaHost
+                ? await _hostFolders!.isRepository(folder)
+                : inGitRepository(folder));
     final starting = _Starting();
     _inFlight.add(starting);
     try {
       await _startHosted(draft, source.hostEntry!, folder, worktree, starting, hostMakes: hostMakes);
     } catch (_) {
-      if (madeFolder) await removeEmptyFolder(folder);
+      if (madeFolder) {
+        if (hostMade && scratchRequest != null) {
+          await _hostFolders!.removeScratch(scratchRequest);
+        } else {
+          await removeEmptyFolder(folder);
+        }
+      }
       rethrow;
     } finally {
       _inFlight.remove(starting);
@@ -1978,6 +2019,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (identical(store.gitReader, _gitReaderFor)) store.gitReader = null;
     widget.host?.removeListener(_hostChanged);
     unawaited(_reconnects?.cancel());
+    _hostFolders?.dispose();
     unawaited(_control?.close());
     widget.settingsSignal?.removeListener(_requestSettings);
     widget.hostingSignal?.removeListener(_requestHosting);
@@ -1993,6 +2035,49 @@ class _CanoaAppState extends State<CanoaApp> {
   String? _scratchOf(ChatSession session) {
     final id = session.workspaceId;
     return id == null ? null : scratchFolder(config.sessions.workspace, id, source: session.source, now: session.created, documents: widget.documents);
+  }
+
+  /// The folder the host made for a chat on a desktop, or null when its control channel does not answer and this computer makes it.
+  Future<({String path, bool made})?> _scratchViaHost(ScratchRequest request) async {
+    try {
+      return await _hostFolders!.makeScratch(request);
+    } on ControlFailed {
+      rethrow;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// The names an `@` offers in [folder]: the host's, or this computer's while a desktop's host does not answer.
+  Future<List<String>> _mentionsOf(String folder) async {
+    if (_viaHost) {
+      try {
+        return await _hostFolders!.mentions(folder);
+      } on Object {
+        if (widget.served != null || !canRunLocalAgents) return const [];
+      }
+    }
+    return canRunLocalAgents ? listFolderEntries(folder) : const [];
+  }
+
+  /// The file or folder [relative] names inside [folder], from the host, or this computer while a desktop's host does not answer.
+  Future<InsideFile?> _resolveIn(String folder, String relative) async {
+    if (_viaHost) {
+      try {
+        return await _hostFolders!.resolve(folder, relative);
+      } on Object {
+        if (widget.served != null || !canRunLocalAgents) return null;
+      }
+    }
+    return canRunLocalAgents ? resolveInside(folder, relative) : null;
+  }
+
+  /// What the host makes [session]'s scratch folder from, null for a session made no id here.
+  ScratchRequest? _scratchRequest(ChatSession session) {
+    final id = session.workspaceId;
+    if (id == null) return null;
+    final source = session.source;
+    return (session: id, source: source?.label ?? '', handler: source == null ? '' : handlerOf(source), created: session.created);
   }
 
   /// Asks which folder of the host's computer a new session works in, from the places the host lets this page's key browse.
@@ -2020,7 +2105,9 @@ class _CanoaAppState extends State<CanoaApp> {
     sources: _sources,
     checks: _checks,
     recentFolders: _recentFolders,
-    inGitRepository: widget.isGitRepository ?? inGitRepository,
+    inGitRepository: widget.isGitRepository ?? (_viaHost ? _hostFolders!.inRepository : inGitRepository),
+    foldersChanged: _hostFolders,
+    foldersReadable: _viaHost ? (session) => _filesOf(session) != null : null,
     pickFolder: widget.pickFolder ?? (widget.served != null ? _pickHostFolder : canRunLocalAgents ? () => getDirectoryPath() : null),
     // A served page has no file system: the host makes a chat's folder when the session opens.
     scratchFolder: widget.served != null ? (_) => siteStandInFolder : hasWorkspaceFolders && canRunLocalAgents ? _scratchOf : null,
@@ -2028,8 +2115,8 @@ class _CanoaAppState extends State<CanoaApp> {
     statFile: widget.statFile ?? (canRunLocalAgents ? localFileSize : null),
     uploadFile: widget.served == null ? null : _upload,
     hostFiles: widget.served == null ? null : _onServedHost,
-    listFolder: canRunLocalAgents ? listFolderEntries : null,
-    resolveInside: canRunLocalAgents ? resolveInside : null,
+    listFolder: _viaHost || canRunLocalAgents ? _mentionsOf : null,
+    resolveInside: _viaHost || canRunLocalAgents ? _resolveIn : null,
     clipboard: widget.clipboard ?? const SystemClipboard(),
     overlays: config.overlays.keys.toList(),
     defaultOverlays: config.defaultOverlays,

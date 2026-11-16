@@ -217,6 +217,19 @@ void main() {
   });
 
   group('General', () {
+    testWidgets('where chats keep their files is shown as the host works it out, for the template as it stands', (tester) async {
+      final asked = <String>[];
+      await openSettings(tester, section: 'general', hostWorkspacePreview: (template) async {
+        asked.add(template);
+        return '/host/docs/${template.contains('day') ? 'day' : 'chats'}/example';
+      });
+      expect(find.textContaining('/host/docs/chats/example'), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('settings-workspace')), r'${documents}/day/${session}');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('/host/docs/day/example'), findsOneWidget);
+      expect(asked.length, 2, reason: 'asked once for each text, not on every build');
+    });
+
     testWidgets('round-trips through canoa.cfg, marks what stays on this computer, and disables a sub-option with its parent', (tester) async {
       final h = await openSettings(tester, config: every, section: 'general');
       expect(find.byKey(const Key('machine-badge')), findsWidgets);

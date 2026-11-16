@@ -67,6 +67,11 @@ class PlaceToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final changed = kit.foldersChanged;
+    return changed == null ? _toggle() : ListenableBuilder(listenable: changed, builder: (context, _) => _toggle());
+  }
+
+  Widget _toggle() {
     final cwd = session.cwd;
     final inRepository = cwd != null && (kit.inGitRepository?.call(cwd) ?? false);
     return Padding(

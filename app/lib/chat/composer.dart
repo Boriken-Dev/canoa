@@ -44,6 +44,8 @@ final class ComposerKit {
     this.hostFiles,
     this.listFolder,
     this.resolveInside,
+    this.foldersReadable,
+    this.foldersChanged,
     this.clipboard = const TextClipboard(),
     this.overlays = const [],
     this.defaultOverlays,
@@ -114,7 +116,14 @@ final class ComposerKit {
   /// The files and folders under a folder on this computer, as paths relative to it, and the file or folder one names when it is
   /// inside the folder: what an `@` offers. Null where files cannot be read by their path.
   final Future<List<String>> Function(String folder)? listFolder;
-  final InsideFile? Function(String folder, String relative)? resolveInside;
+  final Future<InsideFile?> Function(String folder, String relative)? resolveInside;
+
+  /// Whether [session]'s folder is on a computer this app reads folders of (for `@` names); null means this one, for a session
+  /// started here.
+  final bool Function(ChatSession session)? foldersReadable;
+
+  /// Told when a folder's answer arrives that a widget built with a guess.
+  final Listenable? foldersChanged;
 
   /// canoa.cfg's overlays, by name, in their order.
   final List<String> overlays;
@@ -313,7 +322,7 @@ class SessionComposer extends StatelessWidget {
     final draft = session.status == SessionStatus.draft;
     final options = store.optionsOf(session);
     final seen = store.optionsSeen(session);
-    final mentions = kit.listFolder != null && kit.resolveInside != null && store.canAttach(session) && SessionMentions.offeredFor(session)
+    final mentions = kit.listFolder != null && kit.resolveInside != null && store.canAttach(session) && SessionMentions.offeredFor(session, readable: kit.foldersReadable)
         ? SessionMentions(store: store, session: session, list: kit.listFolder!, resolve: kit.resolveInside!)
         : null;
     final inputs = [if (mentions != null) '@ files', '/ commands'].join(', ');
