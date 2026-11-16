@@ -2,9 +2,9 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-One Cargo feature, `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
+Three Cargo features: `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao`) and `speech-builtin` (the two providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
-The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`).
+The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`) and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
 
 No `unsafe` code (`#![forbid(unsafe_code)]`).
 
@@ -234,3 +234,96 @@ impl SourcePreset {
     pub const fn managed(self, store: &'static str) -> Self;               // the program store whose managed copy runs in place of one found
 }
 ```
+
+## `speech_provider` (`canoa::speech`, feature `speech`)
+
+A Guatiao kind, not ACP: a provider that turns a stream of audio into text. The app captures audio wherever it runs, the host passes
+it on in chunks, and the provider owns what is specific to it (a program, an endpoint, a model). Needs `guatiao`. The files an outside
+library is built against: `include/canoa.speech.kinds.json` (the two kinds) and `include/canoa.speech.schemas.json` (every model, and
+the two built-in providers' settings), both checked current by `tests/speech_kinds.rs`.
+
+```rust
+#[guatiao::kind(name = "speech_provider")]
+pub trait SpeechProvider: Send + Sync {
+    fn describe(&self) -> Result<SpeechInfo, ProviderError>;
+    fn open(&self, request: OpenRequest) -> Result<Object<dyn SpeechSession>, ProviderError>;
+}
+
+#[guatiao::kind(object, name = "speech_session")]
+pub trait SpeechSession: Send + Sync {
+    fn push(&self, audio: &[u8]) -> Result<Heard, ProviderError>;
+    fn finish(&self) -> Result<Transcript, ProviderError>;
+    fn cancel(&self) -> Result<(), ProviderError>;
+}
+```
+
+Every method is required and synchronous. A recording is `open`, any number of `push`es in order, then `finish` (the final text) or
+`cancel`; dropping a session is a cancel.
+
+- `describe`: cheap, the same on every call. `SpeechInfo { title, description, encodings, partials, max_seconds, hints }`: the encodings
+  it reads, whether it answers partial text, its own limit on a recording, and which `Hints` fields it uses (`language`, `vocabulary`,
+  `profile`), so a form offers only what has an effect.
+- `open`: nothing is started for a recording it refuses: `UNSUPPORTED` naming the encodings it reads (`unsupported_format`), `BAD_VALUE`
+  for a setting it cannot use. It may start a process or a connection, which the session ends.
+- `push`: the chunk is borrowed for the call, so a provider that keeps it copies it once. It returns when the provider has taken the chunk:
+  a provider that cannot keep up slows the caller down, and no queue grows. `Heard.partial` is the whole text so far, replacing the last
+  partial, and is absent when nothing changed.
+- `finish`: ends the audio and answers `Transcript { text, front_matter }`. A failure is an error with its reason, never an empty text.
+- `cancel`: whatever the provider started is ended; nothing is answered.
+
+Models, all `#[non_exhaustive]` with `new` (set fields after). What a host sends (`AudioFormat`, `VoiceProfile`, `Hints`, `OpenRequest`)
+refuses a key it does not declare, and an answer is read leniently:
+
+```rust
+pub const PCM_S16LE: &str = "pcm_s16le";   // raw 16-bit little-endian samples, interleaved by channel
+pub const OPUS: &str = "opus";             // Opus packets, one per chunk
+pub struct AudioFormat { pub encoding: String, pub rate: u32, pub channels: u8 }       // AudioFormat::new(encoding, rate), ::pcm(rate); channels default 1
+pub struct VoiceProfile { pub accent: Option<String>, pub voice: Option<String>, pub traits: BTreeMap<String, String> }  // the person's own, never inferred
+pub struct Hints { pub language: Option<String>, pub vocabulary: Vec<String>, pub profile: Option<VoiceProfile> }  // language is a BCP 47 tag
+pub struct OpenRequest { pub format: AudioFormat, pub hints: Hints }                   // OpenRequest::new(format)
+pub struct SpeechInfo { pub title: String, pub description: Option<String>, pub encodings: Vec<String>, pub partials: bool,
+                        pub max_seconds: Option<u32>, pub hints: Vec<String> }         // SpeechInfo::new(title, encodings)
+pub struct Heard { pub partial: Option<String> }                                       // Heard::nothing(), ::partial(text)
+pub struct Transcript { pub text: String, pub front_matter: Value }                    // Transcript::new(text), .with(key, value)
+```
+
+`front_matter` is a map. A provider uses these keys when it knows them, so a reader finds the same thing under one name: `language` (what
+was detected, BCP 47), `confidence` (0 to 1), `duration_ms`, `speaker` (what it heard of the voice, in words) and `notes` (anything it
+wants the next model to know). Any other key is the provider's own. A new encoding word or a new `Hints` field is how the kind grows.
+
+A provider's own settings are its Guatiao configuration, with a form that shows them: `#[provider(SpeechProvider, id = "...", config =
+Settings, form = Settings)]` with `Settings` deriving `Schema` and `guatiao_intake::Form`. Sections, titles, `advanced`, widgets and
+units ride the schema and the form, so any program that draws a provider's settings draws these.
+
+Helpers: `unsupported_format(format, takes)`, `bad_value(why)` and `internal(why)` build the three errors.
+
+### `canoa::speech::builtin` (feature `speech-builtin`)
+
+Needs `guatiao-intake`, `serde_json` and `ureq`. Two providers, ids `speech_command` and `speech_endpoint`, both reading `pcm_s16le` and
+neither limiting which program or address the person names (they run as the person). Nothing is downloaded by Canoa.
+
+```rust
+pub struct CommandSettings { pub program: String, pub args: Vec<String>, pub input: CommandInput, pub partials: bool, pub timeout_seconds: u32 }
+pub enum CommandInput { Wav /* default */, Pcm }
+pub struct CommandSpeech;      // From<CommandSettings>; the `speech_command` provider
+pub struct EndpointSettings { pub url: String, pub model: Option<String>, pub api_key: Option<Secret<String>>, pub max_seconds: u32, pub timeout_seconds: u32 }
+pub struct EndpointSpeech;     // From<EndpointSettings>; the `speech_endpoint` provider
+pub fn wav_header(format: &AudioFormat, data_len: Option<u32>) -> [u8; 44];   // None: both sizes 0xFFFF_FFFF, a stream of unknown length
+pub const WAV_HEADER_LEN: usize = 44;
+```
+
+`CommandSettings::new(program)` and `EndpointSettings::new(url)` set the defaults: WAV input, no partials, 120 s to finish; 300 s of audio, 120 s to answer.
+
+- Command: the program starts at `open`; its standard input gets a streaming WAV header and then each chunk as it arrives (or the samples
+  alone with `Pcm`), written in place, so a program that stops reading slows `push` down and one that exits early is not an error until
+  `finish`. Standard output is read as it is written and kept up to `command::MAX_OUTPUT` (4 MiB; more is dropped and
+  `front_matter.output_truncated` is true); the text is that output, trimmed. With `partials`, each change in it is a `Heard.partial`. After
+  the audio ends the program has `timeout_seconds` before it is killed; a non-zero exit is an error carrying the end of its standard error.
+  `args` may name `{language}`, `{vocabulary}`, `{accent}`, `{voice}`, `{rate}` and `{channels}`, and each hint present is also the
+  variable `CANOA_SPEECH_LANGUAGE`, `_VOCABULARY` (comma-separated), `_ACCENT` or `_VOICE`. `cancel` kills the program.
+- Endpoint: audio is kept as it arrives, once, up to `max_seconds` (a longer recording is `BAD_VALUE` at the push that passes it), and
+  `finish` makes one `POST` of `multipart/form-data` with `model`, `response_format=json`, `language` (the tag's primary subtag), `prompt`
+  (the vocabulary, comma-separated) and `file` (a WAV, `audio.wav`), with the key as `Authorization: Bearer`. The body is read where the audio
+  is, with a `Content-Length`. The answer's `text` is the transcript and each other member that is a string, number or boolean (`language`,
+  `duration`) is front matter; arrays and objects are not. A plain-text answer is the text. A status outside 2xx is an error with the first
+  300 bytes of its body. It answers no partial text and uses no voice profile.
