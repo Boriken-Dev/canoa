@@ -59,23 +59,31 @@ fn standin(status: u16, body: Value) -> Standin {
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { return };
-            let mut head = Vec::new();
-            let mut byte = [0_u8; 1];
-            while !head.ends_with(b"\r\n\r\n") {
-                if stream.read(&mut byte).unwrap_or(0) == 0 {
-                    break;
-                }
-                head.push(byte[0]);
-            }
-            kept.lock()
-                .expect("lock")
-                .push(String::from_utf8_lossy(&head).into_owned());
+            let kept = Arc::clone(&kept);
             let text = body.to_string();
-            let _ = write!(
-                stream,
-                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
-                text.len()
-            );
+            // One thread a connection, and a client that speaks TLS is let go: held, it would stall every other probe of
+            // this process's listeners (the usage tests' reader tries each by TLS too) until that reader's deadline.
+            std::thread::spawn(move || {
+                let mut head = Vec::new();
+                let mut byte = [0_u8; 1];
+                while !head.ends_with(b"\r\n\r\n") {
+                    if stream.read(&mut byte).unwrap_or(0) == 0 {
+                        return;
+                    }
+                    if head.is_empty() && !byte[0].is_ascii_alphabetic() {
+                        return;
+                    }
+                    head.push(byte[0]);
+                }
+                kept.lock()
+                    .expect("lock")
+                    .push(String::from_utf8_lossy(&head).into_owned());
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
+                    text.len()
+                );
+            });
         }
     });
     Standin { address, heard }
