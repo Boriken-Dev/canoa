@@ -110,7 +110,7 @@ void main() {
   });
 
   const loadoutsText = '''
-${overlaysText}[loadouts.main]
+$overlaysText[loadouts.main]
 overlays = ["a"]
 [loadouts.both]
 overlays = ["a", "b", "gone"]

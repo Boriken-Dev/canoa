@@ -43,12 +43,12 @@ class LoadoutDraft extends ChangeNotifier {
 
   /// Why [name] cannot be written, given the names [others] hold; null when it can.
   String? problemWith(Iterable<String> others) {
-    if (!isEntryName(name))
+    if (!isEntryName(name)) {
       return 'A loadout is named with 1 to 64 letters, digits, - or _';
-    if (others.any(
-      (other) => other.toLowerCase() == name.toLowerCase() && other != original,
-    ))
+    }
+    if (others.any((other) => other.toLowerCase() == name.toLowerCase() && other != original)) {
       return 'Another loadout has that name';
+    }
     return null;
   }
 
