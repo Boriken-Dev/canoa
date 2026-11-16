@@ -85,7 +85,7 @@ impl From<SignInRulesError> for ProviderError;     // GUATIAO_ERR_BAD_VALUE
 
 `new` and `build` refuse: a set past its `limits`; a rule with no chain, an empty chain, or too many
 chains or methods; a method that is not 1 to 64 of `a-z`, `0-9`, `_`; a method repeated in a chain; a
-chain made only of `NEEDS_ACCOUNT` methods; a purpose other than `sign_in`, `resume`, `enrol`, or an
+chain made only of `NEEDS_ACCOUNT` methods; a purpose other than `sign_in`, `resume`, `enrol`, `enrol_first`, or an
 empty `purposes`; a client other than `browser`, `app`, `api`; a network that is not an address or
 CIDR network, or is `any`; a subject that is not `account:`, `person:` or `group:`; a service,
 provider or rule name that is empty, over 256 bytes, or holds whitespace (a name may hold spaces) or a

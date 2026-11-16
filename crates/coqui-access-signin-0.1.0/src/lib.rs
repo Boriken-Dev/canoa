@@ -638,11 +638,16 @@ fn compile(
             ));
         }
         Some(given) => {
-            let known = [purposes::SIGN_IN, purposes::RESUME, purposes::ENROL];
+            let known = [
+                purposes::SIGN_IN,
+                purposes::RESUME,
+                purposes::ENROL,
+                purposes::ENROL_FIRST,
+            ];
             if !given.iter().all(|word| known.contains(&word.as_str())) {
                 return Err(rule_fail(
                     index,
-                    "a purpose is not sign_in, resume or enrol",
+                    "a purpose is not sign_in, resume, enrol or enrol_first",
                 ));
             }
             given

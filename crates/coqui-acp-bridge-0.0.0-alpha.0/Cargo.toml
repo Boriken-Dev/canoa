@@ -1,5 +1,4 @@
-# coqui-acp/crates/coqui-acp-bridge at af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83, with what it inherits written out.
-bin = [{ name = "coqui-acp-bridge", path = "src/main.rs" }]
+# coqui-acp/crates/coqui-acp-bridge at a5eabdc23347967ee95cb3aaff1b8841b7c981b4, with what it inherits written out.
 [package]
 name = "coqui-acp-bridge"
 description = "Put a stdio Agent Client Protocol agent on the network, under a proven peer identity"
@@ -11,7 +10,7 @@ repository = "https://github.com/Boriken-Dev/coqui-acp"
 homepage = "https://boriken-dev.github.io/coqui-acp/"
 readme = "README.md"
 keywords = ["acp", "agent", "bridge", "websocket", "webtransport"]
-categories = ["network-programming", "command-line-utilities"]
+categories = ["network-programming"]
 exclude = [".*", "*.local.*"]
 publish = false
 [dependencies]
