@@ -367,6 +367,38 @@ impl Drop for Sandbox {
 /// Held while a suite snapshots and restores the machine's registry keys.
 static REAL_WORLD: Mutex<()> = Mutex::new(());
 
+/// The registry is the machine's, so one apply at a time may snapshot it: the lock in this process, and on Windows a lock file
+/// in the temporary folder for the other processes (another suite run, or a test binary, would otherwise see a value this
+/// one wrote as a change of its own, or have its value put back).
+struct MachineWorld {
+    _process: std::sync::MutexGuard<'static, ()>,
+    _machine: Option<fs::File>,
+}
+
+impl MachineWorld {
+    fn hold() -> Self {
+        let process = REAL_WORLD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A lock that cannot be taken leaves the suite as it was: this process's own lock.
+        let machine = if cfg!(windows) {
+            fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(false)
+                .open(std::env::temp_dir().join("canoa-store-check-registry.lock"))
+                .ok()
+                .filter(|file| file.lock().is_ok())
+        } else {
+            None
+        };
+        Self {
+            _process: process,
+            _machine: machine,
+        }
+    }
+}
+
 /// What one apply left behind.
 struct Applied {
     result: Result<canoa::store::ApplyOutcome, ProviderError>,
@@ -646,9 +678,7 @@ impl Runner<'_> {
             .registry(cfg!(windows))
             .path_dirs([sandbox.root().join("bin")]);
         // The registry is the machine's: one apply at a time may snapshot it and put back what it finds changed.
-        let machine = REAL_WORLD
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let machine = MachineWorld::hold();
         let before = Footprint::take(&watch);
         let prompter = Arc::new(prompter);
         let started = Instant::now();
@@ -958,9 +988,7 @@ impl Runner<'_> {
                 .tree(sandbox.root())
                 .skip(&staging)
                 .registry(cfg!(windows));
-            let machine = REAL_WORLD
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let machine = MachineWorld::hold();
             let before = Footprint::take(&watch);
             let answer = self.store.apply(
                 request,

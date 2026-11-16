@@ -232,13 +232,24 @@ impl ProgramStore for Bad {
     }
 }
 
+/// The value this run plants: named by its process id and the time, so another run on the same registry never reads it, and
+/// a value an earlier run left under a process id this one reuses is not taken for its own.
+#[cfg(windows)]
+fn planted_name() -> &'static str {
+    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        format!("COQUI_STORE_CHECK_{}_{stamp}", std::process::id())
+    })
+}
+
 #[cfg(windows)]
 fn write_registry_value() {
     use windows_registry::CURRENT_USER;
     let key = CURRENT_USER.create("Environment").expect("the key");
-    let nonce = std::process::id();
-    key.set_string(format!("COQUI_STORE_CHECK_{nonce}"), "planted")
-        .expect("a value");
+    key.set_string(planted_name(), "planted").expect("a value");
 }
 
 #[cfg(not(windows))]
@@ -307,7 +318,7 @@ fn a_store_that_writes_the_registry_fails_apply_registry_and_the_value_is_put_ba
     let leftover = key
         .values()
         .expect("values")
-        .any(|(name, _)| name.starts_with("COQUI_STORE_CHECK_"));
+        .any(|(name, _)| name == planted_name());
     assert!(
         !leftover,
         "the suite left a planted value in HKCU\\Environment"

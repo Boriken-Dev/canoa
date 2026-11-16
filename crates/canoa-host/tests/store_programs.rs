@@ -1018,14 +1018,9 @@ fn a_registry_target_is_normalised_and_only_a_programs_own_places_are_accepted()
     ] {
         refuses_with_declares(&s, Rig::DeclaresRegistry(target.to_owned()));
     }
-    let ok = apply_rigged(
-        &s,
-        rigged(
-            &s,
-            Rig::DeclaresRegistry("HKCU\\Software\\Acme\\Echo".to_owned()),
-        ),
-        |_| {},
-    );
+    // A key named by this run, so another run on the same registry never shares it.
+    let own = format!("HKCU\\Software\\canoa-test-{}\\Echo", std::process::id());
+    let ok = apply_rigged(&s, rigged(&s, Rig::DeclaresRegistry(own)), |_| {});
     assert!(ok.is_ok(), "a key of the program's own: {ok:?}");
 }
 
