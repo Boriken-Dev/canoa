@@ -94,6 +94,8 @@ import 'rail/session_rail.dart';
 import 'session_store.dart';
 import 'sources/readiness.dart';
 import 'sources/sources.dart';
+import 'loadout/loadout_editor.dart' show LoadoutDraft;
+import 'loadout/loadouts_section.dart';
 import 'loadout/registry_fetch.dart';
 import 'store/store_section.dart';
 import 'store/programs.dart';
@@ -388,6 +390,9 @@ class _CanoaAppState extends State<CanoaApp> {
   final _settingsKey = GlobalKey<SettingsPageState>();
   final _loadoutKey = GlobalKey<StoreSectionState>();
 
+  /// The loadout being edited, which a visit to the Store leaves as it was.
+  final _loadoutDraft = ValueNotifier<LoadoutDraft?>(null);
+
   /// The section Settings opens at when it is first shown.
   String? _settingsFirst;
 
@@ -617,6 +622,28 @@ class _CanoaAppState extends State<CanoaApp> {
     _layout.select('store');
     if (_loadoutKey.currentState case final page?) unawaited(page.controller.adopt(config));
   }
+
+  /// Shows Loadouts: what new sessions start with.
+  void _showLoadouts() => _layout.select('loadouts');
+
+  /// A new session that starts with the loadout [name], shown.
+  void _useLoadout(String name) {
+    _newSession();
+    final draft = store.selected;
+    if (draft != null && draft.isDraft) store.updateDraft(draft, loadout: name);
+    _layout.select(ShellLayout.conversations);
+  }
+
+  /// The Loadouts section: the list and the editor of canoa.cfg's loadouts.
+  Widget _loadoutsPage() => LoadoutsSection(
+    config: config,
+    home: _home,
+    onSave: _saveLoadout,
+    onStore: () => unawaited(_showLoadout()),
+    onUse: _useLoadout,
+    agents: _profileAgents,
+    draft: _loadoutDraft,
+  );
 
   /// The Store as the section shows it.
   Widget _loadoutPage() => StoreSection(
@@ -1327,9 +1354,16 @@ class _CanoaAppState extends State<CanoaApp> {
   Map<String, Object?> _startMeta(ChatSession draft) {
     final cache = {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account)};
     final asked = draft.overlays;
-    if (widget.served == null || asked == null || config.overlays.isEmpty) return cache;
+    final withLoadout = {...cache, ..._loadoutMeta(draft)};
+    if (widget.served == null || asked == null || config.overlays.isEmpty) return withLoadout;
     final chosen = asked.where(config.overlays.containsKey).toSet();
-    return {...cache, overlaysMeta: _overlaysNamed(chosen)};
+    return {...withLoadout, overlaysMeta: _overlaysNamed(chosen)};
+  }
+
+  /// The loadout [draft] was given, when canoa.cfg still holds it; a session that names none starts with `[defaults] loadout`.
+  Map<String, Object?> _loadoutMeta(ChatSession draft) {
+    final name = draft.loadout;
+    return name != null && config.loadouts.containsKey(name) ? {loadoutMeta: name} : const {};
   }
 
   Future<void> _startHosted(ChatSession draft, String name, String folder, bool worktree, _Starting starting) async {
@@ -1468,11 +1502,14 @@ class _CanoaAppState extends State<CanoaApp> {
     VerifiedAgent? client;
     try {
       // The overlays it starts with are Loadout's defaults unless the person chose; what it starts with is kept with it.
-      final chosen = draft.overlays?.where(config.overlays.containsKey).toSet() ?? config.defaultOverlays.toSet();
+      final named = _loadoutMeta(draft)[loadoutMeta] as String?;
+      final chosen = draft.overlays?.where(config.overlays.containsKey).toSet() ??
+          (named == null ? config.defaultOverlays : config.resolveLoadout(named)!.overlays).toSet();
       if (config.overlays.isNotEmpty) draft.overlays = chosen;
       client = await timed<VerifiedAgent>('link_and_initialize', () => _linkAgent(name, {
         ..._cacheMeta(store.cacheLifetimeOf(draft)),
         ..._accountMeta(draft.account),
+        ..._loadoutMeta(draft),
         if (config.overlays.isNotEmpty) overlaysMeta: _overlaysNamed(chosen),
       }));
       starting.client = client;
@@ -1729,6 +1766,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (widget.layout == null) _layout.dispose();
     _surfaces.dispose();
     _grouping.dispose();
+    _loadoutDraft.dispose();
     _popout.dispose();
     _tabs?.dispose();
     _contextTimer?.cancel();
@@ -1793,7 +1831,9 @@ class _CanoaAppState extends State<CanoaApp> {
     clipboard: widget.clipboard ?? const SystemClipboard(),
     overlays: config.overlays.keys.toList(),
     defaultOverlays: config.defaultOverlays,
-    onLoadout: _showLoadout,
+    loadouts: {for (final name in config.loadouts.keys) name: config.resolveLoadout(name)!},
+    defaultLoadout: config.defaultLoadout,
+    onLoadout: _showLoadouts,
     pasteAsFile: config.pasteAsFile,
     enterSteers: config.sessions.whileWorking == WhileWorking.steer,
     warnPermille: config.warnPermille,
@@ -1846,9 +1886,9 @@ class _CanoaAppState extends State<CanoaApp> {
         animation: Listenable.merge([store, _popout]),
         builder: (context, _) => _CanoaHome(
           store: store, onNewSession: _newSession, onSettings: _showSettings,
-          onHosts: () => _layout.select(HostsController.section), onLoadout: _showLoadout, onReopen: _reopen,
+          onHosts: () => _layout.select(HostsController.section), onLoadout: _showLoadout, onLoadouts: _showLoadouts, onReopen: _reopen,
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
-          layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(),
+          layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(), loadouts: _loadoutsPage(),
           hostsIndex: _hostsIndex(), hostsPage: _hostsPage(),
           usageIndex: _usageIndex(), usagePage: _usagePage(),
           conversation: _conversation,
@@ -1869,9 +1909,9 @@ class _CanoaAppState extends State<CanoaApp> {
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onNewSession, required this.onSettings,
-    this.onHosts, this.onLoadout, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
+    this.onHosts, this.onLoadout, this.onLoadouts, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
     this.renderers = chat.ChatRenderers.none, required this.welcome, this.localHost, required this.grouping,
-    required this.layout, required this.surfaces, required this.settings, required this.loadout,
+    required this.layout, required this.surfaces, required this.settings, required this.loadout, required this.loadouts,
     required this.hostsIndex, required this.hostsPage, this.usageIndex, this.usagePage,
   });
 
@@ -1882,8 +1922,8 @@ class _CanoaHome extends StatelessWidget {
   final ShellLayout layout;
   final WorkSurfaces surfaces;
 
-  /// The main views of the Settings and Loadouts sections.
-  final Widget settings, loadout;
+  /// The main views of the Settings, Store and Loadouts sections.
+  final Widget settings, loadout, loadouts;
 
   /// The Hosts section's index and main view.
   final Widget hostsIndex, hostsPage;
@@ -1900,7 +1940,7 @@ class _CanoaHome extends StatelessWidget {
   final chat.ChatRenderers renderers;
   final VoidCallback onSettings;
   final VoidCallback? onHosts;
-  final VoidCallback? onLoadout;
+  final VoidCallback? onLoadout, onLoadouts;
   final String? account;
   final Future<void> Function()? onSignOut;
   final Future<void> Function(LedgerEntry)? onReopen;
@@ -1959,6 +1999,7 @@ class _CanoaHome extends StatelessWidget {
               PaletteItem(action.label, () => unawaited(runWorkspaceAction(context, action, target)),
                   detail: target.path, icon: action.icon),
         PaletteItem('Settings', onSettings, icon: Icons.settings_outlined),
+        if (onLoadouts != null) PaletteItem('Loadouts', onLoadouts!, icon: Icons.inventory_2_outlined),
         if (onLoadout != null) PaletteItem('Store', onLoadout!, icon: Icons.storefront_outlined),
         if (onHosts != null) PaletteItem('Hosts', onHosts!, detail: 'Local, saved connections and Hosting', icon: Icons.lan_outlined),
         PaletteItem('Keyboard shortcuts', () => unawaited(showShortcutHelp(context)), icon: Icons.keyboard_outlined),
@@ -2045,6 +2086,7 @@ class _CanoaHome extends StatelessWidget {
           ),
           AppSection(id: HostsController.section, label: 'Hosts', icon: Icons.lan_outlined, index: hostsIndex, main: hostsPage),
           if (usagePage != null) AppSection(id: 'usage', label: 'Usage', icon: Icons.speed, index: usageIndex, main: usagePage!),
+          AppSection(id: 'loadouts', label: 'Loadouts', icon: Icons.inventory_2_outlined, main: loadouts),
           AppSection(id: 'store', label: 'Store', icon: Icons.storefront_outlined, main: loadout),
           AppSection(id: 'settings', label: 'Settings', tooltip: 'Canoa settings', icon: Icons.settings_outlined, main: settings, atFoot: true),
         ],

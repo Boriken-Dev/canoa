@@ -357,6 +357,8 @@ class CacheChooser extends StatelessWidget {
   }
 }
 
+/// The loadout a draft starts with and, for this session alone, which of its whole overlays are on. A loadout is chosen here by
+/// name; what is inside it is edited in Loadouts, and nothing here switches an item inside an overlay.
 class OverlaysChooser extends StatelessWidget {
   const OverlaysChooser({super.key, required this.store, required this.session, required this.kit});
 
@@ -366,8 +368,13 @@ class OverlaysChooser extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final on = session.overlays ?? (kit.defaultOverlays ?? kit.overlays).toSet();
+    final named = session.loadout != null && kit.loadouts.containsKey(session.loadout) ? session.loadout : kit.defaultLoadout;
+    final loadout = kit.loadouts[named];
+    final base = loadout?.overlays ?? kit.defaultOverlays ?? kit.overlays;
+    final on = session.overlays ?? base.toSet();
     final count = kit.overlays.where(on.contains).length;
+    final missing = loadout?.missingOverlays ?? const <String>[];
+    final label = '${loadout == null ? 'Overlays' : named!} ($count)${missing.isEmpty ? '' : ', ${missing.length} missing'}';
     if (!session.isDraft) {
       return InkWell(
         key: const Key('overlays'),
@@ -381,6 +388,17 @@ class OverlaysChooser extends StatelessWidget {
     }
     return MenuAnchor(
       menuChildren: [
+        if (kit.loadouts.isNotEmpty) ...[
+          for (final name in kit.loadouts.keys)
+            MenuItemButton(
+              key: Key('loadout-choice $name'),
+              closeOnActivate: false,
+              leadingIcon: Icon(name == named ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18),
+              onPressed: () => store.updateDraft(session, loadout: name),
+              child: Text(name == kit.defaultLoadout ? '$name (default)' : name),
+            ),
+          const Divider(height: 1),
+        ],
         for (final name in kit.overlays)
           CheckboxMenuButton(
             key: Key('overlay $name'),
@@ -395,13 +413,19 @@ class OverlaysChooser extends StatelessWidget {
                   },
             child: Text(name),
           ),
+        for (final name in missing)
+          MenuItemButton(
+            key: Key('overlay-missing $name'),
+            leadingIcon: Icon(Icons.warning_amber_outlined, size: 18, color: Theme.of(context).colorScheme.error),
+            child: Text('$name is not installed'),
+          ),
         if (kit.onLoadout != null) ...[
           const Divider(height: 1),
           MenuItemButton(
             key: const Key('overlays-loadout'),
             leadingIcon: const Icon(Icons.tune, size: 18),
             onPressed: kit.onLoadout,
-            child: const Text('Manage in the Store'),
+            child: const Text('Manage loadouts'),
           ),
         ],
       ],
@@ -410,8 +434,10 @@ class OverlaysChooser extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         onTap: () => controller.isOpen ? controller.close() : controller.open(),
         child: Tooltip(
-          message: 'The overlays it starts with',
-          child: ComposerPill(label: 'Overlays ($count)', icon: Icons.layers_outlined),
+          message: missing.isEmpty
+              ? 'The loadout it starts with, and which of its overlays are on'
+              : 'The loadout names ${missing.join(', ')}, which ${missing.length == 1 ? 'is' : 'are'} not installed',
+          child: ComposerPill(label: label, icon: missing.isEmpty ? Icons.layers_outlined : Icons.warning_amber_outlined),
         ),
       ),
     );

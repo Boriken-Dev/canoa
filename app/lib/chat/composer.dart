@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../accounts/account_chooser.dart';
 import '../accounts/accounts_controller.dart';
 import '../acp/local_agent.dart' show InsideFile;
+import '../config/canoa_config.dart' show ResolvedLoadout;
 import '../extension/composer_extension.dart';
 import '../session_store.dart';
 import '../sources/sources.dart';
@@ -45,6 +46,8 @@ final class ComposerKit {
     this.clipboard = const TextClipboard(),
     this.overlays = const [],
     this.defaultOverlays,
+    this.loadouts = const {},
+    this.defaultLoadout,
     this.onLoadout,
     this.pasteAsFile = Composer.defaultPasteAsFile,
     this.enterSteers = false,
@@ -66,6 +69,12 @@ final class ComposerKit {
 
   /// The overlays a new session starts with: Loadout's defaults, which are `overlays` when null.
   final List<String>? defaultOverlays;
+
+  /// canoa.cfg's loadouts as a session would start with each, by name; a session picks one in the composer.
+  final Map<String, ResolvedLoadout> loadouts;
+
+  /// The loadout a session that picks none starts with (`[defaults] loadout`); null when none is set.
+  final String? defaultLoadout;
 
   /// Opens the Store, where an overlay is installed and turned on or off by default; null where there is none.
   final VoidCallback? onLoadout;
@@ -362,7 +371,7 @@ class SessionComposer extends StatelessWidget {
         ModelEffortChooser(store: store, session: session, options: options, seen: seen),
         if (options.any((option) => roleOf(option) == OptionRole.other)) MoreChooser(store: store, session: session, options: options),
         if (draft) CacheChooser(store: store, session: session),
-        if (kit.overlays.isNotEmpty || session.profile != null) OverlaysChooser(store: store, session: session, kit: kit),
+        if (kit.overlays.isNotEmpty || kit.loadouts.isNotEmpty || session.profile != null) OverlaysChooser(store: store, session: session, kit: kit),
       ],
     );
   }
@@ -373,7 +382,7 @@ class SessionComposer extends StatelessWidget {
       ComposerAction(name: 'mode', description: 'Switch to the next mode', run: () => unawaited(store.cycleMode(session))),
     if (kit.onSettings != null) ComposerAction(name: 'settings', description: 'Open Settings', run: kit.onSettings!),
     if (kit.onSourceSettings != null) ComposerAction(name: 'sources', description: 'Open the source settings', run: kit.onSourceSettings!),
-    if (kit.onLoadout != null) ComposerAction(name: 'loadout', description: 'Open the Store', run: kit.onLoadout!),
+    if (kit.onLoadout != null) ComposerAction(name: 'loadout', description: 'Open Loadouts', run: kit.onLoadout!),
     if (kit.onProfile != null && session.profile != null)
       ComposerAction(name: 'profile', description: 'Show what this session was given', run: () => kit.onProfile!(session)),
   ];

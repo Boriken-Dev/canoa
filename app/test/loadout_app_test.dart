@@ -2,7 +2,7 @@
 // session, and turning a default off reaches new sessions only. The agent is the test's, reached over a link as the host's own is.
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
-import 'package:canoa/profile/report.dart' show overlaysMeta;
+import 'package:canoa/profile/report.dart' show loadoutMeta, overlaysMeta;
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -39,7 +39,7 @@ void main() {
     await newSession(tester);
     await chooseSource(tester, 'Claude');
     await openFolder(tester);
-    expect(_pill(tester, 'overlays'), 'Overlays (1)', reason: 'b is off by default');
+    expect(_pill(tester, 'overlays'), 'main (1)', reason: 'b is off in the default loadout, which the pill names');
     await send(tester, 'hello');
     await until(tester, () => agent.requests.any((request) => request['method'] == 'initialize'), 'initialize');
     expect(_overlaysAsked(agent, 0), ['a']);
@@ -106,6 +106,50 @@ void main() {
     final entry = ledger.entries.single;
     expect(entry.overlays, ['a', 'b'], reason: 'the ledger keeps them with the session');
     expect(LedgerEntry.fromJson(entry.toJson())!.overlays, ['a', 'b']);
+    await finish(tester);
+  });
+
+  const loadoutsText = '''
+${overlaysText}[loadouts.main]
+overlays = ["a"]
+[loadouts.both]
+overlays = ["a", "b", "gone"]
+[defaults]
+loadout = "main"
+''';
+
+  testWidgets('a loadout chosen in the composer is named to the host, brings its overlays and flags one that is not installed', (tester) async {
+    final agent = OptionsAgent();
+    final store = _store();
+    await pumpApp(tester, store, linked: agent.openLink, config: CanoaConfig.parse(loadoutsText));
+    await newSession(tester);
+    await chooseSource(tester, 'Claude');
+    await openFolder(tester);
+    expect(_pill(tester, 'overlays'), 'main (1)');
+    await tester.tap(find.byKey(const Key('overlays')));
+    await frames(tester);
+    await tester.tap(find.byKey(const Key('loadout-choice both')).last);
+    await frames(tester);
+    expect(find.byKey(const Key('overlay-missing gone')), findsWidgets, reason: 'the overlay it names is not installed');
+    await tester.tapAt(const Offset(5, 5));
+    await frames(tester);
+    expect(_pill(tester, 'overlays'), 'both (2), 1 missing', reason: 'said before Send');
+    await send(tester, 'hello');
+    await until(tester, () => agent.requests.any((request) => request['method'] == 'initialize'), 'initialize');
+    final meta = (agent.requests.firstWhere((request) => request['method'] == 'initialize')['params'] as Map)['_meta'] as Map;
+    expect(meta[loadoutMeta], 'both');
+    expect(meta[overlaysMeta], ['a', 'b']);
+    expect(store.selected!.loadout, 'both');
+    await finish(tester);
+  });
+
+  testWidgets('a session that names no loadout sends none, so the host starts it with its default', (tester) async {
+    final agent = OptionsAgent();
+    await pumpApp(tester, _store(), linked: agent.openLink, config: CanoaConfig.parse(loadoutsText));
+    await _startOnClaude(tester, agent, 1);
+    final meta = (agent.requests.firstWhere((request) => request['method'] == 'initialize')['params'] as Map)['_meta'] as Map;
+    expect(meta.containsKey(loadoutMeta), isFalse);
+    expect(meta[overlaysMeta], ['a']);
     await finish(tester);
   });
 }

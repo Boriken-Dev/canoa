@@ -197,6 +197,9 @@ class ChatSession {
   /// Which of canoa.cfg's overlays a draft starts with, by name; null for all of them.
   Set<String>? overlays;
 
+  /// The `[loadouts]` name a draft starts with; null starts with `[defaults] loadout`. Choosing one starts [overlays] over.
+  String? loadout;
+
   /// The id a draft is kept under between runs; null once it starts.
   String? draftId;
 
@@ -796,7 +799,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   ChatSession createDraft({AgentSource? source, String? cwd, bool worktree = false, Set<String>? overlays, String? id,
       String text = '', Map<String, PendingChoice> pending = const {}, List<Attachment> attachments = const [], String? title,
       String? keptSource, bool bypass = false, String? workspaceId, DateTime? created,
-      CacheLifetime? cacheLifetime, String? account, SessionKind? kind}) {
+      CacheLifetime? cacheLifetime, String? account, SessionKind? kind, String? loadout}) {
     final session = _newSession(
       title: title ?? draftTitle,
       agent: source?.label ?? draftTitle,
@@ -811,6 +814,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       ..cacheLifetime = cacheLifetime
       ..account = account
       ..overlays = overlays
+      ..loadout = loadout
       ..draftId = id ?? newDraftId()
       ..workspaceId = workspaceId ?? newSessionUuid()
       ..draftText = text
@@ -859,7 +863,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// Changes what a draft will start with. Once it has started, its source, folder, worktree and overlays stay as they were.
   void updateDraft(ChatSession session, {AgentSource? source, String? cwd, bool? worktree,
-      Set<String>? overlays, bool allOverlays = false, String? text, SessionKind? kind}) {
+      Set<String>? overlays, bool allOverlays = false, String? loadout, bool defaultLoadout = false, String? text, SessionKind? kind}) {
     if (text != null) session.draftText = text;
     if (session.status == SessionStatus.draft) {
       if (source != null && source != session.source) {
@@ -885,6 +889,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         session.wantsWorktree = false;
       }
       if (worktree != null) session.wantsWorktree = worktree;
+      if (loadout != null || defaultLoadout) {
+        // A loadout brings its own overlays: the switches made on another one mean nothing to it.
+        session
+          ..loadout = defaultLoadout ? null : loadout
+          ..overlays = null;
+      }
       if (overlays != null || allOverlays) session.overlays = allOverlays ? null : overlays;
     }
     _keepDraft(session);
@@ -908,6 +918,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         cacheLifetime: CacheLifetime.named(record['cacheLifetime']),
         account: record['account'] is String ? record['account'] as String : null,
         overlays: record['overlays'] is List ? {for (final name in record['overlays'] as List) if (name is String) name} : null,
+        loadout: record['loadout'] is String ? record['loadout'] as String : null,
         text: record['text'] is String ? record['text'] as String : '',
         title: record['title'] is String ? record['title'] as String : null,
         bypass: record['bypass'] == true,
@@ -959,6 +970,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       'cacheLifetime': ?session.cacheLifetime?.id,
       'account': ?session.account,
       'overlays': ?session.overlays?.toList(),
+      'loadout': ?session.loadout,
       'text': session.draftText,
       if (!session.agentNames) 'title': session.title,
       'pending': [for (final choice in session.pending.values) choice.toJson()],
@@ -2394,6 +2406,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     cwd: session.kind == SessionKind.chat ? null : session.worktree?.repo ?? session.cwd,
     worktree: session.worktree != null || session.wantsWorktree,
     overlays: session.overlays,
+    loadout: session.loadout,
     title: 'Fork of ${session.title}',
     keptSource: session.keptSource,
     cacheLifetime: session.cacheLifetime,
