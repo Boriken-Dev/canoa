@@ -10,10 +10,10 @@
     reason = "files and processes are std's"
 )]
 
+use crate::spawn::{Command, Stdio};
 use std::fs;
 use std::io::Read as _;
 use std::path::{MAIN_SEPARATOR_STR, Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
@@ -432,9 +432,9 @@ fn git_listing(folder: &Path, max_entries: usize) -> Option<Vec<String>> {
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_LITERAL_PATHSPECS", "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stdin(Stdio::Null)
+        .stdout(Stdio::Piped)
+        .stderr(Stdio::Null)
         .spawn()
         .ok()?;
     let mut out = child.stdout.take()?;
