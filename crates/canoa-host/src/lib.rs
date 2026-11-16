@@ -16,6 +16,7 @@ pub mod home;
 mod inproc;
 mod kind;
 mod local;
+mod loopback;
 pub mod native;
 pub mod options;
 pub mod peers;

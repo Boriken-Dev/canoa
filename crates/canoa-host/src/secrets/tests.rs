@@ -697,3 +697,71 @@ fn the_host_asks_a_paired_key_a_form_of_its_own_and_asks_no_other() {
         assert!(hub.asker_for("not a peer").is_none());
     }
 }
+
+/// What `request` gets back from a program run as the user `nobody` that connects to `port`: `None` when this machine cannot run
+/// one (it takes a passwordless `sudo` and `setpriv`).
+#[cfg(target_os = "linux")]
+fn answer_to_another_user(port: u16, request: &str) -> Option<String> {
+    use std::process::Command;
+
+    let can = Command::new("sudo")
+        .args([
+            "-n",
+            "setpriv",
+            "--reuid=65534",
+            "--regid=65534",
+            "--clear-groups",
+            "true",
+        ])
+        .status()
+        .is_ok_and(|status| status.success());
+    if !can {
+        return None;
+    }
+    let script = r#"exec 3<>"/dev/tcp/127.0.0.1/$0"; printf '%s' "$1" >&3; timeout 5 cat <&3"#;
+    let output = Command::new("sudo")
+        .args([
+            "-n",
+            "setpriv",
+            "--reuid=65534",
+            "--regid=65534",
+            "--clear-groups",
+        ])
+        .args(["bash", "-c", script])
+        .arg(port.to_string())
+        .arg(request)
+        .output()
+        .ok()?;
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_connection_from_another_user_is_dropped_even_with_the_right_bearer() {
+    use std::io::{Read as _, Write as _};
+
+    use sha2::{Digest as _, Sha256};
+
+    let tokens = Arc::new(super::Tokens::default());
+    let token = "a".repeat(64);
+    let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
+    let _grant = tokens.add(digest);
+    let server = super::http::Listener::start(&tokens).expect("the server starts");
+    let port = server.addr().port();
+    let request = format!(
+        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nContent-Length: 2\r\n\r\n{{}}"
+    );
+
+    // The same user gets past the bearer: this grant has no tools yet, which is a 503.
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connects");
+    stream.write_all(request.as_bytes()).expect("writes");
+    let mut mine = String::new();
+    stream.read_to_string(&mut mine).expect("reads");
+    assert!(mine.starts_with("HTTP/1.1 503"), "the same user: {mine}");
+
+    let Some(theirs) = answer_to_another_user(port, &request) else {
+        eprintln!("skipped the other user: no passwordless sudo and setpriv here");
+        return;
+    };
+    assert!(theirs.is_empty(), "another user was answered: {theirs}");
+}

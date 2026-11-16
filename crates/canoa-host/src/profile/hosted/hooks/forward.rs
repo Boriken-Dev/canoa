@@ -242,7 +242,7 @@ fn accept(listener: &TcpListener, shared: &Arc<Shared>, stop: &AtomicBool) {
                     continue;
                 };
                 if !from.ip().is_loopback()
-                    || !crate::delegate::ours(from, local)
+                    || !crate::loopback::ours(from, local)
                     || stream.set_nonblocking(false).is_err()
                 {
                     continue;

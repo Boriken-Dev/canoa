@@ -130,7 +130,7 @@ impl Hub {
     fn url(self: &Arc<Self>) -> Option<String> {
         let mut server = lock(&self.server);
         if server.is_none() {
-            *server = http::Listener::start(self).ok();
+            *server = http::start(self).ok();
         }
         server
             .as_ref()
