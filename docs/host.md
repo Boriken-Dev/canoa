@@ -405,7 +405,7 @@ no other program to install or start. Agents stay child processes of the host.
 - `canoa` stays for servers and for use with no desktop: the same library with a command line in front. `CANOA_HOST`
   names a `canoa` for the app to run as a child instead, which is for tests.
 
-**Hosting**, in the app's side rail and its tray menu, shows the host's state and its peer id, lists its entries with
+**Hosting**, in Local's overview in the app's Hosts section and in its tray menu, shows the host's state and its peer id, lists its entries with
 their addresses, adds a stdio ACP agent by its command on a loopback port of its own, after `canoa check` accepts the
 change, and stops hosting one. It lists the keys that may connect, pairs a waiting one and removes one, and shows a PIN for
 a program to pair with.
@@ -430,18 +430,18 @@ logs it at `info`. Naming the method the home already has is never refused, and 
 A browser pairs by connecting once:
 
 1. In the browser, give the entry's address (`ws://127.0.0.1:7801`), the host's peer id, which Hosting shows (and
-   `canoa id` prints), and the method it proves by, which `serve` prints: in Canoa's web connect dialog, or by
+   `canoa id` prints), and the method it proves by, which `serve` prints: in Canoa's Add connection dialog, or by
    adding the agent by hand in the extension's window.
 2. The first connection is turned away, and the browser's key waits on the host.
 3. Hosting lists it as waiting, as does `canoa peers`. Compare its whole id with the one the browser shows (Canoa's
-   connect dialog, or the extension's permissions page), then pair it: **Pair…** and **Pair** in Hosting, or
+   Add connection dialog, or the extension's permissions page), then pair it: **Pair…** and **Pair** in Hosting, or
    `canoa accept <id>`.
 4. Connect again. Removing the key in Hosting, or `canoa revoke <id>`, ends its links within about a second.
 
 A program with a native key, such as `coqui-acp-bridge`, can pair by PIN instead: **Show a PIN** in Hosting, or
 `canoa pair`, shows six digits and an address, and `coqui-acp-bridge pair-dial ADDRESS` with those digits pairs it.
 One wrong try ends the PIN, and it pairs by the host's method. `canoa pair` refuses a browser, so a page cannot spend
-the PIN; a browser pairs with it by connecting once. The extension and Canoa's web connect dialog pair by PIN with
+the PIN; a browser pairs with it by connecting once. The extension and Canoa's web Add connection dialog pair by PIN with
 `coqui-acp-bridge pair-accept --method noise --origin ORIGIN`, the origin each of them shows.
 
 A key's first use is always the person's decision: nothing is accepted automatically, and the app pairs or removes a key
@@ -462,9 +462,8 @@ dir = "site"                 # relative to canoa.cfg; without it, the site built
 listen = "127.0.0.1:7800"    # the default
 ```
 
-`serve` prints `{"web": "http://127.0.0.1:7800"}` after its entries. Open that address: the connect dialog starts filled
-with the host's first entry, its peer id and its method, read from `/canoa.json`, and lists its other entries to
-choose from. That is only a filling. Connecting still proves the host holds that id's key, and the host turns the
+`serve` prints `{"web": "http://127.0.0.1:7800"}` after its entries. Open that address: the Hosts section lists that host, named as the host that served the page and never as Local, with
+its peer id, its method and its entries, read from `/canoa.json`. That is only what the host says of itself. Connecting still proves the host holds that id's key, and the host turns the
 browser away until its key is paired, as in [Pairing](#pairing): connect once, then accept the browser's id in Hosting
 or with `canoa accept`.
 

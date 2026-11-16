@@ -102,7 +102,7 @@ Before its source has run, model and effort offer only **Default**, which sets n
 
 ### A worktree per session
 
-**Worktree** under a new session's message (only for a folder in a git repository), or **In a new git worktree, on its own branch** in the connect dialog for an agent elsewhere, starts the session in a new worktree of the repository holding the folder, from that directory's current commit. For a new session it is made when the first message is sent, and named after its source. The branch is `canoa/` and the session's title (or its agent's name) in lower-case letters and digits joined by hyphens, then six random hexadecimal digits, such as `canoa/fix-the-tests-3fa91c`; nothing else is taken, so no branch reads as an option, a range or a path step. The worktree goes beside the repository, in `<repository>.worktrees/<branch without canoa/>`, and a `.worktrees` directory already there that is a link is refused. The session list shows the branch, and the session list kept across runs notes the worktree with the session.
+**Worktree** under a new session's message (only for a folder in a git repository), or **In a new git worktree, on its own branch** in a new session on a saved Canoa host, starts the session in a new worktree of the repository holding the folder, from that directory's current commit. For a new session it is made when the first message is sent, and named after its source. The branch is `canoa/` and the session's title (or its agent's name) in lower-case letters and digits joined by hyphens, then six random hexadecimal digits, such as `canoa/fix-the-tests-3fa91c`; nothing else is taken, so no branch reads as an option, a range or a path step. The worktree goes beside the repository, in `<repository>.worktrees/<branch without canoa/>`, and a `.worktrees` directory already there that is a link is refused. The session list shows the branch, and the session list kept across runs notes the worktree with the session.
 
 - **An agent this app runs**: the app runs `git` itself, with an argument list, its hooks and fsmonitor off, and refuses a repository whose own settings name a filter, an include or an attributes file, or whose git directory is apart from its work tree, as a submodule's is. Filters in your global settings, such as Git LFS's, run as usual.
 - **An agent `canoa` serves**: the host makes the worktree, only inside its entry's working roots, as [the host](host.md#worktrees) describes; with no working root, or `worktrees = false`, it makes none. The browser's provider makes none.
@@ -506,6 +506,20 @@ Only git sources with a branch, tag or commit install: an entry whose source is 
 git with no ref is listed, and its page says why it does not install. `homepage` and `repository` are shown whole as links that open in the system's browser when tapped, never fetched by
 Canoa; one that is not a plain ASCII `http` or `https` address stays text. A web build lists no catalog.
 
+### Saved connections
+
+The **Hosts** section lists this computer first (Local: the host inside the app, with Hosting in its overview), then each connection saved in `[connections.NAME]`. A name is 1 to 64 characters. Each holds where to connect and which key to expect, never a key, a password or a token: an address with a user name or password is refused.
+
+```toml
+[connections."Work desk"]
+kind = "canoa"                  # "canoa" (a Canoa host, whose agents and abilities it lists) or "acp" (one agent at an endpoint)
+address = "https://desk.example:7800/"   # a Canoa host's web address; for "acp", a wss:// or ws:// endpoint (or https:// with transport = "webtransport")
+peer = "sha256:..."             # the pinned peer id, 64 hex digits
+method = "noise"                # the proof the other end runs: "noise" or "webcrypto"
+```
+
+A Canoa host is read from the list it serves at its address when the section opens, which connects to nothing; a direct agent is connected to only when the person asks it to be checked. What either lists of itself is its claim: connecting proves that it holds the pinned id. A direct endpoint offers a session and nothing else, so the section shows no folder browsing, files or management for it, and a workspace is typed as a path on that machine. Removing a connection removes only this app's record of it and names the sessions that were on it; nothing is stopped on the other end. A page served by a host keeps canoa.cfg on that host and saves no connections.
+
 ### Trusting a project
 
 A project profile is ignored until you trust its directory in Settings → Profiles, which shows the file first, every
@@ -524,7 +538,7 @@ What has been run, by platform:
 - **Linux (Fedora 44 under WSLg, arm64)**: tray_manager draws the icon as a StatusNotifier item, which passes no clicks on, so **Open Canoa** in its menu opens the chat. The app looks for a StatusNotifier host on the session bus (`org.kde.StatusNotifierWatcher`). With one, closing the window hides it, and picking Open Canoa from the menu over D-Bus, as a panel does, brings it back. WSLg's desktop has none, so there the app shows no icon, and closing the window minimizes it instead of hiding it where nothing could bring it back; WSLg does not report the window as minimized.
 - **macOS**: not run.
 
-The Settings action brings up the main window and opens Settings, a page (Ctrl+, from anywhere in the app) with a list of sections at its left: App (General, Appearance, Notifications, Shortcuts), Agents (Sources, Profiles, MCP servers, Permissions, Usage, Hosting) and Overlays (Catalogs), then About, and a search over their keywords. A value applies as it is changed and is written at once to the same canoa.cfg file, not an unrelated preferences database; there is no Save or Cancel, and every section keeps the tables it does not edit. A value kept only on this computer is marked. Quitting is the tray's and the menu's, not Settings'. A system-hosted web application cannot overwrite its deployment canoa.cfg.
+The Settings action brings up the main window and opens Settings, a page (Ctrl+, from anywhere in the app) with a list of sections at its left: App (General, Appearance, Notifications, Shortcuts), Agents (Sources, Profiles, MCP servers, Permissions, Usage) and Overlays (Catalogs), then About, and a search over their keywords. A value applies as it is changed and is written at once to the same canoa.cfg file, not an unrelated preferences database; there is no Save or Cancel, and every section keeps the tables it does not edit. A value kept only on this computer is marked. Quitting is the tray's and the menu's, not Settings'. A system-hosted web application cannot overwrite its deployment canoa.cfg.
 
 The default launch is visible, with close-to-tray enabled. The start-hidden option takes effect on the next launch.
 
