@@ -630,7 +630,12 @@ fn the_tools_processes_end_with_the_link() {
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    assert_eq!(pids.len(), 2, "each fixture wrote its id");
+    assert_eq!(
+        pids.len(),
+        2,
+        "each fixture wrote its id; the file holds {:?}",
+        std::fs::read_to_string(Path::new(&dir).join("tool.pid"))
+    );
     let until = Instant::now() + Duration::from_secs(300);
     while pids.iter().any(|pid| running(*pid)) {
         assert!(

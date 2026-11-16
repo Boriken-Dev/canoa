@@ -167,7 +167,8 @@ fn main() {
         .append(true)
         .open("tool.pid")
     {
-        let _ = writeln!(file, "{}", std::process::id());
+        // One write, so two processes appending at once never interleave their digits and newlines.
+        let _ = file.write_all(format!("{}\n", std::process::id()).as_bytes());
     }
     eprintln!("jsonl_tool: started");
     let args: Vec<String> = std::env::args().skip(1).collect();
