@@ -27,6 +27,32 @@ final class AccountEndpoint {
   final String? fallback;
 }
 
+/// What the host answers when it carries a conversation from one account to another: whether anything moved (accounts that keep
+/// their conversations in one place need nothing moved), the id the conversation has now, and how it was carried.
+final class AccountMove {
+  const AccountMove({required this.moved, required this.session, this.via, this.losses = 0});
+
+  factory AccountMove.parse(Object? json) {
+    final map = _map(json);
+    final losses = map['losses'];
+    return AccountMove(
+      moved: map['moved'] == true,
+      session: _text(map['session']),
+      via: map['via'] is String ? map['via'] as String : null,
+      losses: losses is List ? losses.length : 0,
+    );
+  }
+
+  final bool moved;
+  final String session;
+
+  /// `provider` when the agent's own export carried it, `record` when the host's record of it did.
+  final String? via;
+
+  /// How many kinds of thing did not carry (a count of the host's loss report).
+  final int losses;
+}
+
 /// One kind of account a provider takes (`claude-login`, `anthropic-api-key`).
 final class AccountKindInfo {
   const AccountKindInfo({

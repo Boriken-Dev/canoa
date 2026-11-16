@@ -21,6 +21,7 @@ import 'chat/modes.dart';
 import 'chat/session_options.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretCardEnvironment, shortLine;
 import 'drafts/draft_store.dart';
+import 'accounts/account_models.dart' show AccountMove;
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
 import 'profile/report.dart';
@@ -1696,9 +1697,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     session.hostReport = meta is Map ? meta[hostProfileMeta] : null;
   }
 
-  /// Why [session] cannot go on under another account now; null when it can. [portable] is what the provider says of the kind of
-  /// account the conversation began on (null when the host has not said).
-  String? accountSwitchBlock(ChatSession session, {required bool? portable}) {
+  /// Why [session] cannot go on under another account now; null when it can. Where an account keeps its conversations is the
+  /// host's to say when it moves one, so a refusal for that comes with the move, in the conversation's own words.
+  String? accountSwitchBlock(ChatSession session) {
     if (session.isDraft) return null;
     final client = _clients[session.id];
     if (session.status == SessionStatus.preview || session.site != null || session.place == SessionPlace.browser) {
@@ -1711,57 +1712,88 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (session.remoteSessionId == null || session.cwd == null || client.identity.reopenBy == null || !client.canReopenSessions) {
       return 'The agent cannot open this conversation again, which a new account needs.';
     }
-    if (portable == null) return 'The host has not said whether this kind of account lets a conversation move to another.';
-    if (!portable) return 'This kind of account keeps its conversations to itself. A new conversation can use another account.';
+    if (_clients.entries.any((each) => each.key != session.id && identical(each.value, client))) {
+      return 'Another conversation uses the same agent. Close it first.';
+    }
     return null;
   }
 
-  /// Moves the running [session] to [account]: its agent is started again for that account through [start], which is given the
-  /// session with its new account set, and the same conversation is opened on it, with the model, effort and mode it was in. The
-  /// old agent ends once nothing else uses it. On failure the conversation stays as it was, and says why. Answers whether it moved.
+  /// Moves the running [session] to [account]. Its agent ends, [move] carries the conversation to the account's own folder when
+  /// the accounts keep theirs apart (answering the id it has there), [start] starts the agent again for the account, and the
+  /// conversation is opened on it with the model, effort and mode it was in. Where the accounts share a folder it is the same
+  /// conversation, resumed as it is. If any step fails the agent is started again on the account it had and the conversation is
+  /// opened there, and the transcript says why. Answers whether it moved.
   Future<bool> switchAccount(
     ChatSession session,
     String account, {
-    required bool? portable,
     required Future<VerifiedAgent> Function(ChatSession session) start,
+    Future<AccountMove> Function(ChatSession session, String? from, String to)? move,
     bool expected = false,
   }) async {
     final before = session.account;
     if (before == account) return true;
-    final block = accountSwitchBlock(session, portable: portable);
+    final block = accountSwitchBlock(session);
     if (block != null) {
       session.chat.note('Account: not moved to $account. $block');
       return false;
     }
     final old = _clients[session.id]!;
-    final remote = session.remoteSessionId!, cwd = session.cwd!;
-    session.account = account;
-    VerifiedAgent? client;
-    try {
-      client = await start(session);
-      for (final role in const [OptionRole.model, OptionRole.effort]) {
-        final option = optionIn(session.options, role);
-        if (option != null && option.current.isNotEmpty) session.chat.holdChoice(PendingChoice(option.id, role, option.current));
+    final oldId = session.remoteSessionId!, cwd = session.cwd!;
+    for (final role in const [OptionRole.model, OptionRole.effort]) {
+      final option = optionIn(session.options, role);
+      if (option != null && option.current.isNotEmpty) session.chat.holdChoice(PendingChoice(option.id, role, option.current));
+    }
+    final keptMode = session.chat.underlyingMode ?? session.chat.mode, keptBypass = session.bypass;
+    final oldEntry = session.peerId == null ? null : ledger?.find(session.peerId!, oldId);
+
+    /// Starts the agent for the session's account and opens [id] on it.
+    Future<VerifiedAgent> reopenOn(String id) async {
+      final client = await start(session);
+      try {
+        session.remoteSessionId = id;
+        attachVerifiedClient(session.id, client, record: false);
+        final opened = await session.chat.reopen(() => client.reopenSession(id, cwd: cwd, setup: session.setup), keptMode: keptMode, keptBypass: keptBypass);
+        _takeHostReport(session, opened);
+        await applyHostProfile(session, expected: expected, keptMode: keptMode);
+      } catch (_) {
+        await client.close();
+        rethrow;
       }
-      final keptMode = session.chat.underlyingMode ?? session.chat.mode, keptBypass = session.bypass;
-      attachVerifiedClient(session.id, client, record: false);
-      final opened = await session.chat.reopen(() => client!.reopenSession(remote, cwd: cwd, setup: session.setup), keptMode: keptMode, keptBypass: keptBypass);
-      _takeHostReport(session, opened);
-      await applyHostProfile(session, expected: expected, keptMode: keptMode);
-      _record(session, client);
+      return client;
+    }
+
+    AccountMove? moved;
+    try {
+      // The old agent holds the account's login, and the conversation is read from its folder: it ends first.
+      await old.close();
+      moved = move == null ? null : await move(session, before, account);
+      session.account = account;
+      final client = await reopenOn(moved != null && moved.moved ? moved.session : oldId);
+      if (moved != null && moved.moved) {
+        // The conversation has a new id in the new folder: the list follows it, with what the person had made of it.
+        if (oldEntry != null) ledger?.remove(oldEntry);
+        _record(session, client);
+        if (oldEntry != null && session.peerId != null) {
+          ledger?.setPlacement(session.peerId!, session.remoteSessionId!, pinned: oldEntry.pinned, archived: oldEntry.archived);
+        }
+      } else {
+        _record(session, client);
+      }
     } catch (error) {
       session.account = before;
-      session.chat.dropChoices(where: (choice) => choice.role == OptionRole.model || choice.role == OptionRole.effort);
-      if (client != null) {
-        if (!old.isClosed) attachVerifiedClient(session.id, old, record: false);
-        await client.close();
+      try {
+        await reopenOn(oldId);
+        session.chat.note('Account: not moved to $account: ${reasonOf(error)}. This conversation stays on ${before ?? 'its first account'}.');
+      } catch (again) {
+        session.chat.note('Account: not moved to $account: ${reasonOf(error)}. Its agent could not be started again on ${before ?? 'its first account'} either: ${reasonOf(again)}. Open it again from Earlier conversations.');
       }
-      session.chat.note('Account: not moved to $account: ${reasonOf(error)}. This conversation stays on ${before ?? 'its first account'}.');
       notifyListeners();
       return false;
     }
-    if (!_clients.values.contains(old)) await old.close();
-    session.chat.note('Account: ${before ?? 'the first'} → $account. The agent was started again on it and picked this conversation up.');
+    final how = moved != null && moved.moved
+        ? 'moved to that account\'s own folder (${moved.via == 'record' ? 'from what this host recorded of it' : 'by the agent\'s own export'}) and picked up'
+        : 'picked up as it was';
+    session.chat.note('Account: ${before ?? 'the first'} → $account. The conversation was $how.');
     notifyListeners();
     return true;
   }

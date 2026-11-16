@@ -137,6 +137,10 @@ abstract interface class AccountsHost {
   /// it does not have is made when [harness] says what it runs. The host reads it when it starts.
   Future<void> offer(String entry, List<String> accounts, {String? harness});
 
+  /// Carries the conversation [session] of [entry], which worked in [cwd], from the account [from] (the entry's first when null)
+  /// to [to]: nothing when the accounts keep their conversations in one place, else through the provider's own export and import.
+  Future<AccountMove> moveSession({required String entry, required String session, required String cwd, String? from, required String to});
+
   /// Signs in by [method] and makes the account [name], or signs in again to it when [again].
   SignIn signIn({required String name, required String harness, String? method, Map<String, String> inputs = const {}, bool again = false});
 }
@@ -168,6 +172,10 @@ final class ControlAccountsHost implements AccountsHost {
   Future<void> remove(String name) async {
     await _call('accounts/remove', {'name': name});
   }
+
+  @override
+  Future<AccountMove> moveSession({required String entry, required String session, required String cwd, String? from, required String to}) async =>
+      AccountMove.parse(await _call('history/account', {'entry': entry, 'session': session, 'cwd': cwd, 'from': ?from, 'to': to}));
 
   @override
   Future<List<AccountEntry>> entries() async {

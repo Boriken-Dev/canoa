@@ -117,6 +117,19 @@ final class FakeAccountsHost implements AccountsHost {
     }
   }
 
+  /// The moves the app asked for, and what the host answers: nothing moved (accounts that share a folder), a new id for the
+  /// conversation, or a refusal.
+  final moves = <({String entry, String session, String cwd, String? from, String to})>[];
+  AccountMove? moved;
+  String? moveRefusal;
+
+  @override
+  Future<AccountMove> moveSession({required String entry, required String session, required String cwd, String? from, required String to}) async {
+    moves.add((entry: entry, session: session, cwd: cwd, from: from, to: to));
+    if (moveRefusal != null) throw StateError(moveRefusal!);
+    return moved ?? AccountMove(moved: false, session: session);
+  }
+
   @override
   Future<void> remove(String name) async {
     if (removeRefusal != null) throw StateError(removeRefusal!);

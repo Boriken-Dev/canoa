@@ -36,6 +36,9 @@ final class OptionsAgent {
 
   String model = 'default', effort = 'low', mode;
 
+  /// The session it holds: `o1` from `session/new`, the one a `session/load` or `session/resume` names after it.
+  String session = 'o1';
+
   /// The modes it offers, each with its label: Claude's translator offers five, Codex's four with no Bypass.
   final List<(String, String)> modes;
 
@@ -45,6 +48,9 @@ final class OptionsAgent {
 
   /// What the host would report of a profile, put under `_meta` in the answer to `session/load`.
   Map<String, Object?>? profileMeta;
+
+  /// How many of the next starts fail, as an agent that will not start on an account does.
+  int failNextStarts = 0;
 
   /// Whether a reopened session starts in the agent's own model and effort again, as a new process does.
   bool resetsChoicesOnLoad = false;
@@ -182,6 +188,10 @@ final class OptionsAgent {
     if (name == '@control') throw StateError('no control channel in this test');
     starts.add(name);
     if (failStart != null) throw StateError(failStart!);
+    if (failNextStarts > 0) {
+      failNextStarts--;
+      throw StateError('no such account');
+    }
     final wire = _wire();
     final link = _WireLink(wire.messages, wire.send, wire.close);
     links.add(link);
@@ -251,7 +261,7 @@ final class OptionsAgent {
             }
           case 'session/prompt':
             void end() {
-              update('o1', {'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': 'Done.'}});
+              update(session, {'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': 'Done.'}});
               reply(id, {'stopReason': 'end_turn'});
             }
             if (holdTurns) {
@@ -260,9 +270,10 @@ final class OptionsAgent {
               end();
             }
           case 'session/load' || 'session/resume':
+            session = params['sessionId'] as String? ?? session;
             if (method == 'session/load') {
               for (final body in replay) {
-                update('o1', body);
+                update(session, body);
               }
             }
             void answer() {

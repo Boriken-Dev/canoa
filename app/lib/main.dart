@@ -1890,7 +1890,15 @@ class _CanoaAppState extends State<CanoaApp> {
     switchAccount: (session, account) => store.switchAccount(
       session,
       account,
-      portable: _accounts?.sessionHistoryPortable(session.source?.hostEntry ?? session.agent, session.account),
+      move: _accounts == null
+          ? null
+          : (moving, from, to) => _accounts!.host.moveSession(
+              entry: moving.source?.hostEntry ?? moving.agent,
+              session: moving.remoteSessionId!,
+              cwd: moving.cwd!,
+              from: from,
+              to: to,
+            ),
       start: (moving) async {
         final client = await _agentFor(
           place: moving.place,

@@ -482,8 +482,7 @@ class _SessionPickerState extends State<SessionPicker> {
   /// Why a running session cannot go on under another account now; null when it can, or when it has not started.
   String? _accountBlock(AccountsController accounts) {
     if (draft) return null;
-    final entry = session.source?.hostEntry ?? session.agent;
-    return store.accountSwitchBlock(session, portable: accounts.sessionHistoryPortable(entry, session.account));
+    return store.accountSwitchBlock(session);
   }
 
   Widget _accountTile(BuildContext context, AccountsController accounts, AccountInfo account, {required bool chosen, required int now}) {
