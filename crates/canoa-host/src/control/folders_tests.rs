@@ -582,3 +582,258 @@ fn a_template_that_is_not_a_workspace_is_refused_and_a_preview_makes_nothing() {
     );
     let _ = fs::remove_dir_all(tmp);
 }
+
+/// A link from `link` to the folder `target`: a symbolic link, or a junction on Windows; false when the platform refuses one.
+fn link_folder(target: &Path, link: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link).is_ok()
+    }
+    #[cfg(windows)]
+    {
+        Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .is_ok_and(|done| done.status.success())
+    }
+}
+
+fn real_of(answer: &Value, at: usize) -> Option<String> {
+    answer["result"]["paths"][at]["real"]
+        .as_str()
+        .map(str::to_owned)
+}
+
+#[test]
+fn the_path_methods_need_the_folders_grant() {
+    let tmp = dir("links-grants");
+    let control = opened(plain_files(&tmp, Vec::new()));
+    let nothing = key(&[Grant::Files, Grant::ConfigRead]);
+    for method in ["fs/realpath", "fs/repo_root", "fs/guards"] {
+        let answer = ask(&control, &nothing, method, json!({"path": text(&tmp)}));
+        assert_eq!(answer["error"]["code"], DENIED, "{method}: {answer}");
+    }
+    let _ = fs::remove_dir_all(tmp);
+}
+
+#[test]
+fn realpath_follows_links_in_what_exists_and_keeps_the_rest_as_written() {
+    let tmp = dir("realpath");
+    let real = tmp.join("real");
+    fs::create_dir_all(real.join("src")).expect("folder");
+    write(&real.join("src").join("main.rs"), "x");
+    let linked = tmp.join("linked");
+    let made = link_folder(&real, &linked);
+    let control = opened(plain_files(&tmp, Vec::new()));
+    let owner = Caller::Owner;
+    let said = ask(
+        &control,
+        &owner,
+        "fs/realpath",
+        json!({"paths": [
+            text(&real.join("src").join("main.rs")),
+            text(&real.join("src").join("new").join("later.rs")),
+            text(&tmp.join("gone").join("x")),
+        ]}),
+    );
+    assert_eq!(
+        real_of(&said, 0),
+        Some(text(&real.join("src").join("main.rs"))),
+        "{said}"
+    );
+    assert_eq!(
+        real_of(&said, 1),
+        Some(text(&real.join("src").join("new").join("later.rs"))),
+        "what is not there yet stays as written: {said}"
+    );
+    assert_eq!(
+        real_of(&said, 2),
+        Some(text(&tmp.join("gone").join("x"))),
+        "{said}"
+    );
+    if made {
+        let said = ask(
+            &control,
+            &owner,
+            "fs/realpath",
+            json!({"path": text(&linked.join("src").join("main.rs"))}),
+        );
+        assert_eq!(
+            real_of(&said, 0),
+            Some(text(&real.join("src").join("main.rs"))),
+            "the link is followed: {said}"
+        );
+    }
+    let _ = fs::remove_dir_all(tmp);
+}
+
+#[test]
+fn realpath_refuses_what_it_cannot_say() {
+    let tmp = dir("realpath-bad");
+    let control = opened(plain_files(&tmp, Vec::new()));
+    let said = ask(
+        &control,
+        &Caller::Owner,
+        "fs/realpath",
+        json!({"paths": ["relative/path", text(&tmp.join("a").join("..").join("b")), "C:x"]}),
+    );
+    for at in 0..3 {
+        assert!(
+            said["result"]["paths"][at]["real"].is_null(),
+            "{at}: {said}"
+        );
+        assert!(said["result"]["paths"][at]["why"].is_string(), "{said}");
+    }
+    let many: Vec<String> = (0..65).map(|n| format!("/x{n}")).collect();
+    let said = ask(
+        &control,
+        &Caller::Owner,
+        "fs/realpath",
+        json!({"paths": many}),
+    );
+    assert_eq!(said["error"]["code"], BAD_PARAMS, "{said}");
+    let said = ask(&control, &Caller::Owner, "fs/realpath", json!({}));
+    assert_eq!(said["error"]["code"], BAD_PARAMS, "{said}");
+    let _ = fs::remove_dir_all(tmp);
+}
+
+#[test]
+fn a_key_is_not_told_where_a_link_leads_outside_its_places() {
+    let tmp = dir("realpath-key");
+    let home = tmp.join("home");
+    let elsewhere = tmp.join("elsewhere");
+    fs::create_dir_all(&home).expect("home");
+    write(&elsewhere.join("secret.txt"), "x");
+    let made = link_folder(&elsewhere, &home.join("out"));
+    let control = opened(plain_files(&home, Vec::new()));
+    let folders = key(&[Grant::Folders]);
+    let said = ask(
+        &control,
+        &folders,
+        "fs/realpath",
+        json!({"paths": [
+            text(&home.join("inside.txt")),
+            text(&elsewhere.join("secret.txt")),
+            text(&home.join("out").join("secret.txt")),
+        ]}),
+    );
+    assert_eq!(
+        real_of(&said, 0),
+        Some(text(&home.join("inside.txt"))),
+        "{said}"
+    );
+    assert!(
+        said["result"]["paths"][1]["real"].is_null(),
+        "outside its places: {said}"
+    );
+    if made {
+        assert!(
+            said["result"]["paths"][2]["real"].is_null(),
+            "a link out of its places is not followed for it: {said}"
+        );
+    }
+    // A key holding files is told of any place.
+    let files = key(&[Grant::Folders, Grant::Files]);
+    let said = ask(
+        &control,
+        &files,
+        "fs/realpath",
+        json!({"path": text(&elsewhere.join("secret.txt"))}),
+    );
+    assert_eq!(
+        real_of(&said, 0),
+        Some(text(&elsewhere.join("secret.txt"))),
+        "{said}"
+    );
+    let _ = fs::remove_dir_all(tmp);
+}
+
+#[test]
+fn repo_root_finds_the_repository_and_the_main_one_of_a_worktree() {
+    let tmp = dir("repo-root");
+    let main = tmp.join("main");
+    fs::create_dir_all(main.join(".git").join("worktrees").join("feature")).expect("git");
+    fs::create_dir_all(main.join("src")).expect("folder");
+    let tree = tmp.join("tree");
+    fs::create_dir_all(tree.join("src")).expect("folder");
+    write(
+        &tree.join(".git"),
+        &format!(
+            "gitdir: {}\n",
+            text(&main.join(".git").join("worktrees").join("feature"))
+        ),
+    );
+    fs::create_dir_all(tmp.join("plain")).expect("folder");
+    let control = opened(plain_files(&tmp, Vec::new()));
+    let said = ask(
+        &control,
+        &Caller::Owner,
+        "fs/repo_root",
+        json!({"paths": [
+            text(&main.join("src")),
+            text(&tree.join("src").join("not").join("yet")),
+            text(&tmp.join("plain")),
+        ]}),
+    );
+    let found = said["result"]["folders"].as_array().expect("a list");
+    assert_eq!(found[0]["root"], text(&main), "{said}");
+    assert_eq!(
+        found[1]["root"],
+        text(&main),
+        "a linked worktree is its main repository, a folder not made yet counts: {said}"
+    );
+    assert!(found[2]["root"].is_null(), "no repository: {said}");
+    let _ = fs::remove_dir_all(tmp);
+}
+
+#[test]
+fn repo_root_keeps_a_key_to_its_places() {
+    let tmp = dir("repo-root-key");
+    let home = tmp.join("home");
+    let elsewhere = tmp.join("elsewhere");
+    fs::create_dir_all(home.join("proj")).expect("folder");
+    fs::create_dir_all(elsewhere.join(".git")).expect("folder");
+    fs::create_dir_all(elsewhere.join("sub")).expect("folder");
+    fs::create_dir_all(home.join(".git")).expect("home is a repository");
+    let control = opened(plain_files(&home, Vec::new()));
+    let folders = key(&[Grant::Folders]);
+    let said = ask(
+        &control,
+        &folders,
+        "fs/repo_root",
+        json!({"paths": [text(&home.join("proj")), text(&elsewhere.join("sub"))]}),
+    );
+    let found = said["result"]["folders"].as_array().expect("a list");
+    assert_eq!(found[0]["root"], text(&home), "{said}");
+    assert!(
+        found[1]["root"].is_null(),
+        "a place outside the key's own is not looked into: {said}"
+    );
+    let _ = fs::remove_dir_all(tmp);
+}
+
+#[test]
+fn guards_name_the_home_and_the_folder_of_canoa_cfg() {
+    let tmp = dir("guards");
+    let home = tmp.join("home");
+    let settings = tmp.join("settings");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&settings).expect("settings");
+    let files = Files::new(
+        Some(home.clone()),
+        Vec::new(),
+        Some(settings.join("canoa.cfg")),
+        None,
+        UploadLimits::default(),
+    );
+    let control = opened(files);
+    let said = ask(&control, &key(&[Grant::Folders]), "fs/guards", json!({}));
+    assert_eq!(said["result"]["home"], text(&home), "{said}");
+    assert_eq!(said["result"]["config"], text(&settings), "{said}");
+    let bare = opened(plain_files(&home, Vec::new()));
+    let said = ask(&bare, &Caller::Owner, "fs/guards", json!({}));
+    assert!(said["result"]["config"].is_null(), "no canoa.cfg: {said}");
+    let _ = fs::remove_dir_all(tmp);
+}

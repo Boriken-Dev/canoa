@@ -73,7 +73,7 @@ impl Files {
     }
 
     /// Whether `place` is inside the places `caller` browses, for a root a key may be told about.
-    fn within(&self, caller: &Caller, place: &Path) -> bool {
+    pub(super) fn within(&self, caller: &Caller, place: &Path) -> bool {
         caller.may(Grant::Files)
             || self
                 .browse_roots(caller)

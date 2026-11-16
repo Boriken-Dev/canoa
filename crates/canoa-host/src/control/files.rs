@@ -107,6 +107,7 @@ pub(crate) struct Files {
 }
 
 mod folders;
+mod links;
 pub(crate) use folders::Scratch;
 
 impl Files {

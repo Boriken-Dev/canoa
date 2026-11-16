@@ -81,7 +81,9 @@ pub enum Grant {
     /// `fs/mentions` and `fs/resolve` in the same places (whether a folder is there and in a git repository, the names an `@`
     /// offers inside one, and one name resolved inside it), and `fs/scratch`, `fs/scratch_remove` and `fs/scratch_preview`: the
     /// folder the person's `[sessions] workspace` makes for a chat, made, taken away again if it is empty, or worked out for a
-    /// template being edited.
+    /// template being edited. Also `fs/realpath` and `fs/repo_root`: where a path goes once its links are followed and where the
+    /// repository of a folder starts, and `fs/guards`: the home folder and the folder of canoa.cfg, which the app asks to judge a
+    /// remembered rule for a path.
     Folders,
     /// `config/get`: a named section of canoa.cfg, the app's own tables only.
     ConfigRead,
@@ -612,6 +614,13 @@ impl Control {
                 Some("fs/info") => {
                     allow(caller, Grant::Folders).and_then(|()| self.files.info(caller, &params))
                 }
+                Some("fs/realpath") => allow(caller, Grant::Folders)
+                    .and_then(|()| self.files.realpath(caller, &params)),
+                Some("fs/guards") => {
+                    allow(caller, Grant::Folders).and_then(|()| self.files.guards())
+                }
+                Some("fs/repo_root") => allow(caller, Grant::Folders)
+                    .and_then(|()| self.files.repo_root(caller, &params)),
                 Some("fs/mentions") => allow(caller, Grant::Folders)
                     .and_then(|()| self.files.mentions(caller, &params)),
                 Some("fs/resolve") => {
