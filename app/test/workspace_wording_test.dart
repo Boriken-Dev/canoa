@@ -42,7 +42,6 @@ const _folders = <(String, String)>[
   ('session_store.dart', "own folder"), // where the agent keeps its sessions
   ('programs_view.dart', "outside Canoa\\'s folder"), // Canoa's own folder
   ('new_session_view.dart', 'recent-folder'), // keys
-  ('new_session_view.dart', 'quick-choose-folder'),
   ('new_session_view.dart', 'new-session-folder'),
 ];
 

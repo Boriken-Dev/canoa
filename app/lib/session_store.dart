@@ -642,7 +642,6 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   void _chooseDraftMode(ChatSession session, ModeEntry entry) {
     if (!entry.selectable) return;
     final chat = session.chat;
-    final wasAnswering = chat.bypass;
     if (entry.own) {
       chat.dropChoices(where: (choice) => choice.role == OptionRole.mode);
       chat.presetBypass(true);
@@ -651,11 +650,6 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       chat.presetBypass(false);
       final option = modeOptionIn(optionsOf(session));
       if (option != null) chat.holdChoice(PendingChoice(option.id, OptionRole.mode, entry.value, byPerson: true));
-    }
-    if (chat.bypass && !wasAnswering) {
-      chat.note('Mode: Bypass. A request that offers to allow is allowed without asking you.');
-    } else if (!chat.bypass && wasAnswering) {
-      chat.note('Mode: ${shortLine(entry.label) ?? entry.value}. Requests are asked again.');
     }
     _keepDraft(session);
   }

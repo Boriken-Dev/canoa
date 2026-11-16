@@ -81,11 +81,6 @@ class NewSessionView extends StatelessWidget {
             selected: {session.kind},
             onSelectionChanged: draft ? (chosen) => store.updateDraft(session, kind: chosen.first) : null,
           );
-    final source = session.source;
-    final says = source == null ? null : store.choicesOf(source)?.cacheLifetime;
-    final cacheNote = says == null || source == null
-        ? null
-        : 'Prompt cache: ${store.choicesOf(source)!.cacheLabel(store.cacheLifetimeOf(session).lifetime).toLowerCase()}. Provider: $says';
     return LayoutBuilder(builder: (context, constraints) => SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: ConstrainedBox(
@@ -96,8 +91,6 @@ class NewSessionView extends StatelessWidget {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               CanoaMark(size: 56, color: look.accent),
               const SizedBox(height: 16),
-              Text('NEW SESSION', style: theme.textTheme.labelSmall?.copyWith(color: look.muted, letterSpacing: 1.4)),
-              const SizedBox(height: 6),
               Text('What should we work on?', textAlign: TextAlign.center, style: theme.textTheme.headlineSmall),
               const SizedBox(height: 14),
               ?kind,
@@ -111,15 +104,7 @@ class NewSessionView extends StatelessWidget {
                 folders: recent,
                 chosen: cwd,
                 onChoose: (path) => store.updateDraft(session, cwd: path),
-                onBrowse: kit.pickFolder == null ? null : () => unawaited(_open(context)),
-                onSources: kit.onSourceSettings,
               ),
-              if (cacheNote != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: Text(cacheNote, key: const Key('new-session-cache-note'), textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall?.copyWith(color: look.muted)),
-                ),
               for (final notice in notices)
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
@@ -136,13 +121,11 @@ class NewSessionView extends StatelessWidget {
 
 /// The folders sessions worked in, newest first, one click each, and the quick actions beside them.
 class _RecentFolders extends StatelessWidget {
-  const _RecentFolders({required this.folders, required this.chosen, required this.onChoose, this.onBrowse, this.onSources});
+  const _RecentFolders({required this.folders, required this.chosen, required this.onChoose});
 
   final List<String> folders;
   final String? chosen;
   final void Function(String folder) onChoose;
-  final VoidCallback? onBrowse;
-  final VoidCallback? onSources;
 
   /// The last part of [path], and the rest of it.
   static (String, String) _split(String path) {
@@ -185,24 +168,7 @@ class _RecentFolders extends StatelessWidget {
                 ),
               );
             }),
-          const SizedBox(height: 6),
         ],
-        Wrap(alignment: WrapAlignment.center, spacing: 8, children: [
-          if (onBrowse != null)
-            TextButton.icon(
-              key: const Key('quick-choose-folder'),
-              onPressed: onBrowse,
-              icon: const Icon(Icons.folder_open_outlined, size: 18),
-              label: const Text('Open a workspace'),
-            ),
-          if (onSources != null)
-            TextButton.icon(
-              key: const Key('quick-sources'),
-              onPressed: onSources,
-              icon: const Icon(Icons.tune, size: 18),
-              label: const Text('Sources'),
-            ),
-        ]),
       ]),
     );
   }

@@ -44,9 +44,12 @@ Future<void> _draft(WidgetTester tester, String source) async {
 String _pill(WidgetTester tester, String key) =>
     find.descendant(of: find.byKey(Key(key)), matching: find.byType(Text)).evaluate().map((element) => (element.widget as Text).data).join();
 
-String? _note(WidgetTester tester) {
-  final found = find.byKey(const Key('new-session-cache-note'));
-  return found.evaluate().isEmpty ? null : (found.evaluate().single.widget as Text).data;
+/// The page prints no provider sentence, no variable name and no "Prompt cache:" line.
+void _quiet(WidgetTester tester) {
+  expect(find.byKey(const Key('new-session-cache-note')), findsNothing);
+  for (final text in ['Provider:', 'CLAUDE_CODE', 'PROMPT_CACHE', 'Prompt cache:', 'ignored:']) {
+    expect(find.textContaining(text), findsNothing, reason: text);
+  }
 }
 
 SessionStore _store() => SessionStore(ledger: SessionLedger(MemoryLedgerBackend()));
@@ -62,14 +65,14 @@ void main() {
     await pumpApp(tester, _store(), askChoices: (source) async => _answer(source.label));
     await _draft(tester, 'Claude');
     expect(_pill(tester, 'option-cache'), 'Cache: 1 hour');
-    expect(_note(tester), 'Prompt cache: 1 hour. Provider: $_claudeSays');
+    _quiet(tester);
     await finish(tester);
   });
 
-  testWidgets('a provider that has no control says so, where the person can read it', (tester) async {
+  testWidgets('a provider that has no control shows no control and no sentence', (tester) async {
     await pumpApp(tester, _store(), askChoices: (source) async => _answer(source.label));
     await _draft(tester, 'Codex');
-    expect(_note(tester), 'Prompt cache: agent default. Provider: $_codexSays');
+    _quiet(tester);
     expect(find.byKey(const Key('option-cache')), findsNothing, reason: 'nothing to choose where the choice is ignored');
     await finish(tester);
   });
@@ -78,7 +81,7 @@ void main() {
     await pumpApp(tester, _store(), askChoices: (source) async => _answer(source.label));
     await _draft(tester, 'Scripted');
     expect(find.byKey(const Key('option-cache')), findsNothing);
-    expect(_note(tester), isNull);
+    _quiet(tester);
     await finish(tester);
   });
 
@@ -91,7 +94,7 @@ void main() {
     expect(menu, ['Not chosen (1 hour)', 'Agent default', 'Off', '5 minutes', '1 hour'], reason: 'the provider\'s own names');
     await pick(tester, 'option-cache', '5 minutes');
     expect(_pill(tester, 'option-cache'), 'Cache: 5 minutes');
-    expect(_note(tester), startsWith('Prompt cache: 5 minutes.'));
+    _quiet(tester);
     expect(store.selected!.cacheLifetime, CacheLifetime.short);
     expect(agent.starts, isEmpty, reason: 'choosing starts nothing');
     await send(tester, 'Fix the failing test');

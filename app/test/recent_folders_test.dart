@@ -38,9 +38,12 @@ void main() {
     addTearDown(store.dispose);
     await pumpApp(tester, store);
     await newSession(tester);
+    await chooseWorkspace(tester);
     expect(_shown(tester), folders.reversed.take(NewSessionView.recentShown).toList());
     expect(find.text('RECENT WORKSPACES'), findsOneWidget);
-    expect(find.text('Open a workspace'), findsOneWidget);
+    expect(find.text('Open a workspace'), findsNothing);
+    expect(find.text('Sources'), findsNothing);
+    expect(find.text('NEW SESSION'), findsNothing);
     expect(find.byTooltip('The workspace it works in'), findsOneWidget);
   });
 
@@ -49,6 +52,7 @@ void main() {
     addTearDown(store.dispose);
     await pumpApp(tester, store);
     await newSession(tester);
+    await chooseWorkspace(tester);
     await chooseSource(tester, 'Scripted');
     final session = store.selected!;
     expect(session.cwd, isNull);
@@ -65,10 +69,11 @@ void main() {
     addTearDown(store.dispose);
     await pumpApp(tester, store, folderExists: (folder) => folder != '/home/ana/deleted');
     await newSession(tester);
+    await chooseWorkspace(tester);
     expect(_shown(tester), ['/home/ana/kept']);
   });
 
-  testWidgets('Open a folder opens the dialog and Sources opens Settings on the sources', (tester) async {
+  testWidgets('the workspace chip opens the folder dialog', (tester) async {
     final store = SessionStore(ledger: _ledgerOf(['/home/ana/a']));
     addTearDown(store.dispose);
     var asked = 0;
@@ -77,14 +82,13 @@ void main() {
       return '/home/ana/picked';
     });
     await newSession(tester);
-    await tester.tap(find.byKey(const Key('quick-choose-folder')));
+    await chooseWorkspace(tester);
+    await tester.tap(find.byKey(const Key('new-session-folder')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('new-session-browse')));
     await tester.pumpAndSettle();
     expect(asked, 1);
     expect(store.selected!.cwd, '/home/ana/picked');
-    await tester.tap(find.byKey(const Key('quick-sources')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('settings-nav-sources')), findsOneWidget);
-    expect(find.byKey(const Key('settings-section-sources')), findsOneWidget, reason: 'Sources opens Settings at its sources');
   });
 
   for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
@@ -93,6 +97,7 @@ void main() {
       addTearDown(store.dispose);
       await pumpApp(tester, store, size: size);
       await newSession(tester);
+      await chooseWorkspace(tester);
       await chooseSource(tester, 'Scripted');
       await tester.tap(_row('/home/ana/projects/canoa'));
       await tester.pumpAndSettle();
