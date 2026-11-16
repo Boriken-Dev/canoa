@@ -5,12 +5,22 @@ import 'package:pasteboard/pasteboard.dart';
 
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ClipboardReader;
 
+import 'attachments.dart' show maxAttachedImage;
+import 'image_fit.dart';
+
 /// Whether [bytes] is a Windows bitmap file, which is how the clipboard hands over a screenshot there.
 bool isBitmap(Uint8List bytes) => bytes.length > 2 && bytes[0] == 0x42 && bytes[1] == 0x4d;
 
 /// [bytes] as PNG when they are a bitmap, which is uncompressed and so often larger than an image can be here; anything else
-/// as it is. Null when a bitmap cannot be decoded.
+/// as it is. An image still over the cap is made smaller ([fitImage]). Null when a bitmap cannot be decoded, or an image
+/// cannot be made to fit.
 Future<Uint8List?> pngFromClipboard(Uint8List bytes) async {
+  final png = await _png(bytes);
+  if (png == null || png.length <= maxAttachedImage) return png;
+  return (await fitImage(png))?.bytes;
+}
+
+Future<Uint8List?> _png(Uint8List bytes) async {
   if (!isBitmap(bytes)) return bytes;
   try {
     final codec = await ui.instantiateImageCodec(bytes);

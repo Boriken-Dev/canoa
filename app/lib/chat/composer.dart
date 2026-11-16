@@ -213,7 +213,7 @@ final class SessionAttachments implements ComposerAttachments {
               problem = store.addFile(session, file.name, kept.path, kept.size, mimeType: file.mimeType);
             }
           } else {
-            problem = store.addAttachment(session, file.name, bytes, mimeType: file.mimeType);
+            problem = await store.addAttachmentFitted(session, file.name, bytes, mimeType: file.mimeType);
           }
           if (problem != null) problems.add(problem);
         } on Object catch (error) {

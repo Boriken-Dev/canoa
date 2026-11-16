@@ -15,6 +15,7 @@ import 'package:flutter/foundation.dart';
 import 'chat/agent_events.dart';
 import 'chat/attachments.dart';
 import 'chat/cache_lifetime.dart';
+import 'chat/image_fit.dart';
 import 'chat/git_changes.dart';
 import 'chat/modes.dart';
 import 'chat/session_options.dart';
@@ -1996,6 +1997,19 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       return '$name is not text, and only text files and images can be sent.';
     }
     return _add(session, Attachment.text(name, text, mimeType: mimeType));
+  }
+
+  /// [addAttachment], except that an image over the cap is first made smaller (a PNG at a 2048 px, else a 1536 px long edge)
+  /// and added as that, under the same name with a `.png` ending; an image that fits, and anything else, goes as it is. What
+  /// is wrong, for them to read, when it still cannot be added.
+  Future<String?> addAttachmentFitted(ChatSession session, String name, List<int> bytes, {String? mimeType, String? path}) async {
+    if (bytes.length <= maxAttachedImage || imageTypeOf(name, mimeType) == null) {
+      return addAttachment(session, name, bytes, mimeType: mimeType, path: path);
+    }
+    final fitted = await fitImage(bytes);
+    if (fitted == null) return '$name is larger than an image can be here, and could not be made smaller.';
+    final dot = name.lastIndexOf('.');
+    return addAttachment(session, '${dot > 0 ? name.substring(0, dot) : name}.png', fitted.bytes, mimeType: 'image/png', path: path);
   }
 
   /// Takes the file at [path] on this computer, [size] bytes, read only when it is sent: embedded where the agent takes files
