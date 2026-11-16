@@ -1610,3 +1610,60 @@ fn a_connection_without_the_added_skill_has_none_and_a_skill_of_the_same_name_th
         .expect("a skill");
     assert!(text.contains("Mine."), "{text}");
 }
+
+#[test]
+fn an_overlay_served_as_an_index_leaves_its_files_out_of_the_context_only_when_the_tools_are_given()
+{
+    let files = [
+        ("overlay.cfg", OPTIONS_MANIFEST),
+        ("CONTEXT.md", "Depth ${depth}.\n"),
+        ("rules/style.md", "Prefer short functions.\n"),
+    ];
+    let (temp, connection, parts) = docs_parts(&files, "kb = \"index\"");
+    // The client did not ask for the tools: nothing changes, so no knowledge is lost.
+    let prompt = prompt_of(&parts);
+    assert!(
+        prompt.contains("Prefer short functions.") && prompt.contains("Depth normal."),
+        "{prompt}"
+    );
+    assert!(!prompt.contains("kb_search"), "{prompt}");
+
+    let connection = connection.with_kb_tools();
+    let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
+    let prompt = prompt_of(&parts);
+    assert!(
+        !prompt.contains("Prefer short functions.") && !prompt.contains("Depth normal."),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("Host context."),
+        "the person's own context stays: {prompt}"
+    );
+    assert_eq!(
+        prompt.matches("kb_search (overlay: docs)").count(),
+        1,
+        "{prompt}"
+    );
+
+    let sources = connection.kb_sources();
+    assert_eq!(sources.len(), 1);
+    assert!(sources[0].indexed);
+    assert_eq!(sources[0].identity, "docs");
+    assert_eq!(
+        sources[0].digest,
+        digest_of(&temp, "overlays/docs").as_str()
+    );
+    assert!(sources[0].tree.paths().any(|path| path == "rules/style.md"));
+
+    // `files`, and no key, are the default.
+    for option in ["kb = \"files\"", ""] {
+        let (_temp, connection, _parts) = docs_parts(&files, option);
+        let connection = connection.with_kb_tools();
+        let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
+        assert!(
+            prompt_of(&parts).contains("Prefer short functions."),
+            "{option}"
+        );
+        assert!(!connection.kb_sources()[0].indexed);
+    }
+}

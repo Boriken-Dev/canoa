@@ -15,6 +15,7 @@ mod history;
 pub mod home;
 mod inproc;
 pub mod kb;
+mod kb_mcp;
 mod kind;
 mod local;
 mod loopback;
@@ -46,15 +47,18 @@ mod worktree;
 pub use accounts::ACCOUNT_META;
 pub use config::{
     AccountConfig, AccountStore, CACHE_LIFETIMES, Config, ConfigError, ControlConfig,
-    DelegateConfig, ENTRIES, Entry, EntryKind, HarnessOptions, INSTALLED_DIR_VARIABLE, Layers,
-    Listen, Loadout, NativeConfig, Origin, ResolvedLoadout, Settings, StoreConfig, TransportListen,
-    UnknownLoadout, UsageSource, WebConfig, cache_lifetime_name, cache_lifetime_named, merge_into,
+    DelegateConfig, ENTRIES, Entry, EntryKind, HarnessOptions, INSTALLED_DIR_VARIABLE, KbConfig,
+    Layers, Listen, Loadout, NativeConfig, Origin, ResolvedLoadout, Settings, StoreConfig,
+    TransportListen, UnknownLoadout, UsageSource, WebConfig, cache_lifetime_name,
+    cache_lifetime_named, merge_into,
 };
 /// The `_meta` key of `initialize` that asks a host for the delegation tools, and that a task's permission request carries
 /// with its task id, title and source.
 pub const DELEGATE_META: &str = delegate::META;
 /// The `_meta` key of `initialize` that asks a host for the `canoa-store` tools (search and inspect the Store).
 pub const STORE_META: &str = store::mcp::META;
+/// The `_meta` key of `initialize` that asks for the `canoa-kb` tools.
+pub const KB_META: &str = kb_mcp::META;
 pub use harness::Harness;
 pub use home::{Holder, Home, HomeLock, LockError};
 pub use kind::CACHE_META;

@@ -287,6 +287,8 @@ pub(crate) fn choose_overlays(first: &[u8]) -> Result<Option<Vec<String>>, Refus
 struct ReadOverlay {
     identity: String,
     root: String,
+    /// The digest its install record names, which the files were checked against.
+    digest: String,
     tree: OverlayTree,
     /// The skills it names from elsewhere that the app fetched and that passed the checks, by the name it gives each:
     /// their files by path.
@@ -375,6 +377,9 @@ pub(crate) struct Connection {
     skills: private::Private,
     /// Whether the client is this process's own link, the only one the host asks to approve servers.
     in_process: bool,
+    /// Whether this connection's sessions are given the knowledge tools, so an overlay set to `kb = "index"` is served through
+    /// them and not put in the context.
+    kb_tools: bool,
     /// The host's own program and what goes before its subcommand: how a harness's hooks run the forwarder.
     launcher: OsString,
     before: Vec<OsString>,
@@ -565,6 +570,7 @@ impl Connection {
             env_items,
             skills,
             in_process: false,
+            kb_tools: false,
             launcher: offer.launcher.clone(),
             before: offer.before.clone(),
         })
@@ -575,6 +581,34 @@ impl Connection {
     pub(crate) fn with_skill(mut self, name: &str, files: BTreeMap<String, Vec<u8>>) -> Self {
         self.chosen.entry(name.to_owned()).or_insert(files);
         self
+    }
+
+    /// This connection's sessions are given the knowledge tools.
+    pub(crate) fn with_kb_tools(mut self) -> Self {
+        self.kb_tools = true;
+        self
+    }
+
+    /// The overlays this connection applies, as the knowledge tools read them: each with the digest its files were checked
+    /// against and whether the person asked for it to be served as an index.
+    pub(crate) fn kb_sources(&self) -> Vec<crate::kb_mcp::Source> {
+        self.overlays
+            .iter()
+            .map(|overlay| crate::kb_mcp::Source {
+                identity: overlay.identity.clone(),
+                digest: overlay.digest.clone(),
+                tree: overlay.tree.clone(),
+                indexed: self.host.kb_index.contains(&overlay.identity),
+            })
+            .collect()
+    }
+
+    /// Whether `context` is an overlay's file that is served as an index to search and so not put in the context.
+    fn served_as_index(&self, context: &Sourced<Context>) -> bool {
+        self.kb_tools
+            && context.layer.kind == LayerKind::Overlay
+            && self.host.kb_index.contains(&context.layer.name)
+            && matches!(context.value, Context::File(_) | Context::Template(_))
     }
 
     /// This connection's client is (or is not) this process's own link.
@@ -663,6 +697,7 @@ fn read_overlays(host: &HostProfile, notes: &mut Vec<Item>) -> Vec<ReadOverlay> 
         out.push(ReadOverlay {
             identity: identity.clone(),
             root: root.to_string_lossy().into_owned(),
+            digest: expected.to_owned(),
             tree,
             fetched,
         });
@@ -1567,7 +1602,18 @@ fn parts_for(
     };
     let mut texts = Vec::new();
     let mut bytes = 0;
+    let mut indexed = BTreeSet::new();
     for context in effective.contexts.iter().chain(effective.context.as_ref()) {
+        if connection.served_as_index(context) {
+            if indexed.insert(context.layer.name.clone()) {
+                let note = format!(
+                    "The files of the overlay {name} are not included here: search them with kb_search (overlay: {name}) and read a passage's lines with kb_read.",
+                    name = context.layer.name
+                );
+                texts.push((note, context.layer.clone(), "kb index".to_owned(), None));
+            }
+            continue;
+        }
         match context_text(context, &connection.overlays, &templating) {
             Ok((text, source, again)) => {
                 bytes += text.len();

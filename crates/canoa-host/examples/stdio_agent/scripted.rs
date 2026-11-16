@@ -93,6 +93,8 @@ struct Shared {
     /// Each session's address and bearer for the host's secret tools.
     secret_tools: Mutex<HashMap<String, (String, String)>>,
     store_tools: Mutex<HashMap<String, (String, String)>>,
+    /// Each session's address and bearer for the host's knowledge tools.
+    kb_tools: Mutex<HashMap<String, (String, String)>>,
     /// The working directory each session was opened in.
     cwds: Mutex<HashMap<String, String>>,
     /// The `_meta` each session's `session/new` and latest prompt carried, as this agent received them.
@@ -796,6 +798,14 @@ impl Shared {
                 }
                 None => "no bridge".to_owned(),
             },
+            "KbBearer" => match lock(&self.kb_tools).get(session) {
+                Some((url, token)) => format!("{url} {token}"),
+                None => "no bearer".to_owned(),
+            },
+            "System" => format!(
+                "system: {}",
+                self.with_state(|state| state[session]["system"].to_string())
+            ),
             "StoreBearer" => match lock(&self.store_tools).get(session) {
                 Some((url, token)) => format!("{url} {token}"),
                 None => "no bearer".to_owned(),
@@ -1152,6 +1162,7 @@ impl Shared {
                             Some("canoa-delegate") => Some(&self.tools),
                             Some("canoa-secrets") => Some(&self.secret_tools),
                             Some("canoa-store") => Some(&self.store_tools),
+                            Some("canoa-kb") => Some(&self.kb_tools),
                             _ => None,
                         };
                         if let Some(kept) = kept {
@@ -1317,6 +1328,7 @@ pub fn run(args: &[String]) {
         forge: args.iter().any(|arg| arg == "--forge-profile"),
         secret_tools: Mutex::new(HashMap::new()),
         store_tools: Mutex::new(HashMap::new()),
+        kb_tools: Mutex::new(HashMap::new()),
         tools: Mutex::new(HashMap::new()),
         bridges: Mutex::new(HashMap::new()),
         secret_bridges: Mutex::new(HashMap::new()),

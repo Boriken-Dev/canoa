@@ -59,6 +59,8 @@ pub struct Config {
     pub shell: Option<String>,
     /// `[host.store]`: what the program stores' installs are held to.
     pub store: StoreConfig,
+    /// `[host.kb]`: the knowledge index tools and where their embeddings come from.
+    pub kb: KbConfig,
     /// `[host.delegate]`: what an agent may hand to another one.
     pub delegate: DelegateConfig,
     /// `[host.control]`: the control channel's limits, and where a paired key may reach it from; `None` when the file has no
@@ -116,6 +118,9 @@ pub struct LocalProfiles {
     pub skill_pins: BTreeMap<String, String>,
     /// `[overlays.NAME] options`: the values the person gave an overlay's declared options, by overlay name.
     pub options: BTreeMap<String, coqui_aos::Document>,
+    /// `[overlays.NAME] kb = "index"`: the overlays whose declared rules and context files are served as an index the agent
+    /// searches (the `canoa-kb` tools) instead of being put in its context whole. `kb = "files"`, or no key, keeps them whole.
+    pub kb_index: BTreeSet<String>,
     /// `[loadouts.NAME]`: the named collections of overlays, skills and MCP servers a session may start with, in the file's order.
     pub loadouts: IndexMap<String, Loadout>,
     /// `[defaults] loadout`: the loadout a session starts with when it names none.
@@ -263,6 +268,7 @@ impl LocalProfiles {
             directory: self.directory.clone(),
             skill_pins: self.skill_pins.clone(),
             options: self.options.clone(),
+            kb_index: self.kb_index.clone(),
             chosen_skills: Vec::new(),
             loadouts: self.loadouts.clone(),
             default_loadout: self.default_loadout.clone(),
@@ -410,6 +416,30 @@ pub struct StoreConfig {
     /// `tools`: whether the host offers the `canoa-store` tools (search and inspect) to a session whose client asks for them and
     /// whose key reads the index (default true).
     pub tools: Option<bool>,
+}
+
+/// `[host.kb]`: the `canoa-kb` tools, which search the knowledge an overlay ships. With no `embeddings` an index holds words only
+/// (BM25); with one, passages are also embedded by the endpoint the person names, which Canoa never chooses for them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct KbConfig {
+    /// `tools`: whether the host offers the `canoa-kb` tools to a session whose client asks for them (default true).
+    pub tools: Option<bool>,
+    /// `embeddings`: the address of an OpenAI-compatible embeddings server (`http://127.0.0.1:60570`, with or without `/v1`).
+    pub embeddings: Option<String>,
+    /// `model`: the exact model id that server loaded; required with `embeddings`, and saved with each index.
+    pub model: Option<String>,
+    /// `api_key_env`: the name of a variable holding a key the server asks for, sent as a bearer; the key itself is never in
+    /// canoa.cfg.
+    pub api_key_env: Option<String>,
+    /// `document_prefix`: text put before each passage when it is embedded, for models that ask for one.
+    pub document_prefix: Option<String>,
+    /// `query_prefix`: text put before a query when it is embedded.
+    pub query_prefix: Option<String>,
+    /// `chunk_bytes`: the most bytes of a passage, its prefix included (4 to 65536; default 1024).
+    pub chunk_bytes: Option<usize>,
+    /// `overlap_bytes`: the most bytes of whole lines adjacent passages share (default 0).
+    pub overlap_bytes: Option<usize>,
 }
 
 /// `[host.delegate]`: what an agent session may hand to another source, as tasks the host runs. Every limit is a setting with a
@@ -663,6 +693,8 @@ pub struct HostProfile {
     /// `[overlays.NAME] options`: the values the person gave an overlay's declared options, by overlay name. The overlay's
     /// manifest says which exist and of what type; a value of another type refuses the text that reads it.
     pub options: BTreeMap<String, coqui_aos::Document>,
+    /// `[overlays.NAME] kb = "index"`: see [`LocalProfiles::kb_index`].
+    pub kb_index: BTreeSet<String>,
     /// The skills the session's loadout names, for the host's own sources only: each is delivered from the app's record of it
     /// when the record and the files agree. Empty until a connection resolves its loadout.
     pub chosen_skills: Vec<String>,
@@ -1203,6 +1235,64 @@ struct RawHost {
     usage: Option<RawHostUsage>,
     store: Option<RawStore>,
     delegate: Option<RawDelegate>,
+    kb: Option<RawKb>,
+}
+
+/// `[host.kb]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawKb {
+    tools: Option<bool>,
+    embeddings: Option<String>,
+    model: Option<String>,
+    api_key_env: Option<String>,
+    document_prefix: Option<String>,
+    query_prefix: Option<String>,
+    chunk_bytes: Option<usize>,
+    overlap_bytes: Option<usize>,
+}
+
+impl RawKb {
+    fn into_config(self) -> Result<KbConfig, ConfigError> {
+        let invalid = |what: &str| ConfigError::Invalid {
+            entry: None,
+            what: format!("[host.kb] {what}"),
+        };
+        if let Some(address) = &self.embeddings {
+            let parsed =
+                url::Url::parse(address).map_err(|_| invalid("embeddings is not an address"))?;
+            if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+                return Err(invalid("embeddings is an http or https address"));
+            }
+            if self.model.as_deref().is_none_or(str::is_empty) {
+                return Err(invalid("embeddings needs the model its server loaded"));
+            }
+        } else if self.model.is_some() || self.api_key_env.is_some() {
+            return Err(invalid("model and api_key_env need embeddings"));
+        }
+        let chunk = self.chunk_bytes.unwrap_or(1024);
+        if !(4..=65536).contains(&chunk) {
+            return Err(invalid("chunk_bytes is 4 to 65536"));
+        }
+        let prefix = self.document_prefix.as_deref().map_or(0, str::len);
+        if chunk.saturating_sub(prefix) < 4
+            || self.overlap_bytes.unwrap_or(0) >= chunk - prefix.min(chunk)
+        {
+            return Err(invalid(
+                "overlap_bytes is below the room a passage has after its document prefix",
+            ));
+        }
+        Ok(KbConfig {
+            tools: self.tools,
+            embeddings: self.embeddings,
+            model: self.model,
+            api_key_env: self.api_key_env,
+            document_prefix: self.document_prefix,
+            query_prefix: self.query_prefix,
+            chunk_bytes: self.chunk_bytes,
+            overlap_bytes: self.overlap_bytes,
+        })
+    }
 }
 
 /// `[host.native]`.
@@ -1448,6 +1538,8 @@ impl Config {
         local_profiles.skill_pins.clone_from(&skill_pins);
         let options = overlay_options_of(&raw.overlays)?;
         local_profiles.options.clone_from(&options);
+        let kb_index = overlay_kb_of(&raw.overlays)?;
+        local_profiles.kb_index.clone_from(&kb_index);
         local_profiles.loadouts = loadouts_of(&raw.loadouts)?;
         local_profiles.default_loadout =
             default_loadout_of(raw.defaults.as_ref(), &local_profiles.loadouts)?;
@@ -1477,6 +1569,7 @@ impl Config {
             let mut profile = profile_of(&name, table, &directory)?;
             profile.skill_pins.clone_from(&skill_pins);
             profile.options.clone_from(&options);
+            profile.kb_index.clone_from(&kb_index);
             profile.protected.clone_from(&protected_paths);
             profiles.insert(name, profile);
         }
@@ -1507,6 +1600,11 @@ impl Config {
                 index_cache_bytes: raw.index_cache_bytes,
                 tools: raw.tools,
             });
+        let kb = host
+            .kb
+            .map(RawKb::into_config)
+            .transpose()?
+            .unwrap_or_default();
         let delegate = host
             .delegate
             .map(RawDelegate::into_config)
@@ -1891,6 +1989,7 @@ impl Config {
             history,
             usage,
             store,
+            kb,
             delegate,
             skill_pins,
         })
@@ -2348,6 +2447,7 @@ fn profile_of(
         directory: directory.to_owned(),
         skill_pins: BTreeMap::new(),
         options: BTreeMap::new(),
+        kb_index: BTreeSet::new(),
         chosen_skills: Vec::new(),
         loadouts: IndexMap::new(),
         default_loadout: None,
@@ -2435,6 +2535,7 @@ fn local_profiles_of(
         directory,
         skill_pins: BTreeMap::new(),
         options: BTreeMap::new(),
+        kb_index: BTreeSet::new(),
         loadouts: IndexMap::new(),
         default_loadout: None,
         protected: None,
@@ -2592,6 +2693,32 @@ fn overlay_options_of(
             return Err(invalid());
         };
         out.insert(name.clone(), values);
+    }
+    Ok(out)
+}
+
+/// `[overlays.NAME] kb`: `"index"` serves the overlay's knowledge as an index to search, `"files"` (the default) puts it in the
+/// context whole. The names with `"index"`.
+fn overlay_kb_of(
+    overlays: &IndexMap<String, toml::Value>,
+) -> Result<BTreeSet<String>, ConfigError> {
+    let mut out = BTreeSet::new();
+    for (name, entry) in overlays {
+        let Some(choice) = entry.as_table().and_then(|entry| entry.get("kb")) else {
+            continue;
+        };
+        match choice.as_str() {
+            Some("index") => {
+                out.insert(name.clone());
+            }
+            Some("files") => {}
+            _ => {
+                return Err(ConfigError::Invalid {
+                    entry: None,
+                    what: format!("overlays.{name}.kb is \"index\" or \"files\""),
+                });
+            }
+        }
     }
     Ok(out)
 }

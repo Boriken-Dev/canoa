@@ -40,6 +40,7 @@ use crate::control;
 use crate::delegate::{self, Delegating, Delegation, Peek, Principal};
 use crate::history::{self, Recording};
 use crate::inproc::{self, InProcess};
+use crate::kb_mcp::{self, KbLayer};
 use crate::kind;
 use crate::local::{self, Link};
 use crate::pipe;
@@ -528,6 +529,7 @@ struct Shared {
     secrets: Arc<secrets::Hub>,
     /// What gives a connection's sessions the store tools (search and inspect).
     store_tools: Arc<store_mcp::Hub>,
+    kb_tools: Arc<kb_mcp::Hub>,
     /// What `[host.control]` grants each key, and what every key holds beside it: the store tools are given only to a key that
     /// may read what they read.
     control_grants: IndexMap<PeerId, BTreeSet<control::Grant>>,
@@ -1568,6 +1570,11 @@ impl Serving {
                     config.store.tools.unwrap_or(true),
                     delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
                 ),
+                kb_tools: kb_mcp::Hub::new(
+                    &config.kb,
+                    options.state_dir.clone(),
+                    delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
+                ),
                 control_grants: config
                     .control
                     .as_ref()
@@ -2379,6 +2386,22 @@ fn give_agent<C: Channel>(
             connection
         }
     });
+    // The overlays this connection applies, searchable by the agent when its client asked: it is then given the tools and a skill
+    // that says when to use them, and an overlay set to be served as an index leaves its files out of the context.
+    let kb = connection.as_ref().and_then(|connection| {
+        shared
+            .kb_tools
+            .for_connection(connection.kb_sources(), kb_mcp::asked_in(first))
+    });
+    let connection = connection.map(|connection| {
+        if kb.is_some() {
+            connection
+                .with_kb_tools()
+                .with_skill(kb_mcp::SKILL_NAME, kb_mcp::skill_files())
+        } else {
+            connection
+        }
+    });
     let (program, args) = match agent {
         Agent::Program { program, args } => (program, args),
         Agent::Harness(options) => {
@@ -2394,6 +2417,7 @@ fn give_agent<C: Channel>(
                     conn.as_ref(),
                     link.as_ref(),
                     store.as_ref(),
+                    kb.as_ref(),
                 ),
             );
         }
@@ -2409,9 +2433,12 @@ fn give_agent<C: Channel>(
         };
         let scoped = Scoped::new(channel, scope).agent(agent.pid());
         let end = relay(
-            &StoreLayer::new(
-                &Layer::new(&Delegating::new(&scoped, conn.as_ref()), link.as_ref()),
-                store.as_ref(),
+            &KbLayer::new(
+                &StoreLayer::new(
+                    &Layer::new(&Delegating::new(&scoped, conn.as_ref()), link.as_ref()),
+                    store.as_ref(),
+                ),
+                kb.as_ref(),
             ),
             &agent,
         );
@@ -2437,9 +2464,12 @@ fn give_agent<C: Channel>(
     };
     let hosted = Hosted::new(channel, scope, &connection).agent(agent.pid());
     let end = relay(
-        &StoreLayer::new(
-            &Layer::new(&Delegating::new(&hosted, conn.as_ref()), link.as_ref()),
-            store.as_ref(),
+        &KbLayer::new(
+            &StoreLayer::new(
+                &Layer::new(&Delegating::new(&hosted, conn.as_ref()), link.as_ref()),
+                store.as_ref(),
+            ),
+            kb.as_ref(),
         ),
         &agent,
     );
@@ -2776,6 +2806,7 @@ type Joined<'a> = (
     Option<&'a Arc<delegate::Conn>>,
     Option<&'a Arc<secrets::Link>>,
     Option<&'a Arc<store_mcp::Link>>,
+    Option<&'a Arc<kb_mcp::Link>>,
 );
 
 /// Serves one connection with an `acp_harness` provider in this process, which [`Stopper::stop_agents`] ends like any agent.
@@ -2789,7 +2820,7 @@ fn give_harness<C: Channel>(
     (peer, first): (&PeerId, &[u8]),
     harness: &kind::Harness,
     scope: &Scope,
-    (connection, conn, link, store): Joined<'_>,
+    (connection, conn, link, store, kb): Joined<'_>,
 ) {
     let turn_away = |why: String| {
         let id = serde_json::from_slice::<serde_json::Value>(first)
@@ -2845,20 +2876,23 @@ fn give_harness<C: Channel>(
     let to_provider = (started.request, started.spawner, started.keeper);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
-            &StoreLayer::new(
-                &Layer::new(
-                    &Delegating::new(
-                        &Recording::new(
-                            &Hosted::in_process(&gated, scope, connection),
-                            &shared.history,
-                            &served.name,
-                            harness.id(),
+            &KbLayer::new(
+                &StoreLayer::new(
+                    &Layer::new(
+                        &Delegating::new(
+                            &Recording::new(
+                                &Hosted::in_process(&gated, scope, connection),
+                                &shared.history,
+                                &served.name,
+                                harness.id(),
+                            ),
+                            conn,
                         ),
-                        conn,
+                        link,
                     ),
-                    link,
+                    store,
                 ),
-                store,
+                kb,
             ),
             &*started.harness,
             to_provider,
@@ -2866,20 +2900,23 @@ fn give_harness<C: Channel>(
             &control,
         ),
         None => inproc::serve_kind(
-            &StoreLayer::new(
-                &Layer::new(
-                    &Delegating::new(
-                        &Recording::new(
-                            &Scoped::new(&gated, scope),
-                            &shared.history,
-                            &served.name,
-                            harness.id(),
+            &KbLayer::new(
+                &StoreLayer::new(
+                    &Layer::new(
+                        &Delegating::new(
+                            &Recording::new(
+                                &Scoped::new(&gated, scope),
+                                &shared.history,
+                                &served.name,
+                                harness.id(),
+                            ),
+                            conn,
                         ),
-                        conn,
+                        link,
                     ),
-                    link,
+                    store,
                 ),
-                store,
+                kb,
             ),
             &*started.harness,
             to_provider,
