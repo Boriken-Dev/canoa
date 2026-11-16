@@ -26,6 +26,7 @@ pub(crate) use files::{Files, UploadLimits};
 pub(crate) use import::{Homes, IMPORT_KEY};
 pub(crate) use moves::Moves;
 pub(crate) use overlays::{OverlayLimits, Overlays};
+pub(crate) use registry::Registry;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 pub(crate) use stores::Stores;
@@ -73,6 +74,7 @@ pub enum Grant {
     /// `worktree/new`, `worktree/status` and `worktree/remove`, under the working roots of the entries the key may use.
     Worktree,
     /// `store/list`, `store/report`, `store/latest` and `store/plan`: what the host finds and would do, and nothing it writes.
+    /// Also `host/which`: whether a program is on the host's `PATH`, which starts nothing.
     /// Installing, updating, rolling back and removing is [`Grant::StorePrograms`], which is not implied by this.
     StoreRead,
     /// `fs/list`: the folders under the user's home and the working roots of the entries the key may use.
@@ -86,9 +88,10 @@ pub enum Grant {
     /// `upload/put` and `upload/remove`: files in a folder of the key's own, within the limits of `[host.control]`.
     Upload,
     /// `overlay/installed`, `overlay/read` and `catalog/read`: what is installed and what a check or a catalog fetch holds. The
-    /// host fetches nothing for these.
+    /// host fetches nothing for these. Also `store/contents` and `store/contents_put`: the key's own cache of what the entries of a
+    /// catalog provide, which no other key reads.
     OverlayRead,
-    /// `overlay/check`, `overlay/apply`, `overlay/remove`, `overlay/discard`, `catalog/fetch` and `catalog/remove`: fetch sources with
+    /// `registry/fetch` (one page of an MCP registry's list, from the official registry or one `[store] registries` lists), `overlay/check`, `overlay/apply`, `overlay/remove`, `overlay/discard`, `catalog/fetch` and `catalog/remove`: fetch sources with
     /// git as this user and install what AOS digests, under the overlays folder beside canoa.cfg. Nothing is run.
     OverlayWrite,
     /// `host/restart`: ends this host so that its supervisor starts it again with the canoa.cfg then.
@@ -282,6 +285,8 @@ pub(crate) struct Control {
     /// The shells this host runs for the person.
     terminals: Terminals,
     overlays: Arc<Overlays>,
+    /// Registry reads and the cache of what catalogs provide.
+    registry: Registry,
     /// The catalogs and programs, indexed for `store/index`.
     index: Arc<crate::store::index::StoreIndex>,
     /// Set by `host/restart`, with `stop` raised so the host ends and its supervisor starts it again.
@@ -382,6 +387,7 @@ impl Control {
             files: Files::default(),
             terminals: Terminals::default(),
             overlays: Arc::new(Overlays::default()),
+            registry: Registry::default(),
             index: Arc::new(crate::store::index::StoreIndex::default()),
             restart: Arc::new(AtomicBool::new(false)),
             stop: None,
@@ -424,6 +430,13 @@ impl Control {
     #[must_use]
     pub(crate) fn with_overlays(mut self, overlays: Overlays) -> Self {
         self.overlays = Arc::new(overlays);
+        self
+    }
+
+    /// Offers `registry/fetch` and `store/contents` over this registry.
+    #[must_use]
+    pub(crate) fn with_registry(mut self, registry: Registry) -> Self {
+        self.registry = registry;
         self
     }
 
@@ -607,6 +620,15 @@ impl Control {
                 }),
                 Some("catalog/remove") => allow(caller, Grant::OverlayWrite)
                     .and_then(|()| self.overlays.catalog_remove(&params)),
+                Some("registry/fetch") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| self.registry_fetch(caller, &params)),
+                Some("store/contents") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.registry.contents(caller, &params)),
+                Some("store/contents_put") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.registry.put_contents(caller, &params)),
+                Some("host/which") => {
+                    allow(caller, Grant::StoreRead).and_then(|()| registry::which(&params))
+                }
                 Some("host/restart") => {
                     allow(caller, Grant::HostRestart).and_then(|()| self.restart_now())
                 }
@@ -697,6 +719,22 @@ impl Control {
             }
             Err((code, message)) => error_line(&id, code, &message),
         })
+    }
+
+    /// `registry/fetch`: the person running the host reads any registry; a key reads the official one and those canoa.cfg lists.
+    fn registry_fetch(&self, caller: &Caller, params: &Value) -> Result<Value, (i32, String)> {
+        let bases = match caller {
+            Caller::Owner => None,
+            Caller::Peer { .. } => Some(registry::listed_bases(
+                &self
+                    .files
+                    .config_get(&json!({"section": "store"}))
+                    .ok()
+                    .and_then(|answer| answer.get("value").cloned())
+                    .unwrap_or(Value::Null),
+            )),
+        };
+        self.registry.fetch(params, bases.as_deref())
     }
 
     /// A worktree request, answered by the rule an entry's clients have, over the roots this caller may use: the whole machine
@@ -1160,6 +1198,7 @@ mod moves;
 mod overlays;
 #[cfg(test)]
 mod overlays_tests;
+mod registry;
 mod stores;
 
 #[cfg(test)]

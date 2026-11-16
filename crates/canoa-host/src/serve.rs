@@ -1650,6 +1650,12 @@ impl Serving {
                                 .index_cache_bytes
                                 .unwrap_or(crate::store::index::DEFAULT_CACHE_BYTES),
                         ))
+                        .with_registry(control::Registry::new(
+                            options
+                                .state_dir
+                                .as_ref()
+                                .map(|dir| dir.join("cache").join("contents")),
+                        ))
                         .with_overlays(control::Overlays::new(
                             options
                                 .config_file
