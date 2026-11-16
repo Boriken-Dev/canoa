@@ -314,6 +314,8 @@ pub(crate) mod dart {
             assert!(post(1, 1));
 
             HOLD.store(true, Ordering::SeqCst);
+            // The posts above set it already: only this thread's entry may end the wait below.
+            ENTERED.store(false, Ordering::SeqCst);
             let flying = std::thread::spawn(|| post(1, 1));
             let until = Instant::now() + Duration::from_secs(10);
             while !ENTERED.load(Ordering::SeqCst) {
