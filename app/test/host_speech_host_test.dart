@@ -12,11 +12,14 @@ import 'dart:typed_data';
 
 import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/voice/host_speech.dart';
+import 'package:canoa/voice/record_capture.dart';
 import 'package:canoa/voice/speech_backend.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:record/record.dart';
 
 import 'fixtures/control_process.dart';
 import 'fixtures/examples.dart';
+import 'fixtures/record_standin.dart';
 
 /// A second of 16 kHz mono silence as a WAV file holds it: a 44-byte header and then the samples.
 Uint8List _recordedWav() {
@@ -110,6 +113,27 @@ void main() {
       expect(heard.last.text, 'the quick brown fox');
       expect(heard.last.frontMatter, isA<Map<String, Object?>>());
       expect(capture.opened, 1);
+    });
+
+    test('the app capture, over a recorded tone where the microphone would be, reaches the provider and is released', () async {
+      final recorder = StandInRecorder();
+      RecordPlatform.instance = recorder;
+      final live = HostSpeechCatalog(control, capture: const RecordCapture());
+      await live.refresh();
+      final heard = live.backends.single.start(language: 'en');
+      final stream = StreamIterator(heard);
+      // The tone is half a second; the dictation ends when the person stops it.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(recorder.recording, isTrue);
+      await live.backends.single.stop();
+      final texts = <Transcript>[];
+      while (await stream.moveNext()) {
+        texts.add(stream.current);
+      }
+      expect(texts.last.isFinal, isTrue);
+      expect(texts.last.text, 'the quick brown fox');
+      expect(recorder.recording, isFalse);
+      expect(recorder.calls.last, 'dispose');
     });
 
     test('a provider written from the form is in canoa.cfg, listed without its key, and keeps the key when saved again', () async {
