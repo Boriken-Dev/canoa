@@ -306,6 +306,9 @@ pub struct StoreConfig {
     pub index_ttl: Option<u64>,
     /// `index_cache_bytes`: what the index's cached icons may take in all (default 64 MiB).
     pub index_cache_bytes: Option<u64>,
+    /// `tools`: whether the host offers the `canoa-store` tools (search and inspect) to a session whose client asks for them and
+    /// whose key reads the index (default true).
+    pub tools: Option<bool>,
 }
 
 /// `[host.delegate]`: what an agent session may hand to another source, as tasks the host runs. Every limit is a setting with a
@@ -439,6 +442,7 @@ struct RawStore {
     credential_variables: Option<RawLines>,
     index_ttl: Option<u64>,
     index_cache_bytes: Option<u64>,
+    tools: Option<bool>,
 }
 
 /// Where the credentials of `[host.accounts]` are kept, never in canoa.cfg.
@@ -1361,6 +1365,7 @@ impl Config {
                 credential_variables: raw.credential_variables.map(RawLines::lines),
                 index_ttl: raw.index_ttl,
                 index_cache_bytes: raw.index_cache_bytes,
+                tools: raw.tools,
             });
         let delegate = host
             .delegate

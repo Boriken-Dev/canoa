@@ -459,3 +459,34 @@ fn program_entries_need_the_programs_grant_and_catalog_entries_do_not_leak_to_it
         "{kinds:?}"
     );
 }
+
+#[test]
+fn the_tools_read_the_index_with_the_grants_they_were_given_and_never_more() {
+    use crate::store::mcp::Backend as _;
+    let rig = Rig::new();
+    let control = Arc::new(configured(
+        &rig,
+        &format!("team = \"{}@main#catalog.toml\"", url(&rig.upstream)),
+    ));
+    let backend = ToolsBackend(Arc::clone(&control));
+    let reader: std::collections::BTreeSet<Grant> = [Grant::OverlayRead].into();
+    let read = backend.index(&reader, false).expect("a reader reads");
+    assert_eq!(read["sources"][0]["id"], "catalog:team", "{read}");
+    // The sources are canoa.cfg's, and fetching them again is the grant that fetches.
+    let refused = backend
+        .index(&reader, true)
+        .expect_err("a refresh needs overlay.write");
+    assert!(refused.contains("overlay.write"), "{refused}");
+    let none: std::collections::BTreeSet<Grant> = [Grant::StoreRead].into();
+    assert!(
+        backend.index(&none, false).is_err(),
+        "a key that reads neither half is refused"
+    );
+    let fetching: std::collections::BTreeSet<Grant> =
+        [Grant::OverlayRead, Grant::OverlayWrite].into();
+    assert!(backend.index(&fetching, true).is_ok());
+    assert!(
+        backend.installed().overlays.is_empty(),
+        "nothing is named in this canoa.cfg"
+    );
+}

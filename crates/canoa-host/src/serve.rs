@@ -48,6 +48,7 @@ use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
 use crate::secrets::{self, Layer, Raw};
 use crate::sources;
+use crate::store::mcp::{self as store_mcp, StoreLayer, StorePeek};
 use crate::transport;
 use crate::usage_splice::{Antigravity, Starter};
 use crate::worktree::Worktrees;
@@ -525,6 +526,28 @@ struct Shared {
     history: Arc<history::Store>,
     /// What gives a connection's sessions the secret tools.
     secrets: Arc<secrets::Hub>,
+    /// What gives a connection's sessions the store tools (search and inspect).
+    store_tools: Arc<store_mcp::Hub>,
+    /// What `[host.control]` grants each key, and what every key holds beside it: the store tools are given only to a key that
+    /// may read what they read.
+    control_grants: IndexMap<PeerId, BTreeSet<control::Grant>>,
+    control_everyone: Option<BTreeSet<control::Grant>>,
+}
+
+impl Shared {
+    /// The grants of the key behind a connection that may be given the store tools, or `None` for a task another agent handed
+    /// out, which has no person at its end.
+    fn store_grants(&self, peer: &PeerId, task: bool) -> Option<BTreeSet<control::Grant>> {
+        if task {
+            None
+        } else if *peer == self.method.peer_id() {
+            Some(control::Grant::all().into_iter().collect())
+        } else if let Some(everyone) = &self.control_everyone {
+            Some(everyone.clone())
+        } else {
+            self.control_grants.get(peer).cloned()
+        }
+    }
 }
 
 /// Every agent process running, so stopping the host can end them: on Unix nothing else does when the host goes.
@@ -1525,6 +1548,21 @@ impl Serving {
             shared: Arc::new(Shared {
                 history: Arc::clone(&recorded),
                 secrets: Arc::clone(&secrets),
+                store_tools: store_mcp::Hub::new(
+                    config.store.tools.unwrap_or(true),
+                    delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
+                ),
+                control_grants: config
+                    .control
+                    .as_ref()
+                    .map(|settings| settings.grants.clone())
+                    .unwrap_or_default(),
+                control_everyone: portal_of(options).is_some().then(|| {
+                    control::Grant::all()
+                        .into_iter()
+                        .filter(|grant| *grant != control::Grant::Discover)
+                        .collect()
+                }),
                 method,
                 store,
                 registry,
@@ -1668,6 +1706,12 @@ impl Serving {
             door: None,
         };
         let mut serving = serving;
+        serving
+            .shared
+            .store_tools
+            .serve_with(Arc::new(control::ToolsBackend(Arc::clone(
+                &serving.shared.control,
+            ))));
         serving.door = serving.open_door(config, options);
         serving.attach_delegation(&config.remote_agents, dialer);
 
@@ -2255,9 +2299,14 @@ fn give_agent<C: Channel>(
     let link = shared
         .secrets
         .for_connection(peer, in_process, context.is_some());
+    // The store tools, for a connection whose key may read what they read.
+    let store = shared
+        .store_tools
+        .for_connection(shared.store_grants(peer, context.is_some()).as_ref());
     let peeked = Peek::new(channel, conn.as_ref());
     let raw = Raw::new(&peeked, link.as_ref());
-    let channel = &raw;
+    let store_peek = StorePeek::new(&raw, store.as_ref());
+    let channel = &store_peek;
     let fresh = refresh
         .as_ref()
         .map_or_else(|| offer.clone(), |refresh| refresh.offer());
@@ -2277,6 +2326,14 @@ fn give_agent<C: Channel>(
         },
         None => None,
     };
+    // A session that was given the store tools is told when to use them, by a skill that goes with it.
+    let connection = connection.map(|connection| {
+        if store.is_some() && store_mcp::asked_in(first) {
+            connection.with_skill(store_mcp::SKILL_NAME, store_mcp::skill_files())
+        } else {
+            connection
+        }
+    });
     let (program, args) = match agent {
         Agent::Program { program, args } => (program, args),
         Agent::Harness(options) => {
@@ -2287,7 +2344,12 @@ fn give_agent<C: Channel>(
                 (peer, first),
                 options,
                 scope,
-                (connection.as_ref(), conn.as_ref(), link.as_ref()),
+                (
+                    connection.as_ref(),
+                    conn.as_ref(),
+                    link.as_ref(),
+                    store.as_ref(),
+                ),
             );
         }
     };
@@ -2302,7 +2364,10 @@ fn give_agent<C: Channel>(
         };
         let scoped = Scoped::new(channel, scope).agent(agent.pid());
         let end = relay(
-            &Layer::new(&Delegating::new(&scoped, conn.as_ref()), link.as_ref()),
+            &StoreLayer::new(
+                &Layer::new(&Delegating::new(&scoped, conn.as_ref()), link.as_ref()),
+                store.as_ref(),
+            ),
             &agent,
         );
         tracing::info!(entry = served.name, %peer, "left: {end:?}");
@@ -2327,7 +2392,10 @@ fn give_agent<C: Channel>(
     };
     let hosted = Hosted::new(channel, scope, &connection).agent(agent.pid());
     let end = relay(
-        &Layer::new(&Delegating::new(&hosted, conn.as_ref()), link.as_ref()),
+        &StoreLayer::new(
+            &Layer::new(&Delegating::new(&hosted, conn.as_ref()), link.as_ref()),
+            store.as_ref(),
+        ),
         &agent,
     );
     tracing::info!(entry = served.name, %peer, "left: {end:?}");
@@ -2643,6 +2711,14 @@ fn offered_accounts(
     Ok(listed)
 }
 
+/// What a connection's sessions are given beside the agent: its profile, and the delegation, secret and store tools.
+type Joined<'a> = (
+    Option<&'a Connection>,
+    Option<&'a Arc<delegate::Conn>>,
+    Option<&'a Arc<secrets::Link>>,
+    Option<&'a Arc<store_mcp::Link>>,
+);
+
 /// Serves one connection with an `acp_harness` provider in this process, which [`Stopper::stop_agents`] ends like any agent.
 /// With a profile, its environment goes to the provider's program, and the provider lets Claude Code take the plugin the
 /// host writes for its skills: the host removes every `_meta` a client sends, so that plugin is the only one that can reach
@@ -2654,11 +2730,7 @@ fn give_harness<C: Channel>(
     (peer, first): (&PeerId, &[u8]),
     harness: &kind::Harness,
     scope: &Scope,
-    (connection, conn, link): (
-        Option<&Connection>,
-        Option<&Arc<delegate::Conn>>,
-        Option<&Arc<secrets::Link>>,
-    ),
+    (connection, conn, link, store): Joined<'_>,
 ) {
     let turn_away = |why: String| {
         let id = serde_json::from_slice::<serde_json::Value>(first)
@@ -2714,17 +2786,20 @@ fn give_harness<C: Channel>(
     let to_provider = (started.request, started.spawner, started.keeper);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
-            &Layer::new(
-                &Delegating::new(
-                    &Recording::new(
-                        &Hosted::in_process(&gated, scope, connection),
-                        &shared.history,
-                        &served.name,
-                        harness.id(),
+            &StoreLayer::new(
+                &Layer::new(
+                    &Delegating::new(
+                        &Recording::new(
+                            &Hosted::in_process(&gated, scope, connection),
+                            &shared.history,
+                            &served.name,
+                            harness.id(),
+                        ),
+                        conn,
                     ),
-                    conn,
+                    link,
                 ),
-                link,
+                store,
             ),
             &*started.harness,
             to_provider,
@@ -2732,17 +2807,20 @@ fn give_harness<C: Channel>(
             &control,
         ),
         None => inproc::serve_kind(
-            &Layer::new(
-                &Delegating::new(
-                    &Recording::new(
-                        &Scoped::new(&gated, scope),
-                        &shared.history,
-                        &served.name,
-                        harness.id(),
+            &StoreLayer::new(
+                &Layer::new(
+                    &Delegating::new(
+                        &Recording::new(
+                            &Scoped::new(&gated, scope),
+                            &shared.history,
+                            &served.name,
+                            harness.id(),
+                        ),
+                        conn,
                     ),
-                    conn,
+                    link,
                 ),
-                link,
+                store,
             ),
             &*started.harness,
             to_provider,

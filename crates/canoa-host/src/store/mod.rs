@@ -9,6 +9,7 @@ pub mod exec;
 pub mod extensions;
 pub mod footprint;
 pub(crate) mod index;
+pub(crate) mod mcp;
 pub mod programs;
 pub mod protect;
 pub mod registry;

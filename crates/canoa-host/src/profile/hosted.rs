@@ -501,6 +501,13 @@ impl Connection {
         })
     }
 
+    /// Delivers one more skill with this connection's sessions, as the person's own. A skill of the same name the person chose
+    /// stays theirs.
+    pub(crate) fn with_skill(mut self, name: &str, files: BTreeMap<String, Vec<u8>>) -> Self {
+        self.chosen.entry(name.to_owned()).or_insert(files);
+        self
+    }
+
     /// This connection's client is (or is not) this process's own link.
     pub(crate) fn asking(mut self, in_process: bool) -> Self {
         self.in_process = in_process;

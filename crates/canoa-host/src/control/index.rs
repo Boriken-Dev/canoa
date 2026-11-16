@@ -133,3 +133,57 @@ fn program_entry(info: &Value) -> Value {
         "channels": info.get("channels").cloned().unwrap_or(json!([])),
     })
 }
+
+/// What the `canoa-store` tools read of this host: the index as a key holding the grants they were given would read it, a program
+/// store's plan that is kept for nobody, and what canoa.cfg names. Nothing else of the control channel is reachable through it.
+pub(crate) struct ToolsBackend(pub(crate) std::sync::Arc<Control>);
+
+impl crate::store::mcp::Backend for ToolsBackend {
+    fn index(
+        &self,
+        grants: &std::collections::BTreeSet<Grant>,
+        refresh: bool,
+    ) -> Result<Value, String> {
+        let caller = Caller::Peer {
+            id: "canoa-store".to_owned(),
+            grants: grants.clone(),
+        };
+        self.0
+            .store_index(&caller, &json!({"refresh": refresh}))
+            .map_err(|(_, why)| why)
+    }
+
+    fn plan(&self, provider: &str, action: &str, version: Option<&str>) -> Result<Value, String> {
+        let mut params = json!({"provider": provider, "action": action});
+        if let Some(version) = version {
+            params["version"] = json!(version);
+        }
+        // No owner: the plan is returned and kept for no key, so no apply can name it.
+        self.0
+            .stores()
+            .and_then(|stores| stores.read("store/plan", &params, None))
+            .map_err(|(_, why)| why)
+    }
+
+    fn installed(&self) -> crate::store::mcp::Installed {
+        let section = |name: &str| {
+            self.0
+                .files
+                .config_get(&json!({"section": name}))
+                .ok()
+                .and_then(|answer| answer.get("value").cloned())
+        };
+        let mut installed = crate::store::mcp::Installed::default();
+        if let Some(Value::Object(overlays)) = section("overlays") {
+            installed.overlays.extend(overlays.keys().cloned());
+        }
+        if let Some(Value::Array(skills)) =
+            section("loadout").and_then(|loadout| loadout.get("skills").cloned())
+        {
+            installed
+                .skills
+                .extend(skills.iter().filter_map(Value::as_str).map(str::to_owned));
+        }
+        installed
+    }
+}

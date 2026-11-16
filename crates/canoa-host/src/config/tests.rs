@@ -1866,3 +1866,17 @@ fn host_usage_keeps_four_hundred_days_unless_told_and_refuses_zero_and_the_unkno
         );
     }
 }
+
+#[test]
+fn the_store_tools_are_on_unless_the_file_says_false() {
+    let none = parse("[host.store]\nprotected = []\n").expect("parses");
+    assert_eq!(none.store.tools, None, "absent is the default, which is on");
+    assert_eq!(
+        parse("[host.store]\ntools = false\n")
+            .expect("parses")
+            .store
+            .tools,
+        Some(false)
+    );
+    assert!(parse("[host.store]\ntools = \"no\"\n").is_err());
+}

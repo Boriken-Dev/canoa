@@ -50,6 +50,8 @@ pub use config::{
 /// The `_meta` key of `initialize` that asks a host for the delegation tools, and that a task's permission request carries
 /// with its task id, title and source.
 pub const DELEGATE_META: &str = delegate::META;
+/// The `_meta` key of `initialize` that asks a host for the `canoa-store` tools (search and inspect the Store).
+pub const STORE_META: &str = store::mcp::META;
 pub use harness::Harness;
 pub use home::{Holder, Home, HomeLock, LockError};
 pub use kind::CACHE_META;

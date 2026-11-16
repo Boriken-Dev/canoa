@@ -1365,3 +1365,82 @@ fn an_antigravity_that_takes_no_additional_directories_is_told_why() {
         parts.report
     );
 }
+
+#[test]
+fn a_skill_the_host_adds_reaches_claude_as_a_plugin_skill_and_codex_as_a_skill_directory() {
+    let temp = temp_with_skill();
+    let offer = offer_of(&temp, &config_with(""));
+    let skill = || crate::store::mcp::skill_files();
+    let connection = Connection::prepare(&offer, 0, "a", &lookup)
+        .expect("prepared")
+        .with_skill(crate::store::mcp::SKILL_NAME, skill());
+    let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
+    let plugin =
+        parts.meta.as_ref().expect("a plugin")["claudeCode"]["options"]["plugins"][0]["path"]
+            .as_str()
+            .expect("a path")
+            .to_owned();
+    let text = std::fs::read_to_string(Path::new(&plugin).join("skills/canoa-store/SKILL.md"))
+        .expect("the skill is in the plugin");
+    assert!(text.starts_with("---\nname: canoa-store\n"), "{text}");
+    assert!(
+        Path::new(&plugin).join("skills/review/SKILL.md").is_file(),
+        "the profile's own skills are still there"
+    );
+    drop(parts);
+
+    let takes = Takes {
+        version: 2,
+        capabilities: json!({"session": {"additionalDirectories": {}, "systemPrompt": {}, "mcp": {"stdio": true}}}),
+    };
+    let parts = parts_for(&connection, Some("codex"), &takes, &lookup);
+    let directory = PathBuf::from(&parts.directories[0]);
+    assert!(
+        directory
+            .join(AGENT_SKILLS)
+            .join("canoa-store/SKILL.md")
+            .is_file()
+    );
+    assert_eq!(
+        item(&parts.report, "skills.canoa-store")["state"],
+        "applied",
+        "{}",
+        parts.report
+    );
+}
+
+#[test]
+fn a_connection_without_the_added_skill_has_none_and_a_skill_of_the_same_name_the_person_chose_stays_theirs()
+ {
+    let temp = temp_with_skill();
+    let offer = offer_of(&temp, &config_with(""));
+    let plain = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let parts = parts_for(&plain, Some("claude-code"), &claude(), &lookup);
+    let plugin =
+        parts.meta.as_ref().expect("a plugin")["claudeCode"]["options"]["plugins"][0]["path"]
+            .as_str()
+            .expect("a path")
+            .to_owned();
+    assert!(!Path::new(&plugin).join("skills/canoa-store").exists());
+    drop(parts);
+    let mine: BTreeMap<String, Vec<u8>> = [(
+        "SKILL.md".to_owned(),
+        b"---\nname: canoa-store\n---\nMine.\n".to_vec(),
+    )]
+    .into();
+    let mut chosen = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    chosen.chosen.insert("canoa-store".to_owned(), mine);
+    let chosen = chosen.with_skill(
+        crate::store::mcp::SKILL_NAME,
+        crate::store::mcp::skill_files(),
+    );
+    let parts = parts_for(&chosen, Some("claude-code"), &claude(), &lookup);
+    let plugin =
+        parts.meta.as_ref().expect("a plugin")["claudeCode"]["options"]["plugins"][0]["path"]
+            .as_str()
+            .expect("a path")
+            .to_owned();
+    let text = std::fs::read_to_string(Path::new(&plugin).join("skills/canoa-store/SKILL.md"))
+        .expect("a skill");
+    assert!(text.contains("Mine."), "{text}");
+}

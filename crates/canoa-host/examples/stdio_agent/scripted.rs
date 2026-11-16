@@ -92,6 +92,7 @@ struct Shared {
     secret_bridges: Mutex<HashMap<String, Arc<Mutex<Bridge>>>>,
     /// Each session's address and bearer for the host's secret tools.
     secret_tools: Mutex<HashMap<String, (String, String)>>,
+    store_tools: Mutex<HashMap<String, (String, String)>>,
     /// The working directory each session was opened in.
     cwds: Mutex<HashMap<String, String>>,
     /// The `_meta` each session's `session/new` and latest prompt carried, as this agent received them.
@@ -793,6 +794,10 @@ impl Shared {
                 }
                 None => "no bridge".to_owned(),
             },
+            "StoreBearer" => match lock(&self.store_tools).get(session) {
+                Some((url, token)) => format!("{url} {token}"),
+                None => "no bearer".to_owned(),
+            },
             "Bearer" => match lock(&self.tools).get(session) {
                 Some((url, token)) => format!("{url} {token}"),
                 None => "no bearer".to_owned(),
@@ -1117,6 +1122,7 @@ impl Shared {
                         let kept = match server["name"].as_str() {
                             Some("canoa-delegate") => Some(&self.tools),
                             Some("canoa-secrets") => Some(&self.secret_tools),
+                            Some("canoa-store") => Some(&self.store_tools),
                             _ => None,
                         };
                         if let Some(kept) = kept {
@@ -1281,6 +1287,7 @@ pub fn run(args: &[String]) {
         http: args.iter().any(|arg| arg == "--mcp-http"),
         forge: args.iter().any(|arg| arg == "--forge-profile"),
         secret_tools: Mutex::new(HashMap::new()),
+        store_tools: Mutex::new(HashMap::new()),
         tools: Mutex::new(HashMap::new()),
         bridges: Mutex::new(HashMap::new()),
         secret_bridges: Mutex::new(HashMap::new()),

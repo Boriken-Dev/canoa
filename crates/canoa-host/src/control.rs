@@ -1033,6 +1033,7 @@ mod import;
 #[cfg(test)]
 mod import_tests;
 mod index;
+pub(crate) use index::ToolsBackend;
 #[cfg(test)]
 mod index_tests;
 mod moves;
