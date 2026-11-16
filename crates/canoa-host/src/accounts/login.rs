@@ -96,6 +96,10 @@ pub(crate) fn sign_in(
     interaction: Arc<dyn Interaction>,
     timeout_ms: Option<u64>,
 ) -> Result<LoginOutcome, SignInError> {
+    // Foundry Local is the host's own kind: there is no program to sign in to, and the inputs are the account.
+    if method == canoa_foundry::account::KIND {
+        return super::foundry::sign_in(inputs).map_err(SignInError);
+    }
     // The directory goes when this returns, however the sign-in ended.
     let dir = accounts
         .login_dir()

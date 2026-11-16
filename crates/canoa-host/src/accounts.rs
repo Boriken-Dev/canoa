@@ -13,6 +13,7 @@
 )]
 
 pub(crate) mod commands;
+pub(crate) mod foundry;
 mod gate;
 pub(crate) mod login;
 mod private;
@@ -39,6 +40,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroize as _;
 
 use crate::config::{AccountConfig, AccountStore, Settings};
+use crate::gateway::Ticket;
 use crate::provider::map_of;
 
 pub(crate) use gate::Gated;
@@ -98,12 +100,16 @@ pub(crate) enum Refusal {
     NoCredentials,
     /// The store failed; the reason is for the host's log, not for a client.
     Store(String),
+    /// The gateway of a Foundry Local account could not be given: the reason is the model's or the service's, and the person
+    /// can act on it.
+    Gateway(String),
 }
 
 impl Refusal {
     /// What a client is told: nothing of a path or of the system's words.
     pub(crate) fn client_reason(&self) -> String {
         match self {
+            Self::Gateway(why) => why.clone(),
             Self::Store(why) => {
                 tracing::warn!("an account could not be used: {why}");
                 "the host's account store could not be used for this account".to_owned()
@@ -124,6 +130,7 @@ impl fmt::Display for Refusal {
                 f.write_str("this account has no credentials: sign in with `canoa accounts login`")
             }
             Self::Store(why) => write!(f, "the account store failed: {why}"),
+            Self::Gateway(why) => f.write_str(why),
         }
     }
 }
@@ -156,6 +163,8 @@ pub(crate) struct Accounts {
     writing: Mutex<()>,
     /// Why the credentials rest in sealed files, when they do by a choice that is not the default.
     note: Option<String>,
+    /// The gateways of Foundry Local accounts that sessions hold.
+    gateways: foundry::Gateways,
 }
 
 /// The note that sealed files are in use: what they protect against and what they do not.
@@ -283,9 +292,16 @@ impl Accounts {
             sources: AtomicU64::new(1),
             writing: Mutex::new(()),
             note,
+            gateways: foundry::Gateways::default(),
         });
         accounts.sweep();
         Ok(accounts)
+    }
+
+    /// The gateways of Foundry Local accounts.
+    #[cfg(test)]
+    pub(crate) fn gateways(&self) -> &foundry::Gateways {
+        &self.gateways
     }
 
     /// A number for a provider instance, so its sequences are not taken for another's.
@@ -459,6 +475,7 @@ impl Accounts {
         if config.kind == HARNESS_LOGIN {
             return Ok(Held::new(self, name, grant, None, Arc::default(), false));
         }
+        let foundry = config.kind == canoa_foundry::account::KIND;
         let record = self
             .load(&id)
             .map_err(|error| Refusal::Store(error.to_string()))?
@@ -489,7 +506,25 @@ impl Accounts {
                 }
             }
         }
-        Ok(Held::new(self, name, grant, Some(lock), files, rotates))
+        let mut session = None;
+        if foundry {
+            match foundry::grant(&self.gateways, &config.harness, &grant) {
+                Ok((mapped, ticket)) => {
+                    grant = mapped;
+                    session = Some(ticket);
+                }
+                Err(why) => {
+                    drop(Held::new(self, name, grant, Some(lock), files, rotates));
+                    return Err(Refusal::Gateway(why));
+                }
+            }
+        }
+        let mut held = Held::new(self, name, grant, Some(lock), files, rotates);
+        held.session = session;
+        if foundry {
+            held.kind.clone_from(&config.kind);
+        }
+        Ok(held)
     }
 
     /// The lock on an account's lease file, `exclusive` or shared. A look that `held` is taking can hold it for an
@@ -720,13 +755,17 @@ pub(crate) struct Held {
     lock: Option<fs::File>,
     files: Arc<Mutex<BTreeSet<String>>>,
     rotates: bool,
+    /// The account's own kind, which a Foundry Local account's grant does not carry: the harness is given its own.
+    kind: String,
+    /// The session's bearer on a gateway, ended when the account is let go.
+    session: Option<Ticket>,
 }
 
 impl fmt::Debug for Held {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Held")
             .field("name", &self.name)
-            .field("kind", &self.grant.kind)
+            .field("kind", &self.kind)
             .field("rotates", &self.rotates)
             .finish_non_exhaustive()
     }
@@ -744,16 +783,18 @@ impl Held {
         Self {
             accounts: Arc::clone(accounts),
             name: name.to_owned(),
+            kind: grant.kind.clone(),
             grant,
             lock,
             files,
             rotates,
+            session: None,
         }
     }
 
     /// What `initialize` answers: the account's name and kind, never a value.
     pub(crate) fn report(&self) -> serde_json::Value {
-        serde_json::json!({"name": self.name, "kind": self.grant.kind})
+        serde_json::json!({"name": self.name, "kind": self.kind})
     }
 
     pub(crate) fn id(&self) -> &str {

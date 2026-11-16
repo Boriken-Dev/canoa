@@ -1,0 +1,102 @@
+{
+  "harness": "claude",
+  "kinds": [
+    {
+      "id": "foundry-local",
+      "title": "Foundry Local",
+      "description": "A model run by Foundry Local on this computer, served to the agent through a gateway the host runs for each session. No credential is kept: the model's name and where the service is are the account.",
+      "settings": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model",
+            "description": "The model variant to serve, as `foundry model list` shows it (`qwen3-14b-generic-gpu:2`). Load it in Foundry Local first: this never loads one."
+          },
+          "endpoint": {
+            "type": "string",
+            "format": "uri",
+            "title": "Service address",
+            "description": "The Foundry Local service, `http://127.0.0.1:PORT`. The running service is used when this is empty."
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "service",
+              "sdk"
+            ],
+            "title": "Engine",
+            "description": "`service` (the default) uses the Foundry Local service you run, which holds the model. `sdk` runs the model inside this program through Foundry Local's SDK, which needs the native library below and loads the model into this program's memory."
+          },
+          "library": {
+            "type": "string",
+            "title": "Native library",
+            "description": "For the `sdk` engine: the folder or file of Foundry Local's native library, a copy made outside the installed package, which a program cannot load from."
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "additionalProperties": false
+      },
+      "endpoints": [
+        {
+          "key": "endpoint",
+          "purpose": "model_api"
+        }
+      ],
+      "rotates": false,
+      "history_portable": false,
+      "state_dir": true,
+      "renews": false,
+      "notices": [
+        "the model runs in Foundry Local on this computer: load it there first, and unload it when you are done, since it holds memory other work needs",
+        "the agent is told any model name is this model; what the model cannot do (tools, images) is refused with the reason"
+      ]
+    }
+  ],
+  "logins": [
+    {
+      "id": "foundry-local",
+      "title": "Use a Foundry Local model",
+      "description": "Names a model Foundry Local serves. It is not loaded or checked here: load it in Foundry Local before a session.",
+      "produces": "foundry-local",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model",
+            "description": "The model variant to serve, as `foundry model list` shows it (`qwen3-14b-generic-gpu:2`). Load it in Foundry Local first: this never loads one."
+          },
+          "endpoint": {
+            "type": "string",
+            "format": "uri",
+            "title": "Service address",
+            "description": "The Foundry Local service, `http://127.0.0.1:PORT`. The running service is used when this is empty."
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "service",
+              "sdk"
+            ],
+            "title": "Engine",
+            "description": "`service` (the default) uses the Foundry Local service you run, which holds the model. `sdk` runs the model inside this program through Foundry Local's SDK, which needs the native library below and loads the model into this program's memory."
+          },
+          "library": {
+            "type": "string",
+            "title": "Native library",
+            "description": "For the `sdk` engine: the folder or file of Foundry Local's native library, a copy made outside the installed package, which a program cannot load from."
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "additionalProperties": false
+      },
+      "steps": [],
+      "remote": false
+    }
+  ]
+}

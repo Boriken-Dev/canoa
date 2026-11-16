@@ -147,7 +147,10 @@ impl Harness {
                 ProviderError::Schema(why) => ProviderError::Settings(why),
                 other => other,
             })?;
-        let catalog = plain.accounts().ok();
+        let catalog = plain.accounts().ok().map(|mut catalog| {
+            crate::accounts::foundry::extend(&mut catalog, id);
+            catalog
+        });
         let profiled = if profiles {
             let mut map = settings.as_map().clone();
             map.insert(CLIENT_PLUGINS.to_owned(), serde_json::Value::Bool(true));

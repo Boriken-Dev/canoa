@@ -388,6 +388,38 @@ canoa accounts remove work                                       # forgets the s
   by itself: the offers apply from its next start, and the app asks for one (`host/restart`, which a host run with `--supervised`
   answers by ending so that its supervisor starts it).
 
+### A local model as an account
+
+An account of kind `foundry-local` runs a session on a model Foundry Local serves on this computer, whichever of Claude Code,
+Codex or Pi the entry runs. It holds no credential: the model's id (`model`, as `foundry model list` shows it), and optionally
+the service's address (`endpoint`; the running service's own is read from `~/.foundry/daemon.json`), are the account.
+
+```sh
+canoa accounts add local --harness claude --method foundry-local --input model=qwen3-14b-generic-gpu:2
+```
+
+- **Loading a model is the person's.** Load it first (`foundry model load qwen3-14b-generic-gpu:2`) and unload it when done,
+  since it holds gigabytes other work needs. The host never loads or unloads one; a session on a model that is not loaded is
+  refused with that said.
+- **A gateway per session.** When a session starts on the account the host listens on loopback (a port of the system's choosing)
+  and hands the harness an address and a bearer minted for that session, through the harness's own account kind: a gateway
+  token for Claude Code (`anthropic-auth-token`), an API key and `openai_base_url` for Codex (`codex-api-key`, with a
+  `config.toml` in its folder that turns off its web search and its multi-agent and goal tools), and an `OPENAI_API_KEY` with a
+  `models.json` in its folder for Pi (`pi-api-key`). The bearer ends with the session, the gateway with its last session, and
+  a request is answered only when it shows the bearer, names this socket in `Host` and carries no `Origin` (and, on Linux, comes from a process of this user).
+- **The three APIs.** The gateway answers `/v1/messages` (Anthropic: Claude Code), `/v1/responses` (OpenAI Responses: Codex and
+  Pi) and `/v1/chat/completions`, each translated to one chat completion, with `/v1/models` and `/v1/messages/count_tokens`.
+  Any model name a client sends is served by the account's model. The model is called once, whole, and a stream is replayed from
+  its answer, with a ping or comment while it works: the service's own streaming delivers no tokens in 0.14.0.
+- **What the model cannot do is said, not faked.** Tools offered to a model that cannot call them, an image to one that cannot
+  read it, `previous_response_id` and a tool the gateway cannot run (web search, deferred tools) are refused or dropped with the
+  reason, in the API's own error shape and in an `x-canoa-dropped` header. The service's model list overstates tool calling
+  (only `qwen3-14b-generic-gpu:2` returned structured calls when measured), so the account offers tools and the service's own
+  refusal is passed on as it said it.
+- **`engine`** is `service` (the default: the model lives in the Foundry Local service) or `sdk` (the model lives in this
+  program, through Foundry Local's Rust SDK, which needs a build with the `foundry` feature and `library`, a copy of its native
+  library made outside the installed package: Windows does not let a program outside the package load one from it).
+
 ## Granting a key the Store and accounts
 
 `[host.control] grants` names, per key, what that key may do. Two of the grants run programs as the user: **`store.programs` lets
