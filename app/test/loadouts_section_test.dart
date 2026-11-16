@@ -10,6 +10,7 @@ import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/loadout/loadout_editor.dart';
 import 'package:canoa/loadout/loadouts_section.dart';
 import 'package:canoa/profile/skill_copies.dart';
+import 'package:canoa/theme/look.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -69,7 +70,7 @@ void main() {
       Future<void> pump(WidgetTester tester, {bool shown = true}) async {
         await tester.pumpWidget(MaterialApp(
           debugShowCheckedModeBanner: false,
-          theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
+          theme: themeFor(LookId.canoa, Brightness.dark),
           home: Scaffold(
             body: StatefulBuilder(
               builder: (context, setState) => shown

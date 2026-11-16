@@ -12,7 +12,7 @@ import 'hosts_controller.dart';
 import 'start_session_dialog.dart';
 
 Color _stateColor(BuildContext context, HostState state) => switch (state) {
-  HostState.online => Colors.green,
+  HostState.online => context.look.success,
   HostState.offline || HostState.changed || HostState.refused => Theme.of(context).colorScheme.error,
   HostState.checking || HostState.unchecked => Theme.of(context).colorScheme.outline,
 };

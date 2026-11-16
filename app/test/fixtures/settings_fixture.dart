@@ -6,6 +6,7 @@ import 'package:canoa/profile/profile_home.dart';
 import 'package:canoa/settings/settings_page.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/store/programs.dart';
+import 'package:canoa/theme/look.dart';
 import 'package:canoa/voice/speech_backend.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -45,7 +46,7 @@ Future<SettingsHarness> openSettings(
   final harness = SettingsHarness();
   await tester.pumpWidget(MaterialApp(
     debugShowCheckedModeBanner: false,
-    theme: theme ?? ThemeData(brightness: Brightness.dark, useMaterial3: true),
+    theme: theme ?? themeFor(LookId.canoa, Brightness.dark),
     home: SettingsPage(
       config: config,
       apply: (changed) async {

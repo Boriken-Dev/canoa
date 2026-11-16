@@ -11,8 +11,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/store/store_overlays.dart';
-import 'package:canoa/store/store_section.dart';
 import 'package:canoa/profile/aos_support.dart';
 import 'package:canoa/profile/overlay_layer.dart';
 import 'package:canoa/profile/overlay_store_io.dart';
@@ -21,7 +19,10 @@ import 'package:canoa/profile/profile.dart';
 import 'package:canoa/profile/profile_home_io.dart';
 import 'package:canoa/profile/profile_layers.dart';
 import 'package:canoa/store/store.dart';
+import 'package:canoa/store/store_overlays.dart';
+import 'package:canoa/store/store_section.dart';
 import 'package:canoa/store/store_settings.dart';
+import 'package:canoa/theme/look.dart';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -518,7 +519,7 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(brightness: Brightness.dark),
+        theme: themeFor(LookId.canoa, Brightness.dark),
         home: StoreSection(config: config, home: MemoryHome(overlays), index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last), onSave: (changed) async {
           saved.add(changed);
           return changed;
