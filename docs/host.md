@@ -334,6 +334,12 @@ shell = "pwsh"                  # the program a terminal starts; absent, your ow
 protected = ["~/.ssh", "~/.gnupg", "~/.config/autostart"]   # places a declared change may not be at, under or hold
 credential_variables = ["*TOKEN", "*_API_KEY"]               # variables an install is never given
 
+# The tools that search the knowledge an overlay ships (`canoa-kb`). Without `embeddings` they match words; with it, meaning too, by the
+# server you name. `[overlays.NAME] kb = "index"` serves that overlay's rules and context as a search instead of in the agent's context.
+[host.kb]
+embeddings = "http://127.0.0.1:60570"   # an OpenAI-compatible embeddings server; optional
+model = "qwen3-embedding-0.6b-generic-cpu:1"   # the exact id it loaded; required with embeddings
+
 [host.agents.claude]
 harness = "claude"
 accounts = ["work", "personal"] # a session runs on the first unless its client names another
