@@ -96,12 +96,141 @@ void main() {
       expect(find.byKey(const ValueKey('context none')), findsOneWidget);
       agent.usage(200, 1000);
       await settle(tester);
-      expect(find.text('20% of context'), findsOneWidget);
-      expect(find.text('200 of 1k tokens'), findsOneWidget);
+      expect(find.text('20% used'), findsOneWidget);
+      expect(find.text('200 / 1k'), findsOneWidget);
       agent.usage(640, 1000);
       await settle(tester);
-      expect(find.text('64% of context'), findsOneWidget);
-      expect(find.text('20% of context'), findsNothing);
+      expect(find.text('64% used'), findsOneWidget);
+      expect(find.text('20% used'), findsNothing);
+    });
+
+    String rowText(WidgetTester tester, String key) => tester
+        .widgetList<Text>(find.descendant(of: find.byKey(ValueKey(key)), matching: find.byType(Text)))
+        .map((text) => text.data)
+        .whereType<String>()
+        .join('|');
+
+    testWidgets('as Claude reports it today, is the window split into used and free, and says what is not reported', (tester) async {
+      final (agent, _, _) = await showTask(tester, _desktop);
+      await _openInspector(tester);
+      // The shape a real Claude turn sent: used, size and cost, and the model in `_meta`.
+      agent.update({
+        'sessionUpdate': 'usage_update',
+        'used': 400000,
+        'size': 1000000,
+        'cost': {'amount': 0.39, 'currency': 'USD'},
+        '_meta': {'_claude/model': 'claude-opus'},
+      });
+      await settle(tester);
+      expect(find.text('40% used'), findsOneWidget);
+      expect(find.text('400k / 1M'), findsOneWidget);
+      expect(rowText(tester, 'context used'), 'Used|400k|40.0%');
+      expect(rowText(tester, 'context free'), 'Free space|600k|60.0%');
+      expect(find.byKey(const ValueKey('context unreported')), findsOneWidget);
+      expect(find.byKey(const ValueKey('context kind Messages')), findsNothing, reason: 'a kind nobody named is not made up');
+    });
+
+    testWidgets('as Codex reports it, with only its figures and a token split of the turn, is the same split and invents no kind', (tester) async {
+      final (agent, _, _) = await showTask(tester, _desktop);
+      await _openInspector(tester);
+      agent.update({'sessionUpdate': 'usage_update', 'used': 25000, 'size': 200000});
+      agent.update({
+        'sessionUpdate': 'state_update',
+        'state': 'idle',
+        'stopReason': 'end_turn',
+        'usage': {'inputTokens': 9000, 'outputTokens': 700, 'cachedReadTokens': 0, 'cachedWriteTokens': 0, 'totalTokens': 9700},
+        '_meta': {
+          'quota': {
+            'token_count': {'totalTokens': 9700, 'inputTokens': 9000, 'cachedInputTokens': 0, 'cachedWriteTokens': 0, 'outputTokens': 700, 'reasoningOutputTokens': 200},
+          },
+        },
+      });
+      await settle(tester);
+      expect(find.text('13% used'), findsOneWidget);
+      expect(rowText(tester, 'context free'), 'Free space|175k|87.5%');
+      expect(find.byKey(const ValueKey('context unreported')), findsOneWidget);
+    });
+
+    testWidgets('shows a row for each kind the agent names, with its tokens and share of the window, and deferred kinds apart', (tester) async {
+      final (agent, _, _) = await showTask(tester, _desktop);
+      await _openInspector(tester);
+      agent.update({
+        'sessionUpdate': 'usage_update',
+        'used': 400000,
+        'size': 1000000,
+        '_meta': {
+          '_claude/contextUsage': {
+            'categories': [
+              {'name': 'Messages', 'tokens': 322600},
+              {'name': 'System tools', 'tokens': 27800},
+              {'name': 'Memory files', 'tokens': 16600},
+              {'name': 'Free space', 'tokens': 600000},
+              {'name': 'MCP tools (deferred)', 'tokens': 20800, 'isDeferred': true},
+              {'name': 'Broken', 'tokens': 'many'},
+            ],
+          },
+        },
+      });
+      await settle(tester);
+      expect(rowText(tester, 'context kind Messages'), 'Messages|323k|32.3%');
+      expect(rowText(tester, 'context kind System tools'), 'System tools|27.8k|2.8%');
+      expect(rowText(tester, 'context kind Memory files'), 'Memory files|16.6k|1.7%');
+      expect(rowText(tester, 'context free'), 'Free space|600k|60.0%');
+      expect(rowText(tester, 'context kind MCP tools (deferred)'), 'MCP tools (deferred)|20.8k|—');
+      expect(find.byKey(const ValueKey('context kind Broken')), findsNothing);
+      expect(find.byKey(const ValueKey('context unreported')), findsNothing);
+      expect(find.byKey(const ValueKey('context used')), findsNothing, reason: 'the kinds replace the single used row');
+      final segments = find.descendant(of: find.byKey(const ValueKey('context bar')), matching: find.byType(Expanded));
+      expect(tester.widgetList<Expanded>(segments).map((each) => each.flex).toList(), [322600, 27800, 16600, 600000], reason: 'one segment for each kind that is in the window, then the free space');
+    });
+
+    testWidgets('looks the window by kind, with the bar split and deferred kinds apart', (tester) async {
+      final (agent, _, _) = await showTask(tester, _desktop);
+      await _openInspector(tester);
+      agent.update({
+        'sessionUpdate': 'usage_update',
+        'used': 408100,
+        'size': 1000000,
+        '_meta': {
+          '_claude/contextUsage': {
+            'categories': [
+              {'name': 'Messages', 'tokens': 322600},
+              {'name': 'System tools', 'tokens': 27800},
+              {'name': 'Memory files', 'tokens': 16500},
+              {'name': 'Skills', 'tokens': 6200},
+              {'name': 'Autocompact buffer', 'tokens': 33000},
+              {'name': 'Free space', 'tokens': 558900},
+              {'name': 'MCP tools (deferred)', 'tokens': 20800, 'isDeferred': true},
+            ],
+          },
+        },
+      });
+      await settle(tester);
+      await tester.pumpAndSettle();
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/inspector_context_kinds.png'));
+    });
+
+    testWidgets('a report that names no kinds replaces the ones before it', (tester) async {
+      final (agent, _, _) = await showTask(tester, _desktop);
+      await _openInspector(tester);
+      agent.update({
+        'sessionUpdate': 'usage_update',
+        'used': 100,
+        'size': 1000,
+        '_meta': {
+          '_claude/contextUsage': {
+            'categories': [
+              {'name': 'Messages', 'tokens': 100},
+            ],
+          },
+        },
+      });
+      await settle(tester);
+      expect(find.byKey(const ValueKey('context kind Messages')), findsOneWidget);
+      agent.usage(300, 1000);
+      await settle(tester);
+      expect(find.byKey(const ValueKey('context kind Messages')), findsNothing);
+      expect(find.byKey(const ValueKey('context unreported')), findsOneWidget);
     });
 
     testWidgets('is no longer in the usage line under the conversation', (tester) async {
@@ -468,7 +597,7 @@ void main() {
         await settle(tester);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(find.text('31% of context'), findsOneWidget);
+        expect(find.text('31% used'), findsOneWidget);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/inspector_$label.png'));
       });
     }

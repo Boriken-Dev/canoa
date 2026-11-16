@@ -15,6 +15,7 @@ import 'package:flutter/foundation.dart';
 import 'chat/agent_events.dart';
 import 'chat/attachments.dart';
 import 'chat/cache_lifetime.dart';
+import 'chat/context_kinds.dart';
 import 'chat/image_fit.dart';
 import 'chat/git_changes.dart';
 import 'chat/modes.dart';
@@ -309,6 +310,9 @@ class ChatSession {
   List<PlanEntry> get plan => chat.plan;
   List<AgentCommandInfo> get commands => chat.commands;
   SessionUsage get usage => chat.usage;
+
+  /// What the agent last said its context holds, by kind; empty while it says nothing of the kind.
+  List<ContextKind> contextKinds = const [];
 
   /// What the agent last said of the account's allowances, once it has said; null while it has not.
   UsageReport? get usageReport => chat.usageReport;
@@ -714,6 +718,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   final Expando<VerifiedChatConnection> _connections = Expando();
   final Map<String, StreamSubscription<model.ChatEvent>> _eventSubscriptions = {};
   final Map<String, StreamSubscription<DelegateNotice>> _taskSubscriptions = {};
+  final Map<String, StreamSubscription<AcpSessionUpdate>> _contextSubscriptions = {};
   int _nextId = 0;
   String? _selectedId;
 
@@ -1557,6 +1562,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     session._phase = null;
     session.chat.attach(_connectionOf(client));
     _watchTasks(session, client);
+    _watchContext(session, client);
     if (record) _record(session, client);
     unawaited(refreshGit(session));
     notifyListeners();
@@ -1620,6 +1626,17 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   void _watchTasks(ChatSession session, VerifiedAgent client) {
     unawaited(_taskSubscriptions.remove(session.id)?.cancel());
     _taskSubscriptions[session.id] = client.taskEvents.listen((notice) => _taskEvent(session, notice));
+  }
+
+  /// Keeps what each usage report of [session]'s agent says its context holds, which the shared model does not keep. A report
+  /// that names no kinds replaces the last ones, since the figures they split are no longer the window's.
+  void _watchContext(ChatSession session, VerifiedAgent client) {
+    unawaited(_contextSubscriptions.remove(session.id)?.cancel());
+    _contextSubscriptions[session.id] = client.updates.listen((update) {
+      if (update.kind != 'usage_update' || update.sessionId != session.remoteSessionId) return;
+      session.contextKinds = contextKindsOf(update.raw);
+      notifyListeners();
+    });
   }
 
   void _taskEvent(ChatSession session, DelegateNotice notice) {
@@ -2397,6 +2414,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     }
     unawaited(_eventSubscriptions.remove(session.id)?.cancel());
     unawaited(_taskSubscriptions.remove(session.id)?.cancel());
+    unawaited(_contextSubscriptions.remove(session.id)?.cancel());
     _clients.remove(session.id);
     session.chat.detach();
     _cancelSecrets(session);
@@ -2593,11 +2611,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   @override
   void dispose() {
     _disposed = true;
-    for (final subscription in [..._eventSubscriptions.values, ..._taskSubscriptions.values]) {
+    for (final subscription in [..._eventSubscriptions.values, ..._taskSubscriptions.values, ..._contextSubscriptions.values]) {
       unawaited(subscription.cancel());
     }
     _eventSubscriptions.clear();
     _taskSubscriptions.clear();
+    _contextSubscriptions.clear();
     _clients.clear();
     for (final session in _sessions) {
       session.chat.onChange = null;

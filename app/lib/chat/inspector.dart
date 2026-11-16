@@ -9,6 +9,7 @@ import '../theme/look.dart';
 import '../shell/surface.dart' show SurfaceEnvironment;
 import '../usage/spend_model.dart' show SpendRow;
 import '../usage/tokens_view.dart' show tokenColumns;
+import 'context_kinds.dart';
 import 'delegation_row.dart' show Ticking, stateColor, timeWord;
 import 'delegation_view.dart' show ChildView, lineage;
 import 'git_changes.dart';
@@ -220,7 +221,7 @@ class SessionInspector extends StatelessWidget {
             const SizedBox(height: 16),
             Text('Context', style: heading),
             const SizedBox(height: 6),
-            _ContextMeter(usage: session.usage),
+            _ContextMeter(usage: session.usage, kinds: session.contextKinds),
             if (sessionSpend != null && session.remoteSessionId != null) ...[
               const SizedBox(height: 16),
               Text('Tokens spent', style: heading),
@@ -327,10 +328,15 @@ class _Fact extends StatelessWidget {
   }
 }
 
+/// How full the context window is: what is used out of what there is, a bar split by the kinds the agent names, and a row for
+/// each. An agent that names none gets the two rows the figures give, used and free, and a line saying the rest is not reported.
 class _ContextMeter extends StatelessWidget {
-  const _ContextMeter({required this.usage});
+  const _ContextMeter({required this.usage, required this.kinds});
 
   final SessionUsage usage;
+  final List<ContextKind> kinds;
+
+  static String _share(int tokens, int size) => '${(100 * tokens / size).toStringAsFixed(1)}%';
 
   @override
   Widget build(BuildContext context) {
@@ -338,20 +344,56 @@ class _ContextMeter extends StatelessWidget {
     final percent = usage.percent;
     if (percent == null) return Text('Not reported yet.', key: const ValueKey('context none'), style: TextStyle(color: look.muted, fontSize: 13));
     final used = usage.used!, size = usage.size!;
-    return Column(key: const ValueKey('context meter'), crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('$percent% of context', style: const TextStyle(fontSize: 13)),
+    final named = kinds.where((kind) => !isFreeSpace(kind) && !kind.deferred).toList();
+    final deferred = kinds.where((kind) => kind.deferred).toList();
+    final reportedFree = kinds.where(isFreeSpace).firstOrNull?.tokens;
+    final free = reportedFree ?? (size - used).clamp(0, size);
+    final palette = [look.accent, look.warning, look.success, look.danger, look.muted];
+    final muted = TextStyle(color: look.muted, fontSize: 12);
+    Widget row(String key, Color color, String label, int tokens, String share) => Padding(
+      key: ValueKey(key),
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(children: [
+        Container(width: 10, height: 10, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))),
+        const SizedBox(width: 8),
+        Expanded(child: Text(label, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis)),
+        Text(compactCount(tokens), style: muted),
+        SizedBox(width: 52, child: Text(share, textAlign: TextAlign.end, style: muted)),
+      ]),
+    );
+    final segments = named.isEmpty ? [(used, palette.first)] : [for (var i = 0; i < named.length; i++) (named[i].tokens, palette[i % palette.length])];
+    return Column(key: const ValueKey('context meter'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(children: [
+        Expanded(child: Text('$percent% used', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+        Text('${compactCount(used)} / ${compactCount(size)}', style: muted),
+      ]),
       const SizedBox(height: 6),
       ClipRRect(
         borderRadius: BorderRadius.circular(3),
-        child: LinearProgressIndicator(
-          value: percent / 100,
-          minHeight: 6,
-          color: percent >= 90 ? look.danger : (percent >= 75 ? look.warning : look.accent),
-          backgroundColor: look.border,
+        child: SizedBox(
+          height: 6,
+          child: ColoredBox(
+            color: look.border,
+            child: Row(key: const ValueKey('context bar'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              for (final (tokens, color) in segments)
+                if (tokens > 0) Expanded(flex: tokens, child: ColoredBox(color: color)),
+              if (free > 0) Expanded(flex: free, child: const SizedBox.shrink()),
+            ]),
+          ),
         ),
       ),
-      const SizedBox(height: 4),
-      Text('${compactCount(used)} of ${compactCount(size)} tokens', style: TextStyle(color: look.muted, fontSize: 12)),
+      const SizedBox(height: 6),
+      if (named.isEmpty)
+        row('context used', palette.first, 'Used', used, _share(used, size))
+      else
+        for (var i = 0; i < named.length; i++) row('context kind ${named[i].label}', palette[i % palette.length], named[i].label, named[i].tokens, _share(named[i].tokens, size)),
+      row('context free', look.border, 'Free space', free, _share(free, size)),
+      for (final kind in deferred) row('context kind ${kind.label}', look.border, kind.label, kind.tokens, '—'),
+      if (kinds.isEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text('This agent does not say what its context holds.', key: const ValueKey('context unreported'), style: muted),
+        ),
     ]);
   }
 }

@@ -337,7 +337,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(asked, [session.remoteSessionId]);
-    expect(find.text('20% of context'), findsOneWidget);
+    expect(find.text('20% used'), findsOneWidget);
     expect(find.byKey(const ValueKey('tokens Input (uncached)')), findsOneWidget);
     expect(tester.widget<Text>(find.byKey(const ValueKey('tokens Input (uncached)'))).data, '1,200');
     expect(tester.widget<Text>(find.byKey(const ValueKey('tokens Output'))).data, '300');
