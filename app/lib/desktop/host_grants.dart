@@ -23,6 +23,9 @@ final class HostGrants extends ChangeNotifier {
   /// The grant that reads what the agents spent and the limits they reported.
   static const usage = 'usage';
 
+  /// The grant that opens a shell on the host, as the person.
+  static const terminal = 'terminal';
+
   /// Whether the host said this key holds [grant]; false until it has said.
   bool may(String grant) => _held?.contains(grant) ?? false;
 

@@ -28,6 +28,14 @@ final class ControlListener {
   final Future<Object?> Function(String method, Map<String, Object?> params)? onRequest;
 }
 
+/// What the host pushed on its own, naming no request: a shell's output or its end.
+final class ControlPush {
+  const ControlPush(this.method, this.params);
+
+  final String method;
+  final Map<String, Object?> params;
+}
+
 /// The host's control channel (`@control`) over a link: requests with the answers matched to them by number.
 final class ControlClient {
   ControlClient(this._link, {this.timeout = const Duration(seconds: 30)}) {
@@ -66,6 +74,12 @@ final class ControlClient {
       _listeners.remove(id);
     }
   }
+
+  final _pushes = StreamController<ControlPush>.broadcast(sync: true);
+
+  /// What the host pushes under `terminal/`: its `id` is a shell's, not a request's, so it is not routed to a request's listener.
+  /// A broadcast stream: whoever listens hears what comes after.
+  Stream<ControlPush> get pushes => _pushes.stream;
 
   /// Whether the link has ended, so nothing more can be asked.
   bool get over => _over;
@@ -121,6 +135,10 @@ final class ControlClient {
     };
     final id = message['id'];
     if (id == null) {
+      if (method.startsWith('terminal/')) {
+        if (!_pushes.isClosed) _pushes.add(ControlPush(method, params));
+        return;
+      }
       final owner = params['id'];
       if (owner is int) _listeners[owner]?.onNotification?.call(method, params);
       return;
@@ -147,6 +165,7 @@ final class ControlClient {
   void _ended() {
     _over = true;
     if (!_done.isCompleted) _done.complete();
+    unawaited(_pushes.close());
     for (final waiting in _waiting.values) {
       if (!waiting.isCompleted) waiting.completeError(StateError('the link to the host has ended'));
     }
