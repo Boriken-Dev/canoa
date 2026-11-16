@@ -34,7 +34,7 @@ export 'acp/delegate.dart' show DelegateTask, DelegateTasks, TaskPhase;
 export 'acp/secret_wire.dart' show SecretIdentity;
 export 'chat/agent_events.dart' show MessageRole;
 export 'chat/attachments.dart' show Attachment, AttachmentKind, imageTypeOf, maxAttachedImage, maxAttachedText, maxAttachments;
-export 'ledger/session_ledger.dart' show SessionPlace;
+export 'ledger/session_ledger.dart' show SessionKind, SessionPlace;
 export 'package:coqui_acp_chat/coqui_acp_chat.dart' show AgentQuestion, AttentionKind, ChatMessage, PermissionQuestion, QueueDelivery, QueuedMessage;
 
 /// Canoa's local view of an agent-issued session. The agent session id is
@@ -172,6 +172,13 @@ class ChatSession {
 
   /// Whether a draft starts in a new git worktree of its folder, which is made when it starts.
   bool wantsWorktree = false;
+
+  /// Whether this is a chat, which works in a folder Canoa makes and never shows, or a session in a workspace the person chose. A
+  /// draft's kind is the person's choice until it starts.
+  SessionKind kind = SessionKind.workspace;
+
+  /// Whether the person named it, which the ledger keeps so that no title an agent reports replaces the name later.
+  bool namedByPerson = false;
 
   /// How long the person chose for this session's prompt cache to live; null when they chose none, and then the agent's entry
   /// in canoa.cfg decides, else the chat's default. Kept with the draft and with the session in the ledger.
@@ -789,7 +796,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   ChatSession createDraft({AgentSource? source, String? cwd, bool worktree = false, Set<String>? overlays, String? id,
       String text = '', Map<String, PendingChoice> pending = const {}, List<Attachment> attachments = const [], String? title,
       String? keptSource, bool bypass = false, String? workspaceId, DateTime? created,
-      CacheLifetime? cacheLifetime, String? account}) {
+      CacheLifetime? cacheLifetime, String? account, SessionKind? kind}) {
     final session = _newSession(
       title: title ?? draftTitle,
       agent: source?.label ?? draftTitle,
@@ -799,6 +806,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       created: created,
       agentNames: title == null,
     )
+      ..kind = kind ?? (cwd == null ? SessionKind.chat : SessionKind.workspace)
       ..wantsWorktree = worktree
       ..cacheLifetime = cacheLifetime
       ..account = account
@@ -850,8 +858,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   final Map<String, UsageReport> accountUsage = {};
 
   /// Changes what a draft will start with. Once it has started, its source, folder, worktree and overlays stay as they were.
-  void updateDraft(ChatSession session, {AgentSource? source, String? cwd, bool clearFolder = false, bool? worktree,
-      Set<String>? overlays, bool allOverlays = false, String? text}) {
+  void updateDraft(ChatSession session, {AgentSource? source, String? cwd, bool? worktree,
+      Set<String>? overlays, bool allOverlays = false, String? text, SessionKind? kind}) {
     if (text != null) session.draftText = text;
     if (session.status == SessionStatus.draft) {
       if (source != null && source != session.source) {
@@ -866,8 +874,16 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           ..agent = source.label;
         _askChoices(source);
       }
-      if (cwd != null) session.cwd = cwd;
-      if (clearFolder) session.cwd = null;
+      // A folder chosen makes it a workspace session; a chat has no folder of the person's, which a worktree needs.
+      if (kind != null) session.kind = kind;
+      if (cwd != null) {
+        session.cwd = cwd;
+        session.kind = SessionKind.workspace;
+      }
+      if (session.kind == SessionKind.chat) {
+        session.cwd = null;
+        session.wantsWorktree = false;
+      }
       if (worktree != null) session.wantsWorktree = worktree;
       if (overlays != null || allOverlays) session.overlays = allOverlays ? null : overlays;
     }
@@ -887,6 +903,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         source: kept == null ? null : source(kept),
         keptSource: kept,
         cwd: record['cwd'] is String ? record['cwd'] as String : null,
+        kind: record['kind'] == null ? null : SessionKind.named(record['kind']),
         worktree: record['worktree'] == true,
         cacheLifetime: CacheLifetime.named(record['cacheLifetime']),
         account: record['account'] is String ? record['account'] as String : null,
@@ -937,6 +954,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       },
       'cwd': ?session.cwd,
       'workspaceId': ?session.workspaceId,
+      'kind': session.kind.name,
       'worktree': session.wantsWorktree,
       'cacheLifetime': ?session.cacheLifetime?.id,
       'account': ?session.account,
@@ -1404,6 +1422,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       worktree: worktree,
       agentNames: agentNames,
     )..site = site
+      ..kind = site == null ? SessionKind.workspace : SessionKind.chat
       ..workspaceId = workspaceId);
   }
 
@@ -1608,6 +1627,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       method: session.method,
       worktree: session.worktree,
       canoaId: session.workspaceId,
+      kind: session.kind,
+      named: session.namedByPerson,
       site: session.site,
       cacheLifetime: session.cacheLifetime?.id,
       account: session.account,
@@ -2109,7 +2130,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     try {
       if (await client.describe() case AcpDescription(sessions: AcpKnown(value: final listed))) {
         for (final info in listed.sessions) {
-          if (info.id == entry.sessionId) title = shortLine(info.title) ?? title;
+          if (info.id == entry.sessionId && !entry.named) title = shortLine(info.title) ?? title;
         }
       }
     } on AcpFailure {
@@ -2128,8 +2149,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       websocketFallback: entry.fallback == null ? null : Uri.tryParse(entry.fallback!),
       method: entry.method,
       worktree: entry.worktree,
+      agentNames: !entry.named,
     ))
       ..site = entry.site
+      ..kind = entry.kind
+      ..namedByPerson = entry.named
       ..workspaceId = entry.canoaId
       ..cacheLifetime = CacheLifetime.named(entry.cacheLifetime)
       ..account = entry.account
@@ -2355,9 +2379,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     final named = title.trim();
     if (named.isEmpty) return;
     session.chat.rename(named);
+    session.namedByPerson = true;
     session.titleFromMessage = false;
     final peer = session.peerId, remote = session.remoteSessionId;
-    if (peer != null && remote != null) ledger?.touch(peer, remote, title: session.title);
+    if (peer != null && remote != null) ledger?.touch(peer, remote, title: session.title, byPerson: true);
     notifyListeners();
   }
 
@@ -2365,7 +2390,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// where [session] had one). What was said in [session] is not copied: an agent's history is its own.
   ChatSession fork(ChatSession session) => createDraft(
     source: session.source,
-    cwd: session.worktree?.repo ?? session.cwd,
+    kind: session.kind,
+    cwd: session.kind == SessionKind.chat ? null : session.worktree?.repo ?? session.cwd,
     worktree: session.worktree != null || session.wantsWorktree,
     overlays: session.overlays,
     title: 'Fork of ${session.title}',

@@ -364,7 +364,10 @@ class _SessionRowState extends State<_SessionRow> {
               },
           },
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            if (session.cwd case final cwd? when cwd.isNotEmpty) _MenuFact(label: 'Workspace', value: cwd),
+            if (session.kind == SessionKind.chat)
+              const _MenuFact(label: 'Kind', value: 'Chat')
+            else if (session.cwd case final cwd? when cwd.isNotEmpty)
+              _MenuFact(label: 'Workspace', value: cwd),
             for (final (label, icon, key, action) in actions)
               MenuItemButton(
                 leadingIcon: Icon(icon, size: 18),

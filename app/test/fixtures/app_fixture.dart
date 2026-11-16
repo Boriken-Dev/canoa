@@ -165,6 +165,12 @@ Future<void> newSession(WidgetTester tester) async {
   await frames(tester);
 }
 
+/// Switches the new-session view from Chat to Workspace.
+Future<void> chooseWorkspace(WidgetTester tester) async {
+  await tester.tap(find.descendant(of: find.byKey(const Key('new-session-kind')), matching: find.text('Workspace')));
+  await frames(tester);
+}
+
 Future<void> chooseSource(WidgetTester tester, String label) async {
   await tester.tap(find.byKey(const Key('new-session-source')));
   await frames(tester);
@@ -172,7 +178,9 @@ Future<void> chooseSource(WidgetTester tester, String label) async {
   await frames(tester);
 }
 
+/// Chooses Workspace where the new-session view offers Chat, then opens the folder menu's browse item.
 Future<void> openFolder(WidgetTester tester) async {
+  if (find.byKey(const Key('new-session-folder')).evaluate().isEmpty) await chooseWorkspace(tester);
   await tester.tap(find.byKey(const Key('new-session-folder')));
   await frames(tester);
   await tester.tap(find.byKey(const Key('new-session-browse')));

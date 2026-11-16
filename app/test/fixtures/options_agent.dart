@@ -96,6 +96,12 @@ final class OptionsAgent {
     });
   }
 
+  /// The agent names the conversation, as an agent does once it has something to call it.
+  void titled(String title) => _asks.last({
+    'jsonrpc': '2.0', 'method': 'session/update',
+    'params': {'sessionId': 'o1', 'update': {'sessionUpdate': 'session_info_update', 'title': title}},
+  });
+
   /// Whether a prompt's turn ends only when [finishTurn] is called.
   bool holdTurns = false;
   final _held = <void Function()>[];

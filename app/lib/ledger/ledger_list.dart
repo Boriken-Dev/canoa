@@ -112,14 +112,24 @@ class _LedgerListState extends State<LedgerList> {
                     onSelected: (_) => setState(() => _harness = harness),
                   ),
               ]),
-              for (final harness in filter == null ? harnesses : [filter]) ...[
+              // Chats have no workspace of the person's, so they are listed apart and show no folder.
+              if (shown.any((entry) => entry.kind == SessionKind.chat && (filter == null || entry.harness == filter))) ...[
+                Padding(
+                  key: const ValueKey('earlier chats'),
+                  padding: const EdgeInsets.only(top: 12, bottom: 2),
+                  child: Text('Chats', style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
+                ),
+                for (final entry in shown)
+                  if (entry.kind == SessionKind.chat && (filter == null || entry.harness == filter)) _tile(context, entry),
+              ],
+              for (final harness in [for (final each in filter == null ? harnesses : [filter]) if (shown.any((entry) => entry.harness == each && entry.kind == SessionKind.workspace)) each]) ...[
                 Padding(
                   key: ValueKey('harness $harness'),
                   padding: const EdgeInsets.only(top: 12, bottom: 2),
                   child: Text(harness, style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
                 ),
                 for (final entry in shown)
-                  if (entry.harness == harness) _tile(context, entry),
+                  if (entry.harness == harness && entry.kind == SessionKind.workspace) _tile(context, entry),
               ],
             ],
           ],
@@ -131,7 +141,15 @@ class _LedgerListState extends State<LedgerList> {
   Widget _tile(BuildContext context, LedgerEntry entry) {
     final why = entry.whyNotReopened;
     final branch = entry.worktree == null ? null : 'branch ${entry.worktree!.branch}';
-    final about = [entry.versionLabel, entry.place.label, branch, entry.cwd, _when(entry.lastUsed)].nonNulls.join(' · ');
+    final chat = entry.kind == SessionKind.chat;
+    final about = [
+      if (chat) entry.harness,
+      entry.versionLabel,
+      entry.place.label,
+      branch,
+      if (!chat) entry.cwd,
+      _when(entry.lastUsed),
+    ].nonNulls.join(' · ');
     return ListTile(
       key: ValueKey('session ${entry.key}'),
       dense: true,

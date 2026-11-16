@@ -205,7 +205,7 @@ void main() {
     expect(worktrees.made, isEmpty);
   });
 
-  testWidgets('Ctrl+N and the palette open a new session with the last source, in Scratch, one at a time', (tester) async {
+  testWidgets('Ctrl+N and the palette open a new session with the last source, as a Chat, one at a time', (tester) async {
     final (store, _, _, _) = await _app(tester);
     await newSession(tester);
     await chooseSource(tester, 'Scripted');
@@ -219,9 +219,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.sessions, hasLength(2));
     final second = store.selected!;
-    expect((second.source?.label, second.cwd), ('Scripted', null), reason: 'a folder chosen is for its own session');
+    expect((second.source?.label, second.cwd, second.kind), ('Scripted', null, SessionKind.chat), reason: 'a folder chosen is for its own session');
     expect(find.descendant(of: find.byKey(const Key('new-session-source')), matching: find.text('Scripted')), findsOneWidget);
-    expect(find.byKey(const Key('new-session-scratch-path')), findsOneWidget);
+    expect(find.byKey(const Key('new-session-folder')), findsNothing);
+    await chooseWorkspace(tester);
     expect(await menuOf(tester, 'new-session-folder'), contains('/work/repo'), reason: 'one click away');
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);

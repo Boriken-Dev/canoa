@@ -168,7 +168,7 @@ class _GeneralSectionState extends State<GeneralSection> {
           ),
           if (widget.workspacePreview != null)
             SettingsRow(
-              title: 'Scratch workspace when none is chosen',
+              title: 'Where chats keep their files',
               configKey: const ['sessions', 'workspace'],
               onLayerReset: () {
                 widget.controller.change((c) => c.resetKey(const ['sessions', 'workspace']));

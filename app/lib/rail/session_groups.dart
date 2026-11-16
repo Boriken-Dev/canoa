@@ -111,14 +111,17 @@ String _basename(String path) {
 }
 
 /// [sessions] by workspace, in the order each workspace's first session is kept (newest first). Inside one, the sessions that
-/// need the person come first. Sessions with no workspace follow the others; archived ones that are not active are folded
-/// into a last group.
+/// need the person come first. Chats, which have no workspace of the person's, are one group, "Chats", first; sessions with no
+/// workspace follow the others; archived ones that are not active are folded into a last group.
 List<WorkspaceGroup> groupByWorkspace(Iterable<ChatSession> sessions) {
   final byPath = <String, List<ChatSession>>{};
   final archived = <ChatSession>[];
+  final chats = <ChatSession>[];
   for (final session in sessions) {
     if (session.archived && !rowStateOf(session).active) {
       archived.add(session);
+    } else if (session.kind == SessionKind.chat) {
+      chats.add(session);
     } else {
       byPath.putIfAbsent(session.cwd ?? '', () => []).add(session);
     }
@@ -128,6 +131,7 @@ List<WorkspaceGroup> groupByWorkspace(Iterable<ChatSession> sessions) {
     ...list.where((session) => !session.needsYou),
   ];
   return [
+    if (chats.isNotEmpty) WorkspaceGroup('chats', 'Chats', ordered(chats)),
     for (final MapEntry(:key, :value) in byPath.entries)
       if (key.isNotEmpty) WorkspaceGroup(key, _basename(key), ordered(value)),
     if (byPath['']?.isNotEmpty ?? false) WorkspaceGroup('none', 'No workspace', ordered(byPath['']!)),
@@ -150,8 +154,10 @@ String ageLabel(DateTime now, DateTime at) {
   return '${ago.inDays}d';
 }
 
-/// The branch of [session]'s worktree, else its workspace's name; null for a session with neither.
+/// The branch of [session]'s worktree, else its workspace's name; null for a session with neither, and for a chat, whose folder
+/// is not shown.
 String? locationOf(ChatSession session) {
+  if (session.kind == SessionKind.chat) return null;
   if (session.worktree case final worktree?) return worktree.branch;
   final parts = (session.cwd ?? '').split(RegExp(r'[\\/]')).where((part) => part.isNotEmpty);
   return parts.isEmpty ? null : parts.last;

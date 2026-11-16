@@ -7,8 +7,8 @@ import '../session_store.dart';
 import '../theme/canoa_mark.dart';
 import 'composer.dart';
 
-/// A session before its first message: the mark, the folder it starts in, and the composer in the middle, whose row holds
-/// the source, Local or Worktree, and the agent's choices. Nothing has started; sending starts it.
+/// A session before its first message: the mark, Chat or Workspace and, for a workspace, the folder it works in, and the composer
+/// in the middle, whose row holds the source, Local or Worktree and the agent's choices. Nothing has started; sending starts it.
 class NewSessionView extends StatelessWidget {
   const NewSessionView({super.key, required this.store, required this.session, required this.kit, required this.composer});
 
@@ -18,9 +18,6 @@ class NewSessionView extends StatelessWidget {
 
   /// The composer, built by the conversation that owns its text.
   final Widget composer;
-
-  /// The menu value for the scratch folder; no folder's path holds a NUL.
-  static const _scratchChoice = '\u0000scratch';
 
   /// How many recent folders are offered as rows; the folder menu keeps the rest.
   static const recentShown = 5;
@@ -35,26 +32,19 @@ class NewSessionView extends StatelessWidget {
     final look = context.chatLook;
     final theme = Theme.of(context);
     final cwd = session.cwd;
-    final scratch = kit.scratchFolder?.call(session);
+    // Where a chat works is Canoa's to make, so the view never shows it; a build that cannot make it has workspaces only.
+    final canChat = kit.scratchFolder != null;
+    final chat = canChat && session.kind == SessionKind.chat;
     final folders = {?cwd, ...kit.recentFolders}.toList();
     final draft = session.status == SessionStatus.draft;
-    final recent = draft ? kit.recentFolders.take(recentShown).toList() : const <String>[];
+    final recent = draft && !chat ? kit.recentFolders.take(recentShown).toList() : const <String>[];
     final notices = session.messages.where((message) => message.role == MessageRole.notice).toList();
     final folder = PopupMenuButton<String>(
       key: const Key('new-session-folder'),
       tooltip: 'The workspace it works in',
       enabled: session.status == SessionStatus.draft,
-      onSelected: (chosen) => chosen.isEmpty
-          ? unawaited(_open(context))
-          : chosen == _scratchChoice ? store.updateDraft(session, clearFolder: true) : store.updateDraft(session, cwd: chosen),
+      onSelected: (chosen) => chosen.isEmpty ? unawaited(_open(context)) : store.updateDraft(session, cwd: chosen),
       itemBuilder: (context) => [
-        if (scratch != null)
-          CheckedPopupMenuItem(
-            key: const Key('new-session-scratch'),
-            value: _scratchChoice,
-            checked: cwd == null,
-            child: Text('Scratch  $scratch', overflow: TextOverflow.ellipsis),
-          ),
         for (final each in folders)
           CheckedPopupMenuItem(value: each, checked: each == cwd, child: Text(each, overflow: TextOverflow.ellipsis)),
         if (folders.isNotEmpty) const PopupMenuDivider(),
@@ -74,23 +64,23 @@ class NewSessionView extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.folder_outlined, size: 18, color: look.muted),
           const SizedBox(width: 8),
-          Flexible(
-            child: cwd == null && scratch != null
-                ? Text.rich(
-                    TextSpan(children: [
-                      const TextSpan(text: 'Scratch', style: TextStyle(fontWeight: FontWeight.w600)),
-                      TextSpan(text: '  $scratch', style: TextStyle(color: look.muted)),
-                    ]),
-                    key: const Key('new-session-scratch-path'),
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
-                  )
-                : Text(cwd ?? 'Choose a workspace', overflow: TextOverflow.ellipsis, maxLines: 1),
-          ),
+          Flexible(child: Text(cwd ?? 'Choose a workspace', overflow: TextOverflow.ellipsis, maxLines: 1)),
           Icon(Icons.expand_more, size: 18, color: look.muted),
         ]),
       ),
     );
+    final kind = !canChat
+        ? null
+        : SegmentedButton<SessionKind>(
+            key: const Key('new-session-kind'),
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(value: SessionKind.chat, icon: Icon(Icons.chat_bubble_outline, size: 18), label: Text('Chat')),
+              ButtonSegment(value: SessionKind.workspace, icon: Icon(Icons.folder_outlined, size: 18), label: Text('Workspace')),
+            ],
+            selected: {session.kind},
+            onSelectionChanged: draft ? (chosen) => store.updateDraft(session, kind: chosen.first) : null,
+          );
     final source = session.source;
     final says = source == null ? null : store.choicesOf(source)?.cacheLifetime;
     final cacheNote = says == null ? null : 'Prompt cache: ${store.cacheLifetimeOf(session).lifetime.label.toLowerCase()}. Provider: $says';
@@ -108,7 +98,11 @@ class NewSessionView extends StatelessWidget {
               const SizedBox(height: 6),
               Text('What should we work on?', textAlign: TextAlign.center, style: theme.textTheme.headlineSmall),
               const SizedBox(height: 14),
-              folder,
+              ?kind,
+              if (!chat) ...[
+                if (kind != null) const SizedBox(height: 10),
+                folder,
+              ],
               const SizedBox(height: 20),
               composer,
               if (draft) _RecentFolders(

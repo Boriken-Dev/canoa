@@ -355,7 +355,7 @@ class SessionComposer extends StatelessWidget {
       after: [
         if (draft) SourceChooser(store: store, session: session, kit: kit),
         AccountChooser(store: store, session: session, kit: kit),
-        if (draft) PlaceToggle(store: store, session: session, kit: kit),
+        if (draft && session.kind == SessionKind.workspace) PlaceToggle(store: store, session: session, kit: kit),
       ],
       trailing: [
         if (draft) SourceTroubleChip(store: store, session: session, kit: kit),

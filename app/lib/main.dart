@@ -1185,6 +1185,9 @@ class _CanoaAppState extends State<CanoaApp> {
   AgentSource? _lastSource;
   String? _lastFolder;
 
+  /// What the session started last was, so that the next one begins as it did; null until one started here.
+  SessionKind? _lastKind;
+
   void _noteLast() {
     final session = store.selected;
     if ((session == null || session.isDraft) && !_checked) unawaited(_checkSources());
@@ -1198,9 +1201,9 @@ class _CanoaAppState extends State<CanoaApp> {
   List<String> get _recentFolders => {
     ?_lastFolder,
     for (final session in store.sessions)
-      if (session.source != null && session.cwd != null) session.worktree?.repo ?? session.cwd!,
+      if (session.source != null && session.cwd != null && session.kind == SessionKind.workspace) session.worktree?.repo ?? session.cwd!,
     for (final entry in store.ledger?.entries ?? const <LedgerEntry>[])
-      if (entry.place == SessionPlace.local || entry.place == SessionPlace.host)
+      if (entry.kind == SessionKind.workspace && (entry.place == SessionPlace.local || entry.place == SessionPlace.host))
         ?(entry.worktree?.repo ?? entry.cwd),
   }.where(widget.folderExists ?? folderExists).take(8).toList();
 
@@ -1223,7 +1226,11 @@ class _CanoaAppState extends State<CanoaApp> {
     final source = sources.contains(_lastSource)
         ? _lastSource
         : sources.where((source) => _checks[source]?.ready ?? false).firstOrNull ?? sources.firstOrNull;
-    final draft = store.createDraft(source: source);
+    // A chat when none was started yet or the last was one, where this build can make a chat's folder.
+    final kind = _kit.scratchFolder == null
+        ? SessionKind.workspace
+        : _lastKind ?? store.ledger?.entries.firstOrNull?.kind ?? SessionKind.chat;
+    final draft = store.createDraft(source: source, kind: kind);
     _hint(draft);
   }
 
@@ -1251,10 +1258,11 @@ class _CanoaAppState extends State<CanoaApp> {
     if (!check.ready) {
       throw StateError(check.describe(source.label)!);
     }
-    // With none chosen the session works in its scratch folder, which is made now and not before.
-    final scratch = draft.cwd == null || draft.cwd!.isEmpty;
+    // A chat works in its scratch folder, which is made now and not before; a workspace session needs the folder chosen.
+    final scratch = draft.kind == SessionKind.chat;
+    if (!scratch && (draft.cwd == null || draft.cwd!.isEmpty)) throw StateError('Choose its workspace first');
     final folder = scratch ? _scratchOf(draft) : draft.cwd;
-    if (folder == null) throw StateError('Choose its workspace first');
+    if (folder == null) throw StateError('A chat cannot be started here; choose a workspace instead');
     var madeFolder = false;
     if (scratch) {
       try {
@@ -1269,6 +1277,7 @@ class _CanoaAppState extends State<CanoaApp> {
     _inFlight.add(starting);
     try {
       await _startHosted(draft, source.hostEntry!, folder, worktree, starting);
+      _lastKind = draft.kind;
     } catch (_) {
       if (madeFolder) await removeEmptyFolder(folder);
       rethrow;

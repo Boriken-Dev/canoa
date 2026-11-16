@@ -190,10 +190,25 @@ class SessionInspector extends StatelessWidget {
             Text('Environment', style: heading),
             const SizedBox(height: 6),
             _Fact(machine.label, machine.value),
-            if (folder != null && folder.isNotEmpty) _Fact('Workspace', folder),
+            if (session.kind == SessionKind.chat)
+              const _Fact('Kind', 'Chat')
+            else if (folder != null && folder.isNotEmpty)
+              _Fact('Workspace', folder),
             if (branch != null) _Fact('Branch', branch),
             if (worktree != null) _Fact('Worktree', worktree.path),
             if (mode != null) _Fact('Mode', mode),
+            if (session.kind == SessionKind.chat && folder != null && folder.isNotEmpty)
+              Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  key: const Key('inspector-technical'),
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text('Technical details', style: TextStyle(color: look.muted, fontSize: 12)),
+                  children: [_Fact('Path', folder)],
+                ),
+              ),
             const SizedBox(height: 16),
             Text('Context', style: heading),
             const SizedBox(height: 6),

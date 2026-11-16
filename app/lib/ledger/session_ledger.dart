@@ -68,6 +68,15 @@ final class KeptMessage {
   }
 }
 
+/// What a session is for: a chat has no project and works in a folder Canoa made for it; a workspace session works in a folder the
+/// person chose.
+enum SessionKind {
+  chat,
+  workspace;
+
+  static SessionKind named(Object? name) => name == 'chat' ? chat : workspace;
+}
+
 /// One session the app opened or resumed. The agent keeps the session itself; this is Canoa's note of it.
 final class LedgerEntry {
   LedgerEntry({
@@ -95,6 +104,8 @@ final class LedgerEntry {
     this.overlays,
     this.canoaId,
     this.site,
+    this.kind = SessionKind.workspace,
+    this.named = false,
     this.pinned = false,
     this.archived = false,
     this.messages = const [],
@@ -114,6 +125,12 @@ final class LedgerEntry {
 
   /// The site (a page's host name) a session started from a webpage belongs to; null for any other.
   final String? site;
+
+  /// Whether it is a chat or works in a chosen workspace.
+  SessionKind kind;
+
+  /// Whether the person named it, so that no title an agent reports replaces the name, now or when it is opened again.
+  bool named;
 
   /// The agent entry or preset it was started from, or what the person named a peer.
   final String entry;
@@ -202,6 +219,8 @@ final class LedgerEntry {
     'overlays': ?overlays,
     'canoaId': ?canoaId,
     'site': ?site,
+    'kind': kind.name,
+    if (named) 'named': true,
     if (pinned) 'pinned': true,
     if (archived) 'archived': true,
     if (messages.isNotEmpty) 'messages': [for (final message in messages) message.toJson()],
@@ -241,6 +260,8 @@ final class LedgerEntry {
       overlays: json['overlays'] is List ? [for (final name in json['overlays'] as List) if (name is String) name] : null,
       canoaId: text('canoaId'),
       site: text('site'),
+      kind: SessionKind.named(json['kind']),
+      named: json['named'] == true,
       pinned: json['pinned'] == true,
       archived: json['archived'] == true,
       messages: [
@@ -478,6 +499,8 @@ class SessionLedger extends ChangeNotifier {
     SessionWorktree? worktree,
     String? canoaId,
     String? site,
+    SessionKind? kind,
+    bool named = false,
     String? cacheLifetime,
     String? account,
     List<String>? overlays,
@@ -514,18 +537,22 @@ class SessionLedger extends ChangeNotifier {
       ..cacheLifetime = cacheLifetime ?? found.cacheLifetime
       ..account = account ?? found.account
       ..overlays = overlays ?? found.overlays
-      ..canoaId = canoaId ?? found.canoaId;
+      ..canoaId = canoaId ?? found.canoaId
+      ..kind = kind ?? found.kind
+      ..named = named || found.named;
     _apply();
     _changed();
     return find(peerId, sessionId);
   }
 
-  /// A session was used again, and maybe renamed.
-  void touch(String peerId, String sessionId, {String? title}) {
+  /// A session was used again, and maybe named: by the person, which no later title of the agent replaces, or by the agent, which
+  /// the person's name wins over.
+  void touch(String peerId, String sessionId, {String? title, bool byPerson = false}) {
     final found = find(peerId, sessionId);
     if (found == null) return;
     found.lastUsed = _clock();
-    if (title != null) found.title = title;
+    if (title != null && (byPerson || !found.named)) found.title = title;
+    if (title != null && byPerson) found.named = true;
     _apply();
     _changed();
   }
