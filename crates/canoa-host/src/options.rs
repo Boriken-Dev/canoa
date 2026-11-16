@@ -271,8 +271,8 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
                     Ok(listed) => listed,
                     Err(why) => return Some(Choices::failed(why)),
                 };
-                built = built.offering(store, listed);
-                match built.hold_account(account, "choices") {
+                built = built.offering(store, listed, Vec::new());
+                match built.hold_account(account, "choices", false) {
                     Ok(taken) => held = Some(taken),
                     Err(refusal) => return Some(Choices::failed(refusal.client_reason())),
                 }
