@@ -2815,7 +2815,7 @@ pub(crate) fn offered_accounts(
 /// The accounts of `harness` that an entry which does not list them can still run a session on, for a key trusted with
 /// accounts. One whose key reaches the agent in its environment is left out: only an entry that lists it limits the
 /// settings files a repository could use to redirect that key, so it has to be listed.
-fn other_accounts(
+pub(crate) fn other_accounts(
     config: &Config,
     harness: &str,
     listed: &[kind::Offered],

@@ -344,8 +344,18 @@ impl Accounts {
         }
     }
 
+    /// The host's home, where its accounts are kept.
+    pub(super) fn home_dir(&self) -> &std::path::Path {
+        &self.home
+    }
+
+    /// Whether this is the host of a portal.
+    pub(super) fn portal(&self) -> bool {
+        self.portal
+    }
+
     /// canoa.cfg as it is on disk now: an app's earlier sign-in wrote to it after this host started.
-    fn config(&self) -> Result<Config, Refusal> {
+    pub(super) fn config(&self) -> Result<Config, Refusal> {
         let config = self.load()?;
         // An entry an earlier version made for accounts is folded into the agent's own once, the first time this is asked.
         match fold_made_entries(&self.layers.own, &config, self.portal) {

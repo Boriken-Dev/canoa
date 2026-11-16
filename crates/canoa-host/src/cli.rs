@@ -1727,6 +1727,7 @@ fn options(args: &OptionsArgs, front: &dyn Front) -> Result<(), Failed> {
         let config = load(&args.config, front)?;
         let mut asking = crate::options::Asking {
             wait: core::time::Duration::from_secs(args.wait),
+            any_account: true,
             ..crate::options::Asking::default()
         };
         if let Some(account) = &args.account {

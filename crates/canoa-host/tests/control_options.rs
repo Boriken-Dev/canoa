@@ -1,0 +1,127 @@
+//! `options/choices` on the control channel: what an entry lists before a session starts, for a client with no host of its own
+//! to run `canoa options` on, asked as an account when one is named.
+#![allow(
+    clippy::std_instead_of_core,
+    clippy::std_instead_of_alloc,
+    reason = "tests name what they use from std"
+)]
+
+mod linked;
+mod sealed;
+mod support;
+
+use canoa_host::Link;
+use linked::{Hosted, next, send};
+use sealed::{App, Typed};
+use serde_json::{Value, json};
+use support::{example, quoted};
+
+fn host() -> Hosted {
+    let claude = example("harness_standin", false);
+    let agent = example("stdio_agent", false);
+    Hosted::start_with_setup(
+        |dir| {
+            let program = dir.join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+            std::fs::copy(&claude, &program).expect("the stand-in is copied");
+            format!(
+                "[host]\naccount_store = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\n\n[host.agents.Probe]\nprogram = {}\nargs = [\"--scripted\"]\n",
+                quoted(&program.to_string_lossy()),
+                quoted(&agent.to_string_lossy()),
+            )
+        },
+        &[],
+    )
+}
+
+fn call(link: &Link, id: u64, method: &str, params: &Value) -> Result<Value, Value> {
+    send(
+        link,
+        &json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
+    );
+    loop {
+        let message = next(link).expect("an answer");
+        if message["id"] == id && message.get("method").is_none() {
+            return match message.get("error") {
+                Some(error) => Err(error.clone()),
+                None => Ok(message["result"].clone()),
+            };
+        }
+    }
+}
+
+fn model_ids(answer: &Value) -> Vec<&str> {
+    answer["models"]
+        .as_array()
+        .expect("models")
+        .iter()
+        .filter_map(|model| model["id"].as_str())
+        .collect()
+}
+
+#[test]
+fn a_harness_entry_and_a_probed_program_list_their_models_over_the_link() {
+    let host = host();
+    let link = host.local.open("@control").expect("a link");
+    let claude = call(&link, 1, "options/choices", &json!({"entry": "Claude"})).expect("asked");
+    assert_eq!(claude["known"], true, "{claude}");
+    assert_eq!(claude["models"][0]["id"], "standin-small", "{claude}");
+    let probe = call(&link, 2, "options/choices", &json!({"entry": "Probe"})).expect("asked");
+    assert_eq!(probe["known"], true, "{probe}");
+    assert_eq!(model_ids(&probe), ["default", "fast", "refuse-me"], "{probe}");
+    let missing = call(&link, 3, "options/choices", &json!({"entry": "Nobody"})).expect_err("none");
+    assert_eq!(missing["code"], -32003, "{missing}");
+    let bare = call(&link, 4, "options/choices", &json!({})).expect_err("no entry");
+    assert_eq!(bare["code"], -32602, "{bare}");
+    host.stop();
+}
+
+#[test]
+fn an_entry_is_asked_as_an_account_it_offers_and_not_as_one_it_does_not_have() {
+    let host = host();
+    let link = host.local.open("@control").expect("a link");
+    let secret = host.local.link_secret().expect("the host minted a secret");
+    let app = App::new(&secret[..]);
+    let params = json!({"name": "work", "harness": "claude", "method": "api-key"});
+    let line = json!({"jsonrpc": "2.0", "id": 1, "method": "accounts/add", "params": params});
+    send(&link, &line);
+    let typed = Typed::Fills(&[("api_key", "sk-ant-test-0123456789")]);
+    loop {
+        let message = next(&link).expect("progress");
+        if message["method"] == "_coqui_acp/secret_request" {
+            let result = app.answer(&message["params"], &typed).expect("typed");
+            send(
+                &link,
+                &json!({"jsonrpc": "2.0", "id": message["id"], "result": result}),
+            );
+        } else if message["id"] == 1 && message.get("method").is_none() {
+            assert!(message.get("error").is_none(), "{message}");
+            break;
+        }
+    }
+    call(
+        &link,
+        2,
+        "accounts/offer",
+        &json!({"entry": "Claude", "accounts": ["work"]}),
+    )
+    .expect("offered");
+    let as_work = call(
+        &link,
+        3,
+        "options/choices",
+        &json!({"entry": "Claude", "account": "work"}),
+    )
+    .expect("asked as work");
+    assert_eq!(as_work["known"], true, "{as_work}");
+    assert!(as_work.get("signed_out").is_none(), "{as_work}");
+    let other = call(
+        &link,
+        4,
+        "options/choices",
+        &json!({"entry": "Claude", "account": "nobody"}),
+    )
+    .expect("answered");
+    assert_eq!(other["known"], false, "{other}");
+    assert_eq!(other["unknown_kind"], "failed", "{other}");
+    host.stop();
+}

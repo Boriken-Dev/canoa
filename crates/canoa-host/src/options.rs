@@ -49,6 +49,9 @@ pub struct Asking {
     pub wait: Duration,
     /// The account of the entry to ask as, with the host's accounts; `None` asks on the login the machine has.
     pub(crate) account: Option<(String, Arc<crate::accounts::Accounts>)>,
+    /// Whether the account may be any of the provider's, as for the person at this computer or a key trusted with accounts, and
+    /// not only one the entry lists.
+    pub(crate) any_account: bool,
 }
 
 impl Default for Asking {
@@ -56,6 +59,7 @@ impl Default for Asking {
         Self {
             wait: PROBE_WAIT,
             account: None,
+            any_account: false,
         }
     }
 }
@@ -261,7 +265,7 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
                 };
             let mut held = None;
             if let Some((account, store)) = &asking.account {
-                if !accounts.contains(account) {
+                if !accounts.contains(account) && !asking.any_account {
                     return Some(Choices::failed(format!(
                         "{name} does not offer the account {account}"
                     )));
@@ -271,8 +275,13 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
                     Ok(listed) => listed,
                     Err(why) => return Some(Choices::failed(why)),
                 };
-                built = built.offering(store, listed, Vec::new());
-                match built.hold_account(account, "choices", false) {
+                let others = if asking.any_account {
+                    crate::serve::other_accounts(config, harness, &listed, &built)
+                } else {
+                    Vec::new()
+                };
+                built = built.offering(store, listed, others);
+                match built.hold_account(account, "choices", asking.any_account) {
                     Ok(taken) => held = Some(taken),
                     Err(refusal) => return Some(Choices::failed(refusal.client_reason())),
                 }
