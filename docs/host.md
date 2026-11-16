@@ -324,6 +324,12 @@ harness, so that one session runs on a work subscription and another on a person
 endpoint of its own. The provider knows how its harness takes each kind of login (the variables, the files, the sign-in
 command); the host keeps who the accounts are, their credentials, who holds one, and what a renewal does.
 
+Each kind of account says the standards it provides (a Claude subscription provides `claude-code`, an Anthropic API key
+`anthropic-api`, a Codex login `codex`, an OpenAI key `openai-api`) and each harness the standards it accepts. An account
+can run a session on any agent that accepts one of them, whichever provider made it: an Anthropic key can run Pi, and a
+local model served through the host can run Claude Code, Codex or Pi. An agent never lists an account it cannot use, and
+naming one is refused with what each side says.
+
 ```toml
 [host]
 account_store = "auto"          # the default: the operating system credential store when there is one, else sealed files; "os" or "file" to insist
