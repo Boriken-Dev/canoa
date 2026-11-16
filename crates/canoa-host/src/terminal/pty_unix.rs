@@ -1,16 +1,12 @@
 //! A pseudo-terminal and the shell on it, on Unix.
-//!
-//! This is `unsafe` for one call: the closure a child runs between `fork` and `exec`, which makes it the leader of a session of its own
-//! and the terminal its controlling one, so that Ctrl-C reaches what the person is running and not the host.
-#![allow(unsafe_code, reason = "the child's setup between fork and exec")]
 
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, Read as _, Write as _};
-use std::os::fd::{BorrowedFd, OwnedFd};
-use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
+use std::os::fd::OwnedFd;
+use std::os::unix::process::ExitStatusExt as _;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::Child;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -67,25 +63,7 @@ pub(super) fn open(program: &OsStr, cwd: &Path, size: Size) -> io::Result<Pty> {
     )?;
     set_size(&master, size)?;
     let (wake_read, wake_write) = rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC)?;
-    let mut command = Command::new(program);
-    command
-        .current_dir(cwd)
-        .env("TERM", "xterm-256color")
-        .env("COLORTERM", "truecolor")
-        .stdin(Stdio::from(slave.try_clone()?))
-        .stdout(Stdio::from(slave.try_clone()?))
-        .stderr(Stdio::from(slave));
-    // SAFETY: the closure makes only the two system calls below, which allocate nothing and take no lock, as a closure between
-    // fork and exec must.
-    unsafe {
-        command.pre_exec(|| {
-            rustix::process::setsid()?;
-            // Standard input is the terminal's slave side by now.
-            rustix::process::ioctl_tiocsctty(BorrowedFd::borrow_raw(0))?;
-            Ok(())
-        });
-    }
-    let child = command.spawn()?;
+    let child = crate::spawn::pty::start(program, cwd, &slave)?;
     let group = i32::try_from(child.id()).ok().and_then(Pid::from_raw);
     // Reads and writes wait in `poll`, on the terminal and on the signal that it is over, and never in the call itself.
     let flags = rustix::fs::fcntl_getfl(&master)?;

@@ -26,6 +26,8 @@ use crate::cli::Program;
 mod apart;
 #[cfg(unix)]
 mod harness;
+#[cfg(unix)]
+pub(crate) mod pty;
 
 #[cfg(all(unix, test))]
 pub(crate) use apart::SUBCOMMAND as SPAWNER_COMMAND;

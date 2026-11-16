@@ -557,12 +557,17 @@ fn a_bare_shell_name_is_found_on_path_as_an_absolute_path_and_never_in_the_worki
 #[test]
 fn a_shell_whose_path_has_spaces_starts() {
     let folder = std::env::temp_dir().join("canoa shell 3117");
+    let _ = std::fs::remove_dir_all(&folder);
     std::fs::create_dir_all(&folder).expect("folder");
     let name = if cfg!(windows) {
         "my shell.exe"
     } else {
         "my shell"
     };
+    // A link and not a copy on Unix: a file another test's fork still holds open for writing cannot be executed.
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(shell(), folder.join(name)).expect("linked");
+    #[cfg(not(unix))]
     std::fs::copy(shell(), folder.join(name)).expect("copied");
     let spaced = folder.join(name);
     let control = control(Terminals::new(
