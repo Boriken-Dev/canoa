@@ -461,6 +461,40 @@ impl Accounts {
         self.save(id, &record)
     }
 
+    /// The grant of the account `config`, of the kind `info`, for a call that only reads with its credential and starts
+    /// nothing: it takes no lease, so it answers while a connection holds a rotating account (that connection keeps the
+    /// stored copy current).
+    ///
+    /// # Errors
+    ///
+    /// The account has no credentials, or the store or its directory failed.
+    pub(crate) fn read_grant(
+        &self,
+        config: &AccountConfig,
+        info: &AccountKindInfo,
+    ) -> Result<AccountGrant, Refusal> {
+        let id = &config.id;
+        let mut grant = AccountGrant::new(id.clone(), config.kind.clone())
+            .settings(settings_value(config.settings.as_ref()));
+        if config.kind == HARNESS_LOGIN {
+            return Ok(grant);
+        }
+        let record = self
+            .load(id)
+            .map_err(|error| Refusal::Store(error.to_string()))?
+            .ok_or(Refusal::NoCredentials)?;
+        grant = grant
+            .credentials(record.credentials())
+            .revision(record.revision);
+        if info.state_dir {
+            let dir = self.state_dir(id);
+            private::create_dir(&dir)
+                .map_err(|error| Refusal::Store(format!("{}: {error}", dir.display())))?;
+            grant = grant.state_dir(dir.to_string_lossy().into_owned());
+        }
+        Ok(grant)
+    }
+
     /// The account `name` of `config`, of the kind `info`, for one connection of `holder`.
     pub(crate) fn begin(
         self: &Arc<Self>,

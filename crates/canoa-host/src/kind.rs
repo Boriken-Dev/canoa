@@ -308,6 +308,25 @@ impl Harness {
         offer.host.begin(name, config, info, holder)
     }
 
+    /// The grant of the account `name`, for a call that only reads with its credential (no lease, nothing started).
+    ///
+    /// # Errors
+    ///
+    /// Why it cannot be had: not offered, no credentials, or its store failed.
+    pub(crate) fn read_account(
+        &self,
+        name: &str,
+    ) -> Result<coqui_acp_api::AccountGrant, crate::accounts::Refusal> {
+        let (Some(offer), Some((_, config, info))) =
+            (&self.accounts, self.account_named(name, false))
+        else {
+            return Err(crate::accounts::Refusal::Store(
+                "this entry does not offer that account".to_owned(),
+            ));
+        };
+        offer.host.read_grant(config, info)
+    }
+
     /// The account the client's first message chooses for its connection, held for it: the one it names in `_meta`, else the
     /// entry's first; `None` for an entry that offers none. `holder` says who is holding it. With `any`, the client may also
     /// name an account of the provider the entry does not list, or `null` for the login the program has where it runs.

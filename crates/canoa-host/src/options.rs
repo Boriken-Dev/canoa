@@ -24,6 +24,7 @@ use serde_json::{Map, Value, json};
 
 use crate::spawn::{Command, Stdio};
 
+pub(crate) mod limits;
 mod probe;
 
 use crate::config::{Config, EntryKind, Settings, cache_lifetime_name};
@@ -427,6 +428,16 @@ pub(crate) fn usage_of(
     name: &str,
     store: &Arc<crate::accounts::Accounts>,
 ) -> Result<Value, String> {
+    usage_at(config, name, store, &limits::Endpoints::default())
+}
+
+/// [`usage_of`], with the account-side readers sent to `endpoints` where it names one.
+pub(crate) fn usage_at(
+    config: &Config,
+    name: &str,
+    store: &Arc<crate::accounts::Accounts>,
+    endpoints: &limits::Endpoints,
+) -> Result<Value, String> {
     let account = config
         .accounts
         .get(name)
@@ -468,6 +479,9 @@ pub(crate) fn usage_of(
         .map_err(|error| error.to_string())?;
     let listed = crate::serve::offered_accounts(config, harness, &[name.to_owned()], &built)?;
     let built = built.offering(store, listed, Vec::new());
+    if let Some(report) = limits::read(&built, harness, name, account, endpoints) {
+        return serde_json::to_value(report?).map_err(|error| error.to_string());
+    }
     let held = built
         .hold_account(name, "usage", false)
         .map_err(|refusal| refusal.client_reason())?;
