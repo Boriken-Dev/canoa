@@ -632,7 +632,7 @@ fn a_recorded_session_is_the_owners_alone_whatever_a_key_is_granted() {
             Grant::StoreRead,
         ],
     );
-    for method in ["history/export", "history/move"] {
+    for method in ["history/export", "history/move", "history/portable"] {
         let answer = ask(
             &control,
             &everything,

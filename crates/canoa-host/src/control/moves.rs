@@ -10,10 +10,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use coqui_acp_api::guatiao::Status;
-use coqui_acp_api::{CacheLifetime, SessionImport};
+use coqui_acp_api::{CacheLifetime, SessionExport, SessionImport};
 use coqui_acp_history::paging::{PageError, page};
 use serde_json::{Value, json};
 
+use super::account_move::export_from;
 use super::{BAD_PARAMS, Control, NOT_FOUND, REFUSED, bad, text_param};
 use crate::history::{self, Store, StoreError};
 use crate::kind;
@@ -70,21 +71,32 @@ impl Control {
         let moves = self
             .history
             .as_ref()
-            .filter(|moves| moves.store.recording())
             .ok_or((REFUSED, StoreError::Off.to_string()))?;
         let entry = text_param(params, "entry")?.ok_or_else(|| bad("entry is needed"))?;
         let session = text_param(params, "session")?.ok_or_else(|| bad("session is needed"))?;
         if entry.len() > 256 || session.len() > 256 {
             return Err(bad("entry and session are at most 256 bytes"));
         }
+        if method == "history/move" {
+            return moves.moved_from(entry, session, params);
+        }
+        if !moves.store.recording() {
+            return Err((REFUSED, StoreError::Off.to_string()));
+        }
         let doc = moves
             .store
             .load(entry, session)
             .map_err(|e| from_store(&e))?;
-        if method == "history/export" {
-            return export(&doc, params);
-        }
-        moves.moved(&doc, params)
+        export(&doc, params)
+    }
+
+    /// `history/portable`: what each source that runs a harness can export and import.
+    pub(super) fn history_portable(&self) -> Result<Value, (i32, String)> {
+        let moves = self
+            .history
+            .as_ref()
+            .ok_or((REFUSED, StoreError::Off.to_string()))?;
+        Ok(json!({"entries": moves.portable()}))
     }
 }
 
@@ -116,11 +128,121 @@ fn export(doc: &coqui_acp_history::Document, params: &Value) -> Result<Value, (i
     }
 }
 
+/// The probes' working directory: a place no session of the agent's is in, so asking it finds none.
+fn probe_cwd() -> String {
+    std::env::temp_dir().to_string_lossy().into_owned()
+}
+
+/// What `harness` can export and import, found by asking its provider about a session that cannot exist: a refusal for want of
+/// support says no, anything else (a session it does not have, an id it does not take) says it can.
+fn portability(harness: &kind::Harness) -> Value {
+    let cwd = probe_cwd();
+    let Ok(id) = new_uuid() else {
+        return json!({"export": false, "import": false, "replay": false, "why": "no randomness to probe with"});
+    };
+    let unsupported = |status: Status| status == Status::GUATIAO_ERR_UNSUPPORTED;
+    let connection = harness.connection(None, None, CacheLifetime::default());
+    let why = match connection.harness.export_session(
+        SessionExport::new(id, cwd.clone()),
+        connection.spawner,
+        connection.keeper,
+    ) {
+        Err(error) if unsupported(error.status) => error.message().to_owned(),
+        _ => return json!({"export": true, "import": true, "replay": false}),
+    };
+    // Only an id that is no UUID and a history with nothing in it: a provider that seeds sessions refuses it as a bad value.
+    let connection = harness.connection(None, None, CacheLifetime::default());
+    match connection.harness.import_session(
+        SessionImport::new("not-a-session-id", cwd, ""),
+        connection.spawner,
+        connection.keeper,
+    ) {
+        Err(error) if unsupported(error.status) => {
+            json!({"export": false, "import": false, "replay": false, "why": error.message()})
+        }
+        _ => json!({"export": false, "import": true, "replay": true, "why": why}),
+    }
+}
+
 impl Moves {
+    /// What each source that runs a harness can export and import, by the name of its entry.
+    pub(super) fn portable(&self) -> Value {
+        Value::Object(
+            self.targets
+                .iter()
+                .map(|(name, harness)| (name.clone(), portability(harness)))
+                .collect(),
+        )
+    }
+
+    /// `history/move`: the session as this host recorded it, else as its own agent exports it (the entry's provider, asked for
+    /// the session in `cwd`, which the move then needs from the caller), carried to the source `to`.
+    pub(super) fn moved_from(
+        &self,
+        entry: &str,
+        session: &str,
+        params: &Value,
+    ) -> Result<Value, (i32, String)> {
+        let recorded = if self.store.recording() {
+            match self.store.load(entry, session) {
+                Ok(doc) => Some(doc),
+                Err(StoreError::Missing) => None,
+                Err(other) => return Err(from_store(&other)),
+            }
+        } else {
+            None
+        };
+        match recorded {
+            Some(doc) => self.moved(&doc, params, "record"),
+            None => {
+                let doc = self.exported(entry, session, params)?;
+                self.moved(&doc, params, "provider")
+            }
+        }
+    }
+
+    /// The history of `session` as the agent behind `entry` exports it.
+    fn exported(
+        &self,
+        entry: &str,
+        session: &str,
+        params: &Value,
+    ) -> Result<coqui_acp_history::Document, (i32, String)> {
+        let gone = || (NOT_FOUND, StoreError::Missing.to_string());
+        let harness = self.targets.get(entry).ok_or_else(gone)?;
+        let cwd = text_param(params, "cwd")?.ok_or_else(|| {
+            bad("cwd is needed: the host has no record of this session, so its agent is asked for it where it ran")
+        })?;
+        if cwd.chars().any(char::is_control) {
+            return Err(bad("cwd is an absolute path"));
+        }
+        let text = match export_from(harness, None, session, cwd) {
+            Ok(text) => text,
+            Err(Err(refused)) => return Err(refused),
+            Err(Ok((status, _))) if status == Status::GUATIAO_ERR_NOT_FOUND => return Err(gone()),
+            Err(Ok((_, why))) => {
+                return Err((
+                    REFUSED,
+                    format!(
+                        "{entry} cannot export this conversation, and the host has no record of it: {why}"
+                    ),
+                ));
+            }
+        };
+        text.parse()
+            .map_err(|error: coqui_acp_history::HistoryError| {
+                (
+                    REFUSED,
+                    format!("the exported history cannot be read: {error}"),
+                )
+            })
+    }
+
     fn moved(
         &self,
         doc: &coqui_acp_history::Document,
         params: &Value,
+        via: &str,
     ) -> Result<Value, (i32, String)> {
         let to = text_param(params, "to")?.ok_or_else(|| bad("to is needed"))?;
         let target = self.targets.get(to).ok_or_else(|| {
@@ -187,6 +309,7 @@ impl Moves {
             "compacted": report.compacted,
             "seededFrom": report.seeded_from.as_ref().map(|point| point.line),
             "recorded": recorded.is_ok(),
+            "via": via,
             "losses": losses,
         }))
     }

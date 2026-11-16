@@ -649,6 +649,9 @@ impl Control {
                 Some(method @ ("history/export" | "history/move")) => {
                     owner_only_history(caller).and_then(|()| self.history_call(method, &params))
                 }
+                Some("history/portable") => {
+                    owner_only_history(caller).and_then(|()| self.history_portable())
+                }
                 Some("history/account") => {
                     owner_only_history(caller).and_then(|()| self.account_move(&params))
                 }

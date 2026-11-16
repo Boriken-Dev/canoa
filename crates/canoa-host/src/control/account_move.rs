@@ -46,7 +46,7 @@ fn held(harness: &kind::Harness, name: &str) -> Result<Held, Refused> {
 }
 
 /// The whole history of `session` as `harness` exports it from account `from`'s folder, or the provider's refusal.
-fn export_from(
+pub(super) fn export_from(
     harness: &kind::Harness,
     from: Option<&str>,
     session: &str,
