@@ -57,9 +57,74 @@ pub(crate) trait Service: Send + Sync + 'static {
     fn caller(&self, token: &str) -> Option<Arc<Self::Caller>>;
     /// The largest request body, in bytes.
     fn body_limit(&self) -> usize;
-    /// The answer to one JSON message of the client's.
-    fn answer(self: &Arc<Self>, caller: &Arc<Self::Caller>, message: &Value) -> Answer;
+    /// The answer to one JSON message of the client's. Only a server that keeps the default [`Service::respond`] is asked.
+    fn answer(self: &Arc<Self>, _caller: &Arc<Self::Caller>, _message: &Value) -> Answer {
+        Answer::Unavailable
+    }
+
+    /// What a request is: the one place this server serves, or not. The servers of tools answer `POST /mcp` and nothing else.
+    fn route(&self, method: &str, path: &str) -> Route {
+        if path != "/mcp" {
+            Route::NotFound
+        } else if method != "POST" {
+            Route::Method("POST")
+        } else {
+            Route::Serve
+        }
+    }
+
+    /// The answer to a request [`Service::route`] accepted, whose body is read. By default the body is one JSON message,
+    /// answered by [`Service::answer`].
+    fn respond(self: &Arc<Self>, caller: &Arc<Self::Caller>, request: &Request<'_>) -> Reply {
+        let Ok(message) = serde_json::from_slice::<Value>(request.body) else {
+            return Reply::Answer(Answer::Json(error(
+                &Value::Null,
+                -32700,
+                "the body is not JSON",
+            )));
+        };
+        Reply::Answer(self.answer(caller, &message))
+    }
 }
+
+/// What a server does with a method and a path.
+pub(crate) enum Route {
+    /// It answers this.
+    Serve,
+    /// Nothing is there: a 404.
+    NotFound,
+    /// Something is there, for other methods: a 405 saying which.
+    Method(&'static str),
+}
+
+/// One request, after its head was checked and its body read.
+pub(crate) struct Request<'a> {
+    /// The path, with no query.
+    pub(crate) path: &'a str,
+    pub(crate) body: &'a [u8],
+}
+
+/// What a request is answered with.
+pub(crate) enum Reply {
+    /// The tool servers' answer.
+    Answer(Answer),
+    /// A whole answer: its status and reason, its headers, and its body.
+    Whole {
+        code: u16,
+        reason: &'static str,
+        headers: Vec<String>,
+        body: String,
+    },
+    /// A 200 whose body is written as it is made, ending when the connection closes. It runs here, counted as a call of the
+    /// bearer for as long as it takes.
+    Stream {
+        headers: Vec<String>,
+        run: Streaming,
+    },
+}
+
+/// What writes a stream's body to the connection it is given.
+pub(crate) type Streaming = Box<dyn FnOnce(&mut (dyn Write + Send)) -> std::io::Result<()> + Send>;
 
 /// What a message is answered with.
 pub(crate) enum Answer {
@@ -356,18 +421,31 @@ fn request<S: Service>(
         return Ok(reply(429, "Too Many Requests", &[], ""));
     };
     let body_by = Instant::now() + REQUEST_LIMIT;
-    if head.path != "/mcp" {
-        return Err(Refusal::Status(404, "Not Found"));
+    let (path, _query) = head.path.split_once('?').unwrap_or((&head.path, ""));
+    match service.route(&head.method, path) {
+        Route::Serve => {}
+        Route::NotFound => return Err(Refusal::Status(404, "Not Found")),
+        Route::Method(allowed) => {
+            return Ok(reply(
+                405,
+                "Method Not Allowed",
+                &[&format!("Allow: {allowed}")],
+                "",
+            ));
+        }
     }
-    if head.method != "POST" {
-        return Ok(reply(405, "Method Not Allowed", &["Allow: POST"], ""));
-    }
-    if head.framed || head.lengths.len() != 1 {
+    // A request that asks for something has no body, and says none; one that sends something says how much.
+    let bodiless = matches!(head.method.as_str(), "GET" | "HEAD") && head.lengths.is_empty();
+    if head.framed || (head.lengths.len() != 1 && !bodiless) {
         return Err(Refusal::Status(411, "Length Required"));
     }
-    let length: usize = head.lengths[0]
-        .parse()
-        .map_err(|_| Refusal::Status(400, "Bad Request"))?;
+    let length: usize = if bodiless {
+        0
+    } else {
+        head.lengths[0]
+            .parse()
+            .map_err(|_| Refusal::Status(400, "Bad Request"))?
+    };
     if length > service.body_limit() {
         return Err(Refusal::Status(413, "Content Too Large"));
     }
@@ -377,18 +455,38 @@ fn request<S: Service>(
     while buffer.len() < end {
         read_more(stream, &mut buffer, body_by)?;
     }
-    let body = &buffer[body_start..end];
-    let Ok(message) = serde_json::from_slice::<Value>(body) else {
-        return Ok(json_reply(&error(
-            &Value::Null,
-            -32700,
-            "the body is not JSON",
-        )));
+    let request = Request {
+        path,
+        body: &buffer[body_start..end],
     };
-    Ok(match service.answer(&caller, &message) {
-        Answer::Json(answer) => json_reply(&answer),
-        Answer::Accepted => reply(202, "Accepted", &[], ""),
-        Answer::Unavailable => reply(503, "Service Unavailable", &[], ""),
+    Ok(match service.respond(&caller, &request) {
+        Reply::Answer(Answer::Json(answer)) => json_reply(&answer),
+        Reply::Answer(Answer::Accepted) => reply(202, "Accepted", &[], ""),
+        Reply::Answer(Answer::Unavailable) => reply(503, "Service Unavailable", &[], ""),
+        Reply::Whole {
+            code,
+            reason,
+            headers,
+            body,
+        } => {
+            let headers: Vec<&str> = headers.iter().map(String::as_str).collect();
+            reply(code, reason, &headers, &body)
+        }
+        Reply::Stream { headers, run } => {
+            let mut out = String::from("HTTP/1.1 200 OK\r\n");
+            for header in &headers {
+                out.push_str(header);
+                out.push_str("\r\n");
+            }
+            out.push_str("Cache-Control: no-store\r\nConnection: close\r\n\r\n");
+            if stream.write_all(out.as_bytes()).is_ok() && stream.flush().is_ok() {
+                // A client that went away ends the writing; what is left to say has no one to hear it.
+                let _ = run(stream);
+                let _ = stream.flush();
+            }
+            // Nothing more to write: the body was the stream's.
+            String::new()
+        }
     })
 }
 
