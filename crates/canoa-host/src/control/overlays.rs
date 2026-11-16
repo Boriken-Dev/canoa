@@ -25,6 +25,8 @@ use serde_json::{Value, json};
 use super::{Caller, REFUSED, bad, text_param};
 use crate::profile::{OverlaySource, full_commit_id};
 
+mod skills;
+
 type Outcome = Result<Value, (i32, String)>;
 
 /// The most files one overlay may hold.

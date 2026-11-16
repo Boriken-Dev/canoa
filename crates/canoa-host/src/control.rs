@@ -87,11 +87,11 @@ pub enum Grant {
     ConfigWriteSessions,
     /// `upload/put` and `upload/remove`: files in a folder of the key's own, within the limits of `[host.control]`.
     Upload,
-    /// `overlay/installed`, `overlay/read` and `catalog/read`: what is installed and what a check or a catalog fetch holds. The
+    /// `overlay/installed`, `overlay/read`, `catalog/read`, `skill/list` and `skill/read`: what is installed and what a check or a catalog fetch holds. The
     /// host fetches nothing for these. Also `store/contents` and `store/contents_put`: the key's own cache of what the entries of a
     /// catalog provide, which no other key reads.
     OverlayRead,
-    /// `registry/fetch` (one page of an MCP registry's list, from the official registry or one `[store] registries` lists), `overlay/check`, `overlay/apply`, `overlay/remove`, `overlay/discard`, `catalog/fetch` and `catalog/remove`: fetch sources with
+    /// `registry/fetch` (one page of an MCP registry's list, from the official registry or one `[store] registries` lists), `overlay/check`, `overlay/apply`, `overlay/remove`, `overlay/discard`, `catalog/fetch`, `catalog/remove`, `skill/fetch`, `skill/save` and `skill/remove`: fetch sources with
     /// git as this user and install what AOS digests, under the overlays folder beside canoa.cfg. Nothing is run.
     OverlayWrite,
     /// `host/restart`: ends this host so that its supervisor starts it again with the canoa.cfg then.
@@ -620,6 +620,19 @@ impl Control {
                 }),
                 Some("catalog/remove") => allow(caller, Grant::OverlayWrite)
                     .and_then(|()| self.overlays.catalog_remove(&params)),
+                Some("skill/list") => {
+                    allow(caller, Grant::OverlayRead).and_then(|()| self.overlays.skill_list())
+                }
+                Some("skill/read") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.overlays.skill_read(&params)),
+                Some("skill/fetch") => allow(caller, Grant::OverlayWrite).and_then(|()| {
+                    self.overlays
+                        .skill_fetch(&params, &|repo| self.may_read_source(caller, repo))
+                }),
+                Some("skill/save") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| self.overlays.skill_save(&params)),
+                Some("skill/remove") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| self.overlays.skill_remove(&params)),
                 Some("registry/fetch") => allow(caller, Grant::OverlayWrite)
                     .and_then(|()| self.registry_fetch(caller, &params)),
                 Some("store/contents") => allow(caller, Grant::OverlayRead)
@@ -1199,6 +1212,8 @@ mod overlays;
 #[cfg(test)]
 mod overlays_tests;
 mod registry;
+#[cfg(test)]
+mod skills_tests;
 mod stores;
 
 #[cfg(test)]
