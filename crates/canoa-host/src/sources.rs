@@ -666,12 +666,30 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
-        let dir = std::env::temp_dir().join(format!("canoa-{name}-{}-{nanos}", std::process::id()));
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let number = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("canoa-{name}-{}-{number}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("made");
         dir
+    }
+
+    #[test]
+    fn scratch_folders_made_at_once_are_named_apart() {
+        let names: Vec<_> = std::thread::scope(|scope| {
+            let made: Vec<_> = (0..8)
+                .map(|_| scope.spawn(|| (0..50).map(|_| scratch("apart")).collect::<Vec<_>>()))
+                .collect();
+            made.into_iter()
+                .flat_map(|handle| handle.join().expect("a thread"))
+                .collect()
+        });
+        let distinct: std::collections::BTreeSet<_> = names.iter().collect();
+        assert_eq!(distinct.len(), names.len());
+        for dir in names {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     /// A shelf holding a `pi` whose launch is a node and a script inside the copy, as the Store's Pi extension records it.

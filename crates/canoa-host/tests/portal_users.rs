@@ -361,7 +361,8 @@ fn two_people_each_get_their_own_host_as_themselves_and_reach_nothing_of_the_oth
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos());
-    let (record, accent) = (format!("session-a-{stamp}"), format!("teal-{stamp}"));
+    let run = format!("{}-{stamp}", std::process::id());
+    let (record, accent) = (format!("session-a-{run}"), format!("teal-{run}"));
     let portal = start_portal();
     let addr = portal.addr;
 
