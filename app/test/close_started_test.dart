@@ -3,7 +3,6 @@
 import 'dart:io';
 
 import 'package:canoa/session_store.dart';
-import 'package:canoa/sources/sources.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
