@@ -2576,6 +2576,20 @@ class _ConversationState extends State<_Conversation> {
     surface.workspaceFor(opened.controller, session)?.focused?.type(command);
   }
 
+  /// The Files surface when the host [session] runs on gives its files to browse.
+  FilesSurface? _filesSurface(ChatSession session) {
+    final surface = widget.surfaces.registry.whereType<FilesSurface>().firstOrNull;
+    return surface != null && surface.available(session) ? surface : null;
+  }
+
+  /// Shows [path], a file of the session's host, in the Files surface.
+  void _openInFiles(ChatSession session, String path) {
+    final surface = _filesSurface(session);
+    if (surface == null) return;
+    final opened = widget.surfaces.of(session.id).openSurface(surface, null, (controller) => controller.data[FilesSurface.revealKey] = FileReveal(path));
+    opened.slot == SurfaceSlot.bottom ? widget.layout.showBottom() : widget.layout.showRight();
+  }
+
   /// Takes [text] as a text file on the message being written, or says why it cannot.
   void _attachText(ChatSession session, String name, String text) {
     final messenger = ScaffoldMessenger.of(context);
@@ -2882,6 +2896,7 @@ class _ConversationState extends State<_Conversation> {
         sessionSpend: widget.sessionSpend,
         onComment: _addToComposer,
         onAttachText: widget.store.canAttach(session) ? (name, text) => _attachText(session, name, text) : null,
+        onOpenInFiles: _filesSurface(session) == null ? null : (path) => _openInFiles(session, path),
         onOpenChild: () {
           if (widget.narrow) widget.layout.setRightOpen(false);
         },

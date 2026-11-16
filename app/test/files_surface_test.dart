@@ -233,6 +233,26 @@ void main() {
     expect(find.text('This file cannot be previewed (4 bytes).'), findsOneWidget);
   });
 
+  testWidgets('a file asked for is shown in its folder and previewed, again for each new request, and a missing one says so', (tester) async {
+    final home = _home('reveal-file')..createSync();
+    Directory('${home.path}/src').createSync();
+    File('${home.path}/src/main.dart').writeAsStringSync('void main() {}');
+    File('${home.path}/README.md').writeAsStringSync('# readme');
+    final disk = _Disk(home);
+    await _show(tester, FilesPanel(files: disk, root: home.path, reveal: FileReveal('${home.path}/src/main.dart')));
+    expect(_key('files name'), findsOneWidget);
+    expect(find.text('main.dart'), findsOneWidget);
+    expect(find.text('void main() {}'), findsOneWidget);
+
+    await _show(tester, FilesPanel(files: disk, root: home.path, reveal: FileReveal('${home.path}/README.md')));
+    expect(find.text('README.md'), findsOneWidget);
+    expect(find.text('# readme'), findsOneWidget);
+
+    await _show(tester, FilesPanel(files: disk, root: home.path, reveal: FileReveal('${home.path}/src/gone.dart')));
+    expect(_key('files problem'), findsOneWidget);
+    expect(find.textContaining('not there any more'), findsOneWidget);
+  });
+
   testWidgets('a refusal is the host\'s own words, on the file and on the folder', (tester) async {
     final home = _home('refused')..createSync();
     File('${home.path}/.env').writeAsStringSync('TOKEN=1');

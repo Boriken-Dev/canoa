@@ -9,12 +9,15 @@ import '../theme/look.dart';
 import '../shell/surface.dart' show SurfaceEnvironment;
 import '../usage/spend_model.dart' show SpendRow;
 import '../usage/tokens_view.dart' show tokenColumns;
+import '../workspace/open_in.dart' show WorkspaceOpener;
 import 'context_kinds.dart';
 import 'delegation_row.dart' show Ticking, stateColor, timeWord;
 import 'delegation_view.dart' show ChildView, lineage;
 import 'git_changes.dart';
 import 'git_changes_pane.dart';
 import 'modes.dart';
+import 'outputs.dart';
+import 'outputs_view.dart';
 import 'session_views.dart';
 
 /// The `+N −M` a session's changes add up to: git's, when its folder is read, else what the agent reported.
@@ -59,6 +62,8 @@ class SessionInspectorPanel extends StatefulWidget {
     required this.onComment,
     required this.onClose,
     this.onOpenChild,
+    this.onOpenInFiles,
+    this.opener,
     this.embedded = false,
     this.diffOnly = false,
   });
@@ -72,6 +77,12 @@ class SessionInspectorPanel extends StatefulWidget {
 
   /// Called after a child's thread is opened from the lineage, for a sheet that has to get out of its way.
   final VoidCallback? onOpenChild;
+
+  /// Opens a path in the Files surface; null where it has nothing to show for this session.
+  final ValueChanged<String>? onOpenInFiles;
+
+  /// What can be done with a path on this computer; null when the session's files are on another host.
+  final WorkspaceOpener? opener;
 
   /// Whether the panel sits under a tab of the work panel, which has the title and the close button.
   final bool embedded;
@@ -128,6 +139,8 @@ class _SessionInspectorPanelState extends State<SessionInspectorPanel> {
         onOpenDiff: () => setState(() => _diff = scope),
         onClose: widget.onClose,
         embedded: widget.embedded,
+        onOpenInFiles: widget.onOpenInFiles,
+        opener: widget.opener,
         onOpenChild: (id) {
           widget.store.openChild(widget.session, id);
           widget.onOpenChild?.call();
@@ -150,6 +163,8 @@ class SessionInspector extends StatelessWidget {
     required this.onOpenDiff,
     required this.onClose,
     this.onOpenChild,
+    this.onOpenInFiles,
+    this.opener,
     this.sessionSpend,
     this.embedded = false,
   });
@@ -169,6 +184,12 @@ class SessionInspector extends StatelessWidget {
   /// Opens the thread of the child with this id.
   final ValueChanged<String>? onOpenChild;
 
+  /// Opens a path in the Files surface; null where it has nothing to show for this session.
+  final ValueChanged<String>? onOpenInFiles;
+
+  /// What can be done with a path on this computer; null when the session's files are on another host.
+  final WorkspaceOpener? opener;
+
   @override
   Widget build(BuildContext context) {
     final look = context.chatLook;
@@ -181,6 +202,9 @@ class SessionInspector extends StatelessWidget {
     final children = lineage(session);
     final running = [for (final entry in session.terminals.entries) if (entry.value.isRunning) (entry.key, entry.value)];
     final live = children.where((child) => child.live).length;
+    // The folder the Files surface shows, so a row's path reads the same in both.
+    final workspace = worktree?.path ?? session.cwd;
+    final outputs = outputsOf(session, workspace);
     return Material(
       color: context.look.rail,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -227,6 +251,12 @@ class SessionInspector extends StatelessWidget {
               Text('Tokens spent', style: heading),
               const SizedBox(height: 6),
               _SessionTokens(sessionId: session.remoteSessionId!, load: sessionSpend!, revision: session.usage.used),
+            ],
+            if (outputs.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text('Outputs · ${outputs.length}', style: heading),
+              const SizedBox(height: 4),
+              OutputsList(outputs: outputs, root: workspace, onOpenInFiles: onOpenInFiles, opener: opener),
             ],
             if (children.isNotEmpty) ...[
               const SizedBox(height: 16),

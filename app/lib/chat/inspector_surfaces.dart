@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../session_store.dart';
 import '../shell/surface.dart';
+import '../workspace/open_in.dart' show workspaceOpener;
 import '../surfaces/subagents_surface.dart';
 import 'inspector.dart';
 
@@ -35,6 +36,9 @@ class DetailsSurface extends WorkSurface {
       onComment: env.onComment,
       onClose: () {},
       onOpenChild: env.onOpenChild,
+      onOpenInFiles: env.onOpenInFiles,
+      // Reveal and Open in VS Code are for a workspace on this computer, whose paths its file manager and editor know.
+      opener: workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint).target == null ? null : workspaceOpener,
     );
   }
 }

@@ -89,15 +89,17 @@ class SessionSurfaces extends ChangeNotifier {
   }
 
   /// Opens [surface] in [slot], or chooses it where it already is.
-  OpenSurface openSurface(WorkSurface surface, [SurfaceSlot? slot]) {
+  OpenSurface openSurface(WorkSurface surface, [SurfaceSlot? slot, void Function(SurfaceController controller)? prepare]) {
     final existing = find(surface.id);
     if (existing != null) {
+      prepare?.call(existing.controller);
       _active[existing.slot] = surface.id;
       notifyListeners();
       return existing;
     }
     final placed = slot != null && surface.placements.contains(slot) ? slot : surface.placements.first;
     final opened = OpenSurface(surface, placed);
+    prepare?.call(opened.controller);
     open.add(opened);
     _active[placed] = surface.id;
     notifyListeners();
@@ -168,10 +170,13 @@ class WorkSurfaces extends ChangeNotifier {
 
 /// What the app gives every surface: the store, and the ways to reach the conversation beside it.
 class SurfaceEnvironment extends InheritedWidget {
-  const SurfaceEnvironment({super.key, required this.store, required this.onComment, required this.onOpenChild, this.sessionSpend, this.onAttachText, required super.child});
+  const SurfaceEnvironment({super.key, required this.store, required this.onComment, required this.onOpenChild, this.sessionSpend, this.onAttachText, this.onOpenInFiles, required super.child});
 
   /// Attaches [text] to the message being written as a text file called [name]; null where the conversation takes no attachments.
   final void Function(String name, String text)? onAttachText;
+
+  /// Shows a path in the Files surface; null where that surface has nothing to show for the session.
+  final ValueChanged<String>? onOpenInFiles;
 
   final SessionStore store;
 

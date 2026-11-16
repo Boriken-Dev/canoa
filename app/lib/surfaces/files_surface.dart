@@ -20,6 +20,9 @@ class FilesSurface extends WorkSurface {
 
   static const surfaceId = 'files';
 
+  /// The key under which a [FileReveal] waits in the surface's controller for the panel to show.
+  static const revealKey = 'reveal';
+
   /// The files of the host [session] runs on; null where this app cannot reach that host's files.
   final WorkspaceFiles? Function(ChatSession session) filesFor;
 
@@ -44,7 +47,7 @@ class FilesSurface extends WorkSurface {
     if (root == null || files == null) return const Center(child: Text('This host\'s files cannot be reached from here.'));
     // Reveal and Open in VS Code are for a workspace on this computer, whose paths its file manager and editor know.
     final here = workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint).target != null;
-    return FilesPanel(files: files, root: root, opener: here ? workspaceOpener : null);
+    return FilesPanel(files: files, root: root, opener: here ? workspaceOpener : null, reveal: controller.data[revealKey] as FileReveal?);
   }
 }
 
@@ -150,9 +153,20 @@ String sizeText(int bytes) {
   return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MiB';
 }
 
+/// A request to show one file: each request is its own object, so asking for the same path again shows it again.
+final class FileReveal {
+  const FileReveal(this.path);
+
+  /// The file's path on the host, absolute.
+  final String path;
+}
+
 /// The panel's body: a listing of the workspace, a folder at a time, and a file's preview in its place.
 class FilesPanel extends StatefulWidget {
-  const FilesPanel({super.key, required this.files, required this.root, this.opener});
+  const FilesPanel({super.key, required this.files, required this.root, this.opener, this.reveal});
+
+  /// A file to open as soon as the panel shows, and again whenever a new request replaces it.
+  final FileReveal? reveal;
 
   /// What can be done with a path on this computer; null when the files are on another host, where its paths mean nothing here.
   final WorkspaceOpener? opener;
@@ -181,7 +195,29 @@ class _FilesPanelState extends State<FilesPanel> {
   @override
   void initState() {
     super.initState();
-    unawaited(_list(widget.root));
+    unawaited(_start());
+  }
+
+  Future<void> _start() async {
+    await _list(widget.root);
+    final reveal = widget.reveal;
+    if (reveal != null && mounted) await _reveal(reveal);
+  }
+
+  /// Lists the folder holding [reveal]'s file and opens the file, or says it is not there.
+  Future<void> _reveal(FileReveal reveal) async {
+    final path = reveal.path;
+    final cut = path.lastIndexOf(RegExp(r'[\\/]'));
+    final name = path.substring(cut + 1);
+    setState(() => _file = null);
+    await _list(cut > 0 ? path.substring(0, cut) : widget.root);
+    if (!mounted || widget.reveal != reveal || _problem != null) return;
+    final entry = _listing?.entries.where((each) => !each.isFolder && each.name == name).firstOrNull;
+    if (entry == null) {
+      setState(() => _problem = 'It is not there any more: ${visibleText(path)}');
+      return;
+    }
+    await _open(entry);
   }
 
   @override
@@ -191,7 +227,9 @@ class _FilesPanelState extends State<FilesPanel> {
       _top = null;
       _file = null;
       _fileProblem = null;
-      unawaited(_list(widget.root));
+      unawaited(_start());
+    } else if (widget.reveal != null && widget.reveal != old.reveal) {
+      unawaited(_reveal(widget.reveal!));
     }
   }
 

@@ -7,8 +7,12 @@ import 'package:canoa/shell/work_panel.dart';
 import 'package:canoa/chat/agent_events.dart' show Choice, ConfigOption;
 import 'package:canoa/chat/git_changes.dart';
 import 'package:canoa/chat/git_changes_pane.dart';
+import 'package:canoa/chat/inspector.dart' show SessionInspector;
+import 'package:canoa/chat/outputs.dart';
 import 'package:canoa/chat/session_views.dart' show sessionChanges;
 import 'package:canoa/session_store.dart';
+import 'package:canoa/theme/look.dart';
+import 'package:canoa/workspace/open_in.dart';
 import 'package:canoa/worktree/host.dart';
 import 'package:canoa/worktree/worktree.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
@@ -633,4 +637,180 @@ void main() {
       expect(find.byType(WorkPanel), findsNothing);
     });
   });
+
+  group('the outputs', () {
+    /// A tool call that deleted [path]: Claude names the file in the call's locations, not in a diff.
+    void deleted(TaskAgent agent, String id, String path) =>
+        agent.update({'sessionUpdate': 'tool_call_update', 'toolCallId': id, 'title': 'Delete', 'kind': 'delete', 'status': 'completed', 'locations': [{'path': path}]});
+
+    void wrote(TaskAgent agent, String id, String path) => agent.tool(id, 'completed', [{'type': 'diff', 'path': path, 'newText': 'text\n'}]);
+
+    Future<void> inspector(WidgetTester tester, SessionStore store, ChatSession session, {ValueChanged<String>? onOpenInFiles, WorkspaceOpener? opener}) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: themeFor(LookId.canoa, Brightness.dark),
+        home: Scaffold(
+          body: SessionInspector(
+            store: store,
+            session: session,
+            scopes: const [ChangeScope.reported],
+            scope: ChangeScope.reported,
+            onScope: (_) {},
+            onOpenDiff: () {},
+            onClose: () {},
+            onOpenInFiles: onOpenInFiles,
+            opener: opener,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    double top(WidgetTester tester, String path) => tester.getTopLeft(find.byKey(ValueKey('output $path'))).dy;
+
+    testWidgets('lists each file the tools wrote or changed once, the one touched last first, and leaves out a refused edit', (tester) async {
+      final (agent, _, _) = await showTask(tester, _desktop);
+      agent.task();
+      await settle(tester);
+      await _openInspector(tester);
+      expect(find.text('Outputs · 3'), findsOneWidget);
+      final rows = ['/work/proj/src/report.js', '/work/proj/src/calc.js', '/work/proj/README.md'];
+      for (final path in rows) {
+        expect(find.byKey(ValueKey('output $path')), findsOneWidget, reason: path);
+      }
+      expect(top(tester, rows[0]), lessThan(top(tester, rows[1])));
+      expect(top(tester, rows[1]), lessThan(top(tester, rows[2])), reason: 'calc.js was edited after README.md, so it is listed above it');
+      expect(find.byKey(const ValueKey('output /work/proj/obsolete.txt')), findsNothing, reason: 'a refused edit changed nothing');
+      expect(find.descendant(of: find.byKey(const ValueKey('output /work/proj/src/report.js')), matching: find.text('src/report.js')), findsOneWidget, reason: 'a path is shown relative to the workspace');
+    });
+
+    testWidgets('a path written two ways is one output, and a session that wrote nothing has no list', (tester) async {
+      final (agent, session, _) = await showTask(tester, _desktop);
+      await _openInspector(tester);
+      expect(find.textContaining('Outputs'), findsNothing);
+      wrote(agent, 'a', 'src/a.js');
+      wrote(agent, 'b', '/work/proj/src/a.js');
+      wrote(agent, 'c', './src/b.js');
+      await settle(tester);
+      expect([for (final output in outputsOf(session, '/work/proj')) output.path], ['/work/proj/src/b.js', '/work/proj/src/a.js']);
+      expect(find.text('Outputs · 2'), findsOneWidget);
+    });
+
+    testWidgets('a deleted file is shown as deleted and opens nothing, until a tool writes it again', (tester) async {
+      final (agent, session, store) = await showTask(tester, _desktop);
+      wrote(agent, 'a', '/work/proj/old.txt');
+      deleted(agent, 'rm', '/work/proj/old.txt:1');
+      await settle(tester);
+      final opened = <String>[];
+      await inspector(tester, store, session, onOpenInFiles: opened.add);
+      expect(find.byKey(const ValueKey('output deleted /work/proj/old.txt')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('output /work/proj/old.txt')));
+      await tester.pumpAndSettle();
+      expect(opened, isEmpty);
+      expect(find.byKey(const ValueKey('output menu /work/proj/old.txt')), findsNothing);
+      wrote(agent, 'again', '/work/proj/old.txt');
+      await settle(tester);
+      await inspector(tester, store, session, onOpenInFiles: opened.add);
+      expect(find.byKey(const ValueKey('output deleted /work/proj/old.txt')), findsNothing);
+    });
+
+    testWidgets('past five files the rest wait behind Show more', (tester) async {
+      final (agent, _, _) = await showTask(tester, _desktop);
+      for (var at = 0; at < 7; at++) {
+        wrote(agent, 'w$at', '/work/proj/f$at.txt');
+      }
+      await settle(tester);
+      await _openInspector(tester);
+      expect(find.text('Outputs · 7'), findsOneWidget);
+      expect(find.byKey(const ValueKey('output /work/proj/f6.txt')), findsOneWidget);
+      expect(find.byKey(const ValueKey('output /work/proj/f2.txt')), findsOneWidget);
+      expect(find.byKey(const ValueKey('output /work/proj/f1.txt')), findsNothing);
+      await tester.ensureVisible(find.byKey(const ValueKey('outputs more')));
+      await tester.tap(find.byKey(const ValueKey('outputs more')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('output /work/proj/f0.txt')), findsOneWidget);
+      expect(find.text('Show fewer'), findsOneWidget);
+    });
+
+    testWidgets('a tap opens the file in Files, and the menu offers it with the file manager where this computer can start one', (tester) async {
+      final (agent, session, store) = await showTask(tester, _desktop);
+      wrote(agent, 'a', '/work/proj/src/a.js');
+      await settle(tester);
+      final system = _OpenSystem();
+      final opened = <String>[];
+      await inspector(tester, store, session, onOpenInFiles: opened.add, opener: WorkspaceOpener(system));
+      await tester.tap(find.byKey(const ValueKey('output /work/proj/src/a.js')));
+      await tester.pumpAndSettle();
+      expect(opened, ['/work/proj/src/a.js']);
+
+      await tester.tap(find.byKey(const ValueKey('output menu /work/proj/src/a.js')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('output action files')), findsOneWidget);
+      expect(find.byKey(const ValueKey('output action reveal')), findsOneWidget);
+      expect(find.byKey(const ValueKey('output action vscode')), findsNothing, reason: 'VS Code is not on this stand-in computer');
+      await tester.tap(find.byKey(const ValueKey('output action reveal')));
+      await tester.pumpAndSettle();
+      expect(system.started.single.$2, ['/work/proj/src']);
+    });
+
+    testWidgets('where the files are on another host the menu has Open in Files alone, and with no Files there is no menu', (tester) async {
+      final (agent, session, store) = await showTask(tester, _desktop);
+      wrote(agent, 'a', '/work/proj/a.js');
+      await settle(tester);
+      await inspector(tester, store, session, onOpenInFiles: (_) {});
+      await tester.tap(find.byKey(const ValueKey('output menu /work/proj/a.js')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('output action files')), findsOneWidget);
+      expect(find.byKey(const ValueKey('output action reveal')), findsNothing);
+      await tester.tapAt(Offset.zero);
+      await tester.pumpAndSettle();
+      await inspector(tester, store, session);
+      expect(find.byKey(const ValueKey('output /work/proj/a.js')), findsOneWidget);
+      expect(find.byKey(const ValueKey('output menu /work/proj/a.js')), findsNothing);
+    });
+
+    for (final (label, size, menu) in [('desktop', _desktop, false), ('desktop_menu', _desktop, true), ('phone', _phone, false)]) {
+      testWidgets('the outputs, $label', (tester) async {
+        final (agent, session, store) = await showTask(tester, size);
+        agent.task();
+        wrote(agent, 'notes', '/work/proj/docs/notes.md');
+        wrote(agent, 'gone', '/work/proj/obsolete.txt');
+        deleted(agent, 'rm', '/work/proj/obsolete.txt');
+        agent.usage(62000, 200000);
+        await settle(tester);
+        await inspector(tester, store, session, onOpenInFiles: (_) {}, opener: WorkspaceOpener(_OpenSystem()));
+        if (menu) {
+          await tester.tap(find.byKey(const ValueKey('output menu /work/proj/src/report.js')));
+          await tester.pumpAndSettle();
+        }
+        expect(tester.takeException(), isNull);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/inspector_outputs_$label.png'));
+      });
+    }
+  });
+}
+
+/// A computer that starts nothing and has no VS Code, with every path present: it records what would have been started.
+final class _OpenSystem implements OpenInSystem {
+  final started = <(String, List<String>)>[];
+
+  @override
+  HostOs? get os => HostOs.linux;
+
+  @override
+  Map<String, String> get environment => const {};
+
+  @override
+  bool isDirectory(String path) => true;
+
+  @override
+  bool isFile(String path) => true;
+
+  @override
+  String? registryDefault(String key) => null;
+
+  @override
+  String? bundlePath(String id) => null;
+
+  @override
+  Future<void> start(String executable, List<String> arguments) async => started.add((executable, arguments));
 }
