@@ -440,7 +440,7 @@ impl UsageLog {
         json!({"accounts": state.limits.values().collect::<Vec<_>>()})
     }
 
-    /// `usage/summary`: the lines with `from <= time < to`, for the account and provider asked, summed by `group_by`
+    /// `usage/summary`: the lines with `from <= time < to`, for the account, provider, model and session asked, summed by `group_by`
     /// (`day` in UTC, `account`, `provider`, `model` or `session`). A group's counters are absent when no line in it has them.
     /// The host the figures came from is the client's to name, so `host` is read and let go.
     pub(crate) fn summary(&self, params: &Value) -> Result<Value, String> {
@@ -462,6 +462,7 @@ impl UsageLog {
             return Err("group_by is day, account, provider, model or session".to_owned());
         }
         let (account, provider) = (text("account")?, text("provider")?);
+        let (model, session) = (text("model")?, text("session")?);
         text("host")?;
         let mut groups: BTreeMap<Option<String>, Sum> = BTreeMap::new();
         let mut total = Sum::default();
@@ -481,6 +482,8 @@ impl UsageLog {
                     || row.time >= to
                     || account.is_some_and(|account| account != row.account)
                     || provider.is_some_and(|provider| provider != row.harness)
+                    || model.is_some_and(|model| row.model.as_deref() != Some(model))
+                    || session.is_some_and(|session| session != row.session_id)
                 {
                     continue;
                 }

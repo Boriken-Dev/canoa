@@ -211,6 +211,32 @@ fn the_summary_groups_by_day_and_by_account_and_filters() {
 }
 
 #[test]
+fn the_summary_can_be_narrowed_to_one_model_or_one_session() {
+    let dir = folder("narrowed");
+    let log = UsageLog::open(dir.clone(), 400, NOW);
+    let mut report = spend("s1", 30, 6, None);
+    let mut opus = ModelSpend::new("opus");
+    opus.input = 20;
+    let mut haiku = ModelSpend::new("haiku");
+    haiku.input = 10;
+    report.by_model = vec![opus, haiku];
+    log.record(&turn("work", "s1"), &report, NOW);
+    log.record(&turn("work", "s2"), &spend("s2", 5, 1, None), NOW + 5);
+    let haiku_only = log
+        .summary(&json!({"group_by": "session", "model": "haiku"}))
+        .expect("answers");
+    assert_eq!(haiku_only["total"]["input"], 10, "{haiku_only}");
+    assert_eq!(haiku_only["total"]["sessions"], 1);
+    let one = log
+        .summary(&json!({"group_by": "model", "session": "s2"}))
+        .expect("answers");
+    assert_eq!(one["total"]["input"], 5, "{one}");
+    assert_eq!(one["total"]["sessions"], 1);
+    assert!(log.summary(&json!({"model": 3})).is_err());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn files_older_than_keep_days_are_removed_at_start_and_newer_ones_stay() {
     let dir = folder("retention");
     fs::create_dir_all(&dir).expect("made");
