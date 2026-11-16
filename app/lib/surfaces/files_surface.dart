@@ -10,6 +10,8 @@ import '../served/host_files.dart';
 import '../session_store.dart';
 import '../shell/surface.dart';
 import '../theme/look.dart';
+import '../workspace/open_in.dart';
+import '../workspace/open_in_ui.dart';
 
 /// The files of the session's workspace, on the host the session runs on, to browse and preview. Read-only: nothing here writes, and
 /// the host decides what it shows (its own roots, its protected paths). It opens before any agent has started.
@@ -40,7 +42,9 @@ class FilesSurface extends WorkSurface {
   Widget build(BuildContext context, ChatSession session, SurfaceController controller) {
     final root = workspaceOf(session), files = filesFor(session);
     if (root == null || files == null) return const Center(child: Text('This host\'s files cannot be reached from here.'));
-    return FilesPanel(files: files, root: root);
+    // Reveal and Open in VS Code are for a workspace on this computer, whose paths its file manager and editor know.
+    final here = workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint).target != null;
+    return FilesPanel(files: files, root: root, opener: here ? workspaceOpener : null);
   }
 }
 
@@ -148,7 +152,10 @@ String sizeText(int bytes) {
 
 /// The panel's body: a listing of the workspace, a folder at a time, and a file's preview in its place.
 class FilesPanel extends StatefulWidget {
-  const FilesPanel({super.key, required this.files, required this.root});
+  const FilesPanel({super.key, required this.files, required this.root, this.opener});
+
+  /// What can be done with a path on this computer; null when the files are on another host, where its paths mean nothing here.
+  final WorkspaceOpener? opener;
 
   final WorkspaceFiles files;
 
@@ -238,6 +245,24 @@ class _FilesPanelState extends State<FilesPanel> {
     }
   }
 
+  /// The workspace actions offered for [path]: Reveal in the file manager, Open in VS Code.
+  List<Widget> _actions(BuildContext context, String? path) {
+    final opener = widget.opener;
+    if (opener == null || path == null) {
+      return const [];
+    }
+    final target = WorkspaceTarget(path, item: true);
+    return [
+      for (final action in opener.actionsFor(WorkspaceContext.files, target))
+        IconButton(
+          key: ValueKey('files action ${action.id}'),
+          tooltip: action.label,
+          icon: Icon(action.icon, size: 18),
+          onPressed: () => unawaited(runWorkspaceAction(context, action, target)),
+        ),
+    ];
+  }
+
   String _where() {
     final here = _listing?.path, top = _top;
     if (here == null || top == null || here == top) return 'Workspace';
@@ -272,6 +297,7 @@ class _FilesPanelState extends State<FilesPanel> {
               Expanded(
                 child: Text(_where(), key: const ValueKey('files where'), overflow: TextOverflow.ellipsis),
               ),
+              ..._actions(context, listing?.path),
               IconButton(
                 key: const ValueKey('files refresh'),
                 tooltip: 'Read the folder again',
@@ -354,6 +380,7 @@ class _FilesPanelState extends State<FilesPanel> {
               Expanded(
                 child: Text(visibleText(file.name), key: const ValueKey('files name'), overflow: TextOverflow.ellipsis),
               ),
+              ..._actions(context, file.path),
               if (_fileProblem == null) Text(sizeText(file.size), style: muted),
             ],
           ),
