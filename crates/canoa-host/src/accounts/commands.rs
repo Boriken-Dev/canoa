@@ -396,13 +396,15 @@ impl Row {
 
 /// Every account canoa.cfg names, with its state.
 pub(crate) fn rows(cfg: Cfg<'_>) -> Result<Vec<Row>, Failed> {
-    let accounts = accounts_of(cfg)?;
-    Ok(cfg
-        .config
+    Ok(rows_of(cfg, &accounts_of(cfg)?))
+}
+
+fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
+    cfg.config
         .accounts
         .iter()
         .map(|(name, account)| {
-            let (state, revision, expires_at) = state_of(&accounts, account);
+            let (state, revision, expires_at) = state_of(accounts, account);
             Row {
                 name: name.clone(),
                 harness: account.harness.clone(),
@@ -413,17 +415,23 @@ pub(crate) fn rows(cfg: Cfg<'_>) -> Result<Vec<Row>, Failed> {
                 expires_at,
             }
         })
-        .collect())
+        .collect()
 }
 
 /// `canoa accounts list`.
 pub(crate) fn list(env: &Env<'_>, format: Format) -> Result<(), Failed> {
-    for row in rows(env.cfg())? {
+    let accounts = accounts_of(env.cfg())?;
+    for row in rows_of(env.cfg(), &accounts) {
         let line = match format {
             Format::Json => row.json().to_string(),
             Format::Text => format!("{} {} {} {}", row.name, row.harness, row.kind, row.state),
         };
         env.front.print(&line).map_err(Failed::run)?;
+    }
+    if format == Format::Text
+        && let Some(note) = accounts.note()
+    {
+        env.front.print(note).map_err(Failed::run)?;
     }
     Ok(())
 }

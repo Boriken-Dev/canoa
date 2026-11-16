@@ -436,3 +436,99 @@ fn a_file_account_read_while_it_is_written_over_is_always_there() {
         failures.first()
     );
 }
+
+fn a_record() -> Record {
+    let mut record = Record::default();
+    record.revision = 3;
+    record
+}
+
+fn no_bus(_: &str) -> Result<(), StoreError> {
+    Err(StoreError(
+        "the operating system's credential store is not available (no session bus)".into(),
+    ))
+}
+
+#[test]
+fn auto_keeps_accounts_in_sealed_files_and_says_why_when_the_store_does_not_answer() {
+    let dir = Dir::new();
+    let accounts =
+        Accounts::open_probing(AccountStore::Auto, &dir.0, &no_bus).expect("opens on files");
+    let note = accounts.note().expect("a note");
+    assert!(
+        note.starts_with("non-default: host.account_store is auto and "),
+        "{note}"
+    );
+    assert!(note.contains("no session bus"), "{note}");
+    assert!(accounts.save("one", &a_record()).is_ok());
+    assert_eq!(
+        accounts.load("one").expect("reads").expect("held").revision,
+        3
+    );
+    assert!(holds_files_in(&dir.0));
+}
+
+#[test]
+fn auto_uses_the_operating_systems_store_when_it_answers() {
+    let dir = Dir::new();
+    let accounts = Accounts::open_probing(AccountStore::Auto, &dir.0, &|_| Ok(())).expect("opens");
+    assert!(accounts.note().is_none());
+    assert!(accounts.store.describe().contains("operating system"));
+}
+
+#[test]
+fn a_home_whose_accounts_are_in_files_stays_on_files_though_the_store_answers() {
+    let dir = Dir::new();
+    let first = Accounts::open_probing(AccountStore::Auto, &dir.0, &no_bus).expect("opens");
+    first.save("one", &a_record()).expect("saved");
+    drop(first);
+    let probed = std::cell::Cell::new(false);
+    let again = Accounts::open_probing(AccountStore::Auto, &dir.0, &|_| {
+        probed.set(true);
+        Ok(())
+    })
+    .expect("opens");
+    assert!(!probed.get(), "the store was not asked");
+    assert!(
+        again
+            .note()
+            .expect("a note")
+            .contains("already kept in files")
+    );
+    assert_eq!(again.load("one").expect("reads").expect("held").revision, 3);
+}
+
+#[test]
+fn an_explicit_file_choice_is_noted_and_an_explicit_os_choice_never_falls_back() {
+    let dir = Dir::new();
+    let files = Accounts::open_probing(AccountStore::File, &dir.0, &no_bus).expect("opens");
+    assert!(
+        files
+            .note()
+            .expect("a note")
+            .contains("account_store is file")
+    );
+    let other = Dir::new();
+    let os = Accounts::open_probing(AccountStore::Os, &other.0, &no_bus).expect("opens");
+    assert!(os.note().is_none());
+    assert!(!holds_files_in(&other.0));
+}
+
+#[test]
+fn an_unreachable_os_store_names_auto_and_file() {
+    let error = KeyringStore::new(format!("dev.boriken.canoa.test.{}", std::process::id()))
+        .get("one")
+        .err();
+    if let Some(error) = error.map(|error| error.to_string())
+        && error.contains("is not available")
+    {
+        assert!(
+            error.contains("\"auto\"") && error.contains("\"file\""),
+            "{error}"
+        );
+    }
+}
+
+fn holds_files_in(home: &std::path::Path) -> bool {
+    store::holds_files(&home.join("accounts"))
+}

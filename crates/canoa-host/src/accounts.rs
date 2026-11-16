@@ -154,6 +154,16 @@ pub(crate) struct Accounts {
     sources: AtomicU64,
     /// Held across reading a record and writing it back, so two renewals do not each replace the other.
     writing: Mutex<()>,
+    /// Why the credentials rest in sealed files, when they do by a choice that is not the default.
+    note: Option<String>,
+}
+
+/// The note that sealed files are in use: what they protect against and what they do not.
+fn file_note(why: &str, dir: &Path) -> String {
+    format!(
+        "non-default: {why}: the credentials rest in files sealed to a key in the same directory, which protects against a copied file and not against anyone who can read {}",
+        dir.display()
+    )
 }
 
 impl fmt::Debug for Accounts {
@@ -196,30 +206,74 @@ fn io_error(path: &Path, error: &std::io::Error) -> StoreError {
 
 impl Accounts {
     /// The accounts under `home` (the directory `accounts/` of it), kept in `choice`. The file store is a weakening, and
-    /// is logged as one.
+    /// is logged as one, and is what [`Accounts::note`] says.
     ///
     /// # Errors
     ///
     /// The directory could not be made private to this user.
     pub(crate) fn open(choice: AccountStore, home: &Path) -> Result<Arc<Self>, StoreError> {
+        Self::open_probing(choice, home, &store::probe)
+    }
+
+    /// As [`Accounts::open`], asking `probe` whether the operating system's store answers for `auto`.
+    pub(crate) fn open_probing(
+        choice: AccountStore,
+        home: &Path,
+        probe: &dyn Fn(&str) -> Result<(), StoreError>,
+    ) -> Result<Arc<Self>, StoreError> {
         let dir = home.join("accounts");
-        let store: Box<dyn SecretStore> = match choice {
-            AccountStore::Os => Box::new(KeyringStore::new(store::service_for(home))),
-            AccountStore::File => {
-                tracing::info!(
-                    "non-default: host.account_store is file, default os: the credentials rest in files sealed to a key in the same directory, which protects against a copied file and not against anyone who can read {}",
-                    dir.display()
-                );
-                Box::new(FileStore::new(dir.clone()))
+        let service = store::service_for(home);
+        let (store, note): (Box<dyn SecretStore>, Option<String>) = match choice {
+            AccountStore::Os => (Box::new(KeyringStore::new(service)), None),
+            AccountStore::File => (
+                Box::new(FileStore::new(dir.clone())),
+                Some(file_note("host.account_store is file, default auto", &dir)),
+            ),
+            AccountStore::Auto => {
+                // Accounts already sealed in files stay there: the operating system's store may answer now and hold none
+                // of them.
+                let why = if store::holds_files(&dir) {
+                    Some("accounts are already kept in files".to_owned())
+                } else {
+                    probe(&service).err().map(|error| error.to_string())
+                };
+                match why {
+                    None => (Box::new(KeyringStore::new(service)), None),
+                    Some(why) => (
+                        Box::new(FileStore::new(dir.clone())),
+                        Some(file_note(
+                            &format!("host.account_store is auto and {why}"),
+                            &dir,
+                        )),
+                    ),
+                }
             }
         };
-        Self::with_store(dir, store)
+        if let Some(note) = &note {
+            tracing::info!("{note}");
+        }
+        Self::with_note(dir, store, note)
+    }
+
+    /// Why the credentials rest in files, when that is not what the person asked for by default; `None` for the operating
+    /// system's store.
+    pub(crate) fn note(&self) -> Option<&str> {
+        self.note.as_deref()
     }
 
     /// As [`Accounts::open`], on `store`, in the directory `dir`, which is made private and swept of what a crash left.
+    #[cfg(test)]
     pub(crate) fn with_store(
         dir: PathBuf,
         store: Box<dyn SecretStore>,
+    ) -> Result<Arc<Self>, StoreError> {
+        Self::with_note(dir, store, None)
+    }
+
+    fn with_note(
+        dir: PathBuf,
+        store: Box<dyn SecretStore>,
+        note: Option<String>,
     ) -> Result<Arc<Self>, StoreError> {
         private::create_root(&dir).map_err(|error| io_error(&dir, &error))?;
         let accounts = Arc::new(Self {
@@ -228,6 +282,7 @@ impl Accounts {
             state: Mutex::new(State::default()),
             sources: AtomicU64::new(1),
             writing: Mutex::new(()),
+            note,
         });
         accounts.sweep();
         Ok(accounts)

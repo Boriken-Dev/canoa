@@ -88,7 +88,18 @@ impl Fixture {
 
     /// `canoa ARGS --config canoa.cfg` on this fixture's home, with `input` on its standard input.
     fn canoa(&self, args: &[&str], input: Option<&str>) -> Output {
-        let mut child = Command::new(host_binary())
+        self.canoa_on(args, input, false)
+    }
+
+    /// As [`Fixture::canoa`]; `busless` leaves the process no session bus, as a service has none.
+    fn canoa_on(&self, args: &[&str], input: Option<&str>, busless: bool) -> Output {
+        let mut command = Command::new(host_binary());
+        if busless {
+            command
+                .env_remove("DBUS_SESSION_BUS_ADDRESS")
+                .env("XDG_RUNTIME_DIR", &self.scratch.0);
+        }
+        let mut child = command
             .args(args)
             .arg("--config")
             .arg(&self.config)
@@ -706,4 +717,49 @@ fn an_entrys_own_setting_sources_win_over_that_default() {
         "{sources:?}"
     );
     assert!(!sources.is_empty());
+}
+
+/// A host with no session bus keeps an account in sealed files by itself, with `account_store` left at its default.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_host_with_no_session_bus_signs_an_account_in_and_keeps_it_in_files() {
+    let fixture = Fixture::bare();
+    let cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
+    std::fs::write(
+        &fixture.config,
+        cfg.replace(
+            "[host]
+account_store = \"file\"
+",
+            "[host]
+",
+        ),
+    )
+    .expect("canoa.cfg without account_store");
+    let added = fixture.canoa_on(
+        &[
+            "accounts",
+            "add",
+            "work",
+            "--harness",
+            "claude",
+            "--method",
+            "subscription",
+        ],
+        Some("123456\n"),
+        true,
+    );
+    assert!(added.status.success(), "{}", text(&added.stderr));
+    let listed = fixture.canoa_on(&["accounts", "list"], None, true);
+    let out = text(&listed.stdout);
+    assert!(out.contains("work claude claude-login signed in"), "{out}");
+    assert!(
+        out.contains("non-default: host.account_store is auto and "),
+        "{out}"
+    );
+    let sealed = std::fs::read_dir(fixture.home().join("accounts"))
+        .expect("accounts directory")
+        .flatten()
+        .any(|entry| entry.file_name().to_string_lossy().ends_with(".sealed"));
+    assert!(sealed, "the account is in a sealed file");
 }

@@ -580,11 +580,14 @@ struct RawStore {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AccountStore {
-    /// The operating system's credential store (Windows Credential Manager, macOS Keychain, Secret Service).
+    /// The operating system's credential store when it answers, sealed files when there is none (a Linux service with no
+    /// session bus), and files for good once they hold an account; the host says which and why.
     #[default]
+    Auto,
+    /// Only the operating system's credential store (Windows Credential Manager, macOS Keychain, Secret Service); a host
+    /// without one cannot keep an account.
     Os,
-    /// A file per account in the host's home, sealed to a key beside it: for a host with no credential store, and a
-    /// weakening the host logs.
+    /// A file per account in the host's home, sealed to a key beside it: a weakening the host logs.
     File,
 }
 
@@ -1574,12 +1577,13 @@ impl Config {
             profiles.insert(name, profile);
         }
         let account_store = match host.account_store.as_deref() {
-            None | Some("os") => AccountStore::Os,
+            None | Some("auto") => AccountStore::Auto,
+            Some("os") => AccountStore::Os,
             Some("file") => AccountStore::File,
             Some(_) => {
                 return Err(ConfigError::Invalid {
                     entry: None,
-                    what: "account_store is os or file".to_owned(),
+                    what: "account_store is auto, os or file".to_owned(),
                 });
             }
         };

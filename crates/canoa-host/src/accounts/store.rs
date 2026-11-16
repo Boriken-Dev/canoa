@@ -1,6 +1,6 @@
 //! Where an account's credentials rest. A store keeps bytes by account id; what they mean is [`super::Record`]'s.
 //!
-//! The operating system's credential store is the default. Windows' Credential Manager refuses a credential over 2560
+//! The operating system's credential store is used when it answers (`auto`, the default, checks with [`probe`]). Windows' Credential Manager refuses a credential over 2560
 //! bytes and a Codex `auth.json` is several times that, so a record is cut into chunks of [`CHUNK`] bytes, each its own
 //! entry, and an index entry names the generation that is current. A new generation's chunks are written before the index
 //! points at them, so a write that stops half way leaves the old record whole. Entry names hold a digest of the account's
@@ -137,8 +137,31 @@ fn use_platform_store() -> Result<(), StoreError> {
     .clone()
     .map_err(|why| {
         StoreError(format!(
-            "the operating system's credential store is not available ({why}); set [host] account_store = \"file\" for a host with none"
+            "the operating system's credential store is not available ({why})"
         ))
+    })
+}
+
+/// Asks the operating system's store a question that changes nothing: whether an entry of `service` exists. A store
+/// that answers, even "no such entry", is usable; one that cannot be reached (a service with no session bus) says why.
+pub(crate) fn probe(service: &str) -> Result<(), StoreError> {
+    let _turn = one_at_a_time();
+    let store = KeyringStore::new(service);
+    match store.entry_raw("probe")?.get_secret() {
+        Ok(_) | Err(KeyError::NoEntry) => Ok(()),
+        Err(error) => Err(failed(
+            "the operating system's credential store failed",
+            error,
+        )),
+    }
+}
+
+/// Whether `dir` holds an account the file store sealed.
+pub(crate) fn holds_files(dir: &Path) -> bool {
+    fs::read_dir(dir).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().ends_with(".sealed"))
     })
 }
 
@@ -221,6 +244,16 @@ impl KeyringStore {
     }
 
     pub(crate) fn entry(&self, user: &str) -> Result<Entry, StoreError> {
+        use_platform_store().map_err(|StoreError(why)| {
+            StoreError(format!(
+                "{why}; [host] account_store = \"auto\" uses sealed files when there is none, and \"file\" always does"
+            ))
+        })?;
+        self.entry_raw(user)
+    }
+
+    /// An entry of this store, its failure in the platform's words only.
+    fn entry_raw(&self, user: &str) -> Result<Entry, StoreError> {
         use_platform_store()?;
         // Windows' Credential Manager roams an enterprise credential with the profile; this one stays on this machine.
         let modifiers: std::collections::HashMap<&str, &str> = if cfg!(windows) {
