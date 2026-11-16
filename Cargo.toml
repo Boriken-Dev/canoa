@@ -90,6 +90,8 @@ coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "43050fc4d
 guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e", features = ["provider", "load"] }
 # A provider's settings, as JSON, made a Guatiao value: only the adapter, no text format.
 guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e", default-features = false }
+# How a provider's settings are shown: the speech providers' forms.
+guatiao-intake = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e", default-features = false, features = ["derive"] }
 
 # Crates the member crates share.
 tungstenite = { version = "0.30", default-features = false }

@@ -7,6 +7,9 @@ extern crate alloc;
 
 pub mod preset;
 
+#[cfg(feature = "speech")]
+#[cfg_attr(docsrs, doc(cfg(feature = "speech")))]
+pub mod speech;
 #[cfg(feature = "store")]
 #[cfg_attr(docsrs, doc(cfg(feature = "store")))]
 pub mod store;

@@ -528,8 +528,11 @@ name = "canoa"
 version = "0.0.0-alpha.0"
 dependencies = [
  "coqui-acp-api",
+ "guatiao",
+ "guatiao-intake",
  "guatiao-serde",
  "serde_json",
+ "ureq",
 ]
 
 [[package]]
@@ -2094,6 +2097,7 @@ version = "0.0.0-alpha.1"
 source = "git+https://github.com/Boriken-Dev/guatiao?rev=e0136dcc9760ddd6dd8dc89fc4d41320eec6306e#e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
 dependencies = [
  "guatiao",
+ "guatiao-derive",
 ]
 
 [[package]]

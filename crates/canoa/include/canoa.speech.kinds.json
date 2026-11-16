@@ -1,0 +1,79 @@
+{
+  "kinds": [
+    {
+      "doc": "A provider of speech to text. One instance is one configuration of one provider.",
+      "floor_hash": 4164060242,
+      "name": "speech_provider",
+      "object": false,
+      "slots": [
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [],
+          "doc": "What it can do. Cheap, and the same on every call.",
+          "fallible": true,
+          "name": "describe",
+          "required": true
+        },
+        {
+          "answer": {
+            "kind": "speech_session",
+            "type": "object"
+          },
+          "args": [
+            {
+              "name": "request",
+              "pass": "borrowed",
+              "type": "value"
+            }
+          ],
+          "doc": "Starts a recording. Nothing is started for a recording it refuses: `UNSUPPORTED` (with the encodings it takes) for a\nformat it does not read, `BAD_VALUE` for a setting that cannot be used. The provider may start a process or open a\nconnection here, and its session ends them.",
+          "fallible": true,
+          "name": "open",
+          "required": true
+        }
+      ]
+    },
+    {
+      "doc": "One recording: audio goes in a chunk at a time, text comes out.\n\nA session's methods may be called from different threads, one at a time. Every session ends with [`finish`] or\n[`cancel`], and dropping one is a cancel.\n\n[`finish`]: SpeechSession::finish\n[`cancel`]: SpeechSession::cancel",
+      "floor_hash": 1051878882,
+      "name": "speech_session",
+      "object": true,
+      "slots": [
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [
+            {
+              "name": "audio",
+              "type": "bytes"
+            }
+          ],
+          "doc": "Takes the next chunk, in order, in the format the recording opened with. It returns when the provider has taken the\nchunk, so a provider that cannot keep up slows the caller down rather than growing a queue. The chunk is borrowed\nfor this call.",
+          "fallible": true,
+          "name": "push",
+          "required": true
+        },
+        {
+          "answer": {
+            "type": "value"
+          },
+          "args": [],
+          "doc": "Ends the audio and answers the final text, when the provider has it. A provider that fails answers the reason in the\nerror, never an empty text.",
+          "fallible": true,
+          "name": "finish",
+          "required": true
+        },
+        {
+          "args": [],
+          "doc": "Abandons the recording: whatever the provider started is ended, and nothing is answered.",
+          "fallible": true,
+          "name": "cancel",
+          "required": true
+        }
+      ]
+    }
+  ]
+}
