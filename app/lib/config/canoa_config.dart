@@ -464,10 +464,12 @@ final class CanoaConfig {
     final source = overlays[name];
     if (source == null) throw ArgumentError.value(name, 'name', 'No overlay of that name');
     final raw = _deepCopy((tables['overlays'] as Map?) ?? const {});
-    final options = overlayOptions(name);
+    // The entry's other keys (its options, its `kb` choice, any the host reads that the app does not) stay as they are.
+    final entry = raw[name];
+    final kept = entry is Map ? <String, dynamic>{...entry} : <String, dynamic>{};
     raw[name] = switch (source) {
-      GitOverlay() => <String, dynamic>{'source': source.spec, 'pin': digest, if (options.isNotEmpty) 'options': options},
-      DirOverlay(:final dir) => <String, dynamic>{'dir': dir, 'pin': digest, if (options.isNotEmpty) 'options': options},
+      GitOverlay() => <String, dynamic>{...kept, 'source': source.spec, 'pin': digest},
+      DirOverlay(:final dir) => <String, dynamic>{...kept, 'dir': dir, 'pin': digest},
     };
     return withProfileTables(
       overlays: {
@@ -489,6 +491,60 @@ final class CanoaConfig {
     final entry = (tables['overlays'] as Map?)?[name];
     final options = entry is Map ? entry['options'] : null;
     return options is Map ? {for (final MapEntry(:key, :value) in options.entries) '$key': value} : const {};
+  }
+
+  /// How the overlay [name]'s knowledge reaches the agent: `[overlays.NAME] kb`, `index` (searched through the knowledge tools)
+  /// or `files` (put in the context whole), or null when the person chose neither and the overlay's own hint decides.
+  String? overlayKb(String name) {
+    final entry = (tables['overlays'] as Map?)?[name];
+    final choice = entry is Map ? entry['kb'] : null;
+    return choice == 'index' || choice == 'files' ? choice as String : null;
+  }
+
+  /// This configuration with the knowledge of the overlay [name] reaching the agent as [choice] (`index`, `files`), or by the
+  /// overlay's own hint when [choice] is null. The entry's other keys stay.
+  CanoaConfig withOverlayKb(String name, String? choice) {
+    final source = overlays[name];
+    if (source == null) throw ArgumentError.value(name, 'name', 'No overlay of that name');
+    if (choice != null && choice != 'index' && choice != 'files') throw ArgumentError.value(choice, 'choice', 'index or files');
+    final raw = _deepCopy((tables['overlays'] as Map?) ?? const {});
+    final entry = raw[name];
+    final fields = entry is Map
+        ? <String, dynamic>{...entry}
+        : switch (source) {
+            GitOverlay() => <String, dynamic>{'source': source.spec, if (source.pin != null) 'pin': source.pin},
+            DirOverlay(:final dir, :final pin) => <String, dynamic>{'dir': dir, 'pin': ?pin},
+          };
+    choice == null ? fields.remove('kb') : fields['kb'] = choice;
+    raw[name] = fields;
+    return _withTable('overlays', raw, overlays: overlays);
+  }
+
+  /// `[host.kb]`: where the knowledge tools get meaning and ordering, as the file holds it. Only the four the app edits are
+  /// named here; the others the host reads stay in the file.
+  static const hostKbKeys = ['embeddings', 'model', 'llm_endpoint', 'llm_model'];
+
+  /// The values of [hostKbKeys] that `[host.kb]` holds.
+  Map<String, String> get hostKb {
+    final kb = host?['kb'];
+    if (kb is! Map) return const {};
+    return {
+      for (final key in hostKbKeys)
+        if (kb[key] case final String value when value.isNotEmpty) key: value,
+    };
+  }
+
+  /// This configuration with the [hostKbKeys] of `[host.kb]` set to [values] (a key not in it, or empty, is taken out), and every
+  /// other key of the table, and of `[host]`, as it was. The table goes when nothing is left in it.
+  CanoaConfig withHostKb(Map<String, String> values) {
+    final copy = _deepCopy(host ?? const {});
+    final kb = copy['kb'] is Map ? Map<String, dynamic>.of((copy['kb'] as Map).cast<String, dynamic>()) : <String, dynamic>{};
+    for (final key in hostKbKeys) {
+      final value = values[key]?.trim() ?? '';
+      value.isEmpty ? kb.remove(key) : kb[key] = value;
+    }
+    kb.isEmpty ? copy.remove('kb') : copy['kb'] = kb;
+    return withHost(copy.isEmpty ? null : copy);
   }
 
   /// This configuration with the option values [options] for the overlay [name], or none when [options] is empty. A string
@@ -1173,18 +1229,22 @@ final class CanoaConfig {
         final String digest when RegExp(r'^sha256:[0-9a-fA-F]{64}$').hasMatch(digest) => digest,
         _ => throw FormatException('canoa.cfg: overlays.$key.pin is sha256: and 64 hexadecimal digits'),
       };
-      // The values of the overlay's declared options, which the host reads; only their shape is checked here.
+      // The values of the overlay's declared options, which the host reads, and how its knowledge reaches the agent (`kb`); only
+      // their shape is checked here.
       Map<dynamic, dynamic> options(Map<dynamic, dynamic> entry) {
         if (entry['options'] != null && entry['options'] is! Map) {
           throw FormatException('canoa.cfg: overlays.$key.options is a table of values');
+        }
+        if (entry['kb'] != null && entry['kb'] != 'index' && entry['kb'] != 'files') {
+          throw FormatException('canoa.cfg: overlays.$key.kb is "index" or "files"');
         }
         return entry;
       }
       overlays['$key'] = switch (value) {
         final String spec => git(spec),
-        {'source': final String spec} when value.keys.every(const {'source', 'pin', 'options'}.contains) =>
+        {'source': final String spec} when value.keys.every(const {'source', 'pin', 'options', 'kb'}.contains) =>
           git(spec).pinnedTo(pin(options(value))),
-        {'dir': final String dir} when dir.isNotEmpty && value.keys.every(const {'dir', 'pin', 'options'}.contains) =>
+        {'dir': final String dir} when dir.isNotEmpty && value.keys.every(const {'dir', 'pin', 'options', 'kb'}.contains) =>
           DirOverlay(dir, pin: pin(options(value))),
         _ => throw FormatException('canoa.cfg: overlays.$key is a git source, { source, pin } or { dir, pin }'),
       };

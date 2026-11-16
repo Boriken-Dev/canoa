@@ -95,8 +95,8 @@ packages:
     dependency: "direct main"
     description:
       path: dart
-      ref: "5176974f30f664a4a9c382fdd467d4a1ab87765b"
-      resolved-ref: "5176974f30f664a4a9c382fdd467d4a1ab87765b"
+      ref: "c4babfd9f15347a7d35d0fc25fa28cbe398ac02f"
+      resolved-ref: "c4babfd9f15347a7d35d0fc25fa28cbe398ac02f"
       url: "https://github.com/Boriken-Dev/coqui-aos.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -403,6 +403,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.18.0"
+  mustache_template:
+    dependency: transitive
+    description:
+      name: mustache_template
+      sha256: "544ff0b837836f5ad6b351e7a676ff7c2cad4fa412c465908aeb9358caddb6fc"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.4"
   pasteboard:
     dependency: "direct main"
     description:

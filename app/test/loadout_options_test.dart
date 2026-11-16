@@ -156,6 +156,36 @@ void main() {
         expect(saved.last.encode(), isNot(contains('options')));
       });
 
+      testWidgets('how its knowledge reaches the agent is chosen per overlay and written to its entry beside the rest', (tester) async {
+        await open(tester);
+        Finder segment(String label) =>
+            find.descendant(of: find.byKey(const Key('overlay-kb-review')), matching: find.text(label));
+        Future<void> choose(String label) async {
+          await tester.ensureVisible(segment(label));
+          await tester.pumpAndSettle();
+          await tester.tap(segment(label));
+          await tester.pumpAndSettle();
+        }
+
+        // This overlay's manifest has no hint, so the default is the whole files.
+        expect(segment('Default: whole files'), findsOneWidget);
+        expect(find.byKey(const Key('overlay-kb-note-review')), findsOneWidget);
+        expect(tester.widget<Text>(find.byKey(const Key('overlay-kb-note-review'))).data, contains('Put in the agent\'s context whole'));
+        await choose('Searchable');
+        expect(saved.last.overlayKb('review'), 'index');
+        expect(tester.widget<Text>(find.byKey(const Key('overlay-kb-note-review'))).data, contains('Left out of the agent\'s context'));
+        final reread = CanoaConfig.parse(saved.last.encode());
+        expect(reread.overlayKb('review'), 'index');
+        expect(reread.overlays.keys, ['review'], reason: 'the overlay keeps its source and pin');
+        await golden(tester, 'searchable', label);
+
+        await choose('Whole files');
+        expect(saved.last.overlayKb('review'), 'files');
+        await choose('Default: whole files');
+        expect(saved.last.overlayKb('review'), isNull);
+        expect(saved.last.encode(), isNot(contains('kb')));
+      });
+
       testWidgets('the form with nothing set shows each option with its default', (tester) async {
         await open(tester);
         await golden(tester, 'unset', label);

@@ -30,7 +30,7 @@ dependencies:
     git:
       url: https://github.com/Boriken-Dev/coqui-aos.git
       path: dart
-      ref: 5176974f30f664a4a9c382fdd467d4a1ab87765b
+      ref: c4babfd9f15347a7d35d0fc25fa28cbe398ac02f
   coqui_web:
     git:
       url: https://github.com/Boriken-Dev/coqui-web.git

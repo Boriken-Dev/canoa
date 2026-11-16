@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
 import '../loadout/loadout_controller.dart';
+import '../loadout/overlay_knowledge.dart';
 import '../loadout/overlay_options.dart';
 import '../profile/profile.dart';
 import '../profile/profiles_panel.dart' show OverlayIcon, OverlayUpdateDialog, visible;
@@ -142,6 +143,16 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
             key: Key('overlay-default-label-$name'), style: Theme.of(context).textTheme.labelSmall),
       ]),
       footer: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (layer != null) ...[
+          OverlayKnowledge(
+            overlay: name,
+            choice: c.config.overlayKb(name),
+            hinted: (aosLayer?.manifest['knowledge'] as Map?)?['serve'] == true,
+            busy: c.busy != null,
+            onChanged: (choice) => unawaited(c.apply(c.config.withOverlayKb(name, choice))),
+          ),
+          const SizedBox(height: 8),
+        ],
         if (options.isNotEmpty)
           Theme(
             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),

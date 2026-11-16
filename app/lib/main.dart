@@ -81,6 +81,7 @@ import 'profile/report.dart';
 import 'settings/settings_page.dart';
 import 'rail/session_groups.dart';
 import 'desktop/hosting_panel.dart' show HostingPanel;
+import 'desktop/knowledge_panel.dart' show KnowledgeSearchPanel;
 import 'shell/hosts/host_status.dart' show ConnectionProbe, probeConnection;
 import 'shell/hosts/hosts_controller.dart';
 import 'shell/hosts/hosts_section.dart';
@@ -503,12 +504,18 @@ class _CanoaAppState extends State<CanoaApp> {
       controller: _hosts,
       localDetail: widget.host == null || widget.served != null
           ? null
-          : (context) => HostingPanel(
-              key: const Key('hosts-hosting-panel'),
-              supervisor: widget.host!,
-              config: config,
-              onSave: _saveHosting,
-            ),
+          : (context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              HostingPanel(
+                key: const Key('hosts-hosting-panel'),
+                supervisor: widget.host!,
+                config: config,
+                onSave: _saveHosting,
+              ),
+              const SizedBox(height: 24),
+              Text('Knowledge search', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              KnowledgeSearchPanel(key: const Key('hosts-knowledge-panel'), config: config, onSave: _saveHosting),
+            ]),
     );
   }
 

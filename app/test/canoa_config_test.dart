@@ -51,6 +51,56 @@ cdn = "local"
     expect(() => CanoaConfig.parse('[overlays]\nmine = { dir = "mine", options = "deep" }\n'), throwsFormatException);
   });
 
+  test('an overlay entry carries how its knowledge reaches the agent, and every rewrite of the entry keeps it', () {
+    final config = CanoaConfig.parse('[overlays]\nmine = { dir = "mine", kb = "index", options = { depth = "deep" } }\n'
+        'plain = { source = "https://example.org/a.git@main", kb = "files" }\nbare = "https://example.org/b.git@main"\n');
+    expect(config.overlayKb('mine'), 'index');
+    expect(config.overlayKb('plain'), 'files');
+    expect(config.overlayKb('bare'), isNull);
+    // Pinning, saving Settings and setting options all write the entry again, and none loses `kb`.
+    for (final saved in [
+      config.withProfilesOf(config),
+      config.withOverlayPin('mine', 'sha256:${'0' * 64}'),
+      config.withOverlayPin('plain', 'sha256:${'1' * 64}'),
+      config.withOverlayOptions('mine', {'depth': 'quick'}),
+    ]) {
+      final reread = CanoaConfig.parse(saved.encode());
+      expect(reread.overlayKb('mine'), 'index');
+      expect(reread.overlayKb('plain'), 'files');
+    }
+    expect(CanoaConfig.parse(config.withOverlayPin('mine', 'sha256:${'0' * 64}').encode()).overlayOptions('mine'), {'depth': 'deep'});
+
+    final chosen = config.withOverlayKb('bare', 'index');
+    expect(CanoaConfig.parse(chosen.encode()).overlayKb('bare'), 'index');
+    expect((CanoaConfig.parse(chosen.encode()).overlays['bare'] as GitOverlay).spec, (config.overlays['bare'] as GitOverlay).spec);
+    final cleared = chosen.withOverlayKb('mine', null);
+    expect(CanoaConfig.parse(cleared.encode()).overlayKb('mine'), isNull);
+    expect(CanoaConfig.parse(cleared.encode()).overlayOptions('mine'), {'depth': 'deep'}, reason: 'its other keys stay');
+    expect(() => config.withOverlayKb('mine', 'sometimes'), throwsArgumentError);
+    expect(() => config.withOverlayKb('nope', 'index'), throwsArgumentError);
+    expect(() => CanoaConfig.parse('[overlays]\nmine = { dir = "mine", kb = "sometimes" }\n'), throwsFormatException);
+  });
+
+  test('[host.kb] is read and set by its four keys, and the rest of the table and of [host] stays', () {
+    final config = CanoaConfig.parse('[host.kb]\nembeddings = "http://127.0.0.1:60570"\nmodel = "m"\nchunk_bytes = 512\n'
+        '[host.agents.a]\nprogram = "agent"\nlisten = "127.0.0.1:7000"\n');
+    expect(config.hostKb, {'embeddings': 'http://127.0.0.1:60570', 'model': 'm'});
+    expect(const CanoaConfig().hostKb, isEmpty);
+
+    final changed = config.withHostKb({'embeddings': 'http://127.0.0.1:60570', 'model': 'm', 'llm_endpoint': 'http://127.0.0.1:60570', 'llm_model': 'q'});
+    final reread = CanoaConfig.parse(changed.encode());
+    expect(reread.hostKb['llm_model'], 'q');
+    expect(((reread.host!['kb']) as Map)['chunk_bytes'], 512, reason: 'a key the app does not edit stays');
+    expect(reread.hostEntries.single.name, 'a');
+
+    // Empty values go; a table with nothing left goes; a `[host]` with nothing left goes.
+    final less = reread.withHostKb({'embeddings': 'http://127.0.0.1:60570', 'model': ' '});
+    expect(CanoaConfig.parse(less.encode()).hostKb, {'embeddings': 'http://127.0.0.1:60570'});
+    final bare = CanoaConfig.parse('[host.kb]\nllm_endpoint = "http://h"\nllm_model = "q"\n').withHostKb(const {});
+    expect(bare.host, isNull);
+    expect(CanoaConfig.parse(bare.encode()).hostKb, isEmpty);
+  });
+
   test('allow_once_only is read, written and kept by every copy, and off by default', () {
     expect(const CanoaConfig().allowOnceOnly, isFalse);
     expect(CanoaConfig.parse(const CanoaConfig().encode()).allowOnceOnly, isFalse);
