@@ -703,7 +703,7 @@ in `overlays/.cache/<name>.git` (a catalog's in `overlays/.catalogs/<label>.git`
 - `skill/*`: skills fetched from elsewhere, kept under `overlays/.skills/` as `<lower-case name>/` (the files the skill's digest covers) and `<lower-case name>.json` (what the app accepted), the layout the profile reader checks again before it delivers one.
   `skill/list` -> `{"skills": {key: {name, source, ref?, pin?, digest, catalog?, overlays, chosen}}}` (no files; a record that names another skill than its file is left out) and `skill/read` `{"name"}` -> `{"files": {path: base64}}` (none when the folder holds a link or passes 1024 files or 16 MiB) need `overlay.read`.
   `skill/fetch` `{"repo", "ref"?, "path"?}` -> `{"commit", "files": {path: base64}}` fetches the source one commit deep with the isolated git of `catalog/fetch` (no `ref` is the repository's head), leaves out what is under an excluded name, refuses a link or more than a skill may hold, and keeps nothing; `skill/save` `{name, source, ref?, pin?, digest, catalog?, overlays, chosen, files: {path: base64}}` writes the record and files only when they pass the profile reader's own check (paths inside the folder, the digest the record names, a `SKILL.md` that names the skill) and replaces the folder whole; `skill/remove` `{"name"}`. They need `overlay.write`; the review of what was fetched, and the pin, stay the app's.
-- `host/which` `{"names": [..]}` (at most 32, each 1 to 64 of letters, digits, `.`, `_`, `+`, `-`) -> `{"found": {name: path|null}}`: the first runnable file of that name in an absolute directory of the host's `PATH` (Windows: with a `PATHEXT` extension); it starts nothing. Needs `store.read`.
+- `host/which` `{"names": [..]}` (at most 32, each 1 to 64 of letters, digits, `.`, `_`, `+`, `-`) -> `{"found": {name: path|null}}`: the first runnable file of that name in an absolute directory of the host's `PATH` (Windows: with a `PATHEXT` extension); it starts nothing. The folders of the runtimes the Store installed (Node, Python), when their copy is as it was installed, are searched after `PATH`, so the person's own copy comes first. Needs `store.read`.
 - `store/contents` `{"label"}` -> `{"document": text|null}` and `store/contents_put` `{"label", "document"}`: the JSON object the app keeps for a catalog (what each entry provides), under the host's `cache/contents/`, one folder for the person and one for each key, so a key never reads another's; a document is at most 8 MiB, a folder holds 256. Needs `overlay.read`.
 - `catalog/fetch` `{"label", "repo", "ref", "path"?}` -> `{"commit"}`; `catalog/read` `{"label", "commit" (whole id), "paths", "maxBytes"?, "list"?}` -> `{"files":
   {path: {"size", "data"?: base64} | null}, "directories"?}` reads regular files at that commit by their literal paths, with no data past `maxBytes`
@@ -811,7 +811,7 @@ The params and results are the JSON of `canoa::store`'s models:
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `store/list` | none | `{"stores": [StoreInfo + "provider"]}` |
+| `store/list` | `kind`? (`agents`, the default, or `runtimes`) | `{"stores": [StoreInfo + "provider"]}`: the agents' programs, or the Runtimes type's (`node_store`, `python_store`); every other `store/*` method takes either kind's provider |
 | `store/report` | `provider`, `probe`? (bool), `pick`? | `ProgramReport`: the copies the host finds; no network |
 | `store/latest` | `provider`, `channel`? | `LatestReport` |
 | `store/plan` | `provider`, `action` (`install`, `update`, `uninstall`), `channel`?, `version`? | `InstallPlan`, with its `token`: what an apply would do, nothing written |
@@ -856,6 +856,7 @@ the catalog's own repository; one elsewhere is the catalog's claim only. Nothing
   than `index_ttl` later. An entry the catalog refused or whose manifest does not read is a card with `problem`; the others are listed.
 - `icons: true` adds the icon's bytes (`icon.data`, base64) for entries whose icon file passed AOS's checks and fit `index_cache_bytes`.
 - Programs come from `store/list`: no network, no cache.
+- Runtimes (`node_store`: nodejs.org builds checked against `SHASUMS256.txt`, channels `lts` and `current`; `python_store`: the standalone CPython builds checked against the `SHA256SUMS` of the newest release, channels `3.11` to `3.14`) are kept on the programs folder as `node` and `python`, installed and removed with `store/plan`, `store/apply` and `store/remove` like an agent's. A signature is not checked, and the plan says so. An archive's links are left out, so a Unix copy gets `npm`, `npx`, `python3` and `python` written beside the interpreter.
 - Not indexed yet: `[store] registries` (MCP registries).
 
 ## Worktrees

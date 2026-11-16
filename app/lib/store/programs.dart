@@ -441,6 +441,7 @@ class ProgramStores extends ChangeNotifier {
     DateTime Function()? now,
     this.latestLife = const Duration(hours: 1),
     this.afterChange,
+    this.kind,
   }) : _control = control,
        _open = open,
        _now = now ?? DateTime.now;
@@ -455,6 +456,9 @@ class ProgramStores extends ChangeNotifier {
   /// Runs once a program was installed, updated or removed: the host reads which program a source runs when it starts, so the app has
   /// it start again here.
   final Future<void> Function()? afterChange;
+
+  /// Which stores the host lists: `runtimes` for the Runtimes type; none lists the agents' programs.
+  final String? kind;
 
   final _status = <String, ProgramStatus>{};
   List<String> _order = const [];
@@ -507,7 +511,7 @@ class ProgramStores extends ChangeNotifier {
     notifyListeners();
     try {
       final client = await _control();
-      final listed = _map(await client.call('store/list'));
+      final listed = _map(await client.call('store/list', {'kind': ?kind}));
       final infos = [for (final each in listed['stores'] is List ? listed['stores'] as List : const []) ?ProgramStoreInfo.parse(each)];
       _order = [for (final each in infos) each.provider];
       _listed = true;
@@ -599,6 +603,15 @@ class ProgramStores extends ChangeNotifier {
     } finally {
       await _afterChange(provider);
       if (changed) unawaited(afterChange?.call());
+    }
+  }
+
+  /// Takes the host's copy of [provider] away; a copy found elsewhere on the computer stays. Throws [ControlFailed].
+  Future<void> remove(String provider) async {
+    try {
+      await (await _control()).call('store/remove', {'provider': provider});
+    } finally {
+      await _afterChange(provider);
     }
   }
 

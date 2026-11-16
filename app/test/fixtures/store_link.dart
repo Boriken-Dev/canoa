@@ -67,9 +67,13 @@ final class FakeStore {
     this.latest,
     this.plan,
     this.latestFails,
+    this.runtime = false,
   });
 
   final String provider, title;
+
+  /// Whether the store is of the Runtimes type, which `store/list` gives only when asked for `runtimes`.
+  final bool runtime;
   List<Map<String, Object?>> serves;
   List<Map<String, Object?>> copies;
 
@@ -120,9 +124,9 @@ final class FakeStoreHost {
   ControlClient client() => ControlClient(open());
 
   /// A [ProgramStores] over this host, as the app makes one: the shared link for questions, a link of its own for each apply.
-  ProgramStores programs() {
+  ProgramStores programs({String? kind}) {
     final shared = client();
-    return ProgramStores(control: () async => shared, open: () async => client());
+    return ProgramStores(control: () async => shared, open: () async => client(), kind: kind);
   }
 
   FakeStore store(String provider) => stores.firstWhere((each) => each.provider == provider);
@@ -138,7 +142,7 @@ final class FakeStoreHost {
     if (method == 'store/list') {
       return {
         'stores': [
-          for (final each in stores)
+          for (final each in stores.where((each) => each.runtime == (given['kind'] == 'runtimes')))
             {
               'provider': each.provider,
               'program': each.provider.replaceAll('_store', ''),
