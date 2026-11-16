@@ -1,9 +1,11 @@
 import 'attention/notifier.dart';
 import 'dart:async';
+import 'dart:convert' show utf8;
 import 'served/folder_dialog.dart';
 import 'served/served_app.dart';
 import 'desktop/control_client.dart' show ControlFailed;
 import 'config/canoa_config.dart';
+import 'config/connection.dart' show ConnectionKind;
 import 'config/canoa_config_file.dart';
 import 'desktop/desktop_shell.dart';
 import 'desktop/host_control.dart';
@@ -44,7 +46,10 @@ import 'chat/git_changes.dart' show GitReader;
 import 'chat/inspector.dart';
 import 'chat/timing_log.dart';
 import 'chat/inspector_surfaces.dart';
+import 'chat/run_in_terminal.dart';
 import 'surfaces/files_surface.dart';
+import 'surfaces/terminal_controller.dart' show ControlTerminals;
+import 'surfaces/terminal_surface.dart';
 import 'served/host_files.dart' show HostFiles, WorkspaceFiles;
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show SessionUsage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
@@ -415,7 +420,7 @@ class _CanoaAppState extends State<CanoaApp> {
   String? _settingsFirst;
 
   late final ShellLayout _layout = widget.layout ?? ShellLayout();
-  late final WorkSurfaces _surfaces = WorkSurfaces(widget.surfaces ?? [...builtInSurfaces(), FilesSurface(_filesOf)]);
+  late final WorkSurfaces _surfaces = WorkSurfaces(widget.surfaces ?? [...builtInSurfaces(), FilesSurface(_filesOf), TerminalSurface(_terminalOf)]);
 
   /// Hosting is part of Local's overview, in the Hosts section.
   Future<void> _showHosting() async {
@@ -834,6 +839,23 @@ class _CanoaAppState extends State<CanoaApp> {
         ? session.place == SessionPlace.local || session.place == SessionPlace.host
         : session.peerId == null || session.peerId == served.host.peer;
     return here ? _hostFiles : null;
+  }
+
+  late final ControlTerminals? _terminals = _control == null ? null : ControlTerminals(_control);
+
+  /// What the host [session] runs on offers of a shell: the terminal of the host this app reaches when it grants one; a direct agent
+  /// endpoint says it offers none; nothing for any other host, which the Terminal section reaches.
+  TerminalAccess? _terminalOf(ChatSession session) {
+    final served = widget.served;
+    final here = served == null
+        ? session.place == SessionPlace.local || session.place == SessionPlace.host
+        : session.peerId == null || session.peerId == served.host.peer;
+    if (here) {
+      final terminals = _terminals;
+      return terminals != null && (_grants?.may(HostGrants.terminal) ?? false) ? TerminalOnHost(terminals) : null;
+    }
+    final direct = config.connections.where((each) => each.kind == ConnectionKind.acp && each.peer.toLowerCase() == session.peerId?.toLowerCase());
+    return direct.isEmpty ? null : const TerminalRefused('This is a direct agent endpoint: it offers a session and no shell.');
   }
 
   Worktrees? _localWorktrees() => _control == null ? null : controlWorktrees(_control);
@@ -2225,7 +2247,7 @@ class _CanoaHome extends StatelessWidget {
     chord(LogicalKeyboardKey.keyK): () => unawaited(_palette(context)),
     chord(LogicalKeyboardKey.keyN): onNewSession,
     chord(LogicalKeyboardKey.backquote): () {
-      if (store.selected case final session? when surfaces.offers(session, SurfaceSlot.bottom)) layout.toggleBottom();
+      if (store.selected case final session?) toggleBottomPanel(surfaces: surfaces, layout: layout, session: session);
     },
     chord(LogicalKeyboardKey.keyB, alt: true): () {
       if (store.selected case final session? when surfaces.offers(session, SurfaceSlot.right)) layout.toggleRight();
@@ -2418,6 +2440,28 @@ class _ConversationState extends State<_Conversation> {
     widget.store.refreshGit(session);
     mine.openSurface(surface);
     slot == SurfaceSlot.right ? layout.showRight() : layout.showBottom();
+  }
+
+  /// The Terminal surface when the host [session] runs on gives a shell to open.
+  TerminalSurface? _terminalSurface(ChatSession session) {
+    final surface = widget.surfaces.registry.whereType<TerminalSurface>().firstOrNull;
+    return surface != null && surface.accessFor(session) is TerminalOnHost ? surface : null;
+  }
+
+  /// Types [command] into the session's terminal, shown, without pressing Enter.
+  void _runInTerminal(ChatSession session, String command) {
+    final surface = _terminalSurface(session);
+    if (surface == null) return;
+    final opened = widget.surfaces.of(session.id).openSurface(surface);
+    opened.slot == SurfaceSlot.bottom ? widget.layout.showBottom() : widget.layout.showRight();
+    surface.workspaceFor(opened.controller, session)?.focused?.type(command);
+  }
+
+  /// Takes [text] as a text file on the message being written, or says why it cannot.
+  void _attachText(ChatSession session, String name, String text) {
+    final messenger = ScaffoldMessenger.of(context);
+    final problem = widget.store.addAttachment(session, name, utf8.encode(text), mimeType: 'text/plain');
+    if (problem != null) messenger.showSnackBar(SnackBar(content: Text(problem)));
   }
 
   void _showInspector(ChatSession session) => _toggleSurface(session, DetailsSurface.surfaceId);
@@ -2672,7 +2716,7 @@ class _ConversationState extends State<_Conversation> {
             working: session.status == SessionStatus.working || widget.store.isStarting(session),
             agentName: session.agent,
             turns: [for (final turn in session.chat.turns) chat.TurnSpan.of(turn)],
-            renderers: delegationRenderers.merge(widget.renderers),
+            renderers: delegationRenderers.merge(terminalRenderers(offered: () => _terminalSurface(session) != null, run: (command) => _runInTerminal(session, command))).merge(widget.renderers),
             narrow: widget.narrow,
           )),
         ),
@@ -2718,6 +2762,7 @@ class _ConversationState extends State<_Conversation> {
         store: widget.store,
         sessionSpend: widget.sessionSpend,
         onComment: _addToComposer,
+        onAttachText: widget.store.canAttach(session) ? (name, text) => _attachText(session, name, text) : null,
         onOpenChild: () {
           if (widget.narrow) widget.layout.setRightOpen(false);
         },

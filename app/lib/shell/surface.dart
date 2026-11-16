@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../session_store.dart';
 import '../usage/spend_model.dart' show SpendRow;
+import 'layout_state.dart' show ShellLayout;
 
 /// Where a surface may be shown: in the right panel beside the conversation, or in the bottom panel under it.
 enum SurfaceSlot { right, bottom }
@@ -22,6 +25,18 @@ class SurfaceController extends ChangeNotifier {
   void update(VoidCallback change) {
     change();
     notifyListeners();
+  }
+
+  final List<Future<void> Function()> _releasers = [];
+
+  /// Registers what must end when the surface is closed (a shell, a connection); moving or hiding it never runs these.
+  void onRelease(Future<void> Function() release) => _releasers.add(release);
+
+  /// Runs what [onRelease] registered, once.
+  Future<void> release() async {
+    final all = [..._releasers];
+    _releasers.clear();
+    await Future.wait([for (final each in all) each()]);
   }
 }
 
@@ -101,6 +116,7 @@ class SessionSurfaces extends ChangeNotifier {
     final found = find(id);
     if (found == null) return;
     open.remove(found);
+    unawaited(found.controller.release());
     if (_active[found.slot] == id) _active[found.slot] = null;
     notifyListeners();
   }
@@ -141,6 +157,9 @@ class WorkSurfaces extends ChangeNotifier {
   @override
   void dispose() {
     for (final each in _bySession.values) {
+      for (final open in each.open) {
+        unawaited(open.controller.release());
+      }
       each.dispose();
     }
     super.dispose();
@@ -149,7 +168,10 @@ class WorkSurfaces extends ChangeNotifier {
 
 /// What the app gives every surface: the store, and the ways to reach the conversation beside it.
 class SurfaceEnvironment extends InheritedWidget {
-  const SurfaceEnvironment({super.key, required this.store, required this.onComment, required this.onOpenChild, this.sessionSpend, required super.child});
+  const SurfaceEnvironment({super.key, required this.store, required this.onComment, required this.onOpenChild, this.sessionSpend, this.onAttachText, required super.child});
+
+  /// Attaches [text] to the message being written as a text file called [name]; null where the conversation takes no attachments.
+  final void Function(String name, String text)? onAttachText;
 
   final SessionStore store;
 
@@ -168,4 +190,17 @@ class SurfaceEnvironment extends InheritedWidget {
 
   @override
   bool updateShouldNotify(SurfaceEnvironment oldWidget) => store != oldWidget.store;
+}
+
+/// What the bottom-panel key does for [session]: with the panel hidden it shows it, opening the Terminal when the host offers one
+/// and none is open yet, where it was left otherwise; with it showing it hides it. Does nothing where no surface offers the panel.
+void toggleBottomPanel({required WorkSurfaces surfaces, required ShellLayout layout, required ChatSession session}) {
+  if (!surfaces.offers(session, SurfaceSlot.bottom)) return;
+  final terminal = surfaces.registry.where((each) => each.id == 'terminal' && each.available(session)).firstOrNull;
+  if (terminal == null || layout.bottomOpen) {
+    layout.toggleBottom();
+    return;
+  }
+  final opened = surfaces.of(session.id).openSurface(terminal, SurfaceSlot.bottom);
+  opened.slot == SurfaceSlot.bottom ? layout.showBottom() : layout.showRight();
 }
