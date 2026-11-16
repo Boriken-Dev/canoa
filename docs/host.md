@@ -326,7 +326,7 @@ command); the host keeps who the accounts are, their credentials, who holds one,
 
 ```toml
 [host]
-account_store = "os"            # the default; "file" for a host with no operating system credential store
+account_store = "auto"          # the default: the operating system credential store when there is one, else sealed files; "os" or "file" to insist
 shell = "pwsh"                  # the program a terminal starts; absent, your own ($SHELL, else pwsh or powershell on Windows)
 
 # What a program store's install is held to, as gitignore-style lists (see the host's AGENTS.md); absent, the recommended lists apply.
@@ -360,9 +360,13 @@ canoa accounts remove work                                       # forgets the s
 - **A credential is never in canoa.cfg.** A file that holds one under `[host.accounts]` is refused, naming the key and not
   quoting the value. It rests in the operating system's credential store (Windows Credential Manager, macOS Keychain,
   Secret Service), and a typed key is read from the terminal without echo, never from the command line. A host with no
-  such store, a headless Linux for one, says `account_store = "file"`: a file per account in the host's directory, sealed
-  to a key beside it. That keeps a copied file closed and nothing from anyone who can read the directory, and the host logs it
-  as a weakening.
+  such store, a Linux service with no session bus for one, keeps a file per account in the host's directory instead,
+  sealed to a key beside it, with nothing to set: `account_store = "auto"` is the default, probes the operating system's
+  store once and falls back to files when it does not answer. That keeps a copied file closed and nothing from anyone who
+  can read the directory, so the host logs it as a weakening with the reason, and `canoa accounts list` prints the same
+  note. Once files hold an account, `auto` stays on files, so a store that answers later does not hide them. `"file"`
+  chooses files outright; `"os"` insists on the operating system's store and fails, naming `auto` and `file`, where there
+  is none.
 - **One copy of a login that rotates.** Claude's and Codex's logins replace their refresh token each time they renew, so a
   second copy would be dead the moment the first renewed. A session on such an account holds it from its start until its
   connection ends, a second connection that chooses it is turned away saying who holds it, and so is a second session on
