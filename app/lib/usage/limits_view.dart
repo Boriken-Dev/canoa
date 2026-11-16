@@ -75,18 +75,25 @@ class LimitsView extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(top: 2, bottom: 12),
                       child: Text(
-                        each.hosts.isEmpty ? 'Not reported yet: it shows once its provider says, or a session has run on it' : 'Reported by ${each.hosts.join(', ')}',
+                        each.note != null
+                            ? _noteHeading(each.note!.kind)
+                            : each.hosts.isEmpty
+                            ? 'Not reported yet: it shows once its provider says, or a session has run on it'
+                            : 'Reported by ${each.hosts.join(', ')}',
                         key: Key('usage-hosts ${each.id}'),
                         style: small,
                       ),
                     ),
-                    AccountUsageView(
-                      report: each.report,
-                      now: now,
-                      warnPermille: warnPermille,
-                      large: true,
-                      readAt: each.readAt,
-                    ),
+                    if (each.note != null)
+                      Text(each.note!.text, key: Key('usage-note ${each.id}'), style: each.note!.kind == ReadNoteKind.failed ? small?.copyWith(color: scheme.error) : text.bodyMedium)
+                    else
+                      AccountUsageView(
+                        report: each.report,
+                        now: now,
+                        warnPermille: warnPermille,
+                        large: true,
+                        readAt: each.readAt,
+                      ),
                   ],
                 ),
               ),
@@ -96,3 +103,9 @@ class LimitsView extends StatelessWidget {
     );
   }
 }
+
+String _noteHeading(ReadNoteKind kind) => switch (kind) {
+  ReadNoteKind.notOffered => 'Not offered',
+  ReadNoteKind.notYet => 'Not reported yet',
+  ReadNoteKind.failed => 'Could not be read',
+};

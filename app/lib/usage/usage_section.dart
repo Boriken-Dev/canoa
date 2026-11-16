@@ -146,7 +146,8 @@ class _UsagePageState extends State<UsagePage> {
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
-          child: ListView(
+          // The figures, labels, reasons and errors are text a person copies.
+          child: SelectionArea(child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
               Row(
@@ -243,7 +244,7 @@ class _UsagePageState extends State<UsagePage> {
                   ),
                 ),
             ],
-          ),
+          )),
         ),
       );
     },

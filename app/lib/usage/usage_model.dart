@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../accounts/account_models.dart';
 import '../accounts/accounts_controller.dart';
+import '../desktop/control_client.dart' show ControlFailed;
 import '../desktop/host_control.dart';
 import 'spend_model.dart';
 
@@ -57,6 +58,26 @@ final class ControlUsageSource implements UsageSource, UsageReader {
 /// The provider an account is listed under when nothing says which it is.
 const otherProvider = 'Other';
 
+/// Why an account shows no figures after its provider was asked with no session.
+enum ReadNoteKind {
+  /// The provider has no limits to report for this kind of account, and says why.
+  notOffered,
+
+  /// The provider answered and has no figures yet.
+  notYet,
+
+  /// The question itself failed.
+  failed,
+}
+
+/// What asking an account's provider came to when it gave no figures: which of the three, and the words for it.
+final class ReadNote {
+  const ReadNote(this.kind, this.text);
+
+  final ReadNoteKind kind;
+  final String text;
+}
+
 /// What is known of one account's allowances: the newest reading among the hosts that reported its identity.
 final class AccountLimits {
   const AccountLimits({
@@ -66,7 +87,11 @@ final class AccountLimits {
     required this.hosts,
     required this.report,
     required this.readAt,
+    this.note,
   });
+
+  /// Why there are no figures, when a host was asked and gave none; null when figures show or no host was asked.
+  final ReadNote? note;
 
   /// The identity the agent reported; two hosts reporting the same one are the same allowance.
   final String id;
@@ -175,6 +200,9 @@ class UsageController extends ChangeNotifier {
   /// What each host's provider said when asked of an account with no session, by the host's name and the account's identity.
   final _read = <String, Map<String, _Heard>>{};
 
+  /// Why a host's provider gave no figures for an account, by the host's name and the account's identity.
+  final _notes = <String, Map<String, ReadNote>>{};
+
   /// Asks each host that can for every account this computer lists, so an account no session has run on still says what its
   /// provider can report. A provider that reports only during a turn answers nothing, and an answer that fails leaves the account
   /// as it was.
@@ -188,13 +216,24 @@ class UsageController extends ChangeNotifier {
               try {
                 final row = await (source as UsageReader).read(account.name);
                 final heard = _Heard.parse(row is Map ? {'account': account.id, ...row.cast<String, Object?>()} : null);
-                if (heard != null) (_read[source.name] ??= {})[account.id] = heard;
-              } on Object {
-                // This host cannot read it now: what the sessions reported stands.
+                if (heard == null) return;
+                (_read[source.name] ??= {})[account.id] = heard;
+                final note = heard.report.buckets.isNotEmpty
+                    ? null
+                    : heard.report.supported
+                    ? const ReadNote(ReadNoteKind.notYet, 'The provider answered and has no figures for this account yet.')
+                    : ReadNote(ReadNoteKind.notOffered, heard.report.unsupportedBecause ?? 'This provider reports no limits for this account.');
+                final notes = _notes[source.name] ??= {};
+                note == null ? notes.remove(account.id) : notes[account.id] = note;
+              } on Object catch (error) {
+                // The question failed: said in words, and what the sessions reported stands.
+                (_notes[source.name] ??= {})[account.id] = ReadNote(ReadNoteKind.failed, _why(error));
               }
             }(),
     ]);
   }
+
+  static String _why(Object error) => error is ControlFailed ? error.message : '$error'.replaceFirst(RegExp(r'^(Exception|StateError): '), '');
 
   /// Every account any host reported, and every account this computer lists that none did, one for each identity, the newest
   /// reading winning, in a stable order: provider, then name.
@@ -212,7 +251,11 @@ class UsageController extends ChangeNotifier {
     final merged = <AccountLimits>[];
     for (final each in accounts?.accounts ?? const <AccountInfo>[]) {
       if (byId.containsKey(each.id)) continue;
-      merged.add(AccountLimits(id: each.id, name: each.name, provider: each.harness, hosts: const [], report: UsageReport.parse({'supported': true})!, readAt: 0));
+      ReadNote? note;
+      for (final source in sources) {
+        note ??= _notes[source.name]?[each.id];
+      }
+      merged.add(AccountLimits(id: each.id, name: each.name, provider: each.harness, hosts: const [], report: UsageReport.parse({'supported': true})!, readAt: 0, note: note));
     }
     for (final MapEntry(:key, :value) in byId.entries) {
       var newest = value.first.$2;
