@@ -228,6 +228,15 @@ void main() {
       expect(changedTables(every, h.last), {'desktop', 'sessions', 'network'});
     });
 
+    testWidgets('Enter while the agent works and how queued messages go are rows, and change only sessions', (tester) async {
+      final h = await openSettings(tester, config: every);
+      await choose(tester, 'settings-while-working', 'Steer the turn');
+      await choose(tester, 'settings-queue-delivery', 'One at a time');
+      expect(h.last.sessions.whileWorking, WhileWorking.steer);
+      expect(h.last.sessions.queueDelivery, QueueDelivery.each);
+      expect(changedTables(every, h.last), {'sessions'});
+    });
+
     testWidgets('clears what was said with the session list', (tester) async {
       final ledger = SessionLedger(MemoryLedgerBackend(), settings: const LedgerSettings(keepText: true));
       await openSettings(tester, ledger: ledger, config: const CanoaConfig(sessions: LedgerSettings(keepText: true)));

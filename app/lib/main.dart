@@ -526,6 +526,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (!mounted) return changed;
     setState(() => config = changed);
     store.embedLimit = changed.embedLimit;
+    store.queueDelivery = changed.sessions.queueDelivery;
     if (_checked) unawaited(_checkSources());
     store.ledger?.configure(changed.sessions);
     store.defaultMode = changed.defaultMode;
@@ -1622,6 +1623,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store = widget.store ??
         SessionStore(recorder: updateRecorderFromEnvironment(), ledger: widget.ledger, rules: widget.rules, defaultMode: config.defaultMode, bypassOnceOnly: config.allowOnceOnly,
             drafts: widget.drafts, embedLimit: config.embedLimit);
+    store.queueDelivery = config.sessions.queueDelivery;
     store.starter = _startDraft;
     store.choicesLoader = _askChoices;
     store.gitReader = _gitReaderFor;
@@ -1758,6 +1760,7 @@ class _CanoaAppState extends State<CanoaApp> {
     defaultOverlays: config.defaultOverlays,
     onLoadout: _showLoadout,
     pasteAsFile: config.pasteAsFile,
+    enterSteers: config.sessions.whileWorking == WhileWorking.steer,
     warnPermille: config.warnPermille,
     onSourceSettings: () => unawaited(_showSettings(section: 'sources')),
     onSettings: () => unawaited(_showSettings()),
@@ -2161,7 +2164,16 @@ class _ConversationState extends State<_Conversation> {
     }
   }
 
-  void _send() {
+  /// Puts what was queued back in the composer, after what is written there.
+  void _queuedToComposer(String text) {
+    final current = _input.text;
+    final joined = current.trim().isEmpty ? text : '$current\n\n$text';
+    _input.value = TextEditingValue(text: joined, selection: TextSelection.collapsed(offset: joined.length));
+    _composerFocus.requestFocus();
+  }
+
+  /// Sends the composer's message. While a turn runs it queues, or with [steer] stops the turn and goes first.
+  void _send({bool steer = false}) {
     final text = _input.text;
     final session = widget.store.selected;
     final attached = session?.attachments.isNotEmpty ?? false;
@@ -2170,7 +2182,7 @@ class _ConversationState extends State<_Conversation> {
     final starting = session != null && session.isDraft;
     try {
       _input.clear();
-      unawaited(widget.store.sendText(text).catchError((Object error) {
+      unawaited(widget.store.sendText(text, steer: steer).catchError((Object error) {
         if (!mounted) return;
         // Not sent, so it is there to change and send again.
         if (session != null && !identical(widget.store.selected, session)) {
@@ -2180,7 +2192,7 @@ class _ConversationState extends State<_Conversation> {
         }
         final started = session?.remoteSessionId != null;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${starting && !started ? 'Not started' : 'Message not accepted'}: ${reasonOf(error)}')),
+          SnackBar(content: Text('${steer ? 'Not steered' : starting && !started ? 'Not started' : 'Message not accepted'}: ${reasonOf(error)}')),
         );
       }));
     } on StateError {
@@ -2355,7 +2367,7 @@ class _ConversationState extends State<_Conversation> {
             children: [for (final task in session.tasks.live) ChildView.of(task)],
             onStop: () => unawaited(widget.store.stopTasks(session)),
           ),
-        if (session.queue.isNotEmpty) SessionQueuePanel(store: widget.store, session: session),
+        if (session.queue.isNotEmpty) SessionQueuePanel(store: widget.store, session: session, toComposer: _queuedToComposer),
         if (session.pendingPermissions.isNotEmpty) SessionPermissionCard(store: widget.store, session: session),
         if (session.pendingQuestions.isNotEmpty) SessionQuestionCard(store: widget.store, session: session),
         if (session.pendingSecrets.isNotEmpty) SessionSecretCard(store: widget.store, session: session),
@@ -2412,6 +2424,7 @@ class _ConversationState extends State<_Conversation> {
         session.status == SessionStatus.connected ||
         session.status == SessionStatus.working),
     onSend: _send,
+    onSteer: () => _send(steer: true),
     working: session.status == SessionStatus.working,
     onStop: () {
       final messenger = ScaffoldMessenger.of(context);

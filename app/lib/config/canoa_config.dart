@@ -898,7 +898,7 @@ final class CanoaConfig {
     final network = table('network', {'prefer_webtransport','connect_timeout'});
     final assets = table('assets', {'cdn'});
     final appearance = table('appearance', {'look', 'brightness', 'density'});
-    final sessions = table('sessions', {'keep', 'keep_text', 'text_messages', 'workspace'});
+    final sessions = table('sessions', {'keep', 'keep_text', 'text_messages', 'workspace', 'while_working', 'queue_delivery'});
     final permissions = table('permissions', {'default_mode', 'full_access', 'allow_once_only', 'protected'});
     final notifications = table('notifications', {'permission', 'question', 'finished'});
     final sources = table('sources', {'hidden'});
@@ -997,6 +997,16 @@ final class CanoaConfig {
     final workspace = sessions['workspace'] ?? defaultWorkspace;
     if (workspace is! String) throw const FormatException('canoa.cfg: sessions.workspace must be a string');
     if (workspaceProblem(workspace) case final problem?) throw FormatException('canoa.cfg: sessions.workspace: $problem');
+    final whileWorking = switch (sessions['while_working']) {
+      null || 'queue' => WhileWorking.queue,
+      'steer' => WhileWorking.steer,
+      _ => throw const FormatException('canoa.cfg: sessions.while_working must be queue or steer'),
+    };
+    final queueDelivery = switch (sessions['queue_delivery']) {
+      null || 'merge' => QueueDelivery.merge,
+      'each' => QueueDelivery.each,
+      _ => throw const FormatException('canoa.cfg: sessions.queue_delivery must be merge or each'),
+    };
     final harnesses = data['harnesses'] ?? const <String, Object?>{};
     if (harnesses is! Map || harnesses.values.any((label) => label is! String || label.trim().isEmpty)) {
       throw const FormatException('canoa.cfg: harnesses must map each reported agent name to a label');
@@ -1094,6 +1104,8 @@ final class CanoaConfig {
         textMessages: count('text_messages', LedgerSettings.defaultTextMessages),
         workspace: workspace,
         harnesses: {for (final MapEntry(:key, :value) in harnesses.entries) '$key': value as String},
+        whileWorking: whileWorking,
+        queueDelivery: queueDelivery,
       ),
     );
   }
@@ -1122,7 +1134,7 @@ density = "${density.name}"
 keep = ${sessions.keep}
 keep_text = ${sessions.keepText}
 text_messages = ${sessions.textMessages}
-${sessions.workspace == defaultWorkspace ? '' : 'workspace = ${jsonEncode(sessions.workspace)}\n'}
+${sessions.workspace == defaultWorkspace ? '' : 'workspace = ${jsonEncode(sessions.workspace)}\n'}${sessions.whileWorking == WhileWorking.queue ? '' : 'while_working = "${sessions.whileWorking.name}"\n'}${sessions.queueDelivery == QueueDelivery.merge ? '' : 'queue_delivery = "${sessions.queueDelivery.name}"\n'}
 [notifications]
 permission = ${notifications.permission}
 question = ${notifications.question}

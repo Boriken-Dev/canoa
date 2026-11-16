@@ -138,20 +138,42 @@ class SessionSecretCard extends StatelessWidget {
 
 /// The messages [session] holds for when its turn ends.
 class SessionQueuePanel extends StatelessWidget {
-  const SessionQueuePanel({super.key, required this.store, required this.session});
+  const SessionQueuePanel({super.key, required this.store, required this.session, required this.toComposer});
 
   final SessionStore store;
   final ChatSession session;
+
+  /// Puts the text of a message taken out of the queue in the composer, after what is written there.
+  final void Function(String text) toComposer;
+
+  void _say(BuildContext context, String? problem) {
+    if (problem != null) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(problem)));
+  }
+
+  /// Runs [action], which sends something, saying why in a snackbar if the agent did not take it.
+  void _try(BuildContext context, Future<void> Function() action, String what) {
+    final messenger = ScaffoldMessenger.of(context);
+    unawaited(action().catchError((Object error) {
+      messenger.showSnackBar(SnackBar(content: Text('$what: ${reasonOf(error)}')));
+    }));
+  }
 
   @override
   Widget build(BuildContext context) => QueuePanel(
     lines: [for (final message in session.queue) QueuedLine(message, message.text, attachments: [for (final item in message.attachments) item.name])],
     held: session.queueHeld,
     working: session.status == SessionStatus.working,
+    merged: store.queueDelivery == QueueDelivery.merge,
     onEdit: (index, text) => store.editQueued(session, session.queue[index], text),
     onRemove: (index) => store.removeQueued(session, session.queue[index]),
     onClear: () => store.removeQueued(session),
-    onSendNext: () => store.sendQueued(session),
+    onSendNext: () => _try(context, () => store.sendQueued(session), 'Not sent'),
+    onMergeSend: () => _try(context, () => store.sendMerged(session), 'Not sent'),
+    onMergeAll: () => _say(context, store.mergeAllQueued(session)),
+    onSteer: (index) => _try(context, () => store.steerQueued(session, session.queue[index]), 'Could not steer'),
+    onMerge: (index) => _say(context, store.mergeQueued(session, session.queue[index])),
+    onToComposer: (index) => _say(context, store.takeQueued(session, session.queue[index], into: toComposer)),
+    onMove: (index, by) => store.moveQueued(session, session.queue[index], by),
     dialog: (context, builder) => showSelectableDialog<String>(context: context, builder: builder),
   );
 }

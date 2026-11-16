@@ -35,7 +35,7 @@ export 'acp/secret_wire.dart' show SecretIdentity;
 export 'chat/agent_events.dart' show MessageRole;
 export 'chat/attachments.dart' show Attachment, AttachmentKind, imageTypeOf, maxAttachedImage, maxAttachedText, maxAttachments;
 export 'ledger/session_ledger.dart' show SessionPlace;
-export 'package:coqui_acp_chat/coqui_acp_chat.dart' show AgentQuestion, AttentionKind, ChatMessage, PermissionQuestion, QueuedMessage;
+export 'package:coqui_acp_chat/coqui_acp_chat.dart' show AgentQuestion, AttentionKind, ChatMessage, PermissionQuestion, QueueDelivery, QueuedMessage;
 
 /// Canoa's local view of an agent-issued session. The agent session id is
 /// separate from the local view id and is absent from offline previews.
@@ -529,6 +529,18 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// The largest file, in bytes, sent as the agent's embedded context; a larger one goes as a link to it.
   int embedLimit;
 
+  /// Whether what was queued goes as one message when a turn ends, or one message a turn (canoa.cfg's `[sessions] queue_delivery`).
+  model.QueueDelivery get queueDelivery => _queueDelivery;
+  model.QueueDelivery _queueDelivery = model.QueueDelivery.merge;
+  set queueDelivery(model.QueueDelivery value) {
+    if (value == _queueDelivery) return;
+    _queueDelivery = value;
+    for (final session in _sessions) {
+      session.chat.queueDelivery = value;
+    }
+    notifyListeners();
+  }
+
   /// A file's bytes, read when it is sent.
   final Future<List<int>> Function(String path) readFile;
 
@@ -733,6 +745,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     chat.onAgentMode = (before, now) => _agentChangedMode(session, now);
     chat.permissionPolicy = _Policy(this, session);
     chat.bypassOnceOnly = bypassOnceOnly;
+    chat.queueDelivery = _queueDelivery;
     // A mode the agent moved to by itself was not chosen, so it is neither kept for the ledger to put back as the person's
     // request nor remembered as the session's chosen mode.
     chat.agentModeIsChosen = false;
@@ -1725,17 +1738,20 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// A v2 prompt response confirms insertion, not agent turn completion.
   /// The prompt is never retried automatically after a disconnect. Written while a turn runs, the message is queued instead,
   /// with what goes with it, and sent when the turn ends.
-  Future<void> sendText(String text) async {
+  ///
+  /// With [steer], a turn that runs is stopped and the message goes first, as [model.ChatSession.steer] says: this completes once
+  /// the agent has the message, and throws, with the message and its attachments back in the draft, when it could not be sent.
+  Future<void> sendText(String text, {bool steer = false}) async {
     final session = selected;
     if (session == null) return;
     // A message written while a card waits declines it once and says what to do instead; the turn is not stopped.
     if (session.pendingPermissions.isNotEmpty && (text.trim().isNotEmpty || session.attachments.isNotEmpty)) _refuseOnce(session);
-    await sendTextTo(session, text);
+    await sendTextTo(session, text, steer: steer);
   }
 
   /// [sendText] for [session], which need not be the selected one. With [attached] false what the composer holds for the session
   /// does not go: a message written in another window of it has none of its own.
-  Future<void> sendTextTo(ChatSession session, String text, {bool attached = true, String? from}) async {
+  Future<void> sendTextTo(ChatSession session, String text, {bool attached = true, String? from, bool steer = false}) async {
     // A file named by an @ goes only while the message still names it.
     if (attached) session.attachments.removeWhere((item) => item.mention && !text.contains('@${item.name}'));
     final held = attached ? List.of(session.attachments) : <Attachment>[];
@@ -1749,11 +1765,85 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       await _startThenDeliver(session, text);
       return;
     }
-    await _send(session, text, held, from: from);
+    await _send(session, text, held, from: from, steer: steer);
   }
 
   /// Sends the first queued message of [session] now, and lets the queue go on after it.
-  Future<void> sendQueued(ChatSession session) => session.chat.sendQueued();
+  Future<void> sendQueued(ChatSession session) => session.chat.queue.isEmpty ? Future.value() : session.chat.sendQueued(session.chat.queue.first);
+
+  /// Sends everything queued for [session] now as one message, as many as one message holds, and lets the rest go on after it.
+  Future<void> sendMerged(ChatSession session) => session.chat.sendMerged();
+
+  /// Stops the running turn and sends [message], one of the queue, first.
+  Future<void> steerQueued(ChatSession session, model.QueuedMessage message) => session.chat.steerQueued(message);
+
+  /// What a queued message's attachments were when the person added them, or null when this window did not add them (another
+  /// client's message) and they cannot be put back.
+  List<Attachment>? _originOf(model.QueuedMessage message) => switch (message.origin) {
+    final List<Object?> list when list.every((item) => item is Attachment) => list.cast<Attachment>(),
+    _ when message.attachments.isEmpty => const [],
+    _ => null,
+  };
+
+  /// Joins [message] to the one above it, as [model.ChatSession.mergeQueued] does, keeping what its attachments were. Null when it
+  /// was joined, else the reason, in words, why not.
+  String? mergeQueued(ChatSession session, model.QueuedMessage message) {
+    final index = session.chat.queue.indexOf(message);
+    if (index < 1) return 'There is nothing above it to join.';
+    final above = session.chat.queue[index - 1];
+    final aboveOrigin = _originOf(above), messageOrigin = _originOf(message);
+    try {
+      final joined = session.chat.mergeQueued(message);
+      if (joined != null) {
+        joined.origin = aboveOrigin == null || messageOrigin == null
+            ? null
+            : [
+                ...aboveOrigin,
+                for (final item in messageOrigin)
+                  if (!aboveOrigin.any((other) => other.name == item.name)) item,
+              ];
+      }
+      return null;
+    } on StateError catch (error) {
+      return error.message;
+    }
+  }
+
+  /// Joins each queued message to the one above it as far as one message holds them. Null when any were joined, else why not.
+  String? mergeAllQueued(ChatSession session) {
+    var joined = 0;
+    String? problem;
+    var index = 1;
+    while (index < session.chat.queue.length) {
+      final why = mergeQueued(session, session.chat.queue[index]);
+      if (why == null) {
+        joined++;
+      } else {
+        problem ??= why;
+        index++;
+      }
+    }
+    return joined > 0 ? null : problem;
+  }
+
+  /// Moves [message] [by] places in the queue: negative toward the front.
+  void moveQueued(ChatSession session, model.QueuedMessage message, int by) => session.chat.moveQueued(message, by);
+
+  /// Takes [message] out of the queue for the person to write again: its attachments go back among the draft's, and [into] is
+  /// given its text. Null when that was done, else the reason, in words, it stays queued.
+  String? takeQueued(ChatSession session, model.QueuedMessage message, {required void Function(String text) into}) {
+    if (!session.chat.queue.contains(message)) return 'It has been sent already.';
+    final origin = _originOf(message);
+    if (origin == null) return 'It came with attachments this window cannot take back.';
+    final fresh = [for (final item in origin) if (!session.attachments.any((other) => other.name == item.name)) item];
+    if (session.attachments.length + fresh.length > maxAttachments) return 'The draft has no room for its attachments.';
+    if (!session.chat.unqueue(message)) return 'It has been sent already.';
+    session.attachments.addAll(fresh);
+    _keepDraft(session);
+    notifyListeners();
+    into(message.text);
+    return null;
+  }
 
   /// Changes the text of a queued message.
   void editQueued(ChatSession session, model.QueuedMessage message, String text) => session.chat.editQueued(message, text);
@@ -1764,7 +1854,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// Hands [text] and what goes with it to the conversation, which sends it, or queues it while a turn runs. Each attachment is
   /// checked and read before anything is sent: one the agent cannot be given stops the message, which stays to be changed.
   /// [onSent] is told once the agent has the message, which for a v1 agent is before its turn ends.
-  Future<void> _send(ChatSession session, String text, List<Attachment> attached, {void Function()? onSent, String? from}) async {
+  Future<void> _send(ChatSession session, String text, List<Attachment> attached,
+      {void Function()? onSent, String? from, bool steer = false}) async {
     final client = _clients[session.id];
     if (client == null || client.isClosed || session.remoteSessionId == null) {
       throw StateError('A verified ACP peer must be connected');
@@ -1775,7 +1866,30 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         await toAcp(attachment, takes, embedLimit: embedLimit, read: readFile, agent: _named(session.agent)),
     ];
     _resolveBypass(session);
-    await session.chat.send(text, attachments: attachments, from: from);
+    final origin = List<Attachment>.unmodifiable(attached);
+    if (steer) {
+      // The agent is asked to stop first; a message it cannot be asked about stays in the draft.
+      final queued = await session.chat.steer(text, attachments: attachments, from: from, origin: origin);
+      onSent?.call();
+      session.attachments.removeWhere(attached.contains);
+      session.draftText = '';
+      notifyListeners();
+      try {
+        await queued?.handedOver;
+      } catch (_) {
+        // It could not be sent after the turn ended: what the person wrote is theirs again.
+        for (final item in attached) {
+          if (session.attachments.length < maxAttachments && !session.attachments.any((other) => other.name == item.name)) {
+            session.attachments.add(item);
+          }
+        }
+        _keepDraft(session);
+        notifyListeners();
+        rethrow;
+      }
+      return;
+    }
+    await session.chat.send(text, attachments: attachments, from: from, origin: origin);
     onSent?.call();
     session.attachments.removeWhere(attached.contains);
     session.draftText = '';

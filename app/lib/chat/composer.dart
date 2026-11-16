@@ -47,6 +47,7 @@ final class ComposerKit {
     this.defaultOverlays,
     this.onLoadout,
     this.pasteAsFile = Composer.defaultPasteAsFile,
+    this.enterSteers = false,
     this.warnPermille = defaultWarnPermille,
     this.onSourceSettings,
     this.onSettings,
@@ -56,6 +57,9 @@ final class ComposerKit {
     this.programs,
     this.extension,
   });
+
+  /// Whether Enter steers rather than queues while a turn runs (`[sessions] while_working`); Alt+Enter does the other.
+  final bool enterSteers;
 
   /// What the extension adds above the message and to `+`; null outside it.
   final ComposerExtension? extension;
@@ -253,6 +257,7 @@ class SessionComposer extends StatelessWidget {
     this.enabled = true,
     this.working = false,
     this.onStop,
+    this.onSteer,
     this.commands = const [],
     this.centred = false,
   });
@@ -266,6 +271,9 @@ class SessionComposer extends StatelessWidget {
   final VoidCallback onSend;
   final bool working;
   final VoidCallback? onStop;
+
+  /// Stops the turn that runs and sends the message first; null offers no Steer.
+  final VoidCallback? onSteer;
   final List<AgentCommandInfo> commands;
 
   /// Whether it is the middle of a new session's empty view rather than docked under a conversation.
@@ -294,6 +302,8 @@ class SessionComposer extends StatelessWidget {
       working: working,
       starting: store.isStarting(session),
       onStop: onStop,
+      onSteer: onSteer,
+      enterSteers: kit.enterSteers,
       commands: commands,
       actions: actions,
       actionsTitle: '$appName actions',

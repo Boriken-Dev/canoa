@@ -113,7 +113,7 @@ void main() {
   testWidgets('sending refuses once, with the agent\'s own refusal, and the text goes to the agent', (tester) async {
     final (agent, session, store) = await _waiting(tester);
     await tester.enterText(_field, 'Edit calc.ts instead');
-    await tester.tap(find.byTooltip('Queue'));
+    await tester.tap(find.byKey(const Key('composer-queue')));
     await _settle(tester);
     expect(agent.answerTo(7)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'reject'}});
     expect(session.pendingPermissions, isEmpty);
@@ -141,7 +141,7 @@ void main() {
 
   testWidgets('an empty message sends nothing and leaves the card waiting', (tester) async {
     final (agent, session, _) = await _waiting(tester);
-    await tester.tap(find.byTooltip('Queue'));
+    await tester.tap(find.byKey(const Key('composer-queue')));
     await _settle(tester);
     expect(session.pendingPermissions, hasLength(1));
     expect(agent.answerTo(7), isNull);

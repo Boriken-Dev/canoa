@@ -34,12 +34,21 @@ class _GeneralSectionState extends State<GeneralSection> {
     super.dispose();
   }
 
-  LedgerSettings _sessions(CanoaConfig config, {int? keep, bool? keepText, String? workspace}) => LedgerSettings(
+  LedgerSettings _sessions(
+    CanoaConfig config, {
+    int? keep,
+    bool? keepText,
+    String? workspace,
+    WhileWorking? whileWorking,
+    QueueDelivery? queueDelivery,
+  }) => LedgerSettings(
     keep: keep ?? config.sessions.keep,
     keepText: keepText ?? config.sessions.keepText,
     textMessages: config.sessions.textMessages,
     workspace: workspace ?? config.sessions.workspace,
     harnesses: config.sessions.harnesses,
+    whileWorking: whileWorking ?? config.sessions.whileWorking,
+    queueDelivery: queueDelivery ?? config.sessions.queueDelivery,
   );
 
   void _setWorkspace(String template, {bool text = false}) {
@@ -139,6 +148,24 @@ class _GeneralSectionState extends State<GeneralSection> {
                 ),
               ),
             ),
+          ChoiceRow<WhileWorking>(
+            title: 'Enter while the agent works',
+            configKey: const ['sessions', 'while_working'],
+            description: 'Queue sends it when the turn ends; Steer stops the turn and sends it first. Alt+Enter does the other',
+            fieldKey: const Key('settings-while-working'),
+            value: config.sessions.whileWorking,
+            choices: const [(WhileWorking.queue, 'Queue it'), (WhileWorking.steer, 'Steer the turn')],
+            onChanged: (v) => c.change((x) => x.copyWith(sessions: _sessions(x, whileWorking: v))),
+          ),
+          ChoiceRow<QueueDelivery>(
+            title: 'Queued messages go',
+            configKey: const ['sessions', 'queue_delivery'],
+            description: 'Together sends everything queued as one message when the turn ends; one at a time sends one with each turn',
+            fieldKey: const Key('settings-queue-delivery'),
+            value: config.sessions.queueDelivery,
+            choices: const [(QueueDelivery.merge, 'Together'), (QueueDelivery.each, 'One at a time')],
+            onChanged: (v) => c.change((x) => x.copyWith(sessions: _sessions(x, queueDelivery: v))),
+          ),
           if (widget.workspacePreview != null)
             SettingsRow(
               title: 'Scratch workspace when none is chosen',

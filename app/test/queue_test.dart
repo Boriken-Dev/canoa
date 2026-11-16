@@ -138,11 +138,11 @@ void main() {
     final composer = find.byWidgetPredicate((widget) => widget is TextField && (widget.decoration?.hintText ?? '').startsWith('Message agent'));
     for (final text in ['first', 'second', 'third']) {
       await tester.enterText(composer, text);
-      await tester.tap(find.byTooltip('Queue'));
+      await tester.tap(find.byKey(const Key('composer-queue')));
       await tester.pump();
     }
     expect(find.byType(QueuePanel), findsOneWidget);
-    expect(find.text('3 queued: sent one at a time, as each turn ends'), findsOneWidget);
+    expect(find.text('3 queued: sent together when the turn ends'), findsOneWidget);
     await tester.tap(find.byTooltip('Edit queued message').first);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
@@ -159,11 +159,8 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pump();
     final prompts = sent.where((message) => message['method'] == 'session/prompt').toList();
-    expect(prompts, hasLength(1), reason: 'one per turn');
-    expect((prompts.single['params']['prompt'] as List).single['text'], 'first, edited');
-    expect(session.queue.single.text, 'third');
-    await tester.tap(find.text('Clear queue'));
-    await tester.pump();
+    expect(prompts, hasLength(1), reason: 'everything queued goes as one message');
+    expect((prompts.single['params']['prompt'] as List).single['text'], 'first, edited\n\nthird');
     expect(session.queue, isEmpty);
     expect(find.byType(QueuePanel), findsNothing);
   });

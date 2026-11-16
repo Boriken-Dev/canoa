@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:coqui_acp_chat/coqui_acp_chat.dart' show QueueDelivery;
 import 'package:flutter/foundation.dart';
 
 import '../chat/agent_events.dart' show ConfigOption, chatLimits;
 import '../chat/session_options.dart';
 import '../workspace/workspace_template.dart' show defaultWorkspace;
 import '../worktree/worktree.dart';
+
+export 'package:coqui_acp_chat/coqui_acp_chat.dart' show QueueDelivery;
 
 /// Where a session's agent runs, as the app reached it.
 enum SessionPlace {
@@ -292,7 +295,10 @@ final class SourceMemory {
   }
 }
 
-/// How much the ledger keeps, from canoa.cfg's `[sessions]`.
+/// What Enter does with a message written while a turn runs: queue it, or steer the turn with it.
+enum WhileWorking { queue, steer }
+
+/// How much the ledger keeps, and how messages written during a turn are handled, from canoa.cfg's `[sessions]`.
 final class LedgerSettings {
   const LedgerSettings({
     this.keep = defaultKeep,
@@ -300,6 +306,8 @@ final class LedgerSettings {
     this.textMessages = defaultTextMessages,
     this.workspace = defaultWorkspace,
     this.harnesses = const {},
+    this.whileWorking = WhileWorking.queue,
+    this.queueDelivery = QueueDelivery.merge,
   });
 
   static const defaultKeep = 200;
@@ -319,6 +327,12 @@ final class LedgerSettings {
 
   /// canoa.cfg's `[harnesses]`: reported name to harness label.
   final Map<String, String> harnesses;
+
+  /// `[sessions] while_working`: what Enter does with a message written while a turn runs; Alt+Enter does the other.
+  final WhileWorking whileWorking;
+
+  /// `[sessions] queue_delivery`: whether what was queued goes as one message when the turn ends (`merge`) or one a turn (`each`).
+  final QueueDelivery queueDelivery;
 }
 
 /// Where the ledger is kept: one JSON document, read whole and written whole.
