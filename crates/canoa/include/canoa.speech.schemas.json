@@ -1,405 +1,405 @@
 {
   "AudioFormat": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
+    "type": "object",
     "properties": {
-      "channels": {
-        "default": 1,
-        "description": "How many channels; 1 is mono.",
-        "maximum": 255,
-        "minimum": 0,
-        "type": "integer"
-      },
       "encoding": {
-        "description": "[`PCM_S16LE`] or [`OPUS`]; another word is a format a newer host may offer.",
-        "type": "string"
+        "type": "string",
+        "description": "[`PCM_S16LE`] or [`OPUS`]; another word is a format a newer host may offer."
       },
       "rate": {
-        "description": "Samples per second per channel: 16000 is what most recognizers want.",
-        "maximum": 4294967295,
+        "type": "integer",
         "minimum": 0,
-        "type": "integer"
+        "maximum": 4294967295,
+        "description": "Samples per second per channel: 16000 is what most recognizers want."
+      },
+      "channels": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 255,
+        "description": "How many channels; 1 is mono.",
+        "default": 1
       }
     },
+    "additionalProperties": false,
     "required": [
       "encoding",
       "rate"
-    ],
-    "type": "object"
+    ]
+  },
+  "VoiceProfile": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "accent": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "How they speak the language, such as `Puerto Rican Spanish`."
+      },
+      "voice": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The kind of voice, in their words, such as `male`, `female` or `child`."
+      },
+      "traits": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Anything else a provider may know by name; a provider ignores a key it does not know.",
+        "default": {}
+      }
+    },
+    "additionalProperties": false
+  },
+  "Hints": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "language": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The language spoken, as a BCP 47 tag (`en`, `es-PR`); absent asks the provider to find out."
+      },
+      "vocabulary": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Words and names likely to be said, which a recognizer may favour.",
+        "default": []
+      },
+      "profile": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "accent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How they speak the language, such as `Puerto Rican Spanish`."
+          },
+          "voice": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The kind of voice, in their words, such as `male`, `female` or `child`."
+          },
+          "traits": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Anything else a provider may know by name; a provider ignores a key it does not know.",
+            "default": {}
+          }
+        },
+        "additionalProperties": false,
+        "description": "The person's voice profile."
+      }
+    },
+    "additionalProperties": false
+  },
+  "OpenRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "format": {
+        "type": "object",
+        "properties": {
+          "encoding": {
+            "type": "string",
+            "description": "[`PCM_S16LE`] or [`OPUS`]; another word is a format a newer host may offer."
+          },
+          "rate": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295,
+            "description": "Samples per second per channel: 16000 is what most recognizers want."
+          },
+          "channels": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255,
+            "description": "How many channels; 1 is mono.",
+            "default": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "encoding",
+          "rate"
+        ],
+        "description": "The format every chunk is in."
+      },
+      "hints": {
+        "type": "object",
+        "properties": {
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The language spoken, as a BCP 47 tag (`en`, `es-PR`); absent asks the provider to find out."
+          },
+          "vocabulary": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Words and names likely to be said, which a recognizer may favour.",
+            "default": []
+          },
+          "profile": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "accent": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "How they speak the language, such as `Puerto Rican Spanish`."
+              },
+              "voice": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The kind of voice, in their words, such as `male`, `female` or `child`."
+              },
+              "traits": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Anything else a provider may know by name; a provider ignores a key it does not know.",
+                "default": {}
+              }
+            },
+            "additionalProperties": false,
+            "description": "The person's voice profile."
+          }
+        },
+        "additionalProperties": false,
+        "description": "What the person told it.",
+        "default": {
+          "vocabulary": []
+        }
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "format"
+    ]
+  },
+  "SpeechInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "description": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "One line on what it does."
+      },
+      "encodings": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The [`AudioFormat::encoding`]s it takes; a recording in another is refused with `UNSUPPORTED`."
+      },
+      "partials": {
+        "type": "boolean",
+        "description": "Whether it answers partial text while the person is still speaking.",
+        "default": false
+      },
+      "max_seconds": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "The longest recording it takes, in seconds; absent says it has no limit of its own."
+      },
+      "hints": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The [`Hints`] fields it uses (`language`, `vocabulary`, `profile`), so a form offers only what has an effect.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "title",
+      "encodings"
+    ]
+  },
+  "Heard": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "partial": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The whole text so far, replacing the last partial, when it changed; absent when it did not."
+      }
+    },
+    "additionalProperties": false
+  },
+  "Transcript": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "The text, as the person said it."
+      },
+      "front_matter": {
+        "description": "What else the provider knows, a map of text keys to values.",
+        "default": {}
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ]
   },
   "CommandSettings": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
+    "type": "object",
     "properties": {
+      "program": {
+        "type": "string",
+        "title": "Program",
+        "description": "The program to run: a name found on the search path, or a path.",
+        "x-section": "command"
+      },
       "args": {
-        "default": [],
-        "description": "Its arguments, one per entry.",
+        "type": "array",
         "items": {
           "type": "string"
         },
         "title": "Arguments",
-        "type": "array",
-        "x-section": "command"
+        "description": "Its arguments, one per entry.",
+        "x-section": "command",
+        "default": []
       },
       "input": {
-        "default": "wav",
-        "description": "How it wants the audio.",
+        "type": "string",
         "enum": [
           "wav",
           "pcm"
         ],
-        "title": "Audio on standard input",
-        "type": "string",
         "x-enum-labels": {
-          "pcm": "The samples alone, 16-bit little-endian, at the rate and channels the recording opened with.",
-          "wav": "A WAV stream: a header whose sizes say \"until the end\" and then the samples. What `ffmpeg -i -` and most command line recognizers read."
+          "wav": "A WAV stream: a header whose sizes say \"until the end\" and then the samples. What `ffmpeg -i -` and most command line recognizers read.",
+          "pcm": "The samples alone, 16-bit little-endian, at the rate and channels the recording opened with."
         },
-        "x-section": "command"
+        "title": "Audio on standard input",
+        "description": "How it wants the audio.",
+        "x-section": "command",
+        "default": "wav"
       },
       "partials": {
-        "default": false,
-        "description": "Whether each change in its output while the person speaks is shown as it appears; off, the text comes when they stop.",
-        "title": "Show text while speaking",
         "type": "boolean",
-        "x-section": "command"
-      },
-      "program": {
-        "description": "The program to run: a name found on the search path, or a path.",
-        "title": "Program",
-        "type": "string",
-        "x-section": "command"
+        "title": "Show text while speaking",
+        "description": "Whether each change in its output while the person speaks is shown as it appears; off, the text comes when they stop.",
+        "x-section": "command",
+        "default": false
       },
       "timeout_seconds": {
-        "default": 120,
-        "description": "How long it may take after the audio ends, in seconds, before it is stopped.",
-        "maximum": 4294967295,
-        "minimum": 0,
-        "title": "Time to finish",
         "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "title": "Time to finish",
+        "description": "How long it may take after the audio ends, in seconds, before it is stopped.",
+        "x-section": "command",
         "x-advanced": true,
-        "x-section": "command"
+        "default": 120
       }
     },
+    "additionalProperties": false,
     "required": [
       "program"
-    ],
-    "type": "object"
+    ]
   },
   "EndpointSettings": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
+    "type": "object",
     "properties": {
+      "url": {
+        "type": "string",
+        "title": "Address",
+        "description": "The address the audio is posted to, such as `https://api.openai.com/v1/audio/transcriptions`.",
+        "x-section": "endpoint"
+      },
+      "model": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "title": "Model",
+        "description": "The model to ask for, when the endpoint takes one.",
+        "x-section": "endpoint"
+      },
       "api_key": {
-        "description": "A key sent as `Authorization: Bearer`, when the endpoint asks for one.",
-        "title": "Key",
         "type": [
           "string",
           "null"
         ],
         "writeOnly": true,
-        "x-section": "endpoint",
-        "x-sensitive": true
+        "x-sensitive": true,
+        "title": "Key",
+        "description": "A key sent as `Authorization: Bearer`, when the endpoint asks for one.",
+        "x-section": "endpoint"
       },
       "max_seconds": {
-        "default": 300,
-        "description": "The longest recording kept, in seconds; a longer one is refused rather than held.",
-        "maximum": 4294967295,
-        "minimum": 0,
-        "title": "Longest recording",
         "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "title": "Longest recording",
+        "description": "The longest recording kept, in seconds; a longer one is refused rather than held.",
+        "x-section": "endpoint",
         "x-advanced": true,
-        "x-section": "endpoint"
-      },
-      "model": {
-        "description": "The model to ask for, when the endpoint takes one.",
-        "title": "Model",
-        "type": [
-          "string",
-          "null"
-        ],
-        "x-section": "endpoint"
+        "default": 300
       },
       "timeout_seconds": {
-        "default": 120,
-        "description": "How long the call may take, in seconds.",
-        "maximum": 4294967295,
-        "minimum": 0,
-        "title": "Time to answer",
         "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "title": "Time to answer",
+        "description": "How long the call may take, in seconds.",
+        "x-section": "endpoint",
         "x-advanced": true,
-        "x-section": "endpoint"
-      },
-      "url": {
-        "description": "The address the audio is posted to, such as `https://api.openai.com/v1/audio/transcriptions`.",
-        "title": "Address",
-        "type": "string",
-        "x-section": "endpoint"
+        "default": 120
       }
     },
+    "additionalProperties": false,
     "required": [
       "url"
-    ],
-    "type": "object"
-  },
-  "Heard": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
-    "properties": {
-      "partial": {
-        "description": "The whole text so far, replacing the last partial, when it changed; absent when it did not.",
-        "type": [
-          "string",
-          "null"
-        ]
-      }
-    },
-    "type": "object"
-  },
-  "Hints": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
-    "properties": {
-      "language": {
-        "description": "The language spoken, as a BCP 47 tag (`en`, `es-PR`); absent asks the provider to find out.",
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "profile": {
-        "additionalProperties": false,
-        "description": "The person's voice profile.",
-        "properties": {
-          "accent": {
-            "description": "How they speak the language, such as `Puerto Rican Spanish`.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "traits": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "default": {},
-            "description": "Anything else a provider may know by name; a provider ignores a key it does not know.",
-            "type": "object"
-          },
-          "voice": {
-            "description": "The kind of voice, in their words, such as `male`, `female` or `child`.",
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "type": [
-          "object",
-          "null"
-        ]
-      },
-      "vocabulary": {
-        "default": [],
-        "description": "Words and names likely to be said, which a recognizer may favour.",
-        "items": {
-          "type": "string"
-        },
-        "type": "array"
-      }
-    },
-    "type": "object"
-  },
-  "OpenRequest": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
-    "properties": {
-      "format": {
-        "additionalProperties": false,
-        "description": "The format every chunk is in.",
-        "properties": {
-          "channels": {
-            "default": 1,
-            "description": "How many channels; 1 is mono.",
-            "maximum": 255,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "encoding": {
-            "description": "[`PCM_S16LE`] or [`OPUS`]; another word is a format a newer host may offer.",
-            "type": "string"
-          },
-          "rate": {
-            "description": "Samples per second per channel: 16000 is what most recognizers want.",
-            "maximum": 4294967295,
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "encoding",
-          "rate"
-        ],
-        "type": "object"
-      },
-      "hints": {
-        "additionalProperties": false,
-        "default": {
-          "vocabulary": []
-        },
-        "description": "What the person told it.",
-        "properties": {
-          "language": {
-            "description": "The language spoken, as a BCP 47 tag (`en`, `es-PR`); absent asks the provider to find out.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "profile": {
-            "additionalProperties": false,
-            "description": "The person's voice profile.",
-            "properties": {
-              "accent": {
-                "description": "How they speak the language, such as `Puerto Rican Spanish`.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "traits": {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "default": {},
-                "description": "Anything else a provider may know by name; a provider ignores a key it does not know.",
-                "type": "object"
-              },
-              "voice": {
-                "description": "The kind of voice, in their words, such as `male`, `female` or `child`.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "vocabulary": {
-            "default": [],
-            "description": "Words and names likely to be said, which a recognizer may favour.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "type": "object"
-      }
-    },
-    "required": [
-      "format"
-    ],
-    "type": "object"
-  },
-  "SpeechInfo": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
-    "properties": {
-      "description": {
-        "description": "One line on what it does.",
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "encodings": {
-        "description": "The [`AudioFormat::encoding`]s it takes; a recording in another is refused with `UNSUPPORTED`.",
-        "items": {
-          "type": "string"
-        },
-        "type": "array"
-      },
-      "hints": {
-        "default": [],
-        "description": "The [`Hints`] fields it uses (`language`, `vocabulary`, `profile`), so a form offers only what has an effect.",
-        "items": {
-          "type": "string"
-        },
-        "type": "array"
-      },
-      "max_seconds": {
-        "description": "The longest recording it takes, in seconds; absent says it has no limit of its own.",
-        "maximum": 4294967295,
-        "minimum": 0,
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "partials": {
-        "default": false,
-        "description": "Whether it answers partial text while the person is still speaking.",
-        "type": "boolean"
-      },
-      "title": {
-        "description": "Its name for people.",
-        "type": "string"
-      }
-    },
-    "required": [
-      "title",
-      "encodings"
-    ],
-    "type": "object"
-  },
-  "Transcript": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
-    "properties": {
-      "front_matter": {
-        "default": {},
-        "description": "What else the provider knows, a map of text keys to values."
-      },
-      "text": {
-        "description": "The text, as the person said it.",
-        "type": "string"
-      }
-    },
-    "required": [
-      "text"
-    ],
-    "type": "object"
-  },
-  "VoiceProfile": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
-    "properties": {
-      "accent": {
-        "description": "How they speak the language, such as `Puerto Rican Spanish`.",
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "traits": {
-        "additionalProperties": {
-          "type": "string"
-        },
-        "default": {},
-        "description": "Anything else a provider may know by name; a provider ignores a key it does not know.",
-        "type": "object"
-      },
-      "voice": {
-        "description": "The kind of voice, in their words, such as `male`, `female` or `child`.",
-        "type": [
-          "string",
-          "null"
-        ]
-      }
-    },
-    "type": "object"
+    ]
   }
 }

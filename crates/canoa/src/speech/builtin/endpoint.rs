@@ -15,6 +15,7 @@ use std::io::Read;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use coqui_acp_api::ProcessSpawner;
 use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Map, Schema, Secret, ToValue, Value};
 use guatiao_intake::Form;
@@ -104,7 +105,11 @@ impl SpeechProvider for EndpointSpeech {
         Ok(info)
     }
 
-    fn open(&self, request: OpenRequest) -> Result<Object<dyn SpeechSession>, ProviderError> {
+    fn open(
+        &self,
+        request: OpenRequest,
+        _spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<Object<dyn SpeechSession>, ProviderError> {
         if request.format.encoding != PCM_S16LE {
             return Err(unsupported_format(&request.format, &[PCM_S16LE]));
         }

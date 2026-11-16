@@ -24,7 +24,7 @@ alloc_instead_of_core = "warn"
 # The `program_store` kind: how a program is found, checked for updates and installed into a folder the host owns.
 store = ["dep:coqui-acp-api", "dep:serde_json"]
 # The `speech_provider` kind: audio streamed in, text and front matter out.
-speech = ["dep:guatiao"]
+speech = ["dep:guatiao", "dep:coqui-acp-api"]
 # The two providers that ship with it: a program the person names, and a speech-to-text HTTP endpoint the person names.
 speech-builtin = ["speech", "dep:guatiao-intake", "dep:serde_json", "dep:ureq"]
 
@@ -37,6 +37,7 @@ ureq = { workspace = true, optional = true }
 
 [dev-dependencies]
 guatiao-serde = { workspace = true }
+coqui-acp-harness = { workspace = true }
 serde_json = { workspace = true }
 
 [[test]]

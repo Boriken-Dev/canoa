@@ -27,6 +27,8 @@ use canoa::speech::{
     AudioFormat, Heard, Hints, OPUS, OpenRequest, SpeechInfo, SpeechProvider, SpeechProviderVtable,
     SpeechSession, SpeechSessionVtable, Transcript, VoiceProfile,
 };
+use coqui_acp_api::{ProcessSpawner, ProcessSpawnerVtable, SpawnedProcessVtable};
+use coqui_acp_harness::LocalSpawner;
 use guatiao::library::Object;
 use guatiao::{FromValue, Map, Schema, Secret, Status, ToValue, Value};
 use guatiao_serde::Serializable;
@@ -65,9 +67,11 @@ fn schema_of<T: Schema>() -> Json {
 #[test]
 fn the_committed_description_is_what_this_build_describes() {
     let document = format!(
-        "{{\"kinds\":[{},{}]}}",
+        "{{\"kinds\":[{},{},{},{}]}}",
         SpeechProviderVtable::description(),
-        SpeechSessionVtable::description()
+        SpeechSessionVtable::description(),
+        ProcessSpawnerVtable::description(),
+        SpawnedProcessVtable::description()
     );
     committed(
         "include/canoa.speech.kinds.json",
@@ -174,7 +178,9 @@ fn pcm_second() -> Vec<u8> {
 }
 
 fn open_with(provider: &impl SpeechProvider, request: OpenRequest) -> Object<dyn SpeechSession> {
-    provider.open(request).expect("the recording opens")
+    provider
+        .open(request, spawner())
+        .expect("the recording opens")
 }
 
 fn open(provider: &impl SpeechProvider) -> Object<dyn SpeechSession> {
@@ -277,10 +283,13 @@ fn a_command_that_fails_says_why() {
 fn a_command_that_cannot_start_is_refused_at_open() {
     let request = OpenRequest::new(AudioFormat::pcm(16_000));
     let provider = CommandSpeech::from(CommandSettings::new("a-program-that-is-not-here"));
-    let error = provider.open(request.clone()).err().expect("refused");
+    let error = provider
+        .open(request.clone(), spawner())
+        .err()
+        .expect("refused");
     assert!(error.message.to_string().contains("could not start"));
     let provider = CommandSpeech::from(CommandSettings::new(" "));
-    assert!(provider.open(request).is_err());
+    assert!(provider.open(request, spawner()).is_err());
 }
 
 #[test]
@@ -318,14 +327,18 @@ fn a_command_s_output_is_kept_only_up_to_a_bound() {
 fn a_provider_refuses_a_format_it_does_not_read_and_says_which_it_does() {
     let request = OpenRequest::new(AudioFormat::new(OPUS, 48_000));
     let error = command(&["fixed"])
-        .open(request.clone())
+        .open(request.clone(), spawner())
         .err()
         .expect("refused");
     assert_eq!(error.status, Status::GUATIAO_ERR_UNSUPPORTED);
     assert!(error.message.to_string().contains("pcm_s16le"));
     let endpoint = EndpointSpeech::from(EndpointSettings::new("http://127.0.0.1:1/"));
     assert_eq!(
-        endpoint.open(request).err().expect("refused").status,
+        endpoint
+            .open(request, spawner())
+            .err()
+            .expect("refused")
+            .status,
         Status::GUATIAO_ERR_UNSUPPORTED
     );
 }
@@ -521,4 +534,8 @@ fn the_wav_header_is_the_one_a_reader_expects() {
     assert_eq!(word(&header, 40), 100);
     let open = wav_header(&AudioFormat::pcm(16_000), None);
     assert_eq!(&open[40..44], &[0xFF; 4]);
+}
+
+fn spawner() -> Object<dyn ProcessSpawner> {
+    LocalSpawner::new().into_object()
 }

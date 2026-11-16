@@ -528,6 +528,7 @@ name = "canoa"
 version = "0.0.0-alpha.0"
 dependencies = [
  "coqui-acp-api",
+ "coqui-acp-harness",
  "guatiao",
  "guatiao-intake",
  "guatiao-serde",

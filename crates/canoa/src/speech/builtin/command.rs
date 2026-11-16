@@ -1,6 +1,6 @@
 //! The command provider: a program the person names, audio on its standard input, text on its standard output.
 //!
-//! The program is started when a recording opens and ends when it finishes. Its standard input gets the audio as it
+//! The program is started, through the spawner the host hands the kind, when a recording opens and ends when it finishes. Its standard input gets the audio as it
 //! arrives, so a program that reads a stream starts work at once, and a pipe that is full slows the caller down instead of
 //! growing a queue here. Its standard output is read as it is written and kept up to [`MAX_OUTPUT`] bytes.
 
@@ -8,18 +8,18 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
-use std::io::{ErrorKind, Read, Write};
-use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
+use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use coqui_acp_api::{Environment, ProcessSpawner, SpawnSpec, SpawnedProcess};
 use guatiao::library::{Object, ProviderError};
-use guatiao::{FromValue, Schema, ToValue};
+use guatiao::{FromValue, Schema, Status, ToValue};
 use guatiao_intake::Form;
 
-use super::{WAV_HEADER_LEN, named_hints, wav_header};
+use super::{named_hints, wav_header};
 use crate::speech::{
     Heard, OpenRequest, PCM_S16LE, SpeechInfo, SpeechProvider, SpeechSession, Transcript,
     bad_value, internal, unsupported_format,
@@ -124,14 +124,18 @@ impl SpeechProvider for CommandSpeech {
         Ok(info)
     }
 
-    fn open(&self, request: OpenRequest) -> Result<Object<dyn SpeechSession>, ProviderError> {
+    fn open(
+        &self,
+        request: OpenRequest,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<Object<dyn SpeechSession>, ProviderError> {
         if request.format.encoding != PCM_S16LE {
             return Err(unsupported_format(&request.format, &[PCM_S16LE]));
         }
         if self.settings.program.trim().is_empty() {
             return Err(bad_value("the command to run is not set"));
         }
-        let session = Running::start(&self.settings, &request)?;
+        let session = Running::start(&self.settings, &request, &spawner)?;
         Ok(session.into_object())
     }
 }
@@ -143,20 +147,31 @@ struct Capture {
     dropped: bool,
 }
 
+type Process = Arc<Object<dyn SpawnedProcess>>;
+
 /// One program, running for one recording.
 struct Running {
-    child: Mutex<Option<Child>>,
-    stdin: Mutex<Option<ChildStdin>>,
+    process: Process,
+    /// Whether the program still takes input: false once it closed it or stopped reading.
+    input: Mutex<bool>,
     out: Arc<Mutex<Capture>>,
     err: Arc<Mutex<Vec<u8>>>,
     readers: Mutex<Option<Receiver<()>>>,
+    stopped: Arc<AtomicBool>,
     partials: bool,
     shown: Mutex<String>,
     wait: Duration,
 }
 
+/// How long a read waits for output before looking at whether the recording was abandoned, in milliseconds.
+const POLL_MS: u64 = 100;
+
 impl Running {
-    fn start(settings: &CommandSettings, request: &OpenRequest) -> Result<Self, ProviderError> {
+    fn start(
+        settings: &CommandSettings,
+        request: &OpenRequest,
+        spawner: &Object<dyn ProcessSpawner>,
+    ) -> Result<Self, ProviderError> {
         let named = named_hints(&request.hints);
         let said = |key: &str| {
             named
@@ -166,75 +181,106 @@ impl Running {
         };
         let rate = request.format.rate.to_string();
         let channels = request.format.channels.to_string();
-        let args = settings.args.iter().map(|arg| {
-            arg.replace("{language}", said("language"))
-                .replace("{vocabulary}", said("vocabulary"))
-                .replace("{accent}", said("accent"))
-                .replace("{voice}", said("voice"))
-                .replace("{rate}", &rate)
-                .replace("{channels}", &channels)
-        });
-        let mut command = Command::new(&settings.program);
-        command
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        for (name, text) in &named {
-            command.env(alloc::format!("CANOA_SPEECH_{}", name.to_uppercase()), text);
+        let mut spec = SpawnSpec::new(&settings.program);
+        for arg in &settings.args {
+            spec = spec.arg(
+                arg.replace("{language}", said("language"))
+                    .replace("{vocabulary}", said("vocabulary"))
+                    .replace("{accent}", said("accent"))
+                    .replace("{voice}", said("voice"))
+                    .replace("{rate}", &rate)
+                    .replace("{channels}", &channels),
+            );
         }
-        #[cfg(windows)]
-        std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
-        let mut child = command.spawn().map_err(|error| {
+        let mut environment = Environment::new();
+        for (name, text) in &named {
+            environment.insert(alloc::format!("CANOA_SPEECH_{}", name.to_uppercase()), text);
+        }
+        spec = spec.environment(environment);
+        let process: Process = Arc::new(spawner.spawn(spec).map_err(|error| {
             internal(alloc::format!(
-                "could not start {:?}: {error}",
-                settings.program
+                "could not start {:?}: {}",
+                settings.program,
+                error.message
             ))
-        })?;
+        })?);
+
         let out = Arc::new(Mutex::new(Capture::default()));
         let err: Arc<Mutex<Vec<u8>>> = Arc::default();
+        let stopped = Arc::new(AtomicBool::new(false));
         let (done, readers) = channel();
-        if let Some(stdout) = child.stdout.take() {
-            let (out, done) = (Arc::clone(&out), done.clone());
+        {
+            let (process, out, stopped, done) = (
+                Arc::clone(&process),
+                Arc::clone(&out),
+                Arc::clone(&stopped),
+                done.clone(),
+            );
             thread::spawn(move || {
-                drain(stdout, |chunk| {
-                    let mut out = out.lock().unwrap_or_else(PoisonError::into_inner);
-                    let room = MAX_OUTPUT.saturating_sub(out.bytes.len());
-                    out.bytes.extend_from_slice(&chunk[..chunk.len().min(room)]);
-                    out.dropped |= chunk.len() > room;
-                });
+                drain(
+                    &stopped,
+                    |buffer, wait| process.read(buffer, wait),
+                    |chunk| {
+                        let mut out = out.lock().unwrap_or_else(PoisonError::into_inner);
+                        let room = MAX_OUTPUT.saturating_sub(out.bytes.len());
+                        out.bytes.extend_from_slice(&chunk[..chunk.len().min(room)]);
+                        out.dropped |= chunk.len() > room;
+                    },
+                );
                 done.send(()).ok();
             });
         }
-        if let Some(stderr) = child.stderr.take() {
-            let (err, done) = (Arc::clone(&err), done);
+        {
+            let (process, err, stopped) =
+                (Arc::clone(&process), Arc::clone(&err), Arc::clone(&stopped));
             thread::spawn(move || {
-                drain(stderr, |chunk| {
-                    let mut err = err.lock().unwrap_or_else(PoisonError::into_inner);
-                    err.extend_from_slice(chunk);
-                    let excess = err.len().saturating_sub(MAX_ERROR);
-                    err.drain(..excess);
-                });
+                drain(
+                    &stopped,
+                    |buffer, wait| process.read_error(buffer, wait),
+                    |chunk| {
+                        let mut err = err.lock().unwrap_or_else(PoisonError::into_inner);
+                        err.extend_from_slice(chunk);
+                        let excess = err.len().saturating_sub(MAX_ERROR);
+                        err.drain(..excess);
+                    },
+                );
                 done.send(()).ok();
             });
         }
-        let mut stdin = child.stdin.take();
-        if let (CommandInput::Wav, Some(pipe)) = (settings.input, stdin.as_mut()) {
-            let header: [u8; WAV_HEADER_LEN] = wav_header(&request.format, None);
-            if pipe.write_all(&header).is_err() {
-                stdin = None;
-            }
-        }
-        Ok(Self {
-            child: Mutex::new(Some(child)),
-            stdin: Mutex::new(stdin),
+        let running = Self {
+            process,
+            input: Mutex::new(true),
             out,
             err,
             readers: Mutex::new(Some(readers)),
+            stopped,
             partials: settings.partials,
             shown: Mutex::new(String::new()),
             wait: Duration::from_secs(u64::from(settings.timeout_seconds)),
-        })
+        };
+        if settings.input == CommandInput::Wav {
+            running.write(&wav_header(&request.format, None))?;
+        }
+        Ok(running)
+    }
+
+    /// Writes to the program's input unless it stopped taking it, which is not an error here: how it ended is said at `finish`.
+    fn write(&self, audio: &[u8]) -> Result<(), ProviderError> {
+        if !*self.input.lock().unwrap_or_else(PoisonError::into_inner) {
+            return Ok(());
+        }
+        // Written without a lock held, so a cancel can end a program that stopped reading while this waits for it.
+        match self.process.write(audio) {
+            Ok(()) => Ok(()),
+            Err(error) if error.status == Status::GUATIAO_ERR_GONE => {
+                *self.input.lock().unwrap_or_else(PoisonError::into_inner) = false;
+                Ok(())
+            }
+            Err(error) => Err(internal(alloc::format!(
+                "the command's input failed: {}",
+                error.message
+            ))),
+        }
     }
 
     fn text(&self) -> String {
@@ -243,58 +289,35 @@ impl Running {
     }
 
     fn stop(&self) {
-        drop(
-            self.stdin
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .take(),
-        );
-        if let Some(mut child) = self
-            .child
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
-            drop(child.kill());
-            drop(child.wait());
-        }
+        self.stopped.store(true, Ordering::Relaxed);
+        self.process.kill().ok();
     }
 }
 
-/// Reads `from` to its end, a chunk at a time, into `keep`.
-fn drain(mut from: impl Read, mut keep: impl FnMut(&[u8])) {
+/// Reads until the program has no more to say or the recording is abandoned, a chunk at a time, into `keep`.
+fn drain(
+    stopped: &AtomicBool,
+    mut read: impl FnMut(&mut [u8], u64) -> Result<i64, ProviderError>,
+    mut keep: impl FnMut(&[u8]),
+) {
     let mut chunk = [0_u8; 8192];
-    loop {
-        match from.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(read) => keep(&chunk[..read]),
-            Err(error) if error.kind() == ErrorKind::Interrupted => {}
-            Err(_) => break,
+    while !stopped.load(Ordering::Relaxed) {
+        match read(&mut chunk, POLL_MS) {
+            Ok(0) | Err(_) => break,
+            Ok(count) => {
+                if let Ok(count) = usize::try_from(count) {
+                    keep(&chunk[..count.min(chunk.len())]);
+                }
+                // A timeout or a link that is down is a negative answer: look again.
+            }
         }
     }
 }
 
 impl SpeechSession for Running {
     fn push(&self, audio: &[u8]) -> Result<Heard, ProviderError> {
-        // The pipe is written without the lock a cancel needs on the child, so a program that stops reading can still be
-        // ended while this waits for it.
-        let taken = self
-            .stdin
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        if let Some(mut pipe) = taken {
-            let kept = match pipe.write_all(audio) {
-                Ok(()) => Some(pipe),
-                // The program stopped reading: it has what it wants, and how it ended is said at `finish`.
-                Err(error) if error.kind() == ErrorKind::BrokenPipe => None,
-                Err(error) => {
-                    return Err(internal(alloc::format!(
-                        "the command's input failed: {error}"
-                    )));
-                }
-            };
-            *self.stdin.lock().unwrap_or_else(PoisonError::into_inner) = kept;
+        if !audio.is_empty() {
+            self.write(audio)?;
         }
         if !self.partials {
             return Ok(Heard::nothing());
@@ -309,38 +332,28 @@ impl SpeechSession for Running {
     }
 
     fn finish(&self) -> Result<Transcript, ProviderError> {
-        drop(
-            self.stdin
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .take(),
-        );
-        let Some(mut child) = self
-            .child
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        else {
+        if self.stopped.load(Ordering::Relaxed) {
             return Err(internal("the recording has ended"));
-        };
+        }
+        self.process.close_input().ok();
+        *self.input.lock().unwrap_or_else(PoisonError::into_inner) = false;
         let started = Instant::now();
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if started.elapsed() >= self.wait => {
-                    drop(child.kill());
-                    drop(child.wait());
-                    return Err(internal(alloc::format!(
-                        "the command did not finish in {} seconds",
-                        self.wait.as_secs()
-                    )));
-                }
-                Ok(None) => thread::sleep(Duration::from_millis(10)),
-                Err(error) => {
-                    return Err(internal(alloc::format!(
-                        "could not wait for the command: {error}"
-                    )));
-                }
+        let exit = loop {
+            let exit = self.process.wait(10).map_err(|error| {
+                internal(alloc::format!(
+                    "could not wait for the command: {}",
+                    error.message
+                ))
+            })?;
+            if !exit.running {
+                break exit;
+            }
+            if started.elapsed() >= self.wait {
+                self.stop();
+                return Err(internal(alloc::format!(
+                    "the command did not finish in {} seconds",
+                    self.wait.as_secs()
+                )));
             }
         };
         if let Some(readers) = self
@@ -355,11 +368,15 @@ impl SpeechSession for Running {
                 }
             }
         }
-        if !status.success() {
+        self.stopped.store(true, Ordering::Relaxed);
+        if exit.code != Some(0) {
             let err = self.err.lock().unwrap_or_else(PoisonError::into_inner);
+            let how = exit.code.map_or_else(
+                || "was ended by a signal".to_string(),
+                |code| alloc::format!("exited with {code}"),
+            );
             return Err(internal(alloc::format!(
-                "the command {}: {}",
-                describe(status),
+                "the command {how}: {}",
                 String::from_utf8_lossy(&err).trim()
             )));
         }
@@ -386,13 +403,6 @@ impl Drop for Running {
     fn drop(&mut self) {
         self.stop();
     }
-}
-
-fn describe(status: ExitStatus) -> String {
-    status.code().map_or_else(
-        || "was ended by a signal".to_string(),
-        |code| alloc::format!("exited with {code}"),
-    )
 }
 
 impl core::fmt::Debug for CommandSpeech {

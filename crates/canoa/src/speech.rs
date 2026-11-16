@@ -18,6 +18,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use coqui_acp_api::ProcessSpawner;
 use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, ToValue, Value};
 
@@ -232,7 +233,14 @@ pub trait SpeechProvider: Send + Sync {
     /// Starts a recording. Nothing is started for a recording it refuses: `UNSUPPORTED` (with the encodings it takes) for a
     /// format it does not read, `BAD_VALUE` for a setting that cannot be used. The provider may start a process or open a
     /// connection here, and its session ends them.
-    fn open(&self, request: OpenRequest) -> Result<Object<dyn SpeechSession>, ProviderError>;
+    ///
+    /// `spawner` is the host's: every program a provider runs starts through it, and the provider destroys it, even when it
+    /// refuses. A provider that starts no program just drops it.
+    fn open(
+        &self,
+        request: OpenRequest,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<Object<dyn SpeechSession>, ProviderError>;
 }
 
 /// One recording: audio goes in a chunk at a time, text comes out.
