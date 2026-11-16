@@ -28,6 +28,7 @@ pub struct HttpEmbedder {
     url: String,
     model: String,
     timeout: Duration,
+    bearer: Option<String>,
 }
 
 impl HttpEmbedder {
@@ -45,7 +46,15 @@ impl HttpEmbedder {
             url,
             model: model.into(),
             timeout: Duration::from_secs(120),
+            bearer: None,
         }
+    }
+
+    /// Sends `token` as the request's bearer, for an endpoint that asks for a key.
+    #[must_use]
+    pub fn with_bearer(mut self, token: impl Into<String>) -> Self {
+        self.bearer = Some(token.into());
+        self
     }
 
     /// How long one request may take, 120 seconds by default.
@@ -62,15 +71,23 @@ impl Embedder for HttpEmbedder {
     }
 
     fn embed(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, Error> {
+        let tls = ureq::tls::TlsConfig::builder()
+            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+            .build();
         let agent: ureq::Agent = ureq::Agent::config_builder()
+            .tls_config(tls)
             .max_redirects(0)
             .timeout_global(Some(self.timeout))
             .build()
             .into();
         let body = json!({"model": self.model, "input": inputs}).to_string();
-        let response = agent
+        let mut request = agent
             .post(&self.url)
-            .header("content-type", "application/json")
+            .header("content-type", "application/json");
+        if let Some(token) = &self.bearer {
+            request = request.header("authorization", alloc::format!("Bearer {token}"));
+        }
+        let response = request
             .send(body.as_str())
             .map_err(|error| Error::Embed(alloc::format!("{}: {error}", self.url)))?;
         let text = response

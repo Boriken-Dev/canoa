@@ -860,6 +860,7 @@ fn create_refuses_an_existing_index_and_update_a_missing_one() {
         &small(),
         None,
         &Options::default(),
+        None,
     )
     .unwrap();
     assert_eq!(report.generation, Some(2));
@@ -948,4 +949,74 @@ fn a_corrupt_index_is_reported_not_guessed() {
         Index::open(&scratch.index()),
         Err(Error::Format(_))
     ));
+}
+
+#[test]
+fn a_new_version_starts_from_the_last_one_and_embeds_only_what_differs() {
+    let scratch = Scratch::new();
+    let state = &scratch.0;
+    let embedder = Words::new("m");
+    let variant = variant_dir(&index_dir(state, "team", "sha256:aaaa"), Some("m"));
+    Index::refresh(
+        &variant,
+        Settings::default(),
+        &small(),
+        Some(&embedder),
+        &Options::default(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(embedder.inputs.borrow().len(), 4);
+
+    let next = index_dir(state, "team", "sha256:bbbb");
+    let target = variant_dir(&next, Some("m"));
+    let name = target.file_name().unwrap().to_string_lossy().into_owned();
+    let seed = previous_version(state, "team", "sha256:bbbb", &name);
+    assert_eq!(seed.as_deref(), Some(variant.as_path()));
+    assert_eq!(previous_version(state, "team", "sha256:aaaa", &name), None);
+
+    embedder.inputs.borrow_mut().clear();
+    let mut changed = small();
+    changed
+        .insert("rules/style.md", b"Something else entirely.\n".to_vec())
+        .unwrap();
+    let report = Index::refresh(
+        &target,
+        Settings::default(),
+        &changed,
+        Some(&embedder),
+        &Options::default(),
+        seed.as_deref(),
+    )
+    .unwrap();
+    assert_eq!(report.unchanged, ["kb/python.md", "kb/rust.md"]);
+    assert_eq!(report.changed, ["rules/style.md"]);
+    assert_eq!(embedder.inputs.borrow().len(), 1);
+
+    // Settings that differ, or another model, start from nothing.
+    let words = variant_dir(&next, None);
+    let mut other = Settings::default();
+    other.chunk_bytes = 200;
+    embedder.inputs.borrow_mut().clear();
+    let report = Index::refresh(
+        &target.with_file_name("elsewhere"),
+        other,
+        &changed,
+        Some(&embedder),
+        &Options::default(),
+        seed.as_deref(),
+    )
+    .unwrap();
+    assert_eq!(report.added.len(), 3);
+    assert_ne!(words, target);
+}
+
+#[test]
+fn the_default_paths_are_the_conventional_places() {
+    assert!(
+        is_default_path("kb/a.md")
+            && is_default_path("rules/a.md")
+            && is_default_path("CONTEXT.md")
+    );
+    assert!(!is_default_path("skills/x/SKILL.md") && !is_default_path("docs/CONTEXT.md"));
 }

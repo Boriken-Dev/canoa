@@ -318,6 +318,55 @@ pub fn remove_other_versions(state: &Path, overlay: &str, digest: &str) -> Resul
     Ok(removed)
 }
 
+/// The folder inside an overlay version's folder that holds the index made with `model`: one for words, one for each model,
+/// so changing the model starts a new index and never mixes vectors.
+#[must_use]
+pub fn variant_dir(version: &Path, model: Option<&str>) -> PathBuf {
+    version.join(model.map_or_else(
+        || "words".to_owned(),
+        |model| alloc::format!("m-{}", safe(model)),
+    ))
+}
+
+/// The folder of the newest other version of `overlay` that holds an index of `variant` (a [`variant_dir`] name), to seed the
+/// index of the version with `digest` from.
+#[must_use]
+pub fn previous_version(
+    state: &Path,
+    overlay: &str,
+    digest: &str,
+    variant: &str,
+) -> Option<PathBuf> {
+    let parent = state.join("kb").join(safe(overlay));
+    let keep = safe(digest);
+    let mut found: Option<(std::time::SystemTime, PathBuf)> = None;
+    for entry in std::fs::read_dir(&parent).ok()?.flatten() {
+        if entry.file_name().to_string_lossy() == keep {
+            continue;
+        }
+        let candidate = entry.path().join(variant);
+        let Ok(modified) =
+            std::fs::metadata(candidate.join("CURRENT")).and_then(|meta| meta.modified())
+        else {
+            continue;
+        };
+        if found.as_ref().is_none_or(|(newest, _)| modified > *newest) {
+            found = Some((modified, candidate));
+        }
+    }
+    found.map(|(_, path)| path)
+}
+
+/// Whether `path` is where an overlay keeps its knowledge by default ([`DEFAULT_INCLUDE`]).
+#[must_use]
+pub fn is_default_path(path: &str) -> bool {
+    static DEFAULT: OnceLock<Option<Selector>> = OnceLock::new();
+    DEFAULT
+        .get_or_init(|| Selector::new(&[], &[]).ok())
+        .as_ref()
+        .is_some_and(|selector| selector.selects(path))
+}
+
 /// `name` as one path component: letters, digits, `.`, `-` and `_` stay, anything else becomes `%` and its hex.
 fn safe(name: &str) -> String {
     let mut out = String::new();
@@ -469,7 +518,8 @@ impl Index {
     }
 
     /// Creates the index when `dir` holds none, else updates it with pruning: what to call when an overlay's version may
-    /// have changed.
+    /// have changed. A new index starts from the one in `seed` (a folder of an earlier version) when that was made with the
+    /// same settings and model, so only the files that differ from it are made again.
     ///
     /// # Errors
     ///
@@ -480,7 +530,20 @@ impl Index {
         corpus: &Corpus,
         embedder: Option<&dyn Embedder>,
         options: &Options,
+        seed: Option<&Path>,
     ) -> Result<Report, Error> {
+        if !Self::exists(dir)
+            && let Some(from) = seed
+            && let Ok(earlier) = Self::open(from)
+        {
+            let mut wanted = settings.clone();
+            wanted.model = embedder.map(|embedder| embedder.model().to_string());
+            wanted.dimensions = earlier.settings.dimensions;
+            if wanted == earlier.settings {
+                let meta = store::Meta::new(earlier.settings.clone(), None, earlier.files.clone());
+                store::commit(dir, &meta, &earlier.chunks)?;
+            }
+        }
         if Self::exists(dir) {
             let mut options = options.clone();
             options.prune = true;
