@@ -832,13 +832,27 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   }
 
   /// What [session]'s agent is asked for its prompt cache: the person's choice, else the lifetime canoa.cfg's entry sets, else
-  /// the chat's default. [chosen] says the person chose it, so a host lets it win over its entry's setting.
+  /// the chat's default. [chosen] says the person chose it, so a host lets it win over its entry's setting. A lifetime the
+  /// provider has said it does not honour is not asked: the agent's default is, and [chosen] is false.
   ({CacheLifetime lifetime, bool chosen}) cacheLifetimeOf(ChatSession session) {
-    final chosen = session.cacheLifetime;
-    if (chosen != null) return (lifetime: chosen, chosen: true);
     final source = session.source;
-    final setting = source == null ? null : choicesOf(source)?.cacheLifetimeSetting;
-    return (lifetime: setting ?? CacheLifetime.chat, chosen: false);
+    final choices = source == null ? null : choicesOf(source);
+    final asked = session.cacheLifetime;
+    final wanted = asked ?? choices?.cacheLifetimeSetting ?? CacheLifetime.chat;
+    if (choices != null && choices.cacheLifetime != null && !choices.offersCache(wanted)) {
+      return (lifetime: CacheLifetime.harness, chosen: false);
+    }
+    return (lifetime: wanted, chosen: asked != null);
+  }
+
+  /// The lifetime the person chose for [session] that its provider does not honour, which [cacheLifetimeOf] then replaces with
+  /// the agent's default; null when the choice stands or none was made.
+  CacheLifetime? cacheUnavailable(ChatSession session) {
+    final asked = session.cacheLifetime;
+    final source = session.source;
+    final choices = source == null ? null : choicesOf(source);
+    if (asked == null || choices == null || choices.cacheLifetime == null || choices.offersCache(asked)) return null;
+    return asked;
   }
 
   /// Sets how long [session]'s prompt cache should live; null takes the choice back. A session that has started keeps its own.

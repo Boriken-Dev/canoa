@@ -1,7 +1,10 @@
 /// How long an agent's prompt cache should live, which canoa.cfg's `cache_lifetime` and `canoa agent --cache-lifetime` name.
 enum CacheLifetime {
   /// The harness's own.
-  harness('default', 'Default', 'the harness\'s own'),
+  harness('default', 'Agent default', 'the agent\'s own'),
+
+  /// No prompt cache, where the provider can turn it off.
+  off('off', 'Off', 'no prompt cache'),
 
   /// About five minutes: for one-shot and background runs.
   short('short', 'Short', 'about 5 minutes'),
@@ -24,6 +27,9 @@ enum CacheLifetime {
   /// The lifetime named [id], or null for anything else.
   static CacheLifetime? named(Object? id) => values.where((each) => each.id == id).firstOrNull;
 }
+
+/// A lifetime a provider honours beyond [CacheLifetime.harness], under the name the provider gives it.
+typedef CacheChoice = ({CacheLifetime lifetime, String label});
 
 /// The `_meta` key of `initialize` through which the chat tells a host how long a session's prompt cache should live.
 const cacheLifetimeMeta = 'dev.boriken.canoa/cache_lifetime';

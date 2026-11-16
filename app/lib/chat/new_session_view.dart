@@ -83,7 +83,9 @@ class NewSessionView extends StatelessWidget {
           );
     final source = session.source;
     final says = source == null ? null : store.choicesOf(source)?.cacheLifetime;
-    final cacheNote = says == null ? null : 'Prompt cache: ${store.cacheLifetimeOf(session).lifetime.label.toLowerCase()}. Provider: $says';
+    final cacheNote = says == null || source == null
+        ? null
+        : 'Prompt cache: ${store.choicesOf(source)!.cacheLabel(store.cacheLifetimeOf(session).lifetime).toLowerCase()}. Provider: $says';
     return LayoutBuilder(builder: (context, constraints) => SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: ConstrainedBox(

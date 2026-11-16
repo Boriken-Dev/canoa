@@ -331,8 +331,10 @@ class CacheChooser extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final source = session.source;
-    if (source == null || store.choicesOf(source)?.cacheLifetime == null) return const SizedBox.shrink();
+    final choices = source == null ? null : store.choicesOf(source);
+    if (choices == null || choices.cacheLifetime == null || choices.cacheChoices.isEmpty) return const SizedBox.shrink();
     final asked = store.cacheLifetimeOf(session);
+    final unavailable = store.cacheUnavailable(session);
     return PopupMenuButton<CacheLifetime?>(
       key: const Key('option-cache'),
       tooltip: 'How long the prompt cache lives',
@@ -342,17 +344,30 @@ class CacheChooser extends StatelessWidget {
         PopupMenuItem<CacheLifetime?>(
           key: const Key('cache-unchosen'),
           value: null,
-          child: Text(asked.chosen ? 'Not chosen' : 'Not chosen (${asked.lifetime.label})'),
+          child: Text(asked.chosen ? 'Not chosen' : 'Not chosen (${choices.cacheLabel(asked.lifetime)})'),
         ),
-        for (final each in CacheLifetime.values)
+        CheckedPopupMenuItem<CacheLifetime?>(
+          key: Key('cache-${CacheLifetime.harness.id}'),
+          value: CacheLifetime.harness,
+          checked: asked.chosen && asked.lifetime == CacheLifetime.harness,
+          child: Text(CacheLifetime.harness.label),
+        ),
+        for (final each in choices.cacheChoices)
           CheckedPopupMenuItem<CacheLifetime?>(
-            key: Key('cache-${each.id}'),
-            value: each,
-            checked: asked.chosen && each == asked.lifetime,
-            child: Text('${each.label}, ${each.about}'),
+            key: Key('cache-${each.lifetime.id}'),
+            value: each.lifetime,
+            checked: asked.chosen && each.lifetime == asked.lifetime,
+            child: Text(each.label),
+          ),
+        if (unavailable != null)
+          PopupMenuItem<CacheLifetime?>(
+            key: Key('cache-unavailable-${unavailable.id}'),
+            enabled: false,
+            value: unavailable,
+            child: Text('${unavailable.label}: not offered by this agent, so ${CacheLifetime.harness.label.toLowerCase()} is used'),
           ),
       ],
-      child: ComposerPill(label: 'Cache: ${asked.lifetime.label}', icon: Icons.timer_outlined),
+      child: ComposerPill(label: 'Cache: ${choices.cacheLabel(asked.lifetime)}', icon: Icons.timer_outlined),
     );
   }
 }

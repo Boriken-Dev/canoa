@@ -18,11 +18,16 @@ import 'fixtures/source_choices.dart';
 
 const _claudeSays =
     'sets CLAUDE_CODE_PROMPT_CACHE_TTL and CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL to 5m for short and 1h for long, and leaves both as the environment has them for default';
+const _claudeChoices = [
+  {'id': 'off', 'label': 'Off'},
+  {'id': 'short', 'label': '5 minutes'},
+  {'id': 'long', 'label': '1 hour'},
+];
 const _codexSays = "ignored: Codex's app server has no setting for how long its prompt cache lives (Codex 0.166.0)";
 
 SourceChoices? _answer(String label, {String? setting}) {
   final base = switch (label) {
-    'Claude' => {...claudeAnswer, 'cache_lifetime': _claudeSays},
+    'Claude' => {...claudeAnswer, 'cache_lifetime': _claudeSays, 'cache_choices': _claudeChoices},
     'Codex' => {...codexAnswer, 'cache_lifetime': _codexSays},
     _ => null,
   };
@@ -56,15 +61,16 @@ void main() {
   testWidgets('a chat session asks long, and the view shows the provider\'s sentence', (tester) async {
     await pumpApp(tester, _store(), askChoices: (source) async => _answer(source.label));
     await _draft(tester, 'Claude');
-    expect(_pill(tester, 'option-cache'), 'Cache: Long');
-    expect(_note(tester), 'Prompt cache: long. Provider: $_claudeSays');
+    expect(_pill(tester, 'option-cache'), 'Cache: 1 hour');
+    expect(_note(tester), 'Prompt cache: 1 hour. Provider: $_claudeSays');
     await finish(tester);
   });
 
   testWidgets('a provider that has no control says so, where the person can read it', (tester) async {
     await pumpApp(tester, _store(), askChoices: (source) async => _answer(source.label));
     await _draft(tester, 'Codex');
-    expect(_note(tester), 'Prompt cache: long. Provider: $_codexSays');
+    expect(_note(tester), 'Prompt cache: agent default. Provider: $_codexSays');
+    expect(find.byKey(const Key('option-cache')), findsNothing, reason: 'nothing to choose where the choice is ignored');
     await finish(tester);
   });
 
@@ -82,15 +88,27 @@ void main() {
     await pumpApp(tester, store, linked: agent.openLink, askChoices: (source) async => _answer(source.label));
     await _draft(tester, 'Claude');
     final menu = await menuOf(tester, 'option-cache');
-    expect(menu, ['Not chosen (Long)', 'Default, the harness\'s own', 'Short, about 5 minutes', 'Long, about an hour']);
-    await pick(tester, 'option-cache', 'Short, about 5 minutes');
-    expect(_pill(tester, 'option-cache'), 'Cache: Short');
-    expect(_note(tester), startsWith('Prompt cache: short.'));
+    expect(menu, ['Not chosen (1 hour)', 'Agent default', 'Off', '5 minutes', '1 hour'], reason: 'the provider\'s own names');
+    await pick(tester, 'option-cache', '5 minutes');
+    expect(_pill(tester, 'option-cache'), 'Cache: 5 minutes');
+    expect(_note(tester), startsWith('Prompt cache: 5 minutes.'));
     expect(store.selected!.cacheLifetime, CacheLifetime.short);
     expect(agent.starts, isEmpty, reason: 'choosing starts nothing');
     await send(tester, 'Fix the failing test');
     expect(_asked(agent), {'lifetime': 'short', 'chosen': true});
     expect(store.ledger!.entries.single.cacheLifetime, 'short', reason: 'kept with the session, asked again when it is reopened');
+    await finish(tester);
+  });
+
+  testWidgets('Off reaches the agent as the control for no prompt cache', (tester) async {
+    final agent = OptionsAgent();
+    final store = _store();
+    await pumpApp(tester, store, linked: agent.openLink, askChoices: (source) async => _answer(source.label));
+    await _draft(tester, 'Claude');
+    await pick(tester, 'option-cache', 'Off');
+    expect(_pill(tester, 'option-cache'), 'Cache: Off');
+    await send(tester, 'Fix the failing test');
+    expect(_asked(agent), {'lifetime': 'off', 'chosen': true});
     await finish(tester);
   });
 
@@ -101,6 +119,25 @@ void main() {
     await send(tester, 'Fix the failing test');
     expect(_asked(agent), {'lifetime': 'long', 'chosen': false});
     await finish(tester);
+  });
+
+  test('a lifetime the provider does not honour shows as unavailable and the agent\'s default is asked', () async {
+    const codex = AgentSource.hosted('Codex', harness: 'codex', local: true);
+    final store = SessionStore()..choicesLoader = (_) async => _answer('Codex');
+    final draft = store.createDraft(source: codex);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    store.setCacheLifetime(draft, CacheLifetime.off);
+    expect(store.cacheUnavailable(draft), CacheLifetime.off);
+    expect(store.cacheLifetimeOf(draft), (lifetime: CacheLifetime.harness, chosen: false));
+    expect(store.cacheLifetimeOf(store.createDraft(source: codex)), (lifetime: CacheLifetime.harness, chosen: false),
+        reason: 'not even the chat\'s long, where the provider has said it ignores the choice');
+    const claude = AgentSource.hosted('Claude', harness: 'claude', local: true);
+    final honoured = SessionStore()..choicesLoader = (_) async => _answer('Claude');
+    final asked = honoured.createDraft(source: claude);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    honoured.setCacheLifetime(asked, CacheLifetime.off);
+    expect(honoured.cacheUnavailable(asked), isNull);
+    expect(honoured.cacheLifetimeOf(asked), (lifetime: CacheLifetime.off, chosen: true));
   });
 
   test('an entry sets the default until the person chooses', () async {

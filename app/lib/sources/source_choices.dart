@@ -85,6 +85,7 @@ final class SourceChoices {
     this.programVersion,
     this.cacheLifetime,
     this.cacheLifetimeSetting,
+    this.cacheChoices = const [],
     DateTime? fetchedAt,
   }) : _fetchedAt = fetchedAt;
 
@@ -108,6 +109,18 @@ final class SourceChoices {
 
   /// The lifetime canoa.cfg's entry sets for its sessions, when it sets one.
   final CacheLifetime? cacheLifetimeSetting;
+
+  /// The lifetimes beyond the agent's default that the provider honours, each under its own name; empty where it ignores the
+  /// choice. Only these are offered.
+  final List<CacheChoice> cacheChoices;
+
+  /// Whether the provider honours [lifetime]: the agent's default always, the rest only as [cacheChoices] lists them.
+  bool offersCache(CacheLifetime lifetime) =>
+      lifetime == CacheLifetime.harness || cacheChoices.any((choice) => choice.lifetime == lifetime);
+
+  /// What [lifetime] is called for this provider: its own name for it, else the chat's.
+  String cacheLabel(CacheLifetime lifetime) =>
+      cacheChoices.where((choice) => choice.lifetime == lifetime).map((choice) => choice.label).firstOrNull ?? lifetime.label;
   final DateTime? _fetchedAt;
 
   /// When this was asked; the epoch for choices that were not.
@@ -123,8 +136,15 @@ final class SourceChoices {
         programVersion: programVersion,
         cacheLifetime: cacheLifetime,
         cacheLifetimeSetting: cacheLifetimeSetting,
+        cacheChoices: cacheChoices,
         fetchedAt: when,
       );
+
+  static CacheChoice? _cacheChoice(Object? json) {
+    if (json is! Map || json['label'] is! String) return null;
+    final lifetime = CacheLifetime.named(json['id']);
+    return lifetime == null ? null : (lifetime: lifetime, label: json['label'] as String);
+  }
 
   /// The object `canoa options --format json` prints, in [text]; null when it holds none.
   static SourceChoices? parse(String text) {
@@ -141,6 +161,7 @@ final class SourceChoices {
           programVersion: value['program_version'] is String ? value['program_version'] as String : null,
           cacheLifetime: value['cache_lifetime'] is String ? value['cache_lifetime'] as String : null,
           cacheLifetimeSetting: CacheLifetime.named(value['cache_lifetime_setting']),
+          cacheChoices: [if (value['cache_choices'] is List) for (final choice in value['cache_choices'] as List) ?_cacheChoice(choice)],
         );
       } on FormatException {
         continue;
