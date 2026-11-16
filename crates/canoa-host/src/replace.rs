@@ -85,7 +85,7 @@ mod tests {
 #[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
-    use std::process::Command;
+    use crate::spawn::Command;
 
     fn access_of(path: &Path) -> String {
         let out = Command::new("icacls")
