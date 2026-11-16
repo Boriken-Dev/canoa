@@ -273,7 +273,18 @@ impl Harness {
         self.accounts.as_ref().map_or(&[], |offer| &offer.offered)
     }
 
-    /// The account `name`, one this entry offers, held for a call that is not a connection (moving a session between accounts).
+    /// The account `name` this entry offers or, with `any`, another account of its provider a key trusted with accounts may use.
+    pub(crate) fn account_named(&self, name: &str, any: bool) -> Option<&Offered> {
+        let offer = self.accounts.as_ref()?;
+        offer
+            .offered
+            .iter()
+            .chain(any.then_some(&offer.others).into_iter().flatten())
+            .find(|(each, ..)| each == name)
+    }
+
+    /// The account `name`, held for a call that is not a connection (moving a session between accounts). With `any`, it may be
+    /// an account of the provider the entry does not list.
     ///
     /// # Errors
     ///
@@ -282,17 +293,15 @@ impl Harness {
         &self,
         name: &str,
         holder: &str,
+        any: bool,
     ) -> Result<Held, crate::accounts::Refusal> {
-        let offer = self.accounts.as_ref().ok_or_else(|| {
-            crate::accounts::Refusal::Store("this entry offers no accounts".to_owned())
-        })?;
-        let (name, config, info) = offer
-            .offered
-            .iter()
-            .find(|(offered, ..)| offered == name)
-            .ok_or_else(|| {
-                crate::accounts::Refusal::Store("this entry does not offer that account".to_owned())
-            })?;
+        let (Some(offer), Some((name, config, info))) =
+            (&self.accounts, self.account_named(name, any))
+        else {
+            return Err(crate::accounts::Refusal::Store(
+                "this entry does not offer that account".to_owned(),
+            ));
+        };
         offer.host.begin(name, config, info, holder)
     }
 

@@ -24,10 +24,11 @@ const LOOKS: u32 = 50;
 
 type Refused = (i32, String);
 
-/// The account `name` of `harness`, waiting a little while the connection that ran on it is still ending.
+/// The account `name` of `harness`, waiting a little while the connection that ran on it is still ending. A move is the person's
+/// own, so it may use any account of the provider that a connection may name.
 fn held(harness: &kind::Harness, name: &str) -> Result<Held, Refused> {
     for look in 0..LOOKS {
-        match harness.hold_account(name, "moving a conversation") {
+        match harness.hold_account(name, "moving a conversation", true) {
             Ok(held) => return Ok(held),
             Err(Refusal::InUse(by)) if look + 1 == LOOKS => {
                 return Err((
@@ -47,16 +48,22 @@ fn held(harness: &kind::Harness, name: &str) -> Result<Held, Refused> {
 /// The whole history of `session` as `harness` exports it from account `from`'s folder, or the provider's refusal.
 fn export_from(
     harness: &kind::Harness,
-    from: &str,
+    from: Option<&str>,
     session: &str,
     cwd: &str,
 ) -> Result<String, Result<(Status, String), Refused>> {
-    let held = held(harness, from).map_err(Err)?;
+    let held = from
+        .map(|name| held(harness, name))
+        .transpose()
+        .map_err(Err)?;
     let mut text = String::new();
     let mut after: Option<String> = None;
     loop {
-        let connection = harness.connection(None, Some(&held), CacheLifetime::default());
-        let mut ask = SessionExport::new(session, cwd).account(held.grant());
+        let connection = harness.connection(None, held.as_ref(), CacheLifetime::default());
+        let mut ask = SessionExport::new(session, cwd);
+        if let Some(held) = &held {
+            ask = ask.account(held.grant());
+        }
         if let Some(position) = after.take() {
             ask = ask.after(position);
         }
@@ -78,9 +85,21 @@ fn export_from(
     }
 }
 
+/// An account a move names: text for an account, `null` for the login the program has where it runs, `None` when absent.
+fn side<'a>(params: &'a Value, key: &str) -> Result<Option<Option<&'a str>>, Refused> {
+    match params.get(key) {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(None)),
+        Some(Value::String(name)) => Ok(Some(Some(name))),
+        Some(_) => Err(bad(&format!("{key} is text or null"))),
+    }
+}
+
 impl Control {
     /// `history/account` `{"entry", "session", "cwd", "from"?, "to"}`: what carries a conversation of the harness entry `entry` from
-    /// the account it ran on (`from`, else the entry's first) to another account the entry offers. Accounts with no folder of their
+    /// the account it ran on (`from`, else the entry's first, else the login the program has where it runs) to another account of
+    /// the entry's provider, listed by the entry or not; `null` for `from` or `to` is that login. Only the person's own process
+    /// calls it, which is the trust a session on an unlisted account asks. Accounts with no folder of their
     /// own keep conversations in one place, so nothing moves: `{"moved": false}`, and the session resumes as it is. Where an account
     /// has a folder of its own, the provider exports the conversation from the first account's folder and imports it into the
     /// second's at a new session id, which is answered (`{"moved": true, "session", "via": "provider"}`). A provider that cannot
@@ -93,7 +112,7 @@ impl Control {
         let entry = text_param(params, "entry")?.ok_or_else(|| bad("entry is needed"))?;
         let session = text_param(params, "session")?.ok_or_else(|| bad("session is needed"))?;
         let cwd = text_param(params, "cwd")?.ok_or_else(|| bad("cwd is needed"))?;
-        let to = text_param(params, "to")?.ok_or_else(|| bad("to is needed"))?;
+        let to = side(params, "to")?.ok_or_else(|| bad("to is needed"))?;
         if entry.len() > 256 || session.len() > 256 || cwd.chars().any(char::is_control) {
             return Err(bad("entry, session or cwd is not one"));
         }
@@ -102,32 +121,31 @@ impl Control {
             .get(entry)
             .ok_or((NOT_FOUND, "this host has no such source".to_owned()))?;
         let offered = harness.offered();
-        let from = match text_param(params, "from")? {
-            Some(name) => name,
-            None => offered
-                .first()
-                .map(|(name, ..)| name.as_str())
-                .ok_or((REFUSED, format!("{entry} offers no accounts")))?,
+        let from = match side(params, "from")? {
+            Some(from) => from,
+            None => offered.first().map(|(name, ..)| name.as_str()),
         };
-        let info_of = |name: &str| {
-            offered
-                .iter()
-                .find(|(offered, ..)| offered == name)
-                .map(|(_, _, info)| info)
+        // The login the program has where it runs keeps its conversations in the program's own place, with no folder of its own.
+        let has_folder = |name: Option<&str>| match name {
+            None => Ok(false),
+            Some(name) => harness
+                .account_named(name, true)
+                .map(|(_, _, info)| info.state_dir)
                 .ok_or((
                     NOT_FOUND,
                     format!("{entry} does not offer the account {name}"),
-                ))
+                )),
         };
-        let (from_info, to_info) = (info_of(from)?, info_of(to)?);
+        let (from_folder, to_folder) = (has_folder(from)?, has_folder(to)?);
         if from == to {
             return Err((
                 BAD_PARAMS,
                 "the conversation is on that account already".to_owned(),
             ));
         }
+        let from_name = from.unwrap_or("the machine's login");
         // Accounts with no folder of their own keep conversations where the program's own login does: one place.
-        if !from_info.state_dir && !to_info.state_dir {
+        if !from_folder && !to_folder {
             return Ok(json!({"moved": false, "session": session, "cwd": cwd}));
         }
         let (text, via) = match export_from(harness, from, session, cwd) {
@@ -146,7 +164,7 @@ impl Control {
                         return Err((
                             REFUSED,
                             format!(
-                                "{entry} cannot export this conversation from account {from}, and the host has no record of it: {why}"
+                                "{entry} cannot export this conversation from account {from_name}, and the host has no record of it: {why}"
                             ),
                         ));
                     }
@@ -166,20 +184,21 @@ impl Control {
         let body = moved
             .to_string()
             .map_err(|e| (REFUSED, format!("the history cannot be written: {e}")))?;
-        let account = held(harness, to)?;
-        let connection = harness.connection(None, Some(&account), CacheLifetime::default());
+        let account = to.map(|name| held(harness, name)).transpose()?;
+        let connection = harness.connection(None, account.as_ref(), CacheLifetime::default());
+        let mut take = SessionImport::new(new.clone(), cwd, body);
+        if let Some(account) = &account {
+            take = take.account(account.grant());
+        }
         let report = connection
             .harness
-            .import_session(
-                SessionImport::new(new.clone(), cwd, body).account(account.grant()),
-                connection.spawner,
-                connection.keeper,
-            )
+            .import_session(take, connection.spawner, connection.keeper)
             .map_err(|error| {
                 (
                     REFUSED,
                     format!(
-                        "{entry} cannot take this conversation into account {to}: {}",
+                        "{entry} cannot take this conversation into account {}: {}",
+                        to.unwrap_or("the machine's login"),
                         error.message()
                     ),
                 )

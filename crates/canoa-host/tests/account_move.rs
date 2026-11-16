@@ -167,10 +167,11 @@ fn a_conversation_follows_the_person_to_another_account_by_the_providers_own_exp
     add(&scratch, "other", "subscription", "123456\n");
     add(&scratch, "key1", "api-key", "sk-test-key-0001\n");
     add(&scratch, "key2", "api-key", "sk-test-key-0002\n");
+    add(&scratch, "key3", "api-key", "sk-test-key-0003\n");
     let cfg = std::fs::read_to_string(scratch.0.join("canoa.cfg")).expect("canoa.cfg");
     let cfg = cfg.replace(
         "listen = \"127.0.0.1:0\"",
-        "listen = \"127.0.0.1:0\"\naccounts = [\"work\", \"other\", \"key1\", \"key2\"]",
+        "listen = \"127.0.0.1:0\"\naccounts = [\"work\", \"key1\", \"key2\"]",
     );
     let dir = cwd(&scratch);
     let (work, other) = (folder_of(&scratch, "work"), folder_of(&scratch, "other"));
@@ -192,6 +193,7 @@ fn a_conversation_follows_the_person_to_another_account_by_the_providers_own_exp
         )
     };
 
+    // `other` is not listed by the entry: a move is the person's own, so it may go there all the same.
     // One folder each: exported from the first account's, imported into the second's at a new id.
     let moved = ask("work", "other").expect("moved");
     assert_eq!(moved["moved"], true, "{moved}");
@@ -224,6 +226,29 @@ fn a_conversation_follows_the_person_to_another_account_by_the_providers_own_exp
     let home = ask("work", "key1").expect("moved to the shared place");
     assert_eq!(home["moved"], true, "{home}");
     assert_eq!(sessions_in(&default_folder).len(), 1);
+
+    // To the login the program has where it runs, and from it to an unlisted account with a folder of its own.
+    let machine = call(
+        &control,
+        3,
+        &json!({"entry": "Claude", "session": SESSION, "cwd": dir, "from": "work", "to": null}),
+    )
+    .expect("moved to the machine's login");
+    assert_eq!(machine["moved"], true, "{machine}");
+    let back = machine["session"]
+        .as_str()
+        .expect("a session id")
+        .to_owned();
+    let away = call(
+        &control,
+        4,
+        &json!({"entry": "Claude", "session": back, "cwd": dir, "from": null, "to": "other"}),
+    )
+    .expect("moved from the machine's login");
+    assert_eq!(away["moved"], true, "{away}");
+    // An unlisted account whose key reaches the agent has to be offered to the entry first.
+    let keyed = ask("work", "key3").expect_err("refused");
+    assert_eq!(keyed.0, -32003, "{keyed:?}");
 
     // What cannot be exported is refused, with the account and the reason, never made up.
     let missing = call(
