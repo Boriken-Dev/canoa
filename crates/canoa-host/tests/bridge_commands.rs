@@ -349,3 +349,33 @@ fn mcp_config_names_this_program_this_home_and_the_peer() {
         "{program}"
     );
 }
+
+/// A home named by nobody is this host's `.canoa` in the person's folder, which is where the library's commands keep what they
+/// write, not the folder the library would choose for itself.
+#[test]
+fn the_commands_keep_their_files_in_this_hosts_own_home_when_none_is_named() {
+    let scratch = Scratch::new();
+    let person = scratch.0.join("person");
+    let elsewhere = scratch.0.join("elsewhere");
+    std::fs::create_dir_all(&person).expect("a folder");
+    let peer = format!("sha256:{}", "ef".repeat(32));
+    let mut command = Command::new(host_binary());
+    command
+        .env_remove("COQUI_AGENTIC_PEER_HOME")
+        .env_remove("CANOA_CONFIG")
+        .env("HOME", &person)
+        .env("USERPROFILE", &person)
+        .env("LOCALAPPDATA", &elsewhere)
+        .env("XDG_CONFIG_HOME", &elsewhere)
+        .args(["grant", &peer, "tcp/1:127.0.0.1:9"]);
+    let given = run(&mut command);
+    assert!(given.status.success(), "{}", text(&given.stderr));
+    assert!(
+        person.join(".canoa").join("grants.json").exists(),
+        "the grants are in this host's home"
+    );
+    assert!(
+        !elsewhere.exists(),
+        "and nowhere the library would have put them"
+    );
+}
