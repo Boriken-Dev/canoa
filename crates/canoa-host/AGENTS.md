@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa-host` crate, whose command-line program is `canoa`: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `anycfg` (`bf71f70`, from its repository), `canoa`, `clap`, `coqui-acp`, `coqui-acp-api`, `coqui-acp-bridge`, `canoa-antigravity`, `canoa-claude`, `canoa-codex`, `canoa-grok`, `canoa-pi` (each agent's source preset, Store recipe and, for Claude, Codex and Pi, coqui-acp provider), `coqui-acp-harness` (`kind`), `coqui-acp-history` and `coqui-acp-provider` and `coqui-acp-secrets` (coqui-acp `34de3e9`), `coqui-aos` (`815aa3c`), `coqui-agentic-peer` (`8dad1766`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-transport-pipe` (`1bf161f`), `coqui-transport-guatiao` (`f09bf2d`; `pipe`, `websocket`), `coqui-transport` and `coqui-transport-web` (`websocket`), `coqui-builder` (the error a listener builder returns), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `httparse`, `if-addrs`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `serde-saphyr` (feature `yaml`), `toml`, `tracing` and `tracing-subscriber`, and for accounts `keyring-core` with the platform's store (`windows-native-keyring-store`, `apple-native-keyring-store`, `zbus-secret-service-keyring-store`), `aes-gcm`, `zeroize`, `time` (`parsing`) and `rpassword`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its git dependencies are not released. It depends on `anycfg` (`bf71f70`, from its repository), `canoa`, `clap`, `coqui-acp`, `coqui-acp-api`, `coqui-acp-bridge`, `canoa-antigravity`, `canoa-claude`, `canoa-codex`, `canoa-grok`, `canoa-pi` (each agent's source preset, Store recipe and, for Claude, Codex and Pi, coqui-acp provider), `coqui-acp-harness` (`kind`), `coqui-acp-history` and `coqui-acp-provider` and `coqui-acp-secrets` (coqui-acp `34de3e9`), `coqui-aos` (`815aa3c`), `coqui-agentic-peer` (`8dad1766`, which brings `coqui-peer-noise`), `coqui-peer`, `coqui-peer-webcrypto`, `coqui-transport-pipe` (`1bf161f`), `coqui-transport-guatiao` (`f09bf2d`; `pipe`, `websocket`), `coqui-transport` and `coqui-transport-web` (`websocket`), `coqui-builder` (the error a listener builder returns), `guatiao` (`provider`, `load`), `guatiao-serde` (no format), `globset` (`kb`'s filters), `httparse`, `if-addrs`, `indexmap`, `percent-encoding`, `rustls` (`ring`), `serde`, `serde_json`, `serde-saphyr` (feature `yaml`), `toml`, `tracing` and `tracing-subscriber`, and for accounts `keyring-core` with the platform's store (`windows-native-keyring-store`, `apple-native-keyring-store`, `zbus-secret-service-keyring-store`), `aes-gcm`, `zeroize`, `time` (`parsing`) and `rpassword`.
 
 | Feature | Adds | Needed for | Default |
 | --- | --- | --- | --- |
@@ -11,7 +11,7 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`): its 
 
 `CANOA_WEB_DIST` must be an absolute directory holding `index.html` (a `flutter build web` output): with `web` on and it unset, relative or without an index, the build stops. Names starting with a dot are left out; a link leading out of the directory stops the build. `--all-features` therefore needs it set too.
 
-The root re-exports `SITE_META`, `ACCOUNT_META`, `CACHE_META`, `CACHE_LIFETIMES`, `cache_lifetime_name`, `cache_lifetime_named`, `AccountConfig`, `AccountStore`, `StoreConfig`, `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Listen`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `Local`, `LocalError`, `Link`, `LinkError`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `options`, `peers`, `pipe`, `portal` (feature `portal`, Unix), `portal_link`, `profile`, `provider`, `serve`, `tool`, `web`.
+The root re-exports `SITE_META`, `ACCOUNT_META`, `CACHE_META`, `CACHE_LIFETIMES`, `cache_lifetime_name`, `cache_lifetime_named`, `AccountConfig`, `AccountStore`, `StoreConfig`, `Config`, `ConfigError`, `Entry`, `EntryKind`, `HarnessOptions`, `Listen`, `Origin`, `Settings`, `UsageSource`, `WebConfig`, `Harness`, `Holder`, `Home`, `HomeLock`, `LockError`, `Peer`, `PeerState`, `PeersError`, `HostLine`, `ProviderError`, `ProviderOptions`, `serve_stdio`, `Listening`, `ServeError`, `ServeOptions`, `Serving`, `Stopper`, `Local`, `LocalError`, `Link`, `LinkError`, `ToolSpec`, `WebError`, `WebServer` and `WebStopper`. Public modules: `cli`, `config`, `harness`, `home`, `kb`, `options`, `peers`, `pipe`, `portal` (feature `portal`, Unix), `portal_link`, `profile`, `provider`, `serve`, `tool`, `web`.
 
 `#![deny(unsafe_code)]`: the one `unsafe` module is `usage_splice/members/win32.rs` (Windows' Toolhelp snapshot of the process table, through `windows-sys`). Loading a provider library or source runs its code; see `serve_stdio`.
 
@@ -1165,6 +1165,31 @@ stores that know each program. Nothing runs at startup, and the host holds no pr
 Tests: `cargo build -p canoa-host --examples` first, then `cargo test -p canoa-host --all-features --test store_tools --test store_shelf
 --test store_programs --test store_suite --test store_extensions`. `tests/store_live.rs` (ignored) installs the real programs:
 `CANOA_STORE_LIVE=claude,codex,grok,agy,pi cargo test -p canoa-host --test store_live -- --ignored --nocapture`.
+
+## A knowledge index (`canoa_host::kb`)
+
+A local, searchable index of an overlay's text and Markdown files. Search returns passages ranked by score with their path and line range, never an answer. Two scorers behind one `Index::search`: by words (BM25, no model) and by meaning (cosine similarity over vectors from an `Embedder`). Canoa fetches no model: the embedding provider is the person's.
+
+```rust
+pub fn index_dir(state: &Path, overlay: &str, digest: &str) -> PathBuf        // <state>/kb/<overlay>/<digest>, one index per overlay version
+pub fn remove_other_versions(state: &Path, overlay: &str, digest: &str) -> Result<usize, Error>
+Corpus::{new, insert(path, bytes), from_tree(&OverlayTree), from_dir(&Path), text, paths, len, is_empty}  // `skipped`: not UTF-8 text (or NUL, or over 8 MiB)
+Index::create(dir, Settings, &Corpus, Option<&dyn Embedder>, &Options) -> Result<Report, Error>   // fails if `dir` holds an index
+Index::update(dir, &Corpus, Option<&dyn Embedder>, &Options) -> Result<Report, Error>            // saved settings; reuses unchanged files by SHA-256
+Index::rebuild(dir, Settings, &Corpus, Option<&dyn Embedder>, &Options) -> Result<Report, Error> // replaces settings, remakes every passage
+Index::refresh(dir, Settings, &Corpus, Option<&dyn Embedder>, &Options) -> Result<Report, Error> // create, else update with prune
+Index::open(dir) / exists(dir) / settings() / source() / generation() / paths() / len()
+Index::search(&self, query, &SearchOptions, Option<&dyn Embedder>) -> Result<Vec<Hit>, Error>
+trait Embedder { fn model(&self) -> &str; fn embed(&self, &[String]) -> Result<Vec<Vec<f32>>, Error> }
+HttpEmbedder::new(base, model)       // POST {base}/v1/embeddings (Foundry Local's daemon, or any OpenAI-compatible server); `with_timeout`
+```
+
+- `Settings` (saved with the index): `chunk_bytes` 1024 (4 to 65536, the document prefix included, bytes not tokens), `overlap_bytes` 0, `include` (empty means `DEFAULT_INCLUDE`: `kb/**`, `rules/**`, `context/**`, `/CONTEXT.md`), `exclude`, `document_prefix`, `query_prefix`, and `model` and `dimensions`, which the index sets from the embedder (none gives an index of words). A glob with no `/` matches at any depth; `*` stays in a folder, `**` crosses; a leading `/` anchors at the root.
+- Passages: a Markdown file (`.md`, `.markdown`) is cut at ATX headings outside code fences, then by size at lines (a longer line at a space or character boundary); each carries its `heading` path (`A > B`) and an inclusive 1-based line range. A heading with no text under it is no passage. Overlap repeats whole trailing lines. The embedded text is the prefix plus the passage text; the heading is not added to it, but words search reads path, heading and text.
+- `Options`: `prune` (update: remove files missing or no longer selected; otherwise they stay, and `Report::retained` names them), `dry_run` (report, write nothing, call no embedder), `batch_size` 8 (1 to 128; a request also stops at 16 KiB), `source` (an overlay's tree digest, saved).
+- Atomic: a write goes to `gen-N.tmp`, is renamed to `gen-N`, and `CURRENT` is replaced by one rename; an error anywhere leaves the committed generation and removes what the call wrote. Two writers on one folder are not coordinated: the last to commit is the index.
+- `update` of an index with vectors needs an embedder of the saved `model` when a file needs embedding (`Error::Model` otherwise); only `rebuild` changes the model. `SearchOptions`: `top` 5 (1 to 100), `min_score` (cosine, or the BM25 score), `path` (a file or folder, not a glob), `mode` `Auto` (meaning when the index has vectors and an embedder is given, else words), `Lexical`, `Semantic`.
+- Vectors are stored unit length (little-endian f32, base64, in `chunks.jsonl`), so the index folder is text.
 
 ## Errors
 
