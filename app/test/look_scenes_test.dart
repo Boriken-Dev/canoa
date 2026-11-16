@@ -4,17 +4,21 @@
 @Timeout(Duration(minutes: 3))
 library;
 
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:canoa/accounts/accounts_controller.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/config/connection.dart';
 import 'package:canoa/ledger/session_ledger.dart';
+import 'package:canoa/served/host_files.dart';
 import 'package:canoa/shell/hosts/host_status.dart';
 import 'package:canoa/shell/hosts/hosts_controller.dart';
 import 'package:canoa/shell/hosts/hosts_section.dart';
 import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/store/store_section.dart';
+import 'package:canoa/surfaces/files_surface.dart';
 import 'package:canoa/theme/look.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,6 +39,29 @@ const _accountsConfig = CanoaConfig(host: {
     'Claude': {'harness': 'claude', 'accounts': ['work', 'metered', 'old']},
   },
 });
+
+/// A host's workspace held in memory: two folders and two files.
+final class _Workspace implements WorkspaceFiles {
+  static const root = '/work/canoa';
+  static const _main = "import 'dart:io';\n\nvoid main() {\n  stdout.writeln('hello');\n}\n";
+
+  @override
+  Future<HostFolderListing> listFolders({String? path, bool hidden = false, bool files = false}) async => HostFolderListing(
+    path: root,
+    parent: '/work',
+    more: false,
+    entries: const [
+      HostFolderEntry(name: 'docs', path: '$root/docs', isFolder: true),
+      HostFolderEntry(name: 'src', path: '$root/src', isFolder: true),
+      HostFolderEntry(name: 'main.dart', path: '$root/main.dart', isFolder: false),
+      HostFolderEntry(name: 'README.md', path: '$root/README.md', isFolder: false),
+    ],
+  );
+
+  @override
+  Future<HostFileRead> readFile(String path, {int? maxBytes}) async =>
+      HostFileRead(path: path, name: 'main.dart', size: _main.length, kind: 'text', truncated: false, bytes: Uint8List.fromList(utf8.encode(_main)));
+}
 
 const _looks = [
   (LookId.canoa, Brightness.dark),
@@ -103,6 +130,20 @@ void main() {
           await controller.refresh();
           await openSettings(tester, config: _accountsConfig, size: size, section: 'accounts', accounts: controller, theme: theme, version: '0.0.1');
           await golden(tester, 'accounts');
+        });
+
+        testWidgets('Files, a folder and a file previewed', (tester) async {
+          await tester.binding.setSurfaceSize(Size(size.width < 500 ? size.width : 480, size.height));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          await tester.pumpWidget(MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: theme,
+            home: Scaffold(body: FilesPanel(files: _Workspace(), root: _Workspace.root)),
+          ));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('files entry main.dart')));
+          await tester.pumpAndSettle();
+          await golden(tester, 'files');
         });
 
         testWidgets('Hosts', (tester) async {

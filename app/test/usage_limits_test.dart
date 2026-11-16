@@ -10,6 +10,7 @@ import 'package:canoa/accounts/accounts_controller.dart';
 import 'package:canoa/accounts/usage_view.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/settings/settings_page.dart';
+import 'package:canoa/theme/look.dart';
 import 'package:canoa/usage/usage_model.dart';
 import 'package:canoa/usage/usage_section.dart';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart';
@@ -88,6 +89,7 @@ Future<void> _pump(WidgetTester tester, UsageController usage, {Size size = cons
     ..devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(MaterialApp(
+    theme: themeFor(LookId.canoa, Brightness.dark),
     home: Scaffold(
       body: Row(children: [
         if (index) SizedBox(width: 260, child: UsageIndex(controller: usage)),
@@ -216,6 +218,7 @@ void main() {
         ..devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(MaterialApp(
+        theme: themeFor(LookId.canoa, Brightness.dark),
         home: SettingsPage(key: UniqueKey(), config: const CanoaConfig(), apply: (config) async => config, usageSection: section),
       ));
       await tester.pumpAndSettle();

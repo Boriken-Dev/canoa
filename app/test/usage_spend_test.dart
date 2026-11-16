@@ -130,6 +130,7 @@ Future<void> _pump(WidgetTester tester, UsageController usage, {Size size = cons
     ..devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(MaterialApp(
+    theme: themeFor(LookId.canoa, Brightness.dark),
     home: Scaffold(
       body: Row(children: [
         if (index) SizedBox(width: 260, child: UsageIndex(controller: usage)),
