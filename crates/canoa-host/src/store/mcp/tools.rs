@@ -83,8 +83,7 @@ pub(super) fn inert(text: &str, max: usize) -> String {
 }
 
 fn is_hidden(c: char) -> bool {
-    c.is_control()
-        || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}' | '\u{FEFF}')
+    c.is_control() || crate::store::text::hides_text(c)
 }
 
 fn flag(args: &Value, name: &str) -> Result<bool, String> {

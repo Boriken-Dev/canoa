@@ -22,7 +22,7 @@ use super::{Access, Hub, Tokens, tools};
 
 /// Connections that have not yet shown a bearer, at once; past it a new one is closed unread.
 const MAX_CONNECTIONS: usize = 32;
-/// Calls one bearer has under way at once; past it a call is answered 429.
+/// Calls one connection's bearers have under way at once, together; past it a call is answered 429.
 const MAX_PER_ACCESS: usize = 4;
 /// How long a connection has to send a whole request head, before any bearer is checked.
 const HEAD_LIMIT: Duration = Duration::from_secs(2);

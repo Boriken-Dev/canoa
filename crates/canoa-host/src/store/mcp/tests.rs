@@ -391,6 +391,30 @@ fn what_a_catalog_wrote_reaches_the_agent_inert_and_cut() {
     let long = tools::inert(&"x".repeat(5_000), 400);
     assert_eq!(long.chars().count(), 401, "cut at 400 and marked");
     assert_eq!(tools::inert("a\u{200B}b\u{0007}c\u{2066}d", 10), "abcd");
+    // Characters that smuggle text an agent reads and a person does not see.
+    for hidden in [
+        '\u{e0041}',
+        '\u{e007f}',
+        '\u{e0000}',
+        '\u{fe0f}',
+        '\u{fe00}',
+        '\u{e0100}',
+        '\u{e01ef}',
+        '\u{061c}',
+        '\u{2028}',
+        '\u{2029}',
+        '\u{00ad}',
+        '\u{180e}',
+        '\u{206a}',
+        '\u{2061}',
+    ] {
+        let text = format!("ok{hidden}done");
+        assert_eq!(
+            tools::inert(&text, 40),
+            "okdone",
+            "{hidden:?} reached the agent"
+        );
+    }
     let long_query = failed(&call(
         &url,
         &token,

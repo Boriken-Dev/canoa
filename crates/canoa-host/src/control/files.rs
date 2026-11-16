@@ -585,9 +585,9 @@ fn file_name_of(name: &str) -> String {
 /// Whether a directory entry's name may be shown: no control or bidirectional characters.
 fn listable(name: &str) -> bool {
     !name.is_empty()
-        && name.chars().all(|c| {
-            !c.is_control() && !matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-        })
+        && name
+            .chars()
+            .all(|c| !c.is_control() && !crate::store::text::hides_text(c))
 }
 
 /// Whether `text` opens with `\` or `//`: a network share, a verbatim path or a device path, which a filesystem call would open.

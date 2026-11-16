@@ -177,15 +177,28 @@ impl StoreIndex {
     }
 
     /// The answer for each row. `refresh` makes every source be asked and, when it moved, fetched before this returns.
+    #[cfg(test)]
     pub(crate) fn catalogs(
         self: &Arc<Self>,
         overlays: &Arc<Overlays>,
         rows: &[Row],
         refresh: bool,
     ) -> Vec<Answer> {
+        self.catalogs_spaced(overlays, rows, refresh, Duration::ZERO)
+    }
+
+    /// As [`Self::catalogs`], but a refresh is asked of a source only when its last attempt, worked or not, is at least `gap`
+    /// old; otherwise the source answers from what it holds, as it would with no refresh asked.
+    pub(crate) fn catalogs_spaced(
+        self: &Arc<Self>,
+        overlays: &Arc<Overlays>,
+        rows: &[Row],
+        refresh: bool,
+        gap: Duration,
+    ) -> Vec<Answer> {
         rows.iter()
             .map(|row| match row {
-                Ok(source) => self.view(overlays, source, refresh),
+                Ok(source) => self.view(overlays, source, refresh, gap),
                 Err((label, why)) => Answer {
                     source: json!({
                         "id": format!("catalog:{label}"),
@@ -205,6 +218,7 @@ impl StoreIndex {
         overlays: &Arc<Overlays>,
         source: &CatalogSource,
         refresh: bool,
+        gap: Duration,
     ) -> Answer {
         let slot = self.slot(&source.label);
         let mut held = lock(&slot.state).clone();
@@ -218,6 +232,11 @@ impl StoreIndex {
         let held = held.filter(|cached| cached.spec == source.spec);
         let ttl = u64::try_from(self.ttl.as_millis()).unwrap_or(u64::MAX);
         let now = now_millis();
+        let gap = u64::try_from(gap.as_millis()).unwrap_or(u64::MAX);
+        let refresh = refresh
+            && held
+                .as_ref()
+                .is_none_or(|cached| now.saturating_sub(cached.attempted) >= gap);
         match held {
             Some(cached)
                 if !refresh

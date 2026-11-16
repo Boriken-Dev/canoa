@@ -14,6 +14,16 @@ impl Control {
     /// that half, and one holding neither is refused. The sources are the ones canoa.cfg lists: a key names none, so the
     /// host fetches only places its owner chose. `refresh` forces the fetch, which is `overlay.write`'s.
     pub(super) fn store_index(&self, caller: &Caller, params: &Value) -> Outcome {
+        self.store_index_spaced(caller, params, std::time::Duration::ZERO)
+    }
+
+    /// `store/index`, where a refresh is asked of a source only if its last attempt is at least `gap` old.
+    pub(super) fn store_index_spaced(
+        &self,
+        caller: &Caller,
+        params: &Value,
+        gap: std::time::Duration,
+    ) -> Outcome {
         let catalogs = caller.may(Grant::OverlayRead);
         let programs = caller.may(Grant::StorePrograms);
         if !catalogs && !programs {
@@ -46,8 +56,10 @@ impl Control {
                 .unwrap_or(Value::Null);
             let rows = parse_sources(&section);
             for (row, answer) in
-                rows.iter()
-                    .zip(self.index.catalogs(&self.overlays, &rows, refresh))
+                rows.iter().zip(
+                    self.index
+                        .catalogs_spaced(&self.overlays, &rows, refresh, gap),
+                )
             {
                 let mut shown = answer.source;
                 let mut kept = answer.entries;
@@ -134,6 +146,9 @@ fn program_entry(info: &Value) -> Value {
     })
 }
 
+/// How old a source's last attempt must be before a tool's `refresh` fetches it again.
+const TOOL_REFRESH_GAP: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// What the `canoa-store` tools read of this host: the index as a key holding the grants they were given would read it, a program
 /// store's plan that is kept for nobody, and what canoa.cfg names. Nothing else of the control channel is reachable through it.
 pub(crate) struct ToolsBackend(pub(crate) std::sync::Arc<Control>);
@@ -148,8 +163,9 @@ impl crate::store::mcp::Backend for ToolsBackend {
             id: "canoa-store".to_owned(),
             grants: grants.clone(),
         };
+        // An agent that asks again and again must not make the host fetch again and again.
         self.0
-            .store_index(&caller, &json!({"refresh": refresh}))
+            .store_index_spaced(&caller, &json!({"refresh": refresh}), TOOL_REFRESH_GAP)
             .map_err(|(_, why)| why)
     }
 

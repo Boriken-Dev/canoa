@@ -393,26 +393,7 @@ pub fn clean(line: &str) -> String {
     let mut out: String = line
         .trim_end_matches(['\r', '\n'])
         .chars()
-        .filter(|c| !c.is_control() || *c == '\t')
-        .filter(|c| {
-            !matches!(
-                *c,
-                '\u{202a}'..='\u{202e}'
-                    | '\u{2066}'..='\u{2069}'
-                    | '\u{200b}'..='\u{200f}'
-                    | '\u{2028}'
-                    | '\u{2029}'
-                    | '\u{2060}'
-                    | '\u{061c}'
-                    | '\u{feff}'
-                    | '\u{00ad}'
-                    | '\u{180e}'
-                    | '\u{2061}'..='\u{2064}'
-                    | '\u{fe00}'..='\u{fe0f}'
-                    | '\u{e0000}'..='\u{e007f}'
-                    | '\u{e0100}'..='\u{e01ef}'
-            )
-        })
+        .filter(|c| (!c.is_control() || *c == '\t') && !crate::store::text::hides_text(*c))
         .collect();
     if out.len() > 4096 {
         let mut end = 4096;

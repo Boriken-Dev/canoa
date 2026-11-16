@@ -120,6 +120,36 @@ fn settle(index: &StoreIndex) {
 }
 
 #[test]
+fn a_refresh_a_caller_asks_again_within_its_gap_is_answered_from_the_cache() {
+    let rig = Rig::new();
+    let index = rig.index(Duration::from_secs(3600));
+    let gap = Duration::from_secs(60);
+    let spaced = |refresh: bool, gap: Duration| {
+        index
+            .catalogs_spaced(&rig.overlays, &rig.rows(), refresh, gap)
+            .pop()
+            .expect("one source")
+    };
+    spaced(true, gap);
+    let after_first = rig.overlays.git_runs();
+    assert!(after_first > 0, "the first refresh fetched");
+    for _ in 0..3 {
+        let again = spaced(true, gap);
+        assert_eq!(again.source["stale"], false, "{}", again.source);
+    }
+    assert_eq!(
+        rig.overlays.git_runs(),
+        after_first,
+        "a repeat within the gap ran no git"
+    );
+    spaced(true, Duration::ZERO);
+    assert!(
+        rig.overlays.git_runs() > after_first,
+        "with no gap a refresh fetches as it always did"
+    );
+}
+
+#[test]
 fn the_first_call_indexes_and_a_second_within_the_ttl_runs_no_git() {
     let rig = Rig::new();
     let index = rig.index(Duration::from_secs(3600));

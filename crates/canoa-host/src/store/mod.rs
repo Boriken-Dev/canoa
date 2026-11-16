@@ -14,4 +14,5 @@ pub mod programs;
 pub mod protect;
 pub mod registry;
 pub mod shelf;
+pub(crate) mod text;
 pub mod tools;
