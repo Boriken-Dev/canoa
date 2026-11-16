@@ -95,9 +95,35 @@ authenticators = [
   like a wrong password. A password file or a certificate table can therefore name an operating-system account and nothing else.
 - The throttle and the failure floor above apply to every method, and a wrong password, an unknown account and an account the
   portal does not admit all read the same.
-- A certificate provider that names no account itself answers by the certificate's claims, for a matcher to tie to an account.
-  The portal runs no matcher: such a certificate is refused, with a note in the log that names the provider. Give the
-  provider `account` picks that name the account (see its header), or pin certificates (`trust = "pinned"`).
+- **Trusting a CA.** `trust = "ca"` believes every certificate the CA signed that passes the provider's `subject` and `san`
+  globs, and **does not check revocation**: a certificate that was revoked signs in until it expires. Whenever a CA is trusted,
+  limit it with those globs (`san = ["upn:*@corp.example"]`, say) and give the matcher a rule bound to the same realm, so a
+  certificate of the CA for another purpose or another realm is nobody here. The provider `coqui_access_proxy` is refused when
+  the portal starts: it believes a certificate a header carries, whatever the proxy checked.
+- A certificate provider that names no account itself (a CA-trusted certificate with no `account` picks) answers by the
+  certificate's claims, and the portal's **matcher** ties them to an account in a directory: the directory, not the
+  certificate, decides the account and its groups. The rules are tried in order and each renders a template over the claims
+  (`san.upn`, `san.email`, `subject.cn`, ...). The defaults are the UPN as a name, then the email address as an email; the
+  subject's common name is whatever the issuer let the holder type, so it is not among them. The account found is then admitted
+  by the operating system under `min_uid` and `groups` like any other. Exactly one account is a match; more than one, or none,
+  is refused like a wrong certificate, through the throttle and the floor, and the log says which without quoting the claims:
+
+  ```toml
+  # corp.example's UPNs are account names there: alice@corp.example signs in as alice. `local` strips a realm, so it names
+  # the one it strips; another realm's alice is nobody here.
+  matcher = [
+    { by = "name", template = "{san.upn|local}", domain = "corp.example" },
+  ]
+  ```
+
+  A rule with `local` and no `domain` stops the portal from starting. A UPN or email with more than one `@` makes no candidate for
+  a rule that strips or takes the realm (the matcher's own rule, for every rule): the realm is the part after the last, and
+  what remains of two would be a name that holds an `@`. The matcher looks the account up among the operating system's
+  accounts, which answer `name`, `email` and `id` lookups, and the portal then admits that account under `min_uid` and `groups`.
+  **There is no directory setting yet:** a directory that searches (LDAP) names a person by its distinguished name, not by the
+  numeric user id the operating system's account has, so a match there could not be told to be the same account; until a
+  provider gives the user id, the matcher asks the system's accounts only. Only a certificate that arrived on the proxy's
+  socket reaches the matcher at all. Pin certificates (`trust = "pinned"`) to skip it.
 
 `GET /portal/methods` (no cookie needed) answers `{"methods": ["password", "certificate"]}`: the ways in the sign-in policy
 (below) allows this connection, among the ones this portal has. The certificate method is listed only on the proxy's socket.
@@ -267,12 +293,131 @@ is enough alone, from anywhere.
   inside. Listed, a hop that carries no browser address reads as unknown, which is outside.
 - **A policy that cannot decide offers nothing.** The page, `/portal/methods` and the sign-in answer `503` and the log says
   why; the portal never falls back to allowing.
-- **A chain of more than one method** (`["password", "totp"]`) cannot be completed yet: the portal does not ask for a second
-  step, so a sign-in by such a chain is refused like a wrong password. Keep chains of one method until it does.
+- **A chain of more than one method** (`["password", "totp"]`) is asked for step by step; see "A second step" below.
 - **Providers are told apart by their id.** The policy names a provider by the id its `authenticators` entry has, so two
   entries with the same id cannot be told apart: the first is asked, and naming the id never reaches the second.
 - The log says which policy is in force when the portal starts: `sign-in policy: 2 rules`, the provider's id, or `none: every
   method from anywhere`.
+
+### A second step
+
+A chain of more than one method makes a sign-in take more than one step. The one-time code (`totp`) and the recovery code
+(`recovery_code`) are the methods that follow another: they are checked for the account an earlier step named, so the policy
+never offers them first.
+
+```toml
+authenticators = [
+  { provider = "coqui_access_system" },
+  { provider = "coqui_access_totp", library = "/opt/canoa/libcoqui_access_totp_plugin.so",
+    config = { source = { file = { path = "/var/lib/canoa-portal/totp.toml", format = "toml" } }, issuer = "Canoa" } },
+]
+
+# From inside the network only, a person who has no code yet may set one up while signing in, with their password. Nothing else
+# lets a sign-in do that: a rule for `enrol` does not (see "Setting a code up").
+[[sign_in_policy.config.rule]]
+purposes = ["enrol_first"]
+networks = ["10.0.0.0/8"]
+allow = [["password"]]
+
+# Setting a code up again, signed in, needs the password typed again.
+[[sign_in_policy.config.rule]]
+purposes = ["enrol"]
+allow = [["password"]]
+
+# Outside the network a code follows the password; inside it the password is enough.
+
+[[sign_in_policy.config.rule]]
+networks = ["10.0.0.0/8"]
+allow = [["password"]]
+
+[[sign_in_policy.config.rule]]
+allow = [["password", "totp"], ["password", "recovery_code"]]
+```
+
+The one-time code provider needs a `source` file: the portal asks it to check codes and to set them up, and the file is what
+the two share. It is the factor itself, a readable secret for each account, so keep it where only the portal's account can read
+it (the unit's `StateDirectory=canoa-portal`, mode `0700`). Install the library like any other, owned by root.
+
+- **A pending sign-in.** When the steps passed are not enough and the policy offers more, the portal keeps what has passed in
+  memory and gives the browser the cookie `__Host-canoa-pending` (`HttpOnly`, `Secure`, `SameSite=Strict`) naming it. The page
+  then asks for the next step: a code field (`autocomplete="one-time-code"`, `inputmode="numeric"`), **Use a recovery code**
+  where the policy offers one, a line saying the browser must present its certificate where that is the step, and **Start
+  over**. `GET /portal/methods` with the cookie answers `{"step": "next", "methods": [...]}`. When a sign-in by password
+  carries a certificate on the proxy's socket and the next step may be a certificate, that is tried in the same request.
+  The portal restarting ends every pending sign-in.
+- **It ends.** After `pending_seconds` (default 300) or `max_pending_tries` tries (default 5), right or wrong, the sign-in ends
+  and the page starts over; the try that comes after the last is not checked.
+- **A step names the same account.** A code is presented for the account the first step named, and nothing the browser sends
+  names another. A password or certificate that names a different account fails and counts.
+- **Guessing a code is bounded four ways.** Each try is counted like a wrong password for the address and the account, which
+  stops it at `max_failures_per_pair`; each also counts for the account, from any address, and after
+  `max_factor_failures_per_person` failures (default 5) in `failure_window_seconds`, or `max_factor_failures_per_day`
+  (default 20) in `factor_day_seconds` (a day), further tries for that account are refused without asking the provider,
+  whichever address they come from and however often the person starts over; and the provider delays an account itself after
+  wrong codes in a row. **Keep the provider's own lockout on** (`lockout_after`, 5 by default): it is the one count that also
+  holds if the portal's memory is lost by a restart, and `lockout_after = 0` leaves a restart giving a guesser a fresh count. A
+  refused try is a failed one for its address, and the portal logs the first of them at `warn`, saying which limit and from
+  where, never a name: it is what someone guessing at an account looks like. The cost is that someone who knows the password
+  can keep the code step shut for that person while they keep failing; the window's failures leave it as time passes, so it is
+  not for good, but the day's cap holds a day. **Changing the account's password is the remedy for a lock-out**: whoever was
+  guessing needed the old one, and the person's counts, which the portal keeps in memory, do not change with it. An
+  administrator clears them with `canoa portal --config FILE factor unlock NAME`: it writes the time to `<source>.unlock`, a
+  running portal clears the account's counts at its next try for it (no restart, and once for each unlock), and the provider's
+  own delay of the account ends with it. Restarting the portal clears every count. The first refusal in a window is logged at
+  `warn`, naming the account, the address and which limit, and the ones after it at `info`. Every failed step is answered no sooner than `failure_floor` after the request began.
+- **A session does not outlive its code.** A session opened with a code or a recovery code remembers which code it was, and is
+  looked at again at each use and, for a channel left open, every few seconds: it ends when the account has no code, when an
+  administrator disabled or reset it, and when the code is another one than the session was made with (one set up again). The
+  record of when a code was made is in whole seconds, so a code replaced within the second of the one before is not told apart.
+- **A code is the account's, by name and user id.** A code is kept under both (`1000:alice`), so a user id made again for
+  another account does not find the code of the one before, and a recovery code of one is no recovery code of the other. An
+  account that has no code but whose user id has a record or a reset mark under **another name** (it was renamed, or another was
+  made in its place) counts as reset: it is not open to setting a first code up for itself, and an administrator's `enrol`
+  lifts that. A code table that cannot be read is neither "has" nor "has not": a request answers `503` and a session or channel
+  stays until it can be.
+
+#### Setting a code up
+
+`GET /portal/factor` says whether the account has a code. The policy decides who may set one up, and **with no rule for it only
+an administrator does**. Two purposes, because they are not the same trust:
+
+- A signed-in person is asked as `enrol`: the policy says which factors they must show again (the password typed again, say);
+  they do, as at sign-in and through the same counts, and only then is a code set up. The cookie of a session alone sets
+  nothing up.
+- A sign-in that has passed its first step and is asked for a code the account does not have is asked as `enrol_first`, and
+  **only a rule that names `enrol_first` lets it**; a rule for `enrol` does not. There is no session yet, so whoever holds the
+  steps passed (a stolen password, say) is who would set the code up, and the person it belongs to is shut out. Write that
+  rule for the networks and factors you trust with it, as the example above does, or leave it out and have an administrator
+  set codes up. An account that has a code is never offered this: its password alone cannot replace the code. A first setup
+  during a sign-in is logged at `warn`, with the address.
+- The page shows the `otpauth://` link as text and as a QR code (drawn by the portal as an inline image, with no script), the
+  recovery codes once, and a field for the first code from the app. Nothing is a factor until that code confirms it, and it is
+  spent. In a sign-in, the confirming code is also the step the sign-in was waiting for. Starting again replaces the setup
+  waiting; the code in use keeps working until a new one is confirmed.
+- Whoever holds the first factor can set up a code for an account that has none, where an `enrol_first` rule allows it. That is
+  what such a rule says.
+
+`canoa portal --config FILE factor ...`, run as the portal's account, is the administrator's way:
+
+```sh
+canoa portal --config /etc/canoa/portal.toml factor list                    # one JSON line per account: id, user, enrolled, disabled, waiting, reset
+canoa portal --config /etc/canoa/portal.toml factor enrol alice              # prints the link and the recovery codes, once
+canoa portal --config /etc/canoa/portal.toml factor enrol alice --code 123456  # the first code from the app confirms it
+canoa portal --config /etc/canoa/portal.toml factor reset alice              # removes the code, its recovery codes and any setup waiting
+canoa portal --config /etc/canoa/portal.toml factor reset --id 1000:alice    # the same by the id `list` shows, for an account that is gone
+canoa portal --config /etc/canoa/portal.toml factor unlock alice             # clears the account's failure counts, after its password was changed
+```
+
+After `reset`, the sessions that used the code end at their next use (a channel within a few seconds), and the account is
+**marked**: it sets no code up for itself, whatever rule there is, until an administrator sets one up with `enrol` and
+`--code`. Reset is for a code that was lost or may be someone else's, which usually means the password was too: **change the
+account's password as well**, or the one who held both is back in with the password alone. The link and the codes `enrol`
+prints are the factor: treat that output as a secret. No log line, error message or page other than that answer holds a link, a
+code or a recovery code.
+
+The mark is written before the code is removed, under a lock, so a reset that is interrupted leaves the account marked with its
+code, not unmarked without one. The command refuses to run as an account that does not own the one-time code provider's files (`source`, `pending`, `waiting`, and their lock, reset and unlock files) and the folders they are in: it would make files the portal's account cannot read, and every code step would answer `503`. Files of other providers, a password table under a folder root owns, say, are not its concern. The provider is found by `totp` in its id or its library's file name. Run it as the portal's account, for instance
+`sudo -u canoa`.
 
 ## The person's host: `canoa serve --portal`
 
@@ -315,7 +460,7 @@ groups = ["canoa-users"]               # the groups an account must be in: name 
 hosts = ["canoa.example"]              # Host names a request may carry, besides localhost and addresses
 authenticators = [{ provider = "coqui_access_system" }]   # see "Signing in"
 certificate_header = "x-client-cert"   # where the proxy puts the browser's certificate (base64 DER)
-enrol_seconds = 600                    # how long after a password sign-in a certificate may be pinned
+enrol_seconds = 600                    # how long after a password sign-in a certificate may be pinned, and after showing the enrol factors a code set up
 trusted_proxies = []                   # proxies of ours that may appear in X-Forwarded-For before the browser's address
 client_address_header = "x-forwarded-for"   # or the header your proxy puts the browser's address in
 # sign_in_policy: which ways in a connection may use, from where; a table, see "Which ways in a connection may use"
@@ -331,6 +476,11 @@ slow_after_user_failures = 4
 slow_seconds = 2
 failure_window_seconds = 900
 failure_floor_seconds = 2
+pending_seconds = 300                  # how long a sign-in that passed a step waits for the next
+max_pending_tries = 5                  # tries it allows at the next steps
+max_factor_failures_per_person = 5     # failed second-step tries for one account, from anywhere, in the window
+max_factor_failures_per_day = 20       # and in factor_day_seconds
+factor_day_seconds = 86400
 ```
 
 `listen = "127.0.0.1:7890"` opens a loopback TCP address as well, for development: any local user can connect to it, or bind
