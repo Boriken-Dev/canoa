@@ -174,16 +174,23 @@ class LoadoutController extends ChangeNotifier {
   Future<void> refresh() async {
     final home = this.home;
     if (home != null) {
-      skills = await home.overlays.skillCopies();
-      layers = await profileLayers(
-        overlays: config.overlays,
-        user: config.profileWithChosenSkills,
-        agents: config.agentProfiles,
-        agent: agents.firstOrNull ?? '',
-        home: home,
-        iconLimits: config.store.iconLimits,
-        skillPins: config.skillPins,
-      );
+      // The skills and layers are the host's to read; a host that is down or serves no control channel shows none, and says why.
+      try {
+        skills = await home.overlays.skillCopies();
+        layers = await profileLayers(
+          overlays: config.overlays,
+          user: config.profileWithChosenSkills,
+          agents: config.agentProfiles,
+          agent: agents.firstOrNull ?? '',
+          home: home,
+          iconLimits: config.store.iconLimits,
+          skillPins: config.skillPins,
+        );
+      } on Object catch (error) {
+        skills = const {};
+        layers = null;
+        problem = 'The host could not be asked for the skills and layers here: $error';
+      }
     }
     notifyListeners();
   }

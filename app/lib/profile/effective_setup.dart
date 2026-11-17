@@ -50,6 +50,7 @@ class EffectiveSetup extends StatefulWidget {
 
 class _EffectiveSetupState extends State<EffectiveSetup> {
   ProfileLayers? _layers;
+  String? _problem;
 
   @override
   void initState() {
@@ -59,17 +60,24 @@ class _EffectiveSetupState extends State<EffectiveSetup> {
 
   Future<void> _load() async {
     final config = widget.config;
-    final found = await profileLayers(
-      overlays: config.overlays,
-      user: config.profileWithChosenSkills,
-      agents: config.agentProfiles,
-      agent: widget.agent,
-      home: widget.home,
-      workingDirectory: widget.workingDirectory,
-      session: widget.session,
-      iconLimits: config.store.iconLimits,
-      skillPins: config.skillPins,
-    );
+    final ProfileLayers found;
+    try {
+      found = await profileLayers(
+        overlays: config.overlays,
+        user: config.profileWithChosenSkills,
+        agents: config.agentProfiles,
+        agent: widget.agent,
+        home: widget.home,
+        workingDirectory: widget.workingDirectory,
+        session: widget.session,
+        iconLimits: config.store.iconLimits,
+        skillPins: config.skillPins,
+      );
+    } on Object catch (error) {
+      // The layers are the host's to read; one that cannot be asked leaves the setup unshown, and says why.
+      if (mounted) setState(() => _problem = 'The host could not be asked for the layers: $error');
+      return;
+    }
     if (mounted) setState(() => _layers = found);
   }
 
@@ -77,11 +85,7 @@ class _EffectiveSetupState extends State<EffectiveSetup> {
   /// choices for and does not list.
   List<String> _refused(EffectiveProfile effective) {
     final out = [for (final MapEntry(:key, :value) in widget.unsupported.entries) 'The profile\'s $key: $value'];
-    for (final (key, value) in [
-      ('model', effective.model),
-      ('effort', effective.effort),
-      ('mode', effective.mode),
-    ]) {
+    for (final (key, value) in [('model', effective.model), ('effort', effective.effort), ('mode', effective.mode)]) {
       final list = widget.offered[key];
       if (value == null || list == null || list.isEmpty || list.contains(value.value)) continue;
       final line = 'The $key ${value.value}, from ${value.layer}: the agent does not offer it';
@@ -105,13 +109,27 @@ class _EffectiveSetupState extends State<EffectiveSetup> {
           'that gives it. A later layer wins.',
         ),
         const SizedBox(height: 8),
-        if (found == null) const LinearProgressIndicator() else EffectiveTable(effective: found.effective),
+        if (_problem case final problem?)
+          Text(
+            visible(problem),
+            key: const Key('effective-problem'),
+            style: TextStyle(color: theme.colorScheme.error),
+          )
+        else if (found == null)
+          const LinearProgressIndicator()
+        else
+          EffectiveTable(effective: found.effective),
         for (final note in found?.notes ?? const <LayerNote>[])
           Text(visible('${note.layer}: ${note.text}'), style: theme.textTheme.bodySmall),
         if (refused.isNotEmpty) ...[
           const SizedBox(height: 8),
           Text('Not taken', style: theme.textTheme.titleSmall),
-          for (final line in refused) Text(visible(line), key: const Key('effective-refused'), style: TextStyle(color: theme.colorScheme.error)),
+          for (final line in refused)
+            Text(
+              visible(line),
+              key: const Key('effective-refused'),
+              style: TextStyle(color: theme.colorScheme.error),
+            ),
         ],
       ],
     );

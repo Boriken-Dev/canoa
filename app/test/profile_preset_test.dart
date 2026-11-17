@@ -5,6 +5,7 @@ import 'dart:io' show Directory;
 
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
+import 'package:canoa/profile/profile_home_io.dart' show IoProfileHome;
 import 'package:canoa/profile/profiles_panel.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +14,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
+
+/// A home of the test's own, so the profile layers read without a host.
+IoProfileHome _home() {
+  final dir = Directory.systemTemp.createTempSync('canoa-preset');
+  addTearDown(() => dir.deleteSync(recursive: true));
+  return IoProfileHome(dir.path);
+}
 
 SessionStore _store() => SessionStore(ledger: SessionLedger(MemoryLedgerBackend()));
 
@@ -54,7 +62,7 @@ void main() {
 
   testWidgets('choosing a profile sets the draft\'s source, model and effort, and its name shows in the footer', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-    await pumpApp(tester, _store(), config: _config(), linked: agent.openLink);
+    await pumpApp(tester, _store(), profileHome: _home(), config: _config(), linked: agent.openLink);
     await _draft(tester, 'Codex');
     expect(_pill(tester, 'profile-pill'), 'Profile', reason: 'none chosen yet');
     await _menuItem(tester, 'profile-choice Deep review');
@@ -67,7 +75,7 @@ void main() {
 
   testWidgets('changing a value marks the profile Modified; Save changes writes canoa.cfg and Back to the profile undoes it', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-    final written = await pumpApp(tester, _store(), config: _config(), linked: agent.openLink);
+    final written = await pumpApp(tester, _store(), profileHome: _home(), config: _config(), linked: agent.openLink);
     await _draft(tester, 'Claude');
     await _menuItem(tester, 'profile-choice Deep review');
     await pick(tester, 'option-effort', 'Low');
@@ -92,7 +100,7 @@ void main() {
   testWidgets('Save as new profile writes the draft\'s values under a name, with the starting instructions of the profile it began from',
       (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-    final written = await pumpApp(tester, _store(), config: _config(), linked: agent.openLink);
+    final written = await pumpApp(tester, _store(), profileHome: _home(), config: _config(), linked: agent.openLink);
     await _draft(tester, 'Claude');
     await _menuItem(tester, 'profile-choice Deep review');
     await pick(tester, 'option-model', 'Haiku 5.5');
@@ -121,7 +129,7 @@ void main() {
   for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
     testWidgets('the profile menu in the footer with a profile changed, at $label width', (tester) async {
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
-      await pumpApp(tester, _store(), config: _config(), linked: agent.openLink, size: size);
+      await pumpApp(tester, _store(), profileHome: _home(), config: _config(), linked: agent.openLink, size: size);
       await _draft(tester, 'Claude');
       await _menuItem(tester, 'profile-choice Deep review');
       await pick(tester, 'option-effort', 'Low');
@@ -136,7 +144,7 @@ void main() {
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
       final config = CanoaConfig.parse('[profile]\nmodel = "gpt-9"\neffort = "low"\n[profiles."Deep review"]\nsource = "Claude"\n'
           'effort = "high"\ncontext = "Read the tests before the code."\n');
-      await pumpApp(tester, _store(), config: config, linked: agent.openLink, size: size);
+      await pumpApp(tester, _store(), profileHome: _home(), config: config, linked: agent.openLink, size: size);
       await _draft(tester, 'Claude');
       await _menuItem(tester, 'profile-choice Deep review');
       await _menuItem(tester, 'profile-effective');
@@ -149,7 +157,7 @@ void main() {
   testWidgets('a value the agent does not offer is not taken, is said in the pill, and does not read as a change', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
     final config = _config({'Odd': const Preset(source: 'Claude', model: 'no-such-model', effort: 'low')});
-    await pumpApp(tester, _store(), config: config, linked: agent.openLink);
+    await pumpApp(tester, _store(), profileHome: _home(), config: config, linked: agent.openLink);
     await _draft(tester, 'Claude');
     await _menuItem(tester, 'profile-choice Odd');
     expect(_pill(tester, 'profile-pill'), 'Odd');
@@ -165,7 +173,7 @@ void main() {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
     final config = CanoaConfig.parse('[profile]\nmodel = "sonnet"\neffort = "low"\n[profiles.Deep]\nsource = "Claude"\n'
         'effort = "high"\ncontext = "Read the tests first."\n');
-    await pumpApp(tester, _store(), config: config, linked: agent.openLink);
+    await pumpApp(tester, _store(), profileHome: _home(), config: config, linked: agent.openLink);
     await _draft(tester, 'Claude');
     await _menuItem(tester, 'profile-choice Deep');
     await _menuItem(tester, 'profile-effective');
@@ -180,7 +188,7 @@ void main() {
   testWidgets('a model in the person\'s own layer that the agent does not offer is named in the effective setup', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
     final config = CanoaConfig.parse('[profile]\nmodel = "gpt-9"\n[profiles.Plain]\nsource = "Claude"\n');
-    await pumpApp(tester, _store(), config: config, linked: agent.openLink);
+    await pumpApp(tester, _store(), profileHome: _home(), config: config, linked: agent.openLink);
     await _draft(tester, 'Claude');
     await _menuItem(tester, 'profile-choice Plain');
     await _menuItem(tester, 'profile-effective');
