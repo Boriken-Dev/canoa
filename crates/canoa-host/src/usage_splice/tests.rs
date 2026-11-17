@@ -658,8 +658,7 @@ fn a_private_agent_is_started_only_where_allowed_one_at_a_time_and_not_often() {
     let _ = std::fs::remove_dir_all(&state);
 }
 
-/// Serves the recorded `GetUserStatus` answer on a loopback port of this test process, so a reading finds it among the
-/// listeners of the process it is told is the agent.
+/// Serves the recorded `GetUserStatus` answer on a loopback port of this process.
 fn serve_status() {
     use std::io::{Read as _, Write as _};
     let body = std::fs::read(concat!(
@@ -695,12 +694,75 @@ fn serve_status() {
     });
 }
 
+/// What the status server process prints once it listens.
+const STATUS_READY: &str = "canoa-status-server-ready";
+/// Set in the status server process, so that running its test by itself does nothing.
+const STATUS_SERVER: &str = "CANOA_TEST_USAGE_STATUS_SERVER";
+
+/// A process of its own that serves the recorded status, so a reading finds it among the listeners of the one process it
+/// is told is the agent. The test process cannot be that agent: a reading tries every loopback listener of its agent within
+/// a few seconds, and by the time these tests run the others of this binary hold hundreds, some of which answer another
+/// status or never answer a probe.
+struct StatusServer(std::process::Child);
+
+impl StatusServer {
+    fn start() -> Self {
+        use std::io::BufRead as _;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(std::env::current_exe().expect("this test program"))
+            .args([
+                "--ignored",
+                "--exact",
+                "--nocapture",
+                "--test-threads=1",
+                "usage_splice::tests::status_server_process",
+            ])
+            .env(STATUS_SERVER, "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("the status server starts");
+        let out = child.stdout.take().expect("its output");
+        // The harness prints its own words before the marker on the same line; a child that fails ends the read.
+        let ready = std::io::BufReader::new(out)
+            .lines()
+            .map_while(Result::ok)
+            .any(|line| line.ends_with(STATUS_READY));
+        assert!(ready, "the status server listens");
+        Self(child)
+    }
+
+    fn pid(&self) -> u32 {
+        self.0.id()
+    }
+}
+
+impl Drop for StatusServer {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// The status server's own process: serves until its standard input ends. Run by itself it does nothing.
+#[test]
+#[ignore = "the program a StatusServer starts"]
+fn status_server_process() {
+    use std::io::Read as _;
+    if std::env::var_os(STATUS_SERVER).is_none() {
+        return;
+    }
+    serve_status();
+    println!("{STATUS_READY}");
+    let _ = std::io::stdin().read_to_end(&mut Vec::new());
+}
+
 #[test]
 fn a_session_opening_reads_the_quota_and_the_client_that_asked_is_told() {
-    serve_status();
+    let server = StatusServer::start();
     let inference = Arc::new(Inference::new(None).with_quota(quota_entry(None, false)));
-    let splice =
-        Splice::new(Arc::clone(&inference), Some("work".to_owned())).agent(std::process::id());
+    let splice = Splice::new(Arc::clone(&inference), Some("work".to_owned())).agent(server.pid());
     initialize(&splice, true, plain_answer());
     assert_eq!(report_of(&splice)["buckets"], json!([]));
     assert!(
@@ -765,10 +827,9 @@ fn per_connection_entry() -> Arc<Inference> {
 
 #[test]
 fn connections_of_an_entry_with_profiles_never_answer_from_each_others_readings() {
-    serve_status();
+    let server = StatusServer::start();
     let inference = per_connection_entry();
-    let first =
-        Splice::new(Arc::clone(&inference), Some("work".to_owned())).agent(std::process::id());
+    let first = Splice::new(Arc::clone(&inference), Some("work".to_owned())).agent(server.pid());
     let second = Splice::new(Arc::clone(&inference), Some("work".to_owned()));
     initialize(&first, true, plain_answer());
     initialize(&second, true, plain_answer());
