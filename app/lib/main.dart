@@ -55,6 +55,8 @@ import 'chat/inspector_surfaces.dart';
 import 'chat/run_in_terminal.dart';
 import 'surfaces/files_surface.dart';
 import 'surfaces/terminal_controller.dart' show ControlTerminals;
+import 'surfaces/terminal_remote.dart';
+import 'surfaces/terminal_section.dart';
 import 'surfaces/terminal_surface.dart';
 import 'served/host_files.dart' show HostFiles, WorkspaceFiles;
 import 'served/host_state.dart';
@@ -267,7 +269,7 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote,
+    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection,
   });
 
   /// Which section is shown and how each section's index is sized, kept across runs; the app keeps its own when none is given.
@@ -276,6 +278,10 @@ class CanoaApp extends StatefulWidget {
   /// How the Hosts section looks at a saved connection; the app's own reads the host's list or connects.
   @visibleForTesting
   final ConnectionProbe? probe;
+
+  /// What a saved Canoa host offers of a shell, for the Terminal section; the app's own asks the host's control channel.
+  @visibleForTesting
+  final Future<TerminalAccess> Function(Connection connection)? terminalOnConnection;
 
   /// How a chat reaches a host's endpoint; the browser's own proof unless a test stands in.
   final ConnectEndpoint? connectEndpoint;
@@ -976,6 +982,49 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   late final ControlTerminals? _terminals = _control == null ? null : ControlTerminals(_control);
+
+  /// What this app's own host offers of a shell: the Terminal section's Local row (a page's own host on a served page).
+  Future<TerminalAccess> _localTerminal() async {
+    final grants = _grants, terminals = _terminals;
+    if (terminals == null || grants == null) return const TerminalRefused('This app has no host of its own to run a shell.');
+    if (!grants.known) await grants.refresh();
+    if (!grants.known) return const TerminalRefused('The host did not answer, so its grants are not known. Ask again once it runs.');
+    if (grants.may(HostGrants.terminal)) return TerminalOnHost(terminals);
+    return TerminalRefused(widget.served == null
+        ? "This computer's host has not given this app a terminal."
+        : "This host has not given this page's key a terminal. Its canoa.cfg names the keys that may have one.");
+  }
+
+  /// The hosts the Terminal section can open a shell on: the app's own, then each saved Canoa host.
+  List<TerminalTarget> _terminalTargets() => [
+    if (_terminals != null)
+      TerminalTarget(
+        id: widget.served != null ? 'served' : 'local',
+        name: widget.served != null ? (Uri.base.authority.isEmpty ? 'Serving host' : Uri.base.authority) : 'Local',
+        kind: widget.served != null ? 'Serves this page' : 'This computer',
+        access: _localTerminal,
+      ),
+    for (final connection in config.connections)
+      if (connection.kind == ConnectionKind.canoa)
+        TerminalTarget(
+          id: 'connection:${connection.name}',
+          name: connection.name,
+          kind: connection.kind.label,
+          access: () => (widget.terminalOnConnection ?? terminalOnConnection)(connection),
+        ),
+  ];
+
+  /// The folders the conversations on [targetId]'s host use.
+  List<String> _terminalFolders(String targetId) => {
+    for (final session in store.sessions)
+      if (session.cwd case final folder? when folder.isNotEmpty && switch (targetId) {
+        'local' || 'served' => _filesOf(session) != null,
+        _ => session.place == SessionPlace.peer && targetId == 'connection:${config.connections.where((each) => each.peer == session.peerId).firstOrNull?.name}',
+      })
+        folder,
+  }.toList();
+
+  late final TerminalSectionController _terminalSection = TerminalSectionController(targets: _terminalTargets, workspaces: _terminalFolders);
 
   /// What the host [session] runs on offers of a shell: the terminal of the host this app reaches when it grants one; a direct agent
   /// endpoint says it offers none; nothing for any other host, which the Terminal section reaches.
@@ -2524,6 +2573,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.removeListener(_keepSelection);
     if (widget.layout == null) _layout.dispose();
     _surfaces.dispose();
+    _terminalSection.dispose();
     _grouping.dispose();
     _loadoutDraft.dispose();
     _popout.dispose();
@@ -2820,6 +2870,7 @@ class _CanoaAppState extends State<CanoaApp> {
           layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(), loadouts: _loadoutsPage(),
           hostsIndex: _hostsIndex(), hostsPage: _hostsPage(), storeIndex: StoreIndex(selection: _storeSelection),
           usageIndex: _usageIndex(), usagePage: _usagePage(), sessionSpend: _usage?.sessionSpend,
+          terminalIndex: TerminalIndex(controller: _terminalSection), terminalMain: TerminalMain(controller: _terminalSection),
           conversation: _conversation,
           localHost: _localHost,
           grouping: _grouping,
@@ -2844,6 +2895,7 @@ class _CanoaHome extends StatelessWidget {
     this.renderers = chat.ChatRenderers.none, required this.welcome, this.noAgent = false, this.localHost, required this.grouping,
     required this.layout, required this.surfaces, required this.settings, required this.loadout, required this.loadouts,
     required this.hostsIndex, required this.hostsPage, required this.storeIndex, this.usageIndex, this.usagePage, this.sessionSpend,
+    required this.terminalIndex, required this.terminalMain,
   });
 
   /// The extension's bridge to the Canoa on this computer; null where this is not the extension.
@@ -2861,6 +2913,9 @@ class _CanoaHome extends StatelessWidget {
 
   /// The Usage section's index and main view; none where the host does not grant usage.
   final Widget? usageIndex, usagePage;
+
+  /// The Terminal section's index and main view.
+  final Widget terminalIndex, terminalMain;
   final Future<SpendRow?> Function(String sessionId)? sessionSpend;
 
   final SessionStore store;
@@ -3024,6 +3079,7 @@ class _CanoaHome extends StatelessWidget {
             ),
           ),
           AppSection(id: HostsController.section, label: 'Hosts', icon: Icons.lan_outlined, index: hostsIndex, main: hostsPage),
+          AppSection(id: 'terminal', label: 'Terminal', icon: Icons.terminal, index: terminalIndex, main: terminalMain),
           if (usagePage != null) AppSection(id: 'usage', label: 'Usage', icon: Icons.speed, index: usageIndex, main: usagePage!),
           AppSection(id: 'loadouts', label: 'Loadouts', icon: Icons.inventory_2_outlined, main: loadouts),
           AppSection(id: 'store', label: 'Store', icon: Icons.storefront_outlined, index: storeIndex, main: loadout, ownsLayoutControls: true),
