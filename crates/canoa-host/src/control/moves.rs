@@ -142,11 +142,10 @@ fn portability(harness: &kind::Harness) -> Value {
     };
     let unsupported = |status: Status| status == Status::GUATIAO_ERR_UNSUPPORTED;
     let connection = harness.connection(None, None, CacheLifetime::default());
-    let why = match connection.harness.export_session(
-        SessionExport::new(id, cwd.clone()),
-        connection.spawner,
-        connection.keeper,
-    ) {
+    let why = match connection
+        .harness
+        .export_session(SessionExport::new(id, cwd.clone()), connection.spawner)
+    {
         Err(error) if unsupported(error.status) => error.message().to_owned(),
         _ => return json!({"export": true, "import": true, "replay": false}),
     };
@@ -155,7 +154,6 @@ fn portability(harness: &kind::Harness) -> Value {
     match connection.harness.import_session(
         SessionImport::new("not-a-session-id", cwd, ""),
         connection.spawner,
-        connection.keeper,
     ) {
         Err(error) if unsupported(error.status) => {
             json!({"export": false, "import": false, "replay": false, "why": error.message()})
@@ -278,7 +276,6 @@ impl Moves {
             .import_session(
                 SessionImport::new(session.clone(), cwd.clone(), text),
                 connection.spawner,
-                connection.keeper,
             )
             .map_err(|error| {
                 let code = if error.status == Status::GUATIAO_ERR_BAD_VALUE {

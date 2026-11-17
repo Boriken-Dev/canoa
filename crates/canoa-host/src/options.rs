@@ -17,7 +17,7 @@ use std::sync::mpsc;
 
 use coqui_acp_api::guatiao::library::Object;
 use coqui_acp_api::{
-    AccountGrant, AccountKeeper, AcpHarness, CacheLifetime, ModelInfo, ModelListing, ModelsRequest,
+    AccountGrant, AcpHarness, CacheLifetime, ModelInfo, ModelListing, ModelsRequest,
     ProcessSpawner, UnknownKind,
 };
 use serde_json::{Map, Value, json};
@@ -239,7 +239,6 @@ pub fn preset(harness: Harness, executable: Option<&OsStr>) -> Choices {
             ask(
                 connection.harness.as_ref(),
                 connection.spawner,
-                connection.keeper,
                 (None, connection.watch),
             )
         }
@@ -319,7 +318,6 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
             let mut choices = ask(
                 connection.harness.as_ref(),
                 connection.spawner,
-                connection.keeper,
                 (
                     held.as_ref().map(crate::accounts::Held::grant),
                     connection.watch,
@@ -388,7 +386,6 @@ fn probed(name: &str, program: &OsString, args: &[OsString], wait: Duration) -> 
 fn ask(
     harness: &dyn AcpHarness,
     spawner: Object<dyn ProcessSpawner>,
-    keeper: Object<dyn AccountKeeper>,
     (account, watch): (Option<AccountGrant>, Option<Watcher>),
 ) -> Choices {
     let mut request = ModelsRequest::new();
@@ -396,10 +393,10 @@ fn ask(
         request = request.account(account);
     }
     let listing = harness
-        .models(request, spawner, keeper)
+        .models(request, spawner)
         .unwrap_or_else(|error| ModelListing::unavailable(UnknownKind::Failed, error.message()));
     // The harness placed the login for the call, and a program that ran on it may have renewed it: the account provider looks
-    // when its watch begins and again when it ends, and the keeper stores what it finds.
+    // when its watch begins and again when it ends.
     drop(watch.map(Watcher::begin));
     let info = harness.describe().ok();
     let program = harness.program().ok().flatten();
@@ -547,7 +544,6 @@ pub(crate) fn usage_at(
         .usage(
             coqui_acp_api::UsageQuery::new().account(held.grant()),
             connection.spawner,
-            connection.keeper,
         )
         .map_err(|error| error.message().to_owned())?;
     serde_json::to_value(&report).map_err(|error| error.to_string())

@@ -186,8 +186,7 @@ fn renew(
         credentials.expose().clone(),
     );
     renewal.expires_at = report.expires_at;
-    connection
-        .keeper
+    held.keeper(built.plain_source())
         .renewed(renewal)
         .map_err(|error| why(&error))
 }

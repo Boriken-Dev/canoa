@@ -3031,7 +3031,7 @@ fn give_harness<C: Channel>(
         }
         None => scope,
     };
-    let to_provider = (started.request, started.spawner, started.keeper);
+    let to_provider = (started.request, started.spawner);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
             &KbLayer::new(

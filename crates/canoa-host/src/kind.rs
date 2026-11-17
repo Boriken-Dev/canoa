@@ -23,12 +23,12 @@ use coqui_acp_api::guatiao::library::Registry;
 use coqui_acp_api::guatiao::library::kind::InstantiateError;
 use coqui_acp_api::guatiao::schema::{SchemaRef, differences, inline_refs};
 use coqui_acp_api::{
-    AccountCatalog, AccountKeeper, AccountKindInfo, AccountProvider, AcpHarness, CacheLifetime,
-    Environment, HarnessNotice, ProcessSpawner, StartRequest,
+    AccountCatalog, AccountKindInfo, AccountProvider, AcpHarness, CacheLifetime, Environment,
+    HarnessNotice, ProcessSpawner, StartRequest,
 };
 
 use crate::accounts::matching::Runs;
-use crate::accounts::{ACCOUNT_META, Accounts, Held, NoAccounts, Watcher};
+use crate::accounts::{ACCOUNT_META, Accounts, Held, Watcher};
 use crate::config::{AccountConfig, Origin, Settings, cache_lifetime_named};
 use crate::provider::{ProviderError, map_of, open};
 
@@ -129,7 +129,6 @@ pub(crate) struct Connection {
     pub(crate) harness: Arc<dyn AcpHarness>,
     pub(crate) request: StartRequest,
     pub(crate) spawner: Object<dyn ProcessSpawner>,
-    pub(crate) keeper: Object<dyn AccountKeeper>,
     /// What begins the watch of the account's login, for one that rotates and is the provider's own: begun once the harness has
     /// placed the login, and held until the account is given back.
     pub(crate) watch: Option<Watcher>,
@@ -338,6 +337,11 @@ impl Harness {
             .find(|(each, ..)| each == name)
     }
 
+    /// The number of the plain instance's account provider, which the keeper of a call outside a connection reports under.
+    pub(crate) fn plain_source(&self) -> u64 {
+        self.accounts.as_ref().map_or(0, |offer| offer.sources.0)
+    }
+
     /// The account `name`, held for a call that is not a connection (moving a session between accounts). With `any`, it may be
     /// an account of the provider the entry does not list.
     ///
@@ -490,24 +494,20 @@ impl Harness {
         };
         request = request.cache_lifetime(honoured(harness.as_ref(), lifetime));
         let mut watch = None;
-        let (spawner, keeper) = match (account, &self.accounts) {
+        let spawner = match (account, &self.accounts) {
             (Some(held), Some(_)) => {
                 request = request.account(held.grant());
                 watch = self.watcher(held, source);
-                (held.spawner(self.log_notices()), held.keeper(source))
+                held.spawner(self.log_notices())
             }
-            _ => (
-                coqui_acp_harness::LocalSpawner::new()
-                    .notices(self.log_notices())
-                    .into_object(),
-                NoAccounts.into_object(),
-            ),
+            _ => coqui_acp_harness::LocalSpawner::new()
+                .notices(self.log_notices())
+                .into_object(),
         };
         Connection {
             harness,
             request: request.build(),
             spawner,
-            keeper,
             watch,
         }
     }

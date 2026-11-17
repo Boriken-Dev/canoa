@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-use coqui_acp_api::{AccountKeeper, AcpHarness, ChannelSink, ProcessSpawner, StartRequest};
+use coqui_acp_api::{AcpHarness, ChannelSink, ProcessSpawner, StartRequest};
 use coqui_transport::{Channel, Failure};
 
 use crate::accounts::Watcher;
@@ -170,15 +170,11 @@ impl ChannelSink for ToClientSink {
 /// each message the provider's sink gets goes to the client, until the client closes, the channel fails, the provider ends
 /// the connection or `control` is stopped. The provider starts its program through this machine's spawner, and kills what
 /// it started when the connection ends; this returns once it has said so, or after [`STOP_WAIT`]. `spawner` is the machine
-/// the provider's program runs on and `keeper` hears what happens to the connection's account.
+/// the provider's program runs on.
 pub(crate) fn serve_kind<C: Channel + ?Sized>(
     channel: &C,
     harness: &dyn AcpHarness,
-    (request, spawner, keeper): (
-        StartRequest,
-        Object<dyn ProcessSpawner>,
-        Object<dyn AccountKeeper>,
-    ),
+    (request, spawner): (StartRequest, Object<dyn ProcessSpawner>),
     watch: Option<Watcher>,
     max_line: usize,
     control: &InProcess,
@@ -194,7 +190,7 @@ pub(crate) fn serve_kind<C: Channel + ?Sized>(
         max_line,
     }
     .into_object();
-    let started = harness.start(request, spawner, sink, keeper);
+    let started = harness.start(request, spawner, sink);
     let provider = match started {
         Ok(provider) => provider,
         Err(error) => {

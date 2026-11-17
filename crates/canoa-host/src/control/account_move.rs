@@ -69,7 +69,7 @@ pub(super) fn export_from(
         }
         let page = connection
             .harness
-            .export_session(ask, connection.spawner, connection.keeper)
+            .export_session(ask, connection.spawner)
             .map_err(|error| Ok((error.status, error.message().to_owned())))?;
         text.push_str(&page.text);
         if text.len() > MAX_BYTES {
@@ -192,7 +192,7 @@ impl Control {
         }
         let report = connection
             .harness
-            .import_session(take, connection.spawner, connection.keeper)
+            .import_session(take, connection.spawner)
             .map_err(|error| {
                 (
                     REFUSED,

@@ -6,8 +6,7 @@ use coqui_acp_api::guatiao::Secret;
 use coqui_acp_api::guatiao::library::Object;
 use coqui_acp_api::{
     AccountCatalog, AccountRef, Channel as Provided, ExportPage, HarnessInfo, ImportReport,
-    LoginOutcome, LoginPrompter, LoginRequest, RenewReport, RenewRequest, Requirement,
-    SessionExport, SessionImport,
+    Requirement, SessionExport, SessionImport,
 };
 use serde_json::{Value, json};
 
@@ -221,9 +220,8 @@ impl AcpHarness for Stand {
         request: StartRequest,
         spawner: Object<dyn ProcessSpawner>,
         sink: Object<dyn ChannelSink>,
-        keeper: Object<dyn AccountKeeper>,
     ) -> Result<Object<dyn coqui_acp_api::Channel>, ProviderError> {
-        drop((spawner, keeper));
+        drop(spawner);
         if self.refuses {
             return Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"));
         }
@@ -257,7 +255,6 @@ impl AcpHarness for Stand {
         &self,
         _session: SessionImport,
         _spawner: Object<dyn ProcessSpawner>,
-        _keeper: Object<dyn AccountKeeper>,
     ) -> Result<ImportReport, ProviderError> {
         Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"))
     }
@@ -266,25 +263,7 @@ impl AcpHarness for Stand {
         &self,
         _export: SessionExport,
         _spawner: Object<dyn ProcessSpawner>,
-        _keeper: Object<dyn AccountKeeper>,
     ) -> Result<ExportPage, ProviderError> {
-        Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"))
-    }
-
-    fn login(
-        &self,
-        _request: LoginRequest,
-        _spawner: Object<dyn ProcessSpawner>,
-        _prompter: Object<dyn LoginPrompter>,
-    ) -> Result<LoginOutcome, ProviderError> {
-        Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"))
-    }
-
-    fn renew(
-        &self,
-        _request: RenewRequest,
-        _spawner: Object<dyn ProcessSpawner>,
-    ) -> Result<RenewReport, ProviderError> {
         Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"))
     }
 }
@@ -313,11 +292,10 @@ fn served(
     thread::spawn(move || {
         let request = StartRequest::builder().working_root("/root").build();
         let spawner = coqui_acp_harness::LocalSpawner::new().into_object();
-        let keeper = crate::accounts::NoAccounts.into_object();
         serve_kind(
             &*channel,
             &*harness,
-            (request, spawner, keeper),
+            (request, spawner),
             None,
             1024 * 1024,
             &control,
