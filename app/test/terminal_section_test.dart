@@ -95,7 +95,7 @@ Future<void> _show(WidgetTester tester, TerminalSectionController controller) as
 }
 
 /// Local and a second host's home, each with what it offers.
-({TerminalSectionController controller, _Host local, _Host second}) _world({TerminalAccess? secondAccess}) {
+({TerminalSectionController controller, _Host local, _Host second}) _world({TerminalAccess? secondAccess, ({String target, String folder})? selected}) {
   final local = _Host('local'), second = _Host('second');
   final targets = [
     TerminalTarget(id: 'local', name: 'Local', kind: 'This computer', access: () async => TerminalOnHost(local)),
@@ -104,6 +104,7 @@ Future<void> _show(WidgetTester tester, TerminalSectionController controller) as
   final controller = TerminalSectionController(
     targets: () => targets,
     workspaces: (id) => id == 'local' ? const ['/work/app'] : const ['/srv/build'],
+    selected: () => selected,
   );
   return (controller: controller, local: local, second: second);
 }
@@ -234,6 +235,29 @@ void main() {
     await _settle(tester);
     expect(world.second.cwds, ['/srv/build']);
     expect(world.local.opened, isEmpty);
+  });
+
+  testWidgets('the New shell dialog starts on the selected conversation\'s host and workspace, and drops that folder for another host', (tester) async {
+    final world = _world(selected: (target: 'connection:Build box', folder: '/srv/build'));
+    addTearDown(() => tester.runAsync(world.controller.release));
+    await _show(tester, world.controller);
+
+    await tester.tap(_key('terminal-section start'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(_key('terminal-section folder')).controller!.text, '/srv/build');
+    await tester.tap(_key('terminal-section open'));
+    await tester.pumpAndSettle();
+    await _settle(tester);
+    expect(world.second.cwds, ['/srv/build'], reason: 'with no choice made, the shell opens where the conversation is');
+    expect(world.local.opened, isEmpty);
+
+    await tester.tap(_key('terminal-section new'));
+    await tester.pumpAndSettle();
+    await tester.tap(_key('terminal-section host'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Local').last);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(_key('terminal-section folder')).controller!.text, isEmpty, reason: 'that folder is the other host\'s');
   });
 
   testWidgets('the section as the person sees it', (tester) async {

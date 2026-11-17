@@ -1122,14 +1122,30 @@ class _CanoaAppState extends State<CanoaApp> {
   /// The folders the conversations on [targetId]'s host use.
   List<String> _terminalFolders(String targetId) => {
     for (final session in store.sessions)
-      if (session.cwd case final folder? when folder.isNotEmpty && switch (targetId) {
-        'local' || 'served' => _filesOf(session) != null,
-        _ => session.place == SessionPlace.peer && targetId == 'connection:${config.connections.where((each) => each.peer == session.peerId).firstOrNull?.name}',
-      })
-        folder,
+      if (session.cwd case final folder? when folder.isNotEmpty && _terminalTargetOf(session) == targetId) folder,
   }.toList();
 
-  late final TerminalSectionController _terminalSection = TerminalSectionController(targets: _terminalTargets, workspaces: _terminalFolders);
+  /// The Terminal section's target for the host [session] runs on; null for a host it does not list.
+  String? _terminalTargetOf(ChatSession session) {
+    if (_filesOf(session) != null) return widget.served != null ? 'served' : 'local';
+    if (session.place != SessionPlace.peer) return null;
+    final name = config.connections.where((each) => each.peer == session.peerId).firstOrNull?.name;
+    return name == null ? null : 'connection:$name';
+  }
+
+  /// Where a new shell from the Terminal section starts: the selected conversation's workspace on its own host.
+  ({String target, String folder})? _terminalSelected() {
+    final session = store.selected;
+    if (session == null) return null;
+    final target = _terminalTargetOf(session), folder = FilesSurface.workspaceOf(session);
+    return target == null || folder == null || folder.isEmpty ? null : (target: target, folder: folder);
+  }
+
+  late final TerminalSectionController _terminalSection = TerminalSectionController(
+    targets: _terminalTargets,
+    workspaces: _terminalFolders,
+    selected: _terminalSelected,
+  );
 
   /// What the host [session] runs on offers of a shell: the terminal of the host this app reaches when it grants one; a direct agent
   /// endpoint says it offers none; nothing for any other host, which the Terminal section reaches.

@@ -41,13 +41,19 @@ final class TerminalGroup {
 /// The Terminal section's state: the shells the person opened with no conversation, grouped by host and folder, and what each host
 /// said when asked for one. Shells belong to their host's link and end with the group or the app.
 class TerminalSectionController extends ChangeNotifier {
-  TerminalSectionController({required this.targets, this.workspaces = _none});
+  TerminalSectionController({required this.targets, this.workspaces = _none, this.selected = _nothing});
 
   /// The hosts offered now, in the order the Hosts section lists them.
   final List<TerminalTarget> Function() targets;
 
   /// The folders the conversations on a host use, offered when a shell is opened.
   final List<String> Function(String targetId) workspaces;
+
+  /// The host and folder of the conversation now selected, which a new shell starts in unless the person says otherwise; null when
+  /// none is selected or its host offers no shell here.
+  final ({String target, String folder})? Function() selected;
+
+  static ({String target, String folder})? _nothing() => null;
 
   static List<String> _none(String _) => const [];
 
@@ -579,8 +585,12 @@ class _NewShellDialog extends StatefulWidget {
 }
 
 class _NewShellDialogState extends State<_NewShellDialog> {
-  late String _target = widget.controller.targets().first.id;
-  final _folder = TextEditingController();
+  late final ({String target, String folder})? _selected = () {
+    final chosen = widget.controller.selected();
+    return chosen != null && widget.controller.targets().any((each) => each.id == chosen.target) ? chosen : null;
+  }();
+  late String _target = _selected?.target ?? widget.controller.targets().first.id;
+  late final TextEditingController _folder = TextEditingController(text: _selected?.folder ?? '');
 
   @override
   void dispose() {
@@ -608,7 +618,17 @@ class _NewShellDialogState extends State<_NewShellDialog> {
                 for (final target in targets)
                   DropdownMenuItem(value: target.id, child: Text(target.name)),
               ],
-              onChanged: (value) => setState(() => _target = value ?? _target),
+              onChanged: (value) => setState(() {
+                _target = value ?? _target;
+                // The conversation's folder belongs to its own host only.
+                if (_selected case final chosen?) {
+                  if (_target == chosen.target) {
+                    if (_folder.text.isEmpty) _folder.text = chosen.folder;
+                  } else if (_folder.text == chosen.folder) {
+                    _folder.clear();
+                  }
+                }
+              }),
             ),
             const SizedBox(height: 12),
             TextField(
