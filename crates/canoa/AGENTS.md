@@ -327,7 +327,7 @@ pub const WAV_HEADER_LEN: usize = 44;
   `finish`. Standard output is read as it is written and kept up to `command::MAX_OUTPUT` (4 MiB; more is dropped and
   `front_matter.output_truncated` is true); the text is that output, trimmed. With `partials`, each change in it is a `Heard.partial`. After
   the audio ends the program has `timeout_seconds` before it is killed; a non-zero exit is an error carrying the end of its standard error.
-  `args` may name `{language}`, `{vocabulary}`, `{accent}`, `{voice}`, `{rate}` and `{channels}`, and each hint present is also the
+  `args` may name `{language}`, `{language_code}` (its primary subtag in lower case), `{vocabulary}`, `{accent}`, `{voice}`, `{rate}` and `{channels}`, each as `{name|fallback}` to say what stands in for an empty one, and each hint present is also the
   variable `CANOA_SPEECH_LANGUAGE`, `_VOCABULARY` (comma-separated), `_ACCENT` or `_VOICE`. `cancel` kills the program and its tree through the spawner.
 - Endpoint: audio is kept as it arrives, once, up to `max_seconds` (a longer recording is `BAD_VALUE` at the push that passes it), and
   `finish` makes one `POST` of `multipart/form-data` with `model`, `response_format=json`, `language` (the tag's primary subtag), `prompt`

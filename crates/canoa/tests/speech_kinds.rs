@@ -246,6 +246,18 @@ fn a_command_is_told_the_hints_in_its_arguments_and_its_environment() {
 }
 
 #[test]
+fn a_language_code_is_the_primary_subtag_and_a_fallback_stands_in_for_a_language_nobody_said() {
+    let mut said = OpenRequest::new(AudioFormat::pcm(16_000));
+    said.hints.language = Some("es-PR".to_owned());
+    let session = open_with(&command(&["echo", "{language_code|auto}"]), said);
+    assert!(session.finish().expect("answers").text.starts_with("es "));
+
+    let unsaid = OpenRequest::new(AudioFormat::pcm(16_000));
+    let session = open_with(&command(&["echo", "{language_code|auto}"]), unsaid);
+    assert!(session.finish().expect("answers").text.starts_with("auto "));
+}
+
+#[test]
 fn a_command_that_shows_text_while_the_person_speaks_answers_partials() {
     let mut settings = CommandSettings::new(standin());
     settings.args = vec!["grow".to_owned()];

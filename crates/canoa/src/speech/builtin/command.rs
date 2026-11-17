@@ -56,8 +56,9 @@ const fn default_timeout() -> u32 {
 
 /// What the command provider is configured with.
 ///
-/// Each of `args` may name `{language}`, `{vocabulary}`, `{accent}`, `{voice}`, `{rate}` and `{channels}`, which are
-/// replaced with what the recording opened with (an absent hint is the empty text). The hints that are present are also set
+/// Each of `args` may name `{language}`, `{language_code}` (its primary subtag in lower case, `es` for `es-PR`), `{vocabulary}`,
+/// `{accent}`, `{voice}`, `{rate}` and `{channels}`, which are replaced with what the recording opened with (an absent hint is
+/// the empty text, or the word after a bar: `{language_code|auto}` is `auto` when no language was said). The hints that are present are also set
 /// as the variables `CANOA_SPEECH_LANGUAGE`, `CANOA_SPEECH_VOCABULARY`, `CANOA_SPEECH_ACCENT` and `CANOA_SPEECH_VOICE`.
 #[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq)]
 #[form(section(id = "command", label = "Command"))]
@@ -181,16 +182,19 @@ impl Running {
         };
         let rate = request.format.rate.to_string();
         let channels = request.format.channels.to_string();
+        let code = language_code(said("language"));
+        let values = [
+            ("language", said("language")),
+            ("language_code", code.as_str()),
+            ("vocabulary", said("vocabulary")),
+            ("accent", said("accent")),
+            ("voice", said("voice")),
+            ("rate", rate.as_str()),
+            ("channels", channels.as_str()),
+        ];
         let mut spec = SpawnSpec::new(&settings.program);
         for arg in &settings.args {
-            spec = spec.arg(
-                arg.replace("{language}", said("language"))
-                    .replace("{vocabulary}", said("vocabulary"))
-                    .replace("{accent}", said("accent"))
-                    .replace("{voice}", said("voice"))
-                    .replace("{rate}", &rate)
-                    .replace("{channels}", &channels),
-            );
+            spec = spec.arg(fill(arg, &values));
         }
         let mut environment = Environment::new();
         for (name, text) in &named {
@@ -410,5 +414,69 @@ impl core::fmt::Debug for CommandSpeech {
         f.debug_struct("CommandSpeech")
             .field("program", &self.settings.program)
             .finish_non_exhaustive()
+    }
+}
+
+/// `arg` with each `{name}` or `{name|fallback}` of `values` replaced by its value, or by the fallback (empty without one) when
+/// the value is empty. A name `values` does not hold is left as written.
+fn fill(arg: &str, values: &[(&str, &str)]) -> String {
+    let mut out = String::new();
+    let mut rest = arg;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let tail = &rest[open + 1..];
+        let Some(close) = tail.find('}') else {
+            out.push_str(&rest[open..]);
+            return out;
+        };
+        let (name, fallback) = tail[..close]
+            .split_once('|')
+            .unwrap_or((&tail[..close], ""));
+        match values.iter().find(|(known, _)| *known == name) {
+            Some((_, value)) if !value.is_empty() => out.push_str(value),
+            Some(_) => out.push_str(fallback),
+            None => out.push_str(&rest[open..open + close + 2]),
+        }
+        rest = &tail[close + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A language tag's primary subtag in lower case (`es-PR` is `es`), the form most recognizers take.
+fn language_code(tag: &str) -> String {
+    tag.split(['-', '_'])
+        .next()
+        .unwrap_or(tag)
+        .to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fill, language_code};
+
+    #[test]
+    fn a_name_is_its_value_and_a_fallback_stands_in_only_for_an_empty_one() {
+        let values = [("language", "es-PR"), ("voice", ""), ("rate", "16000")];
+        assert_eq!(fill("{language}/{rate}", &values), "es-PR/16000");
+        assert_eq!(fill("{voice|any}", &values), "any");
+        assert_eq!(fill("{voice}", &values), "");
+        assert_eq!(fill("{language|auto}", &values), "es-PR");
+        assert_eq!(fill("--lang={voice|auto}!", &values), "--lang=auto!");
+    }
+
+    #[test]
+    fn a_name_that_is_not_one_and_an_open_brace_are_left_as_written() {
+        let values = [("language", "en")];
+        assert_eq!(fill("{nope|x} {language", &values), "{nope|x} {language");
+        assert_eq!(fill("{}", &values), "{}");
+        assert_eq!(fill("plain", &values), "plain");
+    }
+
+    #[test]
+    fn a_language_code_is_the_primary_subtag_in_lower_case() {
+        assert_eq!(language_code("es-PR"), "es");
+        assert_eq!(language_code("EN_us"), "en");
+        assert_eq!(language_code("fil"), "fil");
     }
 }
