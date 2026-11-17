@@ -11,6 +11,7 @@ CLAUDE*
 !app/assets/icons/agents/claude.svg
 !app/test/fixtures/claude_subagent_updates.json
 !crates/canoa-claude/looks/claude.json
+!app/test/goldens/claude_*.png
 .claude
 *.local.*
 
