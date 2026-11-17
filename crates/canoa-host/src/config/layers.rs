@@ -165,6 +165,7 @@ pub const ENTRIES: &[&[&str]] = &[
     &["profile", "env", "*"],
     &["overlays", "*"],
     &["catalogs", "*"],
+    &["store", "extension_catalogs", "*"],
     &["connections", "*"],
 ];
 

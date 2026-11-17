@@ -47,6 +47,33 @@ pub(crate) struct CatalogSource {
     pub(crate) repo: String,
     pub(crate) reference: String,
     pub(crate) path: String,
+    /// Whether the file is an extensions catalog (`[store] extension_catalogs`) and not an overlay catalog (`[catalogs]`).
+    pub(crate) extensions: bool,
+}
+
+impl CatalogSource {
+    /// The key this source is kept under in the index: an extensions catalog's has a `:`, which no overlay catalog's label (a
+    /// valid overlay name) holds, so the two never share a slot.
+    fn kept(&self) -> String {
+        if self.extensions {
+            format!("extensions:{}", self.label)
+        } else {
+            self.label.clone()
+        }
+    }
+
+    /// The folder of the source's index under `<home>/cache/store`; the prefix differs, so no label of one kind names the other's.
+    fn folder_name(&self) -> String {
+        format!(
+            "s{SCHEMA}-{}-{}",
+            if self.extensions {
+                "extensions"
+            } else {
+                "catalog"
+            },
+            self.label
+        )
+    }
 }
 
 /// One `[catalogs]` row: the source, or why it is no source. A bad row still shows as a source with its reason.
@@ -84,6 +111,16 @@ pub(crate) fn catalog_rows(section: &Value) -> Vec<Row> {
 /// Reads `[catalogs]`, a table of label to `<repository>@<ref>#<path>`, in the order of the labels. A label set to
 /// `false` lists nothing.
 pub(crate) fn parse_sources(section: &Value) -> Vec<Row> {
+    parse_table(section, false)
+}
+
+/// Reads `[store] extension_catalogs`, a table of label to `<repository>@<ref>#<file>`, as [`parse_sources`] reads `[catalogs]`.
+/// No label is offered until the table names one.
+pub(crate) fn parse_extension_sources(section: &Value) -> Vec<Row> {
+    parse_table(section, true)
+}
+
+fn parse_table(section: &Value, extensions: bool) -> Vec<Row> {
     let Some(table) = section.as_object() else {
         return Vec::new();
     };
@@ -117,6 +154,7 @@ pub(crate) fn parse_sources(section: &Value) -> Vec<Row> {
                     repo,
                     reference,
                     path,
+                    extensions,
                 }),
                 _ => Err(problem(
                     "It is not a git source, <repository>@<ref>#<catalog file>",
@@ -251,7 +289,7 @@ impl StoreIndex {
         refresh: bool,
         gap: Duration,
     ) -> Answer {
-        let slot = self.slot(&source.label);
+        let slot = self.slot(&source.kept());
         let mut held = lock(&slot.state).clone();
         if held.is_none() {
             held = self.read_disk(source);
@@ -391,7 +429,7 @@ impl StoreIndex {
         }
         let fetched = overlays
             .catalog_fetch(
-                &json!({"label": source.label, "repo": source.repo, "ref": source.reference, "path": source.path}),
+                &json!({"label": source.label, "extensions": source.extensions, "repo": source.repo, "ref": source.reference, "path": source.path}),
                 &|_| true,
             )
             .map_err(|(_, why)| why)?;
@@ -418,11 +456,7 @@ impl StoreIndex {
 
     /// The folder of a source's index: the form's number and the label, which is a valid overlay name.
     fn source_dir(&self, source: &CatalogSource) -> Option<PathBuf> {
-        Some(
-            self.dir
-                .as_ref()?
-                .join(format!("s{SCHEMA}-catalog-{}", source.label)),
-        )
+        Some(self.dir.as_ref()?.join(source.folder_name()))
     }
 
     /// Writes `index.json` for the commit beside a temporary file and renames it over, so a stop leaves the old one whole.
@@ -541,7 +575,7 @@ impl StoreIndex {
         commit: &str,
     ) -> Result<Built, String> {
         let at = |paths: &[String], max: u64, list: Option<&str>| {
-            read_files(overlays, &source.label, commit, paths, max, list)
+            read_files(overlays, source, commit, paths, max, list)
         };
         let (files, dirs) = at(
             std::slice::from_ref(&source.path),
@@ -551,52 +585,83 @@ impl StoreIndex {
         let base = format!("git+{}@{}#{}", source.repo, source.reference, source.path);
         let mut listed: Vec<Listed> = Vec::new();
         let (mut name, mut description) = (None, None);
-        match files.get(&source.path) {
-            Some(Some((size, _))) if *size > CATALOG_BYTES => {
-                return Err(format!(
-                    "Its file holds {size} bytes, more than the {CATALOG_BYTES} this host reads"
-                ));
-            }
-            Some(Some((_, Some(bytes)))) => {
-                let read =
-                    coqui_aos::read_catalog(bytes, &source.path, Some(&base), &Settings::default())
-                        .map_err(|error| {
-                            format!("It is not a catalog Canoa reads ({})", error.class)
-                        })?;
-                (name, description) = (read.name.clone(), read.description.clone());
-                for (entry_name, entry) in &read.overlays.entries {
-                    listed.push(Listed::of("overlay", entry_name, entry, source));
+        if source.extensions {
+            let bytes = match files.get(&source.path) {
+                Some(Some((size, _))) if *size > CATALOG_BYTES => {
+                    return Err(format!(
+                        "Its file holds {size} bytes, more than the {CATALOG_BYTES} this host reads"
+                    ));
                 }
-                if let Some(skills) = &read.skills {
-                    for (entry_name, entry) in &skills.entries {
-                        listed.push(Listed::of("skill", entry_name, entry, source));
+                Some(Some((_, Some(bytes)))) => bytes,
+                _ => return Err(format!("It has no file {} at that commit", source.path)),
+            };
+            let text = std::str::from_utf8(bytes).map_err(|_| "It is not text".to_owned())?;
+            let read = super::extension_catalog::read(
+                text,
+                &super::extension_catalog::Base {
+                    repo: &source.repo,
+                    reference: &source.reference,
+                    path: &source.path,
+                },
+            )?;
+            (name, description) = (read.name.clone(), read.description.clone());
+            for entry in read.entries.values() {
+                listed.push(Listed::of_extension(entry));
+            }
+            for (refused, why) in &read.refused {
+                listed.push(Listed::refused_of("extension", refused, why.as_str()));
+            }
+        } else {
+            match files.get(&source.path) {
+                Some(Some((size, _))) if *size > CATALOG_BYTES => {
+                    return Err(format!(
+                        "Its file holds {size} bytes, more than the {CATALOG_BYTES} this host reads"
+                    ));
+                }
+                Some(Some((_, Some(bytes)))) => {
+                    let read = coqui_aos::read_catalog(
+                        bytes,
+                        &source.path,
+                        Some(&base),
+                        &Settings::default(),
+                    )
+                    .map_err(|error| {
+                        format!("It is not a catalog Canoa reads ({})", error.class)
+                    })?;
+                    (name, description) = (read.name.clone(), read.description.clone());
+                    for (entry_name, entry) in &read.overlays.entries {
+                        listed.push(Listed::of("overlay", entry_name, entry, source));
+                    }
+                    if let Some(skills) = &read.skills {
+                        for (entry_name, entry) in &skills.entries {
+                            listed.push(Listed::of("skill", entry_name, entry, source));
+                        }
+                    }
+                    for (refused, class) in read
+                        .overlays
+                        .refused
+                        .iter()
+                        .chain(read.skills.iter().flat_map(|skills| &skills.refused))
+                    {
+                        listed.push(Listed::refused(refused, class.as_str()));
                     }
                 }
-                for (refused, class) in read
-                    .overlays
-                    .refused
-                    .iter()
-                    .chain(read.skills.iter().flat_map(|skills| &skills.refused))
-                {
-                    listed.push(Listed::refused(refused, class.as_str()));
-                }
-            }
-            _ => {
-                // A directory is a catalog in its minimal form: each subdirectory is an overlay of that name.
-                let Some(Some(names)) = dirs else {
-                    return Err(format!("It has no file {} at that commit", source.path));
-                };
-                for entry_name in names {
-                    if !valid_overlay_name(&entry_name) {
-                        listed.push(Listed::refused(&entry_name, "invalid-name"));
-                        continue;
-                    }
-                    let folder = if source.path.is_empty() {
-                        entry_name.clone()
-                    } else {
-                        format!("{}/{entry_name}", source.path)
+                _ => {
+                    // A directory is a catalog in its minimal form: each subdirectory is an overlay of that name.
+                    let Some(Some(names)) = dirs else {
+                        return Err(format!("It has no file {} at that commit", source.path));
                     };
-                    listed.push(Listed {
+                    for entry_name in names {
+                        if !valid_overlay_name(&entry_name) {
+                            listed.push(Listed::refused(&entry_name, "invalid-name"));
+                            continue;
+                        }
+                        let folder = if source.path.is_empty() {
+                            entry_name.clone()
+                        } else {
+                            format!("{}/{entry_name}", source.path)
+                        };
+                        listed.push(Listed {
                         kind: "overlay",
                         name: entry_name,
                         here: Some(folder.clone()),
@@ -607,7 +672,9 @@ impl StoreIndex {
                         description: None,
                         about: None,
                         refusal: None,
+                        extension: None,
                     });
+                    }
                 }
             }
         }
@@ -657,6 +724,9 @@ impl StoreIndex {
                 .filter(|list| !list.is_empty())
             {
                 entry["authors"] = Value::Array(authors.clone());
+            }
+            if let Some(extension) = &item.extension {
+                entry["extension"] = extension.clone();
             }
             if let Some(why) = &item.refusal {
                 entry["problem"] =
@@ -830,6 +900,8 @@ struct Listed {
     description: Option<String>,
     about: Option<serde_json::Map<String, Value>>,
     refusal: Option<String>,
+    /// For an extension: what it offers, the digest it is pinned by and what it needs.
+    extension: Option<Value>,
 }
 
 impl Listed {
@@ -855,12 +927,51 @@ impl Listed {
             description: entry.description.clone(),
             about: entry.about.clone(),
             refusal: None,
+            extension: None,
+        }
+    }
+
+    /// An extension of an extensions catalog: the catalog's claim only, since nothing of it is fetched until the person
+    /// installs it. A relative icon is relative to the catalog file's folder, as an overlay's is.
+    fn of_extension(entry: &super::extension_catalog::Entry) -> Self {
+        Self {
+            kind: "extension",
+            name: entry.name.clone(),
+            here: None,
+            base: None,
+            shown: match &entry.source {
+                super::extension_catalog::Source::Git {
+                    repo,
+                    reference,
+                    path,
+                } => format!(
+                    "{repo}{}{}",
+                    reference
+                        .as_ref()
+                        .map(|each| format!("@{each}"))
+                        .unwrap_or_default(),
+                    path.as_ref()
+                        .map(|each| format!("#{each}"))
+                        .unwrap_or_default()
+                ),
+                super::extension_catalog::Source::Url(url) => url.clone(),
+            },
+            origin: entry.origin_json(),
+            pin: None,
+            description: entry.description.clone(),
+            about: (!entry.about.is_empty()).then(|| entry.about.clone()),
+            refusal: None,
+            extension: Some(entry.extension_json()),
         }
     }
 
     fn refused(name: &str, class: &str) -> Self {
+        Self::refused_of("overlay", name, class)
+    }
+
+    fn refused_of(kind: &'static str, name: &str, class: &str) -> Self {
         Self {
-            kind: "overlay",
+            kind,
             name: name.to_owned(),
             here: None,
             base: None,
@@ -870,6 +981,7 @@ impl Listed {
             description: None,
             about: None,
             refusal: Some(class.to_owned()),
+            extension: None,
         }
     }
 
@@ -971,13 +1083,13 @@ fn contents_of(manifest: &serde_json::Map<String, Value>) -> Value {
 /// names a directory, the names of its subdirectories.
 fn read_files(
     overlays: &Overlays,
-    label: &str,
+    source: &CatalogSource,
     commit: &str,
     paths: &[String],
     max: u64,
     list: Option<&str>,
 ) -> Result<Files, String> {
-    let mut params = json!({"label": label, "commit": commit, "paths": paths, "maxBytes": max});
+    let mut params = json!({"label": source.label, "extensions": source.extensions, "commit": commit, "paths": paths, "maxBytes": max});
     if let Some(list) = list {
         params["list"] = Value::String(list.to_owned());
     }
@@ -1027,8 +1139,8 @@ fn folder_bytes(dir: &Path) -> u64 {
 
 fn answer_of(source: &CatalogSource, cached: &Cached, stale: bool, refreshing: bool) -> Answer {
     let mut shown = json!({
-        "id": format!("catalog:{}", source.label),
-        "kind": "catalog",
+        "id": format!("{}:{}", if source.extensions { "extensions" } else { "catalog" }, source.label),
+        "kind": if source.extensions { "extension_catalog" } else { "catalog" },
         "label": source.label,
         "spec": source.spec,
         "commit": cached.commit,

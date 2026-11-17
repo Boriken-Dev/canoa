@@ -6,6 +6,9 @@ pub mod contract;
 pub mod echo;
 pub mod engine;
 pub mod exec;
+pub(crate) mod extension_catalog;
+#[cfg(test)]
+mod extension_catalog_tests;
 pub mod footprint;
 pub(crate) mod index;
 pub(crate) mod mcp;
