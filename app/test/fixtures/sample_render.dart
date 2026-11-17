@@ -31,6 +31,16 @@ final class SampleWriter extends GoldenFileComparator {
   Future<void> update(Uri golden, Uint8List imageBytes) => compare(imageBytes, golden);
 }
 
+/// Registers the bundled monospace face the terminal draws in, which the test engine otherwise replaces with a block font.
+Future<void> loadTerminalFont() async {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  final code = FontLoader('Source Code Pro');
+  for (final face in ['Regular', 'It', 'Bold', 'BoldIt']) {
+    code.addFont(File('assets/fonts/SourceCodePro-$face.otf').readAsBytes().then(ByteData.sublistView));
+  }
+  await code.load();
+}
+
 /// Registers the app's bundled Roboto and the Material icon font, which the test engine otherwise draws as boxes.
 /// `monospace` is the first of a few common system monospace faces present on this machine, else Roboto.
 Future<void> loadSampleFonts() async {
@@ -51,6 +61,8 @@ Future<void> loadSampleFonts() async {
       await loader.load();
     }
   }
+
+  await loadTerminalFont();
 
   const monospaceFaces = [
     r'C:\Windows\Fonts\consola.ttf',

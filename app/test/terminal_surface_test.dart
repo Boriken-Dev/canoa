@@ -18,6 +18,7 @@ import 'package:canoa/theme/look.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/sample_render.dart' show loadTerminalFont;
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
 /// A shell the test drives: it prints what [print] gives it and records what was typed.
@@ -89,7 +90,10 @@ Future<void> _settle(WidgetTester tester) async {
 }
 
 void main() {
-  setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/terminal_surface_test.dart')));
+  setUpAll(() async {
+    goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/terminal_surface_test.dart'));
+    await loadTerminalFont();
+  });
 
   testWidgets('a shell opens in the session\'s workspace, shows what it prints and gets what is typed', (tester) async {
     final host = _Host();
@@ -115,6 +119,47 @@ void main() {
     pane.terminal.textInput('ls\r');
     await _settle(tester);
     expect(host.opened.single.writes.join(), 'ls\r');
+  });
+
+  testWidgets('the terminal draws in a bundled monospace font, so a cell is as wide as any letter in it', (tester) async {
+    final style = terminalTextStyle.toTextStyle();
+    expect(style.fontFamily, 'Source Code Pro', reason: 'a page or a minimal system has no monospace face of its own');
+    double width(String text) => (TextPainter(text: TextSpan(text: text, style: style), textDirection: TextDirection.ltr)..layout()).width;
+    expect(width('i'), width('m'));
+    expect(width('illimit'), width('WWWWWWW'));
+  });
+
+  testWidgets('text sits in even cells: no gap after a narrow letter', (tester) async {
+    final host = _Host();
+    final store = SessionStore();
+    addTearDown(store.dispose);
+    final session = _session(store, '/work/app');
+    final surface = TerminalSurface((_) => TerminalOnHost(host));
+    final controller = SurfaceController('terminal');
+    addTearDown(() => tester.runAsync(controller.release));
+    await _show(tester, Builder(builder: (context) => surface.build(context, session, controller)), size: const Size(520, 160));
+    await _settle(tester);
+    host.opened.single.print('PS /work/app> git status\r\nillimit WWW mmm lllll iiiii\r\n0123456789 {}[]()\r\n');
+    await _settle(tester);
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/terminal_even_cells.png'));
+  });
+
+  testWidgets('a second shell from the panel opens in the session\'s workspace too', (tester) async {
+    final host = _Host();
+    final store = SessionStore();
+    addTearDown(store.dispose);
+    final session = _session(store, '/work/app');
+    final surface = TerminalSurface((_) => TerminalOnHost(host));
+    final controller = SurfaceController('terminal');
+    addTearDown(() => tester.runAsync(controller.release));
+    await _show(tester, Builder(builder: (context) => surface.build(context, session, controller)));
+    await _settle(tester);
+    await tester.tap(_key('terminal new'));
+    await _settle(tester);
+    final workspace = surface.workspaceFor(controller, session)!;
+    workspace.split(workspace.active!);
+    await _settle(tester);
+    expect(host.cwds, ['/work/app', '/work/app', '/work/app']);
   });
 
   testWidgets('hiding the panel, and moving the surface, keep the shell and what it printed', (tester) async {

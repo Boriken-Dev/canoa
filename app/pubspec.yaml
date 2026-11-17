@@ -89,3 +89,14 @@ flutter:
           weight: 500
         - asset: assets/fonts/Roboto-bold.ttf
           weight: 700
+    # The terminal draws one glyph a cell, so it needs a font whose glyphs share one width; a page has no system monospace.
+    - family: Source Code Pro
+      fonts:
+        - asset: assets/fonts/SourceCodePro-Regular.otf
+        - asset: assets/fonts/SourceCodePro-It.otf
+          style: italic
+        - asset: assets/fonts/SourceCodePro-Bold.otf
+          weight: 700
+        - asset: assets/fonts/SourceCodePro-BoldIt.otf
+          weight: 700
+          style: italic

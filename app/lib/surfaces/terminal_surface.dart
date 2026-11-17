@@ -77,6 +77,28 @@ class TerminalSurface extends WorkSurface {
   }
 }
 
+/// The terminal's text: the bundled monospace font first, so a cell is as wide as every glyph drawn in it on any platform, then the
+/// faces xterm lists for what it lacks (CJK, emoji, symbols).
+const terminalTextStyle = TerminalStyle(
+  fontSize: 13,
+  fontFamily: 'Source Code Pro',
+  fontFamilyFallback: [
+    'Menlo',
+    'Monaco',
+    'Consolas',
+    'Liberation Mono',
+    'Courier New',
+    'Noto Sans Mono CJK SC',
+    'Noto Sans Mono CJK TC',
+    'Noto Sans Mono CJK KR',
+    'Noto Sans Mono CJK JP',
+    'Noto Sans Mono CJK HK',
+    'Noto Color Emoji',
+    'Noto Sans Symbols',
+    'monospace',
+  ],
+);
+
 /// The terminal's tabs and screens.
 class TerminalPanel extends StatelessWidget {
   const TerminalPanel({super.key, required this.workspace, this.onAttachText});
@@ -258,7 +280,7 @@ class _Screen extends StatelessWidget {
                 autofocus: true,
                 padding: const EdgeInsets.all(6),
                 theme: _theme,
-                textStyle: const TerminalStyle(fontSize: 13),
+                textStyle: terminalTextStyle,
               ),
             ),
           ),
