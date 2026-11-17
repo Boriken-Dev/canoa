@@ -83,6 +83,7 @@ import 'permissions/real_path.dart';
 import 'permissions/rule_log.dart';
 import 'profile/profile_home.dart' show ProfileHome;
 import 'served/control_overlays.dart' show ControlOverlayManager;
+import 'served/control_profile_home.dart' show ControlProfileHome;
 import 'store/control_data.dart';
 import 'profile/profile_home_platform.dart';
 import 'acp/usage_wire.dart' show ProfileApprover, noApproval;
@@ -668,17 +669,18 @@ class _CanoaAppState extends State<CanoaApp> {
   ProfileHome? _desktopHomeHeld;
   String? _desktopHomeFor;
 
-  /// Beside canoa.cfg, with the overlay and catalog work done by this app's host while it is up and by git here while it is not.
+  /// Beside canoa.cfg, with the overlay and catalog work and the reading of layers and trust done by this app's host while it is up and here while it is not.
   ProfileHome? _desktopHome() {
     final path = _configPath;
     if (_desktopHomeFor == path && _desktopHomeHeld != null) return _desktopHomeHeld;
     final control = _control;
-    final home = platformProfileHome(
+    final local = platformProfileHome(
       configPath: path,
       overlays: control == null ? null : (local) => ControlOverlayManager(control, local: local, hostUp: () => _hostUp),
     );
     _desktopHomeFor = path;
-    return _desktopHomeHeld = home;
+    if (control == null || local == null) return _desktopHomeHeld = local;
+    return _desktopHomeHeld = ControlProfileHome(control, overlays: local.overlays, os: local.os, local: local, hostUp: () => _hostUp);
   }
 
   /// Whether the host answers: the one that served this page, or this app's own once it runs.

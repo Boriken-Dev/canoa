@@ -108,7 +108,7 @@ final class FakeHome implements ProfileHome {
   @override
   String join(String dir, String relative) => '$dir/$relative';
   @override
-  String? canonicalDirectory(String directory) => directory;
+  Future<String?> canonicalDirectory(String directory) async => directory;
   @override
   Future<List<int>?> readBytes(String path) async => files[path] == null ? null : utf8.encode(files[path]!);
   @override

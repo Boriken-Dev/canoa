@@ -18,8 +18,8 @@ abstract interface class ProfileHome {
   /// [relative], `/`-separated, under [dir].
   String join(String dir, String relative);
 
-  /// [directory] with its links resolved, or null when it is not a directory.
-  String? canonicalDirectory(String directory);
+  /// [directory] with its links resolved, or null when it is not a directory (or, on a host, not one this key may name).
+  Future<String?> canonicalDirectory(String directory);
 
   /// A file's bytes, or null when it cannot be read.
   Future<List<int>?> readBytes(String path);

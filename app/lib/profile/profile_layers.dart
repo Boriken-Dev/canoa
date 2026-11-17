@@ -112,7 +112,7 @@ Future<ProfileLayers> profileLayers({
         final commit = installed.commit;
         notes.add(LayerNote(id, 'At commit ${commit.length > 12 ? commit.substring(0, 12) : commit}'));
       case DirOverlay(:final dir, :final pin):
-        final there = home.canonicalDirectory(isAbsolutePath(dir) ? dir : home.join(home.configDir, dir));
+        final there = await home.canonicalDirectory(isAbsolutePath(dir) ? dir : home.join(home.configDir, dir));
         if (there == null) {
           notes.add(LayerNote(id, 'Its directory is not there'));
           continue;
@@ -195,7 +195,7 @@ Future<ProfileLayers> profileLayers({
   ProjectLayer? project;
   if (workingDirectory != null && home != null) {
     const id = LayerId(LayerKind.project);
-    final directory = home.canonicalDirectory(workingDirectory);
+    final directory = await home.canonicalDirectory(workingDirectory);
     if (directory == null) {
       notes.add(const LayerNote(id, 'The working directory is not there'));
     } else {

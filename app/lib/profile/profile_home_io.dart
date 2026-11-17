@@ -53,7 +53,7 @@ final class IoProfileHome implements ProfileHome {
       '$dir${Platform.pathSeparator}${relative.replaceAll('/', Platform.pathSeparator)}';
 
   @override
-  String? canonicalDirectory(String directory) {
+  Future<String?> canonicalDirectory(String directory) async {
     try {
       final resolved = Directory(directory).resolveSymbolicLinksSync();
       return FileSystemEntity.isDirectorySync(resolved) ? resolved : null;

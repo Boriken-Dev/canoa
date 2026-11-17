@@ -33,12 +33,17 @@ enum TrustState {
 /// The directories whose project profiles the person trusts, per directory, kept by the app and revocable.
 /// A trust holds the profile as it was: a profile changed later is ignored until the person trusts it again.
 final class ProjectTrust {
+  /// [read] and [write] hold the whole record, as a file does. A host that keeps the record itself passes [trustOn] and [revokeOn]
+  /// instead: it checks the profile against what was shown, and [read] then gives it back.
   ProjectTrust({required Future<String?> Function() read, required Future<void> Function(String) write,
-      bool caseInsensitive = false})
-      : _read = read, _write = write, _fold = caseInsensitive;
+      bool caseInsensitive = false, Future<void> Function(String directory, List<int> profile)? trustOn,
+      Future<void> Function(String directory)? revokeOn})
+      : _read = read, _write = write, _fold = caseInsensitive, _trustOn = trustOn, _revokeOn = revokeOn;
 
   final Future<String?> Function() _read;
   final Future<void> Function(String) _write;
+  final Future<void> Function(String directory, List<int> profile)? _trustOn;
+  final Future<void> Function(String directory)? _revokeOn;
   final bool _fold;
   List<TrustedProject> _projects = const [];
 
@@ -75,6 +80,10 @@ final class ProjectTrust {
 
   /// Trusts [directory] with [profile] as it is now.
   Future<void> trust(String directory, List<int> profile) async {
+    if (_trustOn case final on?) {
+      await on(directory, profile);
+      return load();
+    }
     _projects = [
       for (final project in _projects) if (!_same(project.directory, directory)) project,
       TrustedProject(directory, digest(profile), DateTime.now()),
@@ -84,6 +93,10 @@ final class ProjectTrust {
 
   /// Stops trusting [directory]; its profile is ignored from the next session on.
   Future<void> revoke(String directory) async {
+    if (_revokeOn case final on?) {
+      await on(directory);
+      return load();
+    }
     _projects = [for (final project in _projects) if (!_same(project.directory, directory)) project];
     await _save();
   }

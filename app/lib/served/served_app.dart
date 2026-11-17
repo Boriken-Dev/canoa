@@ -11,10 +11,8 @@ import '../desktop/host_supervisor.dart';
 import '../desktop/host_tool.dart';
 import '../ledger/host_ledger_backend.dart';
 import '../ledger/session_ledger.dart' show LedgerBackend;
-import '../profile/aos_support.dart' show ReadTree;
-import '../profile/profile_home.dart';
-import '../profile/project_trust.dart';
 import 'control_overlays.dart';
+import 'control_profile_home.dart';
 import 'host_config.dart';
 import 'host_files.dart';
 import 'host_state.dart';
@@ -66,44 +64,6 @@ final class ServedSupervisor extends HostSupervisor {
   Future<void> stop() async {}
 }
 
-/// What the overlay store and Loadout need of the host's computer, with the store's git work done by the host over its control
-/// channel. The host's files are not readable here, so a layer's tree is left out of what a page shows of the profile.
-final class ServedProfileHome implements ProfileHome {
-  ServedProfileHome(this.overlays, {required this.os})
-      : trust = ProjectTrust(
-          read: () async => null,
-          write: (_) async => throw StateError('A project profile is trusted from the host\'s own computer, not from a web page'),
-        );
-
-  @override
-  final ControlOverlayManager overlays;
-
-  @override
-  final ProjectTrust trust;
-
-  @override
-  String get configDir => '';
-
-  @override
-  final String os;
-
-  @override
-  String join(String dir, String relative) => dir.isEmpty ? relative : '$dir/$relative';
-
-  @override
-  String? canonicalDirectory(String directory) => null;
-
-  @override
-  Future<List<int>?> readBytes(String path) async => null;
-
-  @override
-  Future<ReadTree> readTree(String directory, {int maxFiles = 4096, int maxBytes = 64 * 1024 * 1024}) =>
-      throw StateError('A web page does not read the host\'s files');
-
-  @override
-  Future<String?> readSecret(String path, {String? within}) async => null;
-}
-
 /// The host that served this page, as the app uses it: its sources, and over its control channel the session list, folders,
 /// uploads, canoa.cfg and the overlay store. The control channel is the one the host lists; a key it has no grant for gets the
 /// host's own refusal for that request, and nothing else is lost.
@@ -148,7 +108,7 @@ final class ServedApp {
   /// The documents the host keeps for the person: drafts, the layout and the permission rules with their log.
   late final HostState state = HostState(control);
   final ControlOverlayManager overlays;
-  late final ServedProfileHome home = ServedProfileHome(overlays, os: host.os ?? '');
+  late final ControlProfileHome home = ControlProfileHome(control, overlays: overlays, os: host.os ?? '');
 
   /// The session list the host keeps for this page's key.
   final LedgerBackend ledger;

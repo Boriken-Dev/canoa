@@ -307,7 +307,7 @@ final class MemoryHome implements ProfileHome {
   @override
   String join(String dir, String relative) => '$dir/$relative';
   @override
-  String? canonicalDirectory(String directory) => directory;
+  Future<String?> canonicalDirectory(String directory) async => directory;
   @override
   Future<List<int>?> readBytes(String path) async => null;
   @override
