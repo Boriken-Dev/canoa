@@ -169,7 +169,7 @@ fn a_claude_login_reads_its_windows_with_no_session_and_sends_its_token_only_to_
 }
 
 #[test]
-fn an_api_key_is_not_offered_and_nothing_is_sent() {
+fn an_api_key_behind_a_gateway_reports_the_gateways_budget_and_the_key_goes_only_there() {
     let dir = Dir::new();
     let store = accounts(&dir);
     store
@@ -179,21 +179,39 @@ fn an_api_key_is_not_offered_and_nothing_is_sent() {
             None,
         )
         .expect("stored");
-    let server = standin(200, json!({}));
-    let endpoints = Endpoints {
-        claude: Some(server.address.clone()),
-        ..Endpoints::default()
-    };
-    let row = super::super::usage_at(&claude_config(), "key", &store, &endpoints).expect("read");
-    assert_eq!(row["supported"], false, "{row}");
-    assert!(
-        row["unsupported_because"]
-            .as_str()
-            .is_some_and(|why| why.contains("no plan limits")),
-        "{row}"
+    let server = standin(
+        200,
+        json!({"info": {"spend": 4.0, "max_budget": 5.0, "rpm_limit": 20}}),
     );
+    let config = config(&format!(
+        "[host.accounts.key]
+harness = \"claude\"
+kind = \"anthropic-api-key\"
+id = \"id-key\"
+         settings = {{ base_url = \"{}\" }}
+",
+        server.address
+    ));
+    let row = super::super::usage_at(&config, "key", &store, &Endpoints::default()).expect("read");
+    assert_eq!(row["supported"], true, "{row}");
     assert_eq!(row["account"], "id-key", "{row}");
-    assert!(server.heard.lock().expect("lock").is_empty());
+    let ids: Vec<&str> = row["buckets"]
+        .as_array()
+        .expect("buckets")
+        .iter()
+        .filter_map(|bucket| bucket["id"].as_str())
+        .collect();
+    assert_eq!(ids, ["budget", "rpm"], "{row}");
+    assert_eq!(row["buckets"][0]["source"], "gateway", "{row}");
+    assert_eq!(row["buckets"][0]["unit"], "micro_usd", "{row}");
+    assert_eq!(row["buckets"][0]["remaining"], 1_000_000, "{row}");
+    assert!(
+        !row.to_string().contains("canary"),
+        "the answer holds no credential: {row}"
+    );
+    let heard = server.heard.lock().expect("lock");
+    assert!(heard.iter().any(|head| head.starts_with("GET /v1/models")));
+    assert!(heard.iter().any(|head| head.starts_with("GET /key/info")));
 }
 
 #[test]

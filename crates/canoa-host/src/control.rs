@@ -865,7 +865,9 @@ impl Control {
                 }
                 Some("usage/read") => allow(caller, Grant::Usage)
                     .and_then(|()| self.accounts())
-                    .and_then(|accounts| usage_read::call(accounts, &params)),
+                    .and_then(|accounts| {
+                        usage_read::call(accounts, self.usage.as_deref(), &params)
+                    }),
                 Some("options/choices") => self
                     .accounts()
                     .and_then(|accounts| choices::call(accounts, caller, &params)),

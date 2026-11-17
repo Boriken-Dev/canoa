@@ -350,3 +350,34 @@ fn a_sessions_own_figures_leave_out_the_ones_it_started_and_absent_counters_stay
     assert_eq!(log.session_usage("work", "child"), None);
     assert_eq!(log.session_usage("work", "none"), None);
 }
+
+#[test]
+fn recorded_buckets_count_a_keys_tokens_today_in_thirty_days_and_by_model() {
+    let dir = folder("recorded");
+    let log = UsageLog::open(dir.clone(), 400, NOW);
+    assert!(log.recorded_buckets("key", NOW).is_empty());
+    log.record(
+        &turn("key", "s1"),
+        &spend("s1", 100, 20, None),
+        NOW - 3 * DAY,
+    );
+    log.record(&turn("key", "s2"), &spend("s2", 1_000, 200, None), NOW);
+    log.record(&turn("other", "s3"), &spend("s3", 7, 7, None), NOW);
+    let buckets = log.recorded_buckets("key", NOW);
+    let used = |id: &str| {
+        buckets
+            .iter()
+            .find(|bucket| bucket["id"] == id)
+            .map(|bucket| bucket["used"].clone())
+    };
+    assert_eq!(used("recorded_today"), Some(json!(1_200)));
+    assert_eq!(used("recorded_30_days"), Some(json!(1_320)));
+    assert_eq!(used("recorded_model_opus"), Some(json!(1_320)));
+    assert!(
+        buckets
+            .iter()
+            .all(|bucket| bucket["source"] == "recorded" && bucket["unit"] == "tokens"),
+        "{buckets:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}

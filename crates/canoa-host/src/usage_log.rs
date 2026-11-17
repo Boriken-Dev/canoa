@@ -440,6 +440,79 @@ impl UsageLog {
         json!({"accounts": state.limits.values().collect::<Vec<_>>()})
     }
 
+    /// The buckets of the tokens recorded for the account `account` (its id), counted as input plus output: today (UTC), the
+    /// last 30 days, and each model of those 30 days. Empty when nothing was recorded in them.
+    pub(crate) fn recorded_buckets(&self, account: &str, now: i64) -> Vec<Value> {
+        use coqui_acp_api::usage::{Bucket, Coverage, Refill, Source, Status, Unit};
+        const DAY: i64 = 86_400;
+        let tokens = |group: &Value| {
+            let count = |name: &str| group.get(name).and_then(Value::as_u64).unwrap_or(0);
+            count("input").saturating_add(count("output"))
+        };
+        let today = now - now.rem_euclid(DAY);
+        let month = now - 30 * DAY;
+        let ask = |from: i64, group_by: &str| {
+            self.summary(&json!({"account": account, "from": from, "group_by": group_by}))
+                .unwrap_or(Value::Null)
+        };
+        let make = |id: String, label: String, used: u64, models: Coverage, refill: Refill| {
+            let mut bucket = Bucket::new(id);
+            bucket.label = Some(label);
+            bucket.models = models;
+            bucket.unit = Unit::Tokens;
+            bucket.used = Some(used);
+            bucket.status = Status::Ok;
+            bucket.refill = refill;
+            bucket.observed_at = now;
+            bucket.source = Source::Other("recorded".to_owned());
+            serde_json::to_value(bucket).unwrap_or(Value::Null)
+        };
+        let mut out = Vec::new();
+        let by_model = ask(month, "model");
+        let in_month = tokens(&by_model["total"]);
+        if in_month == 0 {
+            return out;
+        }
+        let in_day = tokens(&ask(today, "account")["total"]);
+        out.push(make(
+            "recorded_today".to_owned(),
+            "Recorded by Canoa today (UTC)".to_owned(),
+            in_day,
+            Coverage::All,
+            Refill::FixedWindow {
+                length: Some(core::time::Duration::from_secs(86_400)),
+                resets_at: Some(today + DAY),
+            },
+        ));
+        out.push(make(
+            "recorded_30_days".to_owned(),
+            "Recorded by Canoa, last 30 days".to_owned(),
+            in_month,
+            Coverage::All,
+            Refill::Unknown,
+        ));
+        let mut models: Vec<(String, u64)> = by_model["groups"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|group| Some((group["key"].as_str()?.to_owned(), tokens(group))))
+            .filter(|(_, used)| *used > 0)
+            .collect();
+        models.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        for (model, used) in models.into_iter().take(8) {
+            out.push(make(
+                format!("recorded_model_{model}"),
+                format!("Recorded by Canoa, {model}, last 30 days"),
+                used,
+                Coverage::Only {
+                    models: vec![model],
+                },
+                Refill::Unknown,
+            ));
+        }
+        out
+    }
+
     /// `usage/summary`: the lines with `from <= time < to`, for the account, provider, model and session asked, summed by `group_by`
     /// (`day` in UTC, `account`, `provider`, `model` or `session`). A group's counters are absent when no line in it has them.
     /// The host the figures came from is the client's to name, so `host` is read and let go.

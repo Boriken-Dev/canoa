@@ -156,6 +156,30 @@ fn an_account_with_no_session_is_read_on_demand_and_a_name_the_host_lacks_is_ref
     }
     let listed = call(&link, 2, "accounts/list", &json!({})).expect("listed");
     let id = listed["accounts"][0]["id"].clone();
+    // The key is read from the address its account names, so a loopback stand-in answers in place of the provider.
+    let provider = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    let address = provider.local_addr().expect("its address");
+    std::thread::spawn(move || {
+        for stream in provider.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let mut head = [0_u8; 2048];
+            let _ = std::io::Read::read(&mut stream, &mut head);
+            let _ = std::io::Write::write_all(
+                &mut stream,
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            );
+        }
+    });
+    let file = host.scratch.0.join("canoa.cfg");
+    let text = std::fs::read_to_string(&file).expect("canoa.cfg");
+    let at = text.find("[host.accounts.work]").expect("the account");
+    let end = at + text[at..].find('\n').expect("a line") + 1;
+    let mut text = text;
+    text.insert_str(
+        end,
+        &format!("settings = {{ base_url = \"http://{address}\" }}\n"),
+    );
+    std::fs::write(&file, text).expect("written");
     let read = call(&link, 3, "usage/read", &json!({"account": "work"})).expect("read");
     assert_eq!(read["account"]["account"], id, "{read}");
     assert!(read["account"]["supported"].is_boolean(), "{read}");
