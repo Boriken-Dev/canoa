@@ -1,6 +1,6 @@
-/// The Loadouts section: the loadouts canoa.cfg names, each with what it holds and whether it can start, and the editor of one.
-/// A loadout is a named collection of whole overlays, chosen skills and servers a session starts with; the Store is where those
-/// are found and installed, and the editor's picker leads there without losing what has been typed.
+/// The Loadouts section's main view: the loadout chosen in its index, shown with what it holds and how to change it, or the editor
+/// of one. A loadout is a named collection of whole overlays, chosen skills and servers a session starts with; the Store is where
+/// those are found and installed, and the editor's picker leads there without losing what has been typed.
 library;
 
 import 'dart:async';
@@ -9,8 +9,11 @@ import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
 import '../profile/profile_home.dart';
+import '../shell/shell.dart' show ShellScope;
 import '../store/overlay_page.dart' show SaveConfig;
 import 'loadout_editor.dart';
+import 'loadout_page.dart';
+import 'loadouts_index.dart';
 
 class LoadoutsSection extends StatefulWidget {
   const LoadoutsSection({
@@ -18,10 +21,10 @@ class LoadoutsSection extends StatefulWidget {
     required this.config,
     required this.home,
     required this.onSave,
+    required this.selection,
     this.onStore,
     this.onUse,
     this.agents = const [],
-    this.draft,
   });
 
   final CanoaConfig config;
@@ -37,16 +40,15 @@ class LoadoutsSection extends StatefulWidget {
   final void Function(String name)? onUse;
   final List<String> agents;
 
-  /// The loadout being edited, kept by the owner so that it outlives this page; null opens the list.
-  final ValueNotifier<LoadoutDraft?>? draft;
+  /// The loadout chosen in the index and the one being edited; the owner keeps it so that both outlive this page.
+  final LoadoutsSelection selection;
 
   @override
   State<LoadoutsSection> createState() => LoadoutsSectionState();
 }
 
 class LoadoutsSectionState extends State<LoadoutsSection> {
-  late final ValueNotifier<LoadoutDraft?> _own = ValueNotifier(null);
-  ValueNotifier<LoadoutDraft?> get _editing => widget.draft ?? _own;
+  ValueNotifier<LoadoutDraft?> get _editing => widget.selection.draft;
 
   Set<String> _skills = const {};
 
@@ -67,12 +69,6 @@ class LoadoutsSectionState extends State<LoadoutsSection> {
     if (oldWidget.config != widget.config || oldWidget.home != widget.home) unawaited(_readSkills());
   }
 
-  @override
-  void dispose() {
-    _own.dispose();
-    super.dispose();
-  }
-
   Future<void> _readSkills() async {
     final home = widget.home;
     if (home == null) return;
@@ -87,14 +83,6 @@ class LoadoutsSectionState extends State<LoadoutsSection> {
   CanoaConfig get _config => widget.config;
 
   Set<String> get _servers => {for (final MapEntry(:key, :value) in _config.profile.mcp.entries) if (value != null) key};
-
-  /// What is missing from [loadout]: each as `name (overlay)`.
-  List<String> _missing(Loadout loadout) => [
-    for (final name in loadout.overlays) if (!_config.overlays.containsKey(name)) '$name (overlay)',
-    if (_skillsKnown)
-      for (final name in loadout.skills) if (!_skills.contains(name)) '$name (skill)',
-    for (final name in loadout.mcp) if (!_servers.contains(name)) '$name (MCP server)',
-  ];
 
   Future<void> _save() async {
     final draft = _editing.value;
@@ -126,7 +114,10 @@ class LoadoutsSectionState extends State<LoadoutsSection> {
     final saved = await widget.onSave(changed);
     if (!mounted) return;
     setState(() => _problem = saved == null ? 'canoa.cfg could not be written' : null);
-    if (saved != null) _editing.value = null;
+    if (saved != null) {
+      _editing.value = null;
+      widget.selection.select(name);
+    }
   }
 
   Future<void> _delete(String name) async {
@@ -142,8 +133,15 @@ class LoadoutsSectionState extends State<LoadoutsSection> {
       ),
     );
     if (sure != true || !mounted) return;
+    // The next in the list takes its place, else the one before it.
+    final names = _config.loadouts.keys.toList();
+    final at = names.indexOf(name);
+    final next = at + 1 < names.length ? names[at + 1] : (at > 0 ? names[at - 1] : null);
+    final wasShown = widget.selection.selectedIn(_config) == name;
     final saved = await widget.onSave(_config.withLoadouts({..._config.loadouts}..remove(name)));
-    if (mounted) setState(() => _problem = saved == null ? 'canoa.cfg could not be written' : null);
+    if (!mounted) return;
+    if (saved != null && wasShown && next != null) widget.selection.select(next);
+    setState(() => _problem = saved == null ? 'canoa.cfg could not be written' : null);
   }
 
   Future<void> _makeDefault(String name) async {
@@ -180,14 +178,26 @@ class LoadoutsSectionState extends State<LoadoutsSection> {
   }
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<LoadoutDraft?>(
-    valueListenable: _editing,
-    builder: (context, draft, _) => Align(
-      alignment: Alignment.topCenter,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
-        child: draft != null ? _editor(draft) : _list(context),
-      ),
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.selection,
+    builder: (context, _) => ValueListenableBuilder<LoadoutDraft?>(
+      valueListenable: _editing,
+      builder: (context, draft, _) {
+        // On a narrow window the index is in the drawer, which this button opens.
+        final menu = ShellScope.menuButton(context);
+        return Column(children: [
+          if (menu != null) Align(alignment: Alignment.centerLeft, child: menu),
+          Expanded(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: draft != null ? _editor(draft) : _shown(context),
+              ),
+            ),
+          ),
+        ]);
+      },
     ),
   );
 
@@ -202,75 +212,45 @@ class LoadoutsSectionState extends State<LoadoutsSection> {
     onCancel: () => _editing.value = null,
   );
 
-  Widget _list(BuildContext context) {
-    final loadouts = _config.loadouts;
-    final scheme = Theme.of(context).colorScheme;
-    return ListView(
-      key: const Key('loadouts-list'),
-      padding: const EdgeInsets.all(16),
-      children: [
-        Row(children: [
-          Expanded(child: Text('Loadouts', style: Theme.of(context).textTheme.titleLarge)),
+  /// The loadout chosen in the index, or what to do when there is none.
+  Widget _shown(BuildContext context) {
+    final name = widget.selection.selectedIn(_config);
+    if (name == null) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Loadouts', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 4),
+          Text(
+            'A loadout is what a session starts with: whole overlays, skills you chose and MCP servers. '
+            'Editing one reaches new sessions only.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          const Text('No loadouts yet. New sessions start with every overlay and every server.', key: Key('loadouts-empty-page')),
+          const SizedBox(height: 12),
           FilledButton.icon(
-            key: const Key('loadout-new'),
-            onPressed: () => _open(LoadoutDraft()),
+            key: const Key('loadout-new-page'),
+            onPressed: widget.selection.startNew,
             icon: const Icon(Icons.add),
             label: const Text('New loadout'),
           ),
         ]),
-        const SizedBox(height: 4),
-        Text(
-          'A loadout is what a session starts with: whole overlays, skills you chose and MCP servers. '
-          'Editing one reaches new sessions only.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        if (_problem != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_problem!, style: TextStyle(color: scheme.error))),
-        const SizedBox(height: 12),
-        if (loadouts.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 24),
-            child: Text('No loadouts yet. New sessions start with every overlay and every server.', key: Key('loadouts-empty')),
-          ),
-        for (final MapEntry(:key, :value) in loadouts.entries) _card(context, key, value),
-      ],
-    );
-  }
-
-  Widget _card(BuildContext context, String name, Loadout loadout) {
-    final scheme = Theme.of(context).colorScheme;
-    final missing = _missing(loadout);
-    final isDefault = name == _config.defaultLoadout;
-    String count(int n, String one, String many) => '$n ${n == 1 ? one : many}';
-    return Card(
-      key: Key('loadout-card-$name'),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Flexible(child: Text(name, style: Theme.of(context).textTheme.titleMedium)),
-            if (isDefault) Padding(padding: const EdgeInsets.only(left: 8), child: Chip(key: Key('loadout-default-$name'), label: const Text('Default'), visualDensity: VisualDensity.compact)),
-          ]),
-          if (loadout.description.isNotEmpty) Text(loadout.description),
-          Text(
-            '${count(loadout.overlays.length, 'overlay', 'overlays')} · ${count(loadout.skills.length, 'skill', 'skills')} · '
-            '${count(loadout.mcp.length, 'MCP server', 'MCP servers')}',
-            key: Key('loadout-count-$name'),
-          ),
-          Text(
-            missing.isEmpty ? 'Ready' : 'Missing: ${missing.join(', ')}',
-            key: Key('loadout-ready-$name'),
-            style: TextStyle(color: missing.isEmpty ? null : scheme.error),
-          ),
-          Wrap(spacing: 4, children: [
-            TextButton(key: Key('loadout-edit-$name'), onPressed: () => _open(LoadoutDraft.of(name, loadout)), child: const Text('Edit')),
-            TextButton(key: Key('loadout-duplicate-$name'), onPressed: () => _open(LoadoutDraft.of(name, loadout, copy: true)), child: const Text('Duplicate')),
-            if (widget.onUse != null)
-              TextButton(key: Key('loadout-use-$name'), onPressed: () => widget.onUse!(name), child: const Text('Use in new session')),
-            if (!isDefault) TextButton(key: Key('loadout-default-set-$name'), onPressed: () => unawaited(_makeDefault(name)), child: const Text('Make default')),
-            TextButton(key: Key('loadout-delete-$name'), onPressed: () => unawaited(_delete(name)), child: const Text('Delete')),
-          ]),
-        ]),
-      ),
+      );
+    }
+    final loadout = _config.loadouts[name]!;
+    return LoadoutPage(
+      name: name,
+      config: _config,
+      skills: _skills,
+      skillsKnown: _skillsKnown,
+      agents: widget.agents,
+      problem: _problem,
+      onEdit: () => _open(LoadoutDraft.of(name, loadout)),
+      onDuplicate: () => _open(LoadoutDraft.of(name, loadout, copy: true)),
+      onUse: widget.onUse == null ? null : () => widget.onUse!(name),
+      onMakeDefault: () => unawaited(_makeDefault(name)),
+      onDelete: () => unawaited(_delete(name)),
     );
   }
 }

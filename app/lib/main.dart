@@ -125,7 +125,7 @@ import 'session_store.dart';
 import 'sources/readiness.dart';
 import 'sources/source_checks.dart';
 import 'sources/sources.dart';
-import 'loadout/loadout_editor.dart' show LoadoutDraft;
+import 'loadout/loadouts_index.dart';
 import 'loadout/loadouts_section.dart';
 import 'store/store_index_view.dart';
 import 'store/store_section.dart';
@@ -534,8 +534,8 @@ class _CanoaAppState extends State<CanoaApp> {
   final _speech = platformSpeechBackends();
   final _loadoutKey = GlobalKey<StoreSectionState>();
 
-  /// The loadout being edited, which a visit to the Store leaves as it was.
-  final _loadoutDraft = ValueNotifier<LoadoutDraft?>(null);
+  /// The loadout chosen in the Loadouts index and the one being edited, which a visit to the Store leaves as they were.
+  late final _loadoutsSelection = LoadoutsSelection(layout: _layout);
 
   /// The section Settings opens at when it is first shown.
   String? _settingsFirst;
@@ -867,7 +867,7 @@ class _CanoaAppState extends State<CanoaApp> {
     onStore: () => unawaited(_showLoadout()),
     onUse: _useLoadout,
     agents: _profileAgents,
-    draft: _loadoutDraft,
+    selection: _loadoutsSelection,
   );
 
   /// The Store as the section shows it.
@@ -2646,7 +2646,7 @@ class _CanoaAppState extends State<CanoaApp> {
     _surfaces.dispose();
     _terminalSection.dispose();
     _grouping.dispose();
-    _loadoutDraft.dispose();
+    _loadoutsSelection.dispose();
     _popout.dispose();
     _tabs?.dispose();
     _contextTimer?.cancel();
@@ -2919,6 +2919,7 @@ class _CanoaAppState extends State<CanoaApp> {
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
           layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(), loadouts: _loadoutsPage(),
           hostsIndex: _hostsIndex(), hostsPage: _hostsPage(), storeIndex: StoreIndex(selection: _storeSelection),
+          loadoutsIndex: LoadoutsIndex(selection: _loadoutsSelection, config: config),
           usageIndex: _usageIndex(), usagePage: _usagePage(), sessionSpend: _usage?.sessionSpend,
           terminalIndex: TerminalIndex(controller: _terminalSection), terminalMain: TerminalMain(controller: _terminalSection),
           conversation: _conversation,
@@ -2944,7 +2945,7 @@ class _CanoaHome extends StatelessWidget {
     this.onHosts, this.onLoadout, this.onLoadouts, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
     this.renderers = chat.ChatRenderers.none, required this.welcome, this.noAgent = false, this.localHost, required this.grouping,
     required this.layout, required this.surfaces, required this.settings, required this.loadout, required this.loadouts,
-    required this.hostsIndex, required this.hostsPage, required this.storeIndex, this.usageIndex, this.usagePage, this.sessionSpend,
+    required this.hostsIndex, required this.hostsPage, required this.storeIndex, required this.loadoutsIndex, this.usageIndex, this.usagePage, this.sessionSpend,
     required this.terminalIndex, required this.terminalMain,
   });
 
@@ -2959,7 +2960,7 @@ class _CanoaHome extends StatelessWidget {
   final Widget settings, loadout, loadouts;
 
   /// The Hosts section's index and main view.
-  final Widget hostsIndex, hostsPage, storeIndex;
+  final Widget hostsIndex, hostsPage, storeIndex, loadoutsIndex;
 
   /// The Usage section's index and main view; none where the host does not grant usage.
   final Widget? usageIndex, usagePage;
@@ -3147,7 +3148,7 @@ class _CanoaHome extends StatelessWidget {
           AppSection(id: HostsController.section, label: 'Hosts', icon: Icons.lan_outlined, index: hostsIndex, main: hostsPage),
           AppSection(id: 'terminal', label: 'Terminal', icon: Icons.terminal, index: terminalIndex, main: terminalMain),
           if (usagePage != null) AppSection(id: 'usage', label: 'Usage', icon: Icons.speed, index: usageIndex, main: usagePage!),
-          AppSection(id: 'loadouts', label: 'Loadouts', icon: Icons.inventory_2_outlined, main: loadouts),
+          AppSection(id: 'loadouts', label: 'Loadouts', icon: Icons.inventory_2_outlined, index: loadoutsIndex, main: loadouts),
           AppSection(id: 'store', label: 'Store', icon: Icons.storefront_outlined, index: storeIndex, main: loadout, ownsLayoutControls: true),
           AppSection(id: 'settings', label: 'Settings', tooltip: 'Canoa settings', icon: Icons.settings_outlined, main: settings, atFoot: true),
         ],
