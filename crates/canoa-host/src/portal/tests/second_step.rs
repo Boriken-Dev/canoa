@@ -1033,7 +1033,11 @@ fn a_code_that_belongs_to_another_account_is_not_accepted_for_this_one() {
     let real = real(&first_use_may_set_up(), |_| {});
     // Someone else has a code set up: their account is another user id.
     let other = mine() + 1;
-    let begun = real.rig.accounts.begin_factor("someone", other).unwrap();
+    let begun = real
+        .rig
+        .accounts
+        .begin_factor("someone", other, false)
+        .unwrap();
     real.rig
         .accounts
         .confirm_factor("someone", other, &code_in(&begun.uri, 0))
@@ -1380,7 +1384,9 @@ fn a_first_setup_during_a_sign_in_is_logged_at_warn() {
 /// The administrator's way to give an account a new code, as `canoa portal factor enrol NAME` and then `--code` do it.
 fn administrator_sets_up(real: &Real, ahead: i64) -> String {
     let accounts = &real.rig.accounts;
-    let begun = accounts.begin_factor(&real.name, real.uid()).unwrap();
+    let begun = accounts
+        .begin_factor(&real.name, real.uid(), false)
+        .unwrap();
     accounts
         .confirm_factor(&real.name, real.uid(), &code_in(&begun.uri, ahead))
         .unwrap();
@@ -1520,7 +1526,9 @@ fn a_guesser_who_keeps_under_the_windows_limit_is_stopped_by_the_days() {
 fn a_code_is_the_accounts_by_its_name_and_not_by_a_user_id_alone() {
     let real = real(&first_use_may_set_up(), |_| {});
     let accounts = &real.rig.accounts;
-    let begun = accounts.begin_factor(&real.name, real.uid()).unwrap();
+    let begun = accounts
+        .begin_factor(&real.name, real.uid(), false)
+        .unwrap();
     accounts
         .confirm_factor(&real.name, real.uid(), &code_in(&begun.uri, 0))
         .unwrap();
@@ -1704,4 +1712,74 @@ fn a_code_table_that_cannot_be_read_answers_503_and_keeps_the_session_and_its_ch
     );
     std::fs::write(&table, kept).unwrap();
     assert_eq!(index_at(&real.rig, &session, Some("10.1.2.3")).status, 200);
+}
+
+// ---- replacing a code needs the code ----
+
+fn replace_with(enrol: &[&str]) -> serde_json::Value {
+    let enrol: Vec<_> = enrol.iter().map(|each| serde_json::json!(each)).collect();
+    serde_json::json!({"rule": [
+        {"purposes": ["enrol_first"], "allow": [["password"]]},
+        {"purposes": ["enrol"], "allow": [enrol]},
+        {"allow": [["password", "totp"], ["password", "recovery_code"]]},
+    ]})
+}
+
+fn show_password(real: &Real, session: &str) -> String {
+    let shown = real.factor(
+        "10.1.2.3",
+        &[session],
+        &format!(
+            "action=step&method=password&user={}&password={PASSWORD}",
+            real.name
+        ),
+    );
+    assert_eq!(shown.status, 200, "{}", shown.body);
+    pending_cookie_of(&shown)
+}
+
+#[test]
+fn a_person_with_a_code_cannot_replace_it_by_showing_a_password_alone() {
+    let real = real(&replace_with(&["password"]), |_| {});
+    let (session, _) = enrolled(&real);
+    let enrol = show_password(&real, &session);
+    let begun = real.factor("10.1.2.3", &[&session, &enrol], "action=begin");
+    assert_ne!(begun.status, 200, "{}", begun.body);
+    assert!(!begun.body.contains("otpauth://"));
+    // The code in use stands and nothing waits to replace it.
+    assert_eq!(
+        real.rig.accounts.factor_standing(&real.name, real.uid()),
+        FactorStanding::Enrolled
+    );
+    assert!(
+        real.rig
+            .accounts
+            .list_factors()
+            .unwrap()
+            .iter()
+            .all(|entry| !entry.waiting)
+    );
+}
+
+#[test]
+fn a_person_with_a_code_replaces_it_after_showing_the_code_again() {
+    let real = real(&replace_with(&["password", "totp"]), |_| {});
+    let (session, link) = enrolled(&real);
+    let enrol = show_password(&real, &session);
+    let shown = real.factor(
+        "10.1.2.3",
+        &[&session, &enrol],
+        &format!("action=step&method=totp&code={}", code_in(&link, 2)),
+    );
+    assert_eq!(shown.status, 200, "{}", shown.body);
+    let begun = real.factor("10.1.2.3", &[&session, &enrol], "action=begin");
+    assert_eq!(begun.status, 200, "{}", begun.body);
+    let fresh = link_in(&begun.body);
+    assert_ne!(fresh, link);
+    let done = real.factor(
+        "10.1.2.3",
+        &[&session, &enrol],
+        &format!("action=confirm&code={}", code_in(&fresh, 0)),
+    );
+    assert_eq!(done.status, 200, "{}", done.body);
 }

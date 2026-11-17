@@ -297,13 +297,20 @@ pub trait Accounts: Send + Sync {
     }
 
     /// Begins setting up a one-time code for the account, replacing a setup already waiting; `user` is also the name the app
-    /// shows. The code that is in use keeps working until a first code confirms the new one.
+    /// shows. The code that is in use keeps working until a first code confirms the new one. `proved_current` says the caller
+    /// showed the account's current code or a recovery code just now: an account that has a code is not given a new one
+    /// without it, and an account with none needs nothing.
     ///
     /// # Errors
     ///
     /// [`FactorError`] for a portal that keeps no codes or a store that cannot be written.
-    fn begin_factor(&self, user: &str, uid: u32) -> Result<Enrolment, FactorError> {
-        let _ = (user, uid);
+    fn begin_factor(
+        &self,
+        user: &str,
+        uid: u32,
+        proved_current: bool,
+    ) -> Result<Enrolment, FactorError> {
+        let _ = (user, uid, proved_current);
         Err(FactorError::Unsupported)
     }
 

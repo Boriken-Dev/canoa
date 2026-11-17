@@ -23,21 +23,21 @@ indexmap = { version = "2", default-features = false, features = ["std", "serde"
 # ACP messages a client sends, read to keep a program launch from reaching the agent.
 serde_json = "1"
 # The portal's sign-in: the operating system's accounts through PAM and NSS (`canoa portal`, feature `portal`).
-coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
-coqui-access-system = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
+coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "365b02e967ab2dad726cb1fcc815ffe52f481a08" }
+coqui-access-system = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "365b02e967ab2dad726cb1fcc815ffe52f481a08" }
 # A certificate's claims tied to a directory account by rules (the portal's `matcher`).
-coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
+coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "365b02e967ab2dad726cb1fcc815ffe52f481a08" }
 # Which methods a sign-in may use, from where, and what it still needs.
-coqui-access-signin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
+coqui-access-signin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "365b02e967ab2dad726cb1fcc815ffe52f481a08" }
 # A forwarded certificate's subject and fingerprint, shown when it is enrolled.
 coqui-peer-tls = { version = "=0.0.0-alpha.1", default-features = false, features = ["fields"] }
 # The portal's one-time codes are a library it loads from a path too (its tests build it); the QR code of a setup link, as an inline
 # SVG with no image codecs.
-coqui-access-totp-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
+coqui-access-totp-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "365b02e967ab2dad726cb1fcc815ffe52f481a08" }
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 # The password and certificate providers are libraries the portal loads from a path (its tests build them).
-coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
-coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
+coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "365b02e967ab2dad726cb1fcc815ffe52f481a08" }
+coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "365b02e967ab2dad726cb1fcc815ffe52f481a08" }
 # The web app's server: requests parsed by tungstenite's own parser, request paths percent-decoded by url's, TLS by
 # coqui-transport-web's rustls; each already in the graph at these versions.
 foundry-local-sdk = "2.4"

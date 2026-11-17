@@ -1074,7 +1074,7 @@ fn portal_factor(
                     &serde_json::json!({"enrolled": {"user": user}}).to_string(),
                 );
             }
-            let begun = access.begin_factor(&user, uid).map_err(failed)?;
+            let begun = access.begin_factor(&user, uid, false).map_err(failed)?;
             print(
                 front,
                 &serde_json::json!({"enrol": {

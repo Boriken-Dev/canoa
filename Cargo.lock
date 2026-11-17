@@ -903,7 +903,7 @@ dependencies = [
 [[package]]
 name = "coqui-access"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=365b02e967ab2dad726cb1fcc815ffe52f481a08#365b02e967ab2dad726cb1fcc815ffe52f481a08"
 dependencies = [
  "coqui-builder",
  "guatiao",
@@ -912,7 +912,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-claims"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=365b02e967ab2dad726cb1fcc815ffe52f481a08#365b02e967ab2dad726cb1fcc815ffe52f481a08"
 dependencies = [
  "coqui-access",
  "coqui-peer-tls",
@@ -924,7 +924,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-kit"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=365b02e967ab2dad726cb1fcc815ffe52f481a08#365b02e967ab2dad726cb1fcc815ffe52f481a08"
 dependencies = [
  "argon2",
  "coqui-access",
@@ -941,7 +941,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-mtls"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=365b02e967ab2dad726cb1fcc815ffe52f481a08#365b02e967ab2dad726cb1fcc815ffe52f481a08"
 dependencies = [
  "coqui-access",
  "coqui-access-claims",
@@ -954,7 +954,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-mtls-plugin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=365b02e967ab2dad726cb1fcc815ffe52f481a08#365b02e967ab2dad726cb1fcc815ffe52f481a08"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
@@ -971,7 +971,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-password"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=365b02e967ab2dad726cb1fcc815ffe52f481a08#365b02e967ab2dad726cb1fcc815ffe52f481a08"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
@@ -980,7 +980,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-password-plugin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=365b02e967ab2dad726cb1fcc815ffe52f481a08#365b02e967ab2dad726cb1fcc815ffe52f481a08"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
@@ -995,7 +995,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-signin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=365b02e967ab2dad726cb1fcc815ffe52f481a08#365b02e967ab2dad726cb1fcc815ffe52f481a08"
 dependencies = [
  "coqui-access",
  "coqui-builder",
@@ -1006,7 +1006,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-system"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=365b02e967ab2dad726cb1fcc815ffe52f481a08#365b02e967ab2dad726cb1fcc815ffe52f481a08"
 dependencies = [
  "coqui-access",
  "coqui-builder",
@@ -1019,7 +1019,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-totp"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=365b02e967ab2dad726cb1fcc815ffe52f481a08#365b02e967ab2dad726cb1fcc815ffe52f481a08"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",
@@ -1036,7 +1036,7 @@ dependencies = [
 [[package]]
 name = "coqui-access-totp-plugin"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=365b02e967ab2dad726cb1fcc815ffe52f481a08#365b02e967ab2dad726cb1fcc815ffe52f481a08"
 dependencies = [
  "coqui-access",
  "coqui-access-kit",

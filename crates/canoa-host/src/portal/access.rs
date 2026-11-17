@@ -1250,12 +1250,18 @@ impl Accounts for Access {
         self.codes.as_ref()?.unlock_stamp(&code_key(user, uid))
     }
 
-    fn begin_factor(&self, user: &str, uid: u32) -> Result<Enrolment, FactorError> {
+    fn begin_factor(
+        &self,
+        user: &str,
+        uid: u32,
+        proved_current: bool,
+    ) -> Result<Enrolment, FactorError> {
         let store = self.codes.as_ref().ok_or(FactorError::Unsupported)?;
         let outcome = store
             .accounts
             .put(AccountPut {
                 name: code_key(user, uid),
+                proved_current,
                 display_name: Some(user.to_owned()),
                 ..AccountPut::default()
             })
@@ -2211,7 +2217,7 @@ mod tests {
         assert!(access.admitted("nobody-here").is_err());
         assert!(access.admitted("../x").is_err());
         assert_eq!(access.list_factors(), Ok(Vec::new()));
-        let begun = access.begin_factor(&me, mine()).unwrap();
+        let begun = access.begin_factor(&me, mine(), false).unwrap();
         let waiting = access.list_factors().unwrap();
         assert_eq!(waiting.len(), 1);
         assert_eq!(waiting[0].user.as_deref(), Some(me.as_str()));
@@ -2339,7 +2345,7 @@ mod tests {
     #[test]
     fn a_code_table_that_cannot_be_read_is_unknown_and_never_a_code_that_is_not_there() {
         let (access, table, me) = access_with_codes("unreadable");
-        let begun = access.begin_factor(&me, mine()).unwrap();
+        let begun = access.begin_factor(&me, mine(), false).unwrap();
         access
             .confirm_factor(&me, mine(), &totp_in(&begun.uri))
             .unwrap();
@@ -2390,7 +2396,7 @@ mod tests {
     #[test]
     fn marks_are_written_before_the_code_goes_and_two_commands_do_not_lose_each_others() {
         let (access, table, me) = access_with_codes("marks");
-        let begun = access.begin_factor(&me, mine()).unwrap();
+        let begun = access.begin_factor(&me, mine(), false).unwrap();
         access
             .confirm_factor(&me, mine(), &totp_in(&begun.uri))
             .unwrap();
@@ -2435,7 +2441,7 @@ mod tests {
     fn an_account_renamed_or_made_again_under_the_same_user_id_is_reset_and_not_open_to_a_first_code()
      {
         let (access, _, me) = access_with_codes("renamed");
-        let begun = access.begin_factor(&me, mine()).unwrap();
+        let begun = access.begin_factor(&me, mine(), false).unwrap();
         access
             .confirm_factor(&me, mine(), &totp_in(&begun.uri))
             .unwrap();
@@ -2475,9 +2481,39 @@ mod tests {
     }
 
     #[test]
+    fn an_account_with_a_code_is_given_a_new_one_only_when_its_current_code_was_proved() {
+        let (access, _, me) = access_with_codes("rotate-proof");
+        let begun = access.begin_factor(&me, mine(), false).unwrap();
+        access
+            .confirm_factor(&me, mine(), &totp_in(&begun.uri))
+            .unwrap();
+        let refused = access.begin_factor(&me, mine(), false);
+        let Err(FactorError::Failed(why)) = refused else {
+            panic!("a rotation with no proof was not refused: {refused:?}");
+        };
+        assert!(!why.is_empty() && !why.contains("secret="), "{why}");
+        assert!(
+            access
+                .list_factors()
+                .unwrap()
+                .iter()
+                .all(|each| !each.waiting)
+        );
+        let fresh = access.begin_factor(&me, mine(), true).unwrap();
+        assert_ne!(fresh.uri, begun.uri);
+        assert!(
+            access
+                .list_factors()
+                .unwrap()
+                .iter()
+                .any(|each| each.waiting)
+        );
+    }
+
+    #[test]
     fn an_unlock_leaves_a_code_an_administrator_disabled_disabled() {
         let (access, _, me) = access_with_codes("unlock-disabled");
-        let begun = access.begin_factor(&me, mine()).unwrap();
+        let begun = access.begin_factor(&me, mine(), false).unwrap();
         access
             .confirm_factor(&me, mine(), &totp_in(&begun.uri))
             .unwrap();

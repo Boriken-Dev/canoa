@@ -423,7 +423,17 @@ fn begin(
         );
         return page(who, standing, stage_of(&gate), None, signing_in, 403);
     }
-    match inner.accounts.begin_factor(&who.user, who.uid) {
+    // Only a code or recovery code shown again for this setup is proof of the account's current code; a rule for `enrol` that
+    // asks for a password alone leaves an account that has a code without a way to replace it from here.
+    let proved_current = found.is_some_and(|pending| {
+        pending.done.iter().any(|step| {
+            step.method == Method::Totp.id() || step.method == Method::RecoveryCode.id()
+        })
+    });
+    match inner
+        .accounts
+        .begin_factor(&who.user, who.uid, proved_current)
+    {
         Ok(enrolment) => {
             let from = shown(client_address(inner, request, conn));
             if signing_in {
