@@ -153,6 +153,15 @@ final class SecretShowPrompt extends SecretPrompt {
 /// One conversation as Canoa holds it: the model's conversation ([chat]), which keeps what was said, the turn, the queue, what waits
 /// for the person and the modes, and beside it what is Canoa's own: where the agent runs, the draft, the ledger's notes, the rules,
 /// the tasks handed on, the secret prompts.
+/// When the app first heard of a terminal of the agent's, and of its end: the protocol carries no clock, so this is the time the
+/// updates arrived.
+final class TerminalSpan {
+  TerminalSpan(this.started);
+
+  final DateTime started;
+  DateTime? ended;
+}
+
 class ChatSession {
   ChatSession({
     required String id,
@@ -359,6 +368,9 @@ class ChatSession {
   List<PlanEntry> get plan => chat.plan;
   List<AgentCommandInfo> get commands => chat.commands;
   SessionUsage get usage => chat.usage;
+
+  /// When each terminal of the agent's started and ended as this app saw it, by terminal id.
+  final Map<String, TerminalSpan> terminalSpans = {};
 
   /// What the agent last said its context holds, by kind; empty while it says nothing of the kind.
   List<ContextKind> contextKinds = const [];
@@ -2094,15 +2106,25 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     );
   }
 
-  /// Keeps what each usage report of [session]'s agent says its context holds, which the shared model does not keep. A report
-  /// that names no kinds replaces the last ones, since the figures they split are no longer the window's.
+  /// Keeps what each usage report of [session]'s agent says its context holds, which the shared model does not keep (a report
+  /// that names no kinds replaces the last ones, since the figures they split are no longer the window's), and when each of its
+  /// terminals was first heard of and ended.
   void _watchContext(ChatSession session, VerifiedAgent client) {
     unawaited(_contextSubscriptions.remove(session.id)?.cancel());
     _contextSubscriptions[session.id] = client.updates.listen((update) {
-      if (update.kind != 'usage_update' ||
-          update.sessionId != session.remoteSessionId) {
+      if (update.sessionId != session.remoteSessionId) return;
+      if (update.kind == 'terminal_update' ||
+          update.kind == 'terminal_output_chunk') {
+        final id = update.raw['terminalId'];
+        if (id is! String) return;
+        final span = session.terminalSpans[id] ??= TerminalSpan(clock());
+        final exit = update.raw['exitStatus'];
+        if (span.ended == null && exit is Map && exit['exitCode'] is int) {
+          span.ended = clock();
+        }
         return;
       }
+      if (update.kind != 'usage_update') return;
       session.contextKinds = contextKindsOf(update.raw);
       notifyListeners();
     });

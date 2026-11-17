@@ -3,8 +3,10 @@
 import 'dart:convert' show base64Encode, utf8;
 import 'dart:io' show Directory;
 
+import 'package:canoa/acp/delegate.dart' show TaskPhase, delegateStopMethod;
 import 'package:canoa/shell/work_panel.dart';
 import 'package:canoa/chat/agent_events.dart' show Choice, ConfigOption;
+import 'package:canoa/chat/background_tasks.dart' show BackgroundCommand;
 import 'package:canoa/chat/git_changes.dart';
 import 'package:canoa/chat/git_changes_pane.dart';
 import 'package:canoa/chat/inspector.dart' show SessionInspector;
@@ -467,7 +469,7 @@ void main() {
     });
   });
 
-  group('the lineage and the running commands', () {
+  group('the background tasks', () {
     Future<void> details(WidgetTester tester) async {
       if (find.byTooltip('Session details').evaluate().isEmpty) {
         await tester.tap(find.byTooltip('More'));
@@ -500,7 +502,7 @@ void main() {
       final scene = await openScene(tester, size: const Size(1160, 900));
       await scene.fourChildren();
       await details(tester);
-      expect(find.text('Lineage · 4 running'), findsOneWidget);
+      expect(find.text('Background tasks · 4 running'), findsOneWidget);
       for (final title in childTitles) {
         expect(find.text(title), findsOneWidget);
       }
@@ -508,7 +510,10 @@ void main() {
       expect(inRow('c0', '25s'), findsOneWidget);
       await scene.end('c0', 'COMPLETED', at: 18);
       await scene.end('c1', 'FAILED', at: 21, note: 'No login for it.');
-      expect(find.text('Lineage · 2 running'), findsOneWidget);
+      expect(find.text('Background tasks · 2 running'), findsOneWidget);
+      expect(find.text('2 finished'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('tasks finished')));
+      await tester.pump();
       expect(inRow('c0', 'Completed'), findsOneWidget);
       expect(inRow('c1', 'Failed'), findsOneWidget);
       expect(inRow('c0', '18s'), findsOneWidget);
@@ -517,33 +522,101 @@ void main() {
     testWidgets('a session that handed nothing out has no lineage', (tester) async {
       await openScene(tester, size: const Size(1160, 900));
       await details(tester);
-      expect(find.textContaining('Lineage'), findsNothing);
+      expect(find.textContaining('Background tasks'), findsNothing);
       expect(find.text('Environment'), findsOneWidget);
     });
 
     testWidgets('a child appears while the inspector is open, and a tap opens its thread', (tester) async {
       final scene = await openScene(tester, size: const Size(1160, 900));
       await details(tester);
-      expect(find.textContaining('Lineage'), findsNothing);
+      expect(find.textContaining('Background tasks'), findsNothing);
       await scene.fourChildren();
-      expect(find.text('Lineage · 4 running'), findsOneWidget);
+      expect(find.text('Background tasks · 4 running'), findsOneWidget);
       expect(scene.session.openChild, isNull);
       await tester.tap(find.byKey(const ValueKey('lineage c2')));
       await tester.pump(const Duration(milliseconds: 500));
       expect(scene.session.openChild, 'c2');
     });
 
-    testWidgets('a command still running is listed, and leaves the list when it ends', (tester) async {
+    testWidgets('a command still running is listed with its time, and folds under "finished" when it ends', (tester) async {
       final scene = await openScene(tester, size: const Size(1160, 900));
       await details(tester);
-      expect(find.textContaining('Running commands'), findsNothing);
+      expect(find.textContaining('Background tasks'), findsNothing);
       await scene.say(terminal('t1', command: 'npm run dev'));
       await scene.say(terminal('t2', command: 'cargo test', exit: 0));
-      expect(find.text('Running commands · 1'), findsOneWidget);
-      expect(find.descendant(of: find.byKey(const ValueKey('command t1')), matching: find.text('npm run dev')), findsOneWidget);
-      expect(find.byKey(const ValueKey('command t2')), findsNothing);
+      expect(find.text('Background tasks · 1 running'), findsOneWidget);
+      Finder inCommand(String id, String text) => find.descendant(of: find.byKey(ValueKey('command $id')), matching: find.text(text));
+      expect(inCommand('t1', 'npm run dev'), findsOneWidget);
+      expect(inCommand('t1', 'under a second'), findsOneWidget);
+      scene.now = scene.now.add(const Duration(seconds: 75));
+      await tester.pump(const Duration(seconds: 1));
+      expect(inCommand('t1', '1m 15s'), findsOneWidget, reason: 'the time keeps ticking while it runs');
+      expect(find.byKey(const ValueKey('command t2')), findsNothing, reason: 'a finished one is folded');
+      expect(find.text('1 finished'), findsOneWidget);
       await scene.say(terminal('t1', exit: 130));
-      expect(find.textContaining('Running commands'), findsNothing);
+      expect(find.text('Background tasks'), findsOneWidget);
+      expect(find.text('2 finished'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('tasks finished')));
+      await tester.pump();
+      expect(inCommand('t2', 'Done'), findsOneWidget);
+      expect(inCommand('t1', 'Exit 130'), findsOneWidget);
+      expect(inCommand('t1', '1m 15s'), findsOneWidget, reason: 'a finished command keeps how long it ran');
+    });
+
+    testWidgets('a command has no Stop: the agent runs it in its own terminal', (tester) async {
+      final scene = await openScene(tester, size: const Size(1160, 900));
+      await scene.say(terminal('t1', command: 'npm run dev'));
+      await details(tester);
+      expect(find.byKey(const ValueKey('command t1')), findsOneWidget);
+      expect(find.byIcon(Icons.stop_circle_outlined), findsNothing);
+    });
+
+    testWidgets('a running subagent has a Stop that asks the host to stop that one task, and it leaves the running list', (tester) async {
+      final scene = await openScene(tester, size: const Size(1160, 900));
+      await scene.fourChildren();
+      await details(tester);
+      await tester.tap(find.byKey(const ValueKey('stop c1')));
+      await tester.pump();
+      await scene.settle();
+      expect(scene.host.sentOf(delegateStopMethod).single['params'], {'sessionId': 's1', 'taskId': 'c1'});
+      expect(scene.session.tasks['c1']!.phase, TaskPhase.canceled);
+      expect(find.text('Background tasks · 3 running'), findsOneWidget);
+      expect(find.byKey(const ValueKey('stop c1')), findsNothing);
+      expect(find.byKey(const ValueKey('lineage c1')), findsNothing, reason: 'folded under finished');
+      expect(find.text('1 finished'), findsOneWidget);
+    });
+
+    testWidgets('a subagent started by the conversation itself has no Stop', (tester) async {
+      final scene = await openScene(tester, size: const Size(1160, 900));
+      await scene.nativeChildren('subagents');
+      await details(tester);
+      expect(find.byKey(const ValueKey('lineage panel')), findsOneWidget);
+      expect(find.byIcon(Icons.stop_circle_outlined), findsNothing);
+    });
+
+    testWidgets('past four running the rest wait behind Show more, and finished ones behind their own fold', (tester) async {
+      final scene = await openScene(tester, size: const Size(1160, 900));
+      await scene.fourChildren();
+      await scene.say(terminal('t1', command: 'npm run dev'));
+      await scene.say(terminal('t2', command: 'cargo test', exit: 0));
+      await details(tester);
+      expect(find.text('Background tasks · 5 running'), findsOneWidget);
+      expect(find.byKey(const ValueKey('command t1')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('tasks more')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('command t1')), findsOneWidget);
+      expect(find.text('Show less'), findsOneWidget);
+      expect(find.byKey(const ValueKey('command t2')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('tasks finished')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('command t2')), findsOneWidget);
+    });
+
+    test('a command whose start this app did not see has no time', () {
+      const unseen = BackgroundCommand(id: 't', command: 'make', running: true);
+      expect(unseen.elapsedAt(DateTime.utc(2026)), isNull);
+      final seen = BackgroundCommand(id: 't', command: 'make', running: false, started: DateTime.utc(2026), ended: DateTime.utc(2026, 1, 1, 0, 2));
+      expect(seen.elapsedAt(DateTime.utc(2027)), const Duration(minutes: 2));
     });
 
     testWidgets('on a phone the panel holds the lineage across the window, a child closes it onto its thread, and the panel opens again', (tester) async {
@@ -551,7 +624,7 @@ void main() {
       await scene.fourChildren();
       await details(tester);
       expect(find.byType(WorkPanel), findsOneWidget);
-      expect(find.text('Lineage · 4 running'), findsOneWidget);
+      expect(find.text('Background tasks · 4 running'), findsOneWidget);
       await tester.tap(find.byTooltip('Back to the conversation'));
       await tester.pumpAndSettle();
       expect(find.byType(WorkPanel), findsNothing);
@@ -573,6 +646,8 @@ void main() {
         await scene.end('c3', 'FAILED', at: 21, note: 'No login for it.');
         await scene.say(terminal('t1', command: 'npm run dev -- --port 5173'));
         await details(tester);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('tasks finished')));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/inspector_lineage_$label.png'));

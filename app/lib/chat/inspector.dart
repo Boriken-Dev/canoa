@@ -1,18 +1,19 @@
+import 'dart:async' show unawaited;
+
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show SessionUsage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
 import '../acp/pipe_channel.dart' show isPipeUrl;
 import '../session_store.dart';
-import '../sources/source_icons.dart' show SourceMark;
 import '../theme/look.dart';
 import '../shell/surface.dart' show SurfaceEnvironment;
 import '../usage/spend_model.dart' show SpendRow;
 import '../usage/tokens_view.dart' show tokenColumns;
 import '../workspace/open_in.dart' show WorkspaceOpener;
+import 'background_tasks.dart';
 import 'context_kinds.dart';
-import 'delegation_row.dart' show Ticking, stateColor, timeWord;
-import 'delegation_view.dart' show ChildView, lineage;
+import 'delegation_view.dart' show lineage;
 import 'git_changes.dart';
 import 'git_changes_pane.dart';
 import 'modes.dart';
@@ -200,8 +201,8 @@ class SessionInspector extends StatelessWidget {
     final mode = modeLabelOf(store, session);
     final heading = Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600);
     final children = lineage(session);
-    final running = [for (final entry in session.terminals.entries) if (entry.value.isRunning) (entry.key, entry.value)];
-    final live = children.where((child) => child.live).length;
+    final commands = commandsOf(session);
+    final running = BackgroundTasks.runningIn(children, commands);
     // The folder the Files surface shows, so a row's path reads the same in both.
     final workspace = worktree?.path ?? session.cwd;
     final outputs = outputsOf(session, workspace);
@@ -258,17 +259,17 @@ class SessionInspector extends StatelessWidget {
               const SizedBox(height: 4),
               OutputsList(outputs: outputs, root: workspace, onOpenInFiles: onOpenInFiles, opener: opener),
             ],
-            if (children.isNotEmpty) ...[
+            if (children.isNotEmpty || commands.isNotEmpty) ...[
               const SizedBox(height: 16),
-              Text(live > 0 ? 'Lineage · $live running' : 'Lineage', style: heading),
+              Text(running > 0 ? 'Background tasks · $running running' : 'Background tasks', style: heading),
               const SizedBox(height: 4),
-              _Lineage(children: children, now: store.clock, onOpen: onOpenChild),
-            ],
-            if (running.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Text('Running commands · ${running.length}', style: heading),
-              const SizedBox(height: 4),
-              for (final (id, terminal) in running) _CommandRow(key: ValueKey('command $id'), command: terminal.command ?? id),
+              BackgroundTasks(
+                children: children,
+                commands: commands,
+                now: store.clock,
+                onOpenChild: onOpenChild,
+                onStopChild: (id) => unawaited(store.stopTask(session, id)),
+              ),
             ],
             const SizedBox(height: 16),
             Text('Changes', style: heading),
@@ -276,64 +277,6 @@ class SessionInspector extends StatelessWidget {
             _ChangesSummary(session: session, scopes: scopes, scope: scope, onScope: onScope, onOpen: onOpenDiff, look: look),
           ]),
         ),
-      ]),
-    );
-  }
-}
-
-/// One row for each child the session handed out: its source's mark, title, state and how long it has run. A row opens the child's
-/// thread.
-class _Lineage extends StatelessWidget {
-  const _Lineage({required this.children, required this.now, required this.onOpen});
-
-  final List<ChildView> children;
-  final DateTime Function() now;
-  final ValueChanged<String>? onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final look = context.chatLook;
-    return Ticking(
-      active: children.any((child) => child.live),
-      builder: (context) => Column(key: const ValueKey('lineage panel'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        for (final child in children)
-          InkWell(
-            key: ValueKey('lineage ${child.id}'),
-            borderRadius: BorderRadius.circular(look.radius / 2),
-            onTap: onOpen == null ? null : () => onOpen!(child.id),
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(16.0 * child.depth.clamp(0, 4), 6, 0, 6),
-              child: Row(children: [
-                SizedBox.square(dimension: 18, child: Center(child: SourceMark.provider(child.provider, size: 14))),
-                const SizedBox(width: 8),
-                Expanded(child: Text(child.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13))),
-                const SizedBox(width: 8),
-                Text(child.word, style: TextStyle(color: stateColor(look, child), fontSize: 12)),
-                if (timeWord(child, now()) case final elapsed?)
-                  Padding(padding: const EdgeInsets.only(left: 8), child: Text(elapsed, style: TextStyle(color: look.muted, fontSize: 12))),
-              ]),
-            ),
-          ),
-      ]),
-    );
-  }
-}
-
-/// A command the agent started that has not reported its end.
-class _CommandRow extends StatelessWidget {
-  const _CommandRow({super.key, required this.command});
-
-  final String command;
-
-  @override
-  Widget build(BuildContext context) {
-    final look = context.chatLook;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(children: [
-        Icon(Icons.terminal, size: 16, color: look.muted),
-        const SizedBox(width: 8),
-        Expanded(child: Text(command, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontFamily: look.codeFont, fontSize: 12))),
       ]),
     );
   }
