@@ -871,7 +871,11 @@ source like any other, whose `describe` names the types it adds (`id`: 1 to 32 l
 host loads each into a registry of its own, lists its types in `store/extensions`, and plans, applies, reports and removes through the
 same `store/*` methods and the same plan the person confirms, so an extension writes no installer. One that does not load, names a
 type already taken, or a store it does not offer (or one of the built-in ones) is skipped and logged; the others stay. The app lists
-Runtimes and each type after the built-in ones. `examples/sample_extension.rs` is a stand-in library; `tests/extension_stores.rs` runs it.
+Runtimes and each type after the built-in ones; an installed item the host holds its own copy of has a Remove that shows the plan for
+`store/remove`'s uninstall as an install's. The app's Settings, Extensions (for a key that holds `hosting`) lists `[host.extensions]` from
+`config/get` `host`, adds, edits and removes one by writing `[host]` back with `config/check` then `config/set` (the host reads it only when
+it starts, so the page offers to restart it). `icon` is an app icon's name or a small `data:image/png;base64,` or `data:image/webp;base64,`
+picture. `examples/sample_extension.rs` is a stand-in library; `tests/extension_stores.rs` runs it.
 
 **Installed runtimes** (Node, Python; Store type Runtimes) are put on the `PATH` of every program the host starts through `spawn::Command`
 (agents, their MCP servers, tools), after the person's own `PATH` entries so their own copy wins; a program started with no `PATH` gets none.

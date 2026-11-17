@@ -110,7 +110,7 @@ Returns the text.
 
 ## `store_extension` (`canoa::store::extension`, feature `store`)
 
-A Guatiao kind that adds types to the Store: `describe() -> ExtensionInfo { title, publisher, types: Vec<ExtensionType { id, title, icon?, stores }> }`. `stores` names `program_store` providers the same library offers; the host lists and installs them as any store. `ExtensionType::problem` says why an id or title is refused (`RESERVED_TYPES` are the Store's own).
+A Guatiao kind that adds types to the Store: `describe() -> ExtensionInfo { title, publisher, types: Vec<ExtensionType { id, title, icon?, stores }> }`. `stores` names `program_store` providers the same library offers; the host lists and installs them as any store. `ExtensionType::problem` says why an id, title or icon is refused (`RESERVED_TYPES` are the Store's own). `icon` is the name of one of the application's icons (an unknown name draws the default), or a picture the extension ships as a `data:image/png;base64,...` or `data:image/webp;base64,...` address of at most `MAX_ICON_TEXT` (64 KiB) characters; the application checks its size and dimensions again before it draws it.
 
 ## `program_store` (`canoa::store`, feature `store`)
 
