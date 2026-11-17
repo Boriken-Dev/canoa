@@ -80,6 +80,8 @@ pub(crate) struct Terminals {
     shell: Option<String>,
     home: Option<PathBuf>,
     live: Arc<AtomicUsize>,
+    /// Where shells are looked for; this computer when `None`.
+    lookup: Option<crate::shells::Lookup>,
 }
 
 impl Terminals {
@@ -89,12 +91,40 @@ impl Terminals {
             shell,
             home,
             live: Arc::new(AtomicUsize::new(0)),
+            lookup: None,
         }
     }
 
-    /// The shell to start: the one canoa.cfg names, else the person's own. On Windows it is an absolute path: a bare name is
-    /// looked for on `PATH` and never in the folder the host happens to be in, where a cloned repository could have put one.
-    fn program(&self) -> Result<OsString, String> {
+    /// These terminals looking for the shells an id names in `lookup`, in place of this computer.
+    #[cfg(test)]
+    pub(crate) fn finding(mut self, lookup: crate::shells::Lookup) -> Self {
+        self.lookup = Some(lookup);
+        self
+    }
+
+    /// The shell to start: the one a request names (an id `shell/list` gives), else the one canoa.cfg names (an id, or a
+    /// program), else the person's own. On Windows it is an absolute path: a bare name is looked for on `PATH` and never in the
+    /// folder the host happens to be in, where a cloned repository could have put one.
+    fn program(&self, asked: Option<&str>) -> Result<OsString, String> {
+        let by_id = |id: &str| {
+            let lookup = self
+                .lookup
+                .clone()
+                .unwrap_or_else(crate::shells::Lookup::here);
+            let found = crate::shells::detect(&lookup);
+            found
+                .iter()
+                .find(|shell| shell.id == id)
+                .map(crate::shells::program)
+        };
+        if let Some(id) = asked {
+            return by_id(id).ok_or_else(|| {
+                format!("this host found no shell {id}: shell/list names the ones it has")
+            });
+        }
+        if let Some(program) = self.shell.as_deref().and_then(by_id) {
+            return Ok(program);
+        }
         #[cfg(windows)]
         {
             if let Some(shell) = &self.shell {
@@ -323,7 +353,10 @@ impl<'scope, 'env: 'scope, C: Channel> Link<'scope, 'env, C> {
                 "this host runs at most {MAX_PER_HOST} terminals at once"
             ))
         })?;
-        let program = self.host.program().map_err(Fail::Refused)?;
+        let program = self
+            .host
+            .program(text(params, "shell")?)
+            .map_err(Fail::Refused)?;
         let started = pty::open(&program, &cwd, size).map_err(|error| {
             Fail::Refused(format!(
                 "the shell {} could not be started: {error}",

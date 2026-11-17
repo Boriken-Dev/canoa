@@ -1447,6 +1447,30 @@ impl Serving {
                             provider = provider.offering(host, listed, others).with_unfit(unfit);
                         }
                     }
+                    // The shell the entry's own `shell`, else `[host] shell`, names: told to the harness as its documentation allows.
+                    // An entry that names one that is not here does not start; the host's own that is not here is only said.
+                    if let Some(setting) = entry.shell.as_deref().or(config.shell.as_deref()) {
+                        match crate::shells::agent_applied(
+                            setting,
+                            harness,
+                            &crate::shells::Lookup::here(),
+                        ) {
+                            Ok((shell, applied)) => {
+                                if let Some(words) = &applied.notice {
+                                    tracing::info!(
+                                        "host.agents.{}: shell {} is not passed: {words}",
+                                        entry.name,
+                                        shell.id
+                                    );
+                                }
+                                provider = provider.with_shell_env(applied.env);
+                            }
+                            Err(why) if entry.shell.is_some() => return Err(refused(why)),
+                            Err(why) => {
+                                tracing::warn!("host.agents.{}: [host] shell: {why}", entry.name)
+                            }
+                        }
+                    }
                     let provider = Arc::new(provider);
                     movers.insert(entry.name.clone(), Arc::clone(&provider));
                     (
@@ -1706,6 +1730,23 @@ impl Serving {
                         .with_terminals(crate::terminal::Terminals::new(
                             config.shell.clone(),
                             options.home_dir.clone().or_else(home_from_environment),
+                        ))
+                        .with_shells(crate::shells::Plan::new(
+                            config.shell.clone(),
+                            config
+                                .entries
+                                .iter()
+                                .filter_map(|entry| match &entry.kind {
+                                    EntryKind::Harness { harness, .. } => {
+                                        Some(crate::shells::AgentShell {
+                                            entry: entry.name.clone(),
+                                            harness: harness.clone(),
+                                            own: entry.shell.clone(),
+                                        })
+                                    }
+                                    _ => None,
+                                })
+                                .collect(),
                         ))
                         .with_files(control::Files::new(
                             options.home_dir.clone().or_else(home_from_environment),

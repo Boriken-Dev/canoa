@@ -472,6 +472,68 @@ fn a_key_is_told_the_grants_it_holds_and_the_owner_all() {
     );
 }
 
+#[test]
+fn shell_list_names_the_shells_found_the_choice_and_what_each_agent_is_told() {
+    use crate::shells::{AgentShell, Plan};
+    let own = if cfg!(windows) {
+        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_owned())
+    } else {
+        "/bin/sh".to_owned()
+    };
+    let plan = Plan::new(
+        Some("canoa-no-such-shell-3117".to_owned()),
+        vec![
+            AgentShell {
+                entry: "Claude".to_owned(),
+                harness: "claude".to_owned(),
+                own: Some(own),
+            },
+            AgentShell {
+                entry: "Codex".to_owned(),
+                harness: "codex".to_owned(),
+                own: None,
+            },
+        ],
+    );
+    let control = memory().with_shells(plan);
+    let answer = ask(&control, &Caller::Owner, "shell/list", json!({}));
+    let report = &answer["result"];
+    assert!(report["shells"].is_array(), "{answer}");
+    assert_eq!(report["setting"], "canoa-no-such-shell-3117");
+    assert!(
+        report["problem"]
+            .as_str()
+            .is_some_and(|why| why.contains("canoa-no-such-shell-3117")),
+        "a host choice that is not here is said: {answer}"
+    );
+    let agents = report["agents"].as_array().expect("agents");
+    assert_eq!(agents.len(), 2);
+    assert_eq!(agents[0]["own"], true);
+    assert_eq!(
+        agents[0]["id"], "custom",
+        "a program is a custom shell: {agents:?}"
+    );
+    assert!(agents[0]["notice"].is_string(), "{agents:?}");
+    assert_eq!(agents[1]["own"], false);
+    assert!(agents[1]["problem"].is_string(), "{agents:?}");
+    // What a terminal could start is for a key that may open one or may read what is installed here.
+    for (grant, allowed) in [
+        (Some(Grant::Terminal), true),
+        (Some(Grant::StoreRead), true),
+        (Some(Grant::LedgerRead), false),
+        (None, false),
+    ] {
+        let grants: Vec<Grant> = grant.into_iter().collect();
+        let key = peer("sha256:aa", &grants);
+        let answer = ask(&control, &key, "shell/list", json!({}));
+        assert_eq!(
+            answer.get("result").is_some(),
+            allowed,
+            "{grant:?}: {answer}"
+        );
+    }
+}
+
 /// Sends `requests` on a link served as `caller`, and the answer to each.
 fn over_a_link(control: &Control, caller: &Caller, requests: &[(&str, Value)]) -> Vec<Value> {
     let stopped = alloc::sync::Arc::new(core::sync::atomic::AtomicBool::new(false));

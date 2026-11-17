@@ -338,6 +338,8 @@ pub(crate) struct Control {
     files: Files,
     /// The shells this host runs for the person.
     terminals: Terminals,
+    /// What canoa.cfg says of which shell the host, a terminal and each agent use.
+    shells: crate::shells::Plan,
     /// The speech providers canoa.cfg defines, and the recordings open on them.
     speech: speech::Speech,
     overlays: Arc<Overlays>,
@@ -450,6 +452,7 @@ impl Control {
             entries,
             files: Files::default(),
             terminals: Terminals::default(),
+            shells: crate::shells::Plan::default(),
             speech: speech::Speech::default(),
             overlays: Arc::new(Overlays::default()),
             registry: Registry::default(),
@@ -496,6 +499,13 @@ impl Control {
     #[must_use]
     pub(crate) fn with_terminals(mut self, terminals: Terminals) -> Self {
         self.terminals = terminals;
+        self
+    }
+
+    /// Answers `shell/list` from what canoa.cfg says of shells.
+    #[must_use]
+    pub(crate) fn with_shells(mut self, shells: crate::shells::Plan) -> Self {
+        self.shells = shells;
         self
     }
 
@@ -974,6 +984,14 @@ impl Control {
                     self.speech.call(caller, &self.files, method, &params)
                 }
                 Some("host/grants") => Ok(caller.grants_json()),
+                // The shells a terminal could start, and which one each agent is told to use: for a key that may open a terminal
+                // or read what programs are installed here (their paths are in `store/report` too).
+                Some("shell/list") => if caller.may(Grant::StoreRead) {
+                    Ok(())
+                } else {
+                    allow(caller, Grant::Terminal)
+                }
+                .map(|()| self.shells.report(&crate::shells::Lookup::here())),
                 Some(method) if method.starts_with("terminal/") => allow(caller, Grant::Terminal)
                     .and_then(|()| {
                         Err((

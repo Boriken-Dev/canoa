@@ -582,6 +582,90 @@ fn a_shell_whose_path_has_spaces_starts() {
     std::fs::remove_dir_all(&folder).expect("removed");
 }
 
+/// A folder with a stand-in PowerShell and a stand-in bash on it, which are this machine's own shell under those names, and the
+/// lookup that finds them there and nowhere else.
+fn fixture_shells(name: &str) -> (PathBuf, crate::shells::Lookup) {
+    let folder = std::env::temp_dir().join(name);
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).expect("folder");
+    for stand_in in if cfg!(windows) {
+        ["pwsh.exe", "bash.exe"]
+    } else {
+        ["pwsh", "bash"]
+    } {
+        // A link and not a copy on Unix: a file another test's fork still holds open for writing cannot be executed.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(shell(), folder.join(stand_in)).expect("linked");
+        #[cfg(not(unix))]
+        std::fs::copy(shell(), folder.join(stand_in)).expect("copied");
+    }
+    let lookup = crate::shells::Lookup {
+        windows: cfg!(windows),
+        path: vec![folder.clone()],
+        ..crate::shells::Lookup::default()
+    };
+    (folder, lookup)
+}
+
+#[test]
+fn a_request_names_the_shell_by_an_id_of_those_found_and_one_not_found_is_refused() {
+    let (folder, lookup) = fixture_shells("canoa-shell-ids-3117");
+    let control =
+        control(Terminals::new(Some(shell()), Some(std::env::temp_dir())).finding(lookup));
+    let ((), _) = on_a_link(&control, &Caller::Owner, |page| {
+        for (id, file) in [("pwsh", "pwsh"), ("bash", "bash")] {
+            let answer = page.ask("terminal/open", &json!({"shell": id}));
+            let started = answer["result"]["shell"]
+                .as_str()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let wanted = folder.join(file).to_string_lossy().to_ascii_lowercase();
+            assert!(
+                started.starts_with(&wanted),
+                "{id} starts {wanted}, not {started}: {answer}"
+            );
+            let opened = answer["result"]["id"].as_u64().expect("an id");
+            page.type_in(opened, &say(&format!("from_{id}")));
+            page.until_output(&format!("canoa_from_{id}"));
+        }
+        let unknown = page.ask("terminal/open", &json!({"shell": "wsl"}));
+        assert_eq!(unknown["error"]["code"], -32002, "{unknown}");
+        assert!(
+            unknown["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("wsl") && message.contains("shell/list")),
+            "{unknown}"
+        );
+        // A request names an id of the list and never a program.
+        let program = page.ask("terminal/open", &json!({"shell": shell()}));
+        assert_eq!(program["error"]["code"], -32002, "{program}");
+        let bad = page.ask("terminal/open", &json!({"shell": 7}));
+        assert_eq!(bad["error"]["code"], -32602, "{bad}");
+    });
+    assert_eq!(control.terminals().running(), 0);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn canoa_cfg_names_the_hosts_shell_by_an_id_too() {
+    let (folder, lookup) = fixture_shells("canoa-shell-setting-3117");
+    let control = control(
+        Terminals::new(Some("pwsh".to_owned()), Some(std::env::temp_dir())).finding(lookup),
+    );
+    let ((), _) = on_a_link(&control, &Caller::Owner, |page| {
+        let answer = page.ask("terminal/open", &json!({}));
+        let started = answer["result"]["shell"]
+            .as_str()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        assert!(
+            started.starts_with(&folder.join("pwsh").to_string_lossy().to_ascii_lowercase()),
+            "{answer}"
+        );
+    });
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 /// A new folder on this machine's own administrative share.
 #[cfg(windows)]
 fn share_folder(name: &str) -> PathBuf {

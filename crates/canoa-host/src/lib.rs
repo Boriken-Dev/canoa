@@ -34,6 +34,7 @@ mod scope;
 mod secrets;
 pub mod serve;
 mod share;
+pub mod shells;
 mod site;
 mod sources;
 pub mod spawn;

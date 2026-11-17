@@ -1190,3 +1190,107 @@ fn a_claude_entry_offers_off_and_the_two_lifetimes_under_the_providers_names() {
         "{said}"
     );
 }
+
+/// A stand-in named as a bash is (`bash.exe`, else `bash`), alone in a folder of its own: what a shell setting can name.
+fn fake_bash(scratch: &Scratch, folder: &str) -> PathBuf {
+    let dir = scratch.0.join(folder);
+    std::fs::create_dir_all(&dir).expect("a folder");
+    let path = dir.join(format!("bash{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(example("harness_standin", false), &path).expect("the stand-in is copied");
+    path
+}
+
+/// The variable Claude Code's documentation names for the bash it runs commands with on this system.
+const fn shell_variable() -> &'static str {
+    if cfg!(windows) {
+        "CLAUDE_CODE_GIT_BASH_PATH"
+    } else {
+        "CLAUDE_CODE_SHELL"
+    }
+}
+
+/// Starts a session on `entry`, has its one prompt answered, and the record the command line made when it started.
+fn started_by(host: &Host, entry: &str, record: &Path) -> Value {
+    let before = records(record).len();
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url(entry), &client, host.peer, |rpc| {
+        rpc.initialize().expect("initialize is answered");
+        let opened = rpc
+            .request("session/new", json!({"cwd": dir, "mcpServers": []}))
+            .expect("a session opens");
+        let session = opened["sessionId"].as_str().expect("an id").to_owned();
+        prompt_answering(rpc, &session, "write it", "allow_once");
+    })
+    .expect("a paired key is served");
+    records(record)
+        .into_iter()
+        .nth(before)
+        .unwrap_or_else(|| panic!("{entry} started no command line"))
+}
+
+#[test]
+fn an_entrys_shell_reaches_claude_code_as_its_variable_and_the_hosts_shell_reaches_the_entry_that_names_none()
+ {
+    let scratch = Scratch::new();
+    let claude = standin(&scratch, "claude");
+    let (record, mut env) = env_of(&scratch);
+    env[1] = (
+        "STANDIN_ENV",
+        OsString::from("CLAUDE_CODE_GIT_BASH_PATH,CLAUDE_CODE_SHELL"),
+    );
+    let (hosts, own) = (fake_bash(&scratch, "hosts"), fake_bash(&scratch, "own"));
+    let config = format!(
+        "[host]\nshell = {hosts}\n\
+         [host.agents.Own]\nharness = \"claude\"\nexecutable = {exe}\nshell = {own}\n\
+         [host.agents.Inherits]\nharness = \"claude\"\nexecutable = {exe}\n\
+         [host.agents.Profiled]\nharness = \"claude\"\nexecutable = {exe}\nprofiles = [\"main\"]\n\
+         [host.profiles.main]\ncontext = {{ text = \"Context.\" }}\n",
+        hosts = quoted(&hosts.to_string_lossy()),
+        own = quoted(&own.to_string_lossy()),
+        exe = quoted(&claude.to_string_lossy()),
+    );
+    let host = Host::start_in(scratch, &config, 3, &env);
+    let wanted = |path: &Path| json!(path.to_string_lossy());
+    let own_start = started_by(&host, "Own", &record);
+    assert_eq!(
+        own_start["env"][shell_variable()],
+        wanted(&own),
+        "the entry's own shell: {own_start}"
+    );
+    let inherited = started_by(&host, "Inherits", &record);
+    assert_eq!(
+        inherited["env"][shell_variable()],
+        wanted(&hosts),
+        "the host's shell, for an entry that names none: {inherited}"
+    );
+    let profiled = started_by(&host, "Profiled", &record);
+    assert_eq!(
+        profiled["env"][shell_variable()],
+        wanted(&hosts),
+        "a profiled connection is told it too: {profiled}"
+    );
+    if cfg!(windows) {
+        assert_ne!(
+            own_start["env"]["CLAUDE_CODE_SHELL"],
+            wanted(&own),
+            "Windows takes the Git Bash variable only"
+        );
+    }
+}
+
+#[test]
+fn an_entry_whose_own_shell_is_not_here_does_not_start_and_names_the_entry() {
+    let scratch = Scratch::new();
+    let claude = standin(&scratch, "claude");
+    let config = format!(
+        "[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\nshell = \"canoa-no-such-shell-3117\"\n",
+        quoted(&claude.to_string_lossy())
+    );
+    let failure = bind_refused(&config);
+    assert!(
+        failure.contains("Claude") && failure.contains("canoa-no-such-shell-3117"),
+        "{failure}"
+    );
+}

@@ -1260,6 +1260,35 @@ cache_lifetime = "short"
 }
 
 #[test]
+fn a_harness_entry_names_its_own_shell_and_a_bad_one_is_refused_naming_the_key() {
+    let config = parse(
+        r#"
+[host]
+shell = "pwsh"
+[host.agents.Claude]
+harness = "claude"
+shell = "git-bash"
+[host.agents.Plain]
+harness = "codex"
+"#,
+    )
+    .expect("parses");
+    let shell = |name: &str| config.entry(name).expect("an entry").shell.clone();
+    assert_eq!(shell("Claude").as_deref(), Some("git-bash"));
+    assert_eq!(shell("Plain"), None, "unset takes [host] shell");
+    assert_eq!(config.shell.as_deref(), Some("pwsh"));
+    for text in [
+        "[host.agents.a]\nharness = \"claude\"\nshell = \"\"\n",
+        "[host.agents.a]\nharness = \"claude\"\nshell = \"a\\u0001b\"\n",
+        "[host.agents.a]\nprogram = \"x\"\nshell = \"git-bash\"\n",
+        "[host.agents.a]\nharness = \"x\"\nlibrary = \"l\"\nshell = \"git-bash\"\n",
+    ] {
+        let error = parse(text).expect_err(text).to_string();
+        assert!(error.contains("shell"), "{text}: {error}");
+    }
+}
+
+#[test]
 fn the_top_level_profile_overlays_and_an_agents_layer_and_choices_are_read_for_the_hosts_own_sources()
  {
     let config = parse(

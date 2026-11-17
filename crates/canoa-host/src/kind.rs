@@ -105,6 +105,9 @@ pub(crate) struct Harness {
     lifetime: Option<CacheLifetime>,
     /// The entry's name, which the log carries with each notice its connections' providers give.
     entry: String,
+    /// What the shell the entry uses is told to the harness with: variables added to what each connection starts with, a
+    /// profile's own of the same name taking the place of them.
+    shell_env: Vec<(String, String)>,
     /// Dropped after the instances, which point into what it loaded.
     _registry: Arc<Registry>,
 }
@@ -192,6 +195,7 @@ impl Harness {
             accounts: None,
             lifetime: None,
             entry: String::new(),
+            shell_env: Vec::new(),
             _registry: Arc::clone(registry),
         })
     }
@@ -209,6 +213,12 @@ impl Harness {
         move |notice| {
             tracing::info!(entry, kind = notice.kind.as_str(), "{}", notice.text);
         }
+    }
+
+    /// This harness starting each connection's program with `env` added: how the shell the entry uses is told to it.
+    pub(crate) fn with_shell_env(mut self, env: Vec<(String, String)>) -> Self {
+        self.shell_env = env;
+        self
     }
 
     /// This harness asking `lifetime` of its provider for the sessions whose client chooses none.
@@ -480,9 +490,14 @@ impl Harness {
         }
         let mut source = self.accounts.as_ref().map_or(0, |offer| offer.sources.0);
         let harness = match profile {
-            Some((environment, skills)) => {
+            Some((mut environment, skills)) => {
                 if self.profiled.is_some() {
                     source = self.accounts.as_ref().map_or(0, |offer| offer.sources.1);
+                }
+                for (name, value) in &self.shell_env {
+                    if environment.get(name).is_none() {
+                        environment.insert(name.clone(), value.clone());
+                    }
                 }
                 request = request.environment(environment);
                 if !self.roots.is_empty() {
@@ -490,7 +505,12 @@ impl Harness {
                 }
                 Arc::clone(self.profiled.as_ref().unwrap_or(&self.plain))
             }
-            None => Arc::clone(&self.plain),
+            None => {
+                if !self.shell_env.is_empty() {
+                    request = request.environment(Environment::from_iter(self.shell_env.clone()));
+                }
+                Arc::clone(&self.plain)
+            }
         };
         request = request.cache_lifetime(honoured(harness.as_ref(), lifetime));
         let mut watch = None;

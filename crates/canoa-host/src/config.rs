@@ -1026,6 +1026,10 @@ pub struct Entry {
     /// (`shared_permission_window_seconds`); `None` (unset or `0`) logs nothing. The request stays open: nothing is answered
     /// for the people attached.
     pub shared_permission_window: Option<core::time::Duration>,
+    /// The shell a harness entry's command line is told to use (`shell = "git-bash"`): an id `shell/list` gives, or a program (an
+    /// absolute path, or a name found on the `PATH`). `None` takes `[host] shell`. Each harness is told as its documentation
+    /// allows (`shells::for_harness`), and one that takes no setting is left alone and the host's log says so.
+    pub shell: Option<String>,
 }
 
 /// How long a shared session with no client attached is kept unless the entry says otherwise.
@@ -1616,6 +1620,7 @@ struct RawAgent {
     setting_sources: Option<Vec<String>>,
     modes: Option<Vec<String>>,
     cache_lifetime: Option<String>,
+    shell: Option<String>,
     profiles: Option<Vec<String>>,
     own_profile: Option<bool>,
     accounts: Option<Vec<String>>,
@@ -1969,6 +1974,16 @@ impl Config {
                     })
                 })
                 .transpose()?;
+            let shell = agent.shell.clone();
+            if shell
+                .as_deref()
+                .is_some_and(|shell| shell.trim().is_empty() || shell.chars().any(char::is_control))
+            {
+                return Err(invalid(
+                    &name,
+                    "shell is the id of a shell/list shell, or the name or path of a program",
+                ));
+            }
             let kind = match (agent.program, agent.harness) {
                 (Some(program), None) => {
                     if program.is_empty() {
@@ -1985,6 +2000,7 @@ impl Config {
                         (asks.setting_sources.is_some(), "setting_sources"),
                         (asks.modes.is_some(), "modes"),
                         (agent.cache_lifetime.is_some(), "cache_lifetime"),
+                        (agent.shell.is_some(), "shell"),
                         (agent.library.is_some(), "library"),
                         (agent.source.is_some(), "source"),
                         (agent.source_settings.is_some(), "source_settings"),
@@ -2086,6 +2102,7 @@ impl Config {
                             (asks.setting_sources.is_some(), "setting_sources"),
                             (asks.modes.is_some(), "modes"),
                             (agent.executable.is_some(), "executable"),
+                            (agent.shell.is_some(), "shell"),
                         ] {
                             if set {
                                 return Err(invalid(
@@ -2135,6 +2152,7 @@ impl Config {
             served.shared = shared;
             served.shared_idle = shared_idle;
             served.shared_permission_window = shared_permission_window;
+            served.shell = shell;
             entries.push(served);
         }
         for (name, provider) in host.providers {
@@ -3694,6 +3712,7 @@ fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, Conf
         shared: false,
         shared_idle: None,
         shared_permission_window: None,
+        shell: None,
     })
 }
 
