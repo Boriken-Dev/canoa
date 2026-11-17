@@ -244,7 +244,9 @@ The pane puts the first relation in the address of the frame (`/office/app/?mode
 how the app reads it at load. After that it tells the app through a message (`{"canoa":"relation","relation":{...}}`, a string
 posted to the frame, which accepts it only from the page that frames it and of its own origin). The app says `ready` once it
 listens, and again if it starts over. So in a pinned Outlook pane moving between messages switches the list of related sessions,
-and the open conversation stays where it is. The pane offers nothing about the open session itself.
+and the open conversation stays where it is. The pane offers nothing about the open session itself. The address also carries
+`client=outlook`, `word`, `excel` or `powerpoint` (what Office.js says the host is), since a Word and an Excel document relate alike:
+the app sends that kind to the host, whose canoa.cfg may give each kind a default loadout (`[defaults.clients]`).
 
 ## Sign-in carried through the Office dialog
 

@@ -127,14 +127,18 @@ export function sameRelation(a, b) {
 
 /**
  * The address of the chat-only app for `relation` (or for none), on `origin`: `mode=chat`, and `relation=<kind>:<key>` with
- * `label=` as the app's `ClientMode` reads them.
+ * `label=` as the app's `ClientMode` reads them. `client` is the kind of Office application the pane is in (`outlook`, `word`,
+ * `excel` or `powerpoint`), which canoa.cfg may give a default loadout of its own; a Word and an Excel pane relate to documents
+ * alike, so only this tells them apart.
  * @param {string} origin
  * @param {{kind: string, key: string, label?: string}|null} relation
+ * @param {string} [client]
  * @returns {string}
  */
-export function appAddress(origin, relation) {
+export function appAddress(origin, relation, client) {
   const address = new URL(APP_PATH, origin);
   address.searchParams.set('mode', 'chat');
+  if (client) address.searchParams.set('client', client);
   if (relation) {
     address.searchParams.set('relation', `${relation.kind}:${relation.key}`);
     if (relation.label) address.searchParams.set('label', relation.label);

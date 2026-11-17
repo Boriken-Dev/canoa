@@ -5,7 +5,7 @@ ship as a package; `canoa-host` includes the pages in `taskpane/` at compile tim
 serves them under `/office/` when `[host.web] office = true`. [`README.md`](README.md) says how to turn it on and sideload it.
 
 - `taskpane/relation.js` is pure and imports nothing from Office.js: keep it that way, it is what `npm test` covers. The relation
-  kinds (`conversation`, `document`) and the address parameters (`mode=chat`, `relation=<kind>:<key>`, `label=`) are the app's
+  kinds (`conversation`, `document`) and the address parameters (`mode=chat`, `relation=<kind>:<key>`, `label=`, `client=`) are the app's
   (`app/lib/client/`): change both sides together.
 - The pane and the app talk by two short JSON strings through `postMessage` (`relationMessage`, `parsePaneMessage` in
   `relation.js`; `app/lib/client/pane_message.dart`): change both sides together. The portal's half is

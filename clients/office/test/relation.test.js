@@ -127,6 +127,16 @@ test('the app address asks for the chat alone and carries the relation as the ap
   assert.equal(none.search, '?mode=chat', 'a new message or an unsaved document is unrelated');
 });
 
+test('the app address says which kind of Office application the pane is in, with or without a relation', async () => {
+  const relation = await relationForDocument({ app: 'word', url: 'https://x.example/a.docx' });
+  const word = new URL(appAddress('https://canoa.example', relation, 'word'));
+  assert.equal(word.searchParams.get('client'), 'word');
+  assert.equal(word.searchParams.get('mode'), 'chat');
+  assert.equal(word.searchParams.get('relation'), `document:${relation.key}`);
+  assert.equal(new URL(appAddress('https://canoa.example', null, 'excel')).search, '?mode=chat&client=excel');
+  assert.equal(new URL(appAddress('https://canoa.example', relation)).searchParams.has('client'), false);
+});
+
 test('a relation message carries the kind, the key and what is set of scope and label, and none is null', () => {
   const message = JSON.parse(relationMessage({ kind: CONVERSATION, key: 'abc', label: 'Plan', extra: 'no' }));
   assert.deepEqual(message, { canoa: 'relation', relation: { kind: CONVERSATION, key: 'abc', label: 'Plan' } });

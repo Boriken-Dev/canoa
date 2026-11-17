@@ -29,6 +29,8 @@ let listening = false;
 let loaded = false;
 /** `open` (no sign-in on this host), `signed-in` or `signed-out`, from the host's answer. */
 let gate = 'open';
+/** The kind of Office application this pane is in (`outlook`, `word`, `excel`, `powerpoint`), once Office.js has said. */
+let client;
 
 /** Sets what the bar says. */
 function say(text) {
@@ -54,7 +56,7 @@ function show(relation) {
     loaded = true;
     listening = false;
     frame.hidden = false;
-    frame.src = appAddress(origin, relation);
+    frame.src = appAddress(origin, relation, client);
     return;
   }
   tell(relation);
@@ -224,11 +226,13 @@ if (typeof Office === 'undefined') {
     signIn.addEventListener('click', openSignIn);
     if (onThisComputer) watchHost();
     if (info.host === Office.HostType.Outlook) {
+      client = 'outlook';
       refresh = async () => show(await mailRelation());
       // A pinned pane stays open while the person moves between messages; the item is already the new one when this runs.
       Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => void refresh());
     } else if (info.host !== undefined && info.host !== null) {
       const app = String(info.host).toLowerCase();
+      client = app;
       refresh = async () => show(await documentRelation(app));
     } else {
       say('This Office application is not known');
