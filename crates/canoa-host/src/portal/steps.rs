@@ -571,6 +571,34 @@ pub fn advance(cx: &Cx<'_>, taken: Taken, pending: Option<(String, Pending)>) ->
     } else {
         None
     };
+    // A sign-in made for the Office dialog opens no session here: the dialog shares no cookies with the task pane, which is what
+    // needs one. It leaves a handoff, and the string that names it goes back to the dialog's page.
+    if inner.office.is_some() && request.cookie(OFFICE_COOKIE).is_some() {
+        let handed = inner.handoffs.open(session::Handoff {
+            user: taken.user.clone(),
+            uid: taken.uid,
+            method,
+            password_at: state.password_at,
+            fingerprint: state.fingerprint.clone(),
+            done: state.done.clone(),
+            code_made,
+        });
+        taken.guard.succeeded(inner);
+        let Some(string) = handed else {
+            return Advance::Respond((cx.fail)(503, page::Notice::Busy, None));
+        };
+        let ways: Vec<&str> = state.done.iter().map(|done| done.method.as_str()).collect();
+        tracing::info!(
+            "{} signed in from {address} by {} for the Office dialog",
+            taken.user,
+            ways.join(" and ")
+        );
+        return Advance::Respond(
+            Response::redirect(&format!("{OFFICE_DONE}#done={string}"))
+                .with("Set-Cookie", office::clear_marker())
+                .with("Set-Cookie", clear_pending()),
+        );
+    }
     let Some((session_token, _)) = inner.sessions.open_after(
         &taken.user,
         taken.uid,

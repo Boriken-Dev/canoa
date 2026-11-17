@@ -21,8 +21,7 @@ use crate::config::{WebConfig, WebMode, WebTls};
 use crate::serve::{Gate, Listening, Serving};
 
 mod office;
-pub(crate) use office::frame_source;
-use office::{Office, Route};
+pub(crate) use office::{ICON_FILE, Office, Route, frame_source};
 
 /// Where the site is served when canoa.cfg does not say: loopback, port 7800.
 pub const DEFAULT_LISTEN: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 7800);
@@ -1248,10 +1247,7 @@ fn answer(shared: &Shared, request: &httparse::Request<'_, '_>) -> (Answer, bool
     // The app's page and the icon are the site's own files, under another path.
     let segments = match &office {
         Some((_, Route::App)) => vec!["index.html".to_owned()],
-        Some((_, Route::Icon)) => office::ICON_FILE
-            .iter()
-            .map(|part| (*part).to_owned())
-            .collect(),
+        Some((_, Route::Icon)) => ICON_FILE.iter().map(|part| (*part).to_owned()).collect(),
         _ => segments,
     };
     let own = office

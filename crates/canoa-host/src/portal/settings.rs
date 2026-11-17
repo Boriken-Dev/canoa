@@ -192,6 +192,14 @@ pub struct Settings {
     pub keep_alive: Duration,
     /// `max_requests`: requests one connection serves.
     pub max_requests: usize,
+    /// `office`: serve the Office add-in's pages under `/office/` and let a sign-in end in the Office dialog, with a cookie the
+    /// task pane's frame can carry. Off by default: with it off `/office/...` is an ordinary path of the signed-in site.
+    pub office: bool,
+    /// `office_frames`: with `office`, origins besides the built-in ones that may frame the add-in's pages; each `https`, a host
+    /// that may start with `*.` and then holds a dot more, and an optional port.
+    pub office_frames: Vec<String>,
+    /// `office_handoff_seconds`: how long a sign-in that ended in the Office dialog waits for the task pane to claim it.
+    pub office_handoff: Duration,
 }
 
 impl Default for Settings {
@@ -243,6 +251,9 @@ impl Default for Settings {
             request: Duration::from_secs(10),
             keep_alive: Duration::from_secs(30),
             max_requests: 1000,
+            office: false,
+            office_frames: Vec::new(),
+            office_handoff: Duration::from_secs(60),
         }
     }
 }
@@ -322,6 +333,9 @@ struct Raw {
     request_seconds: Option<u64>,
     keep_alive_seconds: Option<u64>,
     max_requests: Option<usize>,
+    office: Option<bool>,
+    office_frames: Option<Vec<String>>,
+    office_handoff_seconds: Option<u64>,
 }
 
 impl Settings {
@@ -460,6 +474,9 @@ impl Settings {
         settings.max_relays_per_user = count(raw.max_relays_per_user, settings.max_relays_per_user);
         settings.max_message = count(raw.max_message_bytes, settings.max_message);
         settings.max_requests = count(raw.max_requests, settings.max_requests);
+        settings.office = raw.office.unwrap_or(settings.office);
+        settings.office_frames = raw.office_frames.unwrap_or(settings.office_frames);
+        settings.office_handoff = seconds(raw.office_handoff_seconds, settings.office_handoff);
         settings.check()?;
         Ok(settings)
     }
@@ -539,6 +556,16 @@ impl Settings {
         if self.min_uid == 0 {
             return Err("min_uid: at least 1; root never signs in".to_owned());
         }
+        if !self
+            .office_frames
+            .iter()
+            .all(|source| crate::web::frame_source(source))
+        {
+            return Err(
+                "office_frames: each an https origin, a host that may start with *. and holds a dot more, with an optional port"
+                    .to_owned(),
+            );
+        }
         for (name, zero) in [
             ("max_connections", self.max_connections == 0),
             ("max_sign_ins", self.max_sign_ins == 0),
@@ -570,6 +597,7 @@ impl Settings {
             ("failure_window_seconds", self.failure_window.is_zero()),
             ("request_seconds", self.request.is_zero()),
             ("keep_alive_seconds", self.keep_alive.is_zero()),
+            ("office_handoff_seconds", self.office_handoff.is_zero()),
         ] {
             if zero {
                 return Err(format!("{name}: at least 1"));

@@ -10,6 +10,7 @@ mod access;
 mod conn;
 mod factor;
 mod instance;
+mod office;
 mod page;
 mod policy;
 mod relay;
@@ -49,6 +50,17 @@ use crate::web::{self, Body, Lookup};
 /// The session's cookie. The `__Host-` prefix makes a browser refuse it unless it is `Secure`, for the whole site and with no
 /// `Domain`, so no sibling site can set it.
 pub const COOKIE: &str = "__Host-canoa";
+/// The session cookie of an Office task pane's frame, which a third-party context only carries as `SameSite=None; Partitioned`.
+/// It names the same kind of session as [`COOKIE`], made by claiming a sign-in that ended in the Office dialog.
+pub const PANE_COOKIE: &str = "__Host-canoa-pane";
+/// Set while a browser signs in for the Office dialog, so that the sign-in ends there and not at the site.
+pub const OFFICE_COOKIE: &str = "__Host-canoa-office";
+/// Where the Office dialog starts a sign-in.
+pub const OFFICE_SIGN_IN: &str = "/office/signin";
+/// Where the task pane asks whether it is signed in, and claims a sign-in the dialog made.
+pub const OFFICE_SESSION: &str = "/office/session";
+/// The page a sign-in ends at in the Office dialog; its fragment carries the string that claims the sign-in.
+pub const OFFICE_DONE: &str = "/office/dialog.html";
 /// Where a browser signs in.
 pub const LOGIN: &str = "/portal/login";
 /// Where a browser asks which ways in the portal accepts; no cookie is needed.
@@ -99,6 +111,10 @@ struct Inner {
     /// The unlock time the portal last acted on for each account.
     unlocked: Mutex<alloc::collections::BTreeMap<u32, i64>>,
     policy: policy::Policy,
+    /// The add-in's routes and their policies, when `office` asks for them.
+    office: Option<web::Office>,
+    /// The sign-ins that ended in the Office dialog and wait for the task pane's frame to claim them.
+    handoffs: session::Handoffs,
     instances: Arc<Instances>,
     accounts: Arc<dyn Accounts>,
     stopped: Arc<AtomicBool>,
@@ -201,6 +217,16 @@ impl Portal {
             settings.max_hosts,
         );
         instances.adopt();
+        if settings.office {
+            tracing::warn!(
+                "non-default: portal office serves the Office add-in under /office/: Office on the web may frame its pages, and a sign-in may end in the Office dialog with a cookie the task pane's frame carries"
+            );
+            for source in &settings.office_frames {
+                tracing::warn!(
+                    "non-default: portal office_frames lets {source} frame the Office add-in's pages"
+                );
+            }
+        }
         let inner = Inner {
             sessions: Sessions::new(
                 settings.session,
@@ -225,6 +251,14 @@ impl Portal {
             .with_person_limit(settings.max_factor_failures_per_person)
             .with_person_daily(settings.max_factor_failures_per_day, settings.factor_day),
             policy,
+            office: settings
+                .office
+                .then(|| web::Office::new(&[], &settings.office_frames)),
+            handoffs: session::Handoffs::new(
+                settings.office_handoff,
+                settings.max_sessions,
+                settings.max_sessions_per_user,
+            ),
             root,
             instances,
             accounts,
@@ -369,8 +403,9 @@ impl Request {
         self.target.split_once('?').map_or("", |(_, query)| query)
     }
 
+    /// The session the browser holds: the site's cookie, else the task pane's.
     fn token(&self) -> Option<String> {
-        self.cookie(COOKIE)
+        self.cookie(COOKIE).or_else(|| self.cookie(PANE_COOKIE))
     }
 
     /// The value of the cookie called `cookie`; none when the browser sent two of that name, since it cannot be told which is
@@ -620,8 +655,8 @@ fn write_response(
                 .map(|(name, value)| (*name, value.clone())),
         )
     {
-        // A value written from a request is never allowed a line break.
-        if value.contains(['\r', '\n']) {
+        // A value written from a request is never allowed a line break, and an empty one means the header is not sent.
+        if value.is_empty() || value.contains(['\r', '\n']) {
             continue;
         }
         text.push_str(&format!("{name}: {value}\r\n"));
@@ -1002,11 +1037,24 @@ fn resume(
 }
 
 fn answer(inner: &Inner, request: &Request, conn: &Conn) -> Response {
+    let response = route(inner, request, conn);
+    // The Office dialog is a window another origin opened, which Office talks to through that link: while a browser signs in
+    // there, no page of the portal cuts it with `Cross-Origin-Opener-Policy`.
+    if inner.office.is_some() && request.cookie(OFFICE_COOKIE).is_some() {
+        return response.replacing("Cross-Origin-Opener-Policy", String::new());
+    }
+    response
+}
+
+fn route(inner: &Inner, request: &Request, conn: &Conn) -> Response {
     let started = Instant::now();
     if !host_ok(inner, request) || !request.target.starts_with('/') {
         return Response::refusal(421);
     }
     let path = request.path();
+    if let Some(response) = office::answer(inner, request, conn, path) {
+        return response;
+    }
     match (request.method.as_str(), path) {
         ("GET" | "HEAD", LOGIN) => {
             let notice = match request.query() {
@@ -1045,13 +1093,22 @@ fn answer(inner: &Inner, request: &Request, conn: &Conn) -> Response {
             if !from_own_page(request, conn) {
                 return Response::refusal(403);
             }
-            if let Some(token) = request.token() {
-                inner.sessions.close(&token);
+            for cookie in [COOKIE, PANE_COOKIE] {
+                if let Some(token) = request.cookie(cookie) {
+                    inner.sessions.close(&token);
+                }
             }
-            Response::redirect(LOGIN).with(
-                "Set-Cookie",
-                format!("{COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"),
-            )
+            Response::redirect(LOGIN)
+                .with(
+                    "Set-Cookie",
+                    format!("{COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"),
+                )
+                .with(
+                    "Set-Cookie",
+                    format!(
+                        "{PANE_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=None; Partitioned; Max-Age=0"
+                    ),
+                )
         }
         ("GET", "/portal/session") => match authed(inner, request) {
             Some(session) => match resume(inner, request, conn, &session) {
@@ -1462,6 +1519,17 @@ fn site(inner: &Inner, request: &Request, public: bool) -> Response {
     let Some(segments) = web::segments(request.path()) else {
         return Response::refusal(404);
     };
+    site_file(inner, request, segments, public, Vec::new())
+}
+
+/// The file of the site that `segments` name, with `own` among its headers.
+fn site_file(
+    inner: &Inner,
+    request: &Request,
+    segments: Vec<String>,
+    public: bool,
+    own: Vec<(&'static str, String)>,
+) -> Response {
     let found = match web::lookup_dir(&inner.root, &segments) {
         Lookup::Found(found) => Some((found, segments.last().cloned())),
         Lookup::Refused => None,
@@ -1484,6 +1552,7 @@ fn site(inner: &Inner, request: &Request, public: bool) -> Response {
         web::cache_control(&segments, &name, web::Limits::default().immutable_age, true)
     };
     let mut headers = web::validators(&found, caching, &name);
+    headers.extend(own);
     if web::not_modified(
         request.header("if-none-match"),
         request.header("if-modified-since"),

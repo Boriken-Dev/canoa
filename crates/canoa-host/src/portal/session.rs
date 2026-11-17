@@ -426,6 +426,111 @@ impl Pendings {
     }
 }
 
+/// A sign-in that finished in the Office dialog and waits for the task pane to claim it.
+///
+/// The dialog is a window of its own, whose cookies the task pane's frame does not share, and the only thing that crosses from
+/// one to the other is a string Office carries. So a sign-in that ends in the dialog opens no session there: it leaves this, and
+/// the string names it. The pane's frame claims it once, and the session opens for the frame's own cookie.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Handoff {
+    /// The account the steps named, as the system spells it.
+    pub user: String,
+    /// Its user id.
+    pub uid: u32,
+    /// The method the session will record.
+    pub method: Option<Method>,
+    /// When a password step was passed, if one was.
+    pub password_at: Option<Instant>,
+    /// The fingerprint of the certificate a step carried.
+    pub fingerprint: Option<String>,
+    /// The steps that signed it in.
+    pub done: Vec<Factor>,
+    /// When the one-time code that signed it in was set up, if one did.
+    pub code_made: Option<i64>,
+}
+
+struct KeptHandoff {
+    handoff: Handoff,
+    id: u64,
+    until: Instant,
+}
+
+/// The sign-ins waiting to be claimed, by the digest of the string the dialog sent: single use, short-lived, bounded and held in
+/// memory only.
+pub struct Handoffs {
+    lifetime: Duration,
+    limit: usize,
+    per_user: usize,
+    state: Mutex<(u64, HashMap<[u8; 32], KeptHandoff>)>,
+}
+
+impl core::fmt::Debug for Handoffs {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Handoffs").finish_non_exhaustive()
+    }
+}
+
+impl Handoffs {
+    /// Handoffs that wait `lifetime`, `limit` at once and `per_user` for one account.
+    #[must_use]
+    pub fn new(lifetime: Duration, limit: usize, per_user: usize) -> Self {
+        Self {
+            lifetime,
+            limit,
+            per_user: per_user.max(1),
+            state: Mutex::new((0, HashMap::new())),
+        }
+    }
+
+    /// Keeps `handoff` and answers the string that claims it, ending the oldest of the same account when it holds its share
+    /// already. `None` when the table is full of live ones of others.
+    pub fn open(&self, handoff: Handoff) -> Option<String> {
+        let mut bytes = [0_u8; TOKEN_BYTES];
+        getrandom::fill(&mut bytes).ok()?;
+        let token = BASE64URL_NOPAD.encode(&bytes);
+        let now = Instant::now();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let (next, map) = &mut *state;
+        map.retain(|_, kept| kept.until > now);
+        let mut mine: Vec<([u8; 32], u64)> = map
+            .iter()
+            .filter(|(_, kept)| kept.handoff.user == handoff.user)
+            .map(|(key, kept)| (*key, kept.id))
+            .collect();
+        if mine.len() >= self.per_user {
+            mine.sort_by_key(|(_, id)| *id);
+            for (key, _) in mine.iter().take(mine.len() + 1 - self.per_user) {
+                map.remove(key);
+            }
+        }
+        if map.len() >= self.limit {
+            return None;
+        }
+        *next += 1;
+        let id = *next;
+        map.insert(
+            digest(&token),
+            KeptHandoff {
+                handoff,
+                id,
+                until: now.checked_add(self.lifetime)?,
+            },
+        );
+        Some(token)
+    }
+
+    /// The handoff `token` names, taken: it is gone whether or not it was still valid, so a string is good for one claim.
+    pub fn take(&self, token: &str) -> Option<Handoff> {
+        if token.is_empty() || token.len() > 128 {
+            return None;
+        }
+        let now = Instant::now();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let kept = state.1.remove(&digest(token))?;
+        (kept.until > now).then_some(kept.handoff)
+    }
+}
+
 /// The failed sign-ins inside a window, by address with account, by address and by account.
 pub struct Throttle {
     window: Duration,
@@ -783,6 +888,57 @@ mod tests {
         std::thread::sleep(Duration::from_millis(60));
         assert_eq!(sessions.get(&token), None);
         assert!(sessions.open("b", 2).is_some());
+    }
+
+    fn handoff(user: &str) -> Handoff {
+        Handoff {
+            user: user.to_owned(),
+            uid: 1001,
+            method: Some(Method::Password),
+            password_at: None,
+            fingerprint: None,
+            done: Vec::new(),
+            code_made: None,
+        }
+    }
+
+    #[test]
+    fn a_handoff_is_claimed_once_and_only_by_its_own_string() {
+        let handoffs = Handoffs::new(Duration::from_secs(60), 4, 2);
+        let token = handoffs.open(handoff("a")).unwrap();
+        assert!(token.len() >= 43);
+        assert_eq!(handoffs.take("not-the-string"), None);
+        assert_eq!(handoffs.take(&token), Some(handoff("a")));
+        assert_eq!(
+            handoffs.take(&token),
+            None,
+            "a string is good for one claim"
+        );
+    }
+
+    #[test]
+    fn a_handoff_ends_with_its_lifetime_and_an_account_keeps_only_its_share() {
+        let short = Handoffs::new(Duration::from_millis(30), 4, 2);
+        let token = short.open(handoff("a")).unwrap();
+        std::thread::sleep(Duration::from_millis(60));
+        assert_eq!(short.take(&token), None);
+
+        let handoffs = Handoffs::new(Duration::from_secs(60), 3, 2);
+        let other = handoffs.open(handoff("b")).unwrap();
+        let first = handoffs.open(handoff("a")).unwrap();
+        let second = handoffs.open(handoff("a")).unwrap();
+        let third = handoffs.open(handoff("a")).unwrap();
+        assert_eq!(
+            handoffs.take(&first),
+            None,
+            "the oldest of the account went"
+        );
+        assert!(handoffs.take(&second).is_some());
+        assert!(handoffs.take(&third).is_some());
+        assert!(
+            handoffs.take(&other).is_some(),
+            "another account's is not touched"
+        );
     }
 
     #[test]
