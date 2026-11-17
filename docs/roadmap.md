@@ -5,6 +5,7 @@ This page distinguishes tested code from planned integration work.
 | Component | Status |
 | --- | --- |
 | Delegation: a session hands a task to another source (A2A tasks, HTTP and stdio MCP tools, privilege checks); the app takes the wire (task list, a child's approval, Stop); a task may also go to another machine's A2A agent, and a granted key may be served A2A; the card and the child's thread are pending | Implemented in the host and tested with scripted agents |
+| Shared sessions: an entry with `shared = true` keeps a session's agent running in the host (coqui-acp's session hub); several clients attach, prompt and answer permissions, a closed link only detaches, a client reattaches with replay from a cursor, and a session nobody is attached to ends after `shared_idle_seconds` or when a client closes it | Implemented in the host and tested with the stand-in agent over real links (two keys, replay, a permission answered by one, the idle rule, `session/close`); the app does not attach yet, and a session does not survive a host restart |
 | Rust in-memory registry and scoped authorization model | Implemented and tested |
 | Chromium permission policy and ACP request option validation | Implemented and tested |
 | Browser tool catalogue and local dispatcher | Implemented and wired: an agent reaches them over a proven link, each call checked against the tab's origin and the person's grant (see the browser tools rows below) |

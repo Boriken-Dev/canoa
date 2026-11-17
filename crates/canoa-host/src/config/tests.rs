@@ -337,6 +337,63 @@ fn limits_of_zero_are_refused() {
 }
 
 #[test]
+fn shared_sessions_are_off_unless_an_agent_entry_asks_and_keep_a_day_by_default() {
+    let config = parse(
+        "[host.agents.a]
+program = \"x\"
+[host.agents.b]
+program = \"x\"
+shared = true
+         [host.agents.c]
+program = \"x\"
+shared = true
+shared_idle_seconds = 0
+         [host.agents.d]
+program = \"x\"
+shared = true
+shared_idle_seconds = 90
+",
+    )
+    .expect("parses");
+    let kept: Vec<_> = config
+        .entries
+        .iter()
+        .map(|entry| (entry.shared, entry.shared_idle))
+        .collect();
+    assert_eq!(
+        kept,
+        [
+            (false, None),
+            (
+                true,
+                Some(core::time::Duration::from_secs(DEFAULT_SHARED_IDLE_SECONDS))
+            ),
+            (true, None),
+            (true, Some(core::time::Duration::from_secs(90))),
+        ]
+    );
+    assert!(
+        parse(
+            "[host.agents.a]
+program = \"x\"
+shared_idle_seconds = 5
+"
+        )
+        .is_err()
+    );
+    assert!(
+        parse(
+            "[host.providers.a]
+library = \"l\"
+provider = \"p\"
+shared = true
+"
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn a_byte_order_mark_is_ignored() {
     assert_eq!(
         parse("\u{feff}[host.agents.a]\nprogram = \"x\"\n")

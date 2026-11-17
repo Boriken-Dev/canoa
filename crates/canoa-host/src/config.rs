@@ -987,7 +987,17 @@ pub struct Entry {
     /// Whether it is served only over [`crate::Local`]: it listens on no address, and no paired key reaches it. The host's
     /// own sources are these; canoa.cfg cannot make one.
     pub local: bool,
+    /// Whether a session outlives the connection that opened it: the host keeps its agent running, and any key the entry
+    /// admits may attach to it by `session/load` or `session/resume` and take part (`shared = true`). Off, each connection
+    /// has an agent of its own that ends with it. Only an agent or harness entry may set it.
+    pub shared: bool,
+    /// How long a shared session that no client is attached to is kept, after which the host ends it
+    /// (`shared_idle_seconds`, a day by default); `None` keeps it until a client ends it or the host stops (`0`).
+    pub shared_idle: Option<core::time::Duration>,
 }
+
+/// How long a shared session with no client attached is kept unless the entry says otherwise.
+pub const DEFAULT_SHARED_IDLE_SECONDS: u64 = 24 * 60 * 60;
 
 /// What a `claude` or `codex` harness entry's keys ask before the command line acts. Each one unset is the host's own value,
 /// never the person's configuration on this machine: Claude Code's permission mode `default`, Codex's approval policy
@@ -1576,6 +1586,8 @@ struct RawAgent {
     accounts: Option<Vec<String>>,
     usage: Option<String>,
     title: Option<String>,
+    shared: Option<bool>,
+    shared_idle_seconds: Option<u64>,
     listen: Option<String>,
     transport: Option<String>,
     transport_library: Option<String>,
@@ -1832,6 +1844,19 @@ impl Config {
                 check_title(&name, title)?;
             }
             let title = agent.title;
+            let shared = agent.shared.unwrap_or(false);
+            if !shared && agent.shared_idle_seconds.is_some() {
+                return Err(invalid(
+                    &name,
+                    "shared_idle_seconds goes with shared = true",
+                ));
+            }
+            let shared_idle = match agent.shared_idle_seconds {
+                _ if !shared => None,
+                Some(0) => None,
+                Some(seconds) => Some(core::time::Duration::from_secs(seconds)),
+                None => Some(core::time::Duration::from_secs(DEFAULT_SHARED_IDLE_SECONDS)),
+            };
             for (index, profile) in offered.iter().enumerate() {
                 if !profiles.contains_key(profile) {
                     return Err(invalid(
@@ -2058,6 +2083,8 @@ impl Config {
             let mut served = entry(name, kind, common)?;
             served.own_profile = own_profile;
             served.title = title;
+            served.shared = shared;
+            served.shared_idle = shared_idle;
             entries.push(served);
         }
         for (name, provider) in host.providers {
@@ -3564,6 +3591,8 @@ fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, Conf
         title: None,
         own_profile: false,
         local: false,
+        shared: false,
+        shared_idle: None,
     })
 }
 

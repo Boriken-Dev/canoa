@@ -16,6 +16,7 @@ use std::thread;
 
 use crate::portal_link::PortalSockets;
 mod door;
+mod sessions;
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
 use coqui_acp_bridge::relay::relay;
@@ -402,6 +403,11 @@ impl Gate {
         Self(Arc::new(AtomicUsize::new(0)), ceiling)
     }
 
+    /// The most it lets in at once.
+    const fn ceiling(&self) -> usize {
+        self.1
+    }
+
     pub(crate) fn enter(&self) -> Option<Entered> {
         let mut running = self.0.load(Ordering::SeqCst);
         while running < self.1 {
@@ -504,6 +510,8 @@ struct Served {
     delegable: bool,
     run: Run,
     running: Gate,
+    /// Set for an entry whose sessions outlive their connections.
+    keep: Option<sessions::Keep>,
 }
 
 /// What every connection shares.
@@ -535,6 +543,8 @@ struct Shared {
     /// may read what they read.
     control_grants: IndexMap<PeerId, BTreeSet<control::Grant>>,
     control_everyone: Option<BTreeSet<control::Grant>>,
+    /// The sessions kept for more than one connection.
+    hosted: sessions::Hosted,
 }
 
 impl Shared {
@@ -1518,6 +1528,9 @@ impl Serving {
                 delegable: kind == "agent",
                 run,
                 running: Gate::new(entry.max_peers),
+                keep: entry.shared.then_some(sessions::Keep {
+                    idle: entry.shared_idle,
+                }),
             });
             match listener {
                 Some(listener) => listeners.push((served, listener)),
@@ -1573,6 +1586,7 @@ impl Serving {
                         }),
                     },
                     running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
+                    keep: None,
                 }),
                 bound,
             ));
@@ -1600,6 +1614,7 @@ impl Serving {
                     options.state_dir.clone(),
                     delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
                 ),
+                hosted: sessions::Hosted::default(),
                 control_grants: config
                     .control
                     .as_ref()
@@ -1876,6 +1891,7 @@ impl Serving {
                 everyone: Some(config.native.control.clone()),
             },
             running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
+            keep: None,
         });
         Some(Door::new(
             listener,
@@ -2229,8 +2245,8 @@ impl Shared {
 /// A connection's proof and what follows it. `admit`, when given, is asked once the key is known and may turn it away: the native
 /// door uses it to bind a browser's key to the extension that paired it.
 fn connection<C: Channel>(
-    shared: &Shared,
-    served: &Served,
+    shared: &Arc<Shared>,
+    served: &Arc<Served>,
     channel: &C,
     unproven: Entered,
     admit: Option<&dyn Fn(&PeerId) -> bool>,
@@ -2281,8 +2297,8 @@ fn connection<C: Channel>(
 /// Serves a connection whose peer is known, from its first message to its end; the caller closes `channel` after. `in_process` is
 /// true only for the connections [`Local`] opens, whose peer is this process.
 fn serve_proven<C: Channel>(
-    shared: &Shared,
-    served: &Served,
+    shared: &Arc<Shared>,
+    served: &Arc<Served>,
     sealed: &C,
     peer: &PeerId,
     context: Option<&delegate::ChildContext>,
@@ -2342,6 +2358,27 @@ fn serve_proven<C: Channel>(
 }
 
 fn give_agent<C: Channel>(
+    shared: &Arc<Shared>,
+    served: &Arc<Served>,
+    channel: &C,
+    (first, peer): (&[u8], &PeerId),
+    (context, in_process): (Option<&delegate::ChildContext>, bool),
+) {
+    // A task another agent handed out has no person at its end to attach to it: it is never kept.
+    if let (Some(keep), Run::Agent { .. }, None) = (&served.keep, &served.run, context) {
+        return sessions::serve(shared, served, keep, channel, (first, peer), in_process);
+    }
+    give_agent_flow(
+        shared,
+        served,
+        channel,
+        (first, peer),
+        (context, in_process),
+    );
+}
+
+/// Serves one connection with an agent of its own, until either ends.
+fn give_agent_flow<C: Channel>(
     shared: &Shared,
     served: &Served,
     channel: &C,

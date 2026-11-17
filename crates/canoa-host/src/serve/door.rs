@@ -96,7 +96,7 @@ fn reply(channel: &pipe::PipeChannel, value: &Value) -> bool {
 }
 
 fn meet(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     (hello, served, control): (&Value, &[Arc<Served>], &Arc<Served>),
     home: &Path,
     channel: &pipe::PipeChannel,
