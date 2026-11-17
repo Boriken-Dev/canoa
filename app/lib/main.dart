@@ -2044,7 +2044,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (scratch && !hostMakes) {
       try {
         final request = scratchRequest;
-        if (request == null) throw StateError('Its folder is made by the host, which is not here');
+        if (request == null) throw StateError('Its workspace is made by the host, which is not here');
         final made = await _hostFolders!.makeScratch(request);
         folder = made.path;
         hostMade = true;
