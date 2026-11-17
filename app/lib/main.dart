@@ -217,7 +217,8 @@ Future<void> main(List<String> args) async {
     if (served.reachable) await served.openIn.load();
   }
   final hostCfg = served != null && served.reachable ? await served.loadConfig() : null;
-  if (hostCfg != null) await served?.refreshOverlays();
+  // The chat alone shows no Store or Settings, and a browser key is not granted what the overlays list needs.
+  if (hostCfg != null && !ClientMode.fromUri(Uri.base).chatOnly) await served?.refreshOverlays();
   final config = hostCfg ?? await loadConfig();
   final shell = createDesktopShell();
   final host = served?.supervisor ??
@@ -2657,7 +2658,7 @@ class _CanoaAppState extends State<CanoaApp> {
       unawaited(_grants?.refresh());
       unawaited(_accounts?.refresh());
       unawaited(_running?.refresh());
-      unawaited(_refreshOverlays());
+      if (!_mode.chatOnly) unawaited(_refreshOverlays());
     }
     final serving = _hostedSources;
     if (_serving != null && _serving!.length == serving.length && _serving!.every(serving.contains)) return;

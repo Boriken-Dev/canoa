@@ -35,10 +35,14 @@ final class ServedEntry {
 /// connect dialog: connecting still proves the host holds [peer]'s key, and the host still turns this browser away until
 /// its key is accepted there.
 final class ServedHost {
-  const ServedHost({required this.peer, required this.method, required this.entries, this.control, this.os, this.user, this.web});
+  const ServedHost({required this.peer, required this.method, required this.entries, this.control, this.os, this.user, this.web, this.admit});
 
   /// The account signed in to the `canoa portal` that served this page; null for any other server.
   final String? user;
+
+  /// Where this page asks the host that serves it, which runs on the same computer as its client, to accept its key without a
+  /// pairing step (the Office add-in on this computer); null for a host that offers nothing of the kind.
+  final String? admit;
 
   /// The host's peer id.
   final String peer;
@@ -94,6 +98,7 @@ final class ServedHost {
         os: value['os'] is String ? value['os'] as String : null,
         web: WebMode.named(value['web']),
         user: value['user'] is String && (value['user'] as String).isNotEmpty ? value['user'] as String : null,
+        admit: value['admit'] is String && (value['admit'] as String).startsWith('/') ? value['admit'] as String : null,
       );
     } on FormatException {
       return null;

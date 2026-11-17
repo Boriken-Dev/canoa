@@ -20,6 +20,7 @@ import 'control_profile_home.dart';
 import 'host_config.dart';
 import 'host_files.dart';
 import 'host_state.dart';
+import 'local_admission.dart';
 import 'portal_session.dart';
 import 'served_control.dart';
 
@@ -184,7 +185,7 @@ final class ServedSupervisor extends HostSupervisor {
 /// uploads, canoa.cfg and the overlay store. The control channel is the one the host lists; a key it has no grant for gets the
 /// host's own refusal for that request, and nothing else is lost.
 final class ServedApp {
-  ServedApp._(this.host, this.control, this.portal, Uri? page)
+  ServedApp._(this.host, this.control, this.portal, this.admission, Uri? page)
       : page = page ?? Uri.base,
         supervisor = ServedSupervisor(host, control),
         overlays = ControlOverlayManager(control),
@@ -192,7 +193,8 @@ final class ServedApp {
 
   /// The page's host as `canoa.json` lists it, with a control channel of the page's own when the host listens for one; [portal]
   /// when `canoa portal` served the page.
-  ServedApp.over(ServedHost host, HostControl control, {PortalSession? portal, Uri? page}) : this._(host, control, portal, page);
+  ServedApp.over(ServedHost host, HostControl control, {PortalSession? portal, LocalAdmission? admission, Uri? page})
+      : this._(host, control, portal, admission, page);
 
   /// Reads `canoa.json` beside this page (or beside [base]): null where the page was not served by a `canoa`, and, behind a
   /// portal, where nobody is signed in (the browser is sent to sign in).
@@ -210,7 +212,17 @@ final class ServedApp {
     final portal = user == null
         ? null
         : PortalSession(user: user, base: base ?? Uri.base, client: client, navigate: navigate, localPeer: localPeer);
-    return ServedApp.over(host, (control ?? (host) => servedControl(host, failed: portal?.active))(host), portal: portal, page: base);
+    final path = host.admit;
+    final admission = portal != null || path == null
+        ? null
+        : LocalAdmission(base: base ?? Uri.base, path: path, client: client, localPeer: localPeer);
+    return ServedApp.over(
+      host,
+      (control ?? (host) => servedControl(host, failed: portal?.active))(host),
+      portal: portal,
+      admission: admission,
+      page: base,
+    );
   }
 
   final ServedHost host;
@@ -231,6 +243,9 @@ final class ServedApp {
 
   /// The sign-in the portal that served this page keeps, or null for a page served by anything else.
   final PortalSession? portal;
+
+  /// How this page's key is accepted by a host that runs on the client's own computer and serves the page itself, or null.
+  final LocalAdmission? admission;
   final HostControl control;
   final ServedSupervisor supervisor;
   late final HostFiles files = HostFiles(control);
@@ -272,7 +287,11 @@ final class ServedApp {
     Future<void> ask() async => (await control.ready()).call('ledger/list', {'limit': 1}).timeout(within);
     try {
       // Behind a portal the page introduces its own key after the first refusal, then asks again.
-      await (portal == null ? ask() : portal!.connect(host.method, ask));
+      await (portal != null
+          ? portal!.connect(host.method, ask)
+          : admission != null
+              ? admission!.connect(host.method, ask)
+              : ask());
       problem = null;
     } on PortalSignedOut {
       problem = 'You are signed out: going to the sign-in page.';
