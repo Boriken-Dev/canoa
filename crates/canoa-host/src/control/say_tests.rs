@@ -554,6 +554,11 @@ fn piper_copy(tmp: &Path) -> PathBuf {
         .join("piper")
         .join(format!("piper{}", std::env::consts::EXE_SUFFIX));
     fs::create_dir_all(program.parent().expect("a folder")).expect("folder");
+    // A link on Unix, not a copy: nothing holds the program open for writing, so a start from another test's thread cannot find
+    // it busy.
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(standin(), &program).expect("a stand-in for piper");
+    #[cfg(not(unix))]
     fs::copy(standin(), &program).expect("a stand-in for piper");
     let voices = copy.join("voices");
     fs::create_dir_all(&voices).expect("folder");
