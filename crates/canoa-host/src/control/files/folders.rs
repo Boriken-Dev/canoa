@@ -457,7 +457,9 @@ fn git_listing(folder: &Path, max_entries: usize) -> Option<Vec<String>> {
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
-            Ok(None) if started.elapsed() < GIT_TIME && !reader.is_finished() => {
+            // git closes its output a moment before it exits; a reader that stops early on too much output closes the pipe, which
+            // ends git too.
+            Ok(None) if started.elapsed() < GIT_TIME => {
                 std::thread::sleep(Duration::from_millis(10));
             }
             Ok(None) => {
