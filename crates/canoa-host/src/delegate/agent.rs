@@ -57,7 +57,7 @@ impl DelegationAgent {
     /// The sources `session` may name: what its connection may use, narrowed by `[host.delegate] sources` and by what the person
     /// set for the session.
     pub(super) fn allowed(engine: &Engine, session: &Session) -> Vec<super::Source> {
-        let narrowed = lock(&session.setup).sources.clone();
+        let narrowed = lock(&session.setup).source_names().cloned();
         Self::offered(engine, session)
             .into_iter()
             .filter(|source| {

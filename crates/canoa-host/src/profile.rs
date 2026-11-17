@@ -307,6 +307,27 @@ impl Scalar {
     }
 }
 
+/// What a layer suggests about delegation: where a task starts, which sources it may name and how many run at once. Only a
+/// suggestion: the host applies each part where its own configuration and the connection allow it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Delegate {
+    /// The source a task starts on when none is named.
+    pub default: Option<String>,
+    /// The sources a task may name; an empty list suggests none.
+    pub sources: Option<Vec<String>>,
+    /// The most tasks of a session running at once.
+    pub max_running: Option<u32>,
+}
+
+impl Delegate {
+    /// Whether it says nothing.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.default.is_none() && self.sources.is_none() && self.max_running.is_none()
+    }
+}
+
 /// One profile document: what one layer sets and removes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -319,6 +340,8 @@ pub struct Profile {
     pub mode: Option<String>,
     /// The initial context.
     pub context: Option<Context>,
+    /// What it suggests about delegation, key by key.
+    pub delegate: Delegate,
     /// Values of lower layers this one takes back.
     pub unset: Vec<Scalar>,
     /// Variables of this process that overlays and projects may read with `from_env`; only in the person's own layers.
@@ -460,6 +483,7 @@ struct RawProfile {
     effort: Option<String>,
     mode: Option<String>,
     context: Option<RawContext>,
+    delegate: Option<RawDelegate>,
     #[serde(default)]
     unset: Vec<String>,
     #[serde(default)]
@@ -470,6 +494,14 @@ struct RawProfile {
     skills: IndexMap<String, RawSkill>,
     #[serde(default)]
     mcp: IndexMap<String, RawMcp>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawDelegate {
+    default: Option<String>,
+    sources: Option<Vec<String>>,
+    max_running: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -565,6 +597,9 @@ impl Profile {
                 _ => return Err(invalid("context", Rule::Form)),
             });
         }
+        if let Some(delegate) = raw.delegate {
+            profile.delegate = checked_delegate(delegate)?;
+        }
         for name in raw.unset {
             let scalar = Scalar::ALL
                 .into_iter()
@@ -655,6 +690,35 @@ impl Profile {
         }
         Ok(profile)
     }
+}
+
+fn checked_delegate(raw: RawDelegate) -> Result<Delegate, ProfileError> {
+    if let Some(default) = &raw.default
+        && !plain(default)
+    {
+        return Err(invalid("delegate.default", Rule::Value));
+    }
+    if let Some(sources) = &raw.sources {
+        for (at, name) in sources.iter().enumerate() {
+            if !plain(name) || sources[..at].contains(name) {
+                return Err(invalid("delegate.sources", Rule::Value));
+            }
+        }
+    }
+    let max_running = raw
+        .max_running
+        .map(|limit| {
+            i32::try_from(limit)
+                .ok()
+                .and_then(|limit| u32::try_from(limit).ok())
+                .ok_or_else(|| invalid("delegate.max_running", Rule::Value))
+        })
+        .transpose()?;
+    Ok(Delegate {
+        default: raw.default,
+        sources: raw.sources,
+        max_running,
+    })
 }
 
 fn invalid(key: &str, rule: Rule) -> ProfileError {
@@ -840,6 +904,18 @@ pub struct Refused {
     pub reads: String,
 }
 
+/// The delegation suggestions every layer adds up to, each with its layer: a later layer wins per key.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EffectiveDelegate {
+    /// The source a task starts on when none is named.
+    pub default: Option<Sourced<String>>,
+    /// The sources a task may name.
+    pub sources: Option<Sourced<Vec<String>>>,
+    /// The most tasks of a session running at once.
+    pub max_running: Option<Sourced<u32>>,
+}
+
 /// The profile every layer adds up to, each value with its layer.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -852,6 +928,8 @@ pub struct Effective {
     pub mode: Option<Sourced<String>>,
     /// The initial context.
     pub context: Option<Sourced<Context>>,
+    /// What the layers suggest about delegation, each part with the layer that set it.
+    pub delegate: EffectiveDelegate,
     /// Environment variables, in the order they were first set.
     pub env: IndexMap<String, Sourced<EnvValue>>,
     /// Skills, likewise.
@@ -942,6 +1020,31 @@ pub fn merge(layers: &[Layer]) -> Effective {
                 value: context.clone(),
                 layer: layer.id.clone(),
                 dir: layer.dir.clone(),
+            });
+        }
+        let from_here = |layer: &Layer| (layer.id.clone(), layer.dir.clone());
+        if let Some(default) = &profile.delegate.default {
+            let (layer, dir) = from_here(layer);
+            out.delegate.default = Some(Sourced {
+                value: default.clone(),
+                layer,
+                dir,
+            });
+        }
+        if let Some(sources) = &profile.delegate.sources {
+            let (layer, dir) = from_here(layer);
+            out.delegate.sources = Some(Sourced {
+                value: sources.clone(),
+                layer,
+                dir,
+            });
+        }
+        if let Some(limit) = profile.delegate.max_running {
+            let (layer, dir) = from_here(layer);
+            out.delegate.max_running = Some(Sourced {
+                value: limit,
+                layer,
+                dir,
             });
         }
         let mut log = Log {
@@ -1051,6 +1154,29 @@ impl Effective {
                 "context".to_owned(),
                 json!({"value": context_json(&context.value), "layer": context.layer.to_string()}),
             );
+        }
+        let delegate = &self.delegate;
+        let mut hint = Map::new();
+        if let Some(default) = &delegate.default {
+            hint.insert(
+                "default".to_owned(),
+                json!({"value": default.value, "layer": default.layer.to_string()}),
+            );
+        }
+        if let Some(sources) = &delegate.sources {
+            hint.insert(
+                "sources".to_owned(),
+                json!({"value": sources.value, "layer": sources.layer.to_string()}),
+            );
+        }
+        if let Some(limit) = &delegate.max_running {
+            hint.insert(
+                "max_running".to_owned(),
+                json!({"value": limit.value, "layer": limit.layer.to_string()}),
+            );
+        }
+        if !hint.is_empty() {
+            out.insert("delegate".to_owned(), Value::Object(hint));
         }
         out.insert("env".to_owned(), entries(&self.env, env_json));
         out.insert(

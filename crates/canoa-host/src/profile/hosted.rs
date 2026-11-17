@@ -429,9 +429,42 @@ pub(crate) struct Connection {
     /// The host's own program and what goes before its subcommand: how a harness's hooks run the forwarder.
     launcher: OsString,
     before: Vec<OsString>,
+    /// Each layer's delegation suggestion, for the harness a session's agent turns out to be.
+    delegation: Vec<(Layer, Option<aos::Document>)>,
 }
 
 impl Connection {
+    /// What this connection's layers suggest about delegation for an agent that reports itself as `reported`, each part with
+    /// its layer. An overlay's suggestion is the one it makes for that agent's harness.
+    pub(crate) fn delegate_hints(&self) -> crate::delegate::Hints {
+        let entry = self.entry.clone();
+        let layers = self.delegation.clone();
+        Box::new(move |reported| {
+            let harness = harness_of(reported, &entry);
+            let stripped: Vec<Layer> = layers
+                .iter()
+                .map(|(layer, manifest)| {
+                    let mut profile = super::Profile::default();
+                    match (manifest, harness) {
+                        (Some(manifest), Some(harness)) => {
+                            if let Some(hint) = aos::harness_delegate_of(manifest, harness) {
+                                profile.delegate = super::Delegate {
+                                    default: hint.default,
+                                    sources: hint.sources,
+                                    max_running: hint.max_running,
+                                };
+                            }
+                        }
+                        (Some(_), None) => {}
+                        (None, _) => profile.delegate = layer.profile.delegate.clone(),
+                    }
+                    Layer::new(layer.id.clone(), None, profile)
+                })
+                .collect();
+            merge(&stripped).delegate
+        })
+    }
+
     /// Reads the overlays `offer`'s profile `index` names and resolves its environment through `lookup`.
     ///
     /// # Errors
@@ -652,6 +685,19 @@ impl Connection {
             shared_env,
             launcher: offer.launcher.clone(),
             before: offer.before.clone(),
+            delegation: layers
+                .iter()
+                .map(|layer| {
+                    (
+                        Layer::new(layer.id.clone(), None, {
+                            let mut profile = super::Profile::default();
+                            profile.delegate = layer.profile.delegate.clone();
+                            profile
+                        }),
+                        layer.aos.as_ref().map(|aos| aos.manifest.clone()),
+                    )
+                })
+                .collect(),
         })
     }
 

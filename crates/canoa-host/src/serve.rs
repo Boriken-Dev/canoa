@@ -2471,6 +2471,10 @@ fn give_agent<C: Channel>(
             connection
         }
     });
+    // What the profile suggests about delegation reaches each session this connection opens.
+    if let (Some(conn), Some(connection)) = (&conn, &connection) {
+        conn.suggest_with(connection.delegate_hints());
+    }
     let (program, args) = match agent {
         Agent::Program { program, args } => (program, args),
         Agent::Harness(options) => {

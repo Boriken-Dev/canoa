@@ -14,6 +14,7 @@ use serde_json::{Map, Value, json};
 use super::agent::DelegationAgent;
 use super::context::{self, Kind};
 use super::{Engine, Session, Source, lock, tools};
+use crate::profile::EffectiveDelegate;
 
 /// What the person narrowed a session's delegation to.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -27,6 +28,41 @@ pub(crate) struct Setup {
     /// What its agent may hand a task besides the task text, by its own call: nothing unless the person lets it. The person's own
     /// start never needs this, since they are shown what goes.
     pub(crate) context: Vec<Kind>,
+    /// What the session's profile suggests, which the person's own setting above replaces key by key.
+    pub(crate) hint: EffectiveDelegate,
+}
+
+impl Setup {
+    /// The only sources its tasks may name: the person's, else the profile's suggestion.
+    pub(crate) fn source_names(&self) -> Option<&Vec<String>> {
+        self.sources
+            .as_ref()
+            .or(self.hint.sources.as_ref().map(|hint| &hint.value))
+    }
+
+    /// Tasks of the session running at once, at most: the person's, else the profile's suggestion. The host's own limits apply
+    /// beside it, so a suggestion never raises one.
+    pub(crate) fn running_limit(&self) -> Option<usize> {
+        self.max_running.or_else(|| {
+            self.hint
+                .max_running
+                .as_ref()
+                .map(|hint| usize::try_from(hint.value).unwrap_or(usize::MAX))
+        })
+    }
+}
+
+/// The source a task with none named goes to: the person's, else the profile's when the connection may use it.
+pub(crate) fn default_source(engine: &Engine, session: &Session) -> Option<String> {
+    let setup = lock(&session.setup).clone();
+    if let Some(default) = setup.default {
+        return Some(default);
+    }
+    let hint = setup.hint.default?;
+    DelegationAgent::allowed(engine, session)
+        .iter()
+        .any(|source| source.name == hint.value)
+        .then_some(hint.value)
 }
 
 /// `_canoa/delegate/setup {sessionId, sources?, default?, maxRunning?, context?}`: each key present replaces the setting, `null` clears
@@ -251,15 +287,56 @@ pub(crate) fn listing(
     let setup = lock(&session.setup).clone();
     let mut out = Map::new();
     out.insert("targets".to_owned(), Value::Array(targets));
-    if let Some(default) = setup.default {
+    // Where each value in effect comes from: `session` for the person's own setting, else the profile layer that suggested it.
+    let mut from = Map::new();
+    if let Some(default) = default_source(engine, session) {
         out.insert("default".to_owned(), json!(default));
+        let own = setup.default.is_some();
+        from.insert(
+            "default".to_owned(),
+            json!(if own {
+                "session".to_owned()
+            } else {
+                setup
+                    .hint
+                    .default
+                    .as_ref()
+                    .map_or_else(String::new, |hint| hint.layer.to_string())
+            }),
+        );
     }
-    if let Some(limit) = setup.max_running {
+    if let Some(limit) = setup.running_limit() {
         out.insert("maxRunning".to_owned(), json!(limit));
+        from.insert(
+            "maxRunning".to_owned(),
+            json!(match (&setup.max_running, &setup.hint.max_running) {
+                (None, Some(hint)) => hint.layer.to_string(),
+                _ => "session".to_owned(),
+            }),
+        );
     }
-    if let Some(sources) = setup.sources {
+    if let Some(sources) = setup.source_names() {
         out.insert("sources".to_owned(), json!(sources));
+        from.insert(
+            "sources".to_owned(),
+            json!(match (&setup.sources, &setup.hint.sources) {
+                (None, Some(hint)) => hint.layer.to_string(),
+                _ => "session".to_owned(),
+            }),
+        );
     }
+    // What the profile suggested and did not take effect: a default the connection may not use.
+    if let Some(hint) = &setup.hint.default
+        && setup.default.is_none()
+        && !from.contains_key("default")
+    {
+        out.insert(
+            "unusedDefault".to_owned(),
+            json!({"value": hint.value, "layer": hint.layer.to_string(),
+                "why": "the connection may not use that source"}),
+        );
+    }
+    out.insert("from".to_owned(), Value::Object(from));
     out.insert(
         "context".to_owned(),
         json!(

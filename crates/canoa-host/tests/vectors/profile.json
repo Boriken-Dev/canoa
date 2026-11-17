@@ -1352,6 +1352,214 @@
           }
         ]
       }
+    },
+    {
+      "name": "delegation suggestions merge key by key, each with its layer",
+      "layers": [
+        {
+          "kind": "overlay",
+          "name": "a",
+          "toml": "[delegate]\ndefault = \"Claude\"\nsources = [\"Claude\", \"Pi\"]\nmax_running = 4\n"
+        },
+        {
+          "kind": "user",
+          "toml": "[delegate]\ndefault = \"Codex\"\nmax_running = 2\n"
+        }
+      ],
+      "effective": {
+        "env": [],
+        "skills": [],
+        "mcp": [],
+        "removed": [],
+        "share_env": [],
+        "refused": [],
+        "delegate": {
+          "default": {
+            "value": "Codex",
+            "layer": "user"
+          },
+          "sources": {
+            "value": [
+              "Claude",
+              "Pi"
+            ],
+            "layer": "overlay:a"
+          },
+          "max_running": {
+            "value": 2,
+            "layer": "user"
+          }
+        }
+      }
+    },
+    {
+      "name": "an empty list of sources is a suggestion of none, and a later layer's list replaces it",
+      "layers": [
+        {
+          "kind": "overlay",
+          "name": "a",
+          "toml": "[delegate]\nsources = []\n"
+        },
+        {
+          "kind": "agent",
+          "name": "x",
+          "toml": "[delegate]\nsources = [\"Pi\"]\n"
+        },
+        {
+          "kind": "session",
+          "toml": "[delegate]\nmax_running = 0\n"
+        }
+      ],
+      "effective": {
+        "env": [],
+        "skills": [],
+        "mcp": [],
+        "removed": [],
+        "share_env": [],
+        "refused": [],
+        "delegate": {
+          "sources": {
+            "value": [
+              "Pi"
+            ],
+            "layer": "agent:x"
+          },
+          "max_running": {
+            "value": 0,
+            "layer": "session"
+          }
+        }
+      }
+    },
+    {
+      "name": "a layer with no delegate table says nothing about it",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "model = \"a\"\n"
+        }
+      ],
+      "effective": {
+        "env": [],
+        "skills": [],
+        "mcp": [],
+        "removed": [],
+        "share_env": [],
+        "refused": [],
+        "model": {
+          "value": "a",
+          "layer": "user"
+        }
+      }
+    },
+    {
+      "name": "a delegate default that is empty",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "[delegate]\ndefault = \"\"\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "value",
+        "key": "delegate.default"
+      }
+    },
+    {
+      "name": "a delegate source that holds a control character",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "[delegate]\nsources = [\"a\\nb\"]\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "value",
+        "key": "delegate.sources"
+      }
+    },
+    {
+      "name": "a delegate source named twice",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "[delegate]\nsources = [\"Pi\", \"Claude\", \"Pi\"]\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "value",
+        "key": "delegate.sources"
+      }
+    },
+    {
+      "name": "a delegate limit below zero",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "[delegate]\nmax_running = -1\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "value",
+        "key": "delegate.max_running"
+      }
+    },
+    {
+      "name": "a delegate limit past what the specification allows",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "[delegate]\nmax_running = 2147483648\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "value",
+        "key": "delegate.max_running"
+      }
+    },
+    {
+      "name": "a delegate limit that is not an integer",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "[delegate]\nmax_running = 2.5\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "parse"
+      }
+    },
+    {
+      "name": "a delegate key no profile has",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "[delegate]\nfollow = true\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "parse"
+      }
+    },
+    {
+      "name": "a delegate that is not a table",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "delegate = \"Claude\"\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "parse"
+      }
     }
   ],
   "sources": [
@@ -2690,6 +2898,70 @@
         "removed": []
       },
       "environment": {}
+    },
+    {
+      "name": "the delegation hint of the agent's own harness is read, and another harness's is not",
+      "os": "linux",
+      "harness": "codex",
+      "overlays": [
+        {
+          "identity": "team",
+          "root": "/ov/team",
+          "pinned": true,
+          "files": {
+            "overlay.cfg": "[harness.codex.delegate]\ndefault = \"Claude\"\nsources = [\"Claude\", \"Pi\"]\nmax_running = 3\n\n[harness.claude-code.delegate]\ndefault = \"Pi\"\n"
+          }
+        }
+      ],
+      "refused": [],
+      "view": {
+        "env": [
+          {
+            "name": "TEAM_OVERLAY_ROOT",
+            "value": {
+              "value": "/ov/team"
+            },
+            "layer": "overlay:team"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "delegate": {
+          "default": {
+            "value": "Claude",
+            "layer": "overlay:team"
+          },
+          "sources": {
+            "value": [
+              "Claude",
+              "Pi"
+            ],
+            "layer": "overlay:team"
+          },
+          "max_running": {
+            "value": 3,
+            "layer": "overlay:team"
+          }
+        },
+        "overlays": [
+          {
+            "layer": "overlay:team",
+            "digest": "sha256:e36ff40c8f20806f24023eaa977d6f56df92dfb3c57d0fbea27201d548a77b9b",
+            "not_applied": [
+              "harness.claude-code: hints for another harness"
+            ],
+            "ungranted": [],
+            "unresolved": [],
+            "non_defaults": []
+          }
+        ]
+      },
+      "environment": {
+        "TEAM_OVERLAY_ROOT": "/ov/team"
+      }
     }
   ],
   "reserved_env": {

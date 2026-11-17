@@ -2039,6 +2039,153 @@ fn what_the_person_sets_narrows_the_targets_and_sets_a_default_and_a_limit() {
     host.stop();
 }
 
+/// A parent entry that offers one profile, `main`, whose text is `profile`.
+fn profiled_parent(profile: &str, extra_config: &str) -> String {
+    format!(
+        "[host.agents.parent]\nprogram = {}\nargs = [\"--scripted\", \"--mcp-http\", \"--modes=default,manual\"]\nlisten = \"127.0.0.1:0\"\nprofiles = [\"main\"]\n[host.profiles.main.delegate]\n{profile}\n{}{}{extra_config}",
+        quoted(&example("stdio_agent", false).to_string_lossy()),
+        agent("child", "default,manual", ""),
+        agent("other", "default,manual", ""),
+    )
+}
+
+#[test]
+fn a_profiles_delegation_suggestions_apply_where_the_connection_allows_them() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let config = profiled_parent(
+        "default = \"child\"\nsources = [\"child\", \"ghost\"]\nmax_running = 1",
+        "",
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+    let listed = called(&mut convo, &session, "delegate_targets", &json!({})).expect("targets");
+    // The suggested sources narrow what the connection may use, and a name it has no source for adds nothing.
+    assert_eq!(
+        listed["targets"].as_array().map(Vec::len),
+        Some(1),
+        "{listed}"
+    );
+    assert_eq!(listed["targets"][0]["source"], "child", "{listed}");
+    assert_eq!(listed["default"], "child", "{listed}");
+    assert_eq!(listed["maxRunning"], 1, "{listed}");
+    assert_eq!(listed["from"]["default"], "user", "{listed}");
+    assert_eq!(listed["from"]["sources"], "user", "{listed}");
+    assert_eq!(listed["from"]["maxRunning"], "user", "{listed}");
+    let hidden = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"source": "other", "task": "x"}),
+    )
+    .expect_err("not suggested");
+    assert!(hidden.contains("other"), "{hidden}");
+    // A task with no source goes to the suggested default, and the suggested limit holds.
+    let first = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"task": "Wait"}),
+    )
+    .expect("default");
+    assert!(first["taskId"].is_string(), "{first}");
+    let second = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"task": "Wait"}),
+    )
+    .expect_err("past the limit");
+    assert!(second.contains("1 tasks"), "{second}");
+    // What the person sets replaces the suggestion key by key, and clearing it brings the suggestion back.
+    convo
+        .request(
+            "_canoa/delegate/setup",
+            json!({"sessionId": session, "sources": ["child", "other"], "default": "other", "maxRunning": 5}),
+            &|_| None,
+        )
+        .expect("set");
+    let own = called(&mut convo, &session, "delegate_targets", &json!({})).expect("targets");
+    assert_eq!(own["default"], "other", "{own}");
+    assert_eq!(own["maxRunning"], 5, "{own}");
+    assert_eq!(own["from"]["default"], "session", "{own}");
+    assert_eq!(own["from"]["sources"], "session", "{own}");
+    assert_eq!(own["targets"].as_array().map(Vec::len), Some(2), "{own}");
+    convo
+        .request(
+            "_canoa/delegate/setup",
+            json!({"sessionId": session, "sources": null, "default": null, "maxRunning": null}),
+            &|_| None,
+        )
+        .expect("cleared");
+    let back = called(&mut convo, &session, "delegate_targets", &json!({})).expect("targets");
+    assert_eq!(back["default"], "child", "{back}");
+    assert_eq!(back["from"]["default"], "user", "{back}");
+    convo
+        .request(
+            "_canoa/delegate/stop",
+            json!({"sessionId": session}),
+            &|_| None,
+        )
+        .expect("stopped");
+    drop(link);
+    host.stop();
+}
+
+#[test]
+fn a_suggested_default_the_connection_may_not_use_and_a_limit_above_the_hosts_change_nothing() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    // `other` is suggested as the default but left out of the suggested sources; the suggested limit is above the host's.
+    let config = profiled_parent(
+        "default = \"other\"\nsources = [\"child\"]\nmax_running = 9",
+        "[host.delegate]\nmax_children = 1\n",
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+    let listed = called(&mut convo, &session, "delegate_targets", &json!({})).expect("targets");
+    assert!(listed.get("default").is_none(), "{listed}");
+    assert_eq!(listed["unusedDefault"]["value"], "other", "{listed}");
+    assert_eq!(listed["unusedDefault"]["layer"], "user", "{listed}");
+    let none = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"task": "Wait"}),
+    )
+    .expect_err("no default in effect");
+    assert!(none.contains("source is required"), "{none}");
+    let kept = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"source": "child", "task": "Wait"}),
+    )
+    .expect("a task");
+    assert!(kept["taskId"].is_string(), "{kept}");
+    let over = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"source": "child", "task": "Wait"}),
+    )
+    .expect_err("the host's limit");
+    assert!(over.contains("max_children"), "{over}");
+    convo
+        .request(
+            "_canoa/delegate/stop",
+            json!({"sessionId": session}),
+            &|_| None,
+        )
+        .expect("stopped");
+    drop(link);
+    host.stop();
+}
+
 /// `_canoa/delegate/context` as the person's client asks it.
 fn preview(convo: &mut Convo<'_>, session: &str, kind: &str) -> Result<Value, Value> {
     convo.request(

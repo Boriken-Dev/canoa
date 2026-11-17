@@ -22,7 +22,7 @@ use coqui_a2a::wire::Method;
 use serde_json::{Map, Value, json};
 
 use super::agent::DelegationAgent;
-use super::{Engine, MAX_WAIT, Session, Who, lock, person};
+use super::{Engine, MAX_WAIT, Session, Who, person};
 
 /// The tools and their input, as `tools/list` answers.
 pub(crate) fn list(engine: &Engine, session: &Session) -> Value {
@@ -156,7 +156,7 @@ pub(super) fn delegate(
     session: &Arc<Session>,
     args: &Value,
 ) -> Result<Value, String> {
-    let default = lock(&session.setup).default.clone();
+    let default = person::default_source(engine, session);
     let source = text_arg(args, "source")?
         .map(str::to_owned)
         .or(default)

@@ -540,6 +540,16 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
                         .filter_map(Value::as_str)
                         .filter_map(|path| context_entry(input.tree, path, &settings)),
                 ),
+                ("delegate", _) => {
+                    // Suggestions only: the host applies each where its own settings allow.
+                    if let Some(hint) = aos::harness_delegate_of(&manifest, id) {
+                        profile.delegate = super::Delegate {
+                            default: hint.default,
+                            sources: hint.sources,
+                            max_running: hint.max_running,
+                        };
+                    }
+                }
                 ("skills", Value::Bool(true)) => {}
                 ("skills", _) => {
                     not_applied.push(format!("harness.{id}.skills: delivery by routing line"))

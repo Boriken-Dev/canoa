@@ -47,6 +47,7 @@ pub(crate) use channel::{Delegating, Peek};
 
 use crate::config::DelegateConfig;
 use crate::local::Link;
+use crate::profile::EffectiveDelegate;
 use crate::serve::LocalError;
 use privilege::Modes;
 
@@ -352,7 +353,7 @@ impl Engine {
                 ),
             ));
         }
-        let narrowed = lock(&session.setup).max_running;
+        let narrowed = lock(&session.setup).running_limit();
         if let Some(narrowed) = narrowed
             && session.live.load(Ordering::SeqCst) >= narrowed
         {
@@ -678,6 +679,8 @@ struct ConnState {
     version: u64,
     pending: HashMap<String, Pending>,
     sessions: Vec<Arc<Session>>,
+    /// The name the agent gave itself in `initialize`, which says its harness.
+    reported: Option<String>,
 }
 
 /// One client connection that may delegate: what it is, the sessions that hold a bearer, and the messages the host adds to its
@@ -691,6 +694,24 @@ pub(crate) struct Conn {
     answers: Mutex<HashMap<String, Arc<Waiting>>>,
     closed: AtomicBool,
     asked: AtomicU64,
+    /// What the connection's profile suggests about delegation for the harness its agent reports.
+    hints: Mutex<Option<Hints>>,
+}
+
+/// A profile's delegation suggestions, by the name an agent reports.
+pub(crate) type Hints = Box<dyn Fn(Option<&str>) -> EffectiveDelegate + Send + Sync>;
+
+impl Conn {
+    /// Gives the connection what its profile suggests about delegation: each session it opens starts with it.
+    pub(crate) fn suggest_with(&self, hints: Hints) {
+        *lock(&self.hints) = Some(hints);
+    }
+
+    fn suggest(&self, session: &Session, reported: Option<&str>) {
+        if let Some(hints) = lock(&self.hints).as_ref() {
+            lock(&session.setup).hint = hints(reported);
+        }
+    }
 }
 
 impl Engine {
@@ -708,6 +729,7 @@ impl Engine {
             answers: Mutex::new(HashMap::new()),
             closed: AtomicBool::new(false),
             asked: AtomicU64::new(0),
+            hints: Mutex::new(None),
         })
     }
 }
@@ -1017,6 +1039,7 @@ impl Conn {
         let token: String = secret.iter().map(|byte| format!("{byte:02x}")).collect();
         let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let session = self.engine.new_session(self, cwd, digest);
+        self.suggest(&session, state.reported.as_deref());
         tracing::debug!(
             entry = self.info.entry,
             "a session was given the delegation tools"
@@ -1119,6 +1142,11 @@ impl Conn {
                     .unwrap_or(1);
                 let mut state = lock(&self.state);
                 state.version = version;
+                state.reported = result
+                    .pointer("/agentInfo/name")
+                    .or_else(|| result.pointer("/info/name"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
                 state.http = takes(
                     result
                         .pointer("/agentCapabilities/mcpCapabilities/http")
