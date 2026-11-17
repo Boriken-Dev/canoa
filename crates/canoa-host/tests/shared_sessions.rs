@@ -425,3 +425,38 @@ fn a_permission_that_waits_past_the_entrys_window_is_logged_and_stays_open() {
     })
     .expect("a link");
 }
+
+#[test]
+fn an_extension_asked_for_before_attaching_is_refused_and_the_attach_still_goes() {
+    let host = Host::start(&shared_entry("shared", ""), 1);
+    let (key_a, key_b) = (support::key(), support::key());
+    host.pair(&key_a);
+    host.pair(&key_b);
+    let dir = cwd(&host.scratch);
+    let url = host.url("shared").to_owned();
+    with_link(&url, &key_a, host.peer, |a| {
+        let session = open_session(a, &dir);
+        assert_eq!(a.prompt(&session, "one").expect("a turn"), "echo: one");
+        with_link(&url, &key_b, host.peer, |b| {
+            b.initialize().expect("initialize is answered");
+            let refused = b
+                .request("_coqui_acp/usage", json!({"sessionId": session}))
+                .expect_err("nothing answers it before the session is open");
+            assert_eq!(refused["code"], -32000, "{refused}");
+            b.updates.borrow_mut().clear();
+            let answered = b
+                .request(
+                    "session/load",
+                    json!({"sessionId": session, "cwd": dir, "mcpServers": []}),
+                )
+                .expect("the session attaches");
+            assert!(answered["_meta"][META]["cursor"].is_string(), "{answered}");
+            assert_eq!(
+                update_texts(&b.updates.borrow(), "agent_message_chunk"),
+                ["echo: one"]
+            );
+        })
+        .expect("B's link");
+    })
+    .expect("A's link");
+}

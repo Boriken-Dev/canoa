@@ -808,6 +808,16 @@ pub(super) fn serve<C: Channel>(
                     swallow.push(request.clone());
                     replay.push(next);
                 }
+                (Some(method), Some(request)) if method.starts_with('_') => {
+                    // An extension asked for before the client has said which session it takes part in (an app asks for the
+                    // agent's usage as soon as it is connected): nothing answers it yet, and no client needs it to go on.
+                    if channel
+                        .send(&error_to(request, "not available until a session is open"))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
                 (Some("session/load" | "session/resume"), Some(request)) => {
                     let named = message
                         .pointer("/params/sessionId")

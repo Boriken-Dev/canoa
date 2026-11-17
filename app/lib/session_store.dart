@@ -3631,9 +3631,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     // What the agent lists now names the session, when it still has it under the same name.
     var title = entry.title ?? 'Earlier conversation';
     try {
-      if (await client.describe() case AcpDescription(
-        sessions: AcpKnown(value: final listed),
-      )) {
+      // A session the host keeps is joined by the first thing said on the connection, so nothing is asked before it.
+      final described = attach ? null : await client.describe();
+      if (described case AcpDescription(sessions: AcpKnown(value: final listed))) {
         for (final info in listed.sessions) {
           if (info.id == entry.sessionId && !entry.named) {
             title = shortLine(info.title) ?? title;
