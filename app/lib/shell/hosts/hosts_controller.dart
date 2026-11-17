@@ -179,9 +179,20 @@ class HostsController extends ChangeNotifier {
     this.addDialog,
     this.browserProvider,
     this.useBrowserAgents,
+    this.hasShell,
+    this.openShell,
+    this.onHostGone,
   });
 
   static const section = 'hosts';
+
+  /// Whether a shell can be offered on [HostItem]'s host, and opening one there (the Terminal section's New shell). Both null where
+  /// the app has no Terminal section.
+  final bool Function(HostItem item)? hasShell;
+  final void Function(HostItem item)? openShell;
+
+  /// Told the id of a host that is no longer listed under that id, removed or renamed, so what ran on it can end.
+  final void Function(String id)? onHostGone;
 
   final ShellLayout layout;
 
@@ -293,6 +304,7 @@ class HostsController extends ChangeNotifier {
       final moved = _status.remove('connection:$replacing');
       if (moved != null) _status['connection:${connection.name}'] = moved;
       if (layout.of(section).item == 'connection:$replacing') layout.setItem(section, 'connection:${connection.name}');
+      onHostGone?.call('connection:$replacing');
     }
     notifyListeners();
     // A Canoa host is read at once, as it is when the section opens; a direct agent waits for the person to check it.
@@ -314,6 +326,7 @@ class HostsController extends ChangeNotifier {
     _config = changed;
     _status.remove('connection:${connection.name}');
     if (layout.of(section).item == 'connection:${connection.name}') layout.setItem(section, null);
+    onHostGone?.call('connection:${connection.name}');
     notifyListeners();
   }
 }

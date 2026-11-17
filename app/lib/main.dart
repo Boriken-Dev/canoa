@@ -569,6 +569,12 @@ class _CanoaAppState extends State<CanoaApp> {
     start: _connect,
     browserProvider: kIsWeb ? _provider : null,
     useBrowserAgents: _useBrowserAgents,
+    hasShell: (item) => _terminalTargets().any((target) => target.id == item.id),
+    openShell: (item) {
+      _layout.select('terminal');
+      unawaited(_terminalSection.open(item.id, null));
+    },
+    onHostGone: (id) => unawaited(_terminalSection.closeHost(id)),
   );
 
   /// The Hosts section's index and main view, built from what the app holds now.
@@ -3012,6 +3018,8 @@ class _CanoaHome extends StatelessWidget {
         for (final command in session?.commands ?? const <AgentCommandInfo>[])
           PaletteItem('/${command.name}', () => conversation.insert?.call('/${command.name} '),
               detail: command.description.isEmpty ? 'A command of the agent\'s' : command.description, icon: Icons.terminal),
+        PaletteItem('Open in browser', () => unawaited(askToOpenInBrowser(context, workspaceOpener)),
+            detail: 'A web address, in the system browser', icon: Icons.open_in_browser),
       ]),
     );
   }

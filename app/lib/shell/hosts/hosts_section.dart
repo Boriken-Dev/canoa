@@ -113,6 +113,15 @@ class _Row extends StatelessWidget {
                   Text(item.kindLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
                 ]),
               ),
+              if (controller.openShell != null && (controller.hasShell?.call(item) ?? false))
+                IconButton(
+                  key: ValueKey('host-shell ${item.id}'),
+                  tooltip: 'Open a shell on ${item.name}',
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  icon: const Icon(Icons.terminal),
+                  onPressed: () => controller.openShell!(item),
+                ),
               if (status != null) Tooltip(
                 message: status.state.label,
                 child: Icon(Icons.circle, size: 10, color: _stateColor(context, status.state)),

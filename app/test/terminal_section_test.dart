@@ -171,6 +171,26 @@ void main() {
     expect(_key('terminal-section start'), findsOneWidget);
   });
 
+  testWidgets('a host that is removed from the list takes its shells with it and leaves the other host alone', (tester) async {
+    final world = _world();
+    addTearDown(() => tester.runAsync(world.controller.release));
+    await _show(tester, world.controller);
+    await tester.runAsync(() => world.controller.open('local', '/work/app'));
+    await tester.runAsync(() => world.controller.open('connection:Build box', '/srv/build'));
+    await tester.runAsync(() => world.controller.open('connection:Build box', null));
+    await _settle(tester);
+    expect(world.controller.groups, hasLength(3));
+
+    await tester.runAsync(() => world.controller.closeHost('connection:Build box'));
+    await _settle(tester);
+    expect(world.second.opened.map((shell) => shell.closed), [true, true], reason: 'every shell on it ended');
+    expect(world.local.opened.single.closed, isFalse);
+    expect(world.controller.groups.map((group) => group.target.id), ['local']);
+    expect(world.controller.accessOf('connection:Build box'), isNull, reason: 'what it said is forgotten');
+    expect(find.text('/srv/build'), findsNothing);
+    expect(find.text('/work/app'), findsOneWidget);
+  });
+
   testWidgets('a host that gives no terminal says so in the index and in the main view, and opens nothing', (tester) async {
     final world = _world(secondAccess: const TerminalRefused('Build box has not given this app a terminal.'));
     addTearDown(() => tester.runAsync(world.controller.release));

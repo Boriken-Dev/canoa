@@ -64,6 +64,9 @@ Future<(HostsController, List<CanoaConfig>)> _show(
   Size size = const Size(1100, 800),
   bool overviewOnly = false,
   List<ChatSession> sessions = const [],
+  bool Function(HostItem item)? hasShell,
+  void Function(HostItem item)? openShell,
+  void Function(String id)? onHostGone,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -77,6 +80,9 @@ Future<(HostsController, List<CanoaConfig>)> _show(
     servedName: servedName,
     servedSummary: servedName == null ? null : () => const HostSummary(state: 'Serving this page', agents: ['Claude'], capabilities: ['Session list']),
     mayWrite: () => canSave,
+    hasShell: hasShell,
+    openShell: openShell,
+    onHostGone: onHostGone,
   )..adopt(config);
   addTearDown(controller.dispose);
   await tester.pumpWidget(MaterialApp(
@@ -292,6 +298,37 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('rename-save')));
       await tester.pumpAndSettle();
       expect(find.text('A connection named One agent is already saved.'), findsOneWidget);
+    });
+
+    testWidgets('a row with a shell to offer has an Open a shell button that names its host; one without has none', (tester) async {
+      final opened = <String>[];
+      await _show(
+        tester,
+        config: const CanoaConfig().withConnection(_desk).withConnection(_agent),
+        hasShell: (item) => item.id != 'connection:One agent',
+        openShell: (item) => opened.add(item.id),
+      );
+      expect(find.byKey(const ValueKey('host-shell local')), findsOneWidget);
+      expect(find.byKey(const ValueKey('host-shell connection:Desk')), findsOneWidget);
+      expect(find.byKey(const ValueKey('host-shell connection:One agent')), findsNothing, reason: 'a direct endpoint offers no shell');
+      expect(find.byTooltip('Open a shell on Desk'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('host-shell connection:Desk')));
+      await tester.pumpAndSettle();
+      expect(opened, ['connection:Desk'], reason: 'the button does not also choose the row');
+    });
+
+    testWidgets('no shortcut where the app has no Terminal section', (tester) async {
+      await _show(tester, config: const CanoaConfig().withConnection(_desk));
+      expect(find.byTooltip('Open a shell on Desk'), findsNothing);
+    });
+
+    testWidgets('removing or renaming a host says its id is gone, so its shells can end', (tester) async {
+      final gone = <String>[];
+      final (controller, _) = await _show(tester, config: const CanoaConfig().withConnection(_desk), onHostGone: gone.add);
+      await controller.rename(_desk, 'Desk upstairs');
+      expect(gone, ['connection:Desk']);
+      await controller.remove(controller.config.connections.single);
+      expect(gone, ['connection:Desk', 'connection:Desk upstairs']);
     });
 
     testWidgets('removing one names the sessions on it, and says nothing remote is stopped', (tester) async {

@@ -165,6 +165,16 @@ class TerminalSectionController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  /// Ends every shell on [targetId]'s host and forgets what it said: the host was removed from the list, or is listed under
+  /// another name now.
+  Future<void> closeHost(String targetId) async {
+    _access.remove(targetId);
+    final gone = [for (final group in groups) if (group.target.id == targetId) group];
+    groups.removeWhere(gone.contains);
+    if (!_disposed) notifyListeners();
+    await Future.wait([for (final group in gone) group.workspace.release()]);
+  }
+
   /// Ends every shell: the app is closing.
   Future<void> release() => Future.wait([
     for (final group in [...groups]) group.workspace.release(),
