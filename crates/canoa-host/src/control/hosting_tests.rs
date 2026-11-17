@@ -238,3 +238,52 @@ fn an_extension_is_added_changed_and_removed_through_the_host_table() {
     );
     assert_eq!(denied["error"]["code"], DENIED, "{denied}");
 }
+
+#[test]
+fn a_host_write_made_from_a_table_the_file_no_longer_holds_is_refused() {
+    let (path, control) = editing("[host.agents.echo]\nprogram = \"echo\"\nlisten = \"127.0.0.1:0\"\n");
+    let who = key(&[Grant::Hosting]);
+    let read = ask(&control, &who, "config/get", json!({"section": "host"}));
+    let digest = read["result"]["digest"].as_str().expect("a digest").to_owned();
+    assert!(!digest.is_empty(), "{read}");
+
+    // Another writer adds an agent after the page read the table.
+    let meanwhile = fs::read_to_string(&path).expect("canoa.cfg")
+        + "\n[host.agents.later]\nprogram = \"echo\"\nlisten = \"127.0.0.1:0\"\n";
+    fs::write(&path, &meanwhile).expect("canoa.cfg");
+    let mine = json!({"agents": {"echo": {"program": "echo", "listen": "127.0.0.1:0"}}, "origins": ["https://canoa.example"]});
+    let refused = ask(
+        &control,
+        &who,
+        "config/set",
+        json!({"section": "host", "value": mine, "digest": digest}),
+    );
+    assert_eq!(refused["error"]["code"], files::CHANGED, "{refused}");
+    assert_eq!(fs::read_to_string(&path).expect("canoa.cfg"), meanwhile);
+
+    // A check changes nothing and is not refused; read again, the same write goes through and names the new table.
+    let reread = ask(&control, &who, "config/get", json!({"section": "host"}));
+    let fresh = reread["result"]["digest"].as_str().expect("a digest").to_owned();
+    assert_ne!(fresh, digest);
+    let mut both = reread["result"]["value"].clone();
+    both["origins"] = json!(["https://canoa.example"]);
+    let set = ask(
+        &control,
+        &who,
+        "config/set",
+        json!({"section": "host", "value": both, "digest": fresh}),
+    );
+    assert_eq!(set["result"]["restart"], true, "{set}");
+    assert_ne!(set["result"]["digest"], json!(fresh), "{set}");
+    let text = fs::read_to_string(&path).expect("canoa.cfg");
+    assert!(text.contains("later") && text.contains("canoa.example"), "{text}");
+
+    // Without a digest the write is the caller's whole word, as before.
+    let plain = ask(
+        &control,
+        &who,
+        "config/set",
+        json!({"section": "host", "value": mine}),
+    );
+    assert_eq!(plain["result"]["restart"], true, "{plain}");
+}

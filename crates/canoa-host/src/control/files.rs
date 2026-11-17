@@ -75,6 +75,15 @@ pub const GUARDED_SECTIONS: &[&str] = &[
 /// The table of the host's own settings, which `config/get`, `config/set` and `config/check` serve only a key that holds `hosting`.
 pub(crate) const HOST: &str = "host";
 
+/// The code of a refusal because the table a write was made from is no longer the file's.
+pub(crate) const CHANGED: i32 = -32004;
+
+/// A name for the `[host]` table as the file holds it now: what a write names to say which table it was made from.
+fn host_digest(table: Option<&Value>) -> String {
+    let bytes = serde_json::to_vec(table.unwrap_or(&Value::Null)).unwrap_or_default();
+    data_encoding::HEXLOWER.encode(&Sha256::digest(bytes))
+}
+
 /// The sections the host itself reads, which it takes up when it next starts.
 const READ_AT_START: &[&str] = &["permissions", "usage"];
 
@@ -518,18 +527,37 @@ impl Files {
     /// `[host]`, which no page edits through `config/set` (it names the programs the host runs and the keys' grants): read for a
     /// key that holds `hosting`.
     pub(crate) fn host_get(&self) -> Outcome {
+        let value = self.hidden_section(HOST)?;
         Ok(json!({
             "section": HOST,
-            "value": self.hidden_section(HOST)?,
+            "digest": host_digest(value.as_ref()),
+            "value": value,
             "restart": true,
         }))
     }
 
     /// Replaces `[host]` with an object, or removes it with null, after the host has read what canoa.cfg would then hold; the host
     /// reads it only when it starts. With `write` false nothing is written: the answer is the host's own verdict.
+    ///
+    /// A write that names the `digest` of the table its page read is refused when the file holds another table now, so a page
+    /// never overwrites keys, agents or settings added in the meantime; the refusal's code is [`CHANGED`].
     pub(crate) fn host_set(&self, params: &Value, write: bool) -> Outcome {
         let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
-        self.change_section(HOST, params.get("value").unwrap_or(&Value::Null), write)
+        if write && let Some(read) = text_param(params, "digest")? {
+            let now = host_digest(self.hidden_section(HOST)?.as_ref());
+            if now != read {
+                return Err((
+                    CHANGED,
+                    "the host's own settings changed since this page read them: read them again and make the change again"
+                        .to_owned(),
+                ));
+            }
+        }
+        let mut done = self.change_section(HOST, params.get("value").unwrap_or(&Value::Null), write)?;
+        if write {
+            done["digest"] = Value::String(host_digest(self.hidden_section(HOST)?.as_ref()));
+        }
+        Ok(done)
     }
 
     /// `config/check`: whether `section` set to the value would leave canoa.cfg one the host accepts, and in the host's words why
