@@ -157,9 +157,15 @@ impl Gateway {
             Ok(made) => made,
             Err(error) => return self.fail(api, track, &error),
         };
+        track.begin(
+            &self.log,
+            body.len(),
+            made.chat.get("max_tokens").and_then(Value::as_u64),
+        );
         if !made.stream {
             return match self.run(&made) {
                 Ok(done) => {
+                    track.answered(done.usage.input, done.usage.output);
                     track.finish(&self.log, 200, None, None);
                     Self::json(
                         &match api {
@@ -192,7 +198,7 @@ impl Gateway {
         api: Api,
         made: &Translated,
         (usage, input): (bool, u64),
-        track: Track,
+        mut track: Track,
         out: &mut (dyn Write + Send),
     ) -> std::io::Result<()> {
         let model = self.engine.model().map(|m| m.id).unwrap_or_default();
@@ -239,6 +245,9 @@ impl Gateway {
             outcome
         });
         let failure = outcome.as_ref().err().map(|error| error.message.clone());
+        if let Ok(done) = &outcome {
+            track.answered(done.usage.input, done.usage.output);
+        }
         let text = match (outcome, api) {
             (Ok(done), Api::Chat) => openai::stream_body(&done, usage),
             (Ok(done), Api::Responses) => responses::stream_body(&done),

@@ -531,13 +531,36 @@ fn a_page_cannot_reach_the_gateway() {
     assert!(said.starts_with("HTTP/1.1 403"), "{said}");
 }
 
+#[test]
+fn a_program_whose_fetch_names_only_its_mode_is_served_and_a_page_is_not() {
+    let up = up(Stub::new(text_answer("hi")), Duration::from_secs(10));
+    let port = up.running.listener.addr().port();
+    let status = |extra: &str| {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connects");
+        let request = format!(
+            "GET /v1/models HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{extra}Authorization: Bearer {}\r\n\r\n",
+            up.ticket.bearer()
+        );
+        stream.write_all(request.as_bytes()).expect("writes");
+        let mut said = String::new();
+        let _ = stream.read_to_string(&mut said);
+        said.split_whitespace().nth(1).map(str::to_owned)
+    };
+    assert_eq!(status("Sec-Fetch-Mode: cors\r\n").as_deref(), Some("200"));
+    assert_eq!(
+        status("Sec-Fetch-Mode: cors\r\nSec-Fetch-Site: cross-site\r\n").as_deref(),
+        Some("403")
+    );
+}
+
 /// The lines of the log at `path` once it has `count` of them: a stream's line is written after its last byte.
 fn log_lines(path: &std::path::Path, count: usize) -> Vec<Value> {
     for _ in 0..200 {
         let lines: Vec<Value> = std::fs::read_to_string(path)
             .unwrap_or_default()
             .lines()
-            .filter_map(|line| serde_json::from_str(line).ok())
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|line| line["event"] != "begin")
             .collect();
         if lines.len() >= count {
             return lines;
@@ -608,6 +631,17 @@ fn every_request_is_logged_with_how_it_ended_and_never_what_was_said() {
     );
     let text = std::fs::read_to_string(&path).expect("reads");
     assert!(!text.contains(secret), "the prompt is not logged");
+    let begun: Vec<Value> = text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|line| line["event"] == "begin")
+        .collect();
+    assert_eq!(begun.len(), 2, "each request says it began: {text}");
+    assert!(
+        begun
+            .iter()
+            .all(|line| line["request_bytes"].as_u64() > Some(0))
+    );
     drop(ticket);
     drop(running);
     std::fs::remove_dir_all(&dir).expect("removes");

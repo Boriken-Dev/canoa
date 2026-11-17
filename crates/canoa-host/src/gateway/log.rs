@@ -63,6 +63,7 @@ pub(crate) struct Track {
     model: String,
     stream: bool,
     start: Instant,
+    tokens: Option<(u64, u64)>,
 }
 
 impl Track {
@@ -72,7 +73,31 @@ impl Track {
             model: String::new(),
             stream: false,
             start: Instant::now(),
+            tokens: None,
         }
+    }
+
+    /// The model's usage, once it has answered.
+    pub(crate) fn answered(&mut self, input: u64, output: u64) {
+        self.tokens = Some((input, output));
+    }
+
+    /// Writes the line that says a request is being worked on: a request that never ends leaves only this one. `max_tokens` is
+    /// what the model is allowed to say, as the service will be asked.
+    pub(crate) fn begin(&self, log: &Log, bytes: usize, max_tokens: Option<u64>) {
+        if log.path.is_none() {
+            return;
+        }
+        let line = json!({
+            "at": SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_secs()),
+            "event": "begin",
+            "route": self.route,
+            "model": self.model,
+            "stream": self.stream,
+            "request_bytes": bytes,
+            "max_tokens": max_tokens,
+        });
+        log.append(&line.to_string());
     }
 
     /// What the client asked for, once its body has been read.
@@ -117,6 +142,8 @@ impl Track {
             "status": status,
             "first_byte_ms": u64::try_from(first.unwrap_or(total).as_millis()).unwrap_or(u64::MAX),
             "total_ms": u64::try_from(total.as_millis()).unwrap_or(u64::MAX),
+            "input_tokens": self.tokens.map(|(input, _)| input),
+            "output_tokens": self.tokens.map(|(_, output)| output),
             "error": error,
         });
         log.append(&line.to_string());

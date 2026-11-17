@@ -385,7 +385,9 @@ fn request<S: Service>(
                         "content-length" => head.lengths.push(value),
                         "transfer-encoding" | "content-encoding" => head.framed = true,
                         "origin" => head.from_page = true,
-                        _ if name.starts_with("sec-fetch-") => head.from_page = true,
+                        // A browser sets this on every request and a page cannot change it; Node's `fetch` sends only
+                        // `Sec-Fetch-Mode`, so that header alone does not make a request a page's.
+                        "sec-fetch-site" => head.from_page = true,
                         _ => {}
                     }
                 }
