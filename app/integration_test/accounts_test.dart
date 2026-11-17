@@ -6,6 +6,7 @@
 //
 // Needs the stand-in (`cargo build -p canoa-host --examples`, `harness_standin`), found as
 // test/fixtures/examples.dart says. CANOA_HOST has to be unset, as it is for a person.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -50,7 +51,15 @@ List<String> _leaks(Directory dir, List<String> needles) => [
 ];
 
 bool _holds(File file, List<String> needles) {
-  final text = latin1.decode(file.readAsBytesSync());
+  final List<int> bytes;
+  try {
+    bytes = file.readAsBytesSync();
+  } on FileSystemException {
+    // A login the host placed for a session is taken away when the session ends, which can be between the listing and this read,
+    // and the host's own lock file is locked while it runs: neither can be read by anyone looking for a key.
+    return false;
+  }
+  final text = latin1.decode(bytes);
   return needles.any(text.contains);
 }
 
@@ -111,6 +120,15 @@ peers = []
       config: () => CanoaConfig.parse(cfg.readAsStringSync(), name: cfg.path),
       change: change,
     );
+    // A list asked while the host restarts fails, and the app asks again when its host serves anew; this controller stands alone, so
+    // it is asked again here once the host serves and its last answer was a failure.
+    int offers(String entry) {
+      if (controller.problem != null && !controller.loading && host.phase == HostPhase.running && host.served.isNotEmpty) {
+        unawaited(controller.refresh());
+      }
+      return controller.offeredBy(entry).length;
+    }
+
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child: AccountsSection(controller: controller)))));
     await tester.binding.setSurfaceSize(const Size(1000, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -126,6 +144,15 @@ peers = []
         'Sign in to be offered for $method',
       );
       await tester.tap(find.byKey(const Key('add-account-start')));
+      // A login that takes a plain input first (a subscription's optional email) asks for it in a dialog of its own before it starts.
+      await until(
+        () => find.byKey(const Key('add-account-start')).evaluate().isEmpty || find.byKey(const Key('program-ask')).evaluate().isNotEmpty,
+        'the sign-in of $name to start or ask',
+      );
+      if (find.byKey(const Key('program-ask')).evaluate().isNotEmpty) {
+        await tester.tap(find.byKey(const Key('ask-submit')));
+        await tester.pumpAndSettle();
+      }
       await until(() => find.byKey(const Key('add-account-start')).evaluate().isEmpty, 'the sign-in of $name to start');
     }
 
@@ -149,7 +176,7 @@ peers = []
     await typeSealed('api_key', _canary);
     await done('metered');
     // The entry now offers it, written before the host is restarted to serve that: the next sign-in waits for the host.
-    await until(() => controller.offeredBy('claude-accounts').isNotEmpty, 'the entry to offer the account');
+    await until(() => offers('claude-accounts') == 1, 'the entry to offer the account');
     await tester.pump(const Duration(seconds: 1));
     await until(() => host.phase == HostPhase.running && host.served.isNotEmpty, 'the host to serve again');
 
@@ -158,6 +185,8 @@ peers = []
     await until(() => find.byKey(const Key('sign-in-page')).evaluate().isNotEmpty || find.byType(TextField).evaluate().isNotEmpty, 'the login to ask');
     await typeSealed('code', '123456');
     await done('work');
+    await until(() => offers('claude-accounts') == 2, 'the entry to offer both accounts');
+    await until(() => host.phase == HostPhase.running && host.served.isNotEmpty, 'the host to serve again');
 
     await controller.refresh();
     expect(controller.accounts.map((each) => each.name), containsAll(['metered', 'work']));
@@ -169,9 +198,17 @@ peers = []
     await until(() => host.phase == HostPhase.running && host.listening.any((entry) => entry.name == 'claude-accounts'), 'the host to serve the entry');
     Future<String> turn(String account) async {
       final link = host.openLink('claude-accounts');
+      // The host names the account in the answer to `initialize`, which the client does not keep: read it as it goes by.
+      Object? reported;
+      final messages = link.messages.map((message) {
+        final value = jsonDecode(message);
+        final meta = value is Map && value['result'] is Map ? (value['result'] as Map)['_meta'] : null;
+        if (meta is Map && meta.containsKey(accountMeta)) reported = meta[accountMeta];
+        return message;
+      });
       final client = VerifiedAgent.fromChild(
         label: 'claude-accounts',
-        messages: link.messages,
+        messages: messages,
         send: link.send,
         close: link.close,
         decider: (request, from) => Future<AcpDecision>.value(const AcpAllow()),
@@ -180,8 +217,7 @@ peers = []
       try {
         await client.initialize();
         final opened = await client.openSession(cwd: dir.path);
-        final meta = (opened.raw['_meta'] as Map?)?[accountMeta];
-        expect((meta as Map?)?['name'], account, reason: 'the answer names the account the session runs on');
+        expect((reported as Map?)?['name'], account, reason: 'the answer names the account the session runs on');
         final written = StringBuffer();
         final listening = client.updates.listen((update) => written.write(update.text ?? ''));
         await client.prompt(opened.id, 'hello on $account');
