@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:canoa/ledger/ledger_backend_io.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/permissions/permission_rules.dart';
+import 'package:canoa/permissions/protected_paths.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _source = 'Scripted';
@@ -91,7 +92,7 @@ void main() {
   group('a path as the agent wrote it', () {
     test('is read only when absolute: nothing relative, ~, UNC, device, stream or drive-relative', () {
       for (final path in [
-        'src/a.js', './a.js', '../a.js', 'a.js', '~/a.js', '~', '~root/x', r'\\server\share\a.js', '//server/share/a.js', r'\\?\C:\work\a.js',
+        'src/a.js', './a.js', '../a.js', 'a.js', '~/a.js', '~', '~root/x', r'\\?\C:\work\a.js', r'\\.\pipe\x', r'\\server', r'\\server\share\..\..\a.js',
         'C:a.js', r'C:work\a.js', '/work/calc/a.js:stream', r'C:\work\calc\a.js:$DATA', '/work/calc/x:y/a.js', '/C:/work/a.js', '', '/work\u0000/a',
         '/..', '/work/../../a.js',
       ]) {
@@ -105,6 +106,23 @@ void main() {
       expect(scopeProblem(RuleType.path, '/work/calc/src/../src', _edit('/work/calc/src/a.js')!, _folder, real: _plain), contains('.. '));
       expect(cleanPath(r'C:\Work\Calc\a.js'), 'c:/work/calc/a.js');
       expect(cleanPath('c:/Work'), 'c:/work');
+    });
+
+    test('a share is a place like a drive: its server and share are its root, and it has no case', () {
+      expect(cleanPath(r'\\Server\Share\Work\.\a.js'), '//server/share/work/a.js');
+      expect(cleanPath('//server/share/work/../a.js'), '//server/share/a.js');
+      expect(cleanPath(r'\\server\share'), '//server/share');
+    });
+
+    test('a path on a share is covered under its folder, and a protected entry on the share is never covered', () {
+      const folder = r'\\localhost\C$\work\calc';
+      const guards = PermissionGuards(protected: null);
+      expect(pathProblem(scope: r'\\localhost\C$\work\calc\src', file: r'\\localhost\C$\work\calc\src\a.js', folder: folder, guards: guards, real: _plain), isNull);
+      final protected = guards.withProtected(ProtectedPaths([r'\\localhost\C$\work\calc\secrets']));
+      for (final file in [r'\\localhost\C$\work\calc\secrets\key.pem', r'\\LOCALHOST\c$\Work\Calc\Secrets\key.pem']) {
+        expect(pathProblem(scope: file, file: file, folder: folder, guards: protected, real: _plain), contains('protected'), reason: file);
+      }
+      expect(pathProblem(scope: r'\\localhost\C$\work\calc\src', file: r'\\localhost\C$\work\calc\src\a.js', folder: folder, guards: protected, real: _plain), isNull);
     });
   });
 

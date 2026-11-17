@@ -117,13 +117,16 @@ RuleSubject? subjectOf({String? kind, Object? rawInput, Map<String, dynamic>? to
 final RegExp _drive = RegExp(r'^[A-Za-z]:/');
 
 /// [path] with `.` and `..` resolved and `/` for every separator, lower-cased for a Windows drive path, which has no case.
-/// Null unless it is absolute as the agent wrote it: not relative, not starting with `~`, not a UNC or device path, and with no
+/// Null unless it is absolute as the agent wrote it: not relative, not starting with `~`, not a device path, and with no
 /// `:` but the one after a drive letter (which also refuses an alternate data stream and a drive-relative `C:x`). Null too when
 /// it climbs out of its root. Links are not followed here: see [RealPath].
 String? cleanPath(String path) {
   if (path.contains('\u0000') || path.startsWith('~')) return null;
   final text = path.replaceAll('\\', '/');
-  if (text.startsWith('//')) return null;
+  // A share (`//server/share/...`) is a Windows path like a drive's: its server and share are its root, and it has no case. A
+  // device path (`//?/`, `//./`) is no folder.
+  final share = text.startsWith('//');
+  if (share && !RegExp(r'^//[^/?.][^/]*/[^/]+').hasMatch(text)) return null;
   final drive = _drive.hasMatch(text) ? text.substring(0, 2) : null;
   final rest = drive == null ? text : text.substring(2);
   if (rest.contains(':') || (drive == null && !text.startsWith('/'))) return null;
@@ -131,12 +134,13 @@ String? cleanPath(String path) {
   for (final part in rest.split('/')) {
     if (part.isEmpty || part == '.') continue;
     if (part == '..') {
-      if (segments.isEmpty) return null;
+      if (segments.length <= (share ? 2 : 0)) return null;
       segments.removeLast();
     } else {
       segments.add(part);
     }
   }
+  if (share) return '//${segments.join('/')}'.toLowerCase();
   final cleaned = '${drive ?? ''}/${segments.join('/')}';
   return drive == null ? cleaned : cleaned.toLowerCase();
 }
