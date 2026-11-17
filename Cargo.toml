@@ -59,19 +59,20 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["s
 # Reading overlays: the Agent Overlay Specification, one implementation shared with the other consumers. Not published yet.
 coqui-aos = { git = "https://github.com/Boriken-Dev/coqui-aos", rev = "caa9bf6dcf8485fb179f092bbd2cd9db17861670" }
 # The stdio relay and the provider facade, on coqui-acp at one revision. Not published yet.
-coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "145e9b83bf14fcf7935d48b69ddcd0621c735fbe" }
-coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "145e9b83bf14fcf7935d48b69ddcd0621c735fbe" }
-coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "145e9b83bf14fcf7935d48b69ddcd0621c735fbe" }
-coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "145e9b83bf14fcf7935d48b69ddcd0621c735fbe" }
+coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "049e63d4e880326dec831bf255d7639ee8d9e133" }
+coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "049e63d4e880326dec831bf255d7639ee8d9e133" }
+coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "049e63d4e880326dec831bf255d7639ee8d9e133" }
+coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "049e63d4e880326dec831bf255d7639ee8d9e133" }
 # Claude Code, Codex and Pi as ACP agents, run in this process with no Node: their translators and what they share.
-coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "145e9b83bf14fcf7935d48b69ddcd0621c735fbe", features = ["history"] }
-coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "145e9b83bf14fcf7935d48b69ddcd0621c735fbe", features = ["history"] }
+coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "049e63d4e880326dec831bf255d7639ee8d9e133", features = ["history"] }
+coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "049e63d4e880326dec831bf255d7639ee8d9e133", features = ["history"] }
 # The session-history format: the recorder, the reader and the loss report.
-coqui-acp-history = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "145e9b83bf14fcf7935d48b69ddcd0621c735fbe" }
+coqui-acp-history = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "049e63d4e880326dec831bf255d7639ee8d9e133" }
 # The host side of secret prompts: the tools an agent is served and what the person is asked.
-coqui-acp-secrets = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "145e9b83bf14fcf7935d48b69ddcd0621c735fbe" }
-coqui-acp-pi = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "145e9b83bf14fcf7935d48b69ddcd0621c735fbe", features = ["history"] }
-coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "145e9b83bf14fcf7935d48b69ddcd0621c735fbe", features = ["antigravity", "kind"] }
+coqui-acp-secrets = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "049e63d4e880326dec831bf255d7639ee8d9e133" }
+coqui-acp-pi = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "049e63d4e880326dec831bf255d7639ee8d9e133", features = ["history"] }
+coqui-acp-hub = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "049e63d4e880326dec831bf255d7639ee8d9e133" }
+coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "049e63d4e880326dec831bf255d7639ee8d9e133", features = ["antigravity", "kind"] }
 # The revisions the bridge library (coqui-acp-bridge) builds on at that commit, so the graph holds one of each.
 coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "f45938e8cede85a2a2e00afedea1b4944f7c8a67" }
 coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "984db3d54b73de10c7892b06fe269a259de2d1c5" }
