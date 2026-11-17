@@ -12,6 +12,7 @@ import 'package:canoa/config/connection.dart';
 import 'package:canoa/desktop/control_client.dart' show ControlFailed;
 import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_tool.dart' show HostLink;
+import 'package:canoa/settings/shell_settings.dart' show HostShell;
 import 'package:canoa/surfaces/terminal_controller.dart';
 import 'package:canoa/surfaces/terminal_remote.dart';
 import 'package:canoa/surfaces/terminal_section.dart';
@@ -61,12 +62,20 @@ final class _Host implements TerminalHost {
   final opened = <_Shell>[];
   final cwds = <String?>[];
 
+  /// The shell each open named, and the shells this host lists.
+  final named = <String?>[];
+  List<HostShell> listed = const [];
+
   @override
-  Future<RemoteTerminal> open({String? cwd, required int cols, required int rows}) async {
+  Future<List<HostShell>> shells() async => listed;
+
+  @override
+  Future<RemoteTerminal> open({String? cwd, String? shell, required int cols, required int rows}) async {
     cwds.add(cwd);
-    final shell = _Shell(cwd ?? '/home/$name');
-    opened.add(shell);
-    return shell;
+    named.add(shell);
+    final made = _Shell(cwd ?? '/home/$name');
+    opened.add(made);
+    return made;
   }
 }
 
@@ -258,6 +267,50 @@ void main() {
     await tester.tap(find.text('Local').last);
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(_key('terminal-section folder')).controller!.text, isEmpty, reason: 'that folder is the other host\'s');
+  });
+
+  testWidgets('the New shell dialog offers the shells the host found, and a shell is opened with the one chosen', (tester) async {
+    final world = _world();
+    world.local.listed = const [
+      HostShell(id: 'git-bash', label: 'Git Bash', path: r'C:\Git\bin\bash.exe', family: 'bash', origin: 'git-for-windows'),
+      HostShell(id: 'pwsh', label: 'PowerShell 7', path: r'C:\PS\pwsh.exe', family: 'powershell', origin: 'system'),
+    ];
+    addTearDown(() => tester.runAsync(world.controller.release));
+    await _show(tester, world.controller);
+
+    await tester.tap(_key('terminal-section start'));
+    await tester.pumpAndSettle();
+    expect(_key('terminal-section shell'), findsOneWidget);
+    await tester.tap(_key('terminal-section shell'));
+    await tester.pumpAndSettle();
+    expect(find.text('The host\'s own choice'), findsWidgets);
+    await tester.tap(find.text('Git Bash').last);
+    await tester.pumpAndSettle();
+    await tester.tap(_key('terminal-section open'));
+    await tester.pumpAndSettle();
+    await _settle(tester);
+    expect(world.local.named, ['git-bash']);
+
+    // The same folder and another shell is another group, the same shell again joins the first.
+    await tester.runAsync(() => world.controller.open('local', null, shell: 'pwsh'));
+    await tester.runAsync(() => world.controller.open('local', null, shell: 'git-bash'));
+    await _settle(tester);
+    expect(world.local.named, ['git-bash', 'pwsh', 'git-bash']);
+    expect(world.controller.groups.map((group) => group.shell), ['git-bash', 'pwsh']);
+    expect(world.controller.groups.first.workspace.shells, 2);
+  });
+
+  testWidgets('a host that lists no shell shows no Shell field, and the host\'s own choice opens with none named', (tester) async {
+    final world = _world();
+    addTearDown(() => tester.runAsync(world.controller.release));
+    await _show(tester, world.controller);
+    await tester.tap(_key('terminal-section start'));
+    await tester.pumpAndSettle();
+    expect(_key('terminal-section shell'), findsNothing);
+    await tester.tap(_key('terminal-section open'));
+    await tester.pumpAndSettle();
+    await _settle(tester);
+    expect(world.local.named, [null]);
   });
 
   testWidgets('the section as the person sees it', (tester) async {

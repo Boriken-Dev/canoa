@@ -18,6 +18,7 @@ import 'app_sections.dart';
 import '../shell/shell.dart' show ShellScope;
 import 'overlay_sections.dart';
 import 'extension_settings.dart';
+import 'shell_settings.dart';
 import 'setting_layers.dart';
 import 'settings_controller.dart';
 
@@ -45,6 +46,7 @@ const _sections = [
   SettingsSection(id: 'mcp', group: 'Agents', title: 'MCP servers', icon: Icons.extension_outlined, keywords: 'tools servers mcp allowed per agent'),
   SettingsSection(id: 'permissions', group: 'Agents', title: 'Permissions', icon: Icons.shield_outlined, keywords: 'bypass mode allow once remembered rules protected paths log revoke full access'),
   SettingsSection(id: 'accounts', group: 'Agents', title: 'Accounts', icon: Icons.manage_accounts_outlined, keywords: 'login sign in api key subscription claude codex grok credentials add remove several'),
+  SettingsSection(id: 'shells', group: 'Agents', title: 'Shells', icon: Icons.terminal, keywords: 'bash git bash powershell pwsh wsl msys2 terminal shell command windows'),
   SettingsSection(id: 'usage', group: 'Agents', title: 'Usage', icon: Icons.speed, keywords: 'limit warn percent quota'),
   SettingsSection(id: 'catalogs', group: 'Overlays', title: 'Catalogs', icon: Icons.storefront_outlined, keywords: 'store limits catalog sources icons size'),
   SettingsSection(id: 'extensions', group: 'Store', title: 'Extensions', icon: Icons.extension_outlined, keywords: 'store types runtimes add library provider host restart'),
@@ -73,6 +75,7 @@ class SettingsPage extends StatefulWidget {
     this.onLoadout,
     this.accounts,
     this.extensions,
+    this.shells,
     this.usageSection = false,
     this.voiceBackends = const [],
     this.hostSpeech,
@@ -125,6 +128,10 @@ class SettingsPage extends StatefulWidget {
   /// The store extensions the host loads, for the Extensions section; none where the key may not change the host's settings.
   final ExtensionSettings? extensions;
 
+  /// The shells the host found and the choice of which its terminals and agents use, for the Shells section; none where the key may
+  /// not change the host's settings.
+  final ShellSettings? shells;
+
   /// Whether the app has a Usage section of its own, which then holds the usage warning.
   final bool usageSection;
 
@@ -148,7 +155,7 @@ class SettingsPageState extends State<SettingsPage> {
 
   List<SettingsSection> get _available => [
     for (final section in _sections)
-      if ((section.id != 'accounts' || widget.accounts != null) && (section.id != 'extensions' || widget.extensions != null) && (section.id != 'usage' || !widget.usageSection)) section,
+      if ((section.id != 'accounts' || widget.accounts != null) && (section.id != 'extensions' || widget.extensions != null) && (section.id != 'shells' || widget.shells != null) && (section.id != 'usage' || !widget.usageSection)) section,
   ];
 
   @override
@@ -252,6 +259,7 @@ class SettingsPageState extends State<SettingsPage> {
       'usage' => UsageWarning(controller: controller),
       'catalogs' => CatalogsSection(controller: controller),
       'extensions' => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!),
+      'shells' => ShellsSection(key: const Key('settings-shells'), settings: widget.shells!),
       _ => AboutSection(version: widget.version),
     };
     return Align(

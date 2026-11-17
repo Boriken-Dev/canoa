@@ -372,4 +372,78 @@ void main() {
     expect(tester.takeException(), isNull);
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/runtime_page_not_installed_desktop.png'));
   });
+
+  group('the shells', () {
+    FakeStoreHost shells() => FakeStoreHost([
+      FakeStore(
+        'git_bash_store',
+        title: 'Git Bash',
+        runtime: true,
+        summary: 'The bash shell of Git for Windows, with the tools that go with it and git: what an agent such as Claude Code runs commands with on Windows, and a shell for the Terminal.',
+        icon: 'branch',
+        homepage: 'https://gitforwindows.org',
+        commands: ['bash', 'sh', 'git'],
+        endpoints: ['https://api.github.com/repos/git-for-windows/git/releases', 'https://github.com/git-for-windows/git/releases/download/'],
+        copies: [copyOf('2.56.1', path: r'C:\Users\someone\AppData\Local\canoa\programs\git-bash\2.56.1\git\bin\bash.exe')],
+        latest: '2.56.1',
+      ),
+      FakeStore(
+        'powershell_store',
+        title: 'PowerShell',
+        runtime: true,
+        summary: 'PowerShell 7, on Windows and Linux: a shell for the Terminal and what an agent that runs PowerShell commands finds as pwsh.',
+        icon: 'prompt',
+        homepage: 'https://github.com/PowerShell/PowerShell',
+        commands: ['pwsh'],
+        endpoints: ['https://api.github.com/repos/PowerShell/PowerShell/releases'],
+        copies: [copyOf('7.6.0', managed: false, path: r'C:\Program Files\PowerShell\7\pwsh.exe')],
+        latest: '7.7.0',
+      ),
+    ]);
+
+    testWidgets('each has its own glyph on its tile and its page, which says what uses its commands', (tester) async {
+      final host = shells();
+      final config = CanoaConfig(
+        host: {
+          'agents': {
+            'Claude': {'program': 'bash', 'args': ['-c', 'agent']},
+          },
+        },
+        profile: const Profile(mcp: {'git': McpStdio(command: 'git', args: ['mcp'])}),
+      );
+      final extensions = StoreExtensions(control: () async => host.client(), open: () async => host.client());
+      addTearDown(extensions.dispose);
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: Scaffold(body: ExtensionBody(type: extensions.types.first, view: StoreView(runtimesTypeId), config: config)),
+      ));
+      await tester.runAsync(extensions.ensure);
+      await _settle(tester);
+      expect(find.byKey(const Key('runtime-glyph-branch')), findsOneWidget);
+      expect(find.byKey(const Key('runtime-glyph-prompt')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/runtimes_list_shells_desktop.png'));
+
+      await tester.tap(find.byKey(const Key('store-entry-This host-Git Bash')));
+      await _settle(tester);
+      expect(find.byKey(const Key('runtime-details-git_bash_store')), findsOneWidget);
+      expect(find.textContaining('Commands it provides: bash, sh, git'), findsOneWidget);
+      expect(find.textContaining('Agent Claude starts bash'), findsOneWidget);
+      expect(find.textContaining('MCP server git starts git'), findsOneWidget);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/runtime_page_git_bash_desktop.png'));
+    });
+
+    testWidgets('a copy found on the computer is said to be found there, and the page offers a copy for Canoa', (tester) async {
+      final host = shells();
+      final programs = await _load(tester, host);
+      await _page(tester, programs, 'powershell_store', size: const Size(1280, 800));
+      expect(find.byKey(const Key('runtime-glyph-prompt')), findsOneWidget);
+      expect(find.textContaining('found on this computer'), findsWidgets);
+      expect(find.text('Install a copy for Canoa'), findsOneWidget);
+      expect(find.byKey(const Key('runtime-remove')), findsNothing, reason: 'Canoa holds no copy of its own to take away');
+    });
+  });
 }

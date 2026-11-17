@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../theme/look.dart';
+import '../settings/shell_settings.dart' show HostShell;
 import 'terminal_controller.dart';
 import 'terminal_surface.dart';
 
@@ -27,21 +28,28 @@ final class TerminalTarget {
 
 /// The shells opened in one folder of one host, as the Terminal surface keeps a conversation's: tabs, and a split in any of them.
 final class TerminalGroup {
-  TerminalGroup(this.target, this.cwd, this.workspace);
+  TerminalGroup(this.target, this.cwd, this.workspace, {this.shell});
 
   final TerminalTarget target;
 
   /// The folder the shells start in; null for the host's default.
   final String? cwd;
+
+  /// The id of the shell they run, one the host listed; null for the host's own choice.
+  final String? shell;
   final TerminalWorkspace workspace;
 
-  String get key => '${target.id}\u0000${cwd ?? ''}';
+  String get key => '${target.id}\u0000${cwd ?? ''}\u0000${shell ?? ''}';
 }
 
 /// The Terminal section's state: the shells the person opened with no conversation, grouped by host and folder, and what each host
 /// said when asked for one. Shells belong to their host's link and end with the group or the app.
 class TerminalSectionController extends ChangeNotifier {
-  TerminalSectionController({required this.targets, this.workspaces = _none, this.selected = _nothing});
+  TerminalSectionController({
+    required this.targets,
+    this.workspaces = _none,
+    this.selected = _nothing,
+  });
 
   /// The hosts offered now, in the order the Hosts section lists them.
   final List<TerminalTarget> Function() targets;
@@ -120,9 +128,22 @@ class TerminalSectionController extends ChangeNotifier {
     return asking;
   }
 
-  /// A new shell on [targetId] in [cwd] (the host's default when null or empty): in the group for that pair, which is made when it
-  /// is the first. A host that offers none leaves [refusal] and returns null.
-  Future<TerminalGroup?> open(String targetId, String? cwd) async {
+  /// The shells [targetId]'s host lists for a new terminal to name; none when it offers no terminal or lists none.
+  Future<List<HostShell>> shellsOf(String targetId) async {
+    final target = targets().where((each) => each.id == targetId).firstOrNull;
+    if (target == null) return const [];
+    final access = await _ask(target);
+    return access is TerminalOnHost ? access.host.shells() : const [];
+  }
+
+  /// A new shell on [targetId] in [cwd] (the host's default when null or empty) running [shell] (an id the host listed; its own
+  /// choice when null): in the group for that triple, which is made when it is the first. A host that offers none leaves [refusal]
+  /// and returns null.
+  Future<TerminalGroup?> open(
+    String targetId,
+    String? cwd, {
+    String? shell,
+  }) async {
     final target = targets().where((each) => each.id == targetId).firstOrNull;
     if (target == null) {
       refusal = 'That host is not listed any more.';
@@ -140,13 +161,19 @@ class TerminalSectionController extends ChangeNotifier {
     }
     final folder = cwd == null || cwd.trim().isEmpty ? null : cwd.trim();
     var group = groups
-        .where((each) => each.target.id == targetId && each.cwd == folder)
+        .where(
+          (each) =>
+              each.target.id == targetId &&
+              each.cwd == folder &&
+              each.shell == shell,
+        )
         .firstOrNull;
     if (group == null) {
       group = TerminalGroup(
         target,
         folder,
-        TerminalWorkspace(host: access.host, cwd: folder),
+        TerminalWorkspace(host: access.host, cwd: folder, shell: shell),
+        shell: shell,
       );
       group.workspace.addListener(() => _changed(group!));
       groups.add(group);
@@ -175,7 +202,10 @@ class TerminalSectionController extends ChangeNotifier {
   /// another name now.
   Future<void> closeHost(String targetId) async {
     _access.remove(targetId);
-    final gone = [for (final group in groups) if (group.target.id == targetId) group];
+    final gone = [
+      for (final group in groups)
+        if (group.target.id == targetId) group,
+    ];
     groups.removeWhere(gone.contains);
     if (!_disposed) notifyListeners();
     await Future.wait([for (final group in gone) group.workspace.release()]);
@@ -226,7 +256,9 @@ class TerminalIndex extends StatefulWidget {
   final TerminalSectionController controller;
 
   /// Asks which host and folder a new shell is for; the section's own dialog when null.
-  final Future<({String target, String? cwd})?> Function(BuildContext context)?
+  final Future<({String target, String? cwd, String? shell})?> Function(
+    BuildContext context,
+  )?
   askFolder;
 
   @override
@@ -246,7 +278,9 @@ class _TerminalIndexState extends State<TerminalIndex> {
     final choice =
         await (widget.askFolder?.call(context) ??
             showNewShellDialog(context, controller));
-    if (choice != null) await controller.open(choice.target, choice.cwd);
+    if (choice != null) {
+      await controller.open(choice.target, choice.cwd, shell: choice.shell);
+    }
   }
 
   @override
@@ -562,15 +596,18 @@ class TerminalMain extends StatelessWidget {
 
   Future<void> _askAndOpen(BuildContext context) async {
     final choice = await showNewShellDialog(context, controller);
-    if (choice != null) await controller.open(choice.target, choice.cwd);
+    if (choice != null) {
+      await controller.open(choice.target, choice.cwd, shell: choice.shell);
+    }
   }
 }
 
-/// Asks which host the shell is on, then which folder: one the host's conversations use, or one typed, or the host's default.
-Future<({String target, String? cwd})?> showNewShellDialog(
+/// Asks which host the shell is on, then which folder (one the host's conversations use, or one typed, or the host's default) and
+/// which of the shells the host found it runs (its own choice by default).
+Future<({String target, String? cwd, String? shell})?> showNewShellDialog(
   BuildContext context,
   TerminalSectionController controller,
-) => showDialog<({String target, String? cwd})>(
+) => showDialog<({String target, String? cwd, String? shell})>(
   context: context,
   builder: (context) => _NewShellDialog(controller: controller),
 );
@@ -587,10 +624,20 @@ class _NewShellDialog extends StatefulWidget {
 class _NewShellDialogState extends State<_NewShellDialog> {
   late final ({String target, String folder})? _selected = () {
     final chosen = widget.controller.selected();
-    return chosen != null && widget.controller.targets().any((each) => each.id == chosen.target) ? chosen : null;
+    return chosen != null &&
+            widget.controller.targets().any((each) => each.id == chosen.target)
+        ? chosen
+        : null;
   }();
-  late String _target = _selected?.target ?? widget.controller.targets().first.id;
-  late final TextEditingController _folder = TextEditingController(text: _selected?.folder ?? '');
+  late String _target =
+      _selected?.target ?? widget.controller.targets().first.id;
+  late final TextEditingController _folder = TextEditingController(
+    text: _selected?.folder ?? '',
+  );
+
+  /// The id of the shell chosen, null for the host's own, and what the host listed for the host now chosen.
+  String? _shell;
+  late Future<List<HostShell>> _shells = widget.controller.shellsOf(_target);
 
   @override
   void dispose() {
@@ -620,6 +667,8 @@ class _NewShellDialogState extends State<_NewShellDialog> {
               ],
               onChanged: (value) => setState(() {
                 _target = value ?? _target;
+                _shell = null;
+                _shells = widget.controller.shellsOf(_target);
                 // The conversation's folder belongs to its own host only.
                 if (_selected case final chosen?) {
                   if (_target == chosen.target) {
@@ -631,6 +680,37 @@ class _NewShellDialogState extends State<_NewShellDialog> {
               }),
             ),
             const SizedBox(height: 12),
+            FutureBuilder<List<HostShell>>(
+              future: _shells,
+              builder: (context, snapshot) {
+                final shells = snapshot.data ?? const <HostShell>[];
+                if (shells.isEmpty) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: DropdownButtonFormField<String?>(
+                    key: const ValueKey('terminal-section shell'),
+                    initialValue: _shell,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Shell'),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('The host\'s own choice'),
+                      ),
+                      for (final shell in shells)
+                        DropdownMenuItem<String?>(
+                          value: shell.id,
+                          child: Text(
+                            shell.label,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: (value) => setState(() => _shell = value),
+                  ),
+                );
+              },
+            ),
             TextField(
               key: const ValueKey('terminal-section folder'),
               controller: _folder,
@@ -666,6 +746,7 @@ class _NewShellDialogState extends State<_NewShellDialog> {
           onPressed: () => Navigator.pop(context, (
             target: _target,
             cwd: _folder.text.trim().isEmpty ? null : _folder.text.trim(),
+            shell: _shell,
           )),
           child: const Text('Open'),
         ),

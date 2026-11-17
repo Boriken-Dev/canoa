@@ -112,6 +112,7 @@ import 'profile/approval_dialog.dart';
 import 'profile/effective_setup.dart';
 import 'profile/report.dart';
 import 'settings/extension_settings.dart';
+import 'settings/shell_settings.dart';
 import 'settings/settings_page.dart';
 import 'rail/session_groups.dart';
 import 'desktop/hosting_panel.dart' show HostingPanel;
@@ -538,6 +539,14 @@ class _CanoaAppState extends State<CanoaApp> {
 
   ExtensionSettings? get _extensionSettings => _grants?.may(HostGrants.hosting) ?? false ? _extensionSettingsHeld : null;
 
+  /// The shells the host found and which of them its terminals and agents use, chosen in Settings where this key may change the
+  /// host's own settings.
+  late final ShellSettings? _shellSettingsHeld = _hostFiles == null
+      ? null
+      : ShellSettings(files: _hostFiles, restart: _restartForExtensions, saved: _extensionsSaved);
+
+  ShellSettings? get _shellSettings => _grants?.may(HostGrants.hosting) ?? false ? _shellSettingsHeld : null;
+
   /// Has the host start again so that it loads the extensions canoa.cfg now names; true when it did.
   Future<bool> _restartForExtensions() async {
     if (widget.served != null) return _restartHost();
@@ -755,6 +764,7 @@ class _CanoaAppState extends State<CanoaApp> {
       onLoadout: _showLoadout,
       accounts: _accounts,
       extensions: _extensionSettings,
+      shells: _shellSettings,
       usageSection: _usage != null,
       voiceBackends: _speech,
       hostSpeech: _hostSpeech,

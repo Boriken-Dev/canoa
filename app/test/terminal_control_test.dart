@@ -82,6 +82,34 @@ void main() {
     expect(seen.join(), 'one two');
   });
 
+  test('a shell is named by the id the host listed, and only when one is named', () async {
+    link.answer = (request) => switch (request['method']) {
+      'terminal/open' => {'id': 1, 'shell': r'C:\Git\bin\bash.exe', 'cwd': '/work'},
+      'shell/list' => {
+        'shells': [
+          {'id': 'git-bash', 'label': 'Git Bash', 'path': r'C:\Git\bin\bash.exe', 'family': 'bash', 'origin': 'git-for-windows'},
+          {'id': 'pwsh', 'label': 'PowerShell 7', 'path': r'C:\PS\pwsh.exe', 'family': 'powershell', 'origin': 'system'},
+          {'label': 'a shell with no id'},
+        ],
+      },
+      _ => {},
+    };
+    final listed = await terminals.shells();
+    expect([for (final shell in listed) shell.id], ['git-bash', 'pwsh'], reason: 'an entry with no id is no shell');
+    expect(listed.first.family, 'bash');
+    final named = await terminals.open(shell: 'git-bash', cols: 80, rows: 24);
+    expect(link.requests.last['params'], {'cols': 80, 'rows': 24, 'shell': 'git-bash'});
+    expect(named.shell, r'C:\Git\bin\bash.exe');
+    link.answer = (request) => request['method'] == 'terminal/open' ? {'id': 2, 'shell': 'pwsh', 'cwd': '/work'} : {};
+    await terminals.open(cols: 80, rows: 24);
+    expect((link.requests.last['params'] as Map).containsKey('shell'), isFalse, reason: 'the host\'s own choice names none');
+  });
+
+  test('a key that may open a terminal but not list what is installed is offered no shells and still opens one', () async {
+    link.answer = (request) => request['method'] == 'shell/list' ? throw const ControlFailed(-32001, 'no grant') : {'id': 1, 'shell': 'pwsh', 'cwd': '/work'};
+    expect(await terminals.shells(), isEmpty);
+  });
+
   test('output that came in the same turn as the answer to open is kept, not dropped', () async {
     link.after.add(jsonEncode({'jsonrpc': '2.0', 'method': 'terminal/output', 'params': {'id': 1, 'data': _b64('banner\r\n'), 'end': 8}}));
     final shell = await terminals.open(cols: 80, rows: 24);

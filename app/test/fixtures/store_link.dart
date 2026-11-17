@@ -125,6 +125,9 @@ final class FakeStoreHost {
   /// What `extension/apply` refuses with; null installs, which writes `[host.extensions.NAME]` as the host does.
   String? extensionApplyRefusal;
 
+  /// What `shell/list` answers: the shells found, the host's choice and what each agent entry is told.
+  Map<String, Object?> shellReport = {'shells': <Object?>[], 'agents': <Object?>[]};
+
   /// Foundry Local's models as `foundry/models` lists them (`id`, `cached`, `loaded` and the rest), and whether the host found
   /// Foundry Local; `foundry/model` changes them the way the real command line does.
   List<Map<String, Object?>> foundryModels = [];
@@ -232,6 +235,8 @@ final class FakeStoreHost {
       hostTable = extensions.isEmpty ? null : {...?hostTable, 'extensions': extensions};
       return {'removed': true, 'files_removed': true, 'restart': true};
     }
+
+    if (method == 'shell/list') return shellReport;
     if (method == 'config/get') return {'section': given['section'], 'value': hostTable, 'restart': true};
     if (method == 'config/check') {
       if (checkRefusal != null) throw ControlFailed(-32002, checkRefusal!);

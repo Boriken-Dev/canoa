@@ -10,6 +10,7 @@ import 'dart:io';
 
 import 'package:canoa/desktop/control_client.dart' show ControlFailed;
 import 'package:canoa/session_store.dart';
+import 'package:canoa/settings/shell_settings.dart' show HostShell;
 import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/shell/surface.dart';
 import 'package:canoa/surfaces/terminal_controller.dart';
@@ -62,13 +63,16 @@ final class _Host implements TerminalHost {
   String? refuse;
 
   @override
-  Future<RemoteTerminal> open({String? cwd, required int cols, required int rows}) async {
+  Future<RemoteTerminal> open({String? cwd, String? shell, required int cols, required int rows}) async {
     cwds.add(cwd);
     if (refuse case final why?) throw ControlFailed(-32002, why);
     final shell = _Shell(cwd ?? '/home');
     opened.add(shell);
     return shell;
   }
+
+  @override
+  Future<List<HostShell>> shells() async => const [];
 }
 
 Finder _key(String name) => find.byKey(ValueKey(name));
@@ -293,7 +297,7 @@ void main() {
     gate.complete();
     await tester.runAsync(() => starting);
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-    expect(host.shell.writes.join(), 'cargo test', reason: 'no carriage return: the person decides');
+    expect(host.remote.writes.join(), 'cargo test', reason: 'no carriage return: the person decides');
   });
 
   testWidgets('a host that refuses says so in its words, and the shell is started again on request', (tester) async {
@@ -401,11 +405,14 @@ final class _GatedHost implements TerminalHost {
   _GatedHost(this.gate);
 
   final Future<void> gate;
-  final shell = _Shell('/work');
+  final remote = _Shell('/work');
 
   @override
-  Future<RemoteTerminal> open({String? cwd, required int cols, required int rows}) async {
+  Future<RemoteTerminal> open({String? cwd, String? shell, required int cols, required int rows}) async {
     await gate;
-    return shell;
+    return remote;
   }
+
+  @override
+  Future<List<HostShell>> shells() async => const [];
 }

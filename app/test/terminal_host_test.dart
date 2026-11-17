@@ -144,6 +144,24 @@ grants = { ${jsonEncode(browserId)} = ["terminal", "folders"] }
     expect(pane.exitCode, 0);
   }, skip: skip);
 
+  test('a shell is opened with one the host listed, by its id, and one it did not list is refused in its words', () async {
+    final terminals = ControlTerminals(control());
+    final listed = await terminals.shells();
+    // Whatever this machine has: the host lists what it finds, and the list may be empty.
+    if (listed.isNotEmpty) {
+      final chosen = listed.first;
+      final pane = TerminalPane(host: terminals, cwd: home, shell: chosen.id);
+      addTearDown(pane.close);
+      await pane.start();
+      expect(pane.state, PaneState.running, reason: '${chosen.id}: ${pane.problem}');
+    }
+    final unknown = TerminalPane(host: terminals, cwd: home, shell: 'no-such-shell-3117');
+    addTearDown(unknown.close);
+    await unknown.start();
+    expect(unknown.state, PaneState.failed);
+    expect(unknown.problem, contains('shell/list'));
+  }, skip: skip);
+
   test('a folder that does not exist is refused in the host\'s words, and the pane says so', () async {
     final pane = TerminalPane(host: ControlTerminals(control()), cwd: '$home/not-there');
     addTearDown(pane.close);

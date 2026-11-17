@@ -168,6 +168,10 @@ final class HostFiles implements WorkspaceFiles, HostOpening {
   Future<bool> removeUpload(String path) async =>
       (await _call('upload/remove', {'id': path.split(RegExp(r'[\\/]')).last}))['removed'] == true;
 
+  /// What `shell/list` answers: the shells the host found, its own choice and what each agent entry is told. Refused without the
+  /// grant `terminal` or `store.read`.
+  Future<Map<Object?, Object?>> shellList() => _call('shell/list');
+
   /// The table [section] of the person's canoa.cfg on the host, or null when it has none.
   Future<Map<String, Object?>?> configGet(String section) async => (await configRead(section)).value;
 

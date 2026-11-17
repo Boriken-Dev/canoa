@@ -6,6 +6,7 @@ import 'package:xterm/xterm.dart';
 
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
+import '../settings/shell_settings.dart' show HostShell;
 
 /// A shell on a host, as the Terminal surface drives it. What it prints arrives on [output] as bytes; what the person types goes
 /// through [write].
@@ -31,9 +32,12 @@ abstract interface class RemoteTerminal {
 
 /// Where shells are opened: a host's own terminal, or a stand-in in a test.
 abstract interface class TerminalHost {
-  /// Starts a shell [cols] by [rows] cells in [cwd] (the host's default when null). Throws [ControlFailed] with the host's own
-  /// words when it refuses.
-  Future<RemoteTerminal> open({String? cwd, required int cols, required int rows});
+  /// Starts a shell [cols] by [rows] cells in [cwd] (the host's default when null), running [shell], the id of one [shells] lists
+  /// (the host's own choice when null). Throws [ControlFailed] with the host's own words when it refuses.
+  Future<RemoteTerminal> open({String? cwd, String? shell, required int cols, required int rows});
+
+  /// The shells the host found, which a new terminal may name; none when it lists none or may not say.
+  Future<List<HostShell>> shells();
 }
 
 /// A host's `terminal/*` over its control channel. The shells belong to the link they were opened on and end with it.
@@ -52,10 +56,21 @@ final class ControlTerminals implements TerminalHost {
   static const earlyLimit = 256;
 
   @override
-  Future<RemoteTerminal> open({String? cwd, required int cols, required int rows}) async {
+  Future<List<HostShell>> shells() async {
+    try {
+      final answer = await (await _control.ready()).call('shell/list', const {});
+      return [if (answer is Map && answer['shells'] is List) for (final each in answer['shells'] as List) ?HostShell.parse(each)];
+    } on ControlFailed {
+      // A key that may open a terminal but not list what is installed opens the host's own.
+      return const [];
+    }
+  }
+
+  @override
+  Future<RemoteTerminal> open({String? cwd, String? shell, required int cols, required int rows}) async {
     final client = await _control.ready();
     _route(client);
-    final answer = await client.call('terminal/open', {'cols': cols, 'rows': rows, 'cwd': ?cwd});
+    final answer = await client.call('terminal/open', {'cols': cols, 'rows': rows, 'cwd': ?cwd, 'shell': ?shell});
     if (answer is! Map || answer['id'] is! num) throw const ControlFailed(-32603, 'the host did not say which terminal it opened');
     final id = (answer['id'] as num).toInt();
     final made = _ControlTerminal(client, id, '${answer['shell'] ?? ''}', '${answer['cwd'] ?? ''}', () => _live.remove(id));
@@ -177,7 +192,7 @@ enum PaneState { starting, running, exited, failed }
 /// One shell and the screen that shows it: the emulator, the selection, and the shell on the host. Lives in a tab for as long as
 /// the tab does, whatever panel it is drawn in.
 class TerminalPane extends ChangeNotifier {
-  TerminalPane({required this.host, required this.cwd, this.maxLines = 10000}) {
+  TerminalPane({required this.host, required this.cwd, this.shell, this.maxLines = 10000}) {
     terminal = Terminal(maxLines: maxLines);
     view = TerminalController();
     terminal.onOutput = _typed;
@@ -192,6 +207,9 @@ class TerminalPane extends ChangeNotifier {
 
   /// The folder the shell starts in on its host; null for the host's default.
   final String? cwd;
+
+  /// The id of the shell the host starts, one it listed; null for the host's own choice.
+  final String? shell;
 
   /// The lines the screen keeps above what is showing.
   final int maxLines;
@@ -225,7 +243,7 @@ class TerminalPane extends ChangeNotifier {
     exitCode = null;
     notifyListeners();
     try {
-      final remote = await host.open(cwd: cwd, cols: terminal.viewWidth, rows: terminal.viewHeight);
+      final remote = await host.open(cwd: cwd, shell: shell, cols: terminal.viewWidth, rows: terminal.viewHeight);
       if (_closed) {
         await remote.close();
         return;
@@ -344,10 +362,13 @@ class TerminalTab {
 /// The shells open for one conversation, in tabs. Held by the surface's controller, so hiding the panel or moving the surface to
 /// the other one leaves every shell running with the screen it has.
 class TerminalWorkspace extends ChangeNotifier {
-  TerminalWorkspace({required this.host, required this.cwd});
+  TerminalWorkspace({required this.host, required this.cwd, this.shell});
 
   final TerminalHost host;
   final String? cwd;
+
+  /// The id of the shell each new tab starts, one the host listed; null for the host's own choice.
+  final String? shell;
   final List<TerminalTab> tabs = [];
   TerminalTab? _active;
   int _made = 0;
@@ -365,7 +386,7 @@ class TerminalWorkspace extends ChangeNotifier {
   TerminalPane? get focused => active?.focused;
 
   TerminalPane _pane() {
-    final pane = TerminalPane(host: host, cwd: cwd);
+    final pane = TerminalPane(host: host, cwd: cwd, shell: shell);
     unawaited(pane.start());
     return pane;
   }

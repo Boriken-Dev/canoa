@@ -99,6 +99,24 @@ def glyphs() -> dict[str, list[str]]:
     for p in (9, 12, 15):
         pins += [bar(p, 2.6, p, 5.5, 1.6), bar(p, 18.5, p, 21.4, 1.6), bar(2.6, p, 5.5, p, 1.6), bar(18.5, p, 21.4, p, 1.6)]
     out["chip"] = [rrect(5.5, 5.5, 13, 13, 2.4), rrect(8, 8, 8, 8, 0.8, hole=True), rrect(10.4, 10.4, 3.2, 3.2, 0.6), *pins]
+
+    # Git Bash: a line that forks into two, the way a branch leaves its trunk.
+    trunk, fork, left, right = (7.0, 4.2), (7.0, 13.0), (7.0, 19.8), (17.0, 8.6)
+    out["branch"] = [
+        bar(*trunk, *left, 2.2),
+        bar(*fork, *right, 2.2),
+        circle(*trunk, 2.6),
+        circle(*left, 2.6),
+        circle(*right, 2.6),
+    ]
+
+    # PowerShell: a prompt, a chevron and the line the next command starts on, in a rounded frame.
+    out["prompt"] = [
+        # One path holds the frame and the hole in it: shapes are filled one by one, so a hole in a shape of its own cuts nothing.
+        rrect(2.5, 3.5, 19, 17, 3) + rrect(4.4, 5.4, 15.2, 13.2, 1.6, hole=True),
+        pts([(6.6, 8.2), (8.4, 7.0), (12.6, 11.3), (8.4, 15.6), (6.6, 14.4), (9.6, 11.3)]),
+        rrect(12.4, 14.2, 5.4, 1.9, 0.9),
+    ]
     return out
 
 
