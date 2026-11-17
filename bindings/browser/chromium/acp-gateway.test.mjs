@@ -123,6 +123,29 @@ test("an answer already on its way when the person revokes cannot bring the gran
   assert.equal(h.grants.length, 0);
 });
 
+test("a link the agent ended before the page was told of it is a connection that failed, not one that never speaks", async () => {
+  // The close is told on the port by connection number, which the page has only once the answer to its connect arrives.
+  const h = harness({
+    dial: async () => {
+      let handler = () => {};
+      return {
+        proven: true,
+        ending: "cut",
+        send: async () => {},
+        onMessage: () => {},
+        // The transport ended while the dial was still being settled.
+        onClose: (listen) => {
+          handler = listen;
+          queueMicrotask(() => handler());
+        },
+        close: () => {},
+      };
+    },
+  });
+  const [agent] = await h.call("agents");
+  await assert.rejects(h.call("connect", { id: agent.id }), { name: "NetworkError" });
+});
+
 test("a person removing an agent closes every link to it", async () => {
   const h = harness();
   await connected(h);

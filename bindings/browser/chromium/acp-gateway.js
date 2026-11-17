@@ -395,6 +395,9 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
         finish(link, "page", false);
         throw NOT_ALLOWED();
       }
+      // The agent can end the link between its proof and this answer (a key it turned away, once the proof finished): the close is
+      // told by connection number, which the page has only from this answer, so it would be lost and the page would wait for ever.
+      if (!live.has(link)) throw refuse("NetworkError", "the agent ended the connection right after the proof");
       return { conn, agent: told };
       }
     },
