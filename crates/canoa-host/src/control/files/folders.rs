@@ -56,7 +56,7 @@ const FOLDER_VARIABLES: [&str; 2] = ["documents", "home"];
 impl Files {
     /// The folder or file `asked` names, as `caller` may see it: resolved, and for a key not holding `files` under a place it may
     /// browse, as `fs/list` keeps to them; a share is a place like any other, reached through the operating system.
-    fn place(&self, caller: &Caller, asked: &str) -> Result<PathBuf, (i32, String)> {
+    pub(super) fn place(&self, caller: &Caller, asked: &str) -> Result<PathBuf, (i32, String)> {
         let roots = self.browse_roots(caller);
         if caller.may(Grant::Files) {
             if !Path::new(asked).is_absolute() {

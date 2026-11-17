@@ -1468,7 +1468,7 @@ fn write_beside(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 /// Now as an ISO 8601 time in UTC, to the second.
-fn iso_now() -> String {
+pub(crate) fn iso_now() -> String {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| i64::try_from(since.as_secs()).unwrap_or(0));

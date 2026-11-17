@@ -83,17 +83,17 @@ pub enum Grant {
     /// folder the person's `[sessions] workspace` makes for a chat, made, taken away again if it is empty, or worked out for a
     /// template being edited. Also `fs/realpath` and `fs/repo_root`: where a path goes once its links are followed and where the
     /// repository of a folder starts, and `fs/guards`: the home folder and the folder of canoa.cfg, which the app asks to judge a
-    /// remembered rule for a path.
+    /// remembered rule for a path. Also `profile/project`: a folder's project profile file, read to be shown and trusted.
     Folders,
-    /// `config/get`: a named section of canoa.cfg, the app's own tables only.
+    /// `config/get`: a named section of canoa.cfg, the app's own tables only. Also `trust/list`: the projects whose profiles the person trusts.
     ConfigRead,
-    /// `config/set`: a named section of canoa.cfg, the app's own tables only; never `host`, `agents` or `profile`.
+    /// `config/set`: a named section of canoa.cfg, the app's own tables only; never `host`, `agents` or `profile`. Also `trust/revoke`.
     ConfigWrite,
-    /// `config/set` of `overlays`, `loadouts`, `defaults` and `permissions`, which change what an agent may do or is given: as much as access to the agent.
+    /// `config/set` of `overlays`, `loadouts`, `defaults` and `permissions`, which change what an agent may do or is given: as much as access to the agent. Also `trust/set`: a project's profile then applies to the sessions in its folder.
     ConfigWriteSessions,
     /// `upload/put` and `upload/remove`: files in a folder of the key's own, within the limits of `[host.control]`.
     Upload,
-    /// `overlay/installed`, `overlay/read`, `catalog/read`, `skill/list` and `skill/read`: what is installed and what a check or a catalog fetch holds. The
+    /// `overlay/installed`, `overlay/read`, `catalog/read`, `skill/list` and `skill/read`: what is installed and what a check or a catalog fetch holds. Also `profile/canonical` and `profile/tree`: an overlay's folder with its links resolved, and its files read whole, for the app to show a profile's layers. The
     /// host fetches nothing for these. Also `store/contents` and `store/contents_put`: the key's own cache of what the entries of a
     /// catalog provide, which no other key reads.
     OverlayRead,
@@ -657,6 +657,19 @@ impl Control {
                         )
                     })
                 }
+                Some("profile/canonical") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.files.profile_canonical(caller, &params)),
+                Some("profile/tree") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.files.profile_tree(&params)),
+                Some("profile/project") => allow(caller, Grant::Folders)
+                    .and_then(|()| self.files.profile_project(caller, &params)),
+                Some("trust/list") => {
+                    allow(caller, Grant::ConfigRead).and_then(|()| self.files.trust_list())
+                }
+                Some("trust/set") => allow(caller, Grant::ConfigWriteSessions)
+                    .and_then(|()| self.files.trust_set(caller, &params)),
+                Some("trust/revoke") => allow(caller, Grant::ConfigWrite)
+                    .and_then(|()| self.files.trust_revoke(caller, &params)),
                 Some("config/get") => {
                     allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(&params))
                 }
@@ -1293,6 +1306,8 @@ mod moves;
 mod overlays;
 #[cfg(test)]
 mod overlays_tests;
+#[cfg(test)]
+mod profiles_tests;
 mod registry;
 #[cfg(test)]
 mod skills_tests;
