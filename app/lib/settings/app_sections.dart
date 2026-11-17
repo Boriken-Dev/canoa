@@ -6,6 +6,7 @@ import '../chat/palette.dart' show shortcutHelp;
 import '../config/canoa_config.dart';
 import '../ledger/session_ledger.dart';
 import '../theme/look.dart';
+import '../theme/vendor_looks.dart';
 import '../workspace/workspace_template.dart';
 import 'settings_controller.dart';
 import 'settings_row.dart';
@@ -232,9 +233,10 @@ class AppearanceSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: controller,
+    listenable: Listenable.merge([controller, vendorLooks]),
     builder: (context, _) {
       final config = controller.config;
+      final fallback = vendorLooks.fallbackReason(config.look);
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         SettingsGroup(title: 'Theme', children: [
           ChoiceRow<LookId>(
@@ -246,6 +248,11 @@ class AppearanceSection extends StatelessWidget {
             choices: [for (final look in LookId.values) (look, look.label)],
             onChanged: (v) => controller.change((c) => c.copyWith(look: v)),
           ),
+          if (fallback != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(fallback, key: const Key('settings-look-fallback'), style: Theme.of(context).textTheme.bodySmall),
+            ),
           SwitchRow(
             title: 'Follow the selected agent',
             configKey: const ['appearance', 'follow_provider'],

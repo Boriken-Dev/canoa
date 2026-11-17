@@ -130,6 +130,7 @@ import 'drafts/draft_backend.dart';
 import 'drafts/draft_store.dart';
 import 'theme/follow_provider.dart';
 import 'theme/look.dart';
+import 'theme/vendor_looks.dart';
 import 'auth/browser_peer.dart' show verifyBrowserPeer;
 import 'workspace/documents.dart' show hasWorkspaceFolders, homeFolder, makeFolder, removeEmptyFolder;
 import 'workspace/host_folders.dart';
@@ -1196,6 +1197,7 @@ class _CanoaAppState extends State<CanoaApp> {
   /// The link to the host was made again after it ended (the host restarted, or the connection came back): what the page read of
   /// it before is read once more, since an account made or a grant changed meanwhile would otherwise stay unseen until a reload.
   Future<void> _hostCameBack() async {
+    unawaited(_loadLooks());
     await _grants?.refresh();
     if (!mounted) return;
     if (_grants?.may(HostGrants.accounts) ?? false) unawaited(_accountsHeld?.refresh());
@@ -2289,6 +2291,7 @@ class _CanoaAppState extends State<CanoaApp> {
   void _hostChanged() {
     // The host was started anew: which accounts it has is asked again.
     if (widget.host?.listening.isNotEmpty ?? false) {
+      if (!vendorLooks.answered) unawaited(_loadLooks());
       unawaited(_grants?.refresh());
       unawaited(_accounts?.refresh());
     }
@@ -2398,6 +2401,7 @@ class _CanoaAppState extends State<CanoaApp> {
     widget.host?.addListener(_hostChanged);
     _reconnects = _control?.reconnected.listen((_) => unawaited(_hostCameBack()));
     scheduleMicrotask(() {
+      unawaited(_loadLooks());
       unawaited(_grants?.refresh());
       unawaited(_accounts?.refresh());
     });
@@ -2707,18 +2711,36 @@ class _CanoaAppState extends State<CanoaApp> {
     );
   }
 
-  final Map<(LookId, Brightness, String), ThemeData> _themes = {};
+  final Map<(LookId, Brightness, String, int), ThemeData> _themes = {};
 
-  ThemeData _theme(LookId family, Brightness brightness) =>
-      _themes.putIfAbsent((family, brightness, config.density.name), () => themeFor(family, brightness, density: config.density));
+  ThemeData _theme(LookId family, Brightness brightness) => _themes.putIfAbsent(
+    (family, brightness, config.density.name, vendorLooks.revision),
+    () => themeFor(family, brightness, density: config.density),
+  );
+
+  /// Asks the host for the families it lists, which the Claude and ChatGPT looks draw from; until it answers they draw as Canoa's.
+  Future<void> _loadLooks() async {
+    final control = _control;
+    if (control == null) return;
+    try {
+      final client = await control.ready(wait: false);
+      vendorLooks.adopt(await client.call('looks/list', const {}));
+    } on Object catch (error) {
+      vendorLooks.failed(error is ControlFailed ? error.message : error is StateError ? error.message : 'no link');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     _popout
       ..look = config.look.name
       ..density = config.density.name;
-    if (!config.followProvider) return _app(config.look);
-    return ListenableBuilder(listenable: Listenable.merge([store, _layout]), builder: (_, _) => _app(_familyShown()));
+    return ListenableBuilder(
+      listenable: vendorLooks,
+      builder: (_, _) => config.followProvider
+          ? ListenableBuilder(listenable: Listenable.merge([store, _layout]), builder: (_, _) => _app(_familyShown()))
+          : _app(config.look),
+    );
   }
 
   Widget _app(LookId family) {
