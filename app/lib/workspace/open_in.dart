@@ -3,11 +3,12 @@ import 'package:flutter/material.dart';
 import '../acp/pipe_channel.dart' show isPipeUrl;
 import '../ledger/session_ledger.dart' show SessionPlace;
 import '../served/web_mode.dart' show WebMode;
+import '../store/links.dart' as links;
 import 'open_in_host.dart';
 import 'open_in_stub.dart' if (dart.library.io) 'open_in_io.dart' as platform;
 
 /// Where a workspace action is offered.
-enum WorkspaceContext { header, palette, chip, files }
+enum WorkspaceContext { header, palette, chip, files, browser }
 
 enum HostOs { windows, macos, linux }
 
@@ -159,10 +160,17 @@ String? parseRegistryDefault(String output, Map<String, String> environment) {
 
 /// The workspace actions, detected on [system].
 final class WorkspaceOpener {
-  WorkspaceOpener(this.system) : hosted = null;
+  WorkspaceOpener(this.system, {Future<bool> Function(Uri uri)? launch})
+      : hosted = null,
+        _launch = launch;
 
   /// A page a host serves: the host starts the program, or the page links to it, by the host's mode.
-  WorkspaceOpener.hosted(HostedOpening this.hosted) : system = const _NoSystem();
+  WorkspaceOpener.hosted(HostedOpening this.hosted, {Future<bool> Function(Uri uri)? launch})
+      : system = const _NoSystem(),
+        _launch = launch;
+
+  /// Hands an address to the system's browser; [links.openLink] unless a test gave another.
+  final Future<bool> Function(Uri uri)? _launch;
 
   final OpenInSystem system;
 
@@ -290,7 +298,34 @@ final class WorkspaceOpener {
     await system.start(plan.executable, plan.arguments);
   }
 
-  List<WorkspaceAction> get actions => hosted?.actions ?? _local;
+  List<WorkspaceAction> get actions => [...(hosted?.actions ?? _local), _browser];
+
+  /// The address [text] names as the person typed it: a bare host such as `localhost:3000` or `example.com/a` is taken as https. Null
+  /// unless it is a plain `http` or `https` address with a host, so a `file:`, `javascript:` or `data:` address is never opened.
+  static Uri? browserUrl(String text) {
+    final trimmed = text.trim();
+    final bare = RegExp(r'^[A-Za-z0-9][A-Za-z0-9.-]*(:\d+)?([/?#]|$)').hasMatch(trimmed) && !trimmed.contains('://');
+    return links.webLink(bare ? 'https://$trimmed' : trimmed);
+  }
+
+  /// Opens [text] in the system's browser, where the extension's side panel shares its tabs under its own permissions; throws
+  /// [OpenInFailure] for an address that is not a web one or that nothing took.
+  Future<void> openUrl(String text) async {
+    final uri = browserUrl(text);
+    if (uri == null) throw OpenInFailure('Only an http or https address opens in the browser: $text');
+    final opened = await (_launch ?? links.openLink)(uri);
+    if (!opened) throw OpenInFailure('The system did not open $uri.');
+  }
+
+  /// Takes an address as a target's path, in its own context: the person gives it, or a tool card links it.
+  late final WorkspaceAction _browser = WorkspaceAction(
+    id: 'browser',
+    label: 'Open in browser',
+    icon: Icons.open_in_browser,
+    contexts: const {WorkspaceContext.browser},
+    available: (target) => browserUrl(target.path) != null,
+    run: (target) => openUrl(target.path),
+  );
 
   late final List<WorkspaceAction> _local = [
     WorkspaceAction(

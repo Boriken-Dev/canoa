@@ -41,6 +41,7 @@ final class _System implements OpenInSystem {
   }
 }
 
+
 WorkspaceAction _action(WorkspaceOpener opener, String id) => opener.actions.firstWhere((action) => action.id == id);
 
 const _winCode = r'D:\Profiles\ana\AppData\Local\Programs\Microsoft VS Code\Code.exe';
@@ -203,6 +204,52 @@ void main() {
       expect(page.canOpen, isFalse);
       expect(page.workspaceOf(place: SessionPlace.local, cwd: '/work'), (target: null, reason: null));
       expect(page.actionsFor(WorkspaceContext.header, const WorkspaceTarget('/work')), isEmpty);
+    });
+  });
+
+  group('Open in browser', () {
+    test('an https address is handed to the launcher as given, and nothing else is started', () async {
+      final launched = <Uri>[];
+      final system = _System(HostOs.linux);
+      final opener = WorkspaceOpener(system, launch: (uri) async { launched.add(uri); return true; });
+      await _action(opener, 'browser').run(const WorkspaceTarget('https://example.com/a%20b?q=%C3%B1'));
+      expect(launched.single.scheme, 'https');
+      expect(launched.single.host, 'example.com');
+      expect(system.started, isEmpty);
+    });
+
+    test('a bare host is taken as https, and an http address stays http', () async {
+      final launched = <Uri>[];
+      final opener = WorkspaceOpener(_System(HostOs.linux), launch: (uri) async { launched.add(uri); return true; });
+      await opener.openUrl('localhost:3000/app');
+      await opener.openUrl('http://127.0.0.1:8080');
+      expect(launched.map((uri) => uri.toString()), ['https://localhost:3000/app', 'http://127.0.0.1:8080']);
+    });
+
+    test('file, javascript, data and credentialed addresses are refused and never launched', () async {
+      final launched = <Uri>[];
+      final opener = WorkspaceOpener(_System(HostOs.linux), launch: (uri) async { launched.add(uri); return true; });
+      for (final text in ['file:///etc/passwd', 'javascript:alert(1)', 'data:text/html,hi', 'https://user:pw@example.com/', 'ftp://example.com/', '', 'https://']) {
+        await expectLater(opener.openUrl(text), throwsA(isA<OpenInFailure>()), reason: text);
+        expect(_action(opener, 'browser').available(WorkspaceTarget(text)), isFalse, reason: text);
+      }
+      expect(launched, isEmpty);
+    });
+
+    test('a launcher that nothing answers is a failure the person reads', () async {
+      final opener = WorkspaceOpener(_System(HostOs.linux), launch: (uri) async => false);
+      await expectLater(opener.openUrl('https://example.com'), throwsA(isA<OpenInFailure>()));
+    });
+
+    test('it is offered in its own context only, and not beside the folder actions', () {
+      final opener = WorkspaceOpener(_System(HostOs.linux, folders: {'/work'}));
+      expect(opener.actionsFor(WorkspaceContext.header, const WorkspaceTarget('/work')).map((action) => action.id), isNot(contains('browser')));
+      expect(opener.actionsFor(WorkspaceContext.browser, const WorkspaceTarget('https://example.com')).map((action) => action.id), ['browser']);
+    });
+
+    test('a page offers it too: the browser opens the address itself', () {
+      final page = WorkspaceOpener(_System(null));
+      expect(page.actionsFor(WorkspaceContext.browser, const WorkspaceTarget('https://example.com')), hasLength(1));
     });
   });
 

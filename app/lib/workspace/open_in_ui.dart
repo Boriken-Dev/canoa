@@ -48,3 +48,50 @@ Future<void> showWorkspaceActions(
     ),
   );
 }
+
+/// Asks for an address and opens it in the system's browser; a refusal is a snackbar, as for the other actions.
+Future<void> askToOpenInBrowser(BuildContext context, WorkspaceOpener opener) async {
+  final address = await showSelectableDialog<String>(
+    context: context,
+    builder: (dialog) => _AddressDialog(onOpen: (text) => Navigator.pop(dialog, text)),
+  );
+  if (address == null || address.trim().isEmpty || !context.mounted) return;
+  final action = opener.actions.firstWhere((each) => each.id == 'browser');
+  await runWorkspaceAction(context, action, WorkspaceTarget(address.trim()));
+}
+
+class _AddressDialog extends StatefulWidget {
+  const _AddressDialog({required this.onOpen});
+
+  final void Function(String text) onOpen;
+
+  @override
+  State<_AddressDialog> createState() => _AddressDialogState();
+}
+
+class _AddressDialogState extends State<_AddressDialog> {
+  final _text = TextEditingController();
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Open in browser'),
+    content: TextField(
+      key: const ValueKey('browser-address'),
+      controller: _text,
+      autofocus: true,
+      keyboardType: TextInputType.url,
+      decoration: const InputDecoration(labelText: 'Web address', hintText: 'https://example.com'),
+      onSubmitted: widget.onOpen,
+    ),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      FilledButton(key: const ValueKey('browser-open'), onPressed: () => widget.onOpen(_text.text), child: const Text('Open')),
+    ],
+  );
+}
