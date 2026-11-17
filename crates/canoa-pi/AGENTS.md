@@ -16,7 +16,7 @@ impl canoa::store::recipe::Recipe for PiRecipe { /* every required method, and `
 
 pub const NODE_VERSION: &str;   // "24.22.2", the Node Pi is installed with
 
-pub use coqui_acp_pi as acp;   // the provider crate, whole: `acp::PiProvider` is the `acp_harness` provider, never redefined here
+pub use coqui_acp_pi as acp;   // the provider crate, whole: `acp::PiProvider` is the `acp_harness` provider and `acp::PiAccounts` the `account_provider`, never redefined here
 ```
 
 - `PRESET`: how the host starts Pi when `canoa.cfg` does not name it: run in process as the `pi` harness, searched for in `~/.pi/agent/bin` and `~/.local/bin`, and from the Store's managed copy when there is one.

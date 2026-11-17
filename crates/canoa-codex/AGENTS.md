@@ -17,7 +17,7 @@ pub const PRESET: SourcePreset;
 pub struct CodexRecipe;
 impl canoa::store::recipe::Recipe for CodexRecipe { /* every required method, and `self_updates` */ }
 
-pub use coqui_acp_codex as acp;   // the provider crate, whole: `acp::CodexProvider` is the `acp_harness` provider, never redefined here
+pub use coqui_acp_codex as acp;   // the provider crate, whole: `acp::CodexProvider` is the `acp_harness` provider and `acp::CodexAccounts` the `account_provider`, never redefined here
 ```
 
 - `PRESET`: how the host starts Codex when `canoa.cfg` does not name it: run in process as the `codex` harness.

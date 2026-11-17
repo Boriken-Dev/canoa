@@ -17,7 +17,7 @@ pub const PRESET: SourcePreset;
 pub struct ClaudeRecipe;
 impl canoa::store::recipe::Recipe for ClaudeRecipe { /* every required method */ }
 
-pub use coqui_acp_claude as acp;   // the provider crate, whole: `acp::ClaudeProvider` is the `acp_harness` provider, never redefined here
+pub use coqui_acp_claude as acp;   // the provider crate, whole: `acp::ClaudeProvider` is the `acp_harness` provider and `acp::ClaudeAccounts` the `account_provider`, never redefined here
 ```
 
 - `PRESET`: how the host starts Claude Code when `canoa.cfg` does not name it: run in process as the `claude` harness.
