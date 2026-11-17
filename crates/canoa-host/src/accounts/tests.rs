@@ -136,6 +136,36 @@ fn the_operating_systems_store_round_trips_a_record_over_the_blob_limit() {
     assert!(gone.expect("reads").is_none());
 }
 
+/// An account a store instance only read counts as shown to it: when the platform store then answers "no such credential"
+/// for its index, a put through that instance refuses rather than writing generation 1 over the live record.
+#[test]
+fn a_store_that_only_read_an_account_does_not_write_over_it_when_its_index_goes_missing() {
+    let service = format!("dev.boriken.canoa.test.{}.{}", std::process::id(), line!());
+    let writer = KeyringStore::new(service.clone());
+    let reader = KeyringStore::new(service);
+    let _forget = Forget(&writer, &["account-read"]);
+    match writer.put("account-read", b"first") {
+        Ok(()) => {}
+        Err(error) if store_unavailable(&error.to_string()) => return,
+        Err(error) => panic!("the store refused a record: {error}"),
+    }
+    assert_eq!(
+        reader.get("account-read").expect("reads"),
+        Some(b"first".to_vec())
+    );
+    // The index entry alone goes, as it reads when the platform store answers a miss under load.
+    writer
+        .entry(&KeyringStore::index_user("account-read"))
+        .expect("an entry")
+        .delete_credential()
+        .expect("deletes the index");
+    let refused = reader.put("account-read", b"second");
+    assert!(
+        refused.is_err(),
+        "a put wrote generation 1 over an account the instance had read"
+    );
+}
+
 fn accounts(dir: &Dir) -> Arc<Accounts> {
     Accounts::with_store(
         dir.0.join("accounts"),

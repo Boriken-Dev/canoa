@@ -368,6 +368,7 @@ impl SecretStore for KeyringStore {
             whole.zeroize();
             return Err(StoreError("a stored record is the wrong length".into()));
         }
+        self.shown().insert(id.to_owned());
         Ok(Some(whole))
     }
 
