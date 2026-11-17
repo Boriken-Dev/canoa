@@ -1578,7 +1578,8 @@ class _CanoaAppState extends State<CanoaApp> {
     final host = widget.host;
     final listening = host?.listening.where((listening) => listening.name == name).firstOrNull;
     if (host == null || listening == null) throw StateError('canoa is not serving $name now: open Hosting to see why');
-    if (listening.local || draft.account != null || (_accounts?.offeredBy(name).isNotEmpty ?? false)) {
+    // Only a desktop holds its host in this process; a served page reaches every entry, account or not, over its host's endpoint.
+    if (widget.served == null && (listening.local || draft.account != null || (_accounts?.offeredBy(name).isNotEmpty ?? false))) {
       draft.account ??= _accounts?.offeredBy(name).where((each) => each.usable).firstOrNull?.name;
       return _startViaLink(draft, name, folder, worktree, starting);
     }
