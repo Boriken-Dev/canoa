@@ -76,6 +76,7 @@ import 'chat/child_thread.dart';
 import 'chat/clipboard.dart';
 import 'chat/composer.dart';
 import 'chat/dictation.dart';
+import 'chat/reply_voice.dart';
 import 'chat/delegation_row.dart';
 import 'chat/delegation_view.dart';
 import 'chat/new_session_view.dart';
@@ -164,8 +165,13 @@ import 'worktree/close_dialog.dart';
 import 'worktree/host.dart';
 import 'worktree/worktree.dart';
 import 'selectable.dart';
+import 'voice/browser_voices.dart';
 import 'voice/host_speech.dart';
+import 'voice/host_speech_output.dart';
+import 'voice/outputs.dart';
+import 'voice/pcm_player.dart';
 import 'voice/record_capture.dart';
+import 'voice/reply_reader.dart';
 import 'voice/system_speech.dart';
 
 /// The folder [file] is in, else null.
@@ -293,7 +299,7 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.home, this.hostFolders, this.listFolder, this.resolveInside, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection, this.speechCapture,
+    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection, this.speechCapture, this.voiceOutputs, this.pcmPlayer,
     this.mode, this.relations, this.openPage, this.paneLink,
   });
 
@@ -344,6 +350,14 @@ class CanoaApp extends StatefulWidget {
   /// Where the audio of a dictation through the host's providers comes from: the microphone by default.
   @visibleForTesting
   final AudioCapture? speechCapture;
+
+  /// The voices replies are read aloud with: the browser's and the host's by default, and a test's own.
+  @visibleForTesting
+  final VoiceOutputs? voiceOutputs;
+
+  /// What plays the audio a voice provider hands back: this platform's own by default, and a test's own.
+  @visibleForTesting
+  final PcmPlayer? pcmPlayer;
 
   /// How a conversation is shown in a window of its own: the platform's by default, and a test's own.
   final PopoutWindows? popoutWindows;
@@ -769,6 +783,8 @@ class _CanoaAppState extends State<CanoaApp> {
       usageSection: _usage != null,
       voiceBackends: _speech,
       hostSpeech: _hostSpeech,
+      voiceOutputs: _voiceOutputs,
+      reader: _reader,
       version: const String.fromEnvironment('CANOA_VERSION'),
     );
 
@@ -785,6 +801,7 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     if (!mounted) return changed;
     setState(() => config = changed);
+    _reader.setVoiceMode(changed.voice.speak.readReplies);
     store.embedLimit = changed.embedLimit;
     store.queueDelivery = changed.sessions.queueDelivery;
     if (_checked) unawaited(_checkSources());
@@ -1166,6 +1183,59 @@ class _CanoaAppState extends State<CanoaApp> {
     return null;
   }
 
+  /// The voice providers of the host this app reaches, which read replies aloud for a page and for a platform with no voices of its
+  /// own. They run over the same control channel as the speech-to-text ones.
+  late final HostVoiceCatalog? _hostVoices = _hostSpeech == null ? null : HostVoiceCatalog(_hostSpeech.call);
+
+  /// Every voice this app or page can read aloud with.
+  late final VoiceOutputs _voiceOutputs = widget.voiceOutputs ?? VoiceOutputs(host: _hostVoices, browser: browserSpeechOutputs(), load: _voicesReady);
+
+  /// Reads the host's voice providers once, before the first reply is read: a page that has just opened has not asked, and a host
+  /// that was down is asked again.
+  Future<void> _voicesReady() async {
+    final catalog = _hostVoices, grants = _grants;
+    if (catalog == null) return;
+    if (grants != null && !grants.known) await grants.refresh();
+    if (grants == null || grants.may(HostGrants.voice)) await catalog.refresh();
+  }
+
+  /// The voice replies are read with now, from what Settings holds; null when none is there, which [_noVoiceWhy] says.
+  Future<ReadingVoice?> _readingVoice() async {
+    await _voiceOutputs.ready();
+    final speak = config.voice.speak;
+    final output = _voiceOutputs.resolve(speak.output);
+    return output == null ? null : (output: output, choices: choicesFor(output, speak));
+  }
+
+  String? _noVoiceWhy() {
+    final named = config.voice.speak.output, grants = _grants;
+    if (named != null && _voiceOutputs.all.isNotEmpty) {
+      return 'The voice $named is not available here. Choose another in Settings, under Voice.';
+    }
+    if (grants != null && grants.known && !grants.may(HostGrants.voice) && _voiceOutputs.browser.isEmpty) {
+      return 'This host has not given this key the voice grant, so it cannot read replies aloud for it. Its canoa.cfg names the keys that may.';
+    }
+    if (_voiceOutputs.problem case final problem?) return "This host's voice providers are not available: $problem";
+    return null;
+  }
+
+  /// Reads replies aloud: a reply's Play button, and voice mode, through the voice Settings holds.
+  late final ReplyReader _reader = ReplyReader(
+    voice: _readingVoice,
+    player: widget.pcmPlayer ?? platformPcmPlayer(),
+    whyNone: _noVoiceWhy,
+    offered: () => _voiceOutputs.offered,
+  )..setVoiceMode(config.voice.speak.readReplies);
+
+  /// Voice mode was turned on or off in the composer: the choice is kept in canoa.cfg.
+  void _voiceModeChanged(bool on) {
+    if (config.voice.speak.readReplies == on) return;
+    final changed = config.copyWith(voice: config.voice.copyWith(speak: config.voice.speak.copyWith(readReplies: on)));
+    setState(() => config = changed);
+    _settingsKey.currentState?.controller.adopt(changed);
+    unawaited(_write(changed));
+  }
+
   /// Dictation into the composer, with the service and choices Settings holds at the moment it starts.
   late final Dictation _dictation = Dictation(
     ready: _speechReady,
@@ -1494,7 +1564,10 @@ class _CanoaAppState extends State<CanoaApp> {
     if (!mounted) return;
     if (_grants?.may(HostGrants.accounts) ?? false) unawaited(_accountsHeld?.refresh());
     if (_grants?.may(HostGrants.usage) ?? false) unawaited(_usageHeld?.refresh());
-    if (_grants?.may(HostGrants.voice) ?? false) unawaited(_hostSpeech?.refresh());
+    if (_grants?.may(HostGrants.voice) ?? false) {
+      unawaited(_hostSpeech?.refresh());
+      unawaited(_hostVoices?.refresh());
+    }
   }
 
   /// A grant arrived or changed: what it opens is listed, and a source's readiness may now name its program.
@@ -1503,7 +1576,10 @@ class _CanoaAppState extends State<CanoaApp> {
     setState(() {});
     if (_grants?.may(HostGrants.accounts) ?? false) unawaited(_accountsHeld?.refresh());
     if (_grants?.may(HostGrants.usage) ?? false) unawaited(_usageHeld?.refresh());
-    if (_grants?.may(HostGrants.voice) ?? false) unawaited(_hostSpeech?.refresh());
+    if (_grants?.may(HostGrants.voice) ?? false) {
+      unawaited(_hostSpeech?.refresh());
+      unawaited(_hostVoices?.refresh());
+    }
     if (_programs != null && _checked) unawaited(_checkSources());
   }
 
@@ -2875,6 +2951,9 @@ class _CanoaAppState extends State<CanoaApp> {
     unawaited(_reconnects?.cancel());
     _hostFolders?.dispose();
     _dictation.dispose();
+    _reader.stop();
+    _reader.dispose();
+    if (widget.voiceOutputs == null) _voiceOutputs.dispose();
     for (final remote in _remoteReady.values) {
       remote.dispose();
     }
@@ -2989,6 +3068,8 @@ class _CanoaAppState extends State<CanoaApp> {
     onSourceSettings: () => unawaited(_showSettings(section: 'sources')),
     onSettings: () => unawaited(_showSettings()),
     dictation: _dictation,
+    reader: _reader,
+    onVoiceMode: _voiceModeChanged,
     accounts: _accounts,
     accountsOf: (session) => _accountsOn(session.host),
     onAccountSettings: () => unawaited(_showSettings(section: 'accounts')),
@@ -3511,6 +3592,7 @@ class _ConversationState extends State<_Conversation> {
     // A draft's text, or a first message not yet taken by its agent.
     if (session != null && (session.isDraft || session.draftText.isNotEmpty)) _input.text = session.draftText;
     _input.addListener(_keepText);
+    widget.store.addListener(_followReplies);
     widget.handle
       ..owner = this
       ..focusComposer = _composerFocus.requestFocus
@@ -3522,6 +3604,21 @@ class _ConversationState extends State<_Conversation> {
         _input.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
         _composerFocus.requestFocus();
       };
+  }
+
+  /// Voice mode hears the conversation shown as it grows, and reads what is new.
+  void _followReplies() {
+    final reader = widget.kit.reader, session = widget.store.selected;
+    if (reader == null || !reader.voiceMode || session == null || session.isDraft) return;
+    followReplies(reader, session.id, session.messages, working: session.status == SessionStatus.working);
+  }
+
+  /// This conversation's renderers: the delegation rows, the terminal's, replies with Play beside Copy, and the app's own.
+  chat.ChatRenderers _renderersFor(ChatSession session) {
+    final reader = widget.kit.reader;
+    var renderers = delegationRenderers.merge(terminalRenderers(offered: () => _terminalSurface(session) != null, run: (command) => _runInTerminal(session, command)));
+    if (reader != null) renderers = renderers.merge(replyRenderers(reader));
+    return renderers.merge(widget.renderers);
   }
 
   /// Adds [text] to the message being written, on a line of its own.
@@ -3602,6 +3699,7 @@ class _ConversationState extends State<_Conversation> {
         ..insert = null;
     }
     _input.removeListener(_keepText);
+    widget.store.removeListener(_followReplies);
     _composerFocus.dispose();
     _input.dispose();
     super.dispose();
@@ -3830,7 +3928,10 @@ class _ConversationState extends State<_Conversation> {
         Expanded(
           child: ChildThreadView(
             store: widget.store, session: session, task: session.tasks[session.openChild!]!,
-            renderers: delegationRenderers.merge(widget.renderers), narrow: widget.narrow,
+            renderers: widget.kit.reader == null
+                ? delegationRenderers.merge(widget.renderers)
+                : delegationRenderers.merge(replyRenderers(widget.kit.reader!)).merge(widget.renderers),
+            narrow: widget.narrow,
           ),
         )
       else ...[
@@ -3843,7 +3944,7 @@ class _ConversationState extends State<_Conversation> {
             working: session.status == SessionStatus.working || widget.store.isStarting(session),
             agentName: session.agent,
             turns: [for (final turn in session.chat.turns) chat.TurnSpan.of(turn)],
-            renderers: delegationRenderers.merge(terminalRenderers(offered: () => _terminalSurface(session) != null, run: (command) => _runInTerminal(session, command))).merge(widget.renderers),
+            renderers: _renderersFor(session),
             narrow: widget.narrow,
           )),
         ),

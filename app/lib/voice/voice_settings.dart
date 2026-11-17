@@ -8,11 +8,14 @@ import '../settings/settings_row.dart';
 import 'host_offers.dart';
 import 'host_speech.dart';
 import 'host_speech_settings.dart';
+import 'outputs.dart';
+import 'read_aloud_settings.dart';
+import 'reply_reader.dart';
 import 'speech_backend.dart';
 
 /// Settings > Voice: where speech is turned into text, said before anything is recorded, and a short test of the microphone.
 class VoiceSection extends StatefulWidget {
-  const VoiceSection({super.key, required this.controller, required this.backends, this.host});
+  const VoiceSection({super.key, required this.controller, required this.backends, this.host, this.outputs, this.reader});
 
   final SettingsController controller;
 
@@ -21,6 +24,12 @@ class VoiceSection extends StatefulWidget {
 
   /// The speech providers of the host this app reaches, offered beside [backends]; null when there is no host to ask.
   final HostSpeechCatalog? host;
+
+  /// The voices replies are read aloud with, shown as their own group; null leaves it out.
+  final VoiceOutputs? outputs;
+
+  /// What reads the sample of a voice.
+  final ReplyReader? reader;
 
   @override
   State<VoiceSection> createState() => _VoiceSectionState();
@@ -87,6 +96,7 @@ class _VoiceSectionState extends State<VoiceSection> {
       if (_all.isEmpty) {
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           _NoSpeechService(host: host != null),
+          if (widget.outputs case final outputs?) ReadAloudGroup(controller: widget.controller, outputs: outputs, reader: widget.reader),
           if (host != null) _hostGroups(host, voice),
         ]);
       }
@@ -243,6 +253,7 @@ class _VoiceSectionState extends State<VoiceSection> {
               ),
             ),
           ]),
+        if (widget.outputs case final outputs?) ReadAloudGroup(controller: widget.controller, outputs: outputs, reader: widget.reader),
         if (host != null) _hostGroups(host, voice),
       ]);
     },

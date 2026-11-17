@@ -11,6 +11,8 @@ import '../selectable.dart';
 import '../sources/sources.dart';
 import '../store/programs.dart';
 import '../voice/host_speech.dart';
+import '../voice/outputs.dart';
+import '../voice/reply_reader.dart';
 import '../voice/speech_backend.dart';
 import '../voice/voice_settings.dart';
 import 'agent_sections.dart';
@@ -39,7 +41,7 @@ const _sections = [
   SettingsSection(id: 'general', group: 'App', title: 'General', icon: Icons.tune, keywords: 'tray window startup network webtransport timeout sessions remembered folder workspace keep history'),
   SettingsSection(id: 'appearance', group: 'App', title: 'Appearance', icon: Icons.palette_outlined, keywords: 'look theme brightness dark light detail verbose density preview'),
   SettingsSection(id: 'notifications', group: 'App', title: 'Notifications', icon: Icons.notifications_none, keywords: 'alerts permission question finished browser toast'),
-  SettingsSection(id: 'voice', group: 'App', title: 'Voice', icon: Icons.mic_none, keywords: 'dictation speech microphone input device language push to talk transcribe audio'),
+  SettingsSection(id: 'voice', group: 'App', title: 'Voice', icon: Icons.mic_none, keywords: 'dictation speech microphone input device language push to talk transcribe audio read aloud voice speak speaker playback tts text to speech'),
   SettingsSection(id: 'shortcuts', group: 'App', title: 'Shortcuts', icon: Icons.keyboard_outlined, keywords: 'keyboard keys chords hotkeys'),
   SettingsSection(id: 'sources', group: 'Agents', title: 'Sources', icon: Icons.hub_outlined, keywords: 'agents providers programs claude codex command install update version ready'),
   SettingsSection(id: 'profiles', group: 'Agents', title: 'Profiles', icon: Icons.layers_outlined, keywords: 'overlays layers model effort mode skills trusted directories project'),
@@ -79,6 +81,8 @@ class SettingsPage extends StatefulWidget {
     this.usageSection = false,
     this.voiceBackends = const [],
     this.hostSpeech,
+    this.voiceOutputs,
+    this.reader,
     this.version = '',
   });
 
@@ -140,6 +144,10 @@ class SettingsPage extends StatefulWidget {
 
   /// The speech providers of the host this app reaches, offered beside [voiceBackends].
   final HostSpeechCatalog? hostSpeech;
+
+  /// The voices replies are read aloud with, and what reads a sample of one; Voice offers their choices when given.
+  final VoiceOutputs? voiceOutputs;
+  final ReplyReader? reader;
 
   /// The app's version, for About.
   final String version;
@@ -240,7 +248,7 @@ class SettingsPageState extends State<SettingsPage> {
       'general' => GeneralSection(controller: controller, ledger: widget.ledger, hostWorkspacePreview: widget.hostWorkspacePreview),
       'appearance' => AppearanceSection(controller: controller),
       'notifications' => NotificationsSection(controller: controller, onAllowNotifications: widget.onAllowNotifications),
-      'voice' => VoiceSection(controller: controller, backends: widget.voiceBackends, host: widget.hostSpeech),
+      'voice' => VoiceSection(controller: controller, backends: widget.voiceBackends, host: widget.hostSpeech, outputs: widget.voiceOutputs, reader: widget.reader),
       'shortcuts' => const ShortcutsSection(),
       'sources' => SourcesSection(
         controller: controller, presets: widget.presets, hosted: widget.hosted, checkSource: widget.checkSource, programs: widget.programs, accounts: widget.accounts),

@@ -66,9 +66,44 @@ final class NotificationSettings {
 /// How a dictation is held: one press starts it and the next ends it, or it lasts while a key is down.
 enum DictationMode { toggle, hold }
 
-/// `[voice]`: where speech is turned into text and how. Nothing is recorded until the person starts a dictation.
+/// `[voice]`'s text-to-speech keys: who reads a reply aloud and with what. A null is the provider's own choice, and a null
+/// [output] is the first voice this app or page has.
+final class SpeakSettings {
+  const SpeakSettings({this.output, this.voice, this.model, this.style, this.speed, this.readReplies = false});
+
+  /// The voice provider by the id it has in the app (`host:NAME`, `browser`, `browser:online`).
+  final String? output;
+  final String? voice, model, style;
+
+  /// A multiple of normal speech, 1 being normal.
+  final double? speed;
+
+  /// Whether each reply is read aloud, a sentence at a time, as it arrives.
+  final bool readReplies;
+
+  bool get isDefault => output == null && voice == null && model == null && style == null && speed == null && !readReplies;
+
+  /// The same with the named parts changed; a part named in [clear] goes back to the provider's own choice.
+  SpeakSettings copyWith({
+    String? output, String? voice, String? model, String? style, double? speed, bool? readReplies,
+    bool clearOutput = false, bool clearVoice = false, bool clearModel = false, bool clearStyle = false, bool clearSpeed = false,
+  }) => SpeakSettings(
+    output: clearOutput ? null : output ?? this.output,
+    voice: clearVoice ? null : voice ?? this.voice,
+    model: clearModel ? null : model ?? this.model,
+    style: clearStyle ? null : style ?? this.style,
+    speed: clearSpeed ? null : speed ?? this.speed,
+    readReplies: readReplies ?? this.readReplies,
+  );
+}
+
+/// `[voice]`: where speech is turned into text and how, and who reads replies aloud. Nothing is recorded until the person starts a
+/// dictation.
 final class VoiceSettings {
-  const VoiceSettings({this.backend = defaultVoiceBackend, this.model, this.language, this.device, this.mode = DictationMode.toggle, this.profile = const VoiceProfile(), this.acknowledged = const {}});
+  const VoiceSettings({this.backend = defaultVoiceBackend, this.model, this.language, this.device, this.mode = DictationMode.toggle, this.profile = const VoiceProfile(), this.acknowledged = const {}, this.speak = const SpeakSettings()});
+
+  /// Who reads replies aloud; dictation's choices are the rest.
+  final SpeakSettings speak;
 
   /// The speech service, by the id it has in the app; [defaultVoiceBackend] is the operating system's.
   final String backend;
@@ -90,7 +125,8 @@ final class VoiceSettings {
   final Set<String> acknowledged;
 
   VoiceSettings copyWith({String? backend, String? model, bool clearModel = false, String? language, bool clearLanguage = false,
-      String? device, bool clearDevice = false, DictationMode? mode, VoiceProfile? profile, Set<String>? acknowledged}) => VoiceSettings(
+      String? device, bool clearDevice = false, DictationMode? mode, VoiceProfile? profile, Set<String>? acknowledged, SpeakSettings? speak}) => VoiceSettings(
+    speak: speak ?? this.speak,
     backend: backend ?? this.backend,
     model: clearModel ? null : model ?? this.model,
     language: clearLanguage ? null : language ?? this.language,
@@ -1244,7 +1280,14 @@ final class CanoaConfig {
     final sources = table('sources', {'hidden'});
     final attachments = table('attachments', {'paste_as_file', 'embed_limit'});
     final usage = table('usage', {'warn_permille', 'limit_phrases'});
-    final voiceTable = table('voice', {'backend', 'model', 'language', 'device', 'mode', 'accent', 'voice', 'vocabulary', 'acknowledged'});
+    final voiceTable = table('voice', {
+      'backend', 'model', 'language', 'device', 'mode', 'accent', 'voice', 'vocabulary', 'acknowledged',
+      'output', 'output_voice', 'output_model', 'output_style', 'output_speed', 'read_replies',
+    });
+    final outputSpeed = voiceTable['output_speed'];
+    if (outputSpeed != null && (outputSpeed is! num || !(outputSpeed > 0) || outputSpeed > 10)) {
+      throw const FormatException('canoa.cfg: voice.output_speed must be a number above 0 and at most 10');
+    }
     String? voiceText(String key) {
       final raw = voiceTable[key];
       if (raw == null) return null;
@@ -1472,6 +1515,14 @@ final class CanoaConfig {
         mode: voiceMode == 'hold' ? DictationMode.hold : DictationMode.toggle,
         profile: VoiceProfile(accent: voiceText('accent'), voice: voiceText('voice'), vocabulary: [for (final word in vocabulary) (word as String).trim()]),
         acknowledged: {for (final id in acknowledged) id as String},
+        speak: SpeakSettings(
+          output: voiceText('output'),
+          voice: voiceText('output_voice'),
+          model: voiceText('output_model'),
+          style: voiceText('output_style'),
+          speed: outputSpeed is num ? outputSpeed.toDouble() : null,
+          readReplies: flag(voiceTable, 'read_replies', false),
+        ),
       ),
       notifications: NotificationSettings(
         permission: flag(notifications, 'permission', true),
@@ -1502,6 +1553,12 @@ final class CanoaConfig {
       if (voice.profile.voice != null) 'voice = ${jsonEncode(voice.profile.voice)}',
       if (voice.profile.vocabulary.isNotEmpty) 'vocabulary = ${jsonEncode(voice.profile.vocabulary)}',
       if (voice.acknowledged.isNotEmpty) 'acknowledged = ${jsonEncode(voice.acknowledged.toList()..sort())}',
+      if (voice.speak.output != null) 'output = ${jsonEncode(voice.speak.output)}',
+      if (voice.speak.voice != null) 'output_voice = ${jsonEncode(voice.speak.voice)}',
+      if (voice.speak.model != null) 'output_model = ${jsonEncode(voice.speak.model)}',
+      if (voice.speak.style != null) 'output_style = ${jsonEncode(voice.speak.style)}',
+      if (voice.speak.speed != null) 'output_speed = ${voice.speak.speed}',
+      if (voice.speak.readReplies) 'read_replies = true',
     ];
     return lines.isEmpty ? '' : '\n[voice]\n${lines.join('\n')}\n';
   }

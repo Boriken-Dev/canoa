@@ -17,8 +17,10 @@ import '../store/programs.dart' show ProgramStores;
 import '../workspace/remote_host.dart' show HostChoice;
 import 'agent_events.dart' show AgentCommandInfo, MessageRole;
 import 'attachments.dart';
+import '../voice/reply_reader.dart';
 import 'dictation.dart';
 import 'palette.dart' show dictationKeys;
+import 'reply_voice.dart';
 import 'composer_controls.dart';
 import 'source_trouble.dart';
 import 'mentions.dart';
@@ -75,6 +77,8 @@ final class ComposerKit {
     this.programs,
     this.extension,
     this.dictation,
+    this.reader,
+    this.onVoiceMode,
     this.hosts = const [],
     this.chooseHost,
     this.addHost,
@@ -123,6 +127,12 @@ final class ComposerKit {
 
   /// Dictation into the message; null where this build has no way to record, which leaves the microphone out.
   final Dictation? dictation;
+
+  /// Reads replies aloud; null where this build has no voice to read with, which leaves voice mode's switch and the play buttons out.
+  final ReplyReader? reader;
+
+  /// Told when voice mode is turned on or off in the composer, to keep the choice.
+  final ValueChanged<bool>? onVoiceMode;
 
   /// Whether Enter steers rather than queues while a turn runs (`[sessions] while_working`); Alt+Enter does the other.
   final bool enterSteers;
@@ -483,6 +493,8 @@ class SessionComposer extends StatelessWidget {
       ],
       trailing: [
         if (kit.dictation case final dictation?) DictationButton(dictation: dictation, controller: controller, shortcut: dictationKeys),
+        if (kit.reader case final reader? when reader.available)
+          VoiceModeButton(reader: reader, controller: controller, dictation: kit.dictation, onChanged: kit.onVoiceMode ?? (_) {}),
         if (draft) SourceTroubleChip(store: store, session: session, kit: kit),
         if (draft && (kit.presets.isNotEmpty || kit.savePreset != null)) PresetChooser(store: store, session: session, kit: kit),
         ModelEffortChooser(store: store, session: session, options: options, kit: kit, seen: seen),
