@@ -238,6 +238,12 @@ pub fn record_origin(home: &Path, peer: &str, origin: &str) -> io::Result<()> {
     fs::rename(temporary, file)
 }
 
+/// Whether `peer` was paired through the door by the extension at `origin`. A key paired another way is bound to none.
+#[must_use]
+pub fn bound_to(home: &Path, peer: &str, origin: &str) -> bool {
+    origins(home).is_ok_and(|map| map.get(peer).and_then(Value::as_str) == Some(origin))
+}
+
 /// Whether `peer` may use the door from `origin`: a key bound to an origin only from that one; a key paired another way (by
 /// `canoa accept`) is bound to none and keeps the access its pairing gave it.
 #[must_use]

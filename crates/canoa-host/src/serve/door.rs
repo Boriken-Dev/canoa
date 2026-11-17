@@ -139,8 +139,16 @@ fn meet(
     );
     // A key bound to the extension that paired it is not served to another origin.
     let origin = wanted.origin;
+    // What offers tools to the host's sessions is the browser's own key, the one the extension's PIN pairing bound to its
+    // origin: a program paired another way cannot pose as the browser there.
+    let browser_only = wanted.open == native::TOOLS;
     let admit = |peer: &coqui_peer_webcrypto::PeerId| {
-        native::origin_allows(home, &peer.to_string(), &origin)
+        let peer = peer.to_string();
+        if browser_only {
+            native::bound_to(home, &peer, &origin)
+        } else {
+            native::origin_allows(home, &peer, &origin)
+        }
     };
     connection(shared, target, channel, entered, Some(&admit));
 }

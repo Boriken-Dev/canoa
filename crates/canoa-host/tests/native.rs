@@ -1157,26 +1157,40 @@ fn provide_until(
     }
 }
 
+/// Pairs a new key the way the extension does: by the PIN `canoa pair --native` shows, which binds the key to `ORIGIN`.
+fn pair_by_pin(host: &Host) -> coqui_agentic_peer::auth::Identity {
+    use coqui_agentic_peer::pairing;
+    use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
+
+    let (mut pair, shown) = pairing_door(&host.home());
+    let pin =
+        Pin::parse(&CodeAlphabet::pin(), shown["pin"].as_str().expect("a PIN")).expect("a PIN");
+    let client = support::key();
+    let client_store = canoa_host::Home::at(host.scratch.0.join("client"))
+        .store()
+        .expect("a store");
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let link = Link::open(&relay, "@pair").expect("the pairing door opens while a PIN is shown");
+    pairing::join(&link, &client, pin, &client_store, WAIT).expect("the PIN pairs");
+    link.close();
+    assert!(pair.wait().expect("pair ends").success());
+    client
+}
+
 #[test]
-fn a_browser_offers_its_tools_through_the_door_to_a_paired_key_that_may_use_them_and_never_to_a_page()
- {
+fn a_browser_offers_its_tools_through_the_door_to_every_session_but_a_pages() {
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    let client = support::key();
     let scratch = Scratch::new();
     let documents = scratch.0.join("documents");
-    let config = format!(
-        "{}args = [\"--scripted\", \"--mcp-http\"]\n[host.control]\nlisten = \"127.0.0.1:0\"\ngrants = {{ \"{}\" = [\"tools.use\"] }}\n",
-        agent_entry(),
-        client.peer_id()
-    );
+    let config = format!("{}args = [\"--scripted\", \"--mcp-http\"]\n", agent_entry());
     let host = Host::start_in(
         scratch,
         &config,
-        2,
+        1,
         &[("XDG_DOCUMENTS_DIR", documents.into_os_string())],
     );
-    host.pair(&client);
+    let client = pair_by_pin(&host);
     let (home, peer) = (host.home(), host.peer);
     let dir = cwd(&host.scratch);
 
@@ -1231,7 +1245,7 @@ fn a_browser_offers_its_tools_through_the_door_to_a_paired_key_that_may_use_them
     let (listed, page, extension) = told;
     assert_eq!(
         listed, "browser_request_access",
-        "a paired key that holds tools.use"
+        "a paired key needs no grant to use them"
     );
     assert_eq!(
         page, "no bearer",
@@ -1259,14 +1273,13 @@ fn a_browser_offers_its_tools_through_the_door_to_a_paired_key_that_may_use_them
 }
 
 #[test]
-fn a_key_that_may_not_offer_tools_is_refused_and_so_is_one_through_a_door_that_gives_none() {
-    let client = support::key();
+fn a_browser_key_whose_door_gives_it_no_tools_provide_is_refused() {
     let config = format!(
         "{}[host.native]\ncontrol = [\"ledger.read\"]\n",
         agent_entry()
     );
     let host = Host::start(&config, 1);
-    host.pair(&client);
+    let client = pair_by_pin(&host);
     let relay = Relay::start(&host.home(), ORIGIN);
     let link = Link::open(&relay, "@tools").expect("the door opens @tools");
     let refused = support::with_channel(link, &client, host.peer, |rpc| {
@@ -1276,4 +1289,30 @@ fn a_key_that_may_not_offer_tools_is_refused_and_so_is_one_through_a_door_that_g
     })
     .expect("the key is served");
     assert_eq!(refused["type"], "refused", "{refused}");
+}
+
+#[test]
+fn a_key_paired_another_way_cannot_pose_as_the_browser_at_the_tools_door() {
+    let host = host();
+    let client = support::key();
+    host.pair(&client);
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let link = Link::open(&relay, "@tools").expect("the door opens @tools");
+    let answered = support::with_channel(link, &client, host.peer, |rpc| {
+        rpc.send(&json!({"type": "register", "provider": "browser"}))
+            .ok()?;
+        rpc.next_message(WAIT).ok()
+    });
+    assert!(
+        !matches!(&answered, Ok(Some(message)) if message["type"] == "registered"),
+        "a key no extension's PIN bound is turned away: {answered:?}"
+    );
+    // The same key is still served an entry, as `canoa accept` meant.
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let link = Link::open(&relay, "fixture").expect("the door opens the entry");
+    let dir = cwd(&host.scratch);
+    let text = support::with_channel(link, &client, host.peer, |rpc| turn(rpc, &dir, "still"))
+        .expect("served")
+        .expect("a turn");
+    assert_eq!(text, "echo: still");
 }

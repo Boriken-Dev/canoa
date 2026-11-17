@@ -2574,9 +2574,9 @@ fn give_agent_flow<C: Channel>(
     let peeked = Peek::new(channel, conn.as_ref());
     let raw = Raw::new(&peeked, link.as_ref());
     let store_peek = StorePeek::new(&raw, store.as_ref());
-    // The tools programs offer, for a connection whose key may use them and which is not a task another agent handed out.
+    // The tools programs offer, for every connection but a task another agent handed out.
     let tools = shared.client_tools.for_connection(
-        shared.store_grants(peer, context.is_some()).as_ref(),
+        context.is_some(),
         client_tools::Who {
             agent: served.name.clone(),
             via: if in_process {

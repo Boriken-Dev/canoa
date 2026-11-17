@@ -14,10 +14,6 @@ fn who() -> Who {
     }
 }
 
-fn using() -> BTreeSet<Grant> {
-    [Grant::ToolsUse].into()
-}
-
 fn providing() -> BTreeSet<Grant> {
     [Grant::ToolsProvide].into()
 }
@@ -79,8 +75,8 @@ fn servers(message: &[u8]) -> Vec<Value> {
 }
 
 /// A link that has been through `initialize` with an agent that takes HTTP servers, and a provider that has been seen.
-fn ready(hub: &Arc<Hub>, grants: Option<&BTreeSet<Grant>>) -> Arc<Link> {
-    let link = hub.for_connection(grants, who()).expect("a link");
+fn ready(hub: &Arc<Hub>) -> Arc<Link> {
+    let link = hub.for_connection(false, who()).expect("a link");
     let _ = link.client_said(initialize());
     link.agent_said(&answered(
         1,
@@ -108,24 +104,19 @@ fn a_providers_name_is_a_plain_lowercase_word() {
 }
 
 #[test]
-fn only_a_key_that_holds_tools_use_is_given_the_tools_and_a_task_never_is() {
+fn every_connection_is_given_the_tools_but_a_task_another_agent_handed_out() {
     let hub = hub();
     assert!(
-        hub.for_connection(None, who()).is_none(),
-        "a task another agent handed out"
+        hub.for_connection(true, who()).is_none(),
+        "a task another agent handed out has no person at its end"
     );
-    assert!(hub.for_connection(Some(&BTreeSet::new()), who()).is_none());
-    assert!(
-        hub.for_connection(Some(&providing()), who()).is_none(),
-        "offering is not using"
-    );
-    assert!(hub.for_connection(Some(&using()), who()).is_some());
+    assert!(hub.for_connection(false, who()).is_some());
 }
 
 #[test]
 fn a_key_without_tools_provide_is_refused_and_nothing_is_registered() {
     let hub = hub();
-    let (link, thread) = connect(&hub, "k", using());
+    let (link, thread) = connect(&hub, "k", BTreeSet::new());
     let refused = hear(&link);
     assert_eq!(refused["type"], "refused");
     thread.join().expect("ends");
@@ -177,7 +168,7 @@ fn another_key_cannot_take_a_name_a_provider_holds_but_the_same_key_replaces_its
 #[test]
 fn a_session_request_is_given_one_server_for_each_provider_the_host_has_seen() {
     let hub = hub();
-    let link = ready(&hub, Some(&using()));
+    let link = ready(&hub);
     let untouched = link.client_said(session_new(2));
     assert!(
         servers(&untouched).is_empty(),
@@ -215,7 +206,7 @@ fn an_agent_that_takes_only_stdio_is_given_the_bridge_with_the_address_and_beare
     let hub = hub();
     let (provider, thread) = connect(&hub, "k", providing());
     register(&provider, "browser");
-    let link = hub.for_connection(Some(&using()), who()).expect("a link");
+    let link = hub.for_connection(false, who()).expect("a link");
     let _ = link.client_said(initialize());
     link.agent_said(&answered(1, &json!({"protocolVersion": 1})));
     let given = servers(&link.client_said(session_new(2)));
@@ -254,7 +245,7 @@ fn a_session_a_page_started_is_given_no_server_and_one_the_persons_own_pages_sta
     let hub = hub();
     let (provider, thread) = connect(&hub, "k", providing());
     register(&provider, "browser");
-    let link = ready(&hub, Some(&using()));
+    let link = ready(&hub);
     // What the scope passes on has lost the mark; the peek read it before.
     let forwarded = |id: u64| session_new(id);
     link.client_raw(&page_request(2, None));
@@ -287,7 +278,7 @@ fn a_page_reopening_a_session_is_marked_too() {
     let hub = hub();
     let (provider, thread) = connect(&hub, "k", providing());
     register(&provider, "browser");
-    let link = ready(&hub, Some(&using()));
+    let link = ready(&hub);
     let raw = serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 7, "method": "session/load",
         "params": {"sessionId": "s", "cwd": "/", "mcpServers": [], "_meta": {SITE_META: {"site": "a.example"}}}}))
     .expect("json");
@@ -307,7 +298,7 @@ fn ending_a_session_or_the_connection_ends_its_bearer_and_tells_the_provider() {
     let hub = hub();
     let (provider, thread) = connect(&hub, "k", providing());
     register(&provider, "browser");
-    let link = ready(&hub, Some(&using()));
+    let link = ready(&hub);
     let given = servers(&link.client_said(session_new(2)));
     assert_eq!(given.len(), 1);
     link.agent_said(&answered(2, &json!({"sessionId": "one"})));
@@ -345,7 +336,7 @@ fn a_provider_hears_a_stream_open_forwards_what_the_agent_asks_and_answers_it() 
     let hub = hub();
     let (provider, thread) = connect(&hub, "k", providing());
     register(&provider, "browser");
-    let link = ready(&hub, Some(&using()));
+    let link = ready(&hub);
     let _ = link.client_said(session_new(2));
     let access = lock(&hub.tokens.0)
         .values()
@@ -386,7 +377,7 @@ fn no_connected_provider_gives_an_empty_list_and_a_call_says_why() {
     let hub = hub();
     let (provider, thread) = connect(&hub, "k", providing());
     register(&provider, "browser");
-    let link = ready(&hub, Some(&using()));
+    let link = ready(&hub);
     let _ = link.client_said(session_new(2));
     drop(provider);
     thread.join().expect("ends");
@@ -437,7 +428,7 @@ fn a_provider_leaving_tells_every_session_its_list_changed() {
     let hub = hub();
     let (provider, thread) = connect(&hub, "k", providing());
     register(&provider, "browser");
-    let link = ready(&hub, Some(&using()));
+    let link = ready(&hub);
     let _ = link.client_said(session_new(2));
     let access = lock(&hub.tokens.0)
         .values()

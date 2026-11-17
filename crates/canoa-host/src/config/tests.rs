@@ -1962,9 +1962,8 @@ fn host_native_is_on_with_a_narrow_control_by_default_and_takes_a_list_that_neve
         "a browser asks its host who is nearby by default"
     );
     assert!(
-        none.native.control.contains(&Grant::ToolsProvide)
-            && !none.native.control.contains(&Grant::ToolsUse),
-        "a browser may offer its tools by default; what uses them is a key's own grant"
+        none.native.control.contains(&Grant::ToolsProvide),
+        "a browser may offer its tools by default"
     );
     for never in [
         Grant::ConfigWriteSessions,

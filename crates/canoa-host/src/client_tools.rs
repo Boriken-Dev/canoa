@@ -6,8 +6,8 @@
 //! A session gets one server per provider, `canoa-<provider>`, over loopback HTTP behind a bearer minted for that session (or,
 //! for an agent that takes only stdio, through `PROGRAM mcp-bridge` with the bearer in its environment), the way `canoa-kb` is
 //! offered. The bearer is the session's identity to the provider: each opens its own stream there, so a grant a person gives is
-//! the session's and ends with it. A session started by a web page is never given a server, and neither is one whose key does
-//! not hold `tools.use`. The provider connects with `tools.provide`.
+//! the session's and ends with it. A session started by a web page is never given a server, and neither is a task another agent
+//! handed out. The provider connects with `tools.provide`, which only the browser's paired key holds.
 //!
 //! Wire on `@tools`, one JSON object per message. Provider to host: `{"type":"register","provider":"browser"}` first, then
 //! `{"type":"mcp","stream":S,"message":M}` (an answer to a request, or a `notifications/...` message) and
@@ -414,13 +414,13 @@ impl Hub {
         }
     }
 
-    /// The tools of one connection whose key holds `grants`, or `None` when it is given none.
-    pub(crate) fn for_connection(
-        self: &Arc<Self>,
-        grants: Option<&BTreeSet<Grant>>,
-        who: Who,
-    ) -> Option<Arc<Link>> {
-        grants.filter(|grants| grants.contains(&Grant::ToolsUse))?;
+    /// The tools of one connection, or `None` for a task another agent handed out, which has no person at its other end. Every
+    /// key that reaches the host is the person's own, so no grant is asked of it; a session a web page started is left out
+    /// later, when its request is seen.
+    pub(crate) fn for_connection(self: &Arc<Self>, task: bool, who: Who) -> Option<Arc<Link>> {
+        if task {
+            return None;
+        }
         Some(Arc::new(Link {
             hub: Arc::clone(self),
             who,
