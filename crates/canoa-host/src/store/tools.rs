@@ -189,6 +189,7 @@ pub struct LocalTools {
     limits: ToolsLimits,
     loopback_http: bool,
     allow_unverified: bool,
+    anywhere: bool,
     cancel: Arc<AtomicBool>,
     deadline: Option<std::time::Instant>,
 }
@@ -215,6 +216,7 @@ impl LocalTools {
             limits: ToolsLimits::default(),
             loopback_http: false,
             allow_unverified: false,
+            anywhere: false,
             cancel: Arc::new(AtomicBool::new(false)),
             deadline: None,
         }
@@ -266,6 +268,13 @@ impl LocalTools {
     /// said which downloads those are.
     pub const fn allow_unverified(mut self, allowed: bool) -> Self {
         self.allow_unverified = allowed;
+        self
+    }
+
+    /// Lets a fetch reach any origin, `http` as well as `https`, redirects included, not only the endpoints. For a download whose digest the person's
+    /// confirmed plan names: what is fetched is checked against it, so the server that sends it is not trusted.
+    pub const fn anywhere(mut self, allowed: bool) -> Self {
+        self.anywhere = allowed;
         self
     }
 
@@ -333,12 +342,20 @@ impl LocalTools {
     }
 
     fn allowed(&self, url: &str) -> Result<(), ProviderError> {
-        let (scheme, host_port) = split_origin(url)
+        // Where any origin is allowed, user information is the person's own credentials for it: the origin is its host.
+        let parsed = if self.anywhere {
+            split_origin_any(url)
+        } else {
+            split_origin(url)
+        };
+        let (scheme, host_port) = parsed
             .ok_or_else(|| refused(Status::GUATIAO_ERR_BAD_VALUE, "a URL this host cannot read"))?;
         let origin = format!("{scheme}://{host_port}");
         let host = host_of(&host_port);
         let loopback = matches!(host.as_str(), "localhost" | "127.0.0.1" | "[::1]");
-        if scheme != "https" && !(scheme == "http" && self.loopback_http && loopback) {
+        if scheme != "https"
+            && !(scheme == "http" && ((self.loopback_http && loopback) || self.anywhere))
+        {
             return Err(refused(
                 Status::GUATIAO_ERR_BAD_VALUE,
                 "only https is fetched",
@@ -361,7 +378,7 @@ impl LocalTools {
                 endpoint.eq_ignore_ascii_case(&origin)
             }
         };
-        if !self.endpoints.iter().any(reaches) {
+        if !self.anywhere && !self.endpoints.iter().any(reaches) {
             return Err(refused(
                 Status::GUATIAO_ERR_BAD_VALUE,
                 &format!("{origin} is not one of the store's endpoints"),
@@ -422,6 +439,20 @@ fn split_origin(url: &str) -> Option<(String, String)> {
         return None;
     }
     Some((scheme.to_ascii_lowercase(), authority.to_ascii_lowercase()))
+}
+
+/// As [`split_origin`], for a fetch that may reach any origin: user information is dropped from the origin rather than refused,
+/// since no endpoint is compared with it.
+fn split_origin_any(url: &str) -> Option<(String, String)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    if host.is_empty() {
+        return None;
+    }
+    Some((scheme.to_ascii_lowercase(), host.to_ascii_lowercase()))
 }
 
 fn host_of(authority: &str) -> String {

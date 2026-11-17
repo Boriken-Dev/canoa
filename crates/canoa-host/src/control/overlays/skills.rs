@@ -290,7 +290,12 @@ impl Overlays {
     }
 
     /// The commit the repository's head names, fetched one commit deep.
-    fn fetch_head(&self, trust: Trust, cache: &Path, repo: &str) -> Result<String, (i32, String)> {
+    pub(super) fn fetch_head(
+        &self,
+        trust: Trust,
+        cache: &Path,
+        repo: &str,
+    ) -> Result<String, (i32, String)> {
         let dir = format!("--git-dir={}", cache.display());
         self.run_as(
             trust,

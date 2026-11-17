@@ -1700,6 +1700,9 @@ impl Serving {
                                 .map(|dir| dir.join("overlays")),
                             control::OverlayLimits::default(),
                         ))
+                        .with_extensions(control::ExtensionInstall::new(
+                            options.state_dir.as_ref().map(|dir| dir.join("extensions")),
+                        ))
                         .with_terminals(crate::terminal::Terminals::new(
                             config.shell.clone(),
                             options.home_dir.clone().or_else(home_from_environment),

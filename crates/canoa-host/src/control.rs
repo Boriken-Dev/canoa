@@ -18,6 +18,7 @@ use coqui_transport::{Channel, Failure};
 
 use crate::terminal::{self, Terminals};
 use crate::worktree::Worktrees;
+pub(crate) use extension_install::ExtensionInstall;
 pub use files::{
     DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_TOTAL, DEFAULT_MAX_UPLOADS, MAX_CHUNK, MAX_LIST,
     MAX_SECTION_BYTES, SECTIONS,
@@ -343,6 +344,8 @@ pub(crate) struct Control {
     registry: Registry,
     /// The catalogs and programs, indexed for `store/index`.
     index: Arc<crate::store::index::StoreIndex>,
+    /// Where an extension a catalog lists is kept, and how it is fetched.
+    extensions: extension_install::ExtensionInstall,
     /// Set by `host/restart`, with `stop` raised so the host ends and its supervisor starts it again.
     restart: Arc<AtomicBool>,
     stop: Option<Arc<AtomicBool>>,
@@ -450,6 +453,7 @@ impl Control {
             overlays: Arc::new(Overlays::default()),
             registry: Registry::default(),
             index: Arc::new(crate::store::index::StoreIndex::default()),
+            extensions: extension_install::ExtensionInstall::default(),
             restart: Arc::new(AtomicBool::new(false)),
             stop: None,
             restart_due: AtomicBool::new(false),
@@ -474,6 +478,16 @@ impl Control {
     #[must_use]
     pub(crate) fn with_files(mut self, files: Files) -> Self {
         self.files = files;
+        self
+    }
+
+    /// Offers `extension/*`, keeping what it installs as this does.
+    #[must_use]
+    pub(crate) fn with_extensions(
+        mut self,
+        extensions: extension_install::ExtensionInstall,
+    ) -> Self {
+        self.extensions = extensions;
         self
     }
 
@@ -804,6 +818,16 @@ impl Control {
                 Some("host/accept") => allow(caller, Grant::Hosting)
                     .and_then(|()| self.keys_store())
                     .and_then(|store| hosting::accept(store, &params)),
+                Some("extension/catalogs") => self.extension_catalogs(caller, &params),
+                Some("extension/plan") => {
+                    allow(caller, Grant::Hosting).and_then(|()| self.extension_plan(&params))
+                }
+                Some("extension/apply") => {
+                    allow(caller, Grant::Hosting).and_then(|()| self.extension_apply(&params))
+                }
+                Some("extension/remove") => {
+                    allow(caller, Grant::Hosting).and_then(|()| self.extension_remove(&params))
+                }
                 Some("host/revoke") => allow(caller, Grant::Hosting)
                     .and_then(|()| self.keys_store())
                     .and_then(|store| hosting::revoke(store, &params)),
@@ -1453,6 +1477,9 @@ mod changes;
 mod changes_tests;
 mod choices;
 pub(crate) mod discover;
+mod extension_install;
+#[cfg(test)]
+mod extension_install_tests;
 mod files;
 #[cfg(test)]
 mod files_tests;

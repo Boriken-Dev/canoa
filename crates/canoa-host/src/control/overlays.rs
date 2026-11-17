@@ -28,6 +28,7 @@ use crate::profile::{OverlaySource, full_commit_id};
 mod contents;
 mod scan;
 mod skills;
+mod tree;
 
 type Outcome = Result<Value, (i32, String)>;
 
@@ -275,8 +276,16 @@ impl Overlays {
         Ok(self.root()?.join(".cache").join(format!("{name}.git")))
     }
 
-    fn catalog_cache(&self, label: &str) -> Result<PathBuf, (i32, String)> {
-        Ok(self.root()?.join(".catalogs").join(format!("{label}.git")))
+    /// Where a catalog is fetched to. An extensions catalog has a folder of its own, `.catalogs/.extensions`, whose name no overlay
+    /// catalog's `LABEL.git` can take, so two catalogs that share a label never share a fetch.
+    fn catalog_cache(&self, label: &str, extensions: bool) -> Result<PathBuf, (i32, String)> {
+        let catalogs = self.root()?.join(".catalogs");
+        let folder = if extensions {
+            catalogs.join(".extensions")
+        } else {
+            catalogs
+        };
+        Ok(folder.join(format!("{label}.git")))
     }
 
     /// The overlays folder, when this host has one.
@@ -677,9 +686,10 @@ impl Overlays {
                 "a source on this computer must be in a folder this key may browse",
             ));
         }
-        let gate = self.gate(&format!("catalog:{label}"));
+        let extensions = flag(params, "extensions");
+        let gate = self.gate(&format!("{}:{label}", gate_kind(extensions)));
         let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
-        let cache = self.catalog_cache(label)?;
+        let cache = self.catalog_cache(label, extensions)?;
         self.init_cache(&cache)?;
         let commit = self.fetch(Trust::Own, &cache, &repo, &reference)?;
         Ok(json!({"commit": commit}))
@@ -695,6 +705,7 @@ impl Overlays {
         if !full_commit_id(commit) {
             return Err(bad("commit is a whole commit id"));
         }
+        let extensions = flag(params, "extensions");
         let paths: Vec<&str> = params
             .get("paths")
             .and_then(Value::as_array)
@@ -710,7 +721,7 @@ impl Overlays {
             .and_then(Value::as_u64)
             .unwrap_or(MAX_READ_BYTES)
             .min(MAX_READ_BYTES);
-        let cache = self.catalog_cache(label)?;
+        let cache = self.catalog_cache(label, extensions)?;
         let mut found: BTreeMap<String, (String, u64)> = BTreeMap::new();
         let valid: Vec<&str> = paths
             .iter()
@@ -846,8 +857,9 @@ impl Overlays {
     pub(crate) fn catalog_remove(&self, params: &Value) -> Outcome {
         let label =
             checked_name(text_param(params, "label")?.ok_or_else(|| bad("label is needed"))?)?;
-        let cache = self.catalog_cache(label)?;
-        let gate = self.gate(&format!("catalog:{label}"));
+        let extensions = flag(params, "extensions");
+        let cache = self.catalog_cache(label, extensions)?;
+        let gate = self.gate(&format!("{}:{label}", gate_kind(extensions)));
         let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
         if cache.exists() {
             fs::remove_dir_all(cache)
@@ -1484,6 +1496,19 @@ fn unique<'a>(ids: impl IntoIterator<Item = &'a String>) -> Vec<String> {
 }
 
 /// An overlay's or a catalog's name: 1 to 64 letters, digits, `-` or `_`, and an overlay name AOS takes.
+/// Whether the request is for an extensions catalog (`"extensions": true`) and not an overlay catalog.
+fn flag(params: &Value, key: &str) -> bool {
+    params.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn gate_kind(extensions: bool) -> &'static str {
+    if extensions {
+        "extension-catalog"
+    } else {
+        "catalog"
+    }
+}
+
 fn checked_name(name: &str) -> Result<&str, (i32, String)> {
     let shaped = !name.is_empty()
         && name.len() <= crate::profile::MAX_NAME
