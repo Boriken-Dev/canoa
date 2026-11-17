@@ -598,7 +598,7 @@ caller has no grant for it), `-32002` **refused** (a limit), `-32003` not found.
 ```toml
 [host.control]
 listen = "127.0.0.1:0"                              # or a pipe, as an entry has it; without it there is no network control
-grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "files", "config.read", "config.write", "config.write.sessions", "upload", "host.restart", "overlay.read", "overlay.write", "store.programs", "accounts", "discover", "usage", "terminal", "state"] }   # per key; a key not here gets nothing
+grants = { "sha256:…" = ["ledger.read", "ledger.write", "worktree", "store.read", "folders", "files", "config.read", "config.write", "config.write.sessions", "upload", "host.restart", "overlay.read", "overlay.write", "store.programs", "accounts", "discover", "usage", "terminal", "state", "workspace.open", "hosting"] }   # per key; a key not here gets nothing
 max_records = 10000                                 # ledger records the host keeps, per host; the oldest by `updated` are refused at, not dropped
 max_record_bytes = 262144                           # one ledger record
 max_upload_bytes = 8388608                          # one uploaded file, sent in chunks of at most 512 KiB

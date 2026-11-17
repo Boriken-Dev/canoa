@@ -147,7 +147,7 @@ pub enum Grant {
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 22] {
+    pub fn all() -> [Self; 23] {
         [
             Self::LedgerRead,
             Self::LedgerWrite,
