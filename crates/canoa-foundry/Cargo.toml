@@ -22,6 +22,8 @@ daemon = ["dep:ureq"]
 sdk = ["dep:foundry-local-sdk", "dep:tokio"]
 
 [dependencies]
+canoa = { workspace = true, features = ["store"] }
+coqui-acp-api.workspace = true
 serde_json.workspace = true
 ureq = { workspace = true, optional = true }
 foundry-local-sdk = { workspace = true, optional = true }

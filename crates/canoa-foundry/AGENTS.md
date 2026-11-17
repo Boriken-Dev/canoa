@@ -2,7 +2,7 @@
 
 Header-file-style reference for `canoa-foundry`: the OpenAI and Anthropic APIs over a local model run by Foundry Local, so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![forbid(unsafe_code)]`. Depends on `serde_json`; feature `daemon` (default) adds `ureq`, feature `sdk` adds `foundry-local-sdk` `2.4` and `tokio`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `serde_json`; feature `daemon` (default) adds `ureq`, feature `sdk` adds `foundry-local-sdk` `2.4` and `tokio`.
 
 Nothing here opens a listening socket or starts a process: the translations are pure functions of JSON, and an [`Engine`] is what runs a model. The server that carries the requests is `canoa-host`'s (`gateway`).
 
@@ -81,6 +81,27 @@ pub mod sdk {         // feature `sdk`
     impl SdkEngine { pub fn open(config: &SdkConfig) -> Result<Self, EngineError>; pub fn load(&self) -> Result<(), EngineError>; pub fn unload(&self) -> Result<(), EngineError>; }
 }
 
+// Foundry Local as a Store program.
+pub mod store {
+    pub const RELEASES_API: &str; pub const DOWNLOADS: &str;     // the publisher's release listing and the folder its files are served from
+    pub struct FoundryRecipe;                                     // `canoa::store::recipe::Recipe`: program `foundry`; the `cli-preview-X.Y.Z` release, checked against GitHub's SHA-256
+}
+
+// Foundry Local's models, as its command line lists and moves them.
+pub mod models {
+    pub enum ModelAction { Download, Load, Unload }               // ::parse(word), .word()
+    pub enum Listing { All, Cached, Loaded }
+    pub fn valid_model(id: &str) -> bool;                         // 1 to 128 of letters, digits and . _ - : + /, never opening with a dash
+    pub fn action_args(action: ModelAction, model: &str) -> Result<Vec<String>, String>;   // model <action> <model> -o json
+    pub fn list_args(which: Listing) -> Vec<String>;              // model list --variants [--cached|--loaded] -o json
+    pub fn rows(answer: &Value) -> Vec<Row>;                      // a list, or an object holding one under models/items/data/results
+    pub fn merge(all: Vec<Row>, cached: &[Row], loaded: &[Row]) -> Vec<Model>;   // loaded first, then downloaded, then by id
+    pub fn describe(row: &Row) -> String;                         // "chat, gpu, 9.9 GB"
+    pub fn plain(text: &str, most: usize) -> String;              // a program's words without terminal escapes
+    #[non_exhaustive] pub struct Row { pub id, pub alias, pub task, pub device, pub size_mb }
+    #[non_exhaustive] pub struct Model { pub row: Row, pub cached: bool, pub loaded: bool }
+}
+
 // Foundry Local as an account of the host.
 pub mod account {
     pub const KIND: &str = "foundry-local";
@@ -105,6 +126,8 @@ pub mod account {
 - **Streaming** is replayed: the model is called once and the events are written from its whole answer.
 
 ## Gotchas
+
+- The command line's `-o json` answers were not measured: `models::rows` reads a list (or an object holding one) and takes a row's name from the first of `id`, `variantId`, `modelId` and `name`, so a shape with another key lists nothing. The program is `foundry`; `FoundryRecipe` unpacks Microsoft's own Windows package, whose run outside the installed package was not measured.
 
 - The Foundry Local service's model list says every Qwen calls tools; only `qwen3-14b-generic-gpu:2` returned structured calls when measured, so `DaemonEngine` offers tools and lets the service refuse, in its own words (`EngineError::Refused`).
 - The service's streaming delivers no tokens in 0.14.0: `DaemonEngine` forces `stream: false`, and a request abandoned mid-stream leaves the model held.

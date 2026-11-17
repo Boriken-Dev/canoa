@@ -16,6 +16,7 @@ use canoa::store::{
     LatestQuery, LatestReport, PlanRequest, Platform, ProgramQuery, ProgramReport, ProgramStore,
     StoreInfo, StoreSettings,
 };
+use canoa_foundry::store::{DOWNLOADS, FoundryRecipe, RELEASES_API};
 use canoa_host::store::contract::{Fixture, Variant, World, WorldTransport, run, standin_bytes};
 use canoa_host::store::engine::Engine;
 use canoa_host::store::runtimes::{NODE_ORIGIN, NodeRecipe, PYTHON_RELEASES, PythonRecipe};
@@ -251,6 +252,95 @@ impl Fixture for PythonFixture {
     }
 }
 
+struct FoundryFixture;
+
+impl FoundryFixture {
+    fn tag(version: &str) -> String {
+        format!("cli-preview-{version}")
+    }
+
+    fn name(version: &str) -> String {
+        let os = if cfg!(windows) { "win" } else { "linux" };
+        let arch = if cfg!(target_arch = "aarch64") {
+            "arm64"
+        } else {
+            "x64"
+        };
+        let format = if cfg!(windows) { "msix" } else { "tar.gz" };
+        format!("foundry-{version}-{os}-{arch}.{format}")
+    }
+
+    fn archive(version: &str, exit: u32, extra: &[u8]) -> Vec<u8> {
+        let mut program = standin_bytes(&standin(), version, exit, None);
+        program.extend_from_slice(extra);
+        if cfg!(windows) {
+            zipped(&[("foundry.exe", &program), ("foundry_local.dll", b"library")])
+        } else {
+            let root = Self::name(version).trim_end_matches(".tar.gz").to_owned();
+            tar_gz(&[
+                (&format!("{root}/lib/foundry"), &program),
+                (&format!("{root}/lib/libfoundry_local.so"), b"library"),
+            ])
+        }
+    }
+}
+
+impl Fixture for FoundryFixture {
+    fn older(&self) -> String {
+        "0.13.0".to_owned()
+    }
+
+    fn newer(&self) -> String {
+        "0.14.0".to_owned()
+    }
+
+    fn platform(&self) -> Platform {
+        here()
+    }
+
+    fn auto_update_var(&self) -> Option<String> {
+        None
+    }
+
+    fn world(&self, variant: Variant) -> World {
+        let mut world = World::new();
+        let mut releases = vec![
+            // The SDK's own release shares the listing and is not the command line.
+            serde_json::json!({"tag_name": "v2.4.1", "draft": false, "assets": []}),
+        ];
+        for (version, newer) in [("0.13.0", false), ("0.14.0", true)] {
+            let (exit, extra, claim_good) = bytes_for(variant, version, newer);
+            let bytes = Self::archive(version, exit, extra);
+            let claimed = if claim_good {
+                sha256(&Self::archive(version, 0, b""))
+            } else {
+                sha256(&bytes)
+            };
+            let name = Self::name(version);
+            releases.push(serde_json::json!({
+                "tag_name": Self::tag(version),
+                "draft": false,
+                "assets": [
+                    {"name": name, "digest": format!("sha256:{claimed}")},
+                    {"name": "foundry-other.zip", "digest": format!("sha256:{}", "0".repeat(64))},
+                ],
+            }));
+            world.put(format!("{DOWNLOADS}{}/{name}", Self::tag(version)), bytes);
+        }
+        world.put(
+            format!("{RELEASES_API}?per_page=30"),
+            serde_json::Value::Array(releases).to_string().into_bytes(),
+        );
+        if variant == Variant::DownloadFails {
+            world.fail_big(1024);
+        }
+        if variant == Variant::Slow {
+            world.slow();
+        }
+        world
+    }
+}
+
 macro_rules! forwarding {
     ($name:ident, $recipe:ty) => {
         struct $name(Engine<$recipe>);
@@ -296,6 +386,7 @@ macro_rules! forwarding {
 
 forwarding!(Node, NodeRecipe);
 forwarding!(Python, PythonRecipe);
+forwarding!(Foundry, FoundryRecipe);
 
 #[test]
 fn the_node_store_passes_every_check() {
@@ -316,6 +407,19 @@ fn the_python_store_passes_every_check() {
     let store: Arc<dyn ProgramStore> =
         Arc::new(Python(Engine::new(PythonRecipe, StoreSettings::default())));
     let failures = run(store, &PythonFixture);
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn the_foundry_store_passes_every_check() {
+    let _alone = ONE_SUITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let store: Arc<dyn ProgramStore> = Arc::new(Foundry(Engine::new(
+        FoundryRecipe,
+        StoreSettings::default(),
+    )));
+    let failures = run(store, &FoundryFixture);
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
@@ -377,6 +481,48 @@ fn a_plan_fetches_one_file_from_the_publisher_and_checks_its_published_digest() 
 }
 
 #[test]
+fn the_foundry_plan_fetches_the_one_file_of_this_system_and_checks_the_digest_github_lists() {
+    let foundry = Foundry(Engine::new(FoundryRecipe, StoreSettings::default()));
+    let plan = plan_of(&foundry, &FoundryFixture, None);
+    assert_eq!(
+        plan.version.as_deref(),
+        Some("0.14.0"),
+        "the newest command line release"
+    );
+    let [download] = plan.downloads.as_slice() else {
+        panic!("one download: {plan:#?}");
+    };
+    assert_eq!(
+        download.url,
+        format!(
+            "{DOWNLOADS}cli-preview-0.14.0/{}",
+            FoundryFixture::name("0.14.0")
+        )
+    );
+    assert_eq!(
+        download.check,
+        Check::Sha256 {
+            value: sha256(&FoundryFixture::archive("0.14.0", 0, b""))
+        }
+    );
+    assert!(plan.changes.is_empty(), "nothing outside the folder");
+    let older = plan_of(&foundry, &FoundryFixture, Some("0.13.0"));
+    assert_eq!(older.version.as_deref(), Some("0.13.0"));
+    assert!(
+        plan.notices
+            .iter()
+            .any(|n| n.contains("foundry server stop")),
+        "the plan says a loaded model stays in memory: {:?}",
+        plan.notices
+    );
+
+    let tools = tools_for(&foundry, FoundryFixture.world(Variant::Normal));
+    let mut request = PlanRequest::new(Action::Install, here());
+    request.version = Some("9.9.9".to_owned());
+    assert!(foundry.plan(request, tools).is_err(), "no such release");
+}
+
+#[test]
 fn a_version_the_publisher_does_not_list_is_refused_and_a_digest_it_lacks_too() {
     let python = Python(Engine::new(PythonRecipe, StoreSettings::default()));
     let tools = tools_for(&python, PythonFixture.world(Variant::Normal));
@@ -393,7 +539,7 @@ fn a_version_the_publisher_does_not_list_is_refused_and_a_digest_it_lacks_too() 
 
 #[test]
 fn the_runtimes_stores_name_the_publishers_endpoints_and_nothing_wider() {
-    for info in [NodeRecipe.info(), PythonRecipe.info()] {
+    for info in [NodeRecipe.info(), PythonRecipe.info(), FoundryRecipe.info()] {
         assert!(!info.endpoints.is_empty());
         assert!(
             info.endpoints.iter().all(|e| e.starts_with("https://")),

@@ -11,7 +11,7 @@ use alloc::sync::Arc;
 use coqui_acp_api::guatiao::library::Registry;
 
 use super::builtin::store_provider;
-use super::runtimes::{NodeStore, PythonStore};
+use super::runtimes::{FoundryStore, NodeStore, PythonStore};
 
 /// The provider ids of the built-in agent stores, in the order the app lists them; the runtimes are `runtimes::RUNTIMES`.
 pub const BUILT_IN: [&str; 5] = [
@@ -53,7 +53,8 @@ coqui_acp_api::guatiao::local_providers!(
         AgyStore,
         PiStore,
         NodeStore,
-        PythonStore
+        PythonStore,
+        FoundryStore
     ]
 );
 

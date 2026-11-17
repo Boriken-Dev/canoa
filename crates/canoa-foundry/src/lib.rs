@@ -17,10 +17,12 @@ mod completion;
 pub mod daemon;
 mod engine;
 mod error;
+pub mod models;
 pub mod openai;
 pub mod responses;
 #[cfg(feature = "sdk")]
 pub mod sdk;
+pub mod store;
 mod translate;
 
 pub use completion::{Completion, Finish, ToolCall, Usage};

@@ -691,7 +691,8 @@ mod runtimes_tests {
             programs_of(&runtimes),
             [
                 ("node_store".to_owned(), "node".to_owned()),
-                ("python_store".to_owned(), "python".to_owned())
+                ("python_store".to_owned(), "python".to_owned()),
+                ("foundry_store".to_owned(), "foundry".to_owned())
             ]
         );
         let bad = stores.read("store/list", &json!({"kind": "toys"}), None);
