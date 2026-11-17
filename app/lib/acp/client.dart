@@ -9,6 +9,7 @@ import '../chat/agent_events.dart';
 import '../chat/timing_log.dart';
 import 'delegate.dart';
 import 'delegate_targets.dart';
+import 'hub_wire.dart';
 import 'link_secret.dart';
 import 'noise_secret.dart';
 import 'secret_wire.dart';
@@ -16,6 +17,7 @@ import 'usage_wire.dart';
 
 export 'package:coqui_acp/coqui_acp.dart';
 export 'delegate.dart' show DelegateNotice;
+export 'hub_wire.dart' show HubClient, HubClosed, HubEnded, HubEvent, HubPresence, HubWire;
 export 'link_secret.dart' show LinkSecretIdentity, linkSecretIdentity;
 export 'secret_wire.dart' show AgentSecrets;
 
@@ -113,8 +115,9 @@ typedef AgentElicitor = Future<AcpElicitationAnswer> Function(AcpElicitation req
 /// An ACP client that cannot exist until its peer is proven: Canoa's own rule, on the shared client.
 final class VerifiedAgent {
   VerifiedAgent._(AcpClient Function(AcpDecider? decider, AcpElicitor? elicitor) client, this.peerId, this.identity, this._usage,
-      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, DelegateWire? delegate, this.linkSecrets, this.noiseSecrets, this.provedByNoise = false})
-      : _delegate = delegate {
+      AgentDecider? decider, {AgentElicitor? elicitor, this.isChild = false, DelegateWire? delegate, this.linkSecrets, this.noiseSecrets, this.provedByNoise = false, HubWire? hub})
+      : _delegate = delegate,
+        hub = hub ?? HubWire() {
     _client = client(
       decider == null ? null : (request) => decider(request, this),
       elicitor == null ? null : (request) => elicitor(request, this),
@@ -143,6 +146,10 @@ final class VerifiedAgent {
 
   final UsageWire _usage;
   final DelegateWire? _delegate;
+
+  /// What the host's session hub said on this connection: who else is attached, a request another client answered, and the cursor
+  /// of the last message seen. Empty for an agent the host does not keep for several clients.
+  final HubWire hub;
 
   /// The host's events about the tasks a session handed on, as their params; empty when this connection takes none.
   Stream<DelegateNotice> get taskEvents => _delegate?.events ?? Stream<DelegateNotice>.empty();
@@ -202,6 +209,7 @@ final class VerifiedAgent {
       final usage = UsageWire(proven.send, initializeMeta: initializeMeta, approver: approver);
       // A person who can answer permission requests can answer a task's, which come the same way.
       final delegate = DelegateWire(proven.send, optIn: decider != null);
+      final hub = HubWire();
       // Only a host whose peer id was proven can ask for a secret: the answer is bound to that identity, and a program this app
       // started, or a provider, has none. A connection this app's own Noise key proved binds by the two static keys alone and offers
       // nothing else; one whose proof gave no usable key of the host's offers nothing at all.
@@ -215,8 +223,9 @@ final class VerifiedAgent {
           incoming: proven.messages
               .where((message) => !usage.answersApproval(message) && !(secretWire?.answers(message) ?? false) && !delegate.takes(message))
               .map(identity._inspect)
+              .map(hub.incoming)
               .map(usage.incoming),
-          send: (message) => proven.send(_withOffer(secretWire, delegate.outgoing(usage.outgoing(message)))),
+          send: (message) => proven.send(_withOffer(secretWire, delegate.outgoing(usage.outgoing(hub.outgoing(message))))),
           closeSource: proven.close,
           decider: decider,
           elicitor: elicitor,
@@ -231,6 +240,7 @@ final class VerifiedAgent {
         delegate: delegate,
         noiseSecrets: secretWire == null ? null : noiseIdentity,
         provedByNoise: noise != null,
+        hub: hub,
       );
       secretWire?.agent = client;
       return client;
@@ -258,6 +268,7 @@ final class VerifiedAgent {
     final identity = AgentIdentity();
     final usage = UsageWire(send, initializeMeta: initializeMeta, approver: approver);
     final delegate = DelegateWire(send, optIn: decider != null);
+    final hub = HubWire();
     // Only the link to the host in this process, which has the secret it shares with it, can be asked for one.
     final secretWire = secrets == null || linkSecrets == null ? null : SecretWire(send, secrets, offer: linkSecrets.identity.offer);
     final client = VerifiedAgent._(
@@ -265,8 +276,9 @@ final class VerifiedAgent {
         incoming: messages
             .where((message) => !usage.answersApproval(message) && !(secretWire?.answers(message) ?? false) && !delegate.takes(message))
             .map(identity._inspect)
+            .map(hub.incoming)
             .map(usage.incoming),
-        send: (message) => send(_withOffer(secretWire, delegate.outgoing(usage.outgoing(message)))),
+        send: (message) => send(_withOffer(secretWire, delegate.outgoing(usage.outgoing(hub.outgoing(message))))),
         closeSource: close,
         decider: decider,
         elicitor: elicitor,
@@ -283,6 +295,7 @@ final class VerifiedAgent {
       isChild: true,
       delegate: delegate,
       linkSecrets: secretWire == null ? null : linkSecrets,
+      hub: hub,
     );
     secretWire?.agent = client;
     return client;
@@ -298,10 +311,11 @@ final class VerifiedAgent {
     }
     final identity = AgentIdentity();
     final usage = UsageWire(connection.send);
+    final hub = HubWire();
     return VerifiedAgent._(
       (decider, elicitor) => AcpClient(
-        incoming: connection.messages.map(identity._inspect).map(usage.incoming),
-        send: (message) => connection.send(usage.outgoing(message)),
+        incoming: connection.messages.map(identity._inspect).map(hub.incoming).map(usage.incoming),
+        send: (message) => connection.send(usage.outgoing(hub.outgoing(message))),
         closeSource: connection.close,
         decider: decider,
         elicitor: elicitor,
@@ -313,6 +327,7 @@ final class VerifiedAgent {
       usage,
       decider,
       elicitor: elicitor,
+      hub: hub,
     );
   }
 
@@ -338,6 +353,13 @@ final class VerifiedAgent {
   bool get takesFiles => _client.takesFiles;
   bool get canReopenSessions => _client.canReopenSessions;
   Future<AcpSessionPage> listSessions({String? cwd, String? cursor}) => _client.listSessions(cwd: cwd, cursor: cursor);
+  /// Attaches to [id], a session the host keeps running for several clients, with its conversation replayed: all of it, or only
+  /// what follows [cursor], a value [HubWire.cursorOf] gave an earlier connection. Listen to [updates] first.
+  Future<AcpOpenedSession> attachSession(String id, {required String cwd, String? cursor}) {
+    hub.arm(id, cursor: cursor);
+    return _client.resumeSession(id, cwd: cwd, replayHistory: true);
+  }
+
   Future<AcpOpenedSession> reopenSession(String id, {required String cwd, AcpSessionSetup setup = AcpSessionSetup.none}) =>
       _client.reopenSession(id, cwd: cwd, setup: setup);
   Future<String?> prompt(String sessionId, String text, {List<AcpAttachment> attachments = const []}) {
@@ -371,6 +393,7 @@ final class VerifiedAgent {
     } finally {
       _usage.close();
       _delegate?.close();
+      hub.close();
       final actions = [..._afterClose];
       _afterClose.clear();
       for (final action in actions) {

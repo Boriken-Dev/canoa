@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../ledger/ledger_list.dart';
+import '../ledger/running_sessions.dart';
 import '../ledger/session_ledger.dart';
 import '../selectable.dart';
 import '../session_store.dart';
@@ -25,6 +26,8 @@ class SessionRail extends StatefulWidget {
     required this.onSearch,
     required this.onClose,
     this.onReopen,
+    this.running,
+    this.onAttach,
     this.grouping,
     this.initialScroll = 0,
     this.onScroll,
@@ -41,6 +44,10 @@ class SessionRail extends StatefulWidget {
   /// Ends a conversation here, asking first about anything it made.
   final Future<void> Function(ChatSession) onClose;
   final Future<void> Function(LedgerEntry)? onReopen;
+
+  /// The sessions the host keeps running for several clients, listed above the earlier ones, and what joins one.
+  final RunningSessions? running;
+  final Future<void> Function(RunningSession)? onAttach;
 
   /// Where the list starts, and what hears it scroll: the offset, and whether the scrolling has ended.
   final double initialScroll;
@@ -192,7 +199,7 @@ class _SessionRailState extends State<SessionRail> {
                 onClose: () => unawaited(widget.onClose(session)),
               ),
         ],
-        if (store.ledger != null) LedgerList(ledger: store.ledger!, store: store, onReopen: widget.onReopen),
+        if (store.ledger != null) LedgerList(ledger: store.ledger!, store: store, onReopen: widget.onReopen, running: widget.running, onAttach: widget.onAttach),
       ],
     ));
   }

@@ -84,7 +84,9 @@ import 'history/session_import.dart';
 import 'history/session_move.dart';
 import 'ledger/host_ledger_backend.dart';
 import 'ledger/ledger_backend.dart';
+import 'ledger/running_sessions.dart';
 import 'ledger/session_ledger.dart';
+import 'chat/presence.dart';
 import 'permissions/host_paths.dart';
 import 'permissions/permission_rules.dart';
 import 'popout/platform.dart' as popout_platform;
@@ -1035,6 +1037,16 @@ class _CanoaAppState extends State<CanoaApp> {
   bool get _hasProfiles => config.overlays.isNotEmpty || !config.profile.isEmpty || config.agentProfiles.isNotEmpty;
 
   late final HostControl? _control = widget.served?.control ?? (widget.host == null ? null : HostControl(widget.host!));
+
+  /// The sessions the host keeps running for several clients, which Earlier conversations lists to join.
+  late final RunningSessions? _running = _control == null
+      ? null
+      : RunningSessions(() async {
+          final control = _control;
+          final answer = await (await control.ready(wait: false)).call('sessions/running');
+          if (answer is! Map || answer['sessions'] is! List) return const [];
+          return [for (final each in answer['sessions'] as List) ?RunningSession.parse(each)];
+        });
 
   /// The speech providers of the host this app reaches, which run what a page or a platform without a speech service of its own records.
   late final HostSpeechCatalog? _hostSpeech = _control == null ? null : HostSpeechCatalog(_control, capture: const RecordCapture());
@@ -2364,8 +2376,49 @@ class _CanoaAppState extends State<CanoaApp> {
     await store.applyHostProfile(draft, expected: _hasProfiles);
   }
 
-  /// Opens a session from the list again: its agent is started or reached again, then asked to open it.
-  Future<void> _reopen(LedgerEntry entry) async {
+  /// Takes part in a session the host keeps running: this app's connection to that entry is made as for any session of the entry,
+  /// and attaches to the running one, replayed what was said. The ledger notes it as it does any session, with where this app is
+  /// in its log.
+  Future<void> _attachRunning(RunningSession running) async {
+    for (final session in store.sessions) {
+      if (session.remoteSessionId == running.sessionId &&
+          session.agent == running.entry &&
+          session.status != SessionStatus.disconnected) {
+        store.select(session.id);
+        return;
+      }
+    }
+    final SessionPlace place;
+    final String peerId;
+    String? endpoint, method;
+    if (widget.served != null) {
+      final listening = widget.host?.listening.where((each) => each.name == running.entry).firstOrNull;
+      if (listening == null) throw StateError('canoa is not serving ${running.entry} now: open Hosting to see why');
+      place = SessionPlace.host;
+      peerId = listening.peer;
+      endpoint = listening.url;
+      method = listening.method ?? widget.host?.peerMethod;
+    } else {
+      place = SessionPlace.local;
+      peerId = 'local:${running.entry}';
+    }
+    final ledger = store.ledger;
+    final entry = ledger?.find(peerId, running.sessionId) ??
+        ledger?.record(
+          peerId: peerId, sessionId: running.sessionId, entry: running.entry, place: place, reopenBy: 'session/resume',
+          cwd: running.cwd, title: running.title, endpoint: endpoint, method: method,
+        ) ??
+        LedgerEntry(
+          peerId: peerId, sessionId: running.sessionId, entry: running.entry, place: place, created: DateTime.now(),
+          lastUsed: DateTime.now(), harness: running.entry, reopenBy: 'session/resume', cwd: running.cwd, title: running.title,
+          endpoint: endpoint, method: method,
+        );
+    await _reopen(entry, attach: true);
+  }
+
+  /// Opens a session from the list again: its agent is started or reached again, then asked to open it. With [attach] it is a
+  /// session the host keeps running, joined where this app left it.
+  Future<void> _reopen(LedgerEntry entry, {bool attach = false}) async {
     for (final session in store.sessions) {
       if (session.peerId == entry.peerId && session.remoteSessionId == entry.sessionId) {
         store.select(session.id);
@@ -2388,7 +2441,7 @@ class _CanoaAppState extends State<CanoaApp> {
     );
     try {
       // A host this app saved shows under the name it was saved with, not its address.
-      await store.reopen(entry, client, expected: _hasProfiles,
+      await store.reopen(entry, client, expected: _hasProfiles, attach: attach,
           host: entry.place == SessionPlace.peer ? savedNameOfPeer(config.connections, entry.peerId) : null);
       _ownedClients.add(client);
     } catch (_) {
@@ -2485,6 +2538,7 @@ class _CanoaAppState extends State<CanoaApp> {
       if (!vendorLooks.answered) unawaited(_loadLooks());
       unawaited(_grants?.refresh());
       unawaited(_accounts?.refresh());
+      unawaited(_running?.refresh());
       unawaited(_refreshOverlays());
     }
     final serving = _hostedSources;
@@ -2597,6 +2651,7 @@ class _CanoaAppState extends State<CanoaApp> {
       unawaited(_loadLooks());
       unawaited(_grants?.refresh());
       unawaited(_accounts?.refresh());
+      _running?.keepFresh();
     });
     if (store.secretIdentity == null) unawaited(_loadSecretIdentity());
     unawaited(store.restoreDrafts((label) =>
@@ -2659,6 +2714,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   @override
   void dispose() {
+    _running?.dispose();
     store.removeListener(_keepSelection);
     if (widget.layout == null) _layout.dispose();
     _surfaces.dispose();
@@ -2933,7 +2989,7 @@ class _CanoaAppState extends State<CanoaApp> {
         animation: Listenable.merge([store, _popout]),
         builder: (context, _) => _CanoaHome(
           store: store, onNewSession: _newSession, onSettings: _showSettings,
-          onHosts: () => _layout.select(HostsController.section), onLoadout: _showLoadout, onLoadouts: _showLoadouts, onReopen: _reopen,
+          onHosts: () => _layout.select(HostsController.section), onLoadout: _showLoadout, onLoadouts: _showLoadouts, onReopen: _reopen, running: _running, onAttach: _attachRunning,
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
           layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(), loadouts: _loadoutsPage(),
           hostsIndex: _hostsIndex(), hostsPage: _hostsPage(), storeIndex: StoreIndex(selection: _storeSelection),
@@ -2960,7 +3016,7 @@ class _CanoaAppState extends State<CanoaApp> {
 class _CanoaHome extends StatelessWidget {
   const _CanoaHome({
     required this.store, required this.onNewSession, required this.onSettings,
-    this.onHosts, this.onLoadout, this.onLoadouts, this.account, this.onSignOut, this.onReopen, required this.conversation, this.kit = const ComposerKit(),
+    this.onHosts, this.onLoadout, this.onLoadouts, this.account, this.onSignOut, this.onReopen, this.running, this.onAttach, required this.conversation, this.kit = const ComposerKit(),
     this.renderers = chat.ChatRenderers.none, required this.welcome, this.noAgent = false, this.localHost, required this.grouping,
     required this.layout, required this.surfaces, required this.settings, required this.loadout, required this.loadouts,
     required this.hostsIndex, required this.hostsPage, required this.storeIndex, required this.loadoutsIndex, this.usageIndex, this.usagePage, this.sessionSpend,
@@ -3003,6 +3059,10 @@ class _CanoaHome extends StatelessWidget {
   final String? account;
   final Future<void> Function()? onSignOut;
   final Future<void> Function(LedgerEntry)? onReopen;
+
+  /// The sessions the host keeps running, and what joins one.
+  final RunningSessions? running;
+  final Future<void> Function(RunningSession)? onAttach;
   final _ConversationHandle conversation;
 
   /// The session [step] places from the one chosen, going round the list.
@@ -3030,7 +3090,7 @@ class _CanoaHome extends StatelessWidget {
   /// The rail as the window shows it: beside the conversation, or in the drawer.
   Widget _rail(BuildContext context) => SessionRail(
     store: store, onNewSession: onNewSession,
-    onReopen: onReopen, grouping: grouping,
+    onReopen: onReopen, running: running, onAttach: onAttach, grouping: grouping,
     initialScroll: layout.of(ShellLayout.conversations).scroll,
     onScroll: (offset, {required end}) {
       layout.setScroll(ShellLayout.conversations, offset);
@@ -3516,6 +3576,7 @@ class _ConversationState extends State<_Conversation> {
             )),
             if (session != null && !session.isDraft)
               if (changeTotals(session) case (final added, final removed)) _ChangesChip(added: added, removed: removed, onPressed: () => _showInspector(session)),
+            if (session != null && session.others.isNotEmpty) PresenceMark(others: session.others, narrow: widget.narrow),
             if (session != null && widget.store.inBypass(session)) _BypassMark(narrow: widget.narrow),
             ..._headerActions(session, tight: headerBox.maxWidth < 680),
             if (session != null)

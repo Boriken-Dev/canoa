@@ -4,19 +4,26 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../session_store.dart';
+import 'running_sessions.dart';
 import 'session_ledger.dart';
 import '../selectable.dart';
 
 /// The ledger's sessions that are not open now, listed under Earlier conversations, with a filter by agent. Each opens again where its agent
 /// offers that, says why where it does not, and can be removed from the list, which never deletes the agent's own session.
 class LedgerList extends StatefulWidget {
-  const LedgerList({super.key, required this.ledger, required this.store, this.onReopen});
+  const LedgerList({super.key, required this.ledger, required this.store, this.onReopen, this.running, this.onAttach});
 
   final SessionLedger ledger;
   final SessionStore store;
 
   /// Starts or reaches the session's agent again and opens the session; null where nothing can be.
   final Future<void> Function(LedgerEntry)? onReopen;
+
+  /// The sessions the host keeps running for several clients, listed above the earlier ones; null where the host lists none.
+  final RunningSessions? running;
+
+  /// Takes part in a running session: connects to its entry on the host and attaches to it, replayed what was said.
+  final Future<void> Function(RunningSession)? onAttach;
 
   @override
   State<LedgerList> createState() => _LedgerListState();
@@ -26,6 +33,13 @@ class _LedgerListState extends State<LedgerList> {
   /// The harness shown, or null for all.
   String? _harness;
   final Set<String> _opening = {};
+  final Set<String> _attaching = {};
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(widget.running?.refresh());
+  }
 
   static String _when(DateTime at) {
     final local = at.toLocal();
@@ -43,6 +57,30 @@ class _LedgerListState extends State<LedgerList> {
     } finally {
       if (mounted) setState(() => _opening.remove(entry.key));
     }
+  }
+
+  Future<void> _attach(RunningSession session) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final key = _runningKey(session);
+    setState(() => _attaching.add(key));
+    try {
+      await widget.onAttach!(session);
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text('That session could not be joined: $error')));
+    } finally {
+      if (mounted) setState(() => _attaching.remove(key));
+    }
+  }
+
+  static String _runningKey(RunningSession session) => '${session.entry}\n${session.sessionId}';
+
+  /// How long ago [at] was, as a person says it.
+  static String _ago(DateTime at) {
+    final since = DateTime.now().toUtc().difference(at.toUtc());
+    if (since.inSeconds < 60) return 'just now';
+    if (since.inMinutes < 60) return '${since.inMinutes} min ago';
+    if (since.inHours < 48) return '${since.inHours} h ago';
+    return '${since.inDays} days ago';
   }
 
   Future<void> _remove(LedgerEntry entry) async {
@@ -66,7 +104,7 @@ class _LedgerListState extends State<LedgerList> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.ledger,
+    listenable: Listenable.merge([widget.ledger, ?widget.running]),
     builder: (context, _) {
       final look = context.chatLook;
       final open = {
@@ -74,7 +112,21 @@ class _LedgerListState extends State<LedgerList> {
           if (session.peerId != null && session.remoteSessionId != null)
             LedgerEntry.keyOf(session.peerId!, session.remoteSessionId!),
       };
-      final shown = [for (final entry in widget.ledger.entries) if (!open.contains(entry.key)) entry];
+      // What is attached to now is a conversation of the list, not a running one to join.
+      final joined = {
+        for (final session in widget.store.sessions)
+          if (session.remoteSessionId != null && session.status != SessionStatus.disconnected)
+            session.remoteSessionId!,
+      };
+      final running = [
+        for (final session in widget.running?.sessions ?? const <RunningSession>[])
+          if (!joined.contains(session.sessionId)) session,
+      ];
+      final isRunning = {for (final session in running) '${session.entry}\n${session.sessionId}'};
+      final shown = [
+        for (final entry in widget.ledger.entries)
+          if (!open.contains(entry.key) && !isRunning.contains('${entry.entry}\n${entry.sessionId}')) entry,
+      ];
       final harnesses = {for (final entry in shown) entry.harness}.toList();
       final filter = harnesses.contains(_harness) ? _harness : null;
       return Padding(
@@ -89,7 +141,19 @@ class _LedgerListState extends State<LedgerList> {
             ),
             if (widget.ledger.problem != null)
               Text(widget.ledger.problem!, style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
-            if (shown.isEmpty)
+            if (running.isNotEmpty) ...[
+              Padding(
+                key: const ValueKey('running sessions'),
+                padding: const EdgeInsets.only(top: 12, bottom: 2),
+                child: Text('Running now', style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
+              ),
+              Text(
+                'The host keeps these going: join one from any device.',
+                style: TextStyle(color: look.muted, fontSize: 11),
+              ),
+              for (final session in running) _runningTile(context, session),
+            ],
+            if (shown.isEmpty && running.isEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
@@ -97,7 +161,7 @@ class _LedgerListState extends State<LedgerList> {
                   style: TextStyle(color: look.muted, fontSize: 12),
                 ),
               )
-            else ...[
+            else if (shown.isNotEmpty) ...[
               const SizedBox(height: 8),
               Wrap(spacing: 6, runSpacing: 4, children: [
                 ChoiceChip(
@@ -137,6 +201,36 @@ class _LedgerListState extends State<LedgerList> {
       );
     },
   );
+
+  Widget _runningTile(BuildContext context, RunningSession session) {
+    final kept = widget.ledger.entries
+        .where((entry) => entry.sessionId == session.sessionId && entry.entry == session.entry)
+        .firstOrNull;
+    final others = session.clients.length;
+    final about = [
+      session.entry,
+      session.cwd,
+      others == 0 ? 'nobody attached' : '$others attached',
+      if (session.turnRunning) 'working',
+      if (session.permissionsWaiting > 0) 'waiting for an answer',
+      if (session.lastActivity != null) _ago(session.lastActivity!),
+    ].nonNulls.join(' · ');
+    final key = _runningKey(session);
+    return ListTile(
+      key: ValueKey('running $key'),
+      dense: true,
+      contentPadding: const EdgeInsets.only(left: 4),
+      title: Text(kept?.title ?? session.title ?? 'Shared session', maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(about, maxLines: 3),
+      trailing: widget.onAttach == null
+          ? null
+          : IconButton(
+              tooltip: 'Join',
+              icon: const Icon(Icons.login, size: 20),
+              onPressed: _attaching.contains(key) ? null : () => unawaited(_attach(session)),
+            ),
+    );
+  }
 
   Widget _tile(BuildContext context, LedgerEntry entry) {
     final why = entry.whyNotReopened;

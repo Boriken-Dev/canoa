@@ -108,8 +108,13 @@ final class LedgerEntry {
     this.named = false,
     this.pinned = false,
     this.archived = false,
+    this.cursor,
     this.messages = const [],
   });
+
+  /// Where in the host's log of a session it keeps for several clients this app last was: the cursor of the last message it saw,
+  /// from which a later attach is replayed only what followed. Null for a session the host does not share.
+  String? cursor;
 
   /// Whether the person pinned the session to the top of the list, or archived it out of the way.
   bool pinned, archived;
@@ -223,6 +228,7 @@ final class LedgerEntry {
     if (named) 'named': true,
     if (pinned) 'pinned': true,
     if (archived) 'archived': true,
+    'cursor': ?cursor,
     if (messages.isNotEmpty) 'messages': [for (final message in messages) message.toJson()],
   };
 
@@ -264,6 +270,7 @@ final class LedgerEntry {
       named: json['named'] == true,
       pinned: json['pinned'] == true,
       archived: json['archived'] == true,
+      cursor: text('cursor'),
       messages: [
         if (json['messages'] case final List<dynamic> kept)
           for (final message in kept) ?KeptMessage.fromJson(message),
@@ -573,6 +580,14 @@ class SessionLedger extends ChangeNotifier {
     found
       ..pinned = pinned
       ..archived = archived;
+    _changed();
+  }
+
+  /// Notes where in the host's log of [sessionId] this app last was, to attach again from there.
+  void setCursor(String peerId, String sessionId, String? cursor) {
+    final found = find(peerId, sessionId);
+    if (found == null || found.cursor == cursor) return;
+    found.cursor = cursor;
     _changed();
   }
 

@@ -321,6 +321,13 @@ class ChatSession {
   /// Whether the last turn failed and the person has not looked since.
   bool failed = false;
 
+  /// The other clients attached to this session through the host's hub, as it last said; empty when the host shares none.
+  List<HubClient> others = const [];
+
+  /// The cursor of the last message of this session the host's hub gave this app, from which an attach replays only what follows;
+  /// null for a session the host does not share.
+  String? cursor;
+
   /// Whether the person pinned the session to the top of the list, or archived it out of the way. Archived hides it only
   /// while it needs nothing from the person.
   bool pinned = false, archived = false;
@@ -908,6 +915,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   final Map<String, StreamSubscription<DelegateNotice>> _taskSubscriptions = {};
   final Map<String, StreamSubscription<AcpSessionUpdate>>
   _contextSubscriptions = {};
+  final Map<String, List<StreamSubscription<Object?>>> _hubSubscriptions = {};
   int _nextId = 0;
   String? _selectedId;
 
@@ -2193,6 +2201,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     session.chat.attach(_connectionOf(client));
     _watchTasks(session, client);
     _watchContext(session, client);
+    _watchHub(session, client);
     if (record) _record(session, client);
     unawaited(refreshGit(session));
     notifyListeners();
@@ -2204,6 +2213,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       session.failed = true;
     }
     _keepText(session);
+    _keepCursor(session);
     unawaited(refreshGit(session));
   }
 
@@ -2286,6 +2296,77 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     _taskSubscriptions[session.id] = client.taskEvents.listen(
       (notice) => _taskEvent(session, notice),
     );
+  }
+
+  /// Follows what the host's hub says of [session]: who else is attached, a request another client answered, and where in its
+  /// log this app is. All of it is empty for a session the host does not share.
+  void _watchHub(ChatSession session, VerifiedAgent client) {
+    _stopHub(session);
+    final remote = session.remoteSessionId;
+    session.others = remote == null ? const [] : client.hub.others(remote);
+    _hubSubscriptions[session.id] = [
+      client.updates.listen((update) {
+        if (update.sessionId != session.remoteSessionId) return;
+        session.cursor = client.hub.cursorOf(update.sessionId) ?? session.cursor;
+      }),
+      client.hub.events.listen((event) => _hubEvent(session, client, event)),
+    ];
+  }
+
+  void _stopHub(ChatSession session) {
+    final held = _hubSubscriptions.remove(session.id);
+    if (held == null) return;
+    for (final subscription in held) {
+      unawaited(subscription.cancel());
+    }
+  }
+
+  void _hubEvent(ChatSession session, VerifiedAgent client, HubEvent event) {
+    if (event.sessionId != session.remoteSessionId) return;
+    switch (event) {
+      case HubPresence():
+        session.others = client.hub.others(event.sessionId);
+        _keepCursor(session);
+        notifyListeners();
+      case HubClosed():
+        _closedElsewhere(session, client, event);
+      case HubEnded():
+        session.others = const [];
+        session.chat.note('The host ended this session, so nobody can go on with it.');
+        _keepCursor(session);
+        notifyListeners();
+    }
+  }
+
+  /// Another client answered a request this conversation was still asking: it closes here, and says who answered.
+  void _closedElsewhere(ChatSession session, VerifiedAgent client, HubClosed closed) {
+    final call = closed.toolCallId;
+    if (call == null) return;
+    for (final question in [...session.pendingPermissions]) {
+      if (question.toolCallId != call) continue;
+      final by = closed.by;
+      final who = by == null
+          ? 'The host'
+          : (client.hub.clientOf(closed.sessionId, by)?.named ?? 'Another client');
+      final chosen = closed.outcome?['optionId'];
+      final how = chosen is String
+          ? (question.options.where((option) => option.optionId == chosen).firstOrNull?.name ?? chosen)
+          : null;
+      session.chat.settle(question, const AcpCancel());
+      session.chat.note(
+        '$who answered "${shortLine(question.title) ?? 'a request'}"'
+        '${how == null || how.isEmpty ? '' : ': $how'}.',
+      );
+    }
+  }
+
+  /// Notes in the ledger where in the host's log of [session] this app is.
+  void _keepCursor(ChatSession session) {
+    final remote = session.remoteSessionId;
+    final peerId = session.peerId;
+    final cursor = session.cursor;
+    if (ledger == null || remote == null || peerId == null || cursor == null) return;
+    ledger!.setCursor(peerId, remote, cursor);
   }
 
   /// Keeps what each usage report of [session]'s agent says its context holds, which the shared model does not keep (a report
@@ -3508,15 +3589,24 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// Opens a session from the ledger again on [client], an agent just started or connected for it, by `session/load` or
   /// `session/resume`, whichever the agent offers. One already open is selected instead, and [client] is left to the caller.
   /// The profile the host reports for it is applied as [applyHostProfile] does; [expected] says whether one should come.
+  ///
+  /// With [attach] the session is one the host keeps running for several clients: this takes part in it as it runs, replayed what
+  /// was said (all of it, or only what followed this app's cursor when what it said until then is still here), instead of opening
+  /// the agent's own copy again. A session already open here whose connection ended is attached again in place.
   Future<ChatSession> reopen(
     LedgerEntry entry,
     VerifiedAgent client, {
     bool expected = false,
     String? host,
+    bool attach = false,
   }) async {
     for (final session in _sessions) {
       if (session.peerId == entry.peerId &&
           session.remoteSessionId == entry.sessionId) {
+        final live = _clients[session.id];
+        if (attach && (live == null || live.isClosed)) {
+          return _reattach(session, entry, client, expected: expected);
+        }
         select(session.id);
         return session;
       }
@@ -3526,7 +3616,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         'That agent is not the one this session was opened with',
       );
     }
-    if (client.identity.reopenBy == null || !client.canReopenSessions) {
+    if (!attach &&
+        (client.identity.reopenBy == null || !client.canReopenSessions)) {
       throw AcpFailure(
         '${entry.harness} offers neither session/load nor session/resume, so this session cannot be opened again',
       );
@@ -3591,16 +3682,22 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       // The mode the session was left in goes back, once, before anything is sent. A webpage's session is reopened in the folder its
       // host made for it, which the host checks is that site's own.
       final opened = await session.chat.reopen(
-        () => client.reopenSession(
-          entry.sessionId,
-          cwd: cwd,
-          setup: entry.site == null
-              ? AcpSessionSetup.none
-              : siteSetup(entry.site!),
-        ),
+        () => attach
+            ? _attachOpen(session, entry, client, cwd, [
+                for (final kept in entry.messages)
+                  (_keptRole(kept.role), kept.text, kept.at),
+              ])
+            : client.reopenSession(
+                entry.sessionId,
+                cwd: cwd,
+                setup: entry.site == null
+                    ? AcpSessionSetup.none
+                    : siteSetup(entry.site!),
+              ),
         keptMode: keptMode,
         keptBypass: keptBypass,
       );
+      if (attach) _attached(session, client);
       _takeHostReport(session, opened);
       await applyHostProfile(session, expected: expected, keptMode: keptMode);
       if (!opened.replayed && entry.messages.isNotEmpty) {
@@ -3622,6 +3719,75 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   static MessageRole _keptRole(String role) =>
       role == 'user' ? MessageRole.user : MessageRole.agent;
+
+  /// Attaches to a session the host keeps for several clients, with what [held] says was said until the cursor put back first, so
+  /// the replay that follows the cursor completes it. With nothing held the replay is the whole of it, from the start.
+  Future<AcpOpenedSession> _attachOpen(
+    ChatSession session,
+    LedgerEntry entry,
+    VerifiedAgent client,
+    String cwd,
+    List<(MessageRole, String, DateTime)> held,
+  ) {
+    final cursor = held.isEmpty ? null : (session.cursor ?? entry.cursor);
+    if (cursor != null) {
+      for (final (role, text, at) in held) {
+        session.chat.addMessage(role, text, at: at);
+      }
+    }
+    return client.attachSession(entry.sessionId, cwd: cwd, cursor: cursor);
+  }
+
+  /// What follows an attach: where in the host's log this app now is, kept, and a word when the host had dropped some of it.
+  void _attached(ChatSession session, VerifiedAgent client) {
+    final remote = session.remoteSessionId;
+    if (remote == null) return;
+    session.cursor = client.hub.cursorOf(remote) ?? session.cursor;
+    session.others = client.hub.others(remote);
+    _keepCursor(session);
+    if (client.hub.truncated(remote)) {
+      session.chat.note(
+        'The host no longer keeps all of what was said while this app was away, so some of it is missing here.',
+      );
+    }
+  }
+
+  /// A session of the host's hub already open here whose connection ended, attached again on [client]: what it said is put back
+  /// as text and only what followed [ChatSession.cursor] is replayed.
+  Future<ChatSession> _reattach(
+    ChatSession session,
+    LedgerEntry entry,
+    VerifiedAgent client, {
+    bool expected = false,
+  }) async {
+    final cwd = session.cwd ?? entry.cwd;
+    if (cwd == null) {
+      throw StateError(
+        'Canoa did not note where this session was, which the host needs to attach to it',
+      );
+    }
+    if (client.peerId != entry.peerId) {
+      throw StateError(
+        'That agent is not the one this session was opened with',
+      );
+    }
+    final held = [
+      for (final message in session.messages)
+        if (message.role == MessageRole.user ||
+            message.role == MessageRole.agent)
+          (message.role, message.text, message.at),
+    ];
+    attachVerifiedClient(session.id, client, record: false);
+    final opened = await session.chat.reopen(
+      () => _attachOpen(session, entry, client, cwd, held),
+    );
+    _takeHostReport(session, opened);
+    _attached(session, client);
+    _record(session, client);
+    select(session.id);
+    notifyListeners();
+    return session;
+  }
 
   /// Shows what Canoa kept of a session it cannot open again, as an offline preview that sends nothing.
   ChatSession showKept(LedgerEntry entry) {
@@ -3666,6 +3832,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     unawaited(_eventSubscriptions.remove(session.id)?.cancel());
     unawaited(_taskSubscriptions.remove(session.id)?.cancel());
     unawaited(_contextSubscriptions.remove(session.id)?.cancel());
+    _keepCursor(session);
+    _stopHub(session);
     _clients.remove(session.id);
     session.chat.detach();
     _cancelSecrets(session);
@@ -3947,9 +4115,13 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     ]) {
       unawaited(subscription.cancel());
     }
+    for (final subscription in _hubSubscriptions.values.expand((each) => each)) {
+      unawaited(subscription.cancel());
+    }
     _eventSubscriptions.clear();
     _taskSubscriptions.clear();
     _contextSubscriptions.clear();
+    _hubSubscriptions.clear();
     _clients.clear();
     for (final session in _sessions) {
       session.chat.onChange = null;
