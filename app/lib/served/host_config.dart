@@ -26,6 +26,10 @@ const hostConfigSections = [
   'usage',
 ];
 
+/// The tables only the app the host runs in reads and writes: the commands, the window and the profile it holds, and what pins a
+/// skill. No paired key edits them.
+const ownerSections = ['agents', 'desktop', 'profile', 'skill_pins', 'voice'];
+
 /// The host's own table, which only a key that holds `hosting` reads or writes: the agents it serves, who may connect and the
 /// knowledge settings.
 const hostTable = 'host';
@@ -47,9 +51,16 @@ final class HostConfigChanged implements Exception {
 /// The person's own canoa.cfg on a host reached over the control channel, as the app's [CanoaConfig] and written back by table:
 /// only the tables that changed are sent, each as the host's own words allow.
 final class HostConfigStore {
-  HostConfigStore(this._files);
+  HostConfigStore(this._files) : _desktop = false;
+
+  /// The store of the app that runs the host: it holds [config] as the file holds it, so only a table it changes later is written,
+  /// and it may write every table of canoa.cfg the app edits, the ones only that app reaches included.
+  HostConfigStore.ofDesktop(this._files, CanoaConfig config) : _desktop = true {
+    adopt(config);
+  }
 
   final HostFiles _files;
+  final bool _desktop;
 
   /// Each table as this page's own encoding of the configuration it read spells it, by name, as JSON text; absent for a table the
   /// host has none of. Compared with the same spelling at [save], so only a table the person changed is sent, and a table the host
@@ -67,7 +78,18 @@ final class HostConfigStore {
   /// Whether `[host]` was read too, which the host gives a key that holds `hosting`: only then is it written back.
   bool get includesHost => _withHost;
 
-  List<String> get _sections => [...hostConfigSections, if (_withHost) hostTable];
+  List<String> get _sections => [...hostConfigSections, if (_desktop) ...ownerSections, if (_withHost) hostTable];
+
+  /// Takes [config] as what the file holds now, so that the next [save] writes only what differs from it. For the app that runs the
+  /// host, which wrote the file itself since it last read it.
+  void adopt(CanoaConfig config) {
+    _withHost = _desktop;
+    final data = _tablesOf(config);
+    _held
+      ..clear()
+      ..addEntries([for (final section in _sections) MapEntry(section, _textOf(data[section]))]);
+    _loaded = true;
+  }
 
   /// What is wrong with the `[host]` table of [config], in the host's words, or null when the host accepts it. Nothing is written.
   Future<String?> checkHost(CanoaConfig config) async {
@@ -80,7 +102,10 @@ final class HostConfigStore {
 
   static Map<String, Object?> _tablesOf(CanoaConfig config) {
     final text = config.encode();
-    return text.trim().isEmpty ? const {} : decodeConfig(text, name: 'canoa.json').data;
+    if (text.trim().isEmpty) return const {};
+    // In the format the configuration was read in: a page's is JSON, a desktop's is its own file's.
+    final source = config.source;
+    return decodeConfig(text, name: source.marked ? null : 'canoa.${source.format.name}').data;
   }
 
   /// canoa.cfg as the host holds it. A table this page cannot read (a key it does not know) fails the whole read, and nothing is held:

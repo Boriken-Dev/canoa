@@ -1,23 +1,35 @@
 import 'package:flutter/material.dart';
 
+import '../acp/pipe_channel.dart' show isPipeUrl;
 import '../desktop/control_client.dart' show ControlFailed;
+import '../ledger/session_ledger.dart' show SessionPlace;
 import '../served/host_files.dart' show HostOpening, HostOpeners;
 import '../served/web_mode.dart';
 import '../store/links.dart' as links;
 import 'open_in.dart';
 
-/// Open in for a page a host serves, by the mode that host says the page is in. Where the person sits at the host's computer
+/// Open in for an app that reaches a host, by the mode that host says the page is in; the app that runs the host is in the local mode. Where the person sits at the host's computer
 /// ([WebMode.local]) the host starts VS Code or the file manager there. Where the browser is elsewhere ([WebMode.remote]) VS Code
 /// is a Remote-SSH link the browser opens, and the host's file manager is not reachable, so the Files panel stays the way in.
 final class HostedOpening {
-  HostedOpening({required this.mode, required this.opening, required this.hostPeer, required this.page, Future<bool> Function(Uri)? link})
-      : _link = link;
+  HostedOpening({
+    required this.mode,
+    required this.opening,
+    required this.hostPeer,
+    required this.page,
+    this.onThisComputer = false,
+    Future<bool> Function(Uri)? link,
+  }) : _link = link;
 
   final WebMode mode;
   final HostOpening opening;
 
   /// The host's peer id: a session on another peer's host is not this host's folder.
   final String? hostPeer;
+
+  /// Whether the app runs this host itself, so a session of this computer (local, or reached through the host's own pipe) is the
+  /// host's, as a session on a page is by its peer id.
+  final bool onThisComputer;
 
   /// The address this page was reached at; its host name is what Remote-SSH connects to.
   final Uri page;
@@ -36,6 +48,28 @@ final class HostedOpening {
     } on Object {
       _openers = null;
     }
+  }
+
+  /// [cwd] as a target when the session is on this host, else why it is not one.
+  ({WorkspaceTarget? target, String? reason}) folderOf({required SessionPlace place, required String cwd, Uri? endpoint, String? peerId}) {
+    if (onThisComputer) {
+      final here = place == SessionPlace.local ||
+          ((place == SessionPlace.host || place == SessionPlace.peer) && endpoint != null && isPipeUrl(endpoint.toString()));
+      if (here) return (target: WorkspaceTarget(cwd), reason: null);
+      return (
+        target: null,
+        reason: place == SessionPlace.browser
+            ? 'This conversation runs through the browser, so its folder is not one of this computer\'s.'
+            : 'This workspace is on another host, so it cannot be opened on this computer.',
+      );
+    }
+    if (place == SessionPlace.browser) {
+      return (target: null, reason: 'This conversation runs through the browser, so its folder is not one of this host\'s.');
+    }
+    if (peerId != null && peerId != hostPeer) {
+      return (target: null, reason: 'This workspace is on another host, so it cannot be opened from this one.');
+    }
+    return (target: WorkspaceTarget(cwd), reason: null);
   }
 
   bool _has(String id) => _openers?.ids.contains(id) ?? false;

@@ -18,10 +18,10 @@ import 'package:canoa/session_store.dart';
 import 'package:canoa/shell/surface.dart';
 import 'package:canoa/surfaces/files_surface.dart';
 import 'package:canoa/theme/look.dart';
-import 'package:canoa/workspace/open_in.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/open_host.dart';
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
 /// A host's disk, as the host would answer for it: the folder it was made over is the only place it shows.
@@ -274,24 +274,14 @@ void main() {
   ) async {
     final home = _home('reveal')..createSync();
     File('${home.path}/a.txt').writeAsStringSync('a');
-    final system = _OpenSystem();
-    await _show(tester, FilesPanel(files: _Disk(home), root: home.path, opener: WorkspaceOpener(system)));
+    final host = OpenHost();
+    await _show(tester, FilesPanel(files: _Disk(home), root: home.path, opener: await host.opener()));
     expect(_key('files action reveal'), findsOneWidget, reason: 'the folder can be revealed');
     await tester.tap(_key('files entry a.txt'));
     await tester.pumpAndSettle();
     await tester.tap(_key('files action reveal'));
     await tester.pumpAndSettle();
-    final file = '${home.path}${Platform.pathSeparator}a.txt';
-    expect(system.started, hasLength(1));
-    expect(
-      system.started.single.$2.any((argument) => argument.contains('a.txt')),
-      isTrue,
-      reason: 'the path reaches the program: ${system.started}',
-    );
-    expect(
-      system.started.single.$2.where((argument) => argument == file || argument.contains(file) || argument.contains('a.txt')).length,
-      greaterThan(0),
-    );
+    expect(host.started.single, ('${home.path}${Platform.pathSeparator}a.txt', 'reveal'));
 
     // On another host a path means nothing here: no action.
     await _show(tester, FilesPanel(files: _Disk(home), root: home.path));
@@ -514,30 +504,4 @@ final class _Link implements HostLink {
 
   @override
   Future<void> close() => _out.close();
-}
-
-/// This computer's facts as the opener reads them, and the programs it was asked to start.
-final class _OpenSystem implements OpenInSystem {
-  final started = <(String, List<String>)>[];
-
-  @override
-  HostOs? get os => Platform.isWindows ? HostOs.windows : (Platform.isMacOS ? HostOs.macos : HostOs.linux);
-
-  @override
-  Map<String, String> get environment => Platform.environment;
-
-  @override
-  bool isDirectory(String path) => Directory(path).existsSync();
-
-  @override
-  bool isFile(String path) => File(path).existsSync();
-
-  @override
-  String? registryDefault(String key) => null;
-
-  @override
-  String? bundlePath(String id) => null;
-
-  @override
-  Future<void> start(String executable, List<String> arguments) async => started.add((executable, arguments));
 }

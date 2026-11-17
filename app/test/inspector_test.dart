@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/delegation_scene.dart';
+import 'fixtures/open_host.dart';
 import 'fixtures/session_setup.dart';
 import 'fixtures/task_agent.dart';
 
@@ -810,9 +811,9 @@ void main() {
       final (agent, session, store) = await showTask(tester, _desktop);
       wrote(agent, 'a', '/work/proj/src/a.js');
       await settle(tester);
-      final system = _OpenSystem();
+      final host = OpenHost(ids: const ['file_manager', 'reveal']);
       final opened = <String>[];
-      await inspector(tester, store, session, onOpenInFiles: opened.add, opener: WorkspaceOpener(system));
+      await inspector(tester, store, session, onOpenInFiles: opened.add, opener: await host.opener());
       await tester.tap(find.byKey(const ValueKey('output /work/proj/src/a.js')));
       await tester.pumpAndSettle();
       expect(opened, ['/work/proj/src/a.js']);
@@ -821,10 +822,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('output action files')), findsOneWidget);
       expect(find.byKey(const ValueKey('output action reveal')), findsOneWidget);
-      expect(find.byKey(const ValueKey('output action vscode')), findsNothing, reason: 'VS Code is not on this stand-in computer');
+      expect(find.byKey(const ValueKey('output action vscode')), findsNothing, reason: 'VS Code is not on this stand-in host');
       await tester.tap(find.byKey(const ValueKey('output action reveal')));
       await tester.pumpAndSettle();
-      expect(system.started.single.$2, ['/work/proj/src']);
+      expect(host.started.single, ('/work/proj/src/a.js', 'reveal'));
     });
 
     testWidgets('where the files are on another host the menu has Open in Files alone, and with no Files there is no menu', (tester) async {
@@ -852,7 +853,7 @@ void main() {
         deleted(agent, 'rm', '/work/proj/obsolete.txt');
         agent.usage(62000, 200000);
         await settle(tester);
-        await inspector(tester, store, session, onOpenInFiles: (_) {}, opener: WorkspaceOpener(_OpenSystem()));
+        await inspector(tester, store, session, onOpenInFiles: (_) {}, opener: await OpenHost(ids: const ['file_manager', 'reveal']).opener());
         if (menu) {
           await tester.tap(find.byKey(const ValueKey('output menu /work/proj/src/report.js')));
           await tester.pumpAndSettle();
@@ -862,30 +863,4 @@ void main() {
       });
     }
   });
-}
-
-/// A computer that starts nothing and has no VS Code, with every path present: it records what would have been started.
-final class _OpenSystem implements OpenInSystem {
-  final started = <(String, List<String>)>[];
-
-  @override
-  HostOs? get os => HostOs.linux;
-
-  @override
-  Map<String, String> get environment => const {};
-
-  @override
-  bool isDirectory(String path) => true;
-
-  @override
-  bool isFile(String path) => true;
-
-  @override
-  String? registryDefault(String key) => null;
-
-  @override
-  String? bundlePath(String id) => null;
-
-  @override
-  Future<void> start(String executable, List<String> arguments) async => started.add((executable, arguments));
 }

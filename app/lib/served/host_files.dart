@@ -189,7 +189,7 @@ final class HostFiles implements WorkspaceFiles, HostOpening {
   /// [configSet] that names the [digest] of the table it was made from: the host refuses with [hostChanged] when its table is
   /// another by now. Answers the table's new digest when the host names one.
   Future<({bool restart, String? digest})> configWrite(String section, Map<String, Object?>? value, {String? digest}) async {
-    final answer = await _call('config/set', {'section': section, 'value': value, if (digest != null) 'digest': digest});
+    final answer = await _call('config/set', {'section': section, 'value': value, 'digest': ?digest});
     return (restart: answer['restart'] == true, digest: answer['digest'] as String?);
   }
 

@@ -61,6 +61,7 @@ import 'surfaces/terminal_remote.dart';
 import 'surfaces/terminal_section.dart';
 import 'surfaces/terminal_surface.dart';
 import 'served/host_files.dart' show HostFiles, WorkspaceFiles;
+import 'served/host_config.dart' show HostConfigChanged, HostConfigStore;
 import 'served/host_state.dart';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show SessionUsage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
@@ -144,6 +145,8 @@ import 'auth/browser_peer.dart' show verifyBrowserPeer;
 import 'workspace/documents.dart' show hasWorkspaceFolders, homeFolder, makeFolder, removeEmptyFolder;
 import 'workspace/host_folders.dart';
 import 'workspace/open_in.dart';
+import 'workspace/open_in_host.dart' show HostedOpening;
+import 'served/web_mode.dart' show WebMode;
 import 'workspace/open_in_ui.dart';
 import 'workspace/scratch.dart';
 import 'workspace/site_meta.dart';
@@ -230,9 +233,19 @@ Future<void> main(List<String> args) async {
   final ledger = SessionLedger(ledgerBackend, settings: config.sessions);
   await ledger.load();
   final configFile = desktopConfigPath();
-  // A served page keeps the rules, their log, drafts and the layout on its host when this key may, so they follow the person to
-  // another browser; else in this browser, and a desktop beside canoa.cfg.
-  final hostState = served != null && served.reachable && await served.state.available() ? served.state : null;
+  // The rules, their log, drafts and the layout are the host's when the app reaches one that keeps them (the one that served a
+  // page when its key may, so they follow the person to another browser; a desktop's own once it runs); else beside canoa.cfg, or
+  // in this browser.
+  final ownState = served == null && keptByHost ? HostState(HostControl(host)) : null;
+  final hostState = served != null && served.reachable
+      ? (await served.state.available() ? served.state : null)
+      : (ownState != null && await ownState.available() ? ownState : null);
+  if (ownState != null) {
+    // Open in is the host's on this computer too: it asks the host what it can start and has it start it.
+    final openIn = HostedOpening(mode: WebMode.local, opening: HostFiles(HostControl(host!)), hostPeer: null, page: Uri(), onThisComputer: true);
+    workspaceOpener = WorkspaceOpener.hosted(openIn);
+    await openIn.load();
+  }
   final rules = PermissionRules(
     hostState == null ? platformLedgerBackend(configPath: configFile, name: 'permissions') : HostDocumentBackend(hostState, 'permissions.json'),
     log: hostState == null ? platformRuleLog(configPath: configFile) : HostRuleLog(hostState),
@@ -405,19 +418,35 @@ class _CanoaAppState extends State<CanoaApp> {
   });
 
   String? get _configPath => widget.configPath ?? desktopConfigPath();
-  Future<void> _write(CanoaConfig changed) => (widget.writeConfig ?? (widget.served == null ? saveConfig : _writeToHost))(changed);
+  Future<void> _write(CanoaConfig changed) => (widget.writeConfig ?? _writeConfig)(changed);
 
-  /// Writes the tables of canoa.cfg that changed to the host that served this page, which refuses a table or a file it cannot take
-  /// in its own words. A table the host reads only at start applies after the host restarts, which the person is offered.
-  Future<void> _writeToHost(CanoaConfig changed) async {
-    final served = widget.served!;
-    if (!served.configLoaded) {
+  /// The store canoa.cfg is written through while a host answers: the host that served this page, or this app's own. Null for an
+  /// app whose host does not run, which then writes the file itself, as a host that cannot start for what the file holds needs.
+  HostConfigStore? get _configStore => widget.served?.configStore ?? (_hostUp ? _desktopConfig : null);
+
+  /// This app's own host's store, made with the configuration the app started with, so it knows what the file held.
+  HostConfigStore? _desktopConfig;
+
+  Future<void> _writeConfig(CanoaConfig changed) async {
+    final store = _configStore;
+    if (store == null) {
+      await saveConfig(changed);
+      _desktopConfig?.adopt(changed);
+      return;
+    }
+    await _writeToHost(store, changed);
+  }
+
+  /// Writes the tables of canoa.cfg that changed to the host, which refuses a table or a file it cannot take in its own words. A
+  /// table the host reads only at start applies after the host restarts, which a served page offers.
+  Future<void> _writeToHost(HostConfigStore store, CanoaConfig changed) async {
+    if (!store.loaded) {
       _messenger.currentState?.showSnackBar(const SnackBar(
           content: Text('The host canoa.cfg was not read whole, so that change is kept in this page and not written to the host.')));
       return;
     }
     try {
-      if (await served.configStore.save(changed)) _offerRestart();
+      if (await store.save(changed) && widget.served != null) _offerRestart();
     } on HostConfigChanged catch (error) {
       if (mounted) setState(() => config = error.config);
       _settingsKey.currentState?.controller.adopt(error.config);
@@ -1536,14 +1565,8 @@ class _CanoaAppState extends State<CanoaApp> {
   /// run from canoa.cfg.
   Future<SourceChoices?> _askChoicesAs(AgentSource source, String account) async {
     if (source.host != null) return _askChoicesOn(source, account: account);
-    if (_control case final control?) {
-      final asked = await choicesOverControl(control, source, account: account);
-      if (asked != null) return asked;
-    }
-    final tool = widget.host?.tool;
-    if (tool == null || source.hostEntry == null || _configPath == null) return null;
-    final ran = await tool.run(['options', source.hostEntry!, '--entry', ...hostConfigArgs(_configPath!), '--account', account, '--format', 'json']);
-    return ran.exitCode == 0 ? SourceChoices.parse(ran.stdout) : null;
+    final control = _control;
+    return control == null ? null : choicesOverControl(control, source, account: account);
   }
 
   /// What the host [source] belongs to says of it, over that host's own control channel; null for a host that has none.
@@ -1553,31 +1576,13 @@ class _CanoaAppState extends State<CanoaApp> {
     return choicesOverControl(remote.control, source, account: account);
   }
 
-  /// What `canoa options` says of [source]: the models and efforts its provider lists with no session. A preset the host runs
-  /// is asked by its harness, a hosted entry by its name in canoa.cfg; a program entry is asked through a short session of its own.
+  /// What the host says of [source]: the models and efforts its provider lists with no session, which the host asks (a preset by
+  /// its harness, a hosted entry by its name in canoa.cfg, a program entry through a short session of its own).
   Future<SourceChoices?> _askChoices(AgentSource source) async {
     if (widget.askChoices case final ask?) return ask(source);
     if (source.host != null) return _askChoicesOn(source);
-    // The host answers for a page that has no host of its own to run a command on, and for the desktop alike.
-    if (_control case final control?) {
-      final asked = await choicesOverControl(control, source);
-      if (asked != null) return asked;
-    }
-    final tool = widget.host?.tool;
-    if (tool == null) return null;
-    final List<String> args;
-    if (source.local) {
-      // Only a harness lists its models before it starts.
-      final harness = source.harness;
-      if (harness == null) return null;
-      args = ['options', harness, '--format', 'json'];
-    } else if (source.hostEntry != null && _configPath != null) {
-      args = ['options', source.hostEntry!, '--entry', ...hostConfigArgs(_configPath!), '--format', 'json'];
-    } else {
-      return null;
-    }
-    final ran = await tool.run(args);
-    return ran.exitCode == 0 ? SourceChoices.parse(ran.stdout) : null;
+    final control = _control;
+    return control == null ? null : choicesOverControl(control, source);
   }
 
   /// Whether the sources have been looked for: only once a new session or Settings needs them, since each runs a lookup.
@@ -2559,6 +2564,7 @@ class _CanoaAppState extends State<CanoaApp> {
     super.initState();
     ownsStore = widget.store == null;
     config = widget.config;
+    if (_control case final control? when widget.served == null) _desktopConfig = HostConfigStore.ofDesktop(HostFiles(control), config);
     widget.settingsSignal?.addListener(_requestSettings);
     widget.hostingSignal?.addListener(_requestHosting);
     store = widget.store ??
