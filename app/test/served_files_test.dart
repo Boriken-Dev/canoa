@@ -24,6 +24,8 @@ import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:canoa/ledger/host_ledger_backend.dart';
 import 'package:canoa/ledger/session_ledger.dart';
+import 'package:canoa/permissions/permission_rules.dart';
+import 'package:canoa/served/host_state.dart';
 import 'package:canoa/profile/profile.dart' show GitOverlay;
 import 'package:canoa/profile/report.dart';
 import 'package:canoa/served/control_overlays.dart';
@@ -45,7 +47,7 @@ final String? _hostBinary = switch (Platform.environment['CANOA_TEST_HOST']) {
 };
 
 const _grants = [
-  'ledger.read', 'ledger.write', 'folders', 'config.read', 'config.write', 'config.write.sessions', 'upload', 'host.restart', 'overlay.read', 'overlay.write',
+  'ledger.read', 'ledger.write', 'folders', 'config.read', 'config.write', 'config.write.sessions', 'upload', 'host.restart', 'overlay.read', 'overlay.write', 'state',
 ];
 
 /// `canoa serve` as a supervisor runs it: started again, on the same configuration and home, when it ends with the status a
@@ -209,6 +211,39 @@ own_profile = true
     expect(same(nested.parent), home);
     await expectLater(files.listFolders(path: dir.parent.path), throwsA(isA<ControlFailed>()));
     await expectLater(files.listFolders(path: '$home/../'), throwsA(isA<ControlFailed>()));
+  }, skip: skip);
+
+  test('drafts, the layout and the permission rules are kept by the host and are there when the page loads again', () async {
+    final first = HostState(control());
+    expect(await first.available(), isTrue);
+    final id = '0123456789abcdef';
+    final image = List<int>.generate(1024 * 1024 + 7, (index) => (index * 7) % 251);
+    final blob = '${List.filled(64, 'a').join()}.bin';
+    final drafts = HostDraftBackend(first);
+    await drafts.write(id, '{"text":"half written"}');
+    await drafts.writeBlob(id, blob, image);
+    await HostLayoutBackend(first).write('{"section":"files"}');
+    final rules = PermissionRules(HostDocumentBackend(first, 'permissions.json'), log: HostRuleLog(first));
+    await rules.load();
+    final made = rules.add(source: 'Claude', folder: '$home/projects/app', kind: 'command', type: RuleType.command, value: 'git status');
+    expect(made, isNotNull);
+    await rules.flush();
+
+    // A page loaded again, in another browser: a new link and new objects, with nothing but the host in common.
+    final second = HostState(control());
+    final again = HostDraftBackend(second);
+    expect(await again.ids(), [id]);
+    expect(await again.read(id), '{"text":"half written"}');
+    expect(await again.blobs(id), [blob]);
+    expect(await again.readBlob(id, blob), image);
+    expect(await HostLayoutBackend(second).read(), '{"section":"files"}');
+    final loaded = PermissionRules(HostDocumentBackend(second, 'permissions.json'), log: HostRuleLog(second));
+    await loaded.load();
+    expect([for (final rule in loaded.rules) rule.value], ['git status']);
+    expect(await second.getText('permissions-log.jsonl'), contains(made!.id));
+    await again.remove(id);
+    expect(await again.ids(), isEmpty);
+    expect(await again.read(id), isNull);
   }, skip: skip);
 
   test('a file is uploaded to the host within its limit, and removed', () async {

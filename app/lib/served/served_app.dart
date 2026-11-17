@@ -17,6 +17,7 @@ import '../profile/project_trust.dart';
 import 'control_overlays.dart';
 import 'host_config.dart';
 import 'host_files.dart';
+import 'host_state.dart';
 import 'portal_session.dart';
 import 'served_control.dart';
 
@@ -143,6 +144,9 @@ final class ServedApp {
   final ServedSupervisor supervisor;
   late final HostFiles files = HostFiles(control);
   late final HostConfigStore configStore = HostConfigStore(files);
+
+  /// The documents the host keeps for the person: drafts, the layout and the permission rules with their log.
+  late final HostState state = HostState(control);
   final ControlOverlayManager overlays;
   late final ServedProfileHome home = ServedProfileHome(overlays, os: host.os ?? '');
 

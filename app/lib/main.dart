@@ -51,6 +51,7 @@ import 'surfaces/files_surface.dart';
 import 'surfaces/terminal_controller.dart' show ControlTerminals;
 import 'surfaces/terminal_surface.dart';
 import 'served/host_files.dart' show HostFiles, WorkspaceFiles;
+import 'served/host_state.dart';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' show SessionUsage;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'chat/child_thread.dart';
@@ -206,9 +207,12 @@ Future<void> main(List<String> args) async {
   final ledger = SessionLedger(ledgerBackend, settings: config.sessions);
   await ledger.load();
   final configFile = desktopConfigPath();
+  // A served page keeps the rules, their log, drafts and the layout on its host when this key may, so they follow the person to
+  // another browser; else in this browser, and a desktop beside canoa.cfg.
+  final hostState = served != null && served.reachable && await served.state.available() ? served.state : null;
   final rules = PermissionRules(
-    platformLedgerBackend(configPath: configFile, name: 'permissions'),
-    log: platformRuleLog(configPath: configFile),
+    hostState == null ? platformLedgerBackend(configPath: configFile, name: 'permissions') : HostDocumentBackend(hostState, 'permissions.json'),
+    log: hostState == null ? platformRuleLog(configPath: configFile) : HostRuleLog(hostState),
     guards: PermissionGuards(
       home: homeFolder(),
       config: _parentFolder(configFile),
@@ -218,8 +222,8 @@ Future<void> main(List<String> args) async {
     repoRoot: platformRepoRoot,
   );
   await rules.load();
-  final drafts = DraftKeeper(platformDraftBackend(configPath: desktopConfigPath()));
-  final layout = ShellLayout(backend: platformLayoutBackend(configPath: desktopConfigPath()));
+  final drafts = DraftKeeper(hostState == null ? platformDraftBackend(configPath: desktopConfigPath()) : HostDraftBackend(hostState));
+  final layout = ShellLayout(backend: hostState == null ? platformLayoutBackend(configPath: desktopConfigPath()) : HostLayoutBackend(hostState));
   await layout.load();
   final settingsSignal = ValueNotifier<int>(0);
   final hostingSignal = ValueNotifier<int>(0);
