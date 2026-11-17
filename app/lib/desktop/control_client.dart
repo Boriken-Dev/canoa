@@ -66,9 +66,11 @@ final class ControlClient {
     final answer = Completer<Object?>();
     _waiting[id] = answer;
     if (listener != null) _listeners[id] = listener;
+    // Listened to before the send: a link that ends during it fails the answer, and an answer nobody listens to yet is an uncaught error.
+    final answered = answer.future.timeout(wait ?? timeout)..ignore();
     try {
       await _link.send(jsonEncode({'jsonrpc': '2.0', 'id': id, 'method': method, 'params': params}));
-      return await answer.future.timeout(wait ?? timeout);
+      return await answered;
     } finally {
       _waiting.remove(id);
       _listeners.remove(id);
