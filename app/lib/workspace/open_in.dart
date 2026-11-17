@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../acp/pipe_channel.dart' show isPipeUrl;
 import '../ledger/session_ledger.dart' show SessionPlace;
+import '../served/web_mode.dart' show WebMode;
+import 'open_in_host.dart';
 import 'open_in_stub.dart' if (dart.library.io) 'open_in_io.dart' as platform;
 
 /// Where a workspace action is offered.
@@ -70,6 +72,27 @@ abstract interface class OpenInSystem {
   Future<void> start(String executable, List<String> arguments);
 }
 
+/// What a page has for the system: nothing, since it starts no program itself.
+final class _NoSystem implements OpenInSystem {
+  const _NoSystem();
+
+  @override
+  HostOs? get os => null;
+  @override
+  Map<String, String> get environment => const {};
+  @override
+  bool isDirectory(String path) => false;
+  @override
+  bool isFile(String path) => false;
+  @override
+  String? registryDefault(String key) => null;
+  @override
+  String? bundlePath(String id) => null;
+  @override
+  Future<void> start(String executable, List<String> arguments) =>
+      Future.error(OpenInFailure('A page cannot open programs on the computer it is served from.'));
+}
+
 /// The system this program runs on.
 OpenInSystem systemOpenIn() => platform.systemOpenIn();
 
@@ -136,12 +159,21 @@ String? parseRegistryDefault(String output, Map<String, String> environment) {
 
 /// The workspace actions, detected on [system].
 final class WorkspaceOpener {
-  WorkspaceOpener(this.system);
+  WorkspaceOpener(this.system) : hosted = null;
+
+  /// A page a host serves: the host starts the program, or the page links to it, by the host's mode.
+  WorkspaceOpener.hosted(HostedOpening this.hosted) : system = const _NoSystem();
 
   final OpenInSystem system;
 
-  /// Whether this build can start programs at all. A page served by a host cannot, and shows no action.
-  bool get canOpen => system.os != null;
+  /// How a served page opens a workspace; null for the app that runs on the computer itself.
+  final HostedOpening? hosted;
+
+  /// Whether this build can start programs at all. A page nothing served cannot, and shows no action.
+  bool get canOpen => hosted != null || system.os != null;
+
+  /// What to tell the person where a workspace action they might look for is not offered.
+  String? get note => hosted?.mode == WebMode.remote ? HostedOpening.remoteNote : null;
 
   String? _env(String name) {
     final os = system.os;
@@ -258,7 +290,9 @@ final class WorkspaceOpener {
     await system.start(plan.executable, plan.arguments);
   }
 
-  late final List<WorkspaceAction> actions = [
+  List<WorkspaceAction> get actions => hosted?.actions ?? _local;
+
+  late final List<WorkspaceAction> _local = [
     WorkspaceAction(
       id: 'vscode',
       label: 'Open in VS Code',
@@ -301,8 +335,17 @@ final class WorkspaceOpener {
 
   /// A session's folder as a target, or why it is not one: a session on another host has its folder there, not here.
   /// Both are null where nothing can be started, or when no folder is known.
-  ({WorkspaceTarget? target, String? reason}) workspaceOf({required SessionPlace place, required String? cwd, Uri? endpoint}) {
+  ({WorkspaceTarget? target, String? reason}) workspaceOf({required SessionPlace place, required String? cwd, Uri? endpoint, String? peerId}) {
     if (!canOpen || cwd == null || cwd.isEmpty) return (target: null, reason: null);
+    if (hosted case final host?) {
+      if (place == SessionPlace.browser) {
+        return (target: null, reason: 'This conversation runs through the browser, so its folder is not one of this host\'s.');
+      }
+      if (peerId != null && peerId != host.hostPeer) {
+        return (target: null, reason: 'This workspace is on another host, so it cannot be opened from this one.');
+      }
+      return (target: WorkspaceTarget(cwd), reason: null);
+    }
     final here = place == SessionPlace.local || ((place == SessionPlace.host || place == SessionPlace.peer) && endpoint != null && isPipeUrl(endpoint.toString()));
     if (!here) {
       return (

@@ -38,7 +38,7 @@ class DetailsSurface extends WorkSurface {
       onOpenChild: env.onOpenChild,
       onOpenInFiles: env.onOpenInFiles,
       // Reveal and Open in VS Code are for a workspace on this computer, whose paths its file manager and editor know.
-      opener: workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint).target == null ? null : workspaceOpener,
+      opener: workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint, peerId: session.peerId).target == null ? null : workspaceOpener,
     );
   }
 }

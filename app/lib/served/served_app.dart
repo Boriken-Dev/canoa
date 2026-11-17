@@ -11,6 +11,9 @@ import '../desktop/host_supervisor.dart';
 import '../desktop/host_tool.dart';
 import '../ledger/host_ledger_backend.dart';
 import '../ledger/session_ledger.dart' show LedgerBackend;
+import '../workspace/open_in.dart' show WorkspaceOpener;
+import '../workspace/open_in_host.dart' show HostedOpening;
+import 'web_mode.dart';
 import 'control_overlays.dart';
 import 'control_profile_home.dart';
 import 'host_config.dart';
@@ -68,14 +71,15 @@ final class ServedSupervisor extends HostSupervisor {
 /// uploads, canoa.cfg and the overlay store. The control channel is the one the host lists; a key it has no grant for gets the
 /// host's own refusal for that request, and nothing else is lost.
 final class ServedApp {
-  ServedApp._(this.host, this.control, this.portal)
-      : supervisor = ServedSupervisor(host),
+  ServedApp._(this.host, this.control, this.portal, Uri? page)
+      : page = page ?? Uri.base,
+        supervisor = ServedSupervisor(host),
         overlays = ControlOverlayManager(control),
         ledger = HostLedgerBackend.over(control);
 
   /// The page's host as `canoa.json` lists it, with a control channel of the page's own when the host listens for one; [portal]
   /// when `canoa portal` served the page.
-  ServedApp.over(ServedHost host, HostControl control, {PortalSession? portal}) : this._(host, control, portal);
+  ServedApp.over(ServedHost host, HostControl control, {PortalSession? portal, Uri? page}) : this._(host, control, portal, page);
 
   /// Reads `canoa.json` beside this page (or beside [base]): null where the page was not served by a `canoa`, and, behind a
   /// portal, where nobody is signed in (the browser is sent to sign in).
@@ -93,10 +97,24 @@ final class ServedApp {
     final portal = user == null
         ? null
         : PortalSession(user: user, base: base ?? Uri.base, client: client, navigate: navigate, localPeer: localPeer);
-    return ServedApp.over(host, (control ?? (host) => servedControl(host, failed: portal?.active))(host), portal: portal);
+    return ServedApp.over(host, (control ?? (host) => servedControl(host, failed: portal?.active))(host), portal: portal, page: base);
   }
 
   final ServedHost host;
+
+  /// The address this page was reached at.
+  final Uri page;
+
+  /// Where the person sits: what the host says, else local for a page reached over loopback and remote for any other name. What
+  /// needs the host's own computer (an editor, a file manager) branches on this.
+  late final WebMode mode = WebMode.of(host.web, page);
+
+  /// Open in for this page by [mode]: the host starts the program, or the page links VS Code Remote. Call [HostedOpening.load] once
+  /// the control channel is known to work.
+  late final HostedOpening openIn = HostedOpening(mode: mode, opening: files, hostPeer: host.peer, page: page);
+
+  /// The workspace actions this page offers.
+  late final WorkspaceOpener opener = WorkspaceOpener.hosted(openIn);
 
   /// The sign-in the portal that served this page keeps, or null for a page served by anything else.
   final PortalSession? portal;

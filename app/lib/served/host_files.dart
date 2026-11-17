@@ -59,6 +59,24 @@ abstract interface class WorkspaceFiles {
   Future<HostFileRead> readFile(String path, {int? maxBytes});
 }
 
+/// What the host can start for a folder, from `workspace/openers`.
+final class HostOpeners {
+  const HostOpeners({required this.os, required this.ids, this.hostname});
+
+  /// `windows`, `macos` or `linux`.
+  final String os;
+  final String? hostname;
+
+  /// `vscode` when VS Code is found there, `file_manager` and `reveal`.
+  final List<String> ids;
+}
+
+/// What an Open in needs of a host: what it can start, and starting it.
+abstract interface class HostOpening {
+  Future<HostOpeners> workspaceOpeners();
+  Future<void> workspaceOpen(String path, String opener);
+}
+
 /// A file the host keeps for this key.
 final class HostUpload {
   const HostUpload({required this.path, required this.name, required this.size});
@@ -71,7 +89,7 @@ final class HostUpload {
 
 /// The host's files as a page may use them over the control channel: folders to browse, canoa.cfg by section, uploads, and the
 /// host's restart. Each is a grant the host gave this page's key; a refusal is the host's own words.
-final class HostFiles implements WorkspaceFiles {
+final class HostFiles implements WorkspaceFiles, HostOpening {
   HostFiles(this._control);
 
   final HostControl _control;
@@ -157,6 +175,26 @@ final class HostFiles implements WorkspaceFiles {
   /// [restart] is what applies it.
   Future<bool> configSet(String section, Map<String, Object?>? value) async =>
       (await _call('config/set', {'section': section, 'value': value}))['restart'] == true;
+
+  /// What `workspace/openers` says this host can start for a folder; refused without the grant `workspace.open`.
+  @override
+  Future<HostOpeners> workspaceOpeners() async {
+    final answer = await _call('workspace/openers');
+    return HostOpeners(
+      os: answer['os'] as String? ?? '',
+      hostname: answer['hostname'] as String?,
+      ids: [
+        for (final each in (answer['openers'] as List<Object?>? ?? const []))
+          if (each is Map<Object?, Object?> && each['id'] is String) each['id']! as String,
+      ],
+    );
+  }
+
+  /// Starts [opener] (`vscode`, `file_manager` or `reveal`) for [path] on the host; the host's own words when it cannot.
+  @override
+  Future<void> workspaceOpen(String path, String opener) async {
+    await _call('workspace/open', {'path': path, 'opener': opener});
+  }
 
   /// Ends the host so that its supervisor starts it again with canoa.cfg as it is now; this link ends with it.
   Future<void> restart() async {

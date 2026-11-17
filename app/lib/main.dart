@@ -182,6 +182,11 @@ Future<void> main(List<String> args) async {
   // browser's key is accepted there, and a page that cannot reach its host's control channel keeps its sessions in the browser.
   final served = kIsWeb ? await ServedApp.discover() : null;
   await served?.probe();
+  if (served != null) {
+    // A page's Open in is the host's, by its mode; it only asks the host what it can start when the host is reached.
+    workspaceOpener = served.opener;
+    if (served.reachable) await served.openIn.load();
+  }
   final hostCfg = served != null && served.reachable ? await served.loadConfig() : null;
   if (hostCfg != null) await served?.refreshOverlays();
   final config = hostCfg ?? await loadConfig();
@@ -2375,7 +2380,7 @@ class _CanoaHome extends StatelessWidget {
           PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
         if (session?.status == SessionStatus.working) PaletteItem('Stop the turn', _stop, icon: Icons.stop_circle_outlined),
         if (session != null)
-          if (workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint).target case final target?)
+          if (workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint, peerId: session.peerId).target case final target?)
             for (final action in workspaceOpener.actionsFor(WorkspaceContext.palette, target))
               PaletteItem(action.label, () => unawaited(runWorkspaceAction(context, action, target)),
                   detail: target.path, icon: action.icon),
@@ -2738,7 +2743,7 @@ class _ConversationState extends State<_Conversation> {
   /// The header's entry for opening [session]'s folder on this computer, or null where nothing can be started.
   (String, IconData, VoidCallback)? _workspaceEntry(ChatSession? session) {
     if (session == null) return null;
-    final workspace = workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint);
+    final workspace = workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint, peerId: session.peerId);
     if (workspace.target == null && workspace.reason == null) return null;
     return ('Open the workspace', Icons.folder_open, () => unawaited(showWorkspaceActions(
       context, opener: workspaceOpener, target: workspace.target, reason: workspace.reason,

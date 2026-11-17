@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../auth/peer_proof.dart';
 import '../served/navigate.dart';
+import '../served/web_mode.dart';
 
 /// Whether this is a web page; Flutter's own `kIsWeb` would keep the peer test page, which `dart compile js` builds, from
 /// compiling.
@@ -33,7 +34,7 @@ final class ServedEntry {
 /// connect dialog: connecting still proves the host holds [peer]'s key, and the host still turns this browser away until
 /// its key is accepted there.
 final class ServedHost {
-  const ServedHost({required this.peer, required this.method, required this.entries, this.control, this.os, this.user});
+  const ServedHost({required this.peer, required this.method, required this.entries, this.control, this.os, this.user, this.web});
 
   /// The account signed in to the `canoa portal` that served this page; null for any other server.
   final String? user;
@@ -47,6 +48,9 @@ final class ServedHost {
 
   /// The operating system the host runs on as Rust names it (`windows`, `linux`, `macos`), when it says; overlays are read for it.
   final String? os;
+
+  /// Whether the person sits at the host's computer (`local`) or elsewhere (`remote`), when the host says.
+  final WebMode? web;
 
   /// The host's control channel (its session list, folders, uploads and overlays), when it listens on an address a page may dial; a
   /// key reaches it only with the grants the host gives it. Not one of [entries]: it is no agent.
@@ -87,6 +91,7 @@ final class ServedHost {
       return ServedHost(
         peer: peer, method: PeerMethod.parse(method), entries: served, control: control,
         os: value['os'] is String ? value['os'] as String : null,
+        web: WebMode.named(value['web']),
         user: value['user'] is String && (value['user'] as String).isNotEmpty ? value['user'] as String : null,
       );
     } on FormatException {

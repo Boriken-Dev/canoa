@@ -46,7 +46,7 @@ class FilesSurface extends WorkSurface {
     final root = workspaceOf(session), files = filesFor(session);
     if (root == null || files == null) return const Center(child: Text('This host\'s files cannot be reached from here.'));
     // Reveal and Open in VS Code are for a workspace on this computer, whose paths its file manager and editor know.
-    final here = workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint).target != null;
+    final here = workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint, peerId: session.peerId).target != null;
     return FilesPanel(files: files, root: root, opener: here ? workspaceOpener : null, reveal: controller.data[revealKey] as FileReveal?);
   }
 }

@@ -34,6 +34,8 @@ Future<void> showWorkspaceActions(
             child: Text(target.path, style: Theme.of(dialog).textTheme.bodySmall),
           ),
         if (reason != null) Padding(padding: const EdgeInsets.fromLTRB(24, 0, 24, 16), child: Text(reason)),
+        if (target != null && opener.note != null)
+          Padding(padding: const EdgeInsets.fromLTRB(24, 0, 24, 8), child: Text(opener.note!, style: Theme.of(dialog).textTheme.bodySmall)),
         for (final action in actions)
           SimpleDialogOption(
             onPressed: () {
