@@ -63,6 +63,13 @@ impl Shared {
     }
 }
 
+/// What a program wrote to standard error: the last of it, and whether its end was reached.
+#[derive(Default)]
+struct Errors {
+    tail: Mutex<Vec<u8>>,
+    ended: AtomicBool,
+}
+
 /// One program speaking one text.
 pub struct Spoken {
     /// Ends whatever feeds the buffer.
@@ -107,7 +114,7 @@ impl Spoken {
             changed: Condvar::new(),
         });
         let gone = Arc::new(AtomicBool::new(false));
-        let errors: Arc<Mutex<Vec<u8>>> = Arc::default();
+        let errors: Arc<Errors> = Arc::default();
 
         {
             let (process, gone, errors) =
@@ -120,7 +127,7 @@ impl Spoken {
                         Ok(count) => {
                             if let Ok(count) = usize::try_from(count) {
                                 let mut kept =
-                                    errors.lock().unwrap_or_else(PoisonError::into_inner);
+                                    errors.tail.lock().unwrap_or_else(PoisonError::into_inner);
                                 kept.extend_from_slice(&chunk[..count.min(chunk.len())]);
                                 let excess = kept.len().saturating_sub(MAX_ERROR);
                                 kept.drain(..excess);
@@ -128,6 +135,7 @@ impl Spoken {
                         }
                     }
                 }
+                errors.ended.store(true, Ordering::Relaxed);
             });
         }
         if let Some(lines) = lines {
@@ -293,7 +301,7 @@ fn pump(
     process: &Object<dyn SpawnedProcess>,
     shared: &Shared,
     gone: &AtomicBool,
-    errors: &Mutex<Vec<u8>>,
+    errors: &Errors,
     head: Head,
     idle: Duration,
 ) {
@@ -354,7 +362,14 @@ fn pump(
                 Some("the program did not end after its last sound".to_owned())
             }
             Some(exit) if exit.code != Some(0) => {
-                let tail = errors.lock().unwrap_or_else(PoisonError::into_inner);
+                // What it said on standard error is read by a thread of its own, which may not have reached the end yet.
+                for _ in 0..100 {
+                    if errors.ended.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                let tail = errors.tail.lock().unwrap_or_else(PoisonError::into_inner);
                 let how = exit.code.map_or_else(
                     || "was ended by a signal".to_owned(),
                     |code| alloc::format!("exited with {code}"),
