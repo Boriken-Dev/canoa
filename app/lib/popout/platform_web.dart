@@ -120,7 +120,7 @@ external JSObject? get _canoaBridge;
 /// The extension's pop-out bridge; null in any page the extension did not make, which has no `canoaBridge` at all.
 JSObject? get _popoutBridge => _canoaBridge?.getProperty<JSObject?>('popout'.toJS);
 
-/// The extension's worker, as the panel reaches it (bindings/browser/chromium/bridge.js).
+/// The extension's worker, as the panel reaches it (clients/browser/chromium/bridge.js).
 final class _WebPopoutBridge implements PopoutBridge {
   _WebPopoutBridge() {
     _popoutWatch(((JSNumber id) => _closed.add(id.toDartInt)).toJS);

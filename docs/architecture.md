@@ -39,7 +39,7 @@ Trust requires all relevant parties to approve; an allow from one layer is not a
 
 ## Browser and page tools
 
-Canoa's Chromium implementation lives under `bindings/browser/chromium` and uses Manifest V3. Its local permission store is not shared with other browser implementations. For cross-browser interoperability, standardize the ACP transport and peer-auth proof, not permission database internals.
+Canoa's Chromium implementation lives under `clients/browser/chromium` and uses Manifest V3. Its local permission store is not shared with other browser implementations. For cross-browser interoperability, standardize the ACP transport and peer-auth proof, not permission database internals.
 
 Browser-provided MCP tools may read bounded DOM text, inspect permitted tabs, interact with visible elements, and discover/invoke opt-in WebMCP tools. Site-provided MCP endpoints and WebMCP descriptions are untrusted discovery candidates and cannot grant themselves or an agent access.
 
@@ -53,7 +53,7 @@ See [interop.md](interop.md) for the minimum interoperability profile.
 
 ## Authentication and transport layering
 
-The sources of the browser's cryptographic handshakes are `Boriken-Dev/coqui-peer-noise` and `Boriken-Dev/coqui-peer-webcrypto`. The browser extension bundles an **unchanged, Git-blob-pinned copy** of each JavaScript module (`bindings/browser/chromium/vendor`, recorded in `COQUI-SOURCE.json`) so that it works offline and satisfies MV3 local-code restrictions. The Flutter web build has no JavaScript of its own: `app/lib/auth/web/` runs the WebCrypto method over `package:web` and the Noise method as `coqui-peer-noise` compiled to WebAssembly (`app/web_noise`, built at build time, never committed), one step of a handshake or a PIN pairing at a time, with a key of each method's own; it contains no independent cryptographic handshake.
+The sources of the browser's cryptographic handshakes are `Boriken-Dev/coqui-peer-noise` and `Boriken-Dev/coqui-peer-webcrypto`. The browser extension bundles an **unchanged, Git-blob-pinned copy** of each JavaScript module (`clients/browser/chromium/vendor`, recorded in `COQUI-SOURCE.json`) so that it works offline and satisfies MV3 local-code restrictions. The Flutter web build has no JavaScript of its own: `app/lib/auth/web/` runs the WebCrypto method over `package:web` and the Noise method as `coqui-peer-noise` compiled to WebAssembly (`app/web_noise`, built at build time, never committed), one step of a handshake or a PIN pairing at a time, with a key of each method's own; it contains no independent cryptographic handshake.
 
 The `coqui_transport_web` Dart package owns pending-message storage across the pre-application phase, in `StagedChannel`. The coqui-peer method verifies the remote public key and informs Canoa of the verified peer ID; only then does the connection become available to ACP.
 

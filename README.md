@@ -41,8 +41,7 @@
 | `app/web_noise/` | `coqui-peer-noise` as WebAssembly for the web app's Noise method, built by `app/tool/build_noise.py` |
 | `app/` | Canonical Flutter chat, canoa.cfg settings and desktop tray UI |
 | `crates/canoa-host/examples/` | Test fixtures, built by `cargo build -p canoa-host --examples`: `stdio_agent` is an ACP agent to serve with `canoa serve` |
-| `bindings/browser/chromium/` | Chromium extension, browser permissions and tools |
-| `bindings/` | Additional browser and language bindings |
+| `clients/browser/chromium/` | Chromium extension, browser permissions and tools |
 | `docs/` | Architecture, protocols, browser support and developer guides |
 
 ## Try the current UI
@@ -82,7 +81,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
-(cd bindings/browser/chromium && npm test)
+(cd clients/browser/chromium && npm test)
 ```
 
 The [documentation](https://boriken-dev.github.io/canoa/) contains the [architecture](https://boriken-dev.github.io/canoa/architecture/), [interoperability profile](https://boriken-dev.github.io/canoa/interop/), [browser design](https://boriken-dev.github.io/canoa/browser/), and [roadmap](https://boriken-dev.github.io/canoa/roadmap/).

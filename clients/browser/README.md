@@ -1,6 +1,6 @@
-# Browser bindings
+# Browser clients
 
-The Canoa browser bindings provide a local permission authority for tools acting on tabs and site-provided services.
+The Canoa browser clients provide a local permission authority for tools acting on tabs and site-provided services.
 
 - `chromium/`: Chrome/Chromium MV3 extension, named **Canoa**.
 - Additional browsers and SDKs may be added as independent implementations.

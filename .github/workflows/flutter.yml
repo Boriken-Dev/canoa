@@ -39,10 +39,10 @@ jobs:
         run: python app/tool/build.py chromium
       - name: Check extension assets are bundled locally
         run: |
-          test -f bindings/browser/chromium/ui/index.html
-          grep -F '../bridge.js' bindings/browser/chromium/ui/index.html
-          grep -F '../acp-page.js' bindings/browser/chromium/ui/index.html
-          grep -F '../acp-content.js' bindings/browser/chromium/ui/index.html
+          test -f clients/browser/chromium/ui/index.html
+          grep -F '../bridge.js' clients/browser/chromium/ui/index.html
+          grep -F '../acp-page.js' clients/browser/chromium/ui/index.html
+          grep -F '../acp-content.js' clients/browser/chromium/ui/index.html
       - name: Build web Wasm option
         run: flutter build web --release --wasm
         working-directory: app

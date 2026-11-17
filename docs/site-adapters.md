@@ -6,7 +6,7 @@ A Canoa site adapter is user-installed code that exposes a stable collection of 
 
 An adapter manifest names an id, a version, its runtime (`javascript` or `wasm`), a local entrypoint, exact origin matches and the tools it provides. A tool has a unique name, description and JSON Schema for its arguments. A versioned interface will map `tools/list` and `tools/call` to the adapter; the raw source code is never itself a transport.
 
-The manifest validator is in `bindings/browser/chromium/site-adapters.js`. Validation does **not** execute modules, install browser permissions or establish an MCP server.
+The manifest validator is in `clients/browser/chromium/site-adapters.js`. Validation does **not** execute modules, install browser permissions or establish an MCP server.
 
 Example:
 

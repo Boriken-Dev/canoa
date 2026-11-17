@@ -55,10 +55,10 @@ flutter test
 
 ```sh
 python app/tool/build.py chromium
-(cd bindings/browser/chromium && npm test)
+(cd clients/browser/chromium && npm test)
 ```
 
-Load `bindings/browser/chromium/` using `chrome://extensions` → Developer mode → Load unpacked. In a regular website, use the **Ask Canoa** context-menu action to attach its page or selected text to the local Flutter conversation. The packaging helper copies the Flutter UI to `ui/`. The extension connects the chat to a host over a proven link and offers an agent the browser's tools once a person grants them; see [browser integration](browser.md). The manifest's optional host permissions and userScripts policy are not a substitute for explicit user consent.
+Load `clients/browser/chromium/` using `chrome://extensions` → Developer mode → Load unpacked. In a regular website, use the **Ask Canoa** context-menu action to attach its page or selected text to the local Flutter conversation. The packaging helper copies the Flutter UI to `ui/`. The extension connects the chat to a host over a proven link and offers an agent the browser's tools once a person grants them; see [browser integration](browser.md). The manifest's optional host permissions and userScripts policy are not a substitute for explicit user consent.
 
 See [browser integration](browser.md).
 

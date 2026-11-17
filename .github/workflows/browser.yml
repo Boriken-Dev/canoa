@@ -13,4 +13,4 @@ jobs:
           node-version: "22"
       - name: Chromium permission tests
         run: npm test
-        working-directory: bindings/browser/chromium
+        working-directory: clients/browser/chromium

@@ -1,6 +1,6 @@
 # Canoa for Chromium
 
-Canoa is a Manifest V3 extension named **Canoa**, under `bindings/browser/chromium/`.
+Canoa is a Manifest V3 extension named **Canoa**, under `clients/browser/chromium/`.
 
 The canonical multi-session chat UI lives in root `app/` (Flutter); build with `python app/tool/build.py chromium` to embed the UI in the side panel or a full-page tab, where it reaches agents through the same provider a page does. A separate PWA build uses the same source.
 
@@ -55,4 +55,4 @@ There is still no production peer pairing UI, installed user-script runtime, cro
 
 ## Build the elevated CDP variant
 
-Use `python app/tool/build.py chromium --debug`. This produces a **separate** unpacked directory at `build/chromium-debug` with the privileged `debugger` permission, leaving `bindings/browser/chromium/manifest.json` unchanged. Load it explicitly using chrome://extensions → Developer mode → Load unpacked. The browser grants page is accessible under the extension Options menu. Installing the debug build and granting browser.debug is a high-privilege action; remote MCP transport and production peer approvals are not wired yet.
+Use `python app/tool/build.py chromium --debug`. This produces a **separate** unpacked directory at `build/chromium-debug` with the privileged `debugger` permission, leaving `clients/browser/chromium/manifest.json` unchanged. Load it explicitly using chrome://extensions → Developer mode → Load unpacked. The browser grants page is accessible under the extension Options menu. Installing the debug build and granting browser.debug is a high-privilege action; remote MCP transport and production peer approvals are not wired yet.

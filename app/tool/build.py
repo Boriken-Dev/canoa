@@ -366,12 +366,12 @@ def main() -> None:
     if opts.kind == "chromium":
         package_ui(
             APP / "build" / "web",
-            ROOT / "bindings" / "browser" / "chromium" / "ui",
+            ROOT / "clients" / "browser" / "chromium" / "ui",
         )
-        print("Packaged Flutter UI into bindings/browser/chromium/ui")
+        print("Packaged Flutter UI into clients/browser/chromium/ui")
         if opts.debug:
             package_debug_extension(
-                ROOT / "bindings" / "browser" / "chromium",
+                ROOT / "clients" / "browser" / "chromium",
                 ROOT / "build" / "chromium-debug",
             )
             print("Elevated debugger extension in build/chromium-debug")

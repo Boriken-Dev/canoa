@@ -1,6 +1,6 @@
 // The Canoa on this computer, as the extension's panel sees it: whether the browser can reach it, whether it runs, whether this
 // browser is paired with it, and what it serves. The service worker owns the pairing and the proof
-// (bindings/browser/chromium/acp-local.js); this is the panel's view of it and the person's requests to change it.
+// (clients/browser/chromium/acp-local.js); this is the panel's view of it and the person's requests to change it.
 import 'dart:convert';
 
 import 'local_host_stub.dart' if (dart.library.js_interop) 'local_host_web.dart' as platform;

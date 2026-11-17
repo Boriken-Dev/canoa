@@ -29,7 +29,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 (cd app && flutter analyze && flutter test)
 
 # Chromium extension (Node 22 or later)
-(cd bindings/browser/chromium && npm test)
+(cd clients/browser/chromium && npm test)
 
 # Documentation
 mkdocs build --strict

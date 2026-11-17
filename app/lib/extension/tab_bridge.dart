@@ -1,5 +1,5 @@
 // What the extension's service worker says about tabs and the sessions attached to them, as the panel sees it. The worker owns
-// the grants: this is the panel's view of them and the person's requests to change them (bindings/browser/chromium/tab-bindings.js).
+// the grants: this is the panel's view of them and the person's requests to change them (clients/browser/chromium/tab-bindings.js).
 import 'dart:convert';
 
 import 'tab_bridge_stub.dart' if (dart.library.js_interop) 'tab_bridge_web.dart' as platform;

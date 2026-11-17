@@ -1243,7 +1243,7 @@ fn a_setup_link_and_codes_are_only_in_the_one_answer_that_makes_them() {
 }
 
 /// Serves the portal over the real password and one-time code providers on a loopback port, for the browser run
-/// `bindings/browser/chromium/e2e/portal_totp.mjs`, until the file named by `CANOA_TEST_SERVE_UNTIL` exists:
+/// `clients/browser/chromium/e2e/portal_totp.mjs`, until the file named by `CANOA_TEST_SERVE_UNTIL` exists:
 /// `CANOA_TEST_SERVE_UNTIL=/tmp/stop cargo test -p canoa-host --features portal --lib serve_for_a_browser -- --ignored --nocapture`.
 #[test]
 #[ignore = "serves until a file exists, for a browser run"]

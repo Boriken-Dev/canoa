@@ -2,7 +2,7 @@
 
 **Discover. Connect. Route.**
 
-Canoa provides a common place to discover, authenticate and interact with local or remote agent services, without binding users to a single provider or client. It includes a responsive Flutter multi-session interface, browser-specific bindings that can offer authorized page/DevTools functionality through MCP, a Rust host (`canoa`) that serves local agents to paired keys, and a small Rust registry of services and client grants.
+Canoa provides a common place to discover, authenticate and interact with local or remote agent services, without binding users to a single provider or client. It includes a responsive Flutter multi-session interface, a browser extension that can offer authorized page/DevTools functionality through MCP, a Rust host (`canoa`) that serves local agents to paired keys, and a small Rust registry of services and client grants.
 
 !!! warning "Development status"
     Early development: nothing here implies a published binary or public service. The [roadmap](roadmap.md) is the one record of what exists.

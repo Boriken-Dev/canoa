@@ -1,5 +1,5 @@
 // What the panel tells the person about the Canoa on this computer, in each state, against a bridge that answers as the extension's
-// worker does (bindings/browser/chromium/acp-local.js).
+// worker does (clients/browser/chromium/acp-local.js).
 import 'dart:async';
 import 'dart:convert';
 

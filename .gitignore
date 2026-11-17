@@ -37,8 +37,8 @@ __pycache__/
 /app/.gitignore
 
 # Built extension UI
-/bindings/browser/chromium/ui/
-/bindings/browser/firefox/ui/
+/clients/browser/chromium/ui/
+/clients/browser/firefox/ui/
 
 # Docs build
 /site/

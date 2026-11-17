@@ -6,7 +6,7 @@ import 'popout_window.dart';
 
 /// What the browser extension's worker does for windows: it opens one with `chrome.windows.create` at the extension's own page,
 /// and tells when a window of the panel's has gone. A window gains nothing from being one: what it may ask of the worker is limited
-/// there (bindings/browser/chromium/tab-sessions.js).
+/// there (clients/browser/chromium/tab-sessions.js).
 abstract interface class PopoutBridge {
   /// Who this page is to the worker; only the panel opens windows.
   String get client;
