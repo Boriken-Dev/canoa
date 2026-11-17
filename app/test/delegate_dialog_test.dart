@@ -2,6 +2,7 @@
 // sends, a refusal that names the choice, and an answer that never came, which is shown as uncertain and never sent again by itself.
 
 import 'package:canoa/acp/delegate_targets.dart';
+import 'package:canoa/acp/delegate.dart' show delegateContextMethod;
 import 'package:canoa/chat/delegate_dialog.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
@@ -138,6 +139,123 @@ void main() {
     expect((a! as DelegateStarted).taskId, (b! as DelegateStarted).taskId);
     expect((b as DelegateStarted).repeated, isTrue);
     expect(host.started, hasLength(1));
+  });
+
+  testWidgets('a profile and its loadout are chosen among what the agent offers and sent by name', (tester) async {
+    await open(tester, targets: {
+      'targets': [
+        {
+          ..._target('claude', models: _models),
+          'profiles': [
+            {'name': 'review', 'loadouts': ['strict', 'quick']},
+            {'name': 'plain', 'loadouts': <String>[]},
+          ],
+        },
+      ],
+    });
+    expect(find.byKey(const Key('delegate loadout')), findsNothing, reason: 'no profile chosen yet');
+    await tester.enterText(find.byKey(const Key('delegate task field')), 'Review it');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('delegate profile')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('review').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('delegate loadout')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('strict').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('delegate send')));
+    await tester.runAsync(_settle);
+    await tester.pumpAndSettle();
+    final sent = host.sentOf('_canoa/delegate/start').single['params'] as Map<String, dynamic>;
+    expect([sent['profile'], sent['loadout']], ['review', 'strict']);
+  });
+
+  testWidgets('what the agent is given besides the task is shown in full first, and the task is sent with that preview', (tester) async {
+    await open(tester, targets: {'targets': [_target('claude', models: _models)]});
+    final held = {
+      'contextId': 'preview-1',
+      'kind': 'messages',
+      'text': 'The conversation of the agent, its most recent turns:\n\n[person]\nFix the build',
+      'items': [
+        {'name': 'person', 'bytes': 13},
+      ],
+      'skipped': <String>[],
+      'truncated': false,
+    };
+    host.contexts['messages'] = held;
+    await tester.enterText(find.byKey(const Key('delegate task field')), 'Carry on');
+    await tester.pump();
+    expect(find.byKey(const Key('delegate context preview')), findsNothing);
+    await tester.tap(find.byKey(const Key('delegate context')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('The recent turns of this conversation').last);
+    await tester.runAsync(_settle);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('delegate context preview')), findsOneWidget);
+    expect(find.textContaining('person  (13 bytes)'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('delegate context text')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('[person]\nFix the build'), findsOneWidget, reason: 'the whole text is there to read');
+    await tester.tap(find.byKey(const Key('delegate send')));
+    await tester.runAsync(_settle);
+    await tester.pumpAndSettle();
+    final asked = host.sentOf(delegateContextMethod).single['params'] as Map<String, dynamic>;
+    expect(asked['kind'], 'messages');
+    final sent = host.sentOf('_canoa/delegate/start').single['params'] as Map<String, dynamic>;
+    expect([sent['context'], sent['contextId']], ['messages', 'preview-1']);
+  });
+
+  testWidgets('with nothing to hand over the host says so and no task goes out until the person chooses the task text only', (tester) async {
+    await open(tester, targets: {'targets': [_target('claude', models: _models)]});
+    await tester.enterText(find.byKey(const Key('delegate task field')), 'Carry on');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('delegate context')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('The files this conversation touched').last);
+    await tester.runAsync(_settle);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('delegate context none')), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.byKey(const Key('delegate send'))).onPressed, isNull);
+    await tester.tap(find.byKey(const Key('delegate context')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Nothing: the task text only').last);
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(find.byKey(const Key('delegate send'))).onPressed, isNotNull);
+  });
+
+  testWidgets('the delegation setup shows what the host has and sends the whole setup the person made', (tester) async {
+    await open(tester, targets: {
+      'targets': [_target('claude', models: _models)],
+      'sources': ['claude'],
+      'default': 'claude',
+      'maxRunning': 2,
+      'context': ['messages'],
+      'offered': [
+        {'source': 'claude', 'title': 'CLAUDE'},
+        {'source': 'codex', 'title': 'CODEX'},
+      ],
+    });
+    await tester.tap(find.byKey(const Key('delegate setup open')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('delegation setup')), findsOneWidget);
+    expect(tester.widget<Switch>(find.descendant(of: find.byKey(const Key('delegation setup every')), matching: find.byType(Switch))).value, isFalse);
+    expect(tester.widget<Checkbox>(find.descendant(of: find.byKey(const Key('delegation setup agent claude')), matching: find.byType(Checkbox))).value, isTrue);
+    expect(tester.widget<Checkbox>(find.descendant(of: find.byKey(const Key('delegation setup agent codex')), matching: find.byType(Checkbox))).value, isFalse);
+    expect(tester.widget<Checkbox>(find.descendant(of: find.byKey(const Key('delegation setup messages')), matching: find.byType(Checkbox))).value, isTrue);
+    await tester.tap(find.byKey(const Key('delegation setup agent codex')));
+    await tester.tap(find.byKey(const Key('delegation setup files')));
+    await tester.enterText(find.byKey(const Key('delegation setup limit')), '3');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('delegation setup save')));
+    await tester.runAsync(_settle);
+    await tester.pumpAndSettle();
+    final sent = host.sentOf('_canoa/delegate/setup').single['params'] as Map<String, dynamic>;
+    expect(sent['sources'], ['claude', 'codex']);
+    expect(sent['default'], 'claude');
+    expect(sent['maxRunning'], 3);
+    expect(sent['context'], ['messages', 'files']);
+    expect(find.byKey(const Key('delegation setup')), findsNothing, reason: 'the host took it, so the setup is done');
   });
 
   testWidgets('a host that lists nothing says so', (tester) async {

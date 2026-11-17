@@ -64,6 +64,9 @@ final class DelegateHost {
   /// [silent] leaves a start unanswered.
   Map<String, Object?> targets = {'targets': <Object?>[]};
   String? refuseStart;
+
+  /// What the host answers a `context` request with, by kind; a kind with none is answered with an error.
+  final contexts = <String, Map<String, Object?>>{};
   bool silent = false;
   final started = <String, String>{};
 
@@ -87,11 +90,11 @@ final class DelegateHost {
           case delegateTargetsMethod:
             final only = message['params']['source'];
             reply(id, {
+              ...targets,
               'targets': [
                 for (final target in (targets['targets'] as List).cast<Map<String, Object?>>())
                   if (only == null || target['source'] == only) target,
               ],
-              if (targets['default'] != null) 'default': targets['default'],
             });
           case delegateStartMethod:
             final params = message['params'] as Map<String, dynamic>;
@@ -104,6 +107,13 @@ final class DelegateHost {
             final repeated = started.containsKey(key);
             final task = started.putIfAbsent(key, () => 'task-${started.length + 1}');
             reply(id, {'taskId': task, 'state': 'working', if (repeated) 'repeated': true});
+          case delegateContextMethod:
+            final held = contexts[message['params']['kind']];
+            if (held == null) {
+              incoming.add(jsonEncode({'jsonrpc': '2.0', 'id': id, 'error': {'code': -32602, 'message': 'this conversation has no turns to hand over yet'}}));
+            } else {
+              reply(id, held);
+            }
           case delegateHistoryMethod:
             reply(id, {'updates': histories[message['params']['taskId']] ?? const []});
           case 'session/prompt' || 'session/cancel' || null:

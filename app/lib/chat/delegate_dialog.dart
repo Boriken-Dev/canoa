@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -5,13 +6,15 @@ import 'package:flutter/material.dart';
 import '../acp/delegate_targets.dart';
 import '../selectable.dart';
 import '../session_store.dart';
+import 'delegation_setup_dialog.dart';
 
 /// Asks the person what to hand on and to whom, then has the host start it as a task of [session]: the same task the agent's own
 /// `delegate_task` makes, so the agent's `task_status` sees it and the Subagents list shows it. Resolves when the dialog closes.
 Future<void> showDelegateDialog(BuildContext context, SessionStore store, ChatSession session) =>
     showSelectableDialog<void>(context: context, builder: (_) => DelegateDialog(store: store, session: session));
 
-/// The choices in the order the person makes them: host, agent, account, model and effort, then where it works and the task.
+/// The choices in the order the person makes them: host, agent, account, model and effort, a profile and its loadout, then where it
+/// works, what it is given besides the task (shown in full before it goes) and the task.
 class DelegateDialog extends StatefulWidget {
   const DelegateDialog({super.key, required this.store, required this.session});
 
@@ -30,7 +33,13 @@ class _DelegateDialogState extends State<DelegateDialog> {
   bool _loading = true, _sending = false;
   String _host = _anyHost;
   DelegateTarget? _target;
-  String? _account, _model, _effort;
+  String? _account, _model, _effort, _profile, _loadout;
+
+  /// What the agent is given besides the task text: `task` (nothing), `messages` or `files`; and what the host showed of it.
+  String _context = 'task';
+  ContextPreview? _preview;
+  bool _previewing = false;
+  String? _previewProblem;
   final _task = TextEditingController(), _title = TextEditingController(), _folder = TextEditingController();
 
   /// Names the request being sent: kept while it is sent again unchanged, so the host never starts it twice.
@@ -72,12 +81,41 @@ class _DelegateDialogState extends State<DelegateDialog> {
 
   void _edited() => _requestId = _newId();
 
+  void _clearContext() {
+    _context = 'task';
+    _preview = null;
+    _previewProblem = null;
+  }
+
+  /// Asks the host what handing [kind] on would give the agent now, and shows it: what is sent is what the host built for this.
+  Future<void> _choosePreview(String kind) async {
+    setState(() {
+      _context = kind;
+      _preview = null;
+      _previewProblem = null;
+      _edited();
+      _previewing = kind != 'task';
+    });
+    if (kind == 'task') return;
+    final preview = await widget.store.delegateContext(widget.session, kind);
+    if (!mounted || _context != kind) return;
+    setState(() {
+      _previewing = false;
+      _preview = preview;
+      _previewProblem = preview == null ? 'The host has nothing of this conversation to hand over yet.' : null;
+      _edited();
+    });
+  }
+
   void _pick(DelegateTarget target) {
     _target = target;
     _host = target.hostLabel;
     _account = null;
     _model = null;
     _effort = null;
+    _profile = null;
+    _loadout = null;
+    if (target.remote) _clearContext();
     _problem = null;
     _uncertain = false;
     _edited();
@@ -101,6 +139,7 @@ class _DelegateDialogState extends State<DelegateDialog> {
   bool get _ready {
     final target = _target;
     if (target == null || _task.text.trim().isEmpty || _sending) return false;
+    if (_context != 'task' && _preview == null) return false;
     return !target.remote || _folder.text.trim().isNotEmpty;
   }
 
@@ -126,6 +165,10 @@ class _DelegateDialogState extends State<DelegateDialog> {
         model: target.remote ? null : _model,
         effort: target.remote ? null : _effort,
         account: target.remote ? null : _account,
+        profile: target.remote ? null : _profile,
+        loadout: target.remote ? null : _loadout,
+        context: _context == 'task' ? null : _context,
+        contextId: _context == 'task' ? null : _preview?.id,
       ),
     );
     if (!mounted) return;
@@ -234,6 +277,35 @@ class _DelegateDialogState extends State<DelegateDialog> {
                         }),
                       ),
                   ],
+                  if (target != null && !target.remote && target.profiles.isNotEmpty)
+                    DropdownButtonFormField<String?>(
+                      key: const Key('delegate profile'),
+                      initialValue: _profile,
+                      decoration: const InputDecoration(labelText: 'Profile'),
+                      items: [
+                        const DropdownMenuItem<String?>(value: null, child: Text('The agent\'s own')),
+                        for (final profile in target.profiles) DropdownMenuItem<String?>(value: profile.name, child: Text(profile.name)),
+                      ],
+                      onChanged: (profile) => setState(() {
+                        _profile = profile;
+                        _loadout = null;
+                        _edited();
+                      }),
+                    ),
+                  if (target != null && !target.remote && (target.profiles.where((profile) => profile.name == _profile).firstOrNull?.loadouts.isNotEmpty ?? false))
+                    DropdownButtonFormField<String?>(
+                      key: const Key('delegate loadout'),
+                      initialValue: _loadout,
+                      decoration: const InputDecoration(labelText: 'Loadout'),
+                      items: [
+                        const DropdownMenuItem<String?>(value: null, child: Text('The profile\'s own')),
+                        for (final loadout in target.profiles.firstWhere((profile) => profile.name == _profile).loadouts) DropdownMenuItem<String?>(value: loadout, child: Text(loadout)),
+                      ],
+                      onChanged: (loadout) => setState(() {
+                        _loadout = loadout;
+                        _edited();
+                      }),
+                    ),
                   TextField(
                     key: const Key('delegate folder'),
                     controller: _folder,
@@ -252,6 +324,23 @@ class _DelegateDialogState extends State<DelegateDialog> {
                     decoration: const InputDecoration(labelText: 'Name (optional)'),
                     onChanged: (_) => setState(_edited),
                   ),
+                  if (target != null && !target.remote)
+                    DropdownButtonFormField<String>(
+                      key: const Key('delegate context'),
+                      isExpanded: true,
+                      initialValue: _context,
+                      decoration: const InputDecoration(labelText: 'Give the agent besides the task'),
+                      items: const [
+                        DropdownMenuItem(value: 'task', child: Text('Nothing: the task text only')),
+                        DropdownMenuItem(value: 'messages', child: Text('The recent turns of this conversation')),
+                        DropdownMenuItem(value: 'files', child: Text('The files this conversation touched')),
+                      ],
+                      onChanged: (kind) => unawaited(_choosePreview(kind ?? 'task')),
+                    ),
+                  if (_previewing) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator(key: Key('delegate context loading'))),
+                  if (_previewProblem != null)
+                    Padding(padding: const EdgeInsets.only(top: 8), child: Text(_previewProblem!, key: const Key('delegate context none'), style: TextStyle(color: Theme.of(context).colorScheme.error))),
+                  if (_preview != null) _ContextPreviewBox(_preview!),
                   TextField(
                     key: const Key('delegate task field'),
                     controller: _task,
@@ -277,9 +366,43 @@ class _DelegateDialogState extends State<DelegateDialog> {
               ),
       ),
       actions: [
+        if (targets != null && targets.targets.isNotEmpty)
+          TextButton(key: const Key('delegate setup open'), onPressed: () => unawaited(showDelegationSetupDialog(context, widget.store, widget.session, targets)), child: const Text('Delegation setup')),
         TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
         FilledButton(key: const Key('delegate send'), onPressed: _ready ? _send : null, child: Text(_uncertain ? 'Send again' : 'Delegate')),
       ],
+    );
+  }
+}
+
+/// What the host will give the agent besides the task, in full, before anything is sent: each turn or file with its size, what was
+/// left out, and the exact text.
+class _ContextPreviewBox extends StatelessWidget {
+  const _ContextPreviewBox(this.preview);
+
+  final ContextPreview preview;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const Key('delegate context preview'),
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(border: Border.all(color: scheme.outlineVariant), borderRadius: BorderRadius.circular(6)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('The agent is given exactly this, before the task:', style: Theme.of(context).textTheme.labelMedium),
+        const SizedBox(height: 4),
+        for (final (name, bytes) in preview.items) Text('$name  ($bytes bytes)', style: const TextStyle(fontSize: 12)),
+        for (final line in preview.skipped) Text('Left out: $line', style: TextStyle(fontSize: 12, color: scheme.error)),
+        if (preview.truncated) const Text('Cut to fit the bound the host sets.', style: TextStyle(fontSize: 12)),
+        ExpansionTile(
+          key: const Key('delegate context text'),
+          tilePadding: EdgeInsets.zero,
+          title: const Text('The text', style: TextStyle(fontSize: 13)),
+          children: [ConstrainedBox(constraints: const BoxConstraints(maxHeight: 220), child: SingleChildScrollView(child: SelectableText(preview.text, style: const TextStyle(fontSize: 12))))],
+        ),
+      ]),
     );
   }
 }

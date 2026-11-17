@@ -28,6 +28,9 @@ const delegateStartMethod = '_canoa/delegate/start';
 /// The request that narrows what a session may delegate to, and sets its default and its limit.
 const delegateSetupMethod = '_canoa/delegate/setup';
 
+/// The request for what handing the conversation's turns or files on would give a task.
+const delegateContextMethod = '_canoa/delegate/context';
+
 /// A request of the app's that the host refused, with its words.
 final class DelegateRefusal {
   const DelegateRefusal(this.message);
@@ -96,6 +99,9 @@ final class DelegateTask {
   String title = '';
   String source = '';
   String? folder;
+
+  /// What the task was handed besides its text, as the host recorded it ("2 turns, 1,204 bytes"); null when only the task.
+  String? handed;
 
   /// What the task's own session spent, once the host has said; null while it has not, or the agent reported none.
   TaskUsage? usage;
@@ -360,6 +366,7 @@ final class DelegateTasks {
         task.source = _text(metadata['source']) ?? task.source;
         task.folder = _text(metadata['folder'], 1000) ?? task.folder;
         if (metadata['remote'] == true) task.remote = true;
+        task.handed = _handed(metadata['context']) ?? task.handed;
         task.usage = TaskUsage.parse(metadata['usage']) ?? task.usage;
         task.parent = _text(metadata['parentTaskId']) ?? task.parent;
       }
@@ -527,10 +534,15 @@ final class DelegateWire {
     return const DelegateUncertain();
   }
 
+  /// What handing [kind] (`messages` or `files`) of [sessionId] on would give a task now; null when the host has none to give.
+  Future<ContextPreview?> contextPreview(String sessionId, String kind, {Duration timeout = const Duration(seconds: 10)}) async =>
+      ContextPreview.parse(await _ask(delegateContextMethod, {'sessionId': sessionId, 'kind': kind}, timeout));
+
   /// Narrows what [sessionId] may delegate to ([sources]), sets the agent a task with none named goes to ([defaultSource]) and how
-  /// many tasks run at once ([maxRunning]); each is left alone when null. Whether the host took it.
-  Future<bool> setup(String sessionId, {List<String>? sources, String? defaultSource, int? maxRunning, Duration timeout = const Duration(seconds: 10)}) async =>
-      await _ask(delegateSetupMethod, {'sessionId': sessionId, 'sources': ?sources, 'default': ?defaultSource, 'maxRunning': ?maxRunning}, timeout) != null;
+  /// many tasks run at once ([maxRunning]); a null clears that setting, since the call states the whole setup. Whether the host took it.
+  /// [context] lists what the session's agent may attach to a task by its own call (`messages`, `files`; empty allows none).
+  Future<bool> setup(String sessionId, {List<String>? sources, String? defaultSource, int? maxRunning, List<String>? context, Duration timeout = const Duration(seconds: 10)}) async =>
+      await _ask(delegateSetupMethod, {'sessionId': sessionId, 'sources': sources, 'default': defaultSource, 'maxRunning': maxRunning, 'context': context ?? const <String>[]}, timeout) != null;
 
   /// The updates the host kept of [taskId]; null when it has none to give or did not answer.
   Future<List<Map<String, Object?>>?> history(String sessionId, String taskId, {Duration timeout = const Duration(seconds: 10)}) async {
@@ -546,4 +558,17 @@ final class DelegateWire {
     _waiting.clear();
     unawaited(_events.close());
   }
+}
+
+/// The host's record of the context a task was handed, in words; null when it holds none.
+String? _handed(Object? raw) {
+  if (raw is! Map || raw['kind'] is! String) return null;
+  final items = raw['items'] is List ? (raw['items'] as List).length : 0;
+  final what = switch (raw['kind']) {
+    'messages' => '$items ${items == 1 ? 'turn' : 'turns'} of the conversation',
+    'files' => '$items ${items == 1 ? 'file' : 'files'} it touched',
+    final other => other as String,
+  };
+  final bytes = raw['bytes'] is int ? ', ${raw['bytes']} bytes' : '';
+  return '$what$bytes${raw['truncated'] == true ? ', cut to fit' : ''}';
 }

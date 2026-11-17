@@ -3766,6 +3766,23 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     return client.delegateTargets(remote, source: source);
   }
 
+  /// What handing [kind] (`messages` or `files`) of [session] on would give a task, as the host would build it now.
+  Future<ContextPreview?> delegateContext(ChatSession session, String kind) async {
+    final client = _clients[session.id];
+    final remote = session.remoteSessionId;
+    if (client == null || remote == null) return null;
+    return client.delegateContext(remote, kind);
+  }
+
+  /// Sets what [session] may delegate to: the agents ([sources]), the one a task with none named goes to, how many run at once, and
+  /// which context its agent may attach by its own call. Whether the host took it.
+  Future<bool> delegateSetup(ChatSession session, {List<String>? sources, String? defaultSource, int? maxRunning, List<String>? context}) async {
+    final client = _clients[session.id];
+    final remote = session.remoteSessionId;
+    if (client == null || remote == null) return false;
+    return client.delegateSetup(remote, sources: sources, defaultSource: defaultSource, maxRunning: maxRunning, context: context);
+  }
+
   /// Hands [request] to the host as a task of [session]: the same A2A task the agent's own `delegate_task` makes, so the agent's
   /// `task_status` sees it and the lists here show it as the host's events arrive. Never sent again by itself; a [DelegateUncertain]
   /// is the person's to settle.

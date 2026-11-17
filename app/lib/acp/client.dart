@@ -156,6 +156,13 @@ final class VerifiedAgent {
   /// What [sessionId] may hand a task to; null when the host did not say. [source] asks for that agent's models as well.
   Future<DelegateTargets?> delegateTargets(String sessionId, {String? source}) async => await _delegate?.targets(sessionId, source: source);
 
+  /// What handing [kind] on would give a task; null when the host did not say.
+  Future<ContextPreview?> delegateContext(String sessionId, String kind) async => await _delegate?.contextPreview(sessionId, kind);
+
+  /// Narrows what [sessionId] may delegate to; whether the host took it.
+  Future<bool> delegateSetup(String sessionId, {List<String>? sources, String? defaultSource, int? maxRunning, List<String>? context}) async =>
+      await _delegate?.setup(sessionId, sources: sources, defaultSource: defaultSource, maxRunning: maxRunning, context: context) ?? false;
+
   /// Asks the host to start the person's own task in [sessionId].
   Future<DelegateOutcome> delegateStart(String sessionId, DelegateRequest request) async =>
       await _delegate?.start(sessionId, request) ?? const DelegateRefused('This connection takes no tasks.');

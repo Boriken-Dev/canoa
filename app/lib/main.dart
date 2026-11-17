@@ -49,6 +49,7 @@ import 'chat/cache_lifetime.dart';
 import 'chat/modes.dart' show modeEntries, modeOptionIn;
 import 'chat/session_options.dart' show OptionRole, optionIn;
 import 'chat/delegate_dialog.dart';
+import 'chat/delegation_setup_dialog.dart';
 import 'chat/git_changes.dart' show GitReader;
 import 'chat/inspector.dart';
 import 'chat/timing_log.dart';
@@ -3052,6 +3053,9 @@ class _CanoaHome extends StatelessWidget {
         if (session != null && store.canDelegate(session))
           PaletteItem('Delegate task', () => unawaited(showDelegateDialog(context, store, session)),
               detail: 'Hand a task to another agent, model or host', icon: Icons.account_tree_outlined),
+        if (session != null && store.canDelegate(session))
+          PaletteItem('Delegation setup', () => unawaited(openDelegationSetup(context, store, session)),
+              detail: 'Which agents this conversation may delegate to, and what it may attach', icon: Icons.tune),
         if (session != null)
           if (workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint, peerId: session.peerId).target case final target?)
             for (final action in workspaceOpener.actionsFor(WorkspaceContext.palette, target))

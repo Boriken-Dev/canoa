@@ -77,6 +77,7 @@ class ChildFacts extends StatelessWidget {
       if (task.source.isNotEmpty) 'Runs on ${task.source}',
       if (task.folder != null) 'in ${task.folder}',
       if (task.remote) 'on another machine',
+      if (task.handed != null) 'given ${task.handed}',
       if (parent != null) 'started by ${parent!.title}' else if (task.native) "started by the conversation's agent",
     ].join(' ');
     Widget part(String label, Widget body, Key key) => Padding(
