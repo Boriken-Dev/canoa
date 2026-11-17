@@ -15,10 +15,9 @@ Future<Map<Object?, Object?>> _ask(HostControl control, String method, Map<Strin
   return result is Map<Object?, Object?> ? result : const {};
 }
 
-/// Reads a registry's list through the host's `registry/fetch`, which holds the limits (no redirect, 20 seconds, 4 MiB). While the
-/// host is down, [direct] reads it here when this app can; a refusal of the host is a [RegistryRefusal] with its words.
-RegistryFetch controlRegistryFetch(HostControl control, {RegistryFetch? direct, bool Function()? hostUp}) => (uri) async {
-  if (direct != null && !(hostUp?.call() ?? true)) return direct(uri);
+/// Reads a registry's list through the host's `registry/fetch`, which holds the limits (no redirect, 20 seconds, 4 MiB). A refusal
+/// of the host, or a host that cannot be reached, is a [RegistryRefusal] with its words.
+RegistryFetch controlRegistryFetch(HostControl control) => (uri) async {
   try {
     final answer = await _ask(control, 'registry/fetch', {'url': uri.toString()}, const Duration(seconds: 40));
     final body = answer['body'];
@@ -26,13 +25,15 @@ RegistryFetch controlRegistryFetch(HostControl control, {RegistryFetch? direct, 
     return body;
   } on ControlFailed catch (error) {
     throw RegistryRefusal(error.message);
+  } on RegistryRefusal {
+    rethrow;
+  } on Object catch (error) {
+    throw RegistryRefusal('The host could not be reached: $error');
   }
 };
 
-/// Looks a program up on the host's PATH through `host/which`; null when it is not there or the host cannot say. While the host
-/// is down, [direct] looks on this computer when this app can.
-FindProgram controlFindProgram(HostControl control, {FindProgram? direct, bool Function()? hostUp}) => (program) async {
-  if (direct != null && !(hostUp?.call() ?? true)) return direct(program);
+/// Looks a program up on the host's PATH through `host/which`; null when it is not there or the host cannot say.
+FindProgram controlFindProgram(HostControl control) => (program) async {
   try {
     final answer = await _ask(control, 'host/which', {'names': [program]}, const Duration(seconds: 20));
     final found = (answer['found'] as Map<Object?, Object?>?)?[program];
@@ -42,20 +43,15 @@ FindProgram controlFindProgram(HostControl control, {FindProgram? direct, bool F
   }
 };
 
-/// The documents kept by the host (`store/contents`, `store/contents_put`), one for each catalog. While the host is down [direct]
-/// keeps them, when this app can; a document that cannot be had is none, since the cache is only a cache.
+/// The documents kept by the host (`store/contents`, `store/contents_put`), one for each catalog; a document that cannot be had is
+/// none, since the cache is only a cache.
 final class ControlContentsStorage implements ContentsStorage {
-  ControlContentsStorage(this._control, {this.direct, this.hostUp});
+  ControlContentsStorage(this._control);
 
   final HostControl _control;
-  final ContentsStorage? direct;
-  final bool Function()? hostUp;
-
-  ContentsStorage? get _instead => (hostUp?.call() ?? true) ? null : direct;
 
   @override
   Future<String?> read(String label) async {
-    if (_instead case final other?) return other.read(label);
     try {
       final document = (await _ask(_control, 'store/contents', {'label': label}, const Duration(seconds: 30)))['document'];
       return document is String ? document : null;
@@ -66,7 +62,6 @@ final class ControlContentsStorage implements ContentsStorage {
 
   @override
   Future<void> write(String label, String json) async {
-    if (_instead case final other?) return other.write(label, json);
     await _ask(_control, 'store/contents_put', {'label': label, 'document': json}, const Duration(seconds: 30));
   }
 }

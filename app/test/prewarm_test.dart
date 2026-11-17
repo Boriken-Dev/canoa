@@ -1,9 +1,6 @@
 // What a draft knows before Send, and how its choices go to the agent when it starts: nothing is started before Send, the
 // models and modes come from what the source listed or last offered, the mode and model go together with the effort after the
-// model, and a program is looked up on PATH once while PATH is unchanged.
-import 'dart:io';
-
-import 'package:canoa/acp/local_agent_io.dart' show findProgram, pathLookupsRun;
+// model.
 import 'package:canoa/chat/session_options.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
@@ -19,15 +16,6 @@ SessionStore _remembering() => SessionStore(
 );
 
 void main() {
-  test('a program is looked up on PATH once while PATH is unchanged', () async {
-    final program = Platform.isWindows ? 'where' : 'sh';
-    final first = await findProgram(program);
-    expect(first, isNotNull);
-    final before = pathLookupsRun;
-    expect(await findProgram(program), first);
-    expect(pathLookupsRun, before, reason: 'the second lookup came from what the first found');
-  });
-
   test('a program that lists its modes in its session has them before it starts', () {
     final choices = SourceChoices.parse(
       '{"known":true,"modes":[{"id":"default","name":"Manual"},{"id":"plan"}],"default_mode":"default",'

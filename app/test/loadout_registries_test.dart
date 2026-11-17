@@ -10,7 +10,6 @@ import 'dart:io';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/loadout/loadout_controller.dart';
 import 'package:canoa/loadout/mcp_registry.dart';
-import 'package:canoa/loadout/registry_fetch.dart';
 import 'package:canoa/profile/profile_home_io.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -25,6 +24,16 @@ Map<String, Object?> teamServer() => {
     {'type': 'streamable-http', 'url': 'https://tracker.team.test/mcp'},
   ],
 };
+
+/// What the host's `registry/fetch` does for the app, against a server of the test's own.
+Future<String> _read(Uri uri) async {
+  final client = HttpClient();
+  try {
+    return await utf8.decodeStream(await (await client.getUrl(uri)).close());
+  } finally {
+    client.close();
+  }
+}
 
 void main() {
   test('registries are a list of addresses in [store], in the order added, that the file keeps', () {
@@ -71,7 +80,7 @@ void main() {
         return changed;
       },
       agents: const ['Claude'],
-      fetch: fetchRegistry,
+      fetch: _read,
     );
     try {
       final address = 'http://127.0.0.1:${server.port}';

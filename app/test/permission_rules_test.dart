@@ -6,7 +6,6 @@ import 'dart:io';
 import 'package:canoa/ledger/ledger_backend_io.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/permissions/permission_rules.dart';
-import 'package:canoa/permissions/real_path_io.dart' show findRepoRoot, resolveExisting;
 import 'package:flutter_test/flutter_test.dart';
 
 const _source = 'Scripted';
@@ -294,25 +293,6 @@ void main() {
       expect(_allows(rule, _edit('/work/calc/src/pkg'), real: real), isFalse);
       expect(_allows(rule, _edit('/work/calc/src/a.js'), real: (_) => null), isFalse, reason: 'a link that cannot be followed');
       expect(scopeProblem(RuleType.path, '/work/calc/src', _edit('/work/calc/src/out/x')!, _folder, real: real), isNotNull);
-    });
-
-    test('real links on this machine are followed, to the deepest part that exists', () {
-      final dir = Directory.systemTemp.createTempSync('canoa-rules-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final inside = Directory('${dir.path}/folder/src')..createSync(recursive: true);
-      final outside = Directory('${dir.path}/outside')..createSync();
-      try {
-        Link('${inside.path}/out').createSync(outside.path);
-      } on FileSystemException {
-        markTestSkipped('this machine cannot make a link here');
-        return;
-      }
-      final folder = cleanPath('${dir.path}/folder')!;
-      final scope = '$folder/src';
-      expect(pathProblem(scope: scope, file: '$scope/a.js', folder: folder, real: resolveExisting), isNull, reason: 'a file not made yet');
-      expect(pathProblem(scope: scope, file: '$scope/out/a.js', folder: folder, real: resolveExisting), isNotNull);
-      expect(pathProblem(scope: scope, file: '$scope/out/deeper/new/a.js', folder: folder, real: resolveExisting), isNotNull);
-      expect(resolveExisting('${dir.path}/nowhere/x/y'), isNotNull, reason: 'what does not exist is kept as written after the part that does');
     });
   });
 
@@ -736,25 +716,6 @@ void main() {
 String? pathsProblem(RealPath? real) => folderProblem(_folder, real: real);
 
 void fileBackendTests() {
-  group('a linked worktree', () {
-    test('counts as its main repository', () {
-      final dir = Directory.systemTemp.createTempSync('canoa-repos-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final main = Directory('${dir.path}/main/.git/worktrees/w')..createSync(recursive: true);
-      final tree = Directory('${dir.path}/tree/sub')..createSync(recursive: true);
-      File('${dir.path}/tree/.git').writeAsStringSync('gitdir: ${main.path}\n');
-      final plain = Directory('${dir.path}/main/pkg')..createSync();
-      final root = cleanPath('${dir.path}/main');
-      expect(cleanPath(findRepoRoot(tree.path)!), root, reason: 'a worktree maps to the repository it was made from');
-      expect(cleanPath(findRepoRoot(plain.path)!), root);
-      File('${dir.path}/tree/.git').writeAsStringSync('gitdir: ../main/.git/worktrees/w\n');
-      expect(cleanPath(findRepoRoot(tree.path)!), root, reason: 'a relative gitdir is read from the worktree');
-      File('${dir.path}/tree/.git').writeAsStringSync('not a gitdir line');
-      expect(cleanPath(findRepoRoot(tree.path)!), cleanPath('${dir.path}/tree'));
-      expect(findRepoRoot('${dir.path}/nowhere'), anyOf(isNull, isNot(contains('nowhere'))));
-    });
-  });
-
   group('the rules file', () {
     late Directory dir;
     setUp(() => dir = Directory.systemTemp.createTempSync('canoa-rulesfile-'));

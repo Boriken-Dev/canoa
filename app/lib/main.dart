@@ -91,7 +91,6 @@ import 'popout/platform.dart' as popout_platform;
 import 'popout/popout_app.dart';
 import 'popout/popout_hub.dart';
 import 'permissions/protected_paths.dart' show ProtectedPaths;
-import 'permissions/real_path.dart';
 import 'permissions/rule_log.dart';
 import 'profile/profile_home.dart' show ProfileHome;
 import 'served/control_overlays.dart' show ControlOverlayManager;
@@ -126,8 +125,6 @@ import 'sources/readiness.dart';
 import 'sources/sources.dart';
 import 'loadout/loadout_editor.dart' show LoadoutDraft;
 import 'loadout/loadouts_section.dart';
-import 'loadout/registry_fetch.dart';
-import 'store/contents_storage_platform.dart';
 import 'store/store_index_view.dart';
 import 'store/store_section.dart';
 import 'store/store_selection.dart';
@@ -254,8 +251,6 @@ Future<void> main(List<String> args) async {
       config: _parentFolder(configFile),
       protected: config.protectedPaths == null ? null : ProtectedPaths(config.protectedPaths!),
     ),
-    real: platformRealPath,
-    repoRoot: platformRepoRoot,
   );
   await rules.load();
   final drafts = DraftKeeper(hostState == null ? platformDraftBackend(configPath: desktopConfigPath()) : HostDraftBackend(hostState));
@@ -283,7 +278,7 @@ class CanoaApp extends StatefulWidget {
     super.key, this.store, this.config = const CanoaConfig(),
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
-    this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
+    this.isGitRepository, this.folderExists, this.listFolder, this.resolveInside, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
     this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection,
   });
@@ -349,6 +344,10 @@ class CanoaApp extends StatefulWidget {
   final bool Function(String folder)? isGitRepository;
   @visibleForTesting
   final bool Function(String folder)? folderExists;
+  @visibleForTesting
+  final Future<List<String>> Function(String folder)? listFolder;
+  @visibleForTesting
+  final Future<InsideFile?> Function(String folder, String relative)? resolveInside;
   @visibleForTesting
   final Future<String?> Function()? pickFolder;
   @visibleForTesting
@@ -871,20 +870,16 @@ class _CanoaAppState extends State<CanoaApp> {
     key: _loadoutKey,
     embedded: true,
     selection: _storeSelection,
-    contentsStorage: _control == null
-        ? platformContentsStorage(_home?.configDir)
-        : ControlContentsStorage(_control, direct: platformContentsStorage(_home?.configDir), hostUp: () => _hostUp),
+    contentsStorage: _control == null ? null : ControlContentsStorage(_control),
     config: config,
     home: _home,
     onSave: _saveLoadout,
     agents: _profileAgents,
     programs: _programs,
     extensionTypes: _storeTypes(),
-    // The host reads registries and looks programs up; the page never does, and a desktop whose host is down reads them itself.
-    fetchRegistry: _control == null
-        ? (kIsWeb ? null : fetchRegistry)
-        : controlRegistryFetch(_control, direct: kIsWeb ? null : fetchRegistry, hostUp: () => _hostUp),
-    findProgram: _control == null ? findProgram : controlFindProgram(_control, direct: kIsWeb ? null : findProgram, hostUp: () => _hostUp),
+    // The host reads registries and looks programs up, for a page and the desktop alike.
+    fetchRegistry: _control == null ? null : controlRegistryFetch(_control),
+    findProgram: _control == null ? null : controlFindProgram(_control),
     index: ControlStoreIndex.over(_control)?.catalogs,
   );
 
@@ -1073,12 +1068,14 @@ class _CanoaAppState extends State<CanoaApp> {
   bool get _viaHost => _hostFolders != null && _hostUp;
 
   /// The files of the host a session runs on, when this app has a channel to it: its own host, or the one that served this page.
-  WorkspaceFiles? _filesOf(ChatSession session) {
+  WorkspaceFiles? _filesOf(ChatSession session) => _runsOnThisHost(session) ? _hostFiles : null;
+
+  /// Whether [session] runs on the host this app reaches: the one that served this page, or this computer's own.
+  bool _runsOnThisHost(ChatSession session) {
     final served = widget.served;
-    final here = served == null
+    return served == null
         ? session.place == SessionPlace.local || session.place == SessionPlace.host
         : session.peerId == null || session.peerId == served.host.peer;
-    return here ? _hostFiles : null;
   }
 
   late final ControlTerminals? _terminals = _control == null ? null : ControlTerminals(_control);
@@ -1129,20 +1126,15 @@ class _CanoaAppState extends State<CanoaApp> {
   /// What the host [session] runs on offers of a shell: the terminal of the host this app reaches when it grants one; a direct agent
   /// endpoint says it offers none; nothing for any other host, which the Terminal section reaches.
   TerminalAccess? _terminalOf(ChatSession session) {
-    final served = widget.served;
-    final here = served == null
-        ? session.place == SessionPlace.local || session.place == SessionPlace.host
-        : session.peerId == null || session.peerId == served.host.peer;
-    if (here) {
+    if (_runsOnThisHost(session)) {
       final terminals = _terminals;
       return terminals != null && (_grants?.may(HostGrants.terminal) ?? false) ? TerminalOnHost(terminals) : null;
     }
     final direct = config.connections.where((each) => each.kind == ConnectionKind.acp && each.peer.toLowerCase() == session.peerId?.toLowerCase());
     return direct.isEmpty ? null : const TerminalRefused('This is a direct agent endpoint: it offers a session and no shell.');
   }
-  /// Whether [session]'s folder is on a computer this app can ask about links and repositories: the host it is a client of, else
-  /// this computer.
-  bool _pathsOnHost(ChatSession session) => _viaHost ? _filesOf(session) != null : !kIsWeb && session.place == SessionPlace.local;
+  /// Whether [session]'s folder is on a computer this app can ask about links and repositories: the host it is a client of.
+  bool _pathsOnHost(ChatSession session) => _viaHost && _filesOf(session) != null;
 
   Worktrees? _localWorktrees() => _control == null ? null : controlWorktrees(_control);
 
@@ -1656,7 +1648,7 @@ class _CanoaAppState extends State<CanoaApp> {
           if (pathFitsSystem(remote?.os, folder) && (remote?.folders.exists(folder) ?? true)) folder,
       ].take(8).toList();
     }
-    return folders.where(widget.folderExists ?? (_viaHost ? _hostFolders!.exists : folderExists)).take(8).toList();
+    return folders.where(widget.folderExists ?? (_viaHost ? _hostFolders!.exists : (_) => true)).take(8).toList();
   }
 
   List<String> get _recentFolders => _recentFoldersOn(null);
@@ -2061,9 +2053,7 @@ class _CanoaAppState extends State<CanoaApp> {
         draft.wantsWorktree &&
         (widget.isGitRepository != null
             ? widget.isGitRepository!(folder)
-            : _viaHost
-                ? await _hostFolders!.isRepository(folder)
-                : inGitRepository(folder));
+            : _viaHost && await _hostFolders!.isRepository(folder));
     final starting = _Starting();
     _inFlight.add(starting);
     try {
@@ -2704,28 +2694,22 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
-  /// The names an `@` offers in [folder]: the host's, or this computer's while a desktop's host does not answer.
+  /// The names an `@` offers in [folder], which the host lists; none while it does not answer.
   Future<List<String>> _mentionsOf(String folder) async {
-    if (_viaHost) {
-      try {
-        return await _hostFolders!.mentions(folder);
-      } on Object {
-        if (widget.served != null || !canRunLocalAgents) return const [];
-      }
+    try {
+      return await _hostFolders!.mentions(folder);
+    } on Object {
+      return const [];
     }
-    return canRunLocalAgents ? listFolderEntries(folder) : const [];
   }
 
-  /// The file or folder [relative] names inside [folder], from the host, or this computer while a desktop's host does not answer.
+  /// The file or folder [relative] names inside [folder], from the host; null while it does not answer.
   Future<InsideFile?> _resolveIn(String folder, String relative) async {
-    if (_viaHost) {
-      try {
-        return await _hostFolders!.resolve(folder, relative);
-      } on Object {
-        if (widget.served != null || !canRunLocalAgents) return null;
-      }
+    try {
+      return await _hostFolders!.resolve(folder, relative);
+    } on Object {
+      return null;
     }
-    return canRunLocalAgents ? resolveInside(folder, relative) : null;
   }
 
   /// What the host makes [session]'s scratch folder from, null for a session made no id here.
@@ -2761,13 +2745,10 @@ class _CanoaAppState extends State<CanoaApp> {
     sources: _sources,
     checks: _checks,
     recentFolders: _recentFolders,
-    inGitRepository: widget.isGitRepository ?? (_viaHost ? _hostFolders!.inRepository : inGitRepository),
+    inGitRepository: widget.isGitRepository ?? (_viaHost ? _hostFolders!.inRepository : (_) => false),
     foldersChanged: _remoteReady.isEmpty ? _hostFolders : Listenable.merge([?_hostFolders, for (final remote in _remoteReady.values) remote.folders]),
-    foldersReadable: (session) => session.host != null
-        ? false
-        : _viaHost
-            ? _filesOf(session) != null
-            : session.place == SessionPlace.local,
+    foldersReadable: (session) =>
+        session.host == null && (widget.listFolder != null ? session.place == SessionPlace.local : _viaHost && _filesOf(session) != null),
     pickFolder: widget.pickFolder ?? (widget.served != null ? _pickHostFolder : canRunLocalAgents ? () => getDirectoryPath() : null),
     // A served page has no file system: the host makes a chat's folder when the session opens.
     hosts: _hostChoices,
@@ -2789,8 +2770,8 @@ class _CanoaAppState extends State<CanoaApp> {
     statFile: widget.statFile ?? (canRunLocalAgents ? localFileSize : null),
     uploadFile: widget.served == null ? null : _upload,
     hostFiles: widget.served == null ? null : _onServedHost,
-    listFolder: _viaHost || canRunLocalAgents ? _mentionsOf : null,
-    resolveInside: _viaHost || canRunLocalAgents ? _resolveIn : null,
+    listFolder: widget.listFolder ?? (_viaHost ? _mentionsOf : null),
+    resolveInside: widget.resolveInside ?? (_viaHost ? _resolveIn : null),
     clipboard: widget.clipboard ?? const SystemClipboard(),
     overlays: config.overlays.keys.toList(),
     defaultOverlays: config.defaultOverlays,

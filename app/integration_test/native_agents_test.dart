@@ -10,7 +10,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:canoa/acp/local_agent.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
@@ -30,6 +29,18 @@ List<Map<String, dynamic>> _records() {
   final file = File(_record!);
   if (!file.existsSync()) return const [];
   return [for (final line in file.readAsLinesSync()) if (line.isNotEmpty) jsonDecode(line) as Map<String, dynamic>];
+}
+
+/// The first file PATH finds for [program], with the endings Windows adds.
+Future<String?> findProgram(String program) async {
+  final names = Platform.isWindows ? [for (final ending in ['', '.exe', '.cmd', '.bat']) '$program$ending'] : [program];
+  for (final directory in (Platform.environment['PATH'] ?? '').split(Platform.isWindows ? ';' : ':')) {
+    for (final name in names) {
+      final file = File('$directory${Platform.pathSeparator}$name');
+      if (directory.isNotEmpty && file.existsSync()) return file.path;
+    }
+  }
+  return null;
 }
 
 void main() {

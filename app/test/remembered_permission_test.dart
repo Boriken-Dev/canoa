@@ -153,7 +153,7 @@ Future<_Shown> _shown(WidgetTester tester,
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final kept = backend ?? MemoryLedgerBackend();
   final list = rules ?? PermissionRules(kept, real: _plain);
-  final store = SessionStore(rules: list)..pathsOnHost = pathsOnHost;
+  final store = SessionStore(rules: list)..pathsOnHost = pathsOnHost ?? ((session) => session.place == SessionPlace.local);
   final agent = _Agent();
   final session = await tester.runAsync(() => agent.start(store)) as ChatSession;
   await tester.pumpWidget(CanoaApp(store: store, config: const CanoaConfig()));

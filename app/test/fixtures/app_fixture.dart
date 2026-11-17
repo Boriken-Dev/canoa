@@ -10,6 +10,7 @@ import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/accounts/accounts_host.dart';
 import 'package:canoa/acp/agent_commands.dart';
 import 'package:canoa/acp/browser_connect.dart' show ConnectEndpoint;
+import 'package:canoa/acp/local_agent.dart' show InsideFile;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity, ClipboardReader;
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/desktop_shell.dart';
@@ -107,6 +108,8 @@ Future<List<CanoaConfig>> pumpApp(
   ServedApp? served,
   ConnectEndpoint? connectEndpoint,
   Future<CanoaConfig> Function()? readConfig,
+  Future<List<String>> Function(String folder)? listFolder,
+  Future<InsideFile?> Function(String folder, String relative)? resolveInside,
   ShellLayout? layout,
   ConnectionProbe? probe,
   Future<RemoteHost> Function(Connection connection)? openRemote,
@@ -128,6 +131,8 @@ Future<List<CanoaConfig>> pumpApp(
     readConfig: readConfig,
     isGitRepository: (folder) => folder.endsWith('repo'),
     folderExists: folderExists ?? (_) => true,
+    listFolder: listFolder,
+    resolveInside: resolveInside,
     pickFolder: pickFolder ?? () async => '/work/repo',
     pickFiles: pickFiles ?? () async => const [],
     statFile: (path) async => files[path],

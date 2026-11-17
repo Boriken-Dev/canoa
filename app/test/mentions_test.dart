@@ -2,7 +2,7 @@
 // / list has the agent's commands and Canoa's own actions in two groups, and + offers Slash commands.
 import 'dart:io';
 
-import 'package:canoa/acp/local_agent.dart' show listFolderEntries, resolveInside;
+import 'package:canoa/acp/local_agent.dart' show InsideFile;
 import 'package:canoa/chat/agent_events.dart' show AgentCommandInfo;
 import 'package:canoa/chat/mentions.dart' show rankMentions;
 import 'package:canoa/session_store.dart';
@@ -35,12 +35,27 @@ final class _Tree {
   String get outside => '${root.path}${Platform.pathSeparator}outside.txt';
 }
 
+/// What the host lists for an `@`: the files under [folder] as paths relative to it, a folder's ending in a slash.
+Future<List<String>> _list(String folder) async {
+  final root = Directory(folder);
+  return [
+    await for (final entry in root.list(recursive: true, followLinks: false))
+      '${entry.path.substring(root.path.length + 1).replaceAll(Platform.pathSeparator, '/')}${entry is Directory ? '/' : ''}',
+  ];
+}
+
+/// What the host answers for a name picked: the file under [folder] it names.
+Future<InsideFile?> _resolve(String folder, String relative) async {
+  final file = File('$folder${Platform.pathSeparator}${relative.replaceAll('/', Platform.pathSeparator)}');
+  return await file.exists() && !relative.split('/').contains('..') ? (path: file.path, folder: false, size: await file.length()) : null;
+}
+
 Future<(SessionStore, OptionsAgent, _Tree)> _started(WidgetTester tester, {Size size = const Size(1280, 800)}) async {
   final tree = _Tree();
   addTearDown(() => tree.root.deleteSync(recursive: true));
   final agent = OptionsAgent();
   final store = SessionStore();
-  await pumpApp(tester, store, linked: agent.openLink, size: size, pickFolder: () async => tree.folder.path);
+  await pumpApp(tester, store, linked: agent.openLink, size: size, pickFolder: () async => tree.folder.path, listFolder: _list, resolveInside: _resolve);
   await newSession(tester);
   await chooseSource(tester, 'Scripted');
   await openFolder(tester);
@@ -71,77 +86,6 @@ void main() {
       expect(rankMentions(entries, 'zzz', limit: 5), isEmpty);
       expect(rankMentions(entries, '', limit: 2), ['README.md', 'src/'], reason: 'with nothing typed, the top level');
       expect(rankMentions(entries, '../x', limit: 5), isEmpty);
-    });
-
-    test('outside a repository the folder is walked, with no list of names left out and a bound on count and depth', () async {
-      final tree = _Tree();
-      addTearDown(() => tree.root.deleteSync(recursive: true));
-      tree.write('work/node_modules/dep/index.js', 'x');
-      tree.write('work/.hidden/note.txt', 'x');
-      tree.write('work/a/b/c/d/e/deep.txt', 'x');
-      final entries = await listFolderEntries(tree.folder.path);
-      expect(entries, containsAll(['notes.txt', 'src/', 'src/main.dart', 'src/util.dart', 'node_modules/dep/index.js', '.hidden/note.txt']));
-      expect(entries.where((entry) => entry.contains('outside')), isEmpty);
-      final shallow = await listFolderEntries(tree.folder.path, maxDepth: 2);
-      expect(shallow, contains('a/b/c/'));
-      expect(shallow, isNot(contains('a/b/c/d/e/')), reason: 'deeper than the bound');
-      expect((await listFolderEntries(tree.folder.path, maxEntries: 4)).length, lessThanOrEqualTo(4));
-    });
-
-    test('in a git repository the files are git\'s: tracked and untracked, never what an ignore rule covers', () async {
-      final tree = _Tree();
-      addTearDown(() => tree.root.deleteSync(recursive: true));
-      final folder = tree.folder.path;
-      Future<bool> git(List<String> args) async {
-        try {
-          return (await Process.run('git', ['-C', folder, ...args])).exitCode == 0;
-        } on ProcessException {
-          return false;
-        }
-      }
-
-      if (!await git(['init', '-q'])) {
-        markTestSkipped('git is not here');
-        return;
-      }
-      tree.write('work/.gitignore', 'dist/\n*.log\n');
-      tree.write('work/node_modules/dep/index.js', 'ignored by name only if the repository says so');
-      tree.write('work/dist/out.js', 'x');
-      tree.write('work/build.log', 'x');
-      tree.write('work/.github/workflows/ci.yml', 'x');
-      await git(['add', 'notes.txt']);
-      final entries = await listFolderEntries(folder);
-      expect(entries, containsAll(['notes.txt', 'src/main.dart', 'src/', '.gitignore', '.github/workflows/ci.yml', 'node_modules/dep/index.js']),
-          reason: 'tracked and untracked, a dot name included, and a folder no rule ignores');
-      expect(entries.where((entry) => entry.startsWith('dist') || entry.endsWith('.log') || entry.startsWith('.git/')), isEmpty);
-      tree.write('work/.gitignore', 'dist/\n*.log\nnode_modules/\n');
-      expect((await listFolderEntries(folder)).where((entry) => entry.contains('node_modules')), isEmpty, reason: 'the repository\'s rule, read from it');
-    });
-
-    test('a path outside the folder is refused, however it is spelled', () async {
-      final tree = _Tree();
-      addTearDown(() => tree.root.deleteSync(recursive: true));
-      final folder = tree.folder.path;
-      expect(resolveInside(folder, 'src/main.dart'), isNotNull);
-      expect(resolveInside(folder, '../outside.txt'), isNull);
-      expect(resolveInside(folder, 'src/../../outside.txt'), isNull);
-      expect(resolveInside(folder, tree.outside), isNull, reason: 'an absolute path');
-      expect(resolveInside(folder, 'missing.txt'), isNull);
-      expect(resolveInside(folder, ''), isNull);
-    });
-
-    test('a link in the folder to a file outside it is refused', () async {
-      final tree = _Tree();
-      addTearDown(() => tree.root.deleteSync(recursive: true));
-      final link = Link('${tree.folder.path}${Platform.pathSeparator}escape.txt');
-      try {
-        link.createSync(tree.outside);
-      } on FileSystemException {
-        markTestSkipped('this machine does not let a test make a link');
-        return;
-      }
-      expect(resolveInside(tree.folder.path, 'escape.txt'), isNull);
-      expect(await listFolderEntries(tree.folder.path), isNot(contains('escape.txt')));
     });
   });
 

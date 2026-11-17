@@ -2,7 +2,6 @@
 // recent folders take it. The real checks run against this machine's own administrative share, so nothing leaves it.
 import 'dart:io';
 
-import 'package:canoa/acp/local_agent_io.dart';
 import 'package:canoa/acp/share_path.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
@@ -13,6 +12,9 @@ import 'fixtures/app_fixture.dart';
 
 /// [path], a drive path, as the same place named through the administrative share.
 String _onShare(String path) => '\\\\localhost\\${path[0]}\$${path.substring(2)}';
+
+/// What a test's own app is given to tell which recent folders are still there.
+bool folderExists(String folder) => Directory(folder).existsSync();
 
 void main() {
   final notWindows = !Platform.isWindows; // a share is a Windows thing
@@ -36,14 +38,6 @@ void main() {
       Directory('$shared\\project\\src').createSync(recursive: true);
     });
     tearDown(() => made.deleteSync(recursive: true));
-
-    test('the folder checks take a folder on a share', () {
-      expect(folderExists('$shared\\project'), isTrue);
-      expect(folderExists('$shared\\gone'), isFalse);
-      expect(inGitRepository('$shared\\project\\src'), isFalse);
-      Directory('$shared\\project\\.git').createSync();
-      expect(inGitRepository('$shared\\project\\src'), isTrue);
-    }, skip: notWindows);
 
     testWidgets('a recent folder on a share is listed, and one that is gone is not', (tester) async {
       var minute = 0;
