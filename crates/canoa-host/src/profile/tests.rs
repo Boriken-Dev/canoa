@@ -137,3 +137,36 @@ fn a_secret_file_over_the_limit_or_not_a_file_does_not_resolve() {
     }
     std::fs::remove_dir_all(&dir).expect("cleaned");
 }
+
+#[test]
+fn the_agent_is_found_on_the_hosts_path_and_never_in_a_directory_a_profile_puts_first() {
+    use std::ffi::OsStr;
+    let root = std::env::temp_dir().join(format!("canoa-own-path-{}", std::process::id()));
+    let (own, overlay) = (root.join("own"), root.join("overlay"));
+    let file = if cfg!(windows) { "agent.exe" } else { "agent" };
+    for directory in [&own, &overlay] {
+        std::fs::create_dir_all(directory).expect("a directory");
+        let path = directory.join(file);
+        std::fs::write(&path, "").expect("a program");
+        #[cfg(unix)]
+        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("executable");
+    }
+    let found = launch::found_on_own_path(OsStr::new("agent"), own.as_os_str(), ".EXE");
+    assert_eq!(PathBuf::from(found), own.join(file));
+    // A name with a directory, and one nothing here finds, stay as given.
+    let with_directory = overlay.join(file).into_os_string();
+    assert_eq!(
+        launch::found_on_own_path(&with_directory, own.as_os_str(), ".EXE"),
+        with_directory
+    );
+    assert_eq!(
+        launch::found_on_own_path(OsStr::new("absent"), own.as_os_str(), ".EXE"),
+        OsStr::new("absent")
+    );
+    assert!(launch::sets_path(
+        [OsStr::new("HOME"), OsStr::new("Path")].into_iter()
+    ));
+    assert!(!launch::sets_path([OsStr::new("HOME")].into_iter()));
+    let _ = std::fs::remove_dir_all(&root);
+}

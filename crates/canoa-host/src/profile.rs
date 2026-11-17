@@ -1558,6 +1558,8 @@ mod overlay;
 pub(crate) use hosted::forward_hook;
 pub use hosted::{APPROVE_META, APPROVE_METHOD, OVERLAYS_META, PRESET_META, PROFILE_META};
 pub use launch::launch;
+#[cfg(unix)]
+pub(crate) use launch::{found_on_own_path, sets_path};
 pub(crate) use overlay::active_facts;
 pub use overlay::{AosLayer, OverlayInput, OverlayRefusal, OverlayReport, overlay_layer};
 

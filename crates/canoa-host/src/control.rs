@@ -1492,7 +1492,7 @@ mod overlays_isolation_tests;
 mod overlays_tests;
 #[cfg(test)]
 mod profiles_tests;
-mod registry;
+pub(crate) mod registry;
 #[cfg(test)]
 mod skill_scan_tests;
 #[cfg(test)]

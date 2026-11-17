@@ -5,6 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, BufRead as _, Read as _};
+use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 
 use serde_json::{Value, json};
@@ -21,6 +22,23 @@ pub(crate) fn launch_line(env: &[(String, Secret)]) -> Vec<u8> {
         .map(|(name, value)| json!([name, value.expose()]))
         .collect();
     serde_json::to_vec(&json!({ LAUNCH_KEY: 1, "env": pairs })).unwrap_or_default()
+}
+
+/// `program` as this process finds it, when the environment the program is about to be given sets `PATH`: a bare name is
+/// looked for on `own_path` (this process's own, with `pathext` on Windows), not on the `PATH` it is given. An overlay's
+/// `bin/` goes first on the agent's `PATH`, and never decides which program the agent is. A name with a directory, or one
+/// this process cannot find, is left as it is.
+pub(crate) fn found_on_own_path(program: &OsStr, own_path: &OsStr, pathext: &str) -> OsString {
+    if program.to_string_lossy().contains(['/', '\\']) {
+        return program.to_owned();
+    }
+    crate::control::registry::which_in(own_path, pathext, &program.to_string_lossy())
+        .map_or_else(|| program.to_owned(), PathBuf::into_os_string)
+}
+
+/// Whether `env` sets `PATH`, with the case a Windows name takes.
+pub(crate) fn sets_path<'a>(mut names: impl Iterator<Item = &'a OsStr>) -> bool {
+    names.any(|name| name.eq_ignore_ascii_case("PATH"))
 }
 
 /// Reads one line of at most `max` bytes from standard input, `{"canoa_host_launch": 1, "env": [[NAME, VALUE], ...]}`,
@@ -68,6 +86,15 @@ fn start(program: &OsStr, args: &[OsString], max: usize) -> io::Result<core::con
             _ => return Err(wrong()),
         }
     }
+    let program = if sets_path(env.iter().map(|(name, _)| OsStr::new(name))) {
+        found_on_own_path(
+            program,
+            &std::env::var_os("PATH").unwrap_or_default(),
+            &std::env::var("PATHEXT").unwrap_or_default(),
+        )
+    } else {
+        program.to_owned()
+    };
     let mut child = Command::new(program)
         .args(args)
         .envs(env)

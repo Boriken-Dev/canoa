@@ -7,6 +7,7 @@
 //! process uncollected until then.
 
 use alloc::sync::Arc;
+use std::ffi::OsString;
 use std::io::{self, Read};
 use std::os::unix::process::ExitStatusExt as _;
 use std::process::ExitStatus;
@@ -26,10 +27,24 @@ struct Harness;
 
 impl Starter for Harness {
     fn start(&self, launch: &Launch, errors: ErrorStream) -> io::Result<Spawned> {
+        // A profile's `PATH` is the one the agent's own commands use: the agent itself is found on the host's.
+        let found = if crate::profile::sets_path(launch.env.keys().map(OsString::as_os_str)) {
+            let own = std::env::var_os("PATH").unwrap_or_default();
+            let runtimes = crate::sources::runtime_dirs();
+            let own =
+                std::env::join_paths(std::env::split_paths(&own).chain(runtimes)).unwrap_or(own);
+            crate::profile::found_on_own_path(
+                &launch.program,
+                &own,
+                &std::env::var("PATHEXT").unwrap_or_default(),
+            )
+        } else {
+            launch.program.clone()
+        };
         // A batch file does not start in a folder on a share: what it names starts there instead.
         let (program, args) = match &launch.cwd {
-            Some(cwd) => coqui_acp_api::batch::start_in(&launch.program, &launch.args, cwd)?,
-            None => (launch.program.clone(), launch.args.clone()),
+            Some(cwd) => coqui_acp_api::batch::start_in(&found, &launch.args, cwd)?,
+            None => (found, launch.args.clone()),
         };
         let mut command = Command::new(program);
         command
