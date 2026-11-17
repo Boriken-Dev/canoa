@@ -771,3 +771,102 @@ fn a_repository_around_the_overlays_folder_supplies_no_configuration() {
     let _ = fs::remove_dir_all(outer);
     let _ = fs::remove_dir_all(s.tmp);
 }
+
+#[test]
+fn a_batch_of_entries_is_read_here_and_one_that_cannot_be_read_is_noted_against_it() {
+    let s = setup(None, OverlayLimits::default());
+    let overlay = repo(
+        &s.tmp,
+        "ov",
+        &[
+            (
+                "overlay.cfg",
+                "name = \"ov\"\nrequires = [\"lint\"]\n[about]\nsummary = \"s\"\n[knowledge]\nserve = true\n[[mcp.servers]]\nname = \"tracker\"\ntransport = \"stdio\"\ncommand = \"tracker-mcp\"\n",
+            ),
+            ("rules/style.md", "Use tabs.\n"),
+            ("lib/python/requirements.txt", "requests==2.0\n"),
+            (
+                "skills/one/SKILL.md",
+                "---\ndescription: Does one\n---\nbody\n",
+            ),
+            ("bin/tool.sh", "#!/bin/sh\n"),
+            ("env.sh", "echo\n"),
+        ],
+    );
+    let plain = repo(
+        &s.tmp,
+        "plain",
+        &[("tidy/SKILL.md", "---\ndescription: Tidies\n---\nx\n")],
+    );
+    let skill = repo(
+        &s.tmp,
+        "sk",
+        &[("SKILL.md", "---\ndescription: A skill\n---\nx\n")],
+    );
+    let entry = |id: &str, kind: &str, name: &str, from: &Path| {
+        let mut entry = source(from, "");
+        entry["id"] = json!(id);
+        entry["kind"] = json!(kind);
+        entry["name"] = json!(name);
+        entry
+    };
+    let missing = {
+        let mut entry = source(&s.tmp.join("nowhere"), "");
+        entry["id"] = json!("gone");
+        entry["kind"] = json!("overlay");
+        entry["name"] = json!("gone");
+        entry
+    };
+    let who = Caller::Owner;
+    let answer = ask(
+        &s.control,
+        &who,
+        "store/read_ahead",
+        json!({"os": "linux", "entries": [
+            entry("a", "overlay", "ov", &overlay),
+            entry("b", "overlay", "plain", &plain),
+            entry("c", "skill", "sk", &skill),
+            missing,
+        ]}),
+    );
+    let got = &answer["result"]["entries"];
+    assert_eq!(got["a"]["contents"]["skills"][0]["name"], "one", "{answer}");
+    assert_eq!(got["a"]["contents"]["skills"][0]["description"], "Does one");
+    assert_eq!(got["a"]["contents"]["bin"], json!(["tool.sh"]));
+    assert_eq!(got["a"]["contents"]["env_scripts"], json!(["env.sh"]));
+    assert_eq!(got["a"]["contents"]["generated"], false);
+    assert_eq!(got["a"]["contents"]["rules"], json!(["rules/style.md"]));
+    assert_eq!(
+        got["a"]["contents"]["knowledge"],
+        json!([{"path": "rules/style.md", "served": true}])
+    );
+    assert_eq!(
+        got["a"]["contents"]["mcp_servers"],
+        json!(["tracker (stdio)"])
+    );
+    assert_eq!(
+        got["a"]["contents"]["requirements"],
+        json!(["overlay lint", "python: lib/python/requirements.txt"])
+    );
+    assert!(
+        got["a"]["contents"]["digest"]
+            .as_str()
+            .is_some_and(|digest| digest.starts_with("sha256:"))
+    );
+    assert_eq!(
+        got["b"]["contents"]["generated"], true,
+        "no manifest: generated"
+    );
+    assert_eq!(got["b"]["contents"]["skills"][0]["name"], "tidy");
+    assert!(got["b"]["contents"]["manifest"].is_string());
+    assert_eq!(got["c"]["contents"]["skills"][0]["description"], "A skill");
+    assert!(got["gone"]["problem"].is_string(), "{answer}");
+    assert!(
+        !s.overlays.join(".cache").join("ov.git").exists(),
+        "nothing is kept for what was only read"
+    );
+    let key = key("k", &[Grant::OverlayRead]);
+    let refused = ask(&s.control, &key, "store/read_ahead", json!({"entries": []}));
+    assert_eq!(refused["error"]["code"], DENIED);
+    let _ = fs::remove_dir_all(s.tmp);
+}

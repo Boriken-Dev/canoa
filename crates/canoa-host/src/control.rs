@@ -812,6 +812,10 @@ impl Control {
                     .and_then(|()| self.overlays.skill_remove(&params)),
                 Some("registry/fetch") => allow(caller, Grant::OverlayWrite)
                     .and_then(|()| self.registry_fetch(caller, &params)),
+                Some("store/read_ahead") => allow(caller, Grant::OverlayWrite).and_then(|()| {
+                    self.overlays
+                        .read_ahead(caller, &params, &|repo| self.may_read_source(caller, repo))
+                }),
                 Some("store/contents") => allow(caller, Grant::OverlayRead)
                     .and_then(|()| self.registry.contents(caller, &params)),
                 Some("store/contents_put") => allow(caller, Grant::OverlayRead)
