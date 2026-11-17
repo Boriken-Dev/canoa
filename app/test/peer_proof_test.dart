@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:canoa/auth/peer_proof.dart';
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A WebSocket's two kinds of frame, as the peer sees them.

@@ -1,4 +1,4 @@
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 import 'client.dart';
 import 'pipe_channel.dart';
 

@@ -16,7 +16,7 @@ import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/served/served_app.dart';
 import 'package:canoa/session_store.dart';
-import 'package:coqui_web/coqui_web.dart' show WebEndpoints;
+import 'package:coqui_transport_web/coqui_transport_web.dart' show WebEndpoints;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';

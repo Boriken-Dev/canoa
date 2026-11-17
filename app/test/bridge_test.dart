@@ -14,7 +14,7 @@ import 'dart:io';
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/acp/connect.dart';
 import 'package:canoa/auth/peer_proof.dart';
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/web_peer_bridge.dart';

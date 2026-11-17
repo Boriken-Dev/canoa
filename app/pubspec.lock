@@ -100,13 +100,13 @@ packages:
       url: "https://github.com/Boriken-Dev/coqui-aos.git"
     source: git
     version: "0.0.0-alpha.0"
-  coqui_web:
+  coqui_transport_web:
     dependency: "direct main"
     description:
-      path: "bindings/dart/coqui_web"
-      ref: "445007acb04f1b11f8f0f7c9fcf104f694189a2b"
-      resolved-ref: "445007acb04f1b11f8f0f7c9fcf104f694189a2b"
-      url: "https://github.com/Boriken-Dev/coqui-web.git"
+      path: "bindings/dart/coqui_transport_web"
+      ref: "1e0c1452f95bf6f131ce4446cc1eb8d9069f0c53"
+      resolved-ref: "1e0c1452f95bf6f131ce4446cc1eb8d9069f0c53"
+      url: "https://github.com/Boriken-Dev/coqui-transport-web.git"
     source: git
     version: "0.0.0-alpha.0"
   cross_file:

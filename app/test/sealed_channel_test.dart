@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/acp/sealed_channel.dart';
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final class Wire implements ByteWebChannel {

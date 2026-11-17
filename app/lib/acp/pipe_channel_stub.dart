@@ -1,4 +1,4 @@
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 
 /// A browser has no pipes.
 Future<ByteWebChannel> openPipeChannel(String url, Duration timeout, int maxMessage) =>

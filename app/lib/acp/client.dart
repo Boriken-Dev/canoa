@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:coqui_acp/coqui_acp.dart';
 import 'package:coqui_acp/page.dart';
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 
 import '../chat/agent_events.dart';
 import '../chat/timing_log.dart';

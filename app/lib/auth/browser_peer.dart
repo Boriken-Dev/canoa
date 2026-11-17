@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 
 import '../acp/client.dart';
 import 'browser_peer_io.dart'

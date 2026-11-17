@@ -22,7 +22,7 @@ import 'package:canoa/session_store.dart';
 import 'package:canoa/sources/source_choices.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/workspace/remote_host.dart';
-import 'package:coqui_web/coqui_web.dart' show WebEndpoints;
+import 'package:coqui_transport_web/coqui_transport_web.dart' show WebEndpoints;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

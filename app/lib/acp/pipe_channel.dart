@@ -1,5 +1,5 @@
 import 'pipe_channel_stub.dart' if (dart.library.io) 'pipe_channel_io.dart' as platform;
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 
 /// Whether [url] names a pipe or a Unix socket, as `canoa serve` prints an entry that listens on one: `pipe:NAME` (a Windows
 /// named pipe, or on Unix the socket `NAME.sock` in the runtime directory) or `unix:PATH`. A browser cannot dial either.

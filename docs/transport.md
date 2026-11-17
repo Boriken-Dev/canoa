@@ -53,6 +53,6 @@ The transport classes are in [coqui-transport-web](https://github.com/Boriken-De
 
 ## Coqui layering
 
-The `coqui_web` Dart package owns a bounded, ordered queue during protocol setup, with no cryptographic decisions. Peer key verification is done by the experimental coqui-peer browser method, whose canonical source is outside the Canoa repository. Canoa uses a pinned, unmodified bundle copy and supplies a separate application permission decision.
+The `coqui_transport_web` Dart package owns a bounded, ordered queue during protocol setup, with no cryptographic decisions. Peer key verification is done by the experimental coqui-peer browser method, whose canonical source is outside the Canoa repository. Canoa uses a pinned, unmodified bundle copy and supplies a separate application permission decision.
 
 The Canoa code that performs `hello/challenge/proof/accept` frame exchange is a transport adapter for the Coqui method; it is not a second authentication mechanism. Canoa's default client continues to fail closed when the peer key is unpinned or the remote method is unsupported.

@@ -18,7 +18,7 @@ import 'package:canoa/auth/peer_proof.dart';
 import 'package:canoa/chat/cache_lifetime.dart';
 import 'package:canoa/worktree/host.dart';
 import 'package:canoa/worktree/worktree.dart';
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/examples.dart';

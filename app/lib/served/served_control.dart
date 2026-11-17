@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:coqui_acp/secret.dart' show AcpIdentityId;
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 
 import '../acp/client.dart' show LinkSecretIdentity, VerifyAcpPeer;
 import '../acp/noise_secret.dart' show NoiseSecrets;

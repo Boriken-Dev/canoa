@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 
 /// Every application message inside the session a peer proof ended in. A plain message comes from whoever carries the
 /// connection, so anything that does not open ends the channel, and so does a connection cut before the peer's close record,

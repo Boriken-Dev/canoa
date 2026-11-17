@@ -17,7 +17,7 @@ import 'package:coqui_acp_chat/coqui_acp_chat.dart'
         Settlement,
         TurnEvent,
         TurnOutcome;
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 

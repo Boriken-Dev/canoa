@@ -6,7 +6,7 @@ import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:coqui_web/coqui_web.dart';
+import 'package:coqui_transport_web/coqui_transport_web.dart';
 
 /// Opens the pipe or socket [url] names; see `openPipeChannel`.
 Future<ByteWebChannel> openPipeChannel(String url, Duration timeout, int maxMessage) async {
