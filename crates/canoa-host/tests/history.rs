@@ -191,12 +191,18 @@ fn a_session_is_recorded_exported_and_moved_from_claude_to_codex() {
     );
     assert_eq!(carried["id"], new);
 
-    // Paged: a page holds whole lines and says where the next begins.
+    // Paged: a page holds whole lines and says where the next begins. The bound is sized from the export's own longest
+    // line (its header carries paths from the temp folder, whose length is the platform's), so only paging is tested.
+    let bound = text
+        .lines()
+        .map(|line| line.len() + 1)
+        .max()
+        .expect("lines");
     let first = call(
         &control,
         103,
         "history/export",
-        json!({"entry": "Claude", "session": session, "max_bytes": 1000}),
+        json!({"entry": "Claude", "session": session, "max_bytes": bound}),
     )
     .expect("a page");
     let mut pages = 1;
@@ -207,7 +213,7 @@ fn a_session_is_recorded_exported_and_moved_from_claude_to_codex() {
             &control,
             104,
             "history/export",
-            json!({"entry": "Claude", "session": session, "max_bytes": 1000, "after": position}),
+            json!({"entry": "Claude", "session": session, "max_bytes": bound, "after": position}),
         )
         .expect("the next page");
         joined.push_str(page["text"].as_str().expect("text"));
