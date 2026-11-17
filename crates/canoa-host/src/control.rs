@@ -128,11 +128,12 @@ pub enum Grant {
     /// computer, as this user, with output pushed back on the same link as `terminal/output`. It is a shell, so it is as much as
     /// access to the agent and to everything else this user can do here; a delegated child connection never holds it.
     Terminal,
-    /// `speech/providers`, `speech/open`, `speech/push`, `speech/finish` and `speech/cancel`: audio goes to a speech provider the person
+    /// `speech/providers`, `speech/offers`, `speech/open`, `speech/push`, `speech/finish` and `speech/cancel`: audio goes to a speech provider the person
     /// set up on this host, which may run a program of theirs or send it to an address of theirs, and the text comes back. A key
     /// reaches only its own recordings, and no read answers a provider's key.
     Voice,
-    /// `speech/configure`: defines or removes a speech provider in canoa.cfg, which names a program this host runs as this user or
+    /// `speech/configure` and `speech/enable`: defines or removes a speech provider in canoa.cfg (or makes the one of an offer from a
+    /// program the Store installed), which names a program this host runs as this user or
     /// an address it sends audio to: as much as access to the agent.
     VoiceSetup,
     /// `state/get`, `state/put`, `state/append`, `state/list` and `state/remove`: named documents in the host's home, shared by every
@@ -966,6 +967,9 @@ impl Control {
                 Some("discover/nearby") => {
                     allow(caller, Grant::Discover).and_then(|()| discover::nearby(&params))
                 }
+                Some(method @ ("speech/offers" | "speech/enable")) => {
+                    speech_offers::call(caller, &self.files, self.stores(), method, &params)
+                }
                 Some(method) if method.starts_with("speech/") => {
                     self.speech.call(caller, &self.files, method, &params)
                 }
@@ -1497,6 +1501,7 @@ mod looks;
 #[cfg(test)]
 mod looks_tests;
 mod speech;
+mod speech_offers;
 #[cfg(test)]
 mod speech_tests;
 mod state;

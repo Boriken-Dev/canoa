@@ -27,6 +27,7 @@ use guatiao_intake::Screen;
 use serde_json::{Map, Value, json};
 
 use super::files::Files;
+use super::speech_offers;
 use super::{BAD_PARAMS, Caller, Grant, NOT_FOUND, REFUSED, allow, bad, text_param};
 
 type Outcome = Result<Value, (i32, String)>;
@@ -144,7 +145,7 @@ impl core::fmt::Debug for Speech {
     }
 }
 
-fn valid_name(name: &str) -> bool {
+pub(super) fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= MAX_NAME
         && name
@@ -170,6 +171,7 @@ fn built(table: &Value) -> Result<(&'static Kind, Arc<dyn SpeechProvider>), Stri
     let mut settings = table.clone();
     if let Some(map) = settings.as_object_mut() {
         map.remove("provider");
+        map.remove(speech_offers::OFFER_KEY);
     }
     (kind.build)(&settings).map(|provider| (kind, provider))
 }
@@ -232,6 +234,7 @@ impl Speech {
                 format!("this host has no speech provider {name}"),
             )
         })?;
+        let table = &speech_offers::with_model(table, params)?;
         let (_, provider) = built(table).map_err(|why| (REFUSED, format!("{name}: {why}")))?;
         let request = request_of(params)?;
         let owner = caller.owner().to_owned();
@@ -414,7 +417,10 @@ fn providers(files: &Files) -> Outcome {
         let mut settings = Map::new();
         let mut set = Vec::new();
         if let Some(map) = table.as_object() {
-            for (key, value) in map.iter().filter(|(key, _)| *key != "provider") {
+            for (key, value) in map
+                .iter()
+                .filter(|(key, _)| *key != "provider" && *key != speech_offers::OFFER_KEY)
+            {
                 if secrets.contains(key) {
                     set.push(key.clone());
                 } else {
@@ -422,6 +428,11 @@ fn providers(files: &Files) -> Outcome {
                 }
             }
         }
+        entry["models"] = json!(speech_offers::models_of(&Value::Object(settings.clone())));
+        entry["offer"] = table
+            .get(speech_offers::OFFER_KEY)
+            .cloned()
+            .unwrap_or(Value::Null);
         entry["settings"] = Value::Object(settings);
         entry["secrets_set"] = json!(set);
         match built(&table) {
@@ -491,6 +502,10 @@ fn configure(files: &Files, params: &Value) -> Outcome {
             }
         }
         if before.get("provider").and_then(Value::as_str) == Some(id) {
+            // A provider made from an offer stays that offer's when its settings are edited.
+            if let Some(offer) = before.get(speech_offers::OFFER_KEY) {
+                table.insert(speech_offers::OFFER_KEY.to_owned(), offer.clone());
+            }
             for key in &secrets {
                 if !table.contains_key(key)
                     && !clear.contains(key)

@@ -265,3 +265,161 @@ fn a_recording_nobody_has_called_for_is_ended() {
     assert_eq!(answer["error"]["code"], NOT_FOUND, "{answer}");
     let _ = fs::remove_dir_all(&tmp);
 }
+
+/// A control whose Store is an empty shelf of its own, so what it says of whisper.cpp does not depend on this computer.
+fn control_with_empty_store(tmp: &std::path::Path) -> Control {
+    use crate::store::runtimes::RUNTIMES;
+    use crate::store::shelf::Shelf;
+    let programs = crate::store::programs::Programs::new(
+        Shelf::unchecked(tmp.join("programs")),
+        crate::store::registry::built_in().expect("the built-in stores"),
+    );
+    control(tmp).with_stores(
+        Stores::new(Arc::new(programs), Vec::new())
+            .with_runtimes(RUNTIMES.iter().map(|id| (*id).to_owned()).collect()),
+    )
+}
+
+#[test]
+fn the_offers_need_the_voice_grant_and_enabling_one_needs_the_setup_grant() {
+    let tmp = dir("offer-grants");
+    let control = control_with_empty_store(&tmp);
+    let nothing = key("sha256:aa", &[Grant::ConfigWrite]);
+    for method in ["speech/offers", "speech/enable"] {
+        let answer = ask(&control, &nothing, method, json!({"offer": "whisper"}));
+        assert_eq!(answer["error"]["code"], DENIED, "{method}: {answer}");
+    }
+    let voice = key("sha256:bb", &[Grant::Voice]);
+    assert!(ask(&control, &voice, "speech/offers", json!({}))["result"]["offers"].is_array());
+    let answer = ask(
+        &control,
+        &voice,
+        "speech/enable",
+        json!({"offer": "whisper"}),
+    );
+    assert_eq!(answer["error"]["code"], DENIED, "{answer}");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn a_local_engine_and_a_named_service_are_offered_and_the_engine_is_not_enabled_before_it_is_installed()
+ {
+    let tmp = dir("offers");
+    let control = control_with_empty_store(&tmp);
+    let owner = Caller::Owner;
+    let answer = ask(&control, &owner, "speech/offers", json!({}));
+    let offers = answer["result"]["offers"].as_array().expect("offers");
+    let by_id = |id: &str| offers.iter().find(|offer| offer["id"] == id).expect(id);
+    let whisper = by_id("whisper");
+    assert_eq!(whisper["local"], true);
+    assert_eq!(whisper["store"], "whisper_store");
+    assert_eq!(whisper["installed"], false);
+    assert_eq!(whisper["default_model"], "base");
+    assert!(
+        whisper["models"].as_array().expect("models").len() > 3,
+        "{whisper}"
+    );
+    assert!(whisper["provider"].is_null(), "{whisper}");
+    let openai = by_id("openai");
+    assert_eq!(openai["local"], false);
+    assert_eq!(openai["kind"], "speech_endpoint");
+    assert_eq!(openai["settings"]["model"], "gpt-transcribe");
+    assert!(
+        openai["where"]
+            .as_str()
+            .is_some_and(|words| words.contains("api.openai.com")),
+        "a service says where the audio goes: {openai}"
+    );
+    // Nothing is installed, so there is nothing to make a provider of.
+    let answer = ask(
+        &control,
+        &owner,
+        "speech/enable",
+        json!({"offer": "whisper"}),
+    );
+    assert_eq!(answer["error"]["code"], REFUSED, "{answer}");
+    let answer = ask(
+        &control,
+        &owner,
+        "speech/enable",
+        json!({"offer": "openai"}),
+    );
+    assert_eq!(answer["error"]["code"], NOT_FOUND, "{answer}");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn a_provider_made_from_an_offer_runs_lists_its_offer_and_keeps_it_when_its_settings_are_saved() {
+    let tmp = dir("made");
+    let control = control(&tmp);
+    let cfg = tmp.join("canoa.cfg");
+    let program = serde_json::to_string(&standin()).expect("text");
+    let mut text = fs::read_to_string(&cfg).expect("canoa.cfg");
+    text.push_str(&format!(
+        "\n[speech.engine]\nprovider = \"speech_command\"\nprogram = {program}\nargs = [\"fixed\"]\noffer = \"whisper\"\n\n[speech.cloud]\nprovider = \"speech_endpoint\"\nurl = \"https://api.openai.com/v1/audio/transcriptions\"\nmodel = \"whisper-1\"\n"
+    ));
+    fs::write(&cfg, text).expect("written");
+    let owner = Caller::Owner;
+    let listed = ask(&control, &owner, "speech/providers", json!({}));
+    let by_name = |name: &str| {
+        listed["result"]["providers"]
+            .as_array()
+            .expect("providers")
+            .iter()
+            .find(|provider| provider["name"] == name)
+            .cloned()
+            .expect("listed")
+    };
+    let engine = by_name("engine");
+    assert_eq!(engine["offer"], "whisper");
+    assert!(engine.get("problem").is_none(), "{engine}");
+    assert!(
+        engine["settings"].get("offer").is_none(),
+        "the offer is not one of the kind's settings: {engine}"
+    );
+    let cloud = by_name("cloud");
+    assert_eq!(cloud["models"][0]["id"], "gpt-transcribe", "{cloud}");
+    assert!(
+        by_name("says")["models"]
+            .as_array()
+            .expect("models")
+            .is_empty()
+    );
+    // It opens, and a recording may name the model it wants.
+    assert!(open_named(&control, &owner, "engine")["result"]["session"].is_string());
+    let asked = ask(
+        &control,
+        &owner,
+        "speech/open",
+        json!({"provider": "cloud", "model": "gpt-transcribe"}),
+    );
+    assert!(asked["result"]["session"].is_string(), "{asked}");
+    // Saving its settings from a form keeps what it was made from.
+    let saved = ask(
+        &control,
+        &owner,
+        "speech/configure",
+        json!({"name": "engine", "provider": "speech_command", "settings": {"program": standin(), "args": ["fixed", "again"]}}),
+    );
+    assert_eq!(saved["result"]["saved"], true, "{saved}");
+    let listed = ask(&control, &owner, "speech/providers", json!({}));
+    let engine = listed["result"]["providers"]
+        .as_array()
+        .expect("providers")
+        .iter()
+        .find(|provider| provider["name"] == "engine")
+        .cloned()
+        .expect("listed");
+    assert_eq!(engine["offer"], "whisper", "{engine}");
+    assert_eq!(engine["settings"]["args"], json!(["fixed", "again"]));
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+fn open_named(control: &Control, caller: &Caller, provider: &str) -> Value {
+    ask(
+        control,
+        caller,
+        "speech/open",
+        json!({"provider": provider}),
+    )
+}
