@@ -43,11 +43,24 @@ const MAX_OPTIONS: usize = 8;
 const NOTE_BYTES: usize = 4096;
 
 /// The request that hands a task over: the text, addressed to `source`, and nothing else.
-fn request(task: &str, text: &str, source: Option<&str>) -> SendMessageRequest {
-    SendMessageRequest {
+fn request(
+    task: &str,
+    text: &str,
+    source: Option<&str>,
+    workspace: Option<&str>,
+) -> SendMessageRequest {
+    let mut sent = SendMessageRequest {
         tenant: source.map(str::to_owned),
         ..SendMessageRequest::new(Message::text(Role::User, format!("canoa-{task}"), text))
+    };
+    // The folder the person named on that machine: this session's own is never sent.
+    if let Some(workspace) = workspace {
+        sent.metadata = Some(serde_json::Map::from_iter([(
+            "workspace".to_owned(),
+            json!(workspace),
+        )]));
     }
+    sent
 }
 
 /// What a task for another machine's agent came to.
@@ -56,6 +69,7 @@ pub(super) fn drive(
     session: &Arc<Session>,
     child: &Arc<Child>,
     text: &str,
+    workspace: Option<&str>,
 ) -> Outcome {
     let name = &child.source;
     let Some((host, target)) = engine
@@ -74,7 +88,12 @@ pub(super) fn drive(
     };
     let closing = Arc::clone(&channel);
     child.on_stop(move || closing.close());
-    let outcome = linked(engine, session, child, text, (&proof, &channel, &target));
+    let outcome = linked(
+        engine,
+        session,
+        (child, text, workspace),
+        (&proof, &channel, &target),
+    );
     channel.close();
     outcome
 }
@@ -95,10 +114,10 @@ fn dial(url: &str, proof: &Proof) -> Result<websocket::Channel, String> {
 fn linked(
     engine: &Arc<Engine>,
     session: &Arc<Session>,
-    child: &Arc<Child>,
-    text: &str,
+    sent: (&Arc<Child>, &str, Option<&str>),
     (proof, channel, target): (&Proof, &Arc<websocket::Channel>, &Remote),
 ) -> Outcome {
+    let (child, text, workspace) = sent;
     let name = &child.source;
     let established = match auth::prove_out(
         proof,
@@ -118,7 +137,7 @@ fn linked(
     limits.max_message = MAX_MESSAGE;
     limits.heartbeat = Some(Heartbeat::new(HEARTBEAT.0, HEARTBEAT.1));
     let outcome = Mux::run(&sealed, Side::Dialed, limits, None, |mux| {
-        mirror(engine, session, child, text, target, mux)
+        mirror(engine, session, (child, text, workspace), target, mux)
     });
     sealed.close();
     outcome
@@ -127,8 +146,7 @@ fn linked(
 fn mirror<C: Channel>(
     engine: &Arc<Engine>,
     session: &Arc<Session>,
-    child: &Arc<Child>,
-    text: &str,
+    (child, text, workspace): (&Arc<Child>, &str, Option<&str>),
     target: &Remote,
     mux: &Mux<'_, C>,
 ) -> Outcome {
@@ -137,6 +155,7 @@ fn mirror<C: Channel>(
         &child.task,
         text,
         target.source.as_deref(),
+        workspace,
     )) {
         Ok(events) => events,
         Err(error) => return failed(child, &error),
@@ -382,14 +401,15 @@ mod tests {
 
     #[test]
     fn a_task_for_another_machine_carries_its_text_and_the_source_and_nothing_else() {
-        let sent = serde_json::to_value(request("task-1", "do it", Some("far"))).expect("JSON");
+        let sent =
+            serde_json::to_value(request("task-1", "do it", Some("far"), None)).expect("JSON");
         assert_eq!(sent["tenant"], "far");
         assert_eq!(sent["message"]["parts"][0]["text"], "do it");
         let text = sent.to_string();
         for absent in ["folder", "contextId", "taskId", "metadata", "history"] {
             assert!(!text.contains(absent), "{absent} was sent: {text}");
         }
-        let none = serde_json::to_value(request("task-1", "x", None)).expect("JSON");
+        let none = serde_json::to_value(request("task-1", "x", None, None)).expect("JSON");
         assert!(none.get("tenant").is_none(), "{none}");
     }
 

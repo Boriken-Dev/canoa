@@ -20,6 +20,7 @@ use coqui_a2a::{Agent, Caller, Events};
 use serde_json::{Map, Value, json};
 
 use super::child::{self, Child, Job};
+use super::choice::Choice;
 use super::{Engine, Session, Who, lock, privilege};
 
 /// The longest title a task is shown by, in characters.
@@ -52,15 +53,29 @@ impl DelegationAgent {
         Ok((engine, session))
     }
 
-    /// The sources `session` may name.
-    pub(super) fn skills(engine: &Engine, session: &Session) -> Vec<AgentSkill> {
+    /// The sources `session` may name: what its connection may use, narrowed by `[host.delegate] sources` and by what the person
+    /// set for the session.
+    pub(super) fn allowed(engine: &Engine, session: &Session) -> Vec<super::Source> {
         let (Some(host), Some(conn)) = (engine.host(), session.conn()) else {
             return Vec::new();
         };
+        let narrowed = lock(&session.setup).sources.clone();
         privilege::sources(host.as_ref(), &engine.config, conn.principal())
             .into_iter()
             // A key from another machine is shown only what it can run: a source with no working root has no place for its task.
             .filter(|source| !session.is_remote() || !source.roots.is_empty())
+            .filter(|source| {
+                narrowed
+                    .as_ref()
+                    .is_none_or(|names| names.contains(&source.name))
+            })
+            .collect()
+    }
+
+    /// The sources `session` may name, as the card lists them.
+    pub(super) fn skills(engine: &Engine, session: &Session) -> Vec<AgentSkill> {
+        Self::allowed(engine, session)
+            .into_iter()
             .map(|source| AgentSkill {
                 name: source.title.clone().unwrap_or_else(|| source.name.clone()),
                 description: if source.remote.is_some() {
@@ -167,6 +182,36 @@ impl DelegationAgent {
         let to_remote = listed
             .as_ref()
             .is_some_and(|listed| listed.remote.is_some());
+        let choice = Choice::read(request.metadata.as_ref())?;
+        let workspace = choice.workspace.clone();
+        if (to_remote || session.is_remote()) && choice.names_a_run() {
+            // What an agent runs as is that machine's to settle: its models, accounts and profiles are not this host's to name.
+            return Err(A2aError::new(
+                ErrorKind::InvalidParams,
+                "a task that crosses machines takes no model, effort, account, profile or loadout: the host that runs it chooses",
+            ));
+        }
+        if to_remote && workspace.is_none() {
+            return Err(A2aError::new(
+                ErrorKind::InvalidParams,
+                format!(
+                    "{source} runs on another machine: name the folder to work in there (workspace); this session's own folder is never sent"
+                ),
+            ));
+        }
+        if !to_remote && !session.is_remote() && workspace.is_some() {
+            return Err(A2aError::new(
+                ErrorKind::InvalidParams,
+                "a workspace names a folder on another machine: a task here takes a folder",
+            ));
+        }
+        if !to_remote
+            && !session.is_remote()
+            && let (Some(listed), Some(host), Some(conn)) =
+                (listed.as_ref(), engine.host(), session.conn())
+        {
+            choice.check_local(host.as_ref(), conn.principal(), listed)?;
+        }
         // Neither a caller from another machine nor a task for one has a folder to name: the first is run where this host
         // puts it, and nothing of the second's leaves the machine.
         let folder = if session.is_remote() || to_remote {
@@ -179,7 +224,7 @@ impl DelegationAgent {
             if session.is_remote() {
                 let roots = listed.map(|listed| listed.roots).unwrap_or_default();
                 Some(
-                    privilege::remote_folder(&roots)
+                    privilege::remote_folder(&roots, workspace.as_deref())
                         .map_err(|why| A2aError::new(ErrorKind::PermissionDenied, why))?,
                 )
             } else {
@@ -221,6 +266,7 @@ impl DelegationAgent {
         if to_remote {
             metadata.insert("remote".to_owned(), json!(true));
         }
+        choice.record(&mut metadata);
         if session.is_remote() {
             tracing::info!(key = caller.peer, %source, "a task from another machine started");
         }
@@ -250,6 +296,7 @@ impl DelegationAgent {
             folder: folder.unwrap_or_else(|| session.cwd.clone()),
             text,
             reservation,
+            choice,
         };
         if let Err(error) = child::start(job) {
             let _ = session.store.update_status(

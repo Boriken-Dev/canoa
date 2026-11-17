@@ -591,6 +591,21 @@ impl Control {
         }
     }
 
+    /// What `entry` lists before a session starts, as `options/choices` answers it, for a task's source: `None` when this host
+    /// manages no accounts or the entry cannot be asked.
+    pub(crate) fn delegation_choices(
+        &self,
+        caller: &Caller,
+        entry: &str,
+        account: Option<&str>,
+    ) -> Option<Value> {
+        let mut params = json!({"entry": entry});
+        if let Some(account) = account {
+            params["account"] = json!(account);
+        }
+        choices::call(self.accounts().ok()?, caller, &params).ok()
+    }
+
     fn accounts(&self) -> Result<&accounts::Accounts, (i32, String)> {
         self.accounts
             .as_ref()

@@ -19,6 +19,8 @@ impl Host for Fake {
             title: None,
             harness: None,
             roots: Vec::new(),
+            accounts: Vec::new(),
+            missing: Vec::new(),
             remote: None,
         }]
     }

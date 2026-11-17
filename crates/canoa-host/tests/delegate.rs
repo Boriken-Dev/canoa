@@ -421,9 +421,12 @@ fn a_request_without_this_sessions_bearer_is_refused_and_so_is_one_that_comes_fr
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    assert_eq!(names, ["delegate_task", "task_status", "cancel"]);
+    assert_eq!(
+        names,
+        ["delegate_targets", "delegate_task", "task_status", "cancel"]
+    );
     assert!(
-        listed["result"]["tools"][0]["inputSchema"]["properties"]["source"]["description"]
+        listed["result"]["tools"][1]["inputSchema"]["properties"]["source"]["description"]
             .as_str()
             .is_some_and(|text| text.contains("child") && text.contains("parent"))
     );
@@ -1597,7 +1600,10 @@ fn through_the_bridge_no_bearer_another_sessions_or_a_revoked_one_opens_nothing(
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    assert_eq!(names, ["delegate_task", "task_status", "cancel"]);
+    assert_eq!(
+        names,
+        ["delegate_targets", "delegate_task", "task_status", "cancel"]
+    );
 
     // Ending the connection revokes the bearer, bridge or not.
     drop(first);
@@ -1776,4 +1782,259 @@ fn the_bridge_relays_a_request_with_the_bearer_and_answers_what_the_server_canno
     );
     assert!(!refused.to_string().contains(&token) && !silent.to_string().contains(&token));
     assert!(!bridge.said().contains(&token));
+}
+
+/// What `Call TOOL JSON` answered, as JSON, or the text of an error.
+fn called(
+    convo: &mut Convo<'_>,
+    session: &str,
+    tool: &str,
+    arguments: &Value,
+) -> Result<Value, String> {
+    let said = convo.prompt(session, &format!("Call {tool} {arguments}"));
+    serde_json::from_str(&said).map_err(|_| said)
+}
+
+#[test]
+fn a_parent_lists_its_targets_and_hands_a_task_on_with_a_chosen_model_and_effort() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let config = format!(
+        "{}{}{}",
+        agent("parent", "default,manual", ""),
+        agent("child", "default,manual", ""),
+        agent("hidden", "default,manual", "")
+    );
+    let host = Hosted::start(&format!(
+        "{config}[host.delegate]\nsources = [\"child\", \"hidden\"]\n"
+    ));
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+
+    let listed = called(&mut convo, &session, "delegate_targets", &json!({})).expect("targets");
+    let names: Vec<&str> = listed["targets"]
+        .as_array()
+        .expect("targets")
+        .iter()
+        .filter_map(|target| target["source"].as_str())
+        .collect();
+    assert_eq!(names, ["child", "hidden"], "{listed}");
+    let child = &listed["targets"][0];
+    assert_eq!(child["host"], "this host");
+    assert_eq!(child["ready"], true);
+    assert_eq!(child["accounts"], json!([]));
+    assert_eq!(child["workspace"]["kind"], "folder");
+    // No credential is listed, whatever the entries hold.
+    assert!(
+        !listed.to_string().to_lowercase().contains("secret"),
+        "{listed}"
+    );
+    // A source named gets its models too.
+    let one = called(
+        &mut convo,
+        &session,
+        "delegate_targets",
+        &json!({"source": "child"}),
+    )
+    .expect("one target");
+    assert_eq!(one["targets"].as_array().map(Vec::len), Some(1), "{one}");
+    assert!(one["targets"][0].get("models").is_some(), "{one}");
+    let refused = called(
+        &mut convo,
+        &session,
+        "delegate_targets",
+        &json!({"source": "parent"}),
+    )
+    .expect_err("not a source the session may use");
+    assert!(refused.contains("parent"), "{refused}");
+
+    let handed = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"source": "child", "task": "Chosen", "model": "fast", "effort": "high"}),
+    )
+    .expect("a task");
+    let task = handed["taskId"].as_str().expect("an id").to_owned();
+    let status = convo.status(&session, &task, 20_000);
+    assert_eq!(status["state"], "completed", "{status}");
+    assert_eq!(status["result"], "model=fast effort=high");
+    drop(link);
+    host.stop();
+}
+
+#[test]
+fn a_choice_the_source_does_not_offer_is_refused_by_name_and_never_replaced() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let config = format!(
+        "{}{}",
+        agent("parent", "default,manual", ""),
+        agent("child", "default,manual", "")
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+
+    for (key, named) in [
+        ("model", "no-such-model"),
+        ("effort", "ludicrous"),
+        ("account", "somebody-elses"),
+        ("context", "messages"),
+    ] {
+        let mut asked = json!({"source": "child", "task": "Chosen"});
+        asked[key] = json!(named);
+        // Either the host refuses it when it is asked, or the task ends rejected naming it: never a task on another model.
+        match called(&mut convo, &session, "delegate_task", &asked) {
+            Err(refusal) => assert!(refusal.contains(named), "{refusal}"),
+            Ok(handed) => {
+                let task = handed["taskId"].as_str().expect("an id").to_owned();
+                let status = convo.status(&session, &task, 20_000);
+                assert_eq!(status["state"], "rejected", "{status}");
+                assert!(
+                    status["message"].as_str().unwrap_or("").contains(named),
+                    "{status}"
+                );
+            }
+        }
+    }
+    drop(link);
+    host.stop();
+}
+
+#[test]
+fn the_persons_own_task_is_the_sessions_task_and_one_sent_twice_is_made_once() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let marker = dir.0.join("child.pids");
+    let config = format!(
+        "{}{}{}",
+        agent("parent", "default,manual", ""),
+        marked("child", "default,manual", &marker),
+        agent("other", "default,manual", "")
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+
+    let listed = convo
+        .request(
+            "_canoa/delegate/targets",
+            json!({"sessionId": session}),
+            &|_| None,
+        )
+        .expect("targets");
+    assert_eq!(
+        listed["targets"].as_array().map(Vec::len),
+        Some(3),
+        "{listed}"
+    );
+    let start = json!({"sessionId": session, "requestId": "r-1", "source": "child",
+        "task": "Chosen", "model": "fast", "title": "By the person"});
+    let made = convo
+        .request("_canoa/delegate/start", start.clone(), &|_| None)
+        .expect("started");
+    let task = made["taskId"].as_str().expect("an id").to_owned();
+    // The parent's agent reads it with its own task_status, as it reads its own.
+    let status = convo.status(&session, &task, 20_000);
+    assert_eq!(status["state"], "completed", "{status}");
+    assert_eq!(status["title"], "By the person");
+    assert_eq!(status["result"], "model=fast effort=low");
+    // Sent again after a reconnect, it finds the task and starts no other process (the first start asked what the source lists).
+    let started = pids(&marker).len();
+    let again = convo
+        .request("_canoa/delegate/start", start, &|_| None)
+        .expect("found");
+    assert_eq!(again["taskId"], task.as_str());
+    assert_eq!(again["repeated"], true);
+    assert_eq!(pids(&marker).len(), started, "{:?}", pids(&marker));
+    // A refusal reaches the person as an error, naming the choice.
+    let refused = convo
+        .request(
+            "_canoa/delegate/start",
+            json!({"sessionId": session, "source": "child", "task": "x", "account": "nope"}),
+            &|_| None,
+        )
+        .expect_err("refused");
+    assert!(
+        refused["message"].as_str().unwrap_or("").contains("nope"),
+        "{refused}"
+    );
+    let missing = convo
+        .request(
+            "_canoa/delegate/start",
+            json!({"sessionId": "no-such", "source": "child", "task": "x"}),
+            &|_| None,
+        )
+        .expect_err("no session");
+    assert_eq!(missing["code"], -32602);
+    drop(link);
+    host.stop();
+}
+
+#[test]
+fn what_the_person_sets_narrows_the_targets_and_sets_a_default_and_a_limit() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let config = format!(
+        "{}{}{}",
+        agent("parent", "default,manual", ""),
+        agent("child", "default,manual", ""),
+        agent("other", "default,manual", "")
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+    convo
+        .request(
+            "_canoa/delegate/setup",
+            json!({"sessionId": session, "sources": ["child"], "default": "child", "maxRunning": 1}),
+            &|_| None,
+        )
+        .expect("set");
+    let listed = called(&mut convo, &session, "delegate_targets", &json!({})).expect("targets");
+    assert_eq!(
+        listed["targets"].as_array().map(Vec::len),
+        Some(1),
+        "{listed}"
+    );
+    assert_eq!(listed["default"], "child");
+    // A source the person left out is not one it may name; one with no source goes to the default.
+    let hidden = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"source": "other", "task": "x"}),
+    )
+    .expect_err("not offered");
+    assert!(hidden.contains("other"), "{hidden}");
+    let first = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"task": "Wait"}),
+    )
+    .expect("default");
+    assert!(first["taskId"].is_string(), "{first}");
+    let second = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"task": "Wait"}),
+    )
+    .expect_err("past the limit");
+    assert!(second.contains("1 tasks"), "{second}");
+    convo
+        .request(
+            "_canoa/delegate/stop",
+            json!({"sessionId": session}),
+            &|_| None,
+        )
+        .expect("stopped");
+    drop(link);
+    host.stop();
 }

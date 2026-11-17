@@ -109,17 +109,52 @@ pub(crate) fn folder(
 /// # Errors
 ///
 /// The reason it is refused.
-pub(crate) fn remote_folder(roots: &[PathBuf]) -> Result<PathBuf, String> {
+pub(crate) fn remote_folder(roots: &[PathBuf], asked: Option<&str>) -> Result<PathBuf, String> {
     let root = roots.first().ok_or_else(|| {
         "this source has no working root to run a task from another machine in: name one in working_roots".to_owned()
     })?;
     let settled = canonical(root)
         .map_err(|error| format!("the source's working root cannot be read: {error}"))?;
-    if settled.is_dir() {
-        Ok(settled)
-    } else {
-        Err("the source's working root is not a directory".to_owned())
+    if !settled.is_dir() {
+        return Err("the source's working root is not a directory".to_owned());
     }
+    let Some(asked) = asked else {
+        return Ok(settled);
+    };
+    // The sender names a folder of this host's: it must be inside one of the source's working roots, as a folder is for a session
+    // of this host's own.
+    let wanted = canonical(Path::new(asked))
+        .map_err(|error| format!("workspace {asked:?} cannot be used: {error}"))?;
+    let inside = roots
+        .iter()
+        .filter_map(|root| canonical(root).ok())
+        .any(|root| wanted.starts_with(&root));
+    if !inside {
+        return Err(format!(
+            "workspace {asked:?} is outside the working roots of this source"
+        ));
+    }
+    if wanted.is_dir() {
+        Ok(wanted)
+    } else {
+        Err(format!("workspace {asked:?} is not a directory"))
+    }
+}
+
+/// The id of the select option of `category` in a `session/new` answer, when the agent lists one, and the values it lists.
+pub(crate) fn option_of(result: &Value, category: &str) -> Option<(String, Vec<String>)> {
+    let option = result
+        .get("configOptions")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|option| option.get("category").and_then(Value::as_str) == Some(category))?;
+    // Version 1 names an option `id`, version 2 `configId`.
+    let id = option
+        .get("id")
+        .or_else(|| option.get("configId"))
+        .and_then(Value::as_str)?
+        .to_owned();
+    Some((id, option_values(option)))
 }
 
 /// The modes an agent's session lists, read from a `session/new` or `session/set_config_option` answer.
@@ -270,6 +305,8 @@ mod tests {
             title: None,
             harness: None,
             roots: Vec::new(),
+            accounts: Vec::new(),
+            missing: Vec::new(),
             remote: remote.then(|| Remote {
                 url: "ws://127.0.0.1:1".to_owned(),
                 peer: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -302,9 +339,13 @@ mod tests {
     #[test]
     fn a_task_from_another_machine_runs_in_the_first_working_root_or_is_refused() {
         let dir = std::env::temp_dir();
-        assert!(remote_folder(std::slice::from_ref(&dir)).is_ok());
-        assert!(remote_folder(&[]).unwrap_err().contains("working root"));
-        assert!(remote_folder(&[dir.join("canoa-no-such-root")]).is_err());
+        assert!(remote_folder(std::slice::from_ref(&dir), None).is_ok());
+        assert!(
+            remote_folder(&[], None)
+                .unwrap_err()
+                .contains("working root")
+        );
+        assert!(remote_folder(&[dir.join("canoa-no-such-root")], None).is_err());
     }
 
     fn strings(names: &[&str]) -> Vec<String> {

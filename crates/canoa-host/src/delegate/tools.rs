@@ -22,7 +22,7 @@ use coqui_a2a::wire::Method;
 use serde_json::{Map, Value, json};
 
 use super::agent::DelegationAgent;
-use super::{Engine, MAX_WAIT, Session, Who};
+use super::{Engine, MAX_WAIT, Session, Who, lock, person};
 
 /// The tools and their input, as `tools/list` answers.
 pub(crate) fn list(engine: &Engine, session: &Session) -> Value {
@@ -37,16 +37,34 @@ pub(crate) fn list(engine: &Engine, session: &Session) -> Value {
     };
     json!({"tools": [
         {
+            "name": "delegate_targets",
+            "description": "List what you may hand a task to: each source, where it runs (this host or another machine), the \
+                            accounts it offers you, whether it is ready, and what a workspace is for it. Name a source to see \
+                            its models and their efforts as well. Never lists a credential.",
+            "inputSchema": {"type": "object", "properties": {
+                "source": {"type": "string", "description": "A source to list the models of."},
+            }, "additionalProperties": false},
+        },
+        {
             "name": "delegate_task",
             "description": "Hand a task to another agent. It runs as its own session, sees only the task text you give it and \
-                            nothing of this conversation, and works in a folder at or below this session's. Answers a task id \
-                            at once; read the result with task_status.",
+                            nothing of this conversation, and works in a folder at or below this session's (for an agent on \
+                            another machine, in a workspace you name there). A model, effort, account, profile or loadout the \
+                            source does not offer is refused by name, never replaced. Answers a task id at once; read the \
+                            result with task_status.",
             "inputSchema": {"type": "object", "properties": {
                 "source": {"type": "string", "description": named},
                 "task": {"type": "string", "description": "Everything the other agent needs, as one self-contained instruction."},
                 "folder": {"type": "string", "description": "Where it works: this session's folder or one below it. Default: this session's folder."},
+                "workspace": {"type": "string", "description": "For an agent on another machine: the folder to work in there. Required for one; this session's folder is never sent."},
                 "title": {"type": "string", "description": "A short name the person sees for the task."},
-            }, "required": ["source", "task"], "additionalProperties": false},
+                "model": {"type": "string", "description": "A model the source lists (see delegate_targets)."},
+                "effort": {"type": "string", "description": "An effort the model lists."},
+                "account": {"type": "string", "description": "One of the accounts delegate_targets lists for the source."},
+                "profile": {"type": "string", "description": "A profile the source offers."},
+                "loadout": {"type": "string", "description": "A loadout of that profile."},
+                "context": {"type": "string", "enum": ["task"], "description": "What the other agent is given besides the task text: nothing (task)."},
+            }, "required": ["task"], "additionalProperties": false},
         },
         {
             "name": "task_status",
@@ -74,6 +92,7 @@ pub(crate) fn call(
     args: &Value,
 ) -> Value {
     let answer = match name {
+        "delegate_targets" => targets(engine, session, args),
         "delegate_task" => delegate(engine, session, args),
         "task_status" => status(engine, session, args),
         "cancel" => cancel(engine, session, args),
@@ -114,12 +133,49 @@ fn text_arg<'a>(args: &'a Value, name: &str) -> Result<Option<&'a str>, String> 
     }
 }
 
-fn delegate(engine: &Arc<Engine>, session: &Arc<Session>, args: &Value) -> Result<Value, String> {
-    let source = text_arg(args, "source")?.ok_or("source is required")?;
+fn targets(engine: &Arc<Engine>, session: &Arc<Session>, args: &Value) -> Result<Value, String> {
+    person::listing(engine, session, text_arg(args, "source")?)
+}
+
+/// The task `id` of `session`, as `task_status` answers it without waiting.
+pub(super) fn task_of(
+    engine: &Arc<Engine>,
+    session: &Arc<Session>,
+    id: &str,
+) -> Result<Value, String> {
+    let who = who(session)?;
+    Ok(describe(
+        &get(engine, &who, id)?,
+        engine.config.result_bytes,
+    ))
+}
+
+/// `delegate_task`: the tool's, and the person's own start, which come to the one request.
+pub(super) fn delegate(
+    engine: &Arc<Engine>,
+    session: &Arc<Session>,
+    args: &Value,
+) -> Result<Value, String> {
+    let default = lock(&session.setup).default.clone();
+    let source = text_arg(args, "source")?
+        .map(str::to_owned)
+        .or(default)
+        .ok_or("source is required")?;
+    let source = source.as_str();
     let task = text_arg(args, "task")?.ok_or("task is required")?;
     let who = who(session)?;
     let mut metadata = Map::new();
-    for key in ["folder", "title"] {
+    for key in [
+        "folder",
+        "title",
+        "workspace",
+        "model",
+        "effort",
+        "account",
+        "profile",
+        "loadout",
+        "context",
+    ] {
         if let Some(text) = text_arg(args, key)? {
             metadata.insert(key.to_owned(), json!(text));
         }

@@ -17,6 +17,7 @@ use coqui_a2a::error::A2aError;
 use coqui_a2a::model::{Artifact, Message, Part, Role, TaskState};
 use serde_json::{Value, json};
 
+use super::choice::Choice;
 use super::privilege::{self, Modes};
 use super::{ChildContext, Engine, META, Reservation, Session, Waiting, lock};
 use crate::local::{Link, LinkError};
@@ -204,6 +205,8 @@ pub(crate) struct Job {
     pub(crate) folder: PathBuf,
     pub(crate) text: String,
     pub(crate) reservation: Reservation,
+    /// What the task was asked to run as.
+    pub(crate) choice: Choice,
 }
 
 /// Starts the task's thread.
@@ -233,8 +236,9 @@ fn run(job: Job) {
         folder,
         text,
         reservation,
+        choice,
     } = job;
-    let outcome = drive(&engine, &session, &child, &folder, &text);
+    let outcome = drive(&engine, &session, &child, (&folder, &text), &choice);
     // The agent ends before the task is called done, so a task that reads as ended has no process.
     if let Some(link) = lock(&child.link).as_ref() {
         link.close();
@@ -381,8 +385,8 @@ fn drive(
     engine: &Arc<Engine>,
     session: &Arc<Session>,
     child: &Arc<Child>,
-    folder: &Path,
-    text: &str,
+    (folder, text): (&Path, &str),
+    choice: &Choice,
 ) -> Outcome {
     // A cancel that came before the thread did has already ended the task.
     if session
@@ -402,7 +406,7 @@ fn drive(
         .source(&child.source)
         .is_some_and(|source| source.remote.is_some())
     {
-        return super::remote::drive(engine, session, child, text);
+        return super::remote::drive(engine, session, child, text, choice.workspace.as_deref());
     }
     let context = ChildContext {
         principal: conn.principal().clone(),
@@ -425,6 +429,7 @@ fn drive(
         session,
         child,
         link,
+        choice,
         next: 0,
         reply: String::new(),
         cut: false,
@@ -441,6 +446,7 @@ struct Work<'a> {
     session: &'a Arc<Session>,
     child: &'a Arc<Child>,
     link: Arc<Link>,
+    choice: &'a Choice,
     next: u64,
     reply: String,
     cut: bool,
@@ -449,14 +455,27 @@ struct Work<'a> {
 
 impl Work<'_> {
     fn exchange(&mut self, folder: &Path, text: &str) -> Result<Outcome, Outcome> {
-        self.call(
-            "initialize",
-            json!({
-                "protocolVersion": 1,
-                "clientCapabilities": {},
-                "clientInfo": {"name": "canoa-delegate", "version": env!("CARGO_PKG_VERSION")},
-            }),
-        )?;
+        // The account, profile and loadout are the entry's to accept: its host refuses one it does not offer, and the task then
+        // ends saying so.
+        let mut meta = serde_json::Map::new();
+        for (key, value) in [
+            (crate::ACCOUNT_META, &self.choice.account),
+            (crate::profile::hosted::PROFILE_META, &self.choice.profile),
+            (crate::profile::hosted::LOADOUT_META, &self.choice.loadout),
+        ] {
+            if let Some(value) = value {
+                meta.insert(key.to_owned(), json!(value));
+            }
+        }
+        let mut initialize = json!({
+            "protocolVersion": 1,
+            "clientCapabilities": {},
+            "clientInfo": {"name": "canoa-delegate", "version": env!("CARGO_PKG_VERSION")},
+        });
+        if !meta.is_empty() {
+            initialize["_meta"] = serde_json::Value::Object(meta);
+        }
+        self.call("initialize", initialize)?;
         let opened = self.call(
             "session/new",
             json!({"cwd": folder.to_string_lossy(), "mcpServers": []}),
@@ -484,6 +503,14 @@ impl Work<'_> {
         if modes.current.as_deref() != Some(wanted.as_str()) {
             self.set_mode(&modes, &id, &wanted)?;
         }
+        for (category, wanted, what) in [
+            ("model", &self.choice.model, "model"),
+            ("thought_level", &self.choice.effort, "effort"),
+        ] {
+            if let Some(wanted) = wanted {
+                self.choose(&opened, &id, (category, what), wanted)?;
+            }
+        }
         let turn = self.call(
             "session/prompt",
             json!({"sessionId": id, "prompt": [{"type": "text", "text": text}]}),
@@ -504,6 +531,40 @@ impl Work<'_> {
             stop,
             cut: self.cut,
         })
+    }
+
+    /// Sets the model or effort the task was asked for, when the agent's session lists it; the task is refused, naming it, when the
+    /// agent does not, and never runs on another.
+    fn choose(
+        &mut self,
+        opened: &Value,
+        session: &str,
+        (category, what): (&str, &str),
+        wanted: &str,
+    ) -> Result<(), Outcome> {
+        let Some((option, values)) = privilege::option_of(opened, category) else {
+            return Err(Outcome::Rejected(format!(
+                "{} lists no {what} to choose, so {what} {wanted:?} was not set",
+                self.child.source
+            )));
+        };
+        if !values.iter().any(|value| value == wanted) {
+            return Err(Outcome::Rejected(format!(
+                "{what} {wanted:?} is not one {} offers (it offers: {})",
+                self.child.source,
+                values.join(", ")
+            )));
+        }
+        match self.call(
+            "session/set_config_option",
+            json!({"sessionId": session, "configId": option, "value": wanted}),
+        ) {
+            Ok(_) => Ok(()),
+            Err(Outcome::Failed(why)) => Err(Outcome::Rejected(format!(
+                "the agent would not take the {what} {wanted:?}: {why}"
+            ))),
+            Err(other) => Err(other),
+        }
     }
 
     fn set_mode(&mut self, modes: &Modes, session: &str, wanted: &str) -> Result<(), Outcome> {

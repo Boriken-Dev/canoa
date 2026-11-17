@@ -942,6 +942,23 @@ impl delegate::Host for DelegationHost {
             .map_err(|error| error.to_string())
     }
 
+    fn choices(
+        &self,
+        source: &str,
+        who: &Principal,
+        account: Option<&str>,
+    ) -> Option<serde_json::Value> {
+        let shared = self.shared.upgrade()?;
+        let caller = match who {
+            Principal::Owner => control::Caller::Owner,
+            Principal::Key(peer) | Principal::Remote(peer) => control::Caller::Peer {
+                id: peer.to_string(),
+                grants: BTreeSet::new(),
+            },
+        };
+        shared.control.delegation_choices(&caller, source, account)
+    }
+
     fn open(&self, source: &str, context: delegate::ChildContext) -> Result<Link, LocalError> {
         let shared = self.shared.upgrade().ok_or(LocalError::Stopped)?;
         Local {
@@ -1766,7 +1783,7 @@ impl Serving {
                 &serving.shared.control,
             ))));
         serving.door = serving.open_door(config, options);
-        serving.attach_delegation(&config.remote_agents, dialer, usage_log.clone());
+        serving.attach_delegation(config, dialer, usage_log.clone());
 
         if let Some(sockets) = &options.portal {
             let peer = serving.shared.method.peer_id().to_string();
@@ -1871,7 +1888,7 @@ impl Serving {
     /// Gives the delegation the agents this host serves and the way to open one for a task.
     fn attach_delegation(
         &self,
-        remote: &[crate::config::RemoteAgent],
+        config: &Config,
         identity: Identity,
         usage: Option<Arc<crate::usage_log::UsageLog>>,
     ) {
@@ -1895,14 +1912,21 @@ impl Serving {
                         _ => None,
                     })
                     .unwrap_or_default(),
+                accounts: match config.entry(&listening.name).map(|entry| &entry.kind) {
+                    Some(EntryKind::Harness { accounts, .. }) => accounts.clone(),
+                    _ => Vec::new(),
+                },
+                missing: listening.missing.clone(),
                 remote: None,
             })
             .collect();
-        agents.extend(remote.iter().map(|agent| delegate::Source {
+        agents.extend(config.remote_agents.iter().map(|agent| delegate::Source {
             name: agent.name.clone(),
             title: agent.title.clone(),
             harness: None,
             roots: Vec::new(),
+            accounts: Vec::new(),
+            missing: Vec::new(),
             remote: Some(delegate::Remote {
                 url: agent.url.clone(),
                 peer: agent.peer,

@@ -17,6 +17,8 @@ mod agent;
 pub(crate) mod bridge;
 mod channel;
 mod child;
+mod choice;
+mod person;
 pub(crate) mod privilege;
 mod remote;
 mod server;
@@ -55,6 +57,12 @@ pub(crate) const DELEGATE_EVENT: &str = "_canoa/delegate/event";
 const DELEGATE_HISTORY: &str = "_canoa/delegate/history";
 /// The client's request to stop the tasks of a session, or one of them.
 const DELEGATE_STOP: &str = "_canoa/delegate/stop";
+/// The client's request to start a task of the person's own, as a task of the session.
+const DELEGATE_START: &str = "_canoa/delegate/start";
+/// The client's request for what the session may delegate to.
+const DELEGATE_TARGETS: &str = "_canoa/delegate/targets";
+/// The client's request to narrow what the session may delegate to, and to set its default and its limit.
+const DELEGATE_SETUP: &str = "_canoa/delegate/setup";
 /// Notifications of a task's updates the outbox holds before the host drops the next ones (the history keeps them).
 const MAX_QUEUED_UPDATES: usize = 1024;
 /// The name of the MCP server the host adds to a session.
@@ -85,6 +93,10 @@ pub(crate) struct Source {
     pub(crate) harness: Option<String>,
     /// The working roots of its entry. A task from another machine runs in the first, since it names no folder.
     pub(crate) roots: Vec<PathBuf>,
+    /// The `[host.accounts]` names its entry offers: the only accounts a task on it may name.
+    pub(crate) accounts: Vec<String>,
+    /// The programs it needs that were not found; it is not ready while any is missing.
+    pub(crate) missing: Vec<String>,
     /// Where it runs, when it is another machine's agent.
     pub(crate) remote: Option<Remote>,
 }
@@ -121,6 +133,12 @@ pub(crate) trait Host: Send + Sync {
     /// What the session `session` of the agent `source` has spent, as the host's usage log keeps it: `input`, `output`, `cache_read`, `cache_write` and
     /// `cost_micro_usd`, each present only when the agent reported it. `None` when it reported nothing, or no log is kept.
     fn usage_of(&self, _source: &str, _session: &str) -> Option<Value> {
+        None
+    }
+
+    /// What `source` lists before a session starts (its models, each with its efforts) as `who` may ask it, optionally as
+    /// `account`, in the shape of `options/choices`. `None` when it cannot be asked.
+    fn choices(&self, _source: &str, _who: &Principal, _account: Option<&str>) -> Option<Value> {
         None
     }
 
@@ -329,6 +347,15 @@ impl Engine {
                 ),
             ));
         }
+        let narrowed = lock(&session.setup).max_running;
+        if let Some(narrowed) = narrowed
+            && session.live.load(Ordering::SeqCst) >= narrowed
+        {
+            return Err(limit(
+                "max_running",
+                format!("this session is set to run {narrowed} tasks at once, and does"),
+            ));
+        }
         if session.live.load(Ordering::SeqCst) >= self.config.max_children {
             return Err(limit(
                 "max_children",
@@ -499,6 +526,13 @@ pub(crate) struct Session {
     live: AtomicUsize,
     /// Calls of the tool server this session's bearer has under way.
     pub(crate) calls: AtomicUsize,
+    /// The person's own submissions, by the id their client gave each, to the task it made: a request sent again after a
+    /// reconnect finds its task and makes none.
+    pub(crate) submitted: Mutex<HashMap<String, String>>,
+    /// Held while the person's own start is made, so one sent twice at once is made once.
+    pub(crate) starting: Mutex<()>,
+    /// What the person narrowed this session's delegation to.
+    pub(crate) setup: Mutex<person::Setup>,
 }
 
 impl Session {
@@ -787,6 +821,44 @@ impl Conn {
         }
     }
 
+    /// Answers the person's own `start`, `targets` and `setup` on a thread of their own: a start may ask the agent's provider
+    /// what it offers, which takes a while, and the relay must go on meanwhile.
+    fn person_request(self: &Arc<Self>, method: String, id: Option<Value>, params: Value) {
+        let conn = Arc::clone(self);
+        let work = move || {
+            let session = params
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .and_then(|id| conn.session(id));
+            let answer = match session {
+                None => Err("no such session".to_owned()),
+                Some(session) => match method.as_str() {
+                    DELEGATE_START => person::start(&conn.engine, &session, &params),
+                    DELEGATE_TARGETS => person::targets(&conn.engine, &session, &params),
+                    _ => person::setup(&session, &params),
+                },
+            };
+            let Some(id) = id else { return };
+            let reply = match answer {
+                Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+                Err(why) => {
+                    json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32602, "message": why}})
+                }
+            };
+            if let Ok(bytes) = serde_json::to_vec(&reply) {
+                lock(&conn.outbox).push_back(bytes);
+            }
+        };
+        if let Err(error) = std::thread::Builder::new()
+            .name("canoa-delegate-person".to_owned())
+            .spawn(work)
+        {
+            tracing::warn!(
+                "delegation: a request of the person's could not start its thread: {error}"
+            );
+        }
+    }
+
     /// What the host adds to the stream to the client.
     pub(crate) fn drain(&self) -> Vec<Vec<u8>> {
         lock(&self.outbox).drain(..).collect()
@@ -862,6 +934,11 @@ impl Conn {
             (DELEGATE_STOP | DELEGATE_HISTORY, request) => {
                 let id = request.map(|_| value["id"].clone());
                 self.client_request(&method, id, &value["params"]);
+                return None;
+            }
+            (DELEGATE_START | DELEGATE_TARGETS | DELEGATE_SETUP, request) => {
+                let id = request.map(|_| value["id"].clone());
+                self.person_request(method, id, value["params"].take());
                 return None;
             }
             _ => {}
@@ -1239,6 +1316,9 @@ impl Engine {
                 ended: Mutex::new(VecDeque::new()),
                 live: AtomicUsize::new(0),
                 calls: AtomicUsize::new(0),
+                submitted: Mutex::new(HashMap::new()),
+                starting: Mutex::new(()),
+                setup: Mutex::new(person::Setup::default()),
             }
         })
     }

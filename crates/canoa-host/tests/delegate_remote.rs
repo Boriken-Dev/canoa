@@ -184,12 +184,15 @@ struct Convo<'a> {
     requests: Vec<Value>,
     updates: Vec<Value>,
     events: Vec<Value>,
+    /// The folder on the far host that a task for it is told to work in.
+    workspace: Option<String>,
 }
 
 impl<'a> Convo<'a> {
     fn new(link: &'a Link) -> Self {
         Self {
             link,
+            workspace: None,
             next: 0,
             requests: Vec::new(),
             updates: Vec::new(),
@@ -280,7 +283,16 @@ impl<'a> Convo<'a> {
     }
 
     fn delegate(&mut self, session: &str, source: &str, task: &str) -> String {
-        let said = self.prompt(session, &format!("Delegate {source} {task}"));
+        let said = match self.workspace.clone().filter(|_| source == "far") {
+            Some(workspace) => self.prompt(
+                session,
+                &format!(
+                    "Call delegate_task {}",
+                    json!({"source": source, "task": task, "workspace": workspace})
+                ),
+            ),
+            None => self.prompt(session, &format!("Delegate {source} {task}")),
+        };
         let answer: Value =
             serde_json::from_str(&said).unwrap_or_else(|_| panic!("a task id: {said}"));
         answer["taskId"].as_str().expect("a task id").to_owned()
@@ -371,6 +383,7 @@ fn a_parent_hands_a_task_to_the_far_hosts_source_and_reads_its_result() {
     let near = near(scratch, &far, "sources = [\"far\"]");
     let link = near.local.open("parent").expect("a link");
     let mut convo = Convo::new(&link);
+    convo.workspace = Some(far.root.to_string_lossy().into_owned());
     let session = convo.open(&work);
     let task = convo.delegate(&session, "far", "Verbatim hello  world");
     let status = convo.status(&session, &task, 20_000);
@@ -414,6 +427,7 @@ fn a_remote_source_the_sources_setting_does_not_name_is_not_delegable() {
         let near = near(Scratch::new(), &far, sources);
         let link = near.local.open("parent").expect("a link");
         let mut convo = Convo::new(&link);
+        convo.workspace = Some(far.root.to_string_lossy().into_owned());
         let session = convo.open(&work);
         let said = convo.prompt(&session, "Delegate far hi");
         assert!(said.starts_with("error:"), "{sources}: {said}");
@@ -433,6 +447,7 @@ fn a_remote_question_reaches_the_person_on_the_parent_and_the_answer_reaches_the
     let near = near(scratch, &far, "sources = [\"far\"]");
     let link = near.local.open("parent").expect("a link");
     let mut convo = Convo::new(&link);
+    convo.workspace = Some(far.root.to_string_lossy().into_owned());
     let session = convo.open(&work);
     let task = convo.delegate(&session, "far", "Please edit src/report.js");
     let asked = convo.host_request();
@@ -473,6 +488,7 @@ fn cancelling_the_task_ends_the_far_hosts_child_process() {
     let near = near(scratch, &far, "sources = [\"far\"]");
     let link = near.local.open("parent").expect("a link");
     let mut convo = Convo::new(&link);
+    convo.workspace = Some(far.root.to_string_lossy().into_owned());
     let session = convo.open(&work);
     let task = convo.delegate(&session, "far", "Wait");
     until("the far child started", || pids(&far.marker).len() == 1);
@@ -513,6 +529,7 @@ fn a_task_for_the_far_host_sends_no_folder_and_runs_where_the_far_host_puts_it()
     let near = near(scratch, &far, "sources = [\"far\"]");
     let link = near.local.open("parent").expect("a link");
     let mut convo = Convo::new(&link);
+    convo.workspace = Some(far.root.to_string_lossy().into_owned());
     let session = convo.open(&work);
     // A folder cannot be named for it.
     let said = convo.prompt(&session, "DelegateIn . far hi");
@@ -550,6 +567,7 @@ fn a_link_lost_mid_task_ends_the_mirror_failed_and_never_completed() {
     let near = near(scratch, &far, "sources = [\"far\"]");
     let link = near.local.open("parent").expect("a link");
     let mut convo = Convo::new(&link);
+    convo.workspace = Some(far.root.to_string_lossy().into_owned());
     let session = convo.open(&work);
     let task = convo.delegate(&session, "far", "Wait");
     until("the far child started", || pids(&far.marker).len() == 1);
@@ -585,6 +603,7 @@ fn a_task_can_name_no_far_source_when_the_far_host_is_unreachable_and_ends_faile
     let near = Hosted::start_in(scratch, &config, &[]);
     let link = near.local.open("parent").expect("a link");
     let mut convo = Convo::new(&link);
+    convo.workspace = Some("/anywhere".to_owned());
     let session = convo.open(&work);
     let task = convo.delegate(&session, "far", "hi");
     let status = convo.status(&session, &task, 20_000);
@@ -710,6 +729,7 @@ fn a_task_for_another_machine_is_marked_so_in_the_events_the_client_gets() {
     let near = near(scratch, &far, "sources = [\"far\"]");
     let link = near.local.open("parent").expect("a link");
     let mut convo = Convo::new(&link);
+    convo.workspace = Some(far.root.to_string_lossy().into_owned());
     let session = convo.open(&work);
     let task = convo.delegate(&session, "far", "Verbatim x");
     let _ = convo.status(&session, &task, 20_000);
@@ -743,12 +763,16 @@ a2a = {{ url = {}, peer = \"{}\", source = \"shared\" }}
     let near = Hosted::start_in(scratch, &config, &[]);
     let link = near.local.open("parent").expect("a link");
     let mut convo = Convo::new(&link);
+    convo.workspace = Some(far.root.to_string_lossy().into_owned());
     let session = convo.open(&work);
     // The person's session hands a task to `child`, which hands one to the far agent and waits for it.
     let outer = convo.delegate(
         &session,
         "child",
-        "DelegateAwait far Please edit src/report.js",
+        &format!(
+            "DelegateAwait far@{} Please edit src/report.js",
+            far.root.to_string_lossy()
+        ),
     );
     let asked = convo.host_request();
     assert_eq!(asked["method"], "session/request_permission");
@@ -768,6 +792,62 @@ a2a = {{ url = {}, peer = \"{}\", source = \"shared\" }}
         convo.events
     );
     convo.send(&json!({"jsonrpc": "2.0", "id": asked["id"], "result": {"outcome": {"outcome": "selected", "optionId": "no"}}}));
+    drop(link);
+    near.stop();
+    far.host.stop();
+}
+
+#[test]
+fn a_task_for_the_far_host_needs_a_workspace_there_which_the_far_host_checks() {
+    let (scratch, key) = scratch_with_identity();
+    let other = Identity::generate(method()).expect("a key");
+    let far = far(&key, &other, &[&key]);
+    let work = directory(&scratch.0, "work");
+    let inside = directory(&far.root, "project");
+    let outside = directory(&scratch.0, "elsewhere");
+    let near = near(scratch, &far, "sources = [\"far\"]");
+    let link = near.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(&work);
+
+    // No workspace: it is asked for, and this session's own folder is not sent in its place.
+    let none = convo.prompt(&session, "Delegate far Cwd");
+    assert!(
+        none.starts_with("error:") && none.contains("workspace"),
+        "{none}"
+    );
+    // A model is that host's to choose.
+    let chosen = convo.prompt(
+        &session,
+        &format!(
+            "Call delegate_task {}",
+            json!({"source": "far", "task": "Cwd", "workspace": inside.to_string_lossy(), "model": "fast"})
+        ),
+    );
+    assert!(
+        chosen.starts_with("error:") && chosen.contains("crosses machines"),
+        "{chosen}"
+    );
+    // A folder outside the far source's working roots ends the task there, saying which.
+    convo.workspace = Some(outside.to_string_lossy().into_owned());
+    let refused = convo.delegate(&session, "far", "Cwd");
+    let status = convo.status(&session, &refused, 20_000);
+    assert_eq!(status["state"], "failed", "{status}");
+    let said = status["message"].as_str().unwrap_or_default();
+    assert!(said.contains("elsewhere"), "{status}");
+    // A folder inside one is where the task runs.
+    convo.workspace = Some(inside.to_string_lossy().into_owned());
+    let task = convo.delegate(&session, "far", "Cwd");
+    let status = convo.status(&session, &task, 20_000);
+    assert_eq!(status["state"], "completed", "{status}");
+    assert!(
+        status["result"]
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("project"),
+        "{status}"
+    );
     drop(link);
     near.stop();
     far.host.stop();

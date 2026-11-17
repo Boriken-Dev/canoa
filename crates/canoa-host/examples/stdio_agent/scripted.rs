@@ -17,8 +17,8 @@
 //!
 //! Delegation: `--mcp-http` advertises HTTP MCP servers, and `--modes=a,b,c` lists the modes of its mode option (the first is the
 //! default). A session given the host's `canoa-delegate` entry can call its tools: `Delegate SOURCE TEXT`, `DelegateIn FOLDER
-//! SOURCE TEXT`, `DelegateAwait SOURCE TEXT` (and waits for the task to end), `Status ID [WAIT_MS]`, `Cancel ID` and `Call TOOL JSON` say what the tool answered. `Mode` says the mode the
-//! session is in, `Verbatim` the blocks and text of its own prompt, `Wait` waits for a cancel, `PidFile PATH` writes its process id
+//! SOURCE TEXT`, `DelegateAwait SOURCE[@WORKSPACE] TEXT` (and waits for the task to end), `Status ID [WAIT_MS]`, `Cancel ID` and `Call TOOL JSON` say what the tool answered. `Mode` says the mode the
+//! session is in, `Chosen` its model and effort, `Verbatim` the blocks and text of its own prompt, `Wait` waits for a cancel, `PidFile PATH` writes its process id
 //! to PATH and waits for a cancel, `Bearer` says the tool server's address and the session's bearer (a stand-in may; the host never
 //! does), `Raw LINE` writes LINE to the client as it is, `SecretBearer` and `SecretBridge` say what `Bearer` and `Bridge` say for the secret tools, `Secret TOOL JSON` calls a tool of the host's secret server (`secret_request`, `secret_use`, `secret_show`) and says what it
 //! answered, `Pid` says its process id and `Cwd` the working directory the session was opened in. Given the entry as a stdio server
@@ -630,11 +630,16 @@ impl Shared {
                 // Hands a task on and stays in its turn until the task ends, so what the task asks of the person reaches
                 // the person through this session, and answers with the task's last state.
                 let (source, task) = rest.split_once(' ').unwrap_or((rest, ""));
-                let handed = self.tool_call(
-                    session,
-                    "delegate_task",
-                    &json!({"source": source, "task": task}),
-                );
+                // `SOURCE@WORKSPACE` names the folder an agent on another machine works in.
+                let (source, workspace) = match source.split_once('@') {
+                    Some((source, workspace)) => (source, Some(workspace)),
+                    None => (source, None),
+                };
+                let mut arguments = json!({"source": source, "task": task});
+                if let Some(workspace) = workspace {
+                    arguments["workspace"] = json!(workspace);
+                }
+                let handed = self.tool_call(session, "delegate_task", &arguments);
                 let id = serde_json::from_str::<Value>(&handed)
                     .ok()
                     .and_then(|answer| answer["taskId"].as_str().map(str::to_owned));
@@ -738,6 +743,22 @@ impl Shared {
                     .unwrap_or("")
                     .to_owned();
                 format!("mode: {mode}")
+            }
+            "Chosen" => {
+                let chosen = lock(&self.chosen);
+                let pick = |id: &str, default: &str| {
+                    chosen
+                        .get(session)
+                        .and_then(|now| now.get(id))
+                        .and_then(Value::as_str)
+                        .unwrap_or(default)
+                        .to_owned()
+                };
+                format!(
+                    "model={} effort={}",
+                    pick("model", "default"),
+                    pick("effort", "low")
+                )
             }
             "Verbatim" => {
                 let count = blocks;
