@@ -107,7 +107,7 @@ class OverlayPageState extends State<OverlayPage> {
     final home = widget.home!;
     final (name, source) = _target!;
     final found = await previewOverlay(home.overlays, namedAs(config, name) ?? name, source,
-        os: home.os, shared: mergeProfiles([Layer(const LayerId(LayerKind.user), config.profile)]).shareEnv,
+        os: home.os,
         catalogPin: entry.pin, catalog: widget.listed.label, iconLimits: config.store.iconLimits, catalogs: widget.catalogs,
         others: await installedManifests(home, config, except: namedAs(config, name) ?? name), skillPins: config.skillPins);
     if (mounted) setState(() => preview = found);
@@ -427,7 +427,7 @@ class OverlayPageState extends State<OverlayPage> {
             OverlayReportView(report: OverlayReport(report.layer, report.digest, [
               for (final line in report.notApplied)
                 if (!line.endsWith('hints for another harness')) line,
-            ], report.ungranted, report.unresolved, report.nonDefaults)),
+            ], report.nonDefaults)),
         ],
         for (final id in found.harnesses) Text(oneLine('harness.$id: hints for $id agents only'), style: text.bodySmall),
         for (final (path, os, network) in found.setup)

@@ -65,7 +65,7 @@ void main() {
       final loaded = (await ControlStoreIndex.over(HostControl(host))!.catalogs()).single;
       expect(loaded.problem, isNull);
       final entry = StoreListing([loaded]).entries.single.entry;
-      final shown = await previewOverlay(home.overlays, installName(entry), installSource(entry), os: home.os, shared: const {},
+      final shown = await previewOverlay(home.overlays, installName(entry), installSource(entry), os: home.os,
           catalogPin: entry.pin);
       expect(shown.installable, isTrue);
       final installed = await installPreview(home.overlays, base, shown, catalog: 'main');

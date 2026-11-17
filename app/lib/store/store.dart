@@ -380,7 +380,6 @@ final class OverlayPreview {
 /// refused; canoa.cfg's own pin is held by [installPreview].
 Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitOverlay source, {
   required String os,
-  required Map<String, LayerId> shared,
   String? catalogPin,
   String? catalog,
   String? harness,
@@ -431,7 +430,7 @@ Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitO
   try {
     layer = overlayLayer(identity: name, root: overlays.directoryOf(name), os: os, tree: read.tree, harness: harness,
         pinned: true, iconLimits: iconLimits, fetched: await overlays.skillCopies(), skillPins: skillPins);
-    report = overlayReport(layer.id, layer.aos!, shared);
+    report = overlayReport(layer.id, layer.aos!);
   } on OverlayRefusal catch (error) {
     refusal = '$error';
   }

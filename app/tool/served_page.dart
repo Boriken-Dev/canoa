@@ -101,7 +101,7 @@ Future<String> _first(String options) async {
     report['catalogs'] = [for (final loaded in listing.catalogs) {'label': loaded.label, 'problem': loaded.problem, 'entries': loaded.catalog?.entries.keys.toList()}];
     final entry = listing.choose('team/${asked['overlay']}').entry;
     report['at'] = 'preview';
-    final preview = await previewOverlay(app.overlays, installName(entry), installSource(entry), os: 'linux', shared: const {});
+    final preview = await previewOverlay(app.overlays, installName(entry), installSource(entry), os: 'linux');
     report['previewAdded'] = preview.update.added;
     report['at'] = 'install';
     current = await installPreview(app.overlays, current, preview, catalog: 'team');

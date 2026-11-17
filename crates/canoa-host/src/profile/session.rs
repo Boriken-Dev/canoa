@@ -127,7 +127,14 @@ impl fmt::Debug for Session {
     /// Names only: a value may be a path of the person's.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Session")
-            .field("identity", &self.names().collect::<Vec<_>>())
+            .field(
+                "identity",
+                &self
+                    .identity
+                    .iter()
+                    .map(|(name, _)| name)
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -138,11 +145,6 @@ fn same(name: &str, other: &str) -> bool {
 }
 
 impl Session {
-    /// No variable: what a test or an entry the host knows nothing of starts from.
-    pub(crate) fn none() -> Self {
-        Self::default()
-    }
-
     /// The identity variables of `identity`, and `host`'s variables the host sets for the session itself. `own` reads this
     /// process's environment: a variable it already holds is kept, as dotagents keeps one.
     pub(crate) fn new(
@@ -189,17 +191,14 @@ impl Session {
         }
     }
 
+    /// Every variable this holds, with its value.
+    pub(crate) fn variables(&self) -> Vec<(String, String)> {
+        self.identity.iter().chain(&self.host).cloned().collect()
+    }
+
     /// The identity variables, which the agent is given.
     pub(crate) fn identity(&self) -> &[(String, String)] {
         &self.identity
-    }
-
-    /// Every variable name this holds.
-    pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
-        self.identity
-            .iter()
-            .chain(&self.host)
-            .map(|(name, _)| name.as_str())
     }
 
     /// `name`'s value here.
@@ -287,7 +286,14 @@ mod tests {
             Vec::new(),
             &none,
         );
-        assert_eq!(session.names().collect::<Vec<_>>(), ["AGENTS_HOST"]);
+        assert_eq!(
+            session
+                .identity()
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["AGENTS_HOST"]
+        );
         let session = Session::new(
             Who {
                 harness: Some("pi"),

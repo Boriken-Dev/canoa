@@ -204,7 +204,7 @@ model = "claude-x"
     expect(find.textContaining('Team review conventions.'), findsOneWidget, reason: 'its [about] summary');
   });
 
-  testWidgets('what Canoa does not apply, and what no layer of yours grants, is shown with the overlay', (tester) async {
+  testWidgets('what Canoa does not apply is shown with the overlay', (tester) async {
     final (home, _) = await open(tester);
     await tester.tap(find.byKey(const Key('profile-sync-team')));
     await tester.pumpAndSettle();
@@ -213,7 +213,6 @@ model = "claude-x"
     expect(home.overlays.records, contains('team'));
     final report = tester.widget<Text>(find.byKey(const Key('overlay-report-team'))).data!;
     expect(report, contains('setup: setup.sh: not applied by Canoa yet'));
-    expect(report, contains('env:AWS_SECRET_ACCESS_KEY: none of your layers shares it, so it is left unset'));
     expect(report, contains(teamDigest));
     expect(report, isNot(contains('unpinned')), reason: 'applying pinned it');
   });

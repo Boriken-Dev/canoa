@@ -23,7 +23,6 @@ use coqui_aos::{
     self as aos, Document, Environment, Facts, FiredEvent, Hook, HookEvent, HookFacts, HookPlan,
     HookRun, HookScope, OnFailure, Settings,
 };
-use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 
 use super::{Item, LayerId, LayerKind, ReadOverlay, State, Written, os, program_of};
@@ -170,7 +169,6 @@ impl Hooks {
         host: &HostProfile,
         layers: &[AosLayer],
         overlays: &[ReadOverlay],
-        shared: &IndexMap<String, LayerId>,
         lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Self {
         let interpreters = super::cache::interpreters(lookup("PATH"), lookup("PATHEXT"), || {
@@ -235,7 +233,7 @@ impl Hooks {
             interpreters,
             base,
             refusals: allow::Refusals::new(host.protected.as_deref()),
-            active: active_facts(layers, shared, lookup)
+            active: active_facts(layers, lookup)
                 .into_iter()
                 .map(|(manifest, facts)| (manifest.clone(), facts))
                 .collect(),

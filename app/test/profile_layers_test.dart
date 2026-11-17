@@ -36,7 +36,6 @@ url = "https://docs.example/mcp"
 [overlays]
 team = "https://example.invalid/team.git@main#profiles/team"
 [profile]
-share_env = ["GITHUB_TOKEN"]
 effort = "high"
 [profile.env.RUST_LOG]
 value = "info"

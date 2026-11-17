@@ -349,7 +349,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
       await c.run('Installing $name', () async {
         final named = namedAs(c.config, name) ?? name;
         final preview = await previewOverlay(home.overlays, named, source,
-            os: home.os, shared: mergeProfiles([Layer(const LayerId(LayerKind.user), c.config.profile)]).shareEnv,
+            os: home.os,
             catalogPin: entry.pin, catalog: listed.label, iconLimits: c.config.store.iconLimits, catalogs: skillCatalogs(c.loaded),
             others: await installedManifests(home, c.config, except: named), skillPins: c.config.skillPins);
         if (!preview.installable || pinMoved(c.config, preview) != null || (preview.skills?.isEmpty == false)) {

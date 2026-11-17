@@ -110,7 +110,7 @@ void main() {
       tree: treeOfFiles({for (final MapEntry(:key, :value) in files.entries) key: utf8.encode(value)}).tree,
     );
     Map<String, String> environmentOf(Layer layer, Map<String, String> host) {
-      final built = buildOverlayEnvironment([layer.aos!], const {}, (name) => host[name]);
+      final built = buildOverlayEnvironment([layer.aos!], (name) => host[name]);
       return {
         for (final name in const ['PATH', 'PYTHONPATH', 'NODE_PATH'])
           name: ?built.owned(name),
@@ -188,7 +188,7 @@ void main() {
     });
 
     Future<Map<String, String>> environmentOf(Layer layer, SessionVariables session) async {
-      final effective = mergeProfiles([layer], session: session);
+      final effective = mergeProfiles([layer]);
       final env = await effective.environment(
         lookup: (_) => null,
         readFile: (path, {within}) async => null,
@@ -223,6 +223,25 @@ void main() {
       expect(env['AGENTS_MODEL'], 'mine');
       expect(env['STATE'], '/state/thing');
       expect(env['CODEX_HOME'], '/state/own');
+    });
+
+    test('a placeholder reads any variable of this computer, and a header is kept over plain http', () {
+      final layer = layerOf({
+        'overlay.cfg': '[env]\nCOPY = "\${HOST_X}"\n[[mcp.servers]]\nname = "remote"\ntransport = "streamable-http"\n'
+            'url = "http://remote.example/mcp"\nheaders_env = { Authorization = "T" }\n',
+      });
+      final built = buildOverlayEnvironment([layer.aos!], (name) => name == 'HOST_X' ? 'v' : null);
+      expect(built.owned('COPY'), 'v');
+      expect((layer.profile.mcp['remote']! as McpHttp).headers, contains('Authorization'));
+      expect(layer.aos!.notApplied, isNot(contains(contains('never sent'))));
+      expect(
+        [for (final setting in mergeProfiles([layer]).overlays.single.nonDefaults) setting.id],
+        contains('insecure-transport'),
+      );
+    });
+
+    test('share_env is no longer a key of a profile', () {
+      expect(() => Profile.parse('share_env = ["A"]\n', LayerKind.user), throwsA(anything));
     });
 
     test('a variable with no value is not set, and none is ever empty', () async {

@@ -31,7 +31,7 @@ fn config(profiles: &str, extra: &str) -> String {
     format!(
         "[host.agents.profiled]\nprogram = {agent}\nprofiles = {profiles}\n\
          [host.profiles.plain]\n\
-         [host.profiles.main]\nshare_env = [\"HOST_SECRET\"]\ncontext = {{ text = \"Context from the host's profile.\" }}\n{extra}\n\
+         [host.profiles.main]\ncontext = {{ text = \"Context from the host's profile.\" }}\n{extra}\n\
          [host.profiles.main.env.TOKEN]\nfrom_env = \"HOST_SECRET\"\n\
          [host.profiles.main.mcp.probe]\ntype = \"stdio\"\ncommand = {server}\nargs = [\"--from-profile\"]\n\
          [host.profiles.main.mcp.probe.env.PROBE_TOKEN]\nfrom_env = \"HOST_SECRET\"\n",

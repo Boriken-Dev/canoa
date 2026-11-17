@@ -97,7 +97,7 @@ fn config_with(extra: &str) -> String {
     format!(
         "[host.agents.a]\nprogram = \"agent\"\nprofiles = [\"main\", \"other\"]\n\
          [host.profiles.other]\n\
-         [host.profiles.main]\nshare_env = [\"HOST_SECRET\"]\ncontext = {{ text = \"Host context.\" }}\n{extra}\n\
+         [host.profiles.main]\ncontext = {{ text = \"Host context.\" }}\n{extra}\n\
          [host.profiles.main.env.TOKEN]\nfrom_env = \"HOST_SECRET\"\n\
          [host.profiles.main.skills.review]\npath = \"skills/review\"\n\
          [host.profiles.main.mcp.probe]\ntype = \"stdio\"\ncommand = \"probe\"\nargs = [\"--x\"]\n\
@@ -1818,19 +1818,27 @@ fn an_overlays_own_hint_serves_its_knowledge_until_the_person_says_files() {
 }
 
 #[test]
-fn the_knowledge_tools_are_told_the_profile_the_loadout_and_the_variables_it_shares() {
+fn the_knowledge_tools_are_told_the_profile_the_loadout_and_the_sessions_variables() {
     let files = [("overlay.cfg", OPTIONS_MANIFEST)];
     let (_temp, connection, _parts) = docs_parts(&files, "");
     let caller = connection.kb_caller();
     assert_eq!(caller.profile.as_deref(), Some("main"));
     assert_eq!(caller.role, None, "no loadout was named");
-    // `lookup` gives HOST_SECRET, the variable the profile shares.
+    // The session's own variables, never the host's others.
     assert!(
-        caller.env.iter().any(|(name, _)| name == "HOST_SECRET"),
+        caller
+            .env
+            .iter()
+            .any(|(name, value)| name == "AGENTS_PROFILE" && value == "main"),
         "{:?}",
         caller.env.iter().map(|(name, _)| name).collect::<Vec<_>>()
     );
-    assert!(caller.env.iter().all(|(name, _)| name == "HOST_SECRET"));
+    assert!(
+        caller
+            .env
+            .iter()
+            .all(|(name, _)| name.starts_with("AGENTS_"))
+    );
 }
 
 #[test]
@@ -2138,4 +2146,21 @@ fn an_overlay_naming_a_variable_the_specification_reserves_is_left_out() {
         connection.notes
     );
     assert_eq!(env_value(&connection, "FOO_OVERLAY_ROOT"), None);
+}
+
+#[test]
+fn an_overlay_reads_any_variable_of_this_computer_by_placeholder_or_reference() {
+    let connection = session_connection(
+        "[env]\nCOPY = \"${HOST_SECRET}\"\nREF = { provider = \"env\", key = \"HOST_SECRET\" }\n",
+        Starting::default(),
+    );
+    assert_eq!(env_value(&connection, "COPY"), Some(SECRET));
+    assert_eq!(env_value(&connection, "REF"), Some(SECRET));
+}
+
+#[test]
+fn a_profile_naming_share_env_is_refused() {
+    let temp = temp_with_skill();
+    let text = config_with("share_env = [\"HOST_SECRET\"]\n");
+    assert!(Config::from_str_in(&text, &temp.0).is_err());
 }

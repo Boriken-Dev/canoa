@@ -620,3 +620,36 @@ fn only_the_names_the_specification_reserves_for_the_host_are_refused() {
         );
     }
 }
+
+#[test]
+fn a_header_is_read_from_the_variable_even_over_plain_http_and_the_report_lists_the_transport() {
+    use canoa_host::profile::McpServer;
+    let layer = layer_of(&[(
+        "overlay.cfg",
+        "[[mcp.servers]]\nname = \"remote\"\ntransport = \"streamable-http\"\nurl = \"http://remote.example/mcp\"\n\
+         headers_env = { Authorization = \"REMOTE_TOKEN\" }\n",
+    )])
+    .expect("applies");
+    let Some(canoa_host::profile::Change::Set(McpServer::Http { headers, .. })) =
+        layer.profile.mcp.get("remote")
+    else {
+        panic!("an http server");
+    };
+    assert!(headers.contains_key("Authorization"));
+    let aos = layer.aos.as_ref().expect("an AOS layer");
+    assert!(
+        !aos.not_applied
+            .iter()
+            .any(|line| line.contains("never sent")),
+        "{:?}",
+        aos.not_applied
+    );
+    let view = merge(&[layer]).view();
+    let listed: Vec<&str> = view["overlays"][0]["non_defaults"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter_map(|setting| setting[0].as_str())
+        .collect();
+    assert!(listed.contains(&"insecure-transport"), "{listed:?}");
+}

@@ -98,14 +98,14 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 /// Who the agent is to the templates of the knowledge it reads: what the connection's profile and loadout are, and the
-/// variables the profile shares.
+/// session's own variables.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Caller {
     /// The loadout the connection started with.
     pub(crate) role: Option<String>,
     /// The profile it applies.
     pub(crate) profile: Option<String>,
-    /// The variables the profile shares and their values; a sensitive one is never given to a template.
+    /// The session's own variables and their values; a sensitive one is never given to a template.
     pub(crate) env: Vec<(String, String)>,
 }
 

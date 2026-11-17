@@ -270,8 +270,6 @@ pub struct Profile {
     pub delegate: Delegate,
     /// Values of lower layers this one takes back.
     pub unset: Vec<Scalar>,
-    /// Variables of this process that overlays and projects may read with `from_env`; only in the person's own layers.
-    pub share_env: Vec<String>,
     /// Environment variables, by name.
     pub env: IndexMap<String, Change<EnvValue>>,
     /// Skills, by name.
@@ -416,8 +414,6 @@ struct RawProfile {
     #[serde(default)]
     unset: Vec<String>,
     #[serde(default)]
-    share_env: Vec<String>,
-    #[serde(default)]
     env: IndexMap<String, RawEnv>,
     #[serde(default)]
     skills: IndexMap<String, RawSkill>,
@@ -545,17 +541,6 @@ impl Profile {
             }
             if !profile.unset.contains(&scalar) {
                 profile.unset.push(scalar);
-            }
-        }
-        for name in raw.share_env {
-            if confined {
-                return Err(invalid("share_env", Rule::Form));
-            }
-            if !env_name(&name) {
-                return Err(invalid("share_env", Rule::Name));
-            }
-            if !profile.share_env.contains(&name) {
-                profile.share_env.push(name);
             }
         }
         for (name, raw) in raw.env {
@@ -821,18 +806,6 @@ pub struct Removed {
     pub was: LayerId,
 }
 
-/// An entry of an overlay or a project left out because it reads a variable no layer of the person's own shares.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct Refused {
-    /// `env.NAME` or `mcp.NAME`.
-    pub key: String,
-    /// The layer whose entry it was.
-    pub layer: LayerId,
-    /// The first variable it reads that is not shared.
-    pub reads: String,
-}
-
 /// The delegation suggestions every layer adds up to, each with its layer: a later layer wins per key.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -867,10 +840,6 @@ pub struct Effective {
     pub mcp: IndexMap<String, Sourced<McpServer>>,
     /// What layers removed, in the order they did.
     pub removed: Vec<Removed>,
-    /// The variables overlays and projects may read, each with the first layer that shared it.
-    pub share_env: IndexMap<String, LayerId>,
-    /// What overlays and projects set that reads a variable not shared, and was left out.
-    pub refused: Vec<Refused>,
     /// What AOS overlays add to the initial context, in their order, each with its layer.
     pub contexts: Vec<Sourced<Context>>,
     /// Each AOS overlay's report: what Canoa does not apply, what is not granted, and its non-default settings.
@@ -880,39 +849,10 @@ pub struct Effective {
 }
 
 /// Merges `layers`, lowest first. A later layer's value replaces a lower one's; a named entry is replaced whole and keeps
-/// its place; an entry removed and set again later comes last. An overlay's or a project's entry that reads a variable
-/// no other layer lists in `share_env` is left out, and the lower layer's entry stays.
+/// its place; an entry removed and set again later comes last.
 #[must_use]
 pub fn merge(layers: &[Layer]) -> Effective {
-    merge_with(layers, &Session::none())
-}
-
-/// As [`merge`], with `session`'s variables readable by every layer, as if the first layer shared them.
-pub(crate) fn merge_with(layers: &[Layer], session: &Session) -> Effective {
     let mut out = Effective::default();
-    for name in session.names() {
-        out.share_env
-            .entry(name.to_owned())
-            .or_insert_with(|| LayerId::new(LayerKind::BuiltIn, "session"));
-    }
-    for layer in layers.iter().filter(|layer| !layer.id.kind.is_confined()) {
-        for name in &layer.profile.share_env {
-            out.share_env
-                .entry(name.clone())
-                .or_insert_with(|| layer.id.clone());
-        }
-    }
-    let shared = out.share_env.clone();
-    let unshared = |value: &EnvValue| match value {
-        EnvValue::FromEnv(name) if !shared.contains_key(name) => Some(name.clone()),
-        _ => None,
-    };
-    let server_unshared = |server: &McpServer| match server {
-        McpServer::Stdio { env, .. } => env.values().find_map(unshared),
-        McpServer::Http { headers, .. } | McpServer::Sse { headers, .. } => {
-            headers.values().find_map(unshared)
-        }
-    };
     for layer in layers {
         let sourced = |value| Sourced {
             value,
@@ -989,27 +929,14 @@ pub(crate) fn merge_with(layers: &[Layer], session: &Session) -> Effective {
         let mut log = Log {
             layer,
             removed: &mut out.removed,
-            refused: &mut out.refused,
         };
-        merge_entries(&mut out.env, &profile.env, "env", &mut log, &unshared);
-        merge_entries(
-            &mut out.skills,
-            &profile.skills,
-            "skills",
-            &mut log,
-            &|_| None,
-        );
-        merge_entries(
-            &mut out.mcp,
-            &profile.mcp,
-            "mcp",
-            &mut log,
-            &server_unshared,
-        );
+        merge_entries(&mut out.env, &profile.env, "env", &mut log);
+        merge_entries(&mut out.skills, &profile.skills, "skills", &mut log);
+        merge_entries(&mut out.mcp, &profile.mcp, "mcp", &mut log);
     }
     for layer in layers {
         if let Some(aos) = &layer.aos {
-            out.overlays.push(overlay::report(&layer.id, aos, &shared));
+            out.overlays.push(overlay::report(&layer.id, aos));
             out.aos.push((**aos).clone());
         }
     }
@@ -1020,32 +947,19 @@ pub(crate) fn merge_with(layers: &[Layer], session: &Session) -> Effective {
 struct Log<'a> {
     layer: &'a Layer,
     removed: &'a mut Vec<Removed>,
-    refused: &'a mut Vec<Refused>,
 }
 
-/// `unshared` names the first variable an entry reads that is not shared; it counts only in a confined layer.
 fn merge_entries<T: Clone>(
     into: &mut IndexMap<String, Sourced<T>>,
     changes: &IndexMap<String, Change<T>>,
     table: &str,
     log: &mut Log<'_>,
-    unshared: &dyn Fn(&T) -> Option<String>,
 ) {
     let layer = log.layer;
     let removed = &mut *log.removed;
     for (name, change) in changes {
         match change {
             Change::Set(value) => {
-                if layer.id.kind.is_confined()
-                    && let Some(reads) = unshared(value)
-                {
-                    log.refused.push(Refused {
-                        key: format!("{table}.{name}"),
-                        layer: layer.id.clone(),
-                        reads,
-                    });
-                    continue;
-                }
                 let value = Sourced {
                     value: value.clone(),
                     layer: layer.id.clone(),
@@ -1124,26 +1038,6 @@ impl Effective {
         );
         out.insert("mcp".to_owned(), entries(&self.mcp, mcp_json));
         out.insert(
-            "share_env".to_owned(),
-            Value::Array(
-                self.share_env
-                    .iter()
-                    .map(|(name, layer)| json!({"name": name, "layer": layer.to_string()}))
-                    .collect(),
-            ),
-        );
-        out.insert(
-            "refused".to_owned(),
-            Value::Array(
-                self.refused
-                    .iter()
-                    .map(|refused| {
-                        json!({"key": refused.key, "layer": refused.layer.to_string(), "reads": refused.reads})
-                    })
-                    .collect(),
-            ),
-        );
-        out.insert(
             "removed".to_owned(),
             Value::Array(
                 self.removed
@@ -1197,7 +1091,7 @@ impl Effective {
         pre_env: &BTreeMap<String, coqui_aos::HookRun>,
         exported: &[String],
     ) -> Result<Resolved, ProfileError> {
-        let built = overlay::build(&self.aos, &self.share_env, lookup, pre_env)?;
+        let built = overlay::build(&self.aos, lookup, pre_env)?;
         let mut out = Vec::new();
         for (name, value) in &self.env {
             let from_overlay = value.layer.kind == LayerKind::Overlay

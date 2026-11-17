@@ -539,10 +539,6 @@ class EffectiveTable extends StatelessWidget {
         ('skills.$key', describe(value.value), '${value.layer}'),
       for (final MapEntry(:key, :value) in effective.mcp.entries) ('mcp.$key', describe(value.value), '${value.layer}'),
       for (final removed in effective.removed) (removed.key, 'removed, was ${removed.was}', '${removed.layer}'),
-      for (final refused in effective.refused)
-        (refused.key, 'left out: reads \$${refused.reads}, which none of your layers shares', '${refused.layer}'),
-      for (final MapEntry(:key, :value) in effective.shareEnv.entries)
-        ('share_env.$key', 'overlays and projects may read it', '$value'),
     ];
     if (rows.isEmpty) return const Text('Nothing is set: the agent starts with its own defaults.');
     return Table(
@@ -559,7 +555,7 @@ class EffectiveTable extends StatelessWidget {
   }
 }
 
-/// An AOS overlay's report: its digest, what Canoa does not apply yet, what is not granted, and its non-default settings.
+/// An AOS overlay's report: its digest, what Canoa does not apply yet, and its non-default settings.
 class OverlayReportView extends StatelessWidget {
   const OverlayReportView({super.key, required this.report});
   final OverlayReport report;
@@ -569,8 +565,6 @@ class OverlayReportView extends StatelessWidget {
     final lines = [
       '${report.layer}: digest ${report.digest}',
       for (final item in report.notApplied) '  $item: not applied by Canoa yet',
-      for (final item in report.ungranted) '  $item: none of your layers shares it, so it is left unset',
-      for (final item in report.unresolved) '  $item: none of your layers shares it, so no session can start',
       for (final nonDefault in report.nonDefaults)
         '  non-default ${nonDefault.id}${nonDefault.subject.isEmpty ? '' : ': ${nonDefault.subject}'}',
     ];

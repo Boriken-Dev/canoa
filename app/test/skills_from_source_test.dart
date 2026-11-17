@@ -74,7 +74,7 @@ final mainCatalog = catalogOf('[skills]\npdf = { source = "$skillsHost/pdf.git",
 Future<OverlayPreview> preview(MemoryOverlays overlays, {String name = 'team', String repo = teamRepo,
     List<(String, aos.Catalog)>? catalogs, Map<String, InstalledManifest> others = const {},
     Map<String, String> skillPins = const {}}) =>
-    previewOverlay(overlays, name, GitOverlay(repo: repo, reference: 'main'), os: 'linux', shared: const {},
+    previewOverlay(overlays, name, GitOverlay(repo: repo, reference: 'main'), os: 'linux',
         catalogs: catalogs ?? [('main', mainCatalog)], others: others, skillPins: skillPins);
 
 Layer layerOf(MemoryOverlays overlays, Map<String, SkillCopy> copies, {String name = 'team'}) => overlayLayer(

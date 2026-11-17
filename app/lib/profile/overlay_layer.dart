@@ -15,7 +15,7 @@ import 'skill_copies.dart';
 /// An AOS overlay as Canoa applies it: what building its environment needs, and what Canoa does not apply.
 final class AosLayer {
   const AosLayer({required this.identity, required this.root, required this.os, required this.digest,
-      required this.pinned, required this.manifest, required this.files, required this.texts, required this.references,
+      required this.pinned, required this.manifest, required this.files, required this.texts,
       required this.notApplied, this.about = const {}, this.icon = const {}, this.blobs = const {},
       this.fetchedSkills = const {}});
 
@@ -30,15 +30,12 @@ final class AosLayer {
   final String digest;
   final bool pinned;
 
-  /// Its manifest as Canoa applies it: no header sent over plain `http` to another host.
+  /// Its manifest.
   final aos.Document manifest;
   final Set<String> files;
 
   /// Its env files' bytes, by relative path.
   final Map<String, List<int>> texts;
-
-  /// Each secret reference of its environment: the variable, the reference and whether it is optional.
-  final List<(String, String, bool)> references;
 
   /// What it declares that Canoa does not apply yet, each as `<field>` or `<field>: <detail>`.
   final List<String> notApplied;
@@ -79,20 +76,18 @@ final class OverlayRefusal implements Exception {
   }} ($subject)';
 }
 
-/// An AOS overlay's report in the view: what Canoa does not apply, what is not granted, and its non-default settings.
+/// An AOS overlay's report in the view: what Canoa does not apply, and its non-default settings.
 final class OverlayReport {
-  const OverlayReport(this.layer, this.digest, this.notApplied, this.ungranted, this.unresolved, this.nonDefaults);
+  const OverlayReport(this.layer, this.digest, this.notApplied, this.nonDefaults);
   final LayerId layer;
   final String digest;
-  final List<String> notApplied, ungranted, unresolved;
+  final List<String> notApplied;
   final List<aos.NonDefaultSetting> nonDefaults;
 
   Map<String, Object?> toJson() => {
     'layer': '$layer',
     'digest': digest,
     'not_applied': notApplied,
-    'ungranted': ungranted,
-    'unresolved': unresolved,
     'non_defaults': [for (final w in nonDefaults) [w.id, w.subject]],
   };
 }
@@ -167,10 +162,8 @@ Layer overlayLayer({
     for (final file in ignored) 'context: $file, ignored while the body of OVERLAY.md is the context',
   ];
   final texts = <String, List<int>>{};
-  final references = <(String, String, bool)>[];
   final env = <String, EnvValue>{aos.rootVariable(identity): EnvLiteral(root)};
   void set(String name, EnvValue value) {
-    if (value is EnvReference) references.add((name, value.reference, value.optional));
     env[name] = value;
   }
 
@@ -244,7 +237,6 @@ Layer overlayLayer({
     }
   }
 
-  final insecure = _insecureServers(applied, files, texts, identity: identity, root: root, os: os, pinned: pinned);
   final mcp = <String, McpServer?>{};
   final servers = applied['mcp'] is Map ? (applied['mcp']! as Map)['servers'] : null;
   for (final server in (servers is List ? servers : const []).whereType<Map<String, Object?>>()) {
@@ -268,16 +260,10 @@ Layer overlayLayer({
       );
     } else {
       final url = '${server['url'] ?? ''}';
-      final plain = insecure.contains(name);
-      final headers = <String, EnvValue>{};
-      for (final MapEntry(:key, :value) in sortedEntries(server['headers_env'])) {
-        if (plain) {
-          notApplied.add('mcp.$name.headers_env.$key: never sent over plain http to another host');
-          continue;
-        }
-        headers[key] = EnvReference('env:$value', optional: true);
-      }
-      if (plain) server.remove('headers_env');
+      final headers = <String, EnvValue>{
+        for (final MapEntry(:key, :value) in sortedEntries(server['headers_env']))
+          key: EnvReference('env:$value', optional: true),
+      };
       mcp[name] = McpHttp(url: url, headers: headers);
     }
   }
@@ -396,7 +382,6 @@ Layer overlayLayer({
       manifest: applied,
       files: files,
       texts: texts,
-      references: references,
       notApplied: notApplied,
       about: about,
       icon: icon,
@@ -428,38 +413,30 @@ ProfileContext? _context(aos.OverlayTree tree, String path) {
 /// Not empty, with no control character: what Canoa's own layers take for a model or an effort.
 bool _plain(String text) => text.isNotEmpty && !text.runes.any((rune) => rune < 0x20 || (rune >= 0x7f && rune < 0xa0));
 
-bool _shared(Map<String, LayerId> shared, String name, bool windows) =>
-    shared.keys.any((key) => key == name || windows && key.toLowerCase() == name.toLowerCase());
-
 /// A text field of a mapping, empty when it is absent or not text.
 String _text(Object? entry, String key) => entry is Map && entry[key] is String ? entry[key]! as String : '';
 
 /// An independent copy of a document.
 aos.Document _copy(aos.Document manifest) => aos.fromPlain(aos.toPlain(manifest)) as aos.Document;
 
-/// What `aos.effective` says of an overlay for the view. The manifest is read less the references it must have and
-/// nothing shares (the view lists those as unresolved, and they would fail the call). [shared]
-/// are the variables the person's own layers share, each granted and read as empty text. Throws [aos.AosError].
+/// What `aos.effective` says of an overlay for the view. Every variable its text names is the host's own and granted,
+/// read as empty text: only the report is made from it, and a session reads the real values. Throws [aos.AosError].
 aos.Effective _probe(aos.Document manifest, Set<String> files, Map<String, List<int>> texts,
-    {required String identity, required String root, required String os, required bool pinned, List<String> shared = const []}) {
-  final copy = _copy(manifest);
-  if (copy['env'] case final Map<String, Object> env) {
-    env.removeWhere((_, entry) {
-      if (entry is! Map<String, Object>) return false;
-      final reference = entry.containsKey('provider') || entry.containsKey('secret');
-      final granted = entry['provider'] == 'env' && entry['key'] is String && shared.contains(entry['key']);
-      return reference && entry['optional'] != true && !granted;
-    });
+    {required String identity, required String root, required String os, required bool pinned}) {
+  final named = <String>{};
+  _words(manifest, named);
+  for (final text in texts.values) {
+    _words(utf8.decode(text, allowMalformed: true), named);
   }
   final facts = aos.Facts(os)
     ..root = root
     ..identity = identity
     ..pinned = pinned
-    ..grants = {'env': [...shared]}
-    ..hostEnv = {for (final name in shared) name: ''}
-    ..baseEnv = {for (final name in shared) name: ''}
+    ..grants = {'env': [...named]}
+    ..hostEnv = {for (final name in named) name: ''}
+    ..baseEnv = {for (final name in named) name: ''}
     ..tree = _treeOf(files, texts);
-  return aos.effective(copy, facts);
+  return aos.effective(_copy(manifest), facts);
 }
 
 aos.OverlayTree _treeOf(Set<String> files, Map<String, List<int>> texts) {
@@ -470,52 +447,27 @@ aos.OverlayTree _treeOf(Set<String> files, Map<String, List<int>> texts) {
   return tree;
 }
 
-/// The names of the servers that send to a host other than this computer in plain `http`.
-Set<String> _insecureServers(aos.Document manifest, Set<String> files, Map<String, List<int>> texts,
-    {required String identity, required String root, required String os, required bool pinned}) {
-  try {
-    final found = _probe(manifest, files, const {}, identity: identity, root: root, os: os, pinned: pinned);
-    return {for (final setting in found.nonDefaults) if (setting.id == 'insecure-transport') setting.subject};
-  } on aos.AosError {
-    // Without a report, every plain `http` server counts as one to another host.
-    final servers = manifest['mcp'] is Map ? (manifest['mcp']! as Map)['servers'] : null;
-    return {
-      for (final server in servers is List ? servers : const [])
-        if (_text(server, 'url').toLowerCase().startsWith('http://')) _text(server, 'name'),
-    };
-  }
-}
-
-/// An overlay's report, with what the person's own layers share as its grants.
-OverlayReport overlayReport(LayerId layer, AosLayer layerAos, Map<String, LayerId> shared) {
-  final windows = layerAos.os == 'windows';
-  List<String> ungranted = const [];
+/// An overlay's report.
+OverlayReport overlayReport(LayerId layer, AosLayer layerAos) {
   List<aos.NonDefaultSetting> nonDefaults = const [];
   try {
     final found = _probe(layerAos.manifest, layerAos.files, layerAos.texts,
-        identity: layerAos.identity, root: layerAos.root, os: layerAos.os, pinned: layerAos.pinned, shared: shared.keys.toList());
-    ungranted = found.ungranted;
+        identity: layerAos.identity, root: layerAos.root, os: layerAos.os, pinned: layerAos.pinned);
     // Canoa runs no script, setup or install, so what only those would make non-default is not Canoa's to report.
     nonDefaults = [
       for (final setting in found.nonDefaults)
         if (const {'unpinned', 'env-passthrough', 'secret-read', 'env-sensitive', 'insecure-transport'}.contains(setting.id)) setting,
     ];
   } on aos.AosError {
-    // An overlay whose environment cannot be built starts no session; its view then lists no grants.
+    // An overlay whose environment cannot be built starts no session; its view then lists no settings.
   }
-  final unresolved = [
-    for (final (variable, reference, optional) in layerAos.references)
-      if (!optional && !(reference.startsWith('env:') && _shared(shared, reference.substring(4), windows)))
-        '$variable: $reference',
-  ];
-  return OverlayReport(layer, layerAos.digest, layerAos.notApplied, ungranted, unresolved, nonDefaults);
+  return OverlayReport(layer, layerAos.digest, layerAos.notApplied, nonDefaults);
 }
 
 String _reason(String code) => switch (code) {
   'undefined-variable' => "an overlay's placeholder names a variable that is not set",
-  'secret-placeholder' => "an overlay's placeholder reads a secret, or a variable of this computer none of your layers shares",
-  'unresolved-reference' =>
-    'an overlay reads a variable none of your layers shares, or one that is not set, or a secret Canoa does not hold',
+  'secret-placeholder' => "an overlay's placeholder reads a secret",
+  'unresolved-reference' => 'an overlay reads a variable that is not set, or a secret Canoa does not hold',
   'invalid-pattern' => "an overlay's placeholder has a pattern that is not valid",
   'invalid-reference' => 'an overlay names a secret file that is not a relative path',
   'missing-file' || 'invalid-env-file' => "an overlay's env file cannot be read",
@@ -568,11 +520,10 @@ void _words(Object? value, Set<String> out) {
 const _mark = '\u{FFFF}';
 
 /// Builds the AOS overlays' environment, lowest first, over this process's environment as [lookup] reads it. A
-/// placeholder reads only what the overlays set and the variables the person's own layers share; any other variable of
-/// this process is seen by a path addition and `if_unset`, never by a placeholder. Only the variables an overlay's text
-/// names are read from the process. Into [after], when given, goes each overlay's environment as it stood once that
-/// overlay applied: what its MCP servers' text is substituted against. Throws [ProfileException] `resolve`.
-BuiltEnvironment buildOverlayEnvironment(List<AosLayer> layers, Map<String, LayerId> shared, String? Function(String) lookup,
+/// placeholder reads what the overlays set and any variable of this process. Only the variables an overlay's text names
+/// are read from the process. Into [after], when given, goes each overlay's environment as it stood once that overlay
+/// applied: what its MCP servers' text is substituted against. Throws [ProfileException] `resolve`.
+BuiltEnvironment buildOverlayEnvironment(List<AosLayer> layers, String? Function(String) lookup,
     {Map<String, BuiltEnvironment>? after}) {
   final windows = layers.isNotEmpty && layers.first.os == 'windows';
   final named = <String>{};
@@ -594,23 +545,28 @@ BuiltEnvironment buildOverlayEnvironment(List<AosLayer> layers, Map<String, Laye
   final marked = aos.Environment([], windows);
   for (final name in named) {
     if (lookup(name) case final value?) {
-      process.set(name, value, !_shared(shared, name, windows));
-      marked.set(name, '$_mark$value', !_shared(shared, name, windows));
+      process.set(name, value, false);
+      marked.set(name, '$_mark$value', false);
       base[name] = value;
     }
   }
-  final granted = shared.keys.toList();
-  final hostEnv = {for (final name in granted) name: ?lookup(name)};
   final active = <(aos.Document, aos.Facts)>[];
   for (final layer in layers) {
     final tree = _treeOf(layer.files, layer.texts);
+    // Every variable the overlay's text names is this process's own to read.
+    final names = <String>{};
+    _words(layer.manifest, names);
+    for (final text in layer.texts.values) {
+      _words(utf8.decode(text, allowMalformed: true), names);
+    }
+    final hostEnv = {for (final name in names) name: ?lookup(name)};
     active.add((
       layer.manifest,
       aos.Facts(layer.os)
         ..root = layer.root
         ..identity = layer.identity
         ..pinned = layer.pinned
-        ..grants = {'env': granted}
+        ..grants = {'env': hostEnv.keys.toList()}
         ..hostEnv = hostEnv
         ..tree = tree,
     ));
@@ -634,5 +590,3 @@ BuiltEnvironment buildOverlayEnvironment(List<AosLayer> layers, Map<String, Laye
   return last ?? BuiltEnvironment._(aos.Environment([], windows), const {});
 }
 
-/// Whether the person's own layers share [name] with overlays and projects; on Windows names compare without case.
-bool isShared(Map<String, LayerId> shared, String name, {required bool windows}) => _shared(shared, name, windows);

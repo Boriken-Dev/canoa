@@ -349,7 +349,7 @@ fn profiled(harness: &str, executable: &Path, scratch: &Scratch) -> String {
     .expect("written");
     format!(
         "[host.agents.Agent]\nharness = \"{harness}\"\nexecutable = {exe}\nprofiles = [\"main\"]\n\
-         [host.profiles.main]\nshare_env = [\"HOST_SECRET\"]\ncontext = {{ text = \"Context from the host's profile.\" }}\n\
+         [host.profiles.main]\ncontext = {{ text = \"Context from the host's profile.\" }}\n\
          [host.profiles.main.env.TOKEN]\nfrom_env = \"HOST_SECRET\"\n\
          [host.profiles.main.skills.review]\npath = \"skills/review\"\n\
          [host.profiles.main.mcp.probe]\ntype = \"stdio\"\ncommand = {server}\nargs = [\"--from-profile\"]\n",

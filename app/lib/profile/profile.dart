@@ -231,7 +231,6 @@ final class Profile {
     this.context,
     this.delegate = const ProfileDelegate(),
     this.unset = const [],
-    this.shareEnv = const [],
     this.env = const {},
     this.skills = const {},
     this.mcp = const {},
@@ -251,8 +250,6 @@ final class Profile {
   /// `model`, `effort`, `mode` or `context`: values of lower layers this one takes back.
   final List<String> unset;
 
-  /// Variables of this process that overlays and projects may read with `from_env`; only in the person's own layers.
-  final List<String> shareEnv;
   final Map<String, EnvValue?> env;
   final Map<String, Skill?> skills;
   final Map<String, McpServer?> mcp;
@@ -261,10 +258,10 @@ final class Profile {
 
   /// This profile with [skills] in place of its own.
   Profile withSkills(Map<String, Skill?> skills) => Profile(model: model, effort: effort, mode: mode, context: context,
-      delegate: delegate, unset: unset, shareEnv: shareEnv, env: env, skills: skills, mcp: mcp, contexts: contexts);
+      delegate: delegate, unset: unset, env: env, skills: skills, mcp: mcp, contexts: contexts);
 
   bool get isEmpty =>
-      model == null && effort == null && mode == null && context == null && delegate.isEmpty && unset.isEmpty && shareEnv.isEmpty && env.isEmpty &&
+      model == null && effort == null && mode == null && context == null && delegate.isEmpty && unset.isEmpty && env.isEmpty &&
       skills.isEmpty && mcp.isEmpty && contexts.isEmpty;
 
   /// Parses a profile document for a layer of [kind]. Touches no file.
@@ -285,7 +282,7 @@ final class Profile {
   }
 }
 
-const _top = {'model', 'effort', 'mode', 'context', 'delegate', 'unset', 'share_env', 'env', 'skills', 'mcp'};
+const _top = {'model', 'effort', 'mode', 'context', 'delegate', 'unset', 'env', 'skills', 'mcp'};
 const _envKeys = {'value', 'from_env', 'from_file', 'remove'};
 const _mcpKeys = {'type', 'command', 'args', 'env', 'url', 'headers', 'remove'};
 
@@ -323,9 +320,8 @@ void _shape(Map<dynamic, dynamic> map) {
       if (list is! List || list.any((item) => item is! String)) _parseError();
     }
   }
-  for (final key in ['unset', 'share_env']) {
-    if (!map.containsKey(key)) continue;
-    final list = map[key];
+  if (map.containsKey('unset')) {
+    final list = map['unset'];
     if (list is! List || list.any((item) => item is! String)) _parseError();
   }
   void values(Object? table) {
@@ -434,12 +430,6 @@ Profile _checked(Map<dynamic, dynamic> map, bool confined) {
     if (scalar.containsKey(name) || (name == 'context' && context != null)) _invalid('form', name as String);
     if (!unset.contains(name)) unset.add(name as String);
   }
-  final shareEnv = <String>[];
-  for (final name in ((map['share_env'] as List<dynamic>?) ?? const []).cast<String>()) {
-    if (confined) _invalid('form', 'share_env');
-    if (!isEnvName(name)) _invalid('name', 'share_env');
-    if (!shareEnv.contains(name)) shareEnv.add(name);
-  }
   final env = <String, EnvValue?>{};
   for (final MapEntry(:key, :value) in ((map['env'] as Map<dynamic, dynamic>?) ?? const {}).entries) {
     final name = key as String;
@@ -473,7 +463,6 @@ Profile _checked(Map<dynamic, dynamic> map, bool confined) {
     context: context,
     delegate: delegate,
     unset: List.unmodifiable(unset),
-    shareEnv: List.unmodifiable(shareEnv),
     env: Map.unmodifiable(env),
     skills: Map.unmodifiable(skills),
     mcp: Map.unmodifiable(mcp),
@@ -567,14 +556,6 @@ final class Removed {
   final LayerId layer, was;
 }
 
-/// An entry of an overlay or a project left out because it [reads] a variable no layer of the person's own shares.
-final class Refused {
-  const Refused(this.key, this.layer, this.reads);
-  final String key;
-  final LayerId layer;
-  final String reads;
-}
-
 /// The profile every layer adds up to, each value with its layer.
 final class EffectiveProfile {
   Sourced<String>? model, effort, mode;
@@ -588,12 +569,6 @@ final class EffectiveProfile {
   final skills = <String, Sourced<Skill>>{};
   final mcp = <String, Sourced<McpServer>>{};
   final removed = <Removed>[];
-
-  /// The variables overlays and projects may read, each with the first layer that shared it.
-  final shareEnv = <String, LayerId>{};
-
-  /// What overlays and projects set that reads a variable not shared, and was left out.
-  final refused = <Refused>[];
 
   /// What AOS overlays add to the initial context, in their order, each with its layer.
   final contexts = <Sourced<ProfileContext>>[];
@@ -627,10 +602,6 @@ final class EffectiveProfile {
       'removed': [
         for (final removed in this.removed) {'key': removed.key, 'layer': '${removed.layer}', 'was': '${removed.was}'},
       ],
-      'share_env': [for (final MapEntry(:key, :value) in shareEnv.entries) {'name': key, 'layer': '$value'}],
-      'refused': [
-        for (final refused in this.refused) {'key': refused.key, 'layer': '${refused.layer}', 'reads': refused.reads},
-      ],
       if (contexts.isNotEmpty)
         'contexts': [for (final context in contexts) one(context.value.toJson(), context.layer)],
       if (overlays.isNotEmpty) 'overlays': [for (final report in overlays) report.toJson()],
@@ -651,7 +622,7 @@ final class EffectiveProfile {
   }) async {
     final outer = lookup;
     lookup = session.lookup(outer);
-    final built = buildOverlayEnvironment(aos, shareEnv, lookup, after: after);
+    final built = buildOverlayEnvironment(aos, lookup, after: after);
     final out = <String, Secret>{
       for (final MapEntry(:key, :value) in session.identity.entries) key: Secret(value),
     };
@@ -715,24 +686,9 @@ bool isAbsolutePath(String path) =>
     path.startsWith('/') || path.startsWith('\\') || RegExp(r'^[A-Za-z]:[/\\]').hasMatch(path);
 
 /// Merges [layers], lowest first. A later layer's value replaces a lower one's; a named entry is replaced whole and keeps
-/// its place; an entry removed and set again later comes last. An overlay's or a project's entry that reads a variable
-/// no other layer lists in `share_env` is left out, and the lower layer's entry stays.
-EffectiveProfile mergeProfiles(List<Layer> layers, {SessionVariables session = const SessionVariables.none()}) {
+/// its place; an entry removed and set again later comes last.
+EffectiveProfile mergeProfiles(List<Layer> layers) {
   final out = EffectiveProfile();
-  for (final name in session.names) {
-    out.shareEnv.putIfAbsent(name, () => const LayerId(LayerKind.builtIn, 'session'));
-  }
-  for (final layer in layers.where((layer) => !layer.id.kind.confined)) {
-    for (final name in layer.profile.shareEnv) {
-      out.shareEnv.putIfAbsent(name, () => layer.id);
-    }
-  }
-  String? unshared(Object value) => switch (value) {
-    EnvFromEnv(:final name) when !out.shareEnv.containsKey(name) => name,
-    McpStdio(:final env) => env.values.map(unshared).nonNulls.firstOrNull,
-    McpHttp(:final headers) => headers.values.map(unshared).nonNulls.firstOrNull,
-    _ => null,
-  };
   for (final layer in layers) {
     final profile = layer.profile;
     Sourced<T> sourced<T>(T value) => Sourced(value, layer.id, layer.dir);
@@ -769,11 +725,6 @@ EffectiveProfile mergeProfiles(List<Layer> layers, {SessionVariables session = c
     void entries<T extends Object>(Map<String, Sourced<T>> into, Map<String, T?> changes, String table) {
       for (final MapEntry(:key, :value) in changes.entries) {
         if (value != null) {
-          final reads = layer.id.kind.confined ? unshared(value) : null;
-          if (reads != null) {
-            out.refused.add(Refused('$table.$key', layer.id, reads));
-            continue;
-          }
           into[key] = sourced(value);
         } else if (into.remove(key) case final was?) {
           out.removed.add(Removed('$table.$key', layer.id, was.layer));
@@ -786,7 +737,7 @@ EffectiveProfile mergeProfiles(List<Layer> layers, {SessionVariables session = c
   }
   for (final layer in layers) {
     if (layer.aos case final aos?) {
-      out.overlays.add(overlayReport(layer.id, aos, out.shareEnv));
+      out.overlays.add(overlayReport(layer.id, aos));
       out.aos.add(aos);
     }
   }

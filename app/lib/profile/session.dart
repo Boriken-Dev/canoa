@@ -119,9 +119,6 @@ final class SessionVariables {
   /// The variables the host sets for the session itself, which layers read and the host does not hand on again.
   final Map<String, String> host;
 
-  /// Every variable name held.
-  Iterable<String> get names => [...identity.keys, ...host.keys];
-
   /// [outer], with this session's variables first.
   String? Function(String) lookup(String? Function(String) outer) =>
       (name) => identity[name] ?? host[name] ?? outer(name);

@@ -333,7 +333,7 @@ own_profile = true
     expect(loaded.catalog!.entries.keys, ['docs-tools']);
     expect(displaySource(loaded.catalog!.entries['docs-tools']!.source), '${team.location}@main#overlays/docs-tools');
     final preview = await previewOverlay(overlays, 'docs-tools', installSource(loaded.catalog!.entries['docs-tools']!),
-        os: 'linux', shared: const {});
+        os: 'linux');
     expect(preview.update.added, ['overlay.cfg']);
     await overlays.discard('docs-tools');
     expect((await loadCatalog(overlays, 'dirs', at('icons'), const StoreSettings())).problem,
@@ -406,7 +406,7 @@ own_profile = true
         await loadCatalog(overlays, label, source, const StoreSettings()),
     ]);
     final entry = listing.choose('team/docs-tools').entry;
-    final preview = await previewOverlay(overlays, installName(entry), installSource(entry), os: 'linux', shared: const {}, catalog: 'team');
+    final preview = await previewOverlay(overlays, installName(entry), installSource(entry), os: 'linux', catalog: 'team');
     expect(preview.update.added, ['overlay.cfg']);
     expect(overlays.installed('docs-tools'), isNull, reason: 'a preview installs nothing');
     current = await installPreview(overlays, current, preview, catalog: 'team');

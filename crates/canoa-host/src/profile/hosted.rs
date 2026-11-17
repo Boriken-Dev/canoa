@@ -19,11 +19,10 @@ use coqui_transport::{Channel, Failure};
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 
-use super::overlay::{Built, build_each, granted, resolve_path};
+use super::overlay::{Built, build_each, resolve_path};
 use super::{
     Change, Context, Effective, EnvValue, Layer, LayerId, LayerKind, McpServer, OverlayInput,
-    Scalar, Secret, Session, Skill, Sourced, Who, merge, merge_with, overlay_layer, resolve,
-    starting,
+    Scalar, Secret, Session, Skill, Sourced, Who, merge, overlay_layer, resolve, starting,
 };
 use crate::config::HostProfile;
 use crate::scope::{Scope, Verdict};
@@ -426,7 +425,7 @@ pub(crate) struct Connection {
     /// The loadout this connection started with, the role the knowledge tools tell a template the agent is in.
     role: Option<String>,
     /// The variables the profile shares, with the values the host has, for the same templates.
-    shared_env: Vec<(String, String)>,
+    session_env: Vec<(String, String)>,
     /// The host's own program and what goes before its subcommand: how a harness's hooks run the forwarder.
     launcher: OsString,
     before: Vec<OsString>,
@@ -613,21 +612,8 @@ impl Connection {
         );
         let seen = session.lookup(lookup);
         let lookup: &dyn Fn(&str) -> Option<String> = &seen;
-        let effective = merge_with(&layers, &session);
-        // What the person's own layers share, not the session's own variables.
-        let shared_env = effective
-            .share_env
-            .iter()
-            .filter(|(_, layer)| layer.kind != LayerKind::BuiltIn)
-            .filter_map(|(name, _)| lookup(name).map(|value| (name.clone(), value)))
-            .collect();
-        let mut hooks = Hooks::new(
-            host,
-            &effective.aos,
-            &overlays,
-            &effective.share_env,
-            lookup,
-        );
+        let effective = merge(&layers);
+        let mut hooks = Hooks::new(host, &effective.aos, &overlays, lookup);
         // Before the agent starts nobody can be asked, so only what canoa.cfg allows runs.
         let directory = host.directory.clone();
         let harness = harness_of(None, entry).unwrap_or("canoa");
@@ -677,17 +663,6 @@ impl Connection {
                 ));
             }
         }
-        for refused in &effective.refused {
-            notes.push(Item::new(
-                refused.key.clone(),
-                &refused.layer,
-                State::Refused,
-                format!(
-                    "it reads ${}, which this host's profile does not share",
-                    refused.reads
-                ),
-            ));
-        }
         for report in &effective.overlays {
             for (id, subject) in &report.reports {
                 if id == "env-script-not-allowed" {
@@ -724,7 +699,7 @@ impl Connection {
             in_process: false,
             kb_tools: false,
             role,
-            shared_env,
+            session_env: session.variables(),
             launcher: offer.launcher.clone(),
             before: offer.before.clone(),
             delegation: layers
@@ -778,12 +753,12 @@ impl Connection {
     }
 
     /// Who is asking, for the templates of the knowledge the tools serve: the profile, the loadout as the role, and the
-    /// variables the profile shares.
+    /// session's own variables.
     pub(crate) fn kb_caller(&self) -> crate::kb_mcp::Caller {
         crate::kb_mcp::Caller {
             role: self.role.clone(),
             profile: Some(self.name.clone()),
-            env: self.shared_env.clone(),
+            env: self.session_env.clone(),
         }
     }
 
@@ -1537,7 +1512,7 @@ fn environments_after(
     lookup: &dyn Fn(&str) -> Option<String>,
     pre_env: &BTreeMap<String, aos::HookRun>,
 ) -> BTreeMap<String, Result<Built, String>> {
-    build_each(&effective.aos, &effective.share_env, lookup, pre_env)
+    build_each(&effective.aos, lookup, pre_env)
         .into_iter()
         .zip(&effective.aos)
         .map(|(built, layer)| {
@@ -1607,12 +1582,6 @@ fn ready_mcp(
                 if provider != "env" {
                     withheld.push(format!(
                         "{label}: reads {reference}, a secret this host does not hold"
-                    ));
-                    return Ok(None);
-                }
-                if !granted(&effective.share_env, variable, windows) {
-                    withheld.push(format!(
-                        "{label}: reads ${variable}, which this host's profile does not share"
                     ));
                     return Ok(None);
                 }
@@ -1821,7 +1790,7 @@ fn parts_for(
         harness,
         &mut notes,
     );
-    let effective = merge_with(&layers, &connection.session);
+    let effective = merge(&layers);
     let seen = connection.session.lookup(lookup);
     let lookup: &dyn Fn(&str) -> Option<String> = &seen;
     let mut items = connection.notes.clone();
