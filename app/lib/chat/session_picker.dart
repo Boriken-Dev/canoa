@@ -188,7 +188,7 @@ class _SessionPickerState extends State<SessionPicker> {
 
   @override
   Widget build(BuildContext context) {
-    final listenables = <Listenable>[store, ?store.ledger, ?kit.accounts, ?kit.portable];
+    final listenables = <Listenable>[store, ?store.ledger, ?kit.accountsFor(session), ?kit.portable];
     return ListenableBuilder(
       listenable: Listenable.merge(listenables),
       builder: (context, _) {
@@ -298,7 +298,7 @@ class _SessionPickerState extends State<SessionPicker> {
   Widget _sourceTile(BuildContext context, AgentSource each) {
     final look = context.chatLook;
     final choices = store.choicesOf(each);
-    final trouble = sourceTrouble(each, choices, accounts: kit.accounts);
+    final trouble = sourceTrouble(each, choices, accounts: kit.accountsFor(session));
     final check = kit.checks[each];
     final needs = check != null && !check.ready ? 'Needs ${_and(check.missing.isEmpty ? ['setting up'] : check.missing)}' : trouble?.message;
     final here = each == session.source && !_stars;
@@ -366,7 +366,7 @@ class _SessionPickerState extends State<SessionPicker> {
   Widget _middle(BuildContext context, List<ConfigOption> options, List<_ModelRow> rows) {
     final look = context.chatLook;
     final source = session.source;
-    final trouble = source == null ? null : sourceTrouble(source, store.choicesOf(source), accounts: kit.accounts);
+    final trouble = source == null ? null : sourceTrouble(source, store.choicesOf(source), accounts: kit.accountsFor(session));
     final modelOption = optionIn(options, OptionRole.model);
     final known = modelOption != null || pendingChoice(session, OptionRole.model) != null;
     final highlighted = rows.isEmpty ? null : rows[_highlight.clamp(0, rows.length - 1)];
@@ -418,7 +418,7 @@ class _SessionPickerState extends State<SessionPicker> {
 
   Widget _troubleNote(BuildContext context, SourceTrouble trouble) {
     final look = context.chatLook;
-    final act = canAct(trouble, kit) ? () => unawaited(actOnTrouble(context, store, kit, trouble)) : null;
+    final act = canAct(trouble, kit, session: session) ? () => unawaited(actOnTrouble(context, store, kit, trouble, session: session)) : null;
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -480,7 +480,7 @@ class _SessionPickerState extends State<SessionPicker> {
   }
 
   Widget _accounts(BuildContext context) {
-    final accounts = kit.accounts;
+    final accounts = kit.accountsFor(session);
     final entry = session.source?.hostEntry ?? session.agent;
     if (accounts == null) return const SizedBox.shrink();
     final harness = accounts.harnessOf(entry);

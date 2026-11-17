@@ -3285,6 +3285,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     LedgerEntry entry,
     VerifiedAgent client, {
     bool expected = false,
+    String? host,
   }) async {
     for (final session in _sessions) {
       if (session.peerId == entry.peerId &&
@@ -3346,6 +3347,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
               agentNames: !entry.named,
             ),
           )
+          ..host = host
           ..site = entry.site
           ..kind = entry.kind
           ..namedByPerson = entry.named

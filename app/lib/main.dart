@@ -1407,6 +1407,7 @@ class _CanoaAppState extends State<CanoaApp> {
   /// [_askChoices] as the entry's account [account], which lists what that account may use; null for a source the host does not
   /// run from canoa.cfg.
   Future<SourceChoices?> _askChoicesAs(AgentSource source, String account) async {
+    if (source.host != null) return _askChoicesOn(source, account: account);
     if (_control case final control?) {
       final asked = await choicesOverControl(control, source, account: account);
       if (asked != null) return asked;
@@ -1417,10 +1418,18 @@ class _CanoaAppState extends State<CanoaApp> {
     return ran.exitCode == 0 ? SourceChoices.parse(ran.stdout) : null;
   }
 
+  /// What the host [source] belongs to says of it, over that host's own control channel; null for a host that has none.
+  Future<SourceChoices?> _askChoicesOn(AgentSource source, {String? account}) async {
+    final remote = _remoteReady[source.host];
+    if (remote == null || !remote.hasControl) return null;
+    return choicesOverControl(remote.control, source, account: account);
+  }
+
   /// What `canoa options` says of [source]: the models and efforts its provider lists with no session. A preset the host runs
   /// is asked by its harness, a hosted entry by its name in canoa.cfg; a program entry is asked through a short session of its own.
   Future<SourceChoices?> _askChoices(AgentSource source) async {
     if (widget.askChoices case final ask?) return ask(source);
+    if (source.host != null) return _askChoicesOn(source);
     // The host answers for a page that has no host of its own to run a command on, and for the desktop alike.
     if (_control case final control?) {
       final asked = await choicesOverControl(control, source);
@@ -1600,7 +1609,37 @@ class _CanoaAppState extends State<CanoaApp> {
       if (now != null && held != null && held.connection.address == now.address && held.connection.peer == now.peer) continue;
       _remotes.remove(name);
       _remoteReady.remove(name)?.dispose();
+      _remoteAccounts.remove(name)?.dispose();
     }
+  }
+
+  /// The accounts of each saved connection's host a draft was aimed at, asked of that host's own control channel; what the host
+  /// lists is the host's, never this app's canoa.cfg.
+  final Map<String, AccountsController> _remoteAccounts = {};
+
+  /// The accounts controller of the host saved as [name], made and asked once its control channel is known; null for this app's own
+  /// host and for a host with no control channel.
+  AccountsController? _accountsOn(String? name) => name == null ? null : _remoteAccounts[name];
+
+  /// Reads [remote]'s accounts again: each time a draft is aimed at it, since they change under it.
+  void _askAccountsOf(RemoteHost remote) {
+    if (!remote.hasControl) return;
+    final name = remote.connection.name;
+    final held = _remoteAccounts[name] ??= AccountsController(
+      host: ControlAccountsHost(remote.control),
+      config: () => const CanoaConfig(),
+      change: (_) async => throw StateError('$name keeps which accounts its agents offer in its own canoa.cfg'),
+      hostIsHere: false,
+    );
+    unawaited(held.refresh());
+  }
+
+  /// The account a draft starts on when it chose none: the first its source's entry offers, then the first it can use, on that host.
+  String? _defaultAccountOf(AgentSource source) {
+    final entry = source.hostEntry;
+    if (entry == null) return null;
+    final accounts = source.host == null ? _accounts : _accountsOn(source.host);
+    return accounts?.offeredBy(entry).where((each) => each.usable).firstOrNull?.name;
   }
 
   /// The choices the host chip offers: this computer (or the host that served this page) first, then each saved connection.
@@ -1620,12 +1659,12 @@ class _CanoaAppState extends State<CanoaApp> {
   List<AgentSource> _sourcesOn(String host) {
     final connection = _connection(host);
     if (connection == null) return const [];
-    if (connection.kind == ConnectionKind.acp) return [AgentSource.hosted(connection.name)];
+    if (connection.kind == ConnectionKind.acp) return [AgentSource.hosted(connection.name, host: connection.name)];
     final remote = _remoteReady[host];
     if (remote == null) return const [];
     return [
       for (final entry in remote.agents)
-        AgentSource.hosted(entry.name, harness: entry.harness, title: entry.title),
+        AgentSource.hosted(entry.name, harness: entry.harness, title: entry.title, host: host),
     ];
   }
 
@@ -1656,6 +1695,8 @@ class _CanoaAppState extends State<CanoaApp> {
       return;
     }
     if (!mounted || draft.host != name || !draft.isDraft) return;
+    final remote = _remoteReady[name];
+    if (remote != null) _askAccountsOf(remote);
     final offered = _sourcesOn(name);
     final kept = offered.where((source) => source == draft.source).firstOrNull;
     final chosen = kept ?? offered.firstOrNull;
@@ -1750,6 +1791,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (source == null) throw StateError('Choose its agent first');
     if (connection == null) throw StateError('$name is no longer a saved connection');
     final direct = connection.kind == ConnectionKind.acp;
+    draft.account ??= _defaultAccountOf(source);
     final remote = direct ? null : await _remoteOf(name);
     final String url;
     if (remote == null) {
@@ -1815,8 +1857,8 @@ class _CanoaAppState extends State<CanoaApp> {
         decider: store.askPermission,
         elicitor: store.askQuestion,
         secrets: store,
-        // The loadout and accounts of canoa.cfg are this computer's; only the cache lifetime means the same there.
-        initializeMeta: _cacheMeta(store.cacheLifetimeOf(draft)),
+        // The chosen account and loadout travel as they do to this computer's own entries; the host reads them by name.
+        initializeMeta: _startMeta(draft),
       );
       starting.client = client;
       if (_quitting) throw StateError('Canoa is quitting');
@@ -2150,7 +2192,9 @@ class _CanoaAppState extends State<CanoaApp> {
       account: entry.account,
     );
     try {
-      await store.reopen(entry, client, expected: _hasProfiles);
+      // A host this app saved shows under the name it was saved with, not its address.
+      await store.reopen(entry, client, expected: _hasProfiles,
+          host: entry.place == SessionPlace.peer ? savedNameOfPeer(config.connections, entry.peerId) : null);
       _ownedClients.add(client);
     } catch (_) {
       await client.close();
@@ -2344,7 +2388,7 @@ class _CanoaAppState extends State<CanoaApp> {
     store.starter = _startDraft;
     store.choicesLoader = _askChoices;
     store.accountChoicesLoader = _askChoicesAs;
-    store.defaultAccountOf = (source) => source.hostEntry == null ? null : _accounts?.offeredBy(source.hostEntry!).where((each) => each.usable).firstOrNull?.name;
+    store.defaultAccountOf = _defaultAccountOf;
     store.gitReader = _gitReaderFor;
     store.pathsOnHost ??= _pathsOnHost;
     if (_control case final control?) widget.rules?.useHost(HostPaths(control), up: () => _hostUp);
@@ -2440,6 +2484,10 @@ class _CanoaAppState extends State<CanoaApp> {
       remote.dispose();
     }
     _remoteReady.clear();
+    for (final accounts in _remoteAccounts.values) {
+      accounts.dispose();
+    }
+    _remoteAccounts.clear();
     unawaited(_control?.close());
     widget.settingsSignal?.removeListener(_requestSettings);
     widget.hostingSignal?.removeListener(_requestHosting);
@@ -2568,6 +2616,7 @@ class _CanoaAppState extends State<CanoaApp> {
     onSettings: () => unawaited(_showSettings()),
     dictation: _dictation,
     accounts: _accounts,
+    accountsOf: (session) => _accountsOn(session.host),
     onAccountSettings: () => unawaited(_showSettings(section: 'accounts')),
     switchAccount: (session, account) => store.switchAccount(
       session,

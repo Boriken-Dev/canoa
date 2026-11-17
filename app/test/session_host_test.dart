@@ -8,14 +8,19 @@ import 'dart:convert';
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/acp/served_host.dart';
+import 'package:canoa/accounts/account_models.dart' show accountMeta;
 import 'package:canoa/auth/peer_proof.dart';
+import 'package:canoa/chat/inspector.dart' show machineOf;
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/config/connection.dart';
 import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/served/folder_dialog.dart' show breadcrumbs;
+import 'package:canoa/profile/report.dart' show loadoutMeta;
 import 'package:canoa/session_store.dart';
+import 'package:canoa/sources/source_choices.dart';
+import 'package:canoa/sources/sources.dart';
 import 'package:canoa/workspace/remote_host.dart';
 import 'package:coqui_web/coqui_web.dart' show WebEndpoints;
 import 'package:flutter/material.dart';
@@ -67,6 +72,20 @@ final class _Far implements HostLink {
         result = {'path': '/srv/scratch/${params['session']}', 'made': true};
       case 'fs/scratch_remove':
         result = {'removed': true};
+      case 'accounts/list':
+        result = {
+          'accounts': [
+            for (final name in ['far-work', 'far-other', 'far-key'])
+              {'name': name, 'harness': 'claude', 'kind': 'claude-login', 'id': 'id-$name', 'state': 'signed in'},
+          ],
+        };
+      case 'accounts/entries':
+        result = {
+          'entries': [
+            // far-key is signed in but the agent does not accept what it provides, so the host leaves it out of `usable`.
+            {'name': 'Claude', 'harness': 'claude', 'accounts': ['far-work'], 'usable': ['far-work', 'far-other'], 'accepts': ['claude-code']},
+          ],
+        };
       default:
         error = {'code': -32001, 'message': 'no grant'};
     }
@@ -89,21 +108,28 @@ final _far = Connection(
   method: 'noise',
 );
 
-RemoteHost _remote(_Far control, {String os = 'linux'}) => RemoteHost(
-  _far,
+RemoteHost _remote(_Far control, {String os = 'linux', List<ServedEntry>? entries, Connection? connection}) => RemoteHost(
+  connection ?? _far,
   ServedHost(
     peer: _far.peer,
     method: PeerMethod.noise,
     os: os,
-    entries: const [ServedEntry(name: 'scripted', kind: 'agent', url: 'wss://far.test:9/scripted')],
+    entries: entries ?? const [ServedEntry(name: 'scripted', kind: 'agent', url: 'wss://far.test:9/scripted')],
     control: const ServedEntry(name: '@control', kind: 'control', url: 'ws://far.test:9/control'),
   ),
   HostControl.dialing(() async => control),
 );
 
+const _claudeEntry = ServedEntry(name: 'Claude', kind: 'agent', url: 'wss://far.test:9/Claude', harness: 'claude');
+
 typedef _Reached = ({String url, String peer});
 
-Future<(SessionStore, OptionsAgent, List<_Reached>, _Far, SessionLedger)> _page(WidgetTester tester) async {
+Future<(SessionStore, OptionsAgent, List<_Reached>, _Far, SessionLedger)> _page(
+  WidgetTester tester, {
+  List<ServedEntry>? entries,
+  Connection? connection,
+  CanoaConfig? config,
+}) async {
   final agent = OptionsAgent();
   final reached = <_Reached>[];
   final far = _Far();
@@ -112,9 +138,9 @@ Future<(SessionStore, OptionsAgent, List<_Reached>, _Far, SessionLedger)> _page(
   await pumpApp(
     tester,
     store,
-    config: const CanoaConfig(agents: [scripted]).withConnection(_far),
+    config: (config ?? const CanoaConfig(agents: [scripted])).withConnection(connection ?? _far),
     pickFolder: () async => '/home/me/local',
-    openRemote: (connection) async => _remote(far),
+    openRemote: (opened) async => _remote(far, entries: entries, connection: connection),
     connectEndpoint: (WebEndpoints endpoints, {required String pinnedPeerId, required PeerMethod method, Duration timeout = const Duration(seconds: 10),
         AgentDecider? decider, AgentElicitor? elicitor, AgentSecrets? secrets, Map<String, Object?> initializeMeta = const {}}) async {
       reached.add((url: endpoints.webSocket.toString(), peer: pinnedPeerId));
@@ -245,5 +271,89 @@ void main() {
     expect(store.selected!.cwd, startsWith('/srv/scratch/'));
     expect(store.selected!.kind, SessionKind.chat);
     await finish(tester);
+  });
+
+  testWidgets('a draft aimed at another host lists that host\'s accounts the agent accepts, and starts on the one chosen with its loadout', (tester) async {
+    final (store, agent, reached, far, _) = await _page(
+      tester,
+      entries: const [_claudeEntry],
+      config: CanoaConfig.parse('[loadouts.main]\noverlays = []\n'),
+    );
+    await newSession(tester);
+    await chooseWorkspace(tester);
+    await _aimAtFar(tester);
+    expect(store.selected!.source!.label, 'Claude');
+    expect(far.asked, containsAll(['accounts/list', 'accounts/entries']), reason: 'the chosen host is asked for its accounts');
+    store.selected!.loadout = 'main';
+    await tester.tap(find.byKey(const Key('option-account')));
+    await frames(tester);
+    expect(find.byKey(const Key('account-choice far-work')), findsOneWidget);
+    expect(find.byKey(const Key('account-choice far-other')), findsOneWidget);
+    expect(find.byKey(const Key('account-choice far-key')), findsNothing, reason: 'the host says the agent cannot use it');
+    await tester.tap(find.byKey(const Key('account-choice far-other')));
+    await frames(tester);
+    await closePicker(tester);
+    await openFolder(tester);
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('host-folder /srv')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('host-folder /srv/app')));
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('host-folder-choose')));
+    await settle(tester);
+    await send(tester, 'Say hello');
+    await settle(tester, 150);
+    expect(reached.single.url, 'wss://far.test:9/Claude');
+    final initialize = agent.requests.firstWhere((request) => request['method'] == 'initialize');
+    final meta = (initialize['params'] as Map)['_meta'] as Map;
+    expect(meta[accountMeta], 'far-other');
+    expect(meta[loadoutMeta], 'main');
+    await finish(tester);
+  });
+
+  testWidgets('a draft that chose no account starts on the first the other host offers', (tester) async {
+    final (_, agent, _, _, _) = await _page(tester, entries: const [_claudeEntry]);
+    await newSession(tester);
+    await _aimAtFar(tester);
+    await send(tester, 'Say hello');
+    await settle(tester, 150);
+    final initialize = agent.requests.firstWhere((request) => request['method'] == 'initialize');
+    expect(((initialize['params'] as Map)['_meta'] as Map)[accountMeta], 'far-work');
+    await finish(tester);
+  });
+
+  test('what a source\'s provider listed is kept per entry and host, and the local key is the entry\'s name', () async {
+    const here = AgentSource.hosted('Claude');
+    const far = AgentSource.hosted('Claude', host: 'Far');
+    const near = AgentSource.hosted('Claude', host: 'Near');
+    expect(sourceKey(here), 'Claude');
+    expect(sourceKey(far), 'Claude@Far');
+    expect({here, far, near}, hasLength(3));
+    final store = SessionStore();
+    store.choicesLoader = (source) async => SourceChoices(known: true, models: [ModelChoice(id: 'm-${source.host}', name: 'Model of ${source.host}')]);
+    for (final source in [here, far, near]) {
+      await store.askChoicesAgain(source);
+    }
+    expect(store.choicesOf(here)!.models.single.id, 'm-null');
+    expect(store.choicesOf(far)!.models.single.id, 'm-Far');
+    expect(store.choicesOf(near)!.models.single.id, 'm-Near');
+    store.dispose();
+  });
+
+  test('a conversation reopened from the ledger on a saved host shows the saved name, not its address', () async {
+    final ledger = SessionLedger(MemoryLedgerBackend());
+    final entry = ledger.record(
+      peerId: 'local:Scripted', sessionId: 'o1', entry: 'Scripted', place: SessionPlace.peer, reopenBy: 'session/load',
+      endpoint: 'wss://far.test:9/scripted', method: 'noise', cwd: '/srv/app', title: 'An earlier one',
+    )!;
+    final store = SessionStore(ledger: ledger);
+    final client = await OptionsAgent().start(scripted);
+    final reopened = await store.reopen(entry, client, host: savedNameOfPeer([_far], _far.peer));
+    expect(machineOf(reopened).value, 'Far', reason: 'the address is far.test');
+    expect(savedNameOfPeer([_far], 'sha256:${'c' * 64}'), isNull);
+    expect(savedNameOfPeer([_far], _far.peer.toUpperCase().replaceFirst('SHA256', 'sha256')), 'Far');
+    final unsaved = await SessionStore(ledger: ledger).reopen(entry, await OptionsAgent().start(scripted));
+    expect(machineOf(unsaved).value, 'far.test', reason: 'a host that is not saved is named by its address');
+    store.dispose();
   });
 }

@@ -77,15 +77,15 @@ SourceTrouble? sourceTrouble(AgentSource? source, SourceChoices? choices, {Accou
 
 /// Whether [kit] can put [trouble] right from here: the Store when the host's grants allow installing, Accounts when the app has
 /// them. A failure can always be asked again.
-bool canAct(SourceTrouble trouble, ComposerKit kit) => switch (trouble.kind) {
+bool canAct(SourceTrouble trouble, ComposerKit kit, {ChatSession? session}) => switch (trouble.kind) {
   TroubleKind.notInstalled => kit.programs != null,
-  TroubleKind.signIn => kit.accounts != null,
+  TroubleKind.signIn => kit.accountsFor(session) != null,
   TroubleKind.failed => true,
 };
 
 /// Runs [trouble]'s action: the Store's programs to install, Accounts' sign-in as it runs there, or asking the host again.
 /// Whatever it did, the host is asked once more what the source offers.
-Future<void> actOnTrouble(BuildContext context, SessionStore store, ComposerKit kit, SourceTrouble trouble) async {
+Future<void> actOnTrouble(BuildContext context, SessionStore store, ComposerKit kit, SourceTrouble trouble, {ChatSession? session}) async {
   switch (trouble.kind) {
     case TroubleKind.notInstalled:
       final programs = kit.programs;
@@ -97,7 +97,7 @@ Future<void> actOnTrouble(BuildContext context, SessionStore store, ComposerKit 
         ),
       ));
     case TroubleKind.signIn:
-      final accounts = kit.accounts;
+      final accounts = kit.accountsFor(session);
       if (accounts == null || !context.mounted) return;
       await showDialog<void>(
         context: context,
@@ -122,9 +122,9 @@ class SourceTroubleChip extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!session.isDraft) return const SizedBox.shrink();
     final source = session.source;
-    final trouble = sourceTrouble(source, source == null ? null : store.choicesOf(source), accounts: kit.accounts);
+    final trouble = sourceTrouble(source, source == null ? null : store.choicesOf(source), accounts: kit.accountsFor(session));
     if (trouble == null) return const SizedBox.shrink();
-    final act = canAct(trouble, kit) ? () => unawaited(actOnTrouble(context, store, kit, trouble)) : null;
+    final act = canAct(trouble, kit, session: session) ? () => unawaited(actOnTrouble(context, store, kit, trouble, session: session)) : null;
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Tooltip(
         message: trouble.detail ?? trouble.message,

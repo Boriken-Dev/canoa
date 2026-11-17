@@ -4,7 +4,10 @@ import '../desktop/host_tool.dart';
 /// runs, which is one of the host's own sources (a built-in one, or a command of canoa.cfg's `[agents.NAME]`), or an entry
 /// canoa.cfg's `[host]` names.
 final class AgentSource {
-  const AgentSource.hosted(String this.hostEntry, {this.harness, this.title, this.local = false});
+  const AgentSource.hosted(String this.hostEntry, {this.harness, this.title, this.local = false, this.host});
+
+  /// The saved connection whose host serves the entry; null for this app's own host. Two hosts may serve entries of one name.
+  final String? host;
 
   /// The name of the agent entry the host serves.
   final String? hostEntry;
@@ -24,10 +27,10 @@ final class AgentSource {
   String get displayName => title ?? label;
 
   @override
-  bool operator ==(Object other) => other is AgentSource && other.label == label;
+  bool operator ==(Object other) => other is AgentSource && other.label == label && other.host == host;
 
   @override
-  int get hashCode => label.hashCode;
+  int get hashCode => Object.hash(label, host);
 }
 
 /// The sources the host lists: each agent entry it is serving, in its order. An entry added to canoa.cfg, a harness entry
@@ -120,5 +123,6 @@ final class SourceCheck {
       words.length < 2 ? words.join() : '${words.sublist(0, words.length - 1).join(', ')} and ${words.last}';
 }
 
-/// What the session list keeps a source's memory under: its label, which the host keeps unique among its entries.
-String sourceKey(AgentSource source) => source.label;
+/// What the session list keeps a source's memory under: its label, which the host keeps unique among its entries, and for an entry of
+/// a saved connection's host that connection's name after an @.
+String sourceKey(AgentSource source) => source.host == null ? source.label : '${source.label}@${source.host}';

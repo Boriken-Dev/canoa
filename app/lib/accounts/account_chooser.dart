@@ -21,7 +21,7 @@ class AccountChooser extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accounts = kit.accounts;
+    final accounts = kit.accountsFor(session);
     final entry = session.source?.hostEntry ?? session.agent;
     if (accounts == null) return const SizedBox.shrink();
     return ListenableBuilder(

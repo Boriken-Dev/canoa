@@ -62,6 +62,7 @@ final class ComposerKit {
     this.onSettings,
     this.onProfile,
     this.accounts,
+    this.accountsOf,
     this.onAccountSettings,
     this.switchAccount,
     this.switchAgent,
@@ -194,6 +195,13 @@ final class ComposerKit {
 
   /// The accounts the host knows, for the chip that names the one a session runs on; null where the app has none.
   final AccountsController? accounts;
+
+  /// The accounts of the saved connection a session was aimed at, null while that host has told none; used instead of [accounts]
+  /// for a session that has a host.
+  final AccountsController? Function(ChatSession session)? accountsOf;
+
+  /// The accounts the chip and picker list for [session] (any session when null): its own host's when it is aimed at one.
+  AccountsController? accountsFor(ChatSession? session) => session?.host == null ? accounts : accountsOf?.call(session!);
 
   /// Opens Settings at Accounts.
   final VoidCallback? onAccountSettings;

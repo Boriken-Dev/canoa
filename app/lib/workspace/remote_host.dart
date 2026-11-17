@@ -64,6 +64,10 @@ Future<String?> workspaceProblem({
   }
 }
 
+/// The name [connections] save the host under whose pinned key is [peerId], or null when none does.
+String? savedNameOfPeer(Iterable<Connection> connections, String peerId) =>
+    connections.where((each) => each.peer.toLowerCase() == peerId.toLowerCase()).firstOrNull?.name;
+
 /// What the app holds of one saved Canoa host while a new session is aimed at it: the list it served, and its control channel, over
 /// which folders are browsed and checked and a chat's scratch folder and a worktree are made.
 final class RemoteHost {
