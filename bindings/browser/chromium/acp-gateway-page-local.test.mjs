@@ -386,7 +386,8 @@ async function requestAs(origin, agents, decision, names) {
   const listeners = [];
   g.attach({ postMessage: (m) => received.push(m), onMessage: { addListener: (l) => listeners.push(l) }, onDisconnect: { addListener: () => {} } }, { origin, tabId: 1 });
   listeners.forEach((listen) => listen({ id: 1, op: "request", args: [{}], activated: true }));
-  for (let tries = 0; tries < 40 && grants.length === 0; tries += 1) await settle();
+  // Every allowed agent is saved in turn: wait for all of them, however long the saves take.
+  for (let tries = 0; tries < 400 && grants.length < decision.allow.length; tries += 1) await settle();
   return grants;
 }
 

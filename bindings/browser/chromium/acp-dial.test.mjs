@@ -121,6 +121,7 @@ test("a bare link opens no stream of its own, and refuses one the far side opens
 
 test("a heartbeat, when asked for, goes out as the mux's own ping", async () => {
   const { heard } = await dialedLink({ heartbeat: { interval: 5, misses: 100 } });
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // The ping crosses the real proof's async sealing, so how long it takes depends on load: wait for it.
+  for (let turn = 0; turn < 400 && !heard.frames.includes(4); turn += 1) await new Promise((resolve) => setTimeout(resolve, 5));
   assert.ok(heard.frames.includes(4), JSON.stringify(heard.frames));
 });
