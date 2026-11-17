@@ -2889,13 +2889,25 @@ fn prepare<C: Channel>(
             return None;
         }
     };
+    let client = match hosted::choose_client(first) {
+        Ok(client) => client,
+        Err(refusal) => {
+            refuse(refusal.answer, refusal.log);
+            return None;
+        }
+    };
     let lookup = |name: &str| std::env::var(name).ok();
     match Connection::prepare_with(
         offer,
         index,
         &served.name,
         &lookup,
-        (only.as_deref(), loadout.as_deref(), preset.as_deref()),
+        hosted::Choices {
+            only: only.as_deref(),
+            loadout: loadout.as_deref(),
+            preset: preset.as_deref(),
+            client: client.as_deref(),
+        },
         starting,
     ) {
         Ok(connection) => Some(connection.asking(in_process)),

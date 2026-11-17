@@ -1801,6 +1801,44 @@ fn a_loadout_that_is_malformed_or_a_default_that_names_none_refuses_the_file() {
 }
 
 #[test]
+fn a_kind_of_client_has_a_default_loadout_of_its_own() {
+    let config = Config::from_str_in(
+        "[agents.a]\nprogram = \"agent\"\n[loadouts.mail]\n[loadouts.docs]\n[defaults]\nloadout = \"docs\"\ntheme = \"the app's\"\n\
+         [defaults.clients]\noutlook = \"mail\"\nword = \"docs\"\n",
+        Path::new("."),
+    )
+    .expect("parses");
+    let local = &config.local_profiles;
+    assert_eq!(local.default_loadout.as_deref(), Some("docs"));
+    assert_eq!(
+        local.client_loadouts,
+        BTreeMap::from([
+            ("outlook".to_owned(), "mail".to_owned()),
+            ("word".to_owned(), "docs".to_owned())
+        ])
+    );
+    let profile = local.for_agent("a").expect("a profile");
+    assert_eq!(profile.client_loadout("outlook"), Some("mail"));
+    assert_eq!(profile.client_loadout("excel"), None);
+    // Nothing written, nothing held.
+    let bare = Config::from_str_in("[loadouts.mail]\n", Path::new(".")).expect("parses");
+    assert!(bare.local_profiles.client_loadouts.is_empty());
+}
+
+#[test]
+fn a_client_default_that_names_no_kind_or_no_loadout_refuses_the_file() {
+    for text in [
+        "[loadouts.x]\n[defaults.clients]\nfridge = \"x\"\n",
+        "[loadouts.x]\n[defaults.clients]\noutlook = \"y\"\n",
+        "[loadouts.x]\n[defaults.clients]\noutlook = 1\n",
+        "[loadouts.x]\n[defaults]\nclients = \"x\"\n",
+        "[defaults.clients]\noutlook = \"x\"\n",
+    ] {
+        assert!(Config::from_str_in(text, Path::new(".")).is_err(), "{text}");
+    }
+}
+
+#[test]
 fn a_session_names_a_loadout_the_file_does_not_hold_and_it_is_refused_with_its_name() {
     let config = Config::from_str_in("[loadouts.a]\n", Path::new(".")).expect("parses");
     let error = config

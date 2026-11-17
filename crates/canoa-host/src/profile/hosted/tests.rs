@@ -962,7 +962,10 @@ fn a_client_narrows_the_overlays_a_connection_starts_with_and_never_adds_one() {
             0,
             "a",
             &lookup,
-            (only.as_deref(), None, None),
+            Choices {
+                only: only.as_deref(),
+                ..Choices::default()
+            },
             Starting::default(),
         )
         .expect("prepared");
@@ -1367,7 +1370,10 @@ fn loadout_report(offer: &Offer, loadout: Option<&str>) -> (Connection, Value) {
         0,
         "a",
         &lookup,
-        (None, loadout, None),
+        Choices {
+            loadout,
+            ..Choices::default()
+        },
         Starting::default(),
     )
     .expect("prepared");
@@ -1428,7 +1434,11 @@ fn an_overlay_the_client_names_wins_over_the_loadouts_and_skills_come_from_the_l
         0,
         "a",
         &lookup,
-        (Some(&["team".to_owned()]), Some("lean2"), None),
+        Choices {
+            only: Some(&["team".to_owned()]),
+            loadout: Some("lean2"),
+            ..Choices::default()
+        },
         Starting::default(),
     )
     .expect("prepared");
@@ -1488,7 +1498,10 @@ fn preset_report(offer: &Offer, preset: Option<&str>) -> (Connection, Value) {
         0,
         "a",
         &lookup,
-        (None, None, preset),
+        Choices {
+            preset,
+            ..Choices::default()
+        },
         Starting::default(),
     )
     .expect("prepared");
@@ -1563,6 +1576,129 @@ fn a_preset_a_client_names_that_the_profile_does_not_hold_is_refused_with_its_na
         }
     }
 }
+/// What a session of `offer` starts with when it names `loadout`, `preset` and the kind of client it is: the loadout it got, and the
+/// report it started with.
+fn client_start(
+    offer: &Offer,
+    loadout: Option<&str>,
+    preset: Option<&str>,
+    client: Option<&str>,
+) -> (Option<String>, Value) {
+    let connection = Connection::prepare_with(
+        offer,
+        0,
+        "a",
+        &lookup,
+        Choices {
+            only: None,
+            loadout,
+            preset,
+            client,
+        },
+        Starting::default(),
+    )
+    .expect("prepared");
+    let report = parts_for(&connection, Some("claude-code"), &claude(), &lookup).report;
+    (connection.role.clone(), report)
+}
+
+#[test]
+fn the_sessions_loadout_variable_is_the_loadout_the_rule_chose_the_kinds_default_included() {
+    let temp = temp_with_skill();
+    let offer = loadout_offer(
+        &temp,
+        "[loadouts.full]\nmcp = []\n[loadouts.mail]\nmcp = []\n[loadouts.lean]\nmcp = []\n\
+         [defaults]\nloadout = \"full\"\n[defaults.clients]\noutlook = \"mail\"\nword = \"gone\"\n",
+    );
+    let loadout_of = |loadout, client| {
+        let connection = Connection::prepare_with(
+            &offer,
+            0,
+            "a",
+            &lookup,
+            Choices {
+                loadout,
+                client,
+                ..Choices::default()
+            },
+            Starting::default(),
+        )
+        .expect("prepared");
+        env_value(&connection, "AGENTS_LOADOUT").map(str::to_owned)
+    };
+    assert_eq!(loadout_of(None, Some("outlook")).as_deref(), Some("mail"));
+    assert_eq!(
+        loadout_of(Some("lean"), Some("outlook")).as_deref(),
+        Some("lean")
+    );
+    assert_eq!(loadout_of(None, Some("excel")).as_deref(), Some("full"));
+    assert_eq!(loadout_of(None, None).as_deref(), Some("full"));
+    // A kind's loadout the file lost leaves the default.
+    assert_eq!(loadout_of(None, Some("word")).as_deref(), Some("full"));
+}
+
+#[test]
+fn a_client_kind_has_a_default_loadout_below_what_the_session_or_its_preset_names() {
+    let temp = temp_with_skill();
+    let offer = loadout_offer(
+        &temp,
+        &format!(
+            "{PRESETS}[profiles.plain]\nmodel = \"big\"\n\
+             [loadouts.mail]\nmcp = []\n[loadouts.full]\nmcp = []\n\
+             [defaults]\nloadout = \"full\"\n[defaults.clients]\noutlook = \"mail\"\n"
+        ),
+    );
+    let role = |loadout, preset, client| client_start(&offer, loadout, preset, client).0;
+    // The kind's loadout, where it has one; the default for a kind with none, and for a client that says none.
+    assert_eq!(role(None, None, Some("outlook")).as_deref(), Some("mail"));
+    assert_eq!(role(None, None, Some("word")).as_deref(), Some("full"));
+    assert_eq!(
+        role(None, None, Some("unheard-of")).as_deref(),
+        Some("full")
+    );
+    assert_eq!(role(None, None, None).as_deref(), Some("full"));
+    // A loadout the session names, and the loadout of the preset it names, win over the kind's.
+    assert_eq!(
+        role(Some("lean"), None, Some("outlook")).as_deref(),
+        Some("lean")
+    );
+    assert_eq!(
+        role(None, Some("deep"), Some("outlook")).as_deref(),
+        Some("lean")
+    );
+    // A preset with no loadout of its own leaves the kind's.
+    assert_eq!(
+        role(None, Some("plain"), Some("outlook")).as_deref(),
+        Some("mail")
+    );
+    // The report says which loadout the session got, and null where none applies.
+    let (_, report) = client_start(&offer, None, None, Some("outlook"));
+    assert_eq!(report["loadout"], "mail", "{report}");
+}
+
+#[test]
+fn a_client_that_names_its_kind_in_text_is_heard_and_anything_else_is_refused() {
+    let first = |value: Value| {
+        serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"_meta": {CLIENT_META: value}}}))
+        .expect("json")
+    };
+    assert_eq!(
+        choose_client(&first(json!("outlook"))).expect("text"),
+        Some("outlook".to_owned())
+    );
+    assert_eq!(
+        choose_client(b"{\"method\":\"initialize\"}").expect("none"),
+        None
+    );
+    for bad in [json!(3), json!(["outlook"]), json!(null)] {
+        let refusal = choose_client(&first(bad)).expect_err("refused");
+        let answer: Value =
+            serde_json::from_slice(&refusal.answer.expect("an answer")).expect("json");
+        assert_eq!(answer["error"]["code"], INVALID_PARAMS, "{answer}");
+    }
+}
+
 #[test]
 fn a_change_to_canoa_cfg_after_a_session_started_leaves_that_sessions_report_as_it_was() {
     let temp = temp_with_skill();
@@ -1974,7 +2110,7 @@ fn session_connection(cfg: &str, starting: Starting<'_>) -> Connection {
     let temp = temp_with_skill();
     install_files(&temp, "team", &[("overlay.cfg", cfg)]);
     let offer = offer_of(&temp, &config_with("overlays = [\"team\"]\n"));
-    Connection::prepare_with(&offer, 0, "a", &lookup, (None, None, None), starting)
+    Connection::prepare_with(&offer, 0, "a", &lookup, Choices::default(), starting)
         .expect("prepared")
 }
 

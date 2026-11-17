@@ -49,6 +49,24 @@ pub const LOADOUT_META: &str = "dev.boriken.canoa/loadout";
 /// loadout is the one the connection starts with unless the client names another. A name `[profiles]` does not hold is refused.
 pub const PRESET_META: &str = "dev.boriken.canoa/preset";
 
+/// The `_meta` key a client names, in `initialize`, which kind of client it is: one of [`crate::config::CLIENT_KINDS`]. A
+/// connection that names no loadout and no preset that has one starts with the loadout `[defaults.clients]` gives that kind, else
+/// `[defaults] loadout`. A kind the file gives no loadout is no more than a label; anything but text is refused.
+pub const CLIENT_META: &str = "dev.boriken.canoa/client";
+
+/// What a client asks for in `initialize`'s `_meta` when its connection starts, each as its `choose_*` function read it.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Choices<'a> {
+    /// The overlays it starts with, which only narrow what the profile lists.
+    pub only: Option<&'a [String]>,
+    /// The loadout it starts with.
+    pub loadout: Option<&'a str>,
+    /// The preset it starts with.
+    pub preset: Option<&'a str>,
+    /// The kind of client it is.
+    pub client: Option<&'a str>,
+}
+
 /// The longest initial context a session is given, in UTF-8 bytes, every layer's together.
 const MAX_CONTEXT: usize = 1024 * 1024;
 pub(crate) mod fetched;
@@ -296,6 +314,27 @@ pub(crate) fn choose_preset(
     }
 }
 
+/// The kind of client `first` says it is in `initialize`'s `_meta`; `None` when it says none. Anything but text is refused.
+pub(crate) fn choose_client(first: &[u8]) -> Result<Option<String>, Refusal> {
+    let message: Value = serde_json::from_slice(first).unwrap_or(Value::Null);
+    let Some(chosen) = message
+        .get("params")
+        .and_then(|params| params.get("_meta"))
+        .and_then(|meta| meta.get(CLIENT_META))
+    else {
+        return Ok(None);
+    };
+    match chosen.as_str() {
+        Some(kind) => Ok(Some(kind.to_owned())),
+        None => Err(Refusal {
+            answer: message
+                .get("id")
+                .map(|id| error(id, INVALID_PARAMS, "a client names its kind as text")),
+            log: "a client sent something other than text as its kind, which was refused",
+        }),
+    }
+}
+
 /// The overlays `first` chooses for the connection in `initialize`'s `_meta`; `None` when it chooses none, which is every
 /// overlay the profile lists. Anything but an array of names is refused.
 pub(crate) fn choose_overlays(first: &[u8]) -> Result<Option<Vec<String>>, Refusal> {
@@ -493,13 +532,13 @@ impl Connection {
             index,
             entry,
             lookup,
-            (None, None, None),
+            Choices::default(),
             Starting::default(),
         )
     }
 
-    /// As [`Self::prepare`], with the overlays the client chose: only those of them the profile lists are read, and each
-    /// other overlay the profile lists is reported as not chosen for this connection.
+    /// As [`Self::prepare`], with what the client chose: of the overlays it names only those the profile lists are read, and
+    /// each other overlay the profile lists is reported as not chosen for this connection.
     ///
     /// # Errors
     ///
@@ -509,9 +548,15 @@ impl Connection {
         index: usize,
         entry: &str,
         lookup: &dyn Fn(&str) -> Option<String>,
-        (only, loadout, preset): (Option<&[String]>, Option<&str>, Option<&str>),
+        choices: Choices<'_>,
         starting_with: Starting<'_>,
     ) -> Result<Self, String> {
+        let Choices {
+            only,
+            loadout,
+            preset,
+            client,
+        } = choices;
         let (name, listed) = &offer.profiles[index];
         let mut notes = Vec::new();
         let mut narrowed = listed.clone();
@@ -522,8 +567,10 @@ impl Connection {
         // The preset's loadout is the connection's unless the client named one; one the file no longer holds is said, and the
         // default applies.
         let mut loadout = loadout;
+        let mut preset_decides = false;
         if let Some((asked, held)) = preset {
             narrowed.session = Some(held.session_layer());
+            preset_decides = held.loadout.is_some();
             if loadout.is_none()
                 && let Some(named) = held.loadout.as_deref()
             {
@@ -538,6 +585,13 @@ impl Connection {
                     ));
                 }
             }
+        }
+        // A client's kind gives a default of its own, below anything the client or its preset chose.
+        if loadout.is_none()
+            && !preset_decides
+            && let Some(kind) = client
+        {
+            loadout = listed.client_loadout(kind);
         }
         let resolved = listed
             .resolve_loadout(loadout)
@@ -2120,6 +2174,7 @@ fn parts_for(
             "name": connection.name,
             "harness": label,
             "summary": summary,
+            "loadout": connection.role,
             "items": items.iter().map(Item::json).collect::<Vec<_>>(),
         }),
         written,

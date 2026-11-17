@@ -160,6 +160,9 @@ pub struct LocalProfiles {
     pub loadouts: IndexMap<String, Loadout>,
     /// `[defaults] loadout`: the loadout a session starts with when it names none.
     pub default_loadout: Option<String>,
+    /// `[defaults.clients]`: the loadout a session starts with when it names none and its client says which kind it is, by kind
+    /// (see [`CLIENT_KINDS`]). It wins over `[defaults] loadout`.
+    pub client_loadouts: BTreeMap<String, String>,
     /// `[profiles.NAME]`: the named presets of a session's own values, in the file's order.
     pub presets: IndexMap<String, Preset>,
     /// `[permissions] protected`: the places a hook's allow never answers for.
@@ -362,6 +365,7 @@ impl LocalProfiles {
             chosen_skills: Vec::new(),
             loadouts: self.loadouts.clone(),
             default_loadout: self.default_loadout.clone(),
+            client_loadouts: self.client_loadouts.clone(),
             presets: self.presets.clone(),
             session: None,
             protected: self.protected.clone(),
@@ -855,6 +859,8 @@ pub struct HostProfile {
     pub loadouts: IndexMap<String, Loadout>,
     /// `[defaults] loadout`.
     pub default_loadout: Option<String>,
+    /// `[defaults.clients]`: see [`LocalProfiles::client_loadouts`].
+    pub client_loadouts: BTreeMap<String, String>,
     /// `[profiles.NAME]`, which a connection resolves once when it starts.
     pub presets: IndexMap<String, Preset>,
     /// The session's layer, above the agent's: the preset the connection named, once resolved.
@@ -874,6 +880,12 @@ impl HostProfile {
         self.presets
             .get(name)
             .ok_or_else(|| UnknownPreset(name.to_owned()))
+    }
+
+    /// The loadout `[defaults.clients]` names for a client of `kind`, if it names one.
+    #[must_use]
+    pub fn client_loadout(&self, kind: &str) -> Option<&str> {
+        self.client_loadouts.get(kind).map(String::as_str)
     }
 
     /// The loadout `name` (`[defaults] loadout` when `None`) as this profile holds it; `None` when none applies.
@@ -1793,6 +1805,8 @@ impl Config {
         local_profiles.presets = presets_of(&raw.profiles)?;
         local_profiles.default_loadout =
             default_loadout_of(raw.defaults.as_ref(), &local_profiles.loadouts)?;
+        local_profiles.client_loadouts =
+            client_loadouts_of(raw.defaults.as_ref(), &local_profiles.loadouts)?;
         local_profiles.protected.clone_from(&protected_paths);
         let Some(host) = raw.host else {
             return Ok(Self {
@@ -2834,6 +2848,7 @@ fn profile_of(
         chosen_skills: Vec::new(),
         loadouts: IndexMap::new(),
         default_loadout: None,
+        client_loadouts: BTreeMap::new(),
         presets: IndexMap::new(),
         session: None,
         protected: None,
@@ -2923,6 +2938,7 @@ fn local_profiles_of(
         kb_choice: BTreeMap::new(),
         loadouts: IndexMap::new(),
         default_loadout: None,
+        client_loadouts: BTreeMap::new(),
         presets: IndexMap::new(),
         protected: None,
     })
@@ -3081,6 +3097,44 @@ fn presets_of(
         preset.effort = own.effort;
         preset.mode = own.mode;
         out.insert(name.clone(), preset);
+    }
+    Ok(out)
+}
+
+/// The kinds of client that can tell the host which it is, in `initialize`'s `_meta`, and so have a default loadout of their own in
+/// `[defaults.clients]`: a browser's side panel, and the Outlook, Word, Excel and PowerPoint task panes.
+pub const CLIENT_KINDS: [&str; 5] = ["browser", "outlook", "word", "excel", "powerpoint"];
+
+/// `[defaults.clients]`: the loadout a session whose client is of each kind starts with when it names none. A kind that is not
+/// one of [`CLIENT_KINDS`], and a loadout `[loadouts]` does not hold, refuse the file.
+fn client_loadouts_of(
+    defaults: Option<&toml::Table>,
+    loadouts: &IndexMap<String, Loadout>,
+) -> Result<BTreeMap<String, String>, ConfigError> {
+    let invalid = |what: String| ConfigError::Invalid { entry: None, what };
+    let Some(value) = defaults.and_then(|table| table.get("clients")) else {
+        return Ok(BTreeMap::new());
+    };
+    let table = value
+        .as_table()
+        .ok_or_else(|| invalid("[defaults.clients] is a table".to_owned()))?;
+    let mut out = BTreeMap::new();
+    for (kind, value) in table {
+        if !CLIENT_KINDS.contains(&kind.as_str()) {
+            return Err(invalid(format!(
+                "[defaults.clients] {kind} is not a kind of client: {}",
+                CLIENT_KINDS.join(", ")
+            )));
+        }
+        let named = value
+            .as_str()
+            .filter(|name| loadouts.contains_key(*name))
+            .ok_or_else(|| {
+                invalid(format!(
+                    "[defaults.clients] {kind} is not the name of a loadout in [loadouts]"
+                ))
+            })?;
+        out.insert(kind.clone(), named.to_owned());
     }
     Ok(out)
 }

@@ -474,6 +474,8 @@ pub const PROFILE_META: &str = "dev.boriken.canoa/profile";
 pub const OVERLAYS_META: &str = "dev.boriken.canoa/overlays";
 /// `initialize`'s `_meta` key naming, as a loadout's name, the `[loadouts]` entry this connection starts with.
 pub const LOADOUT_META: &str = "dev.boriken.canoa/loadout";
+/// `initialize`'s `_meta` key naming, as text, the kind of client (`browser`, `outlook`, `word`, `excel`, `powerpoint`): a connection that names no loadout, and whose preset names none, starts with `[defaults.clients]`'s loadout for that kind, else `[defaults] loadout`. A kind the file gives nothing is only a label; anything but text is refused. The profile report carries the `loadout` the connection got.
+pub const CLIENT_META: &str = "dev.boriken.canoa/client";
 pub fn launch(program: &OsStr, args: &[OsString], max: usize) -> io::Error
 ```
 

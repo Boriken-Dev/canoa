@@ -489,10 +489,25 @@ adds one.
   start with, it writes a loadout named `Default` that holds that. The old `[loadout]` table (`off`, `skills`,
   `registries`, `mcp`) is not read: `registries` and the notes on installed servers are `[store] registries` and
   `[store.mcp.NAME]` now.
+- **A default loadout for each kind of client.** `[defaults.clients]` names, per kind (`browser`, `outlook`, `word`, `excel`,
+  `powerpoint`), the loadout a session starts with when it names none and its client says which kind it is, in
+  `initialize`'s `_meta["dev.boriken.canoa/client"]`: the browser extension's side panel and the Outlook, Word, Excel and
+  PowerPoint task panes do. It sits between a session's own loadout (and the loadout of the profile it names) and
+  `[defaults] loadout`, so a kind with no entry starts with the default. A kind that is not in that list, and a loadout
+  `[loadouts]` does not hold, refuse the file. The host resolves it when the session starts, so it also applies where the
+  client cannot read canoa.cfg, and the profile report names the loadout the session got (`loadout`). Deleting a loadout in
+  the app drops the entries that name it, and renaming one carries them.
 - **Editing loadouts.** The Loadouts section lists them in the index beside the main area (the default marked, a search when there are many, New loadout at the top) and shows the chosen one there: what it holds, whether it can start, and what a new session gets from it. The choice is kept across a restart. It edits, duplicates and deletes
   them, makes one the default and starts a session with one. Its editor adds installed overlays, skills and servers from a
   searchable list, and leads to the Store for more without losing what was typed. Overlays stay whole: nothing there switches
   an item inside one.
+- **The choice in the chat-only app.** The extension's side panel and the Office task panes start a session in one click,
+  with no draft to choose on, so the loadout and profile controls sit beside New session: the same radio lists as the
+  composer's, the kind's default marked and chosen until the person picks another. What is chosen is sent as
+  `_meta["dev.boriken.canoa/loadout"]` and `["dev.boriken.canoa/preset"]` with the client's kind, applies to the next session
+  only, and the conversation notes which loadout it started with when the link does not carry the host's report. The
+  extension's panel reads canoa.cfg through its worker for the names; a panel that cannot shows no control and the host
+  still applies the kind's default.
 - **The choice per session.** The composer's loadout control names the loadout a session starts with, sent as
   `_meta["dev.boriken.canoa/loadout"]`, and changes its overlays for this session alone.
   What a session started with is kept with it in the session list and asked for again when it is opened, so turning a
@@ -532,6 +547,10 @@ mcp = ["files"]               # servers of [profile.mcp]
 
 [defaults]
 loadout = "review"            # what a session that names no loadout starts with
+
+[defaults.clients]            # ... when its client is of this kind: browser, outlook, word, excel or powerpoint
+outlook = "mail"
+word = "writing"
 
 [store]
 registries = ["https://registry.team.example", "https://git.team.example/lists.git@main#servers.json"]
