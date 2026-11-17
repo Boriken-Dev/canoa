@@ -196,6 +196,19 @@ final class HostFiles implements WorkspaceFiles, HostOpening {
     await _call('workspace/open', {'path': path, 'opener': opener});
   }
 
+  /// What is wrong with [section] set to [value], in the host's words, or null when canoa.cfg would stay one the host accepts.
+  /// Nothing is written.
+  Future<String?> configCheck(String section, Map<String, Object?>? value) async {
+    try {
+      await _call('config/check', {'section': section, 'value': value});
+      return null;
+    } on ControlFailed catch (error) {
+      // -32002 is the host refusing what it read; a grant the key lacks, or an older host, is not an answer about the file.
+      if (error.code == -32002) return error.message;
+      rethrow;
+    }
+  }
+
   /// Ends the host so that its supervisor starts it again with canoa.cfg as it is now; this link ends with it.
   Future<void> restart() async {
     await _call('host/restart');

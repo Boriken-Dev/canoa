@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../auth/peer_proof.dart' show PeerMethod;
 import '../acp/served_host.dart';
 import '../config/canoa_config.dart';
+import '../desktop/control_client.dart' show ControlClient, ControlFailed, ControlListener;
 import '../desktop/host_control.dart';
 import '../desktop/host_supervisor.dart';
 import '../desktop/host_tool.dart';
@@ -26,9 +27,121 @@ import 'served_control.dart';
 /// key proof, as a host that listens on the network is. The page runs nothing itself, so there is no process to start, restart
 /// or stop here; [phase] is `running` while the page is open.
 final class ServedSupervisor extends HostSupervisor {
-  ServedSupervisor(this._served) : super(null);
+  ServedSupervisor(this._served, [this._control]) : super(null);
 
   final ServedHost _served;
+  final HostControl? _control;
+
+  HostControl get _host => _control ?? (throw const HostCommandFailed('this page has no control channel to its host'));
+
+  @override
+  String get runningSaid => 'Serving this page.';
+
+  /// The host's keys, PINs and `[host]` are its own to answer for: this asks it, and it refuses a key that holds no `hosting`.
+  @override
+  bool get managesKeys => _control != null;
+
+  Future<Map<Object?, Object?>> _call(String method, [Map<String, Object?> params = const {}]) async {
+    final result = await (await _host.ready()).call(method, params);
+    return result is Map<Object?, Object?> ? result : const {};
+  }
+
+  Future<T> _asked<T>(Future<T> Function() ask) async {
+    try {
+      return await ask();
+    } on ControlFailed catch (error) {
+      throw HostCommandFailed(error.message);
+    }
+  }
+
+  @override
+  Future<List<HostKey>> keys() => _asked(() async {
+    final listed = (await _call('host/keys'))['keys'];
+    final keys = [
+      if (listed is List<Object?>)
+        for (final each in listed)
+          if (each is Map<Object?, Object?> && each['id'] is String && (each['state'] == 'accepted' || each['state'] == 'waiting'))
+            HostKey(id: each['id']! as String, accepted: each['state'] == 'accepted', from: each['source'] as String?),
+    ];
+    return [...keys.where((key) => key.accepted), ...keys.where((key) => !key.accepted)];
+  });
+
+  @override
+  Future<void> accept(String id) => _asked(() => _call('host/accept', {'id': id}));
+
+  @override
+  Future<void> revoke(String id) => _asked(() => _call('host/revoke', {'id': id}));
+
+  @override
+  Future<HostPairing> pair() => _pairing(native: false);
+
+  @override
+  Future<HostPairing> pairBrowser() => _pairing(native: true);
+
+  /// `host/pair` on a link of its own, which is what ends it: the host stops showing the PIN when the link closes.
+  Future<HostPairing> _pairing({required bool native}) async {
+    final ControlClient client;
+    try {
+      client = await _host.open();
+    } on Object catch (error) {
+      throw HostCommandFailed('$error');
+    }
+    final shown = Completer<Map<String, Object?>>();
+    final paired = Completer<String>();
+    Future<void>? ending;
+    Future<void> end() => ending ??= client.close();
+    void fail(Object error) {
+      final why = HostCommandFailed(error is ControlFailed ? error.message : '$error');
+      if (!shown.isCompleted) shown.completeError(why);
+      if (!paired.isCompleted) paired.completeError(why);
+    }
+    // Nobody may be waiting on it when it is cancelled.
+    unawaited(paired.future.then((_) {}, onError: (Object _) {}));
+    unawaited(
+      client
+          .call(
+            'host/pair',
+            {if (native) 'native': true},
+            ControlListener(
+              onNotification: (method, params) {
+                if (method == 'host/progress' && !shown.isCompleted) shown.complete(params);
+              },
+            ),
+            const Duration(minutes: 6),
+          )
+          .then((result) {
+            final who = result is Map ? result['paired'] : null;
+            if (who is String && !paired.isCompleted) {
+              paired.complete(who);
+            } else {
+              fail('the host said no key paired');
+            }
+          }, onError: fail)
+          .whenComplete(end),
+    );
+    final first = await shown.future.timeout(
+      const Duration(seconds: 20),
+      onTimeout: () {
+        unawaited(end());
+        throw const HostCommandFailed('the host did not show a PIN');
+      },
+    );
+    final [pin, hostId, url] = [first['pin'], first['peer'], first['url'] ?? ''];
+    if (pin is! String || hostId is! String || url is! String) {
+      unawaited(end());
+      throw const HostCommandFailed('the host showed no PIN');
+    }
+    final method = first['method'];
+    return HostPairing.over(
+      pin: pin,
+      hostId: hostId,
+      url: url,
+      method: method is String ? method : null,
+      native: native,
+      paired: paired.future,
+      cancel: () => unawaited(end()),
+    );
+  }
 
   @override
   HostPhase get phase => HostPhase.running;
@@ -73,7 +186,7 @@ final class ServedSupervisor extends HostSupervisor {
 final class ServedApp {
   ServedApp._(this.host, this.control, this.portal, Uri? page)
       : page = page ?? Uri.base,
-        supervisor = ServedSupervisor(host),
+        supervisor = ServedSupervisor(host, control),
         overlays = ControlOverlayManager(control),
         ledger = HostLedgerBackend.over(control);
 

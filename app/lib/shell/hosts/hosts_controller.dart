@@ -78,6 +78,7 @@ final class HostSummary {
     'upload': 'Uploads',
     'host.restart': 'Restarting the host',
     'discover': 'Looking nearby',
+    'hosting': 'Hosting: keys, PINs and the host table',
   };
 
   /// The capabilities a set of grants stands for, each named once, in a fixed order; nothing the host did not grant.

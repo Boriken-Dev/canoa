@@ -44,7 +44,7 @@ class _HostingPanelState extends State<HostingPanel> {
   String? message;
   bool busy = false;
 
-  Future<List<HostKey>> _keys() => widget.supervisor.tool == null ? Future.value(const []) : widget.supervisor.keys();
+  Future<List<HostKey>> _keys() => !widget.supervisor.managesKeys ? Future.value(const []) : widget.supervisor.keys();
 
   void _refresh() => setState(() {
     keys = _keys();
@@ -210,7 +210,7 @@ class _HostingPanelState extends State<HostingPanel> {
             children: [
               Expanded(child: Text('Agents this computer hosts', style: text.titleSmall)),
               TextButton.icon(
-                onPressed: busy || widget.supervisor.tool == null ? null : _add,
+                onPressed: busy || !widget.supervisor.managesKeys ? null : _add,
                 icon: const Icon(Icons.add),
                 label: const Text('Add an agent'),
               ),
@@ -367,12 +367,12 @@ class _HostingPanelState extends State<HostingPanel> {
           runSpacing: 8,
           children: [
             OutlinedButton.icon(
-              onPressed: busy || widget.supervisor.tool == null ? null : _showPin,
+              onPressed: busy || !widget.supervisor.managesKeys ? null : _showPin,
               icon: const Icon(Icons.pin_outlined),
               label: const Text('Show a PIN'),
             ),
             OutlinedButton.icon(
-              onPressed: busy || widget.supervisor.tool == null ? null : () => _showPin(browser: true),
+              onPressed: busy || !widget.supervisor.managesKeys ? null : () => _showPin(browser: true),
               icon: const Icon(Icons.extension_outlined),
               label: const Text('Pair the browser extension'),
             ),
@@ -406,7 +406,7 @@ class _Status extends StatelessWidget {
       HostPhase.off => (Icons.power_settings_new, 'Left off, by canoa.cfg\'s local_host or --no-local-host.'),
       HostPhase.idle => (Icons.pause_circle_outline, 'Nothing to host: add an agent.'),
       HostPhase.starting => (Icons.hourglass_top, 'Starting…'),
-      HostPhase.running => (Icons.check_circle_outline, 'Hosting, on this computer only.'),
+      HostPhase.running => (Icons.check_circle_outline, supervisor.runningSaid),
       HostPhase.waiting => (Icons.restart_alt, 'It stopped: starting again soon. ${supervisor.problem ?? ''}'),
       HostPhase.failed => (Icons.error_outline, 'canoa.cfg is not right for it: ${supervisor.problem ?? ''}'),
       HostPhase.held => (Icons.people_outline, supervisor.problem ?? 'Another host runs on this home.'),

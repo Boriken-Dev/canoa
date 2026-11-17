@@ -163,12 +163,15 @@ class _BrowserAgents extends StatelessWidget {
 /// The chosen host's overview: where it stands, its identity and the trust in it, the agents it serves and what it says it can do.
 /// Local also holds Hosting, which is what the host does for browsers.
 class HostsOverview extends StatelessWidget {
-  const HostsOverview({super.key, required this.controller, this.localDetail});
+  const HostsOverview({super.key, required this.controller, this.localDetail, this.servedDetail});
 
   final HostsController controller;
 
   /// What Local's overview adds under its facts: Hosting.
   final WidgetBuilder? localDetail;
+
+  /// What the overview of the host that served this page adds, when this key may host: the same Hosting, on that host.
+  final WidgetBuilder? servedDetail;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -202,11 +205,16 @@ class HostsOverview extends StatelessWidget {
                         'The host that served this page: this page reaches everything through it, and it is not Local.',
                       ),
                     },
-                    if (item.kind == HostItemKind.local && localDetail != null) ...[
+                    if (switch (item.kind) {
+                      HostItemKind.local => localDetail,
+                      HostItemKind.served => servedDetail,
+                      HostItemKind.saved => null,
+                    }
+                        case final detail?) ...[
                       const SizedBox(height: 24),
                       Text('Hosting', style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(height: 8),
-                      localDetail!(context),
+                      detail(context),
                     ],
                   ],
                 ),

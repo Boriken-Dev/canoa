@@ -47,13 +47,24 @@ final class HostCommandFailed implements Exception {
 
 /// `pair` running: the PIN it shows, until a native client uses it, it fails, or it is cancelled.
 final class HostPairing {
-  HostPairing._(this._child, this.pin, this.hostId, this.method, this.url, this.paired, {this.native = false});
+  HostPairing._(this._cancel, this.pin, this.hostId, this.method, this.url, this.paired, {this.native = false});
+
+  /// A pairing the host shows over its control channel, as a served page asks it: [cancel] ends it with the PIN unused.
+  HostPairing.over({
+    required String pin,
+    required String hostId,
+    required String url,
+    required Future<String> paired,
+    required void Function() cancel,
+    String? method,
+    bool native = false,
+  }) : this._(cancel, pin, hostId, method, url, paired, native: native);
 
   /// Whether this is the browser extension's pairing, which has no address to dial: the extension reaches it through its
   /// native messaging host.
   final bool native;
 
-  final HostChild _child;
+  final void Function() _cancel;
   final String pin;
 
   /// The host's peer id, which the other side shows once it has paired.
@@ -113,11 +124,11 @@ final class HostPairing {
     // Nobody may be waiting on it when it is cancelled.
     unawaited(paired.future.then((_) {}, onError: (Object _) {}));
     final method = first['method'];
-    return HostPairing._(child, pin, hostId, method is String ? method : null, url, paired.future, native: native);
+    return HostPairing._(child.kill, pin, hostId, method is String ? method : null, url, paired.future, native: native);
   }
 
   /// Ends the pairing; the PIN can no longer be used.
-  void cancel() => _child.kill();
+  void cancel() => _cancel();
 }
 
 /// Runs this app's own host: started when the app starts, whatever canoa.cfg names, started again with a growing pause when
@@ -379,6 +390,12 @@ class HostSupervisor extends ChangeNotifier {
       },
     );
   }
+
+  /// What the status line says while the host runs.
+  String get runningSaid => 'Hosting, on this computer only.';
+
+  /// Whether this supervisor can list, pair and remove keys and show a PIN: it runs a host of its own, or reaches one that lets it.
+  bool get managesKeys => tool != null;
 
   /// The keys the host's trust store holds, paired first.
   Future<List<HostKey>> keys() async {

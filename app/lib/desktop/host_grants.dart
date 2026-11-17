@@ -20,6 +20,9 @@ final class HostGrants extends ChangeNotifier {
   /// The grant that writes the app's own tables of canoa.cfg, the saved connections among them.
   static const configWrite = 'config.write';
 
+  /// The grant that lists, pairs and removes keys, shows a PIN and edits `[host]`.
+  static const hosting = 'hosting';
+
   /// The grant that reads what the agents spent and the limits they reported.
   static const usage = 'usage';
 

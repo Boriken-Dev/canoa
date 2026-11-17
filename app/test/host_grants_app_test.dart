@@ -72,6 +72,7 @@ final class _Control implements HostLink {
       'fs/list' => {'path': '', 'parent': null, 'entries': <Object?>[], 'more': false},
       'store/list' => {'stores': <Object?>[]},
       'ledger/list' => {'records': <Object?>[]},
+      'host/keys' => {'keys': <Object?>[]},
       _ => null,
     };
     _out.add(jsonEncode(result == null
@@ -123,7 +124,7 @@ Future<void> _browser(WidgetTester tester, _Control control) {
   return pumpApp(
     tester,
     _store(),
-    host: ServedSupervisor(host),
+    host: ServedSupervisor(host, HostControl.dialing(() async => control)),
     served: ServedApp.over(host, HostControl.dialing(() async => control)),
   );
 }
@@ -155,6 +156,28 @@ void main() {
       await old.refresh();
       expect(old.known, isTrue);
       expect(old.may(HostGrants.programs) || old.may(HostGrants.accounts), isFalse);
+    });
+  });
+
+  group('Hosting on a host that served the page', () {
+      testWidgets('shows Hosting in the Hosts section for a key that holds hosting, and its keys are the host\'s', (tester) async {
+      final control = _Control([..._all, 'hosting']);
+      await _browser(tester, control);
+      await tester.tap(find.byKey(const ValueKey('section hosts')));
+      await frames(tester);
+      expect(find.byKey(const Key('hosts-hosting-panel')), findsOneWidget);
+      expect(find.byKey(const Key('hosts-knowledge-panel')), findsOneWidget);
+      expect(find.text('Serving this page.'), findsOneWidget);
+      expect(control.asked, contains('host/keys'));
+    });
+
+    testWidgets('is not shown, and the host is never asked for its keys, without the grant', (tester) async {
+      final control = _Control(_all);
+      await _browser(tester, control);
+      await tester.tap(find.byKey(const ValueKey('section hosts')));
+      await frames(tester);
+      expect(find.byKey(const Key('hosts-hosting-panel')), findsNothing);
+      expect(control.asked, isNot(contains('host/keys')));
     });
   });
 

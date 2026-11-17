@@ -450,6 +450,7 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Saves canoa.cfg once canoa finds nothing wrong with it, then serves it.
   /// Only [host] comes from the dialog: the rest is what the app has now, which Settings may have changed meanwhile.
   Future<String?> _saveHosting(CanoaConfig fromDialog) async {
+    if (widget.served case final served?) return _saveHostingOnHost(served, fromDialog);
     final host = widget.host;
     final path = _configPath;
     if (host == null || path == null) return 'canoa.cfg has no place on this computer';
@@ -465,6 +466,42 @@ class _CanoaAppState extends State<CanoaApp> {
     await host.apply(configPath: path);
     return null;
   }
+
+  /// The page's Hosting save: the host reads what `[host]` would be and says in its own words what is wrong, then writes it.
+  /// It serves the new table when it next starts, which is offered, since ending it ends the sessions open on it.
+  Future<String?> _saveHostingOnHost(ServedApp served, CanoaConfig fromDialog) async {
+    if (!served.configLoaded || !served.configStore.includesHost) {
+      return "This page holds no copy of the host's settings it may write.";
+    }
+    final changed = config.withHost(fromDialog.host, source: config.source.withOwn('host', fromDialog.source.own['host']));
+    try {
+      final problem = await served.configStore.checkHost(changed);
+      if (problem != null) return problem;
+      final restart = await served.configStore.save(changed);
+      if (mounted) setState(() => config = changed);
+      _settingsKey.currentState?.controller.adopt(changed);
+      if (restart) _offerRestart();
+      return null;
+    } on ControlFailed catch (error) {
+      return error.message;
+    } on Object catch (error) {
+      return 'The host could not be reached to save that: $error';
+    }
+  }
+
+  Widget _hostingColumn(BuildContext context, HostSupervisor supervisor, {Future<int> Function()? freePort}) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    HostingPanel(
+      key: const Key('hosts-hosting-panel'),
+      supervisor: supervisor,
+      config: config,
+      onSave: _saveHosting,
+      freePort: freePort ?? freeLoopbackPort,
+    ),
+    const SizedBox(height: 24),
+    Text('Knowledge search', style: Theme.of(context).textTheme.titleMedium),
+    const SizedBox(height: 8),
+    KnowledgeSearchPanel(key: const Key('hosts-knowledge-panel'), config: config, onSave: _saveHosting),
+  ]);
 
   /// Shows Settings, at [section] when one is named.
   Future<void> _showSettings({String? section}) async {
@@ -534,18 +571,10 @@ class _CanoaAppState extends State<CanoaApp> {
       controller: _hosts,
       localDetail: widget.host == null || widget.served != null
           ? null
-          : (context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              HostingPanel(
-                key: const Key('hosts-hosting-panel'),
-                supervisor: widget.host!,
-                config: config,
-                onSave: _saveHosting,
-              ),
-              const SizedBox(height: 24),
-              Text('Knowledge search', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              KnowledgeSearchPanel(key: const Key('hosts-knowledge-panel'), config: config, onSave: _saveHosting),
-            ]),
+          : (context) => _hostingColumn(context, widget.host!),
+      servedDetail: widget.served == null || !(_grants?.may(HostGrants.hosting) ?? false)
+          ? null
+          : (context) => _hostingColumn(context, widget.served!.supervisor, freePort: () async => 0),
     );
   }
 
