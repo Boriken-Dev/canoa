@@ -45,10 +45,13 @@ Future<List<String>> _list(String folder) async {
   ]..sort((a, b) => depth(a) != depth(b) ? depth(a).compareTo(depth(b)) : a.compareTo(b));
 }
 
-/// What the host answers for a name picked: the file under [folder] it names.
+/// What the host answers for a name picked: the file or folder under [folder] it names.
 Future<InsideFile?> _resolve(String folder, String relative) async {
-  final file = File('$folder${Platform.pathSeparator}${relative.replaceAll('/', Platform.pathSeparator)}');
-  return await file.exists() && !relative.split('/').contains('..') ? (path: file.path, folder: false, size: await file.length()) : null;
+  if (relative.split('/').contains('..')) return null;
+  final path = '$folder${Platform.pathSeparator}${relative.replaceAll('/', Platform.pathSeparator)}';
+  if (await Directory(path).exists()) return (path: path, folder: true, size: 0);
+  final file = File(path);
+  return await file.exists() ? (path: path, folder: false, size: await file.length()) : null;
 }
 
 Future<(SessionStore, OptionsAgent, _Tree)> _started(WidgetTester tester, {Size size = const Size(1280, 800)}) async {
@@ -56,7 +59,7 @@ Future<(SessionStore, OptionsAgent, _Tree)> _started(WidgetTester tester, {Size 
   addTearDown(() => tree.root.deleteSync(recursive: true));
   final agent = OptionsAgent();
   final store = SessionStore();
-  await pumpApp(tester, store, linked: agent.openLink, size: size, pickFolder: () async => tree.folder.path, listFolder: _list, resolveInside: _resolve);
+  await pumpApp(tester, store, linked: agent.openLink, size: size, pickFolder: () async => tree.folder.path, listFolder: _list, resolveInside: _resolve, openIn: false);
   await newSession(tester);
   await chooseSource(tester, 'Scripted');
   await openFolder(tester);
