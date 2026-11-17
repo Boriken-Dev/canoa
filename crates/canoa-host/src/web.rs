@@ -17,12 +17,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Instant, SystemTime};
 
-use crate::config::{WebConfig, WebTls};
+use crate::config::{WebConfig, WebMode, WebTls};
 use crate::serve::{Gate, Listening, Serving};
 
 /// Where the site is served when canoa.cfg does not say: loopback, port 7800.
 pub const DEFAULT_LISTEN: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 7800);
-/// The path of the list of this host's entries: `{"peer", "method", "os", "entries": [{"name", "kind", "url", "harness"?, "title"?}]}`.
+/// The path of the list of this host's entries: `{"peer", "method", "os", "web", "entries": [{"name", "kind", "url", "harness"?, "title"?}]}`.
 pub const HOST_INDEX: &str = "/canoa.json";
 /// Whether this build holds a site of its own (feature `web`), served when no directory is given.
 pub const BUILT_IN: bool = cfg!(feature = "web");
@@ -296,7 +296,8 @@ struct Shared {
     limits: Limits,
     hosts: Vec<String>,
     policy: String,
-    index: Vec<u8>,
+    /// The list at [`HOST_INDEX`] as a page reached over loopback reads it, and as any other page does.
+    index: [Vec<u8>; 2],
     /// Set by [`WebStopper::stop`]: the listener ends, and each connection after the answer it is sending.
     stopped: Arc<AtomicBool>,
 }
@@ -407,7 +408,8 @@ impl WebServer {
                 limits: web.limits,
                 hosts: web.hosts.clone(),
                 policy: policy(&connect),
-                index: host_index(peer, method, entries),
+                index: [WebMode::Local, WebMode::Remote]
+                    .map(|reached| host_index(peer, method, entries, web.mode.unwrap_or(reached))),
                 stopped: Arc::new(AtomicBool::new(false)),
             }),
         })
@@ -650,14 +652,28 @@ fn readable_by_others(file: &Path) -> bool {
     std::fs::metadata(file).is_ok_and(|metadata| metadata.permissions().mode() & 0o077 != 0)
 }
 
-/// The list at [`HOST_INDEX`]: this host's id, method and operating system (`windows`, `linux`, `macos`, for reading an overlay as it would run there), and each entry as `serve` prints it (name, kind, address, and provider id and title when it has them).
-fn host_index(peer: &str, method: &str, entries: &[Listening]) -> Vec<u8> {
+/// The list at [`HOST_INDEX`]: this host's id, method and operating system (`windows`, `linux`, `macos`, for reading an overlay as it would run there), whether the page's person sits at this computer (`web`: `local` or `remote`), and each entry as `serve` prints it (name, kind, address, and provider id and title when it has them).
+fn host_index(peer: &str, method: &str, entries: &[Listening], mode: WebMode) -> Vec<u8> {
     let entries: Vec<_> = entries
         .iter()
         .map(|entry| serde_json::Value::Object(entry.to_json()))
         .collect();
-    serde_json::to_vec(&serde_json::json!({"peer": peer, "method": method, "os": std::env::consts::OS, "entries": entries}))
+    serde_json::to_vec(&serde_json::json!({"peer": peer, "method": method, "os": std::env::consts::OS, "web": mode.as_str(), "entries": entries}))
         .unwrap_or_default()
+}
+
+/// Whether a request's `Host` names this computer's loopback: `localhost`, `127.x.x.x` or `[::1]`, with or without a port.
+fn loopback_host(value: &str) -> bool {
+    let name = match value.strip_prefix('[') {
+        Some(bracketed) => bracketed
+            .split_once(']')
+            .map_or(bracketed, |(address, _)| address),
+        None => value.split(':').next().unwrap_or(value),
+    };
+    name.eq_ignore_ascii_case("localhost")
+        || name
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
 }
 
 /// The Content-Security-Policy every answer carries: scripts, styles, images, fonts and workers from this origin only,
@@ -1161,7 +1177,10 @@ fn answer(shared: &Shared, request: &httparse::Request<'_, '_>) -> (Answer, bool
                 ("Content-Type", "application/json".to_owned()),
                 ("Cache-Control", "no-store".to_owned()),
             ],
-            body: Body::Owned(shared.index.clone()),
+            body: Body::Owned(
+                shared.index[usize::from(!header(request, "host").is_some_and(loopback_host))]
+                    .clone(),
+            ),
             keep: true,
         };
         return (found, head);

@@ -104,11 +104,14 @@ pub(crate) struct Files {
     uploading: Mutex<()>,
     /// The Documents folder a chat's scratch folder is made under, when it is not the system's.
     documents: Option<PathBuf>,
+    /// What can be started for a folder on this computer.
+    opener: workspace::Opener,
 }
 
 mod folders;
 mod links;
 mod profiles;
+pub(crate) mod workspace;
 pub(crate) use folders::Scratch;
 
 impl Files {
@@ -128,7 +131,16 @@ impl Files {
             writing: Mutex::new(()),
             uploading: Mutex::new(()),
             documents: None,
+            opener: workspace::Opener::default(),
         }
+    }
+
+    /// Starts programs through this opener instead of the computer's own.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_opener(mut self, opener: workspace::Opener) -> Self {
+        self.opener = opener;
+        self
     }
 
     /// Makes chats' scratch folders under `documents` rather than the system's Documents folder.

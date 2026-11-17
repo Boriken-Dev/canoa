@@ -561,6 +561,30 @@ fn plain_http_beyond_loopback_is_refused() {
     );
 }
 
+#[test]
+fn the_web_mode_is_local_or_remote_and_unset_by_default() {
+    let mode = |text: &str| {
+        parse(&format!(
+            "[host.agents.a]\nprogram = \"x\"\n[host.web]\n{text}"
+        ))
+        .map(|config| config.web.expect("a web table").mode)
+    };
+    assert_eq!(mode("").expect("parses"), None);
+    assert_eq!(
+        mode("mode = \"local\"\n").expect("parses"),
+        Some(WebMode::Local)
+    );
+    assert_eq!(
+        mode("mode = \"remote\"\n").expect("parses"),
+        Some(WebMode::Remote)
+    );
+    let refused = mode("mode = \"nearby\"\n").expect_err("refused");
+    assert!(
+        refused.to_string().contains("mode is local or remote"),
+        "{refused}"
+    );
+}
+
 /// A pipe's `listen` on this platform, and the same name on the other.
 #[cfg(windows)]
 const PIPE: &str = "pipe:canoa-test";

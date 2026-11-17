@@ -511,12 +511,20 @@ canoa serve --web                   # the site built in, in a build with the web
 [host.web]
 dir = "site"                 # relative to canoa.cfg; without it, the site built in
 listen = "127.0.0.1:7800"    # the default
+mode = "local"               # "local" or "remote": where the person sits (see below)
 ```
 
 `serve` prints `{"web": "http://127.0.0.1:7800"}` after its entries. Open that address: the Hosts section lists that host, named as the host that served the page and never as Local, with
 its peer id, its method and its entries, read from `/canoa.json`. That is only what the host says of itself. Connecting still proves the host holds that id's key, and the host turns the
 browser away until its key is paired, as in [Pairing](#pairing): connect once, then accept the browser's id in Hosting
 or with `canoa accept`.
+
+`mode` says where the person is in front of the page. **`local`**: the browser is at this computer, so Open in starts VS Code or the file
+manager here (a key holding `workspace.open`; `workspace/openers` says what is installed). **`remote`**: the browser is only the interface to
+a computer elsewhere, so Open in VS Code is a `vscode://vscode-remote/ssh-remote+HOST/PATH` link the browser opens (it needs VS Code's Remote -
+SSH extension and an SSH route to this computer under the name the page was reached at) and the file manager is not offered: the Files panel
+shows the folder. Unset, a page reached as `localhost` or a loopback address is local and any other name is remote. The host puts the
+answer in `/canoa.json` as `web`, and the page reads it there.
 
 What it serves and refuses:
 

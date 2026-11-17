@@ -116,6 +116,9 @@ pub enum Grant {
     /// `usage/summary` and `usage/limits`: what the agents on this host spent, by account, harness, model and session, and the
     /// allowances they last reported. It reads the host's records and changes nothing; a delegated child connection never holds it.
     Usage,
+    /// `workspace/openers` and `workspace/open`: what this computer has to open a folder with (VS Code, its file manager) and starting
+    /// one for a folder in the places `folders` browses, as this user. The program starts on the host's screen.
+    WorkspaceOpen,
     /// `fs/read`, and with `folders` an `fs/list` not kept to any place: this computer's files as the account the host runs as can
     /// read them. The grant is the only gate.
     Files,
@@ -146,6 +149,7 @@ impl Grant {
             Self::Worktree,
             Self::StoreRead,
             Self::Folders,
+            Self::WorkspaceOpen,
             Self::ConfigRead,
             Self::ConfigWrite,
             Self::ConfigWriteSessions,
@@ -174,6 +178,7 @@ impl Grant {
             Self::Worktree => "worktree",
             Self::StoreRead => "store.read",
             Self::Folders => "folders",
+            Self::WorkspaceOpen => "workspace.open",
             Self::ConfigRead => "config.read",
             Self::ConfigWrite => "config.write",
             Self::ConfigWriteSessions => "config.write.sessions",
@@ -630,6 +635,10 @@ impl Control {
                 Some("fs/list") => {
                     allow(caller, Grant::Folders).and_then(|()| self.files.list(caller, &params))
                 }
+                Some("workspace/openers") => allow(caller, Grant::WorkspaceOpen)
+                    .and_then(|()| self.files.workspace_openers()),
+                Some("workspace/open") => allow(caller, Grant::WorkspaceOpen)
+                    .and_then(|()| self.files.workspace_open(caller, &params)),
                 Some("fs/info") => {
                     allow(caller, Grant::Folders).and_then(|()| self.files.info(caller, &params))
                 }
@@ -1298,6 +1307,8 @@ mod state;
 #[cfg(test)]
 mod state_tests;
 mod usage_read;
+#[cfg(test)]
+mod workspace_tests;
 pub(crate) use index::ToolsBackend;
 mod account_move;
 #[cfg(test)]

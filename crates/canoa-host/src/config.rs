@@ -637,6 +637,30 @@ pub struct WebConfig {
     /// Directories the site may not hold, such as canoa.cfg's and the identity's: a site whose directory is one of them,
     /// or above one, is refused. Not read from the file.
     pub keep_out: Vec<PathBuf>,
+    /// Where the person sits in front of the page, told to it in `/canoa.json`; `None` says local to a page reached over
+    /// loopback and remote to one reached by any other name.
+    pub mode: Option<WebMode>,
+}
+
+/// Whether the browser showing the web app is at the computer that serves it (the host starts an editor or file manager
+/// there) or is only the interface to a computer elsewhere (files go through the app, an editor connects over SSH).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WebMode {
+    /// The browser sits at this computer.
+    Local,
+    /// The browser is somewhere else.
+    Remote,
+}
+
+impl WebMode {
+    /// Its name in canoa.cfg and in `/canoa.json`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Remote => "remote",
+        }
+    }
 }
 
 impl WebConfig {
@@ -651,6 +675,7 @@ impl WebConfig {
             connect: Vec::new(),
             limits: crate::web::Limits::default(),
             keep_out: Vec::new(),
+            mode: None,
         }
     }
 }
@@ -1403,6 +1428,7 @@ struct RawWeb {
     hosts: Vec<String>,
     #[serde(default)]
     connect: Vec<String>,
+    mode: Option<String>,
     max_connections: Option<usize>,
     max_connections_per_address: Option<usize>,
     connection_seconds: Option<u64>,
@@ -3369,6 +3395,12 @@ fn web_of(raw: RawWeb, directory: &Path, entries: &[Entry]) -> Result<WebConfig,
         }
         web.connect.push(source);
     }
+    web.mode = match raw.mode.as_deref() {
+        None => None,
+        Some("local") => Some(WebMode::Local),
+        Some("remote") => Some(WebMode::Remote),
+        Some(_) => return Err(refused("mode is local or remote")),
+    };
     let count = |value: Option<usize>, setting: &str, default: usize| match value {
         Some(0) => Err(refused(&format!("{setting} must be at least 1"))),
         Some(value) => Ok(value),

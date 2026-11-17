@@ -533,12 +533,45 @@ fn the_host_index_lists_the_entries_it_was_given() {
             "peer": PEER,
             "method": "noise",
             "os": std::env::consts::OS,
+            "web": "local",
             "entries": [
                 {"name": "echo", "kind": "agent", "url": "ws://127.0.0.1:7801", "harness": "claude", "title": "Claude for review"},
                 {"name": "py", "kind": "provider", "url": "ws://127.0.0.1:7802"},
             ],
         })
     );
+}
+
+fn web_of(address: SocketAddr, host: &str) -> String {
+    let request = format!("GET /canoa.json HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+    let reply = replies(address, request.as_bytes())
+        .into_iter()
+        .next()
+        .expect("an answer");
+    assert_eq!(reply.status, 200, "{host}");
+    let listed: serde_json::Value = serde_json::from_slice(&reply.body).expect("JSON");
+    listed["web"].as_str().expect("web").to_owned()
+}
+
+#[test]
+fn the_host_index_says_where_the_person_sits_by_how_the_page_was_reached_unless_the_setting_says() {
+    let mut config = loopback(&site());
+    config.hosts = vec!["box.example".to_owned()];
+    let address = running(&config, &[]);
+    assert_eq!(web_of(address, "127.0.0.1:7800"), "local");
+    assert_eq!(web_of(address, "localhost"), "local");
+    assert_eq!(web_of(address, "[::1]:7800"), "local");
+    assert_eq!(web_of(address, "box.example"), "remote");
+    assert_eq!(web_of(address, "192.0.2.17"), "remote");
+
+    for (mode, said) in [(WebMode::Remote, "remote"), (WebMode::Local, "local")] {
+        let mut config = loopback(&site());
+        config.hosts = vec!["box.example".to_owned()];
+        config.mode = Some(mode);
+        let address = running(&config, &[]);
+        assert_eq!(web_of(address, "127.0.0.1"), said);
+        assert_eq!(web_of(address, "box.example"), said);
+    }
 }
 
 /// A site in a directory of the test's own, beside a file and a directory outside it.
