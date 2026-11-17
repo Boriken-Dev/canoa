@@ -122,6 +122,7 @@ pub mod account {
 - **Any model name** a client sends is answered by the one model the engine serves, and the answer names that model.
 - **Tools** become function tools (a server tool, a hosted tool or a deferred one is dropped and said in `dropped`); a result becomes a `tool` message ahead of the turn's other text; mid-conversation system and developer messages join the system prompt (a model's template takes one at the start).
 - **Thinking** is written out only when the client asked for it and did not ask it omitted; earlier thinking sent back is dropped.
+- **Thinking** is off in the model unless the client asks for a high effort (`thinking.type` `enabled`, `reasoning.effort` or `reasoning_effort` high or more): the request carries `chat_template_kwargs.enable_thinking = false`, since a small model left to think can spend the whole allowance an agent asks for.
 - **Refused up front**, with the reason in the API's own error shape: tools offered to a model that cannot call them, an image to a model that cannot read it, `previous_response_id` (the gateway keeps no conversation).
 - **Streaming** is replayed: the model is called once and the events are written from its whole answer.
 

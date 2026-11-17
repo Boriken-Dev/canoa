@@ -10,7 +10,9 @@ use alloc::vec::Vec;
 
 use serde_json::{Map, Value, json};
 
-use crate::translate::{Builder, check_model, copy_number, function_tool, user_message};
+use crate::translate::{
+    Builder, check_model, copy_number, function_tool, thinking_unless_asked, user_message,
+};
 use crate::{ApiError, Completion, Finish, ModelInfo, Translated};
 
 /// The text parts of a message's content, as one chat content value, and whether an image was among them.
@@ -231,6 +233,10 @@ pub fn to_chat(request: &Value, model: &ModelInfo) -> Result<Translated, ApiErro
             }}),
         );
     }
+    thinking_unless_asked(
+        &mut chat,
+        request.pointer("/reasoning/effort").and_then(Value::as_str),
+    );
     Ok(Translated {
         chat: Value::Object(chat),
         stream: request.get("stream") == Some(&Value::Bool(true)),
@@ -536,6 +542,22 @@ mod tests {
         let refused = to_chat(&continued, &model()).expect_err("kept nowhere");
         assert!(refused.message.contains("previous_response_id"));
         assert_eq!(refused.openai()["error"]["type"], "invalid_request_error");
+    }
+
+    #[test]
+    fn thinking_is_off_unless_a_high_effort_is_asked() {
+        let off = to_chat(
+            &json!({"input": "hi", "reasoning": {"effort": "medium"}}),
+            &model(),
+        )
+        .expect("translates");
+        assert_eq!(off.chat["chat_template_kwargs"]["enable_thinking"], false);
+        let on = to_chat(
+            &json!({"input": "hi", "reasoning": {"effort": "high"}}),
+            &model(),
+        )
+        .expect("translates");
+        assert!(on.chat.get("chat_template_kwargs").is_none());
     }
 
     #[test]

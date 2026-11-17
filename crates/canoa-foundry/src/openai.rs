@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use serde_json::{Map, Value, json};
 
-use crate::translate::{Builder, check_model};
+use crate::translate::{Builder, check_model, thinking_unless_asked};
 use crate::{ApiError, Completion, Finish, ModelInfo, Translated};
 
 /// The fields of a chat request the model's engine takes; the rest is dropped and said.
@@ -116,6 +116,10 @@ pub fn to_chat(request: &Value, model: &ModelInfo) -> Result<Translated, ApiErro
             }
         }
     }
+    thinking_unless_asked(
+        &mut chat,
+        request.get("reasoning_effort").and_then(Value::as_str),
+    );
     Ok(Translated {
         chat: Value::Object(chat),
         stream: request.get("stream") == Some(&Value::Bool(true)),
@@ -295,6 +299,31 @@ mod tests {
                 output: 4,
             },
         }
+    }
+
+    #[test]
+    fn thinking_is_off_unless_a_high_effort_is_asked() {
+        let ask = |extra: Value| {
+            let mut request = json!({"messages": [{"role": "user", "content": "hi"}]});
+            request
+                .as_object_mut()
+                .expect("an object")
+                .extend(extra.as_object().expect("an object").clone());
+            to_chat(&request, &model()).expect("takes it").chat
+        };
+        assert_eq!(
+            ask(json!({}))["chat_template_kwargs"]["enable_thinking"],
+            false
+        );
+        assert_eq!(
+            ask(json!({"reasoning_effort": "medium"}))["chat_template_kwargs"]["enable_thinking"],
+            false
+        );
+        assert!(
+            ask(json!({"reasoning_effort": "high"}))
+                .get("chat_template_kwargs")
+                .is_none()
+        );
     }
 
     #[test]

@@ -10,7 +10,9 @@ use alloc::vec::Vec;
 
 use serde_json::{Map, Value, json};
 
-use crate::translate::{Builder, check_model, copy_number, function_tool, user_message};
+use crate::translate::{
+    Builder, check_model, copy_number, function_tool, thinking_unless_asked, user_message,
+};
 use crate::{ApiError, Completion, Finish, ModelInfo, Translated};
 
 /// What a request's `system` says: text, or blocks of it. Claude Code's own billing marker is not a prompt.
@@ -249,6 +251,8 @@ pub fn to_chat(request: &Value, model: &ModelInfo) -> Result<Translated, ApiErro
         .and_then(|t| t.get("display"))
         .and_then(Value::as_str)
         == Some("omitted");
+    // An explicit budget is a request for thinking; `adaptive` leaves it to the model, which here means off.
+    thinking_unless_asked(&mut chat, (kind == Some("enabled")).then_some("high"));
     Ok(Translated {
         chat: Value::Object(chat),
         stream: request.get("stream") == Some(&Value::Bool(true)),
@@ -436,6 +440,30 @@ mod tests {
                 output: 4,
             },
         }
+    }
+
+    #[test]
+    fn thinking_is_on_only_for_an_explicit_budget() {
+        let ask = |thinking: Value| {
+            let mut request =
+                json!({"max_tokens": 10, "messages": [{"role": "user", "content": "hi"}]});
+            if !thinking.is_null() {
+                request["thinking"] = thinking;
+            }
+            to_chat(&request, &model()).expect("translates").chat
+        };
+        for off in [
+            Value::Null,
+            json!({"type": "adaptive"}),
+            json!({"type": "disabled"}),
+        ] {
+            assert_eq!(ask(off)["chat_template_kwargs"]["enable_thinking"], false);
+        }
+        assert!(
+            ask(json!({"type": "enabled", "budget_tokens": 2000}))
+                .get("chat_template_kwargs")
+                .is_none()
+        );
     }
 
     #[test]

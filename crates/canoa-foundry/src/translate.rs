@@ -111,6 +111,24 @@ pub(crate) fn function_tool(
     serde_json::json!({"type": "function", "function": Value::Object(function)})
 }
 
+/// Turns the model's thinking off in `chat` unless the client asked for a great deal of it (`effort` high or more).
+///
+/// A small local model left to think can spend its whole allowance (an agent asks for tens of thousands of tokens) before it
+/// answers, and the service's prefill and decoding slow with the length; an agent turn needs the answer, not the thinking.
+pub(crate) fn thinking_unless_asked(chat: &mut Map<String, Value>, effort: Option<&str>) {
+    if matches!(effort, Some("high" | "xhigh" | "max")) {
+        return;
+    }
+    let kwargs = chat
+        .entry("chat_template_kwargs")
+        .or_insert_with(|| Value::Object(Map::new()));
+    if let Some(kwargs) = kwargs.as_object_mut() {
+        kwargs
+            .entry("enable_thinking")
+            .or_insert(Value::Bool(false));
+    }
+}
+
 /// Copies `key` of `from` into `into` under `to`, when it is a number.
 pub(crate) fn copy_number(from: &Value, key: &str, into: &mut Map<String, Value>, to: &str) {
     if let Some(number) = from.get(key).filter(|value| value.is_number()) {
