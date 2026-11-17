@@ -328,3 +328,61 @@ fn an_overlay_chosen_from_a_catalog_never_calls_the_persons_credential_helper_or
     assert!(bad["error"].is_object(), "{bad}");
     let _ = fs::remove_dir_all(p.tmp);
 }
+
+fn scan_at(p: &Person, repo: &str, reference: &str, own: bool) -> Value {
+    ask(
+        &p.control,
+        &key("k", &BOTH),
+        "skill/scan",
+        json!({"repo": repo, "ref": reference, "own": own}),
+    )
+}
+
+#[test]
+fn a_skill_scan_is_isolated_unless_the_person_typed_the_source() {
+    let tmp = dir("isolated-scan");
+    let up = upstream(&tmp);
+    let p = person(&up, tmp);
+    let isolated = scan_at(&p, REDIRECTED, "main", false);
+    assert!(
+        isolated["error"].is_object(),
+        "a rewrite in the person's .gitconfig reached a skill scan: {isolated}"
+    );
+    // A source the person typed is fetched as they would from a shell, rewrites and all.
+    let typed = scan_at(&p, REDIRECTED, "main", true);
+    assert_eq!(typed["result"]["skills"][0]["name"], "tools", "{typed}");
+    // A fetch of one skill from it takes the same choice.
+    let fetch = |own: bool| {
+        ask(
+            &p.control,
+            &key("k", &BOTH),
+            "skill/fetch",
+            json!({"repo": REDIRECTED, "ref": "main", "own": own}),
+        )
+    };
+    assert!(fetch(false)["error"].is_object());
+    assert!(fetch(true)["result"]["files"]["SKILL.md"].is_string());
+    let _ = fs::remove_dir_all(p.tmp);
+}
+
+#[test]
+fn a_skill_scan_calls_the_persons_credential_helper_only_for_a_source_they_typed() {
+    let tmp = dir("isolated-scan-helper");
+    let up = upstream(&tmp);
+    let p = person(&up, tmp);
+    let server = demanding_server();
+    let id = git(&up, &["rev-parse", "HEAD"]);
+    let isolated = scan_at(&p, &server, &id, false);
+    assert!(isolated["error"].is_object(), "{isolated}");
+    assert!(
+        !p.helper_log.exists(),
+        "the credential helper ran for a skill source Canoa listed"
+    );
+    let typed = scan_at(&p, &server, &id, true);
+    assert!(typed["error"].is_object(), "{typed}");
+    assert!(
+        p.helper_log.exists(),
+        "a source the person typed did not use their credential helper: {typed}"
+    );
+    let _ = fs::remove_dir_all(p.tmp);
+}

@@ -27,6 +27,16 @@ const MAX_RECORD: u64 = 64 * 1024;
 /// The most overlays a record may name.
 const MAX_NAMING: usize = 256;
 
+/// A git source a skill request names, and whose settings its fetch uses.
+pub(super) struct NamedSource {
+    pub(super) repo: String,
+    pub(super) reference: String,
+    pub(super) path: String,
+    /// The request names no ref, so the repository's head is meant.
+    pub(super) headless: bool,
+    pub(super) trust: Trust,
+}
+
 fn limits() -> Settings {
     Settings::default()
         .tree_files(Limit::at(MAX_SKILL_FILES as u64))
@@ -170,10 +180,18 @@ impl Overlays {
         Ok(json!({"files": files}))
     }
 
-    /// `skill/fetch` `{"repo", "ref"?, "path"?}` -> `{"commit", "files": {path: base64}}`: the files of the skill a git source
-    /// names, one commit deep, as the source holds them: nothing under an excluded name, no link, and no more than a skill
-    /// may hold. Nothing is installed or kept. `local` says whether a source on this computer may be read.
-    pub(crate) fn skill_fetch(&self, params: &Value, local: &dyn Fn(&str) -> bool) -> Outcome {
+    /// The source a request names, held to what the host fetches. Whose git settings the fetch may use is the request's `own`:
+    /// a skill source is someone else's repository, so it is fetched [`Trust::Isolated`] unless the app says the person typed it
+    /// themselves, which a shell would fetch with their credentials and keys.
+    pub(super) fn skill_source(
+        params: &Value,
+        local: &dyn Fn(&str) -> bool,
+    ) -> Result<NamedSource, (i32, String)> {
+        let trust = match params.get("own") {
+            None | Some(Value::Null | Value::Bool(false)) => Trust::Isolated,
+            Some(Value::Bool(true)) => Trust::Own,
+            Some(_) => return Err(bad("own is true or false")),
+        };
         let headless = matches!(params.get("ref"), None | Some(Value::Null));
         let named = if headless {
             let mut with = params.clone();
@@ -188,25 +206,45 @@ impl Overlays {
                 "a source on this computer must be in a folder this key may browse",
             ));
         }
+        Ok(NamedSource {
+            repo,
+            reference,
+            path,
+            headless,
+            trust,
+        })
+    }
+
+    /// Runs `work` with a scratch repository in this host's skills folder, and removes it after.
+    pub(super) fn with_scratch<T>(
+        &self,
+        work: impl FnOnce(&Path) -> Result<T, (i32, String)>,
+    ) -> Result<T, (i32, String)> {
         let mut token = [0_u8; 8];
         getrandom::fill(&mut token).map_err(|_| refused("no randomness to name the fetch"))?;
         let cache = self.skills_dir()?.join(format!(
             ".fetch-{}.git",
             data_encoding::HEXLOWER.encode(&token)
         ));
-        let answer = self.fetch_skill_files(&cache, &repo, &reference, headless, &path);
+        let answer = work(&cache);
         let _ = fs::remove_dir_all(&cache);
         answer
     }
 
-    fn fetch_skill_files(
+    /// `skill/fetch` `{"repo", "ref"?, "path"?, "own"?}` -> `{"commit", "files": {path: base64}}`: the files of the skill a git
+    /// source names, one commit deep, as the source holds them: nothing under an excluded name, no link, and no more than a skill
+    /// may hold. Nothing is installed or kept. `local` says whether a source on this computer may be read.
+    pub(crate) fn skill_fetch(&self, params: &Value, local: &dyn Fn(&str) -> bool) -> Outcome {
+        let named = Self::skill_source(params, local)?;
+        self.with_scratch(|cache| self.fetch_skill_files(cache, &named))
+    }
+
+    /// Makes `cache` an empty bare repository and fetches the commit `named` names into it, which it returns.
+    pub(super) fn fetch_commit(
         &self,
         cache: &Path,
-        repo: &str,
-        reference: &str,
-        headless: bool,
-        path: &str,
-    ) -> Outcome {
+        named: &NamedSource,
+    ) -> Result<String, (i32, String)> {
         fs::create_dir_all(cache)
             .map_err(|error| refused(format!("the fetch could not be made: {error}")))?;
         self.run(
@@ -221,12 +259,16 @@ impl Overlays {
             None,
             1024 * 1024,
         )?;
-        let commit = if headless {
-            self.fetch_head(cache, repo)?
+        if named.headless {
+            self.fetch_head(named.trust, cache, &named.repo)
         } else {
-            self.fetch(Trust::Isolated, cache, repo, reference)?
-        };
-        let (files, _skipped, _digest, bytes) = self.list(cache, &commit, path)?;
+            self.fetch(named.trust, cache, &named.repo, &named.reference)
+        }
+    }
+
+    fn fetch_skill_files(&self, cache: &Path, named: &NamedSource) -> Outcome {
+        let commit = self.fetch_commit(cache, named)?;
+        let (files, _skipped, _digest, bytes) = self.list(cache, &commit, &named.path)?;
         if files.len() > MAX_SKILL_FILES || bytes > MAX_SKILL_BYTES {
             return Err(refused(format!(
                 "a skill holds at most {MAX_SKILL_FILES} files and {MAX_SKILL_BYTES} bytes"
@@ -248,10 +290,10 @@ impl Overlays {
     }
 
     /// The commit the repository's head names, fetched one commit deep.
-    fn fetch_head(&self, cache: &Path, repo: &str) -> Result<String, (i32, String)> {
+    fn fetch_head(&self, trust: Trust, cache: &Path, repo: &str) -> Result<String, (i32, String)> {
         let dir = format!("--git-dir={}", cache.display());
         self.run_as(
-            Trust::Isolated,
+            trust,
             &[
                 dir.clone().into(),
                 "fetch".into(),

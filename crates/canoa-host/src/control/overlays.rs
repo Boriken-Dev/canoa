@@ -26,6 +26,7 @@ use super::{Caller, REFUSED, bad, text_param};
 use crate::profile::{OverlaySource, full_commit_id};
 
 mod contents;
+mod scan;
 mod skills;
 
 type Outcome = Result<Value, (i32, String)>;
