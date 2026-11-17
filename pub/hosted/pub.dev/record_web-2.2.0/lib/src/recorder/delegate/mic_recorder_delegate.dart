@@ -1,0 +1,280 @@
+import 'dart:async';
+import 'dart:js_interop';
+import 'dart:math';
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
+import 'package:record_platform_interface/record_platform_interface.dart';
+import 'package:record_web/src/encoder/encoder.dart';
+import 'package:record_web/src/encoder/pcm_encoder.dart';
+import 'package:record_web/src/encoder/wav_encoder.dart';
+import 'package:record_web/src/recorder/delegate/recorder_delegate.dart';
+import 'package:record_web/src/recorder/recorder.dart';
+import 'package:web/web.dart' as web;
+
+/// Records WAVE and PCM through an AudioWorklet, to a file or a stream.
+class MicRecorderDelegate extends RecorderDelegate {
+  final OnStateChanged onStateChanged;
+  final OnStopped onStopped;
+  @override
+  final void Function(RecordConfig)? onConfigChanged;
+
+  web.AudioWorkletNode? _workletNode;
+
+  StreamController<Uint8List>? _recordStreamCtrl;
+  Encoder? _encoder;
+  // Amplitude
+  double _maxAmplitude = kMinAmplitude;
+  double _amplitude = kMinAmplitude;
+
+  MicRecorderDelegate({
+    required this.onStateChanged,
+    required this.onStopped,
+    this.onConfigChanged,
+  });
+
+  @override
+  Future<void> dispose() => _reset();
+
+  @override
+  Future<Amplitude> getAmplitude() async {
+    return Amplitude(current: _amplitude, max: _maxAmplitude);
+  }
+
+  @override
+  Future<bool> isPaused() async {
+    return audioContext?.state == 'suspended';
+  }
+
+  @override
+  Future<bool> isRecording() async {
+    final context = audioContext;
+    return context != null && context.state != 'closed';
+  }
+
+  @override
+  Future<void> pause() async {
+    final context = audioContext;
+    if (context != null && context.state == 'running') {
+      await context.suspend().toDart;
+      onStateChanged(RecordState.pause);
+    }
+  }
+
+  @override
+  Future<void> resume() async {
+    final context = audioContext;
+    if (context == null || context.state != 'suspended') return;
+
+    if (!await reattachIfDead(() => audioContext == context)) return;
+
+    await context.resume().toDart;
+    if (audioContext != context) return;
+
+    // Chromium disconnects the worklet after a long pause (> 12~15 s).
+    if (source case final source?) wireSource(source);
+
+    onStateChanged(RecordState.record);
+  }
+
+  @override
+  Future<void> start(RecordConfig config, {required String path}) {
+    return _start(config);
+  }
+
+  @override
+  Future<Stream<Uint8List>> startStream(RecordConfig config) async {
+    // Not awaited: an unlistened controller never completes its close.
+    unawaited(_recordStreamCtrl?.close());
+    _recordStreamCtrl = StreamController<Uint8List>();
+
+    try {
+      await _start(config, isStream: true);
+    } catch (err) {
+      debugPrint(err.toString());
+      unawaited(_recordStreamCtrl?.close());
+      _recordStreamCtrl = null;
+      rethrow;
+    }
+
+    return _recordStreamCtrl!.stream;
+  }
+
+  @override
+  Future<String?> stop() async {
+    if (takeRouteStop() case final stopped?) return stopped;
+
+    final wasRecording = audioContext != null;
+    await _reset(resetEncoder: false);
+
+    final blob = _encoder?.finish();
+    _encoder?.cleanup();
+    _encoder = null;
+
+    final url = blob != null ? web.URL.createObjectURL(blob) : null;
+    if (wasRecording) {
+      onStopped(RecordStop(reason: takeStopReason(), path: url));
+    }
+
+    return url;
+  }
+
+  Future<void> _start(RecordConfig config, {bool isStream = false}) async {
+    try {
+      final stream = await initMediaStream(config);
+      mediaStream = stream;
+
+      // The worklet resamples and remixes to the requested format.
+      final effectiveConfig = adjustConfig(
+        stream,
+        config,
+        canConvert: true,
+        onConfigChanged: onConfigChanged,
+      );
+      final context = effectiveConfig.context;
+      audioContext = context;
+      config = effectiveConfig.config;
+
+      final streamSource = context.createMediaStreamSource(stream);
+      source = streamSource;
+
+      final workletNode = await _createWorkletNode(context, config);
+      _workletNode = workletNode;
+
+      if (!isStream) {
+        _encoder?.cleanup();
+
+        if (config.encoder == AudioEncoder.wav) {
+          _encoder = WavEncoder(
+            sampleRate: config.sampleRate.toInt(),
+            numChannels: config.numChannels,
+          );
+        } else if (config.encoder == AudioEncoder.pcm16bits) {
+          _encoder = PcmEncoder();
+        }
+      }
+
+      if (isStream) {
+        workletNode.port.onmessage =
+            ((web.MessageEvent event) => _onMessageStream(event)).toJS;
+      } else {
+        workletNode.port.onmessage = ((web.MessageEvent event) => _onMessage(
+          event,
+        )).toJS;
+      }
+
+      recordConfig = config;
+      requestedDevice = config.device;
+
+      wireSource(streamSource);
+      listenRouteChange(stream);
+
+      onStateChanged(RecordState.record);
+    } catch (_) {
+      await _reset();
+      rethrow;
+    }
+  }
+
+  /// Feeds [source] to the worklet; connecting twice is a no-op.
+  @override
+  void wireSource(web.MediaStreamAudioSourceNode source) {
+    final context = audioContext;
+    final workletNode = _workletNode;
+    if (context == null || workletNode == null) return;
+
+    source.connect(workletNode)?.connect(context.destination);
+  }
+
+  Future<web.AudioWorkletNode> _createWorkletNode(
+    web.AudioContext context,
+    RecordConfig config,
+  ) async {
+    await context.audioWorklet
+        .addModule('assets/packages/record_web/assets/js/record.worklet.js')
+        .toDart;
+
+    return web.AudioWorkletNode(
+      context,
+      'recorder.worklet',
+      web.AudioWorkletNodeOptions(
+        parameterData:
+            {
+                  'numChannels'.toJS: config.numChannels.toJS,
+                  'sampleRate'.toJS: config.sampleRate.toJS,
+                  'streamBufferSize'.toJS:
+                      (config.streamBufferSize ?? 2048).toJS,
+                }.jsify()!
+                as JSObject,
+      ),
+    );
+  }
+
+  void _onMessage(web.MessageEvent event) {
+    // `data` is a int 16 array containing audio samples
+    final output = (event.data as JSInt16Array?)?.toDart;
+
+    if (output case final output?) {
+      _encoder?.encode(output);
+      _updateAmplitude(output);
+    }
+  }
+
+  void _onMessageStream(web.MessageEvent event) {
+    // `data` is a int 16 array containing audio samples
+    final output = (event.data as JSInt16Array?)?.toDart;
+
+    if (output case final output?) {
+      _recordStreamCtrl?.add(
+        output.buffer.asUint8List(output.offsetInBytes, output.lengthInBytes),
+      );
+      _updateAmplitude(output);
+    }
+  }
+
+  void _updateAmplitude(Int16List data) {
+    var maxSample = kMinAmplitude;
+
+    for (var i = 0; i < data.length; i++) {
+      var curSample = data[i].abs();
+      if (curSample > maxSample) {
+        maxSample = curSample.toDouble();
+      }
+    }
+
+    _amplitude = 20 * (log(maxSample / 32767) / ln10);
+
+    if (_amplitude > _maxAmplitude) {
+      _maxAmplitude = _amplitude;
+    }
+  }
+
+  Future<void> _reset({bool resetEncoder = true}) async {
+    // Clear the fields before awaiting `resetContext`, so an in-flight swap sees the take ended.
+    final context = audioContext;
+    final stream = mediaStream;
+    mediaStream = null;
+    audioContext = null;
+    recordConfig = null;
+
+    source?.disconnect();
+    source = null;
+    final workletNode = _workletNode;
+    _workletNode = null;
+
+    await resetContext(context, stream);
+    // Cleared after the close, so buffers already posted still reach the encoder.
+    workletNode?.port.onmessage = null;
+
+    if (resetEncoder) {
+      _encoder?.cleanup();
+      _encoder = null;
+    }
+
+    _maxAmplitude = kMinAmplitude;
+    _amplitude = kMinAmplitude;
+
+    unawaited(_recordStreamCtrl?.close());
+    _recordStreamCtrl = null;
+  }
+}

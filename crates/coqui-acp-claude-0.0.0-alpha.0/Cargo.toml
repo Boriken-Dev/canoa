@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-claude at eaa2a8c4b6d80520f5b7d868261a795c68a2720f, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-claude at d8a3c10eb7499621333bdb307f9e8ce450a203ce, with what it inherits written out.
 bin = [{ name = "coqui-acp-claude", path = "src/main.rs" }]
 example = [{ name = "claude_provider", crate-type = ["cdylib"] }]
 [package]

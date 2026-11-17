@@ -1,0 +1,136 @@
+[![Release](https://img.shields.io/pub/v/record.svg)](https://pub.dev/packages/record)
+[![dl](https://img.shields.io/pub/dm/record?color=fe8e86)]()
+[![Using melos](https://img.shields.io/badge/maintained%20with-melos-linen.svg)](https://github.com/invertase/melos)
+
+
+Audio recorder from microphone to a given file path or stream.  
+
+No external dependencies:
+
+- On Android, AudioRecord and MediaCodec or MediaRecorder.
+- On iOS and macOS, AVFoundation.
+- On Windows, MediaFoundation.
+- On web, well... your browser! (and its underlying platform).
+
+External dependencies:
+- On linux, encoding is provided by `parecord`, `pactl` and `ffmpeg`. It **must** be installed separately.
+
+## Platform feature parity matrix
+| Feature          | Android       | iOS             | web     | Windows    | macOS  | linux
+|------------------|---------------|-----------------|---------|------------|-------|-----------
+| pause/resume     | ✔️            |   ✔️             | ✔️     |      ✔️    | ✔️    |  ✔️
+| amplitude(dBFS)  | ✔️            |   ✔️             |  ✔️     |    ✔️     |  ✔️   |  ✔️
+| permission check | ✔️            |   ✔️             |  ✔️    |            |  ✔️   |
+| num of channels  | ✔️            |   ✔️             |  ✔️    |    ✔️      |  ✔️   |  ✔️
+| device selection | ✔️ 1 / 2      | (auto BT/mic)    |  ✔️    |    ✔️      |  ✔️   |  ✔️
+| auto gain        | ✔️ 2          | ✔️             | ✔️      |            |  ✔️    | 
+| echo cancel      | ✔️ 2          | ✔️             | ✔️      |            |  ✔️     | 
+| noise suppresion | ✔️ 2          |                  | ✔️      |            |       | 
+| audio route change | ✔️ 4        | ✔️               | ✔️      |    ✔️      |  ✔️   |  ✔️
+
+## File
+| Encoder         | Android        | iOS     | web     | Windows | macOS   | linux
+|-----------------|----------------|---------|---------|---------|---------|---------
+| aacLc           | ✔️            |   ✔️    |  ?      |   ✔️    |  ✔️    |  ✔️ 
+| aacEld          | ✔️            |   ✔️    |   ?     |         |  ✔️    | 
+| aacHe           | ✔️            |   ✔️    |   ?     |         |  ✔️    |   
+| amrNb           | ✔️            |        |  ?      |   ✔️    |         |  
+| amrWb           | ✔️            |         |  ?      |          |        |  
+| opus            | ✔️            |   ✔️ 3    |  ?       |         |  ✔️ 3   |  ✔️ 
+| wav             | ✔️ 2          |   ✔️    |   ✔️   |    ✔️    |   ✔️  |   ✔️ 
+| flac            | ✔️ 2          |    ✔️    |  ?     |  ✔️     |   ✔️   |   ✔️
+| pcm16bits       | ✔️ 2          |   ✔️    |  ✔️    |   ✔️    |  ✔️    |  ✔️
+
+?: from my testings:
+| Encoder         | Firefox    | Chrome based   | Safari
+|-----------------|------------|----------------|---------
+| aacLc           |            |                |  ✔️*
+| opus            | ✔️*        |   ✔️*           | 
+| wav             | ✔️        |   ✔️           |   ✔️
+| pcm16bits       | ✔️        |   ✔️           |  ✔️
+
+\* Sample rate output is determined by your settings in OS. Bit depth is likely 32 bits.
+
+wav and pcm16bits are provided by the package directly.
+
+## Stream
+| Encoder       | Android | iOS | web | Windows | macOS | linux |
+|---------------|---------|-----|-----|---------|-------|-------|
+| aacLc       * | ✔️ 2   | ✔️  |     | ✔️     | ✔️    |       |
+| pcm16bits     | ✔️ 2   | ✔️  | ✔️  | ✔️     | ✔️   | ✔️    |
+
+\* AAC is streamed with raw AAC with ADTS headers, so it's directly readable through a file!  
+1. Bluetooth telephony device link (SCO) is automatically done but there's no phone call management.
+2. Unsupported on legacy Android recorder.
+3. Opus in CAF container. This means that your file may not be playable outside Apple platforms.
+4. API 28+ on legacy Android recorder.
+
+## Usage
+
+```dart
+import 'package:record/record.dart';
+
+final record = AudioRecorder();
+
+// Check and request permission if needed
+if (await record.hasPermission()) {
+  // Start recording to file
+  await record.start(const RecordConfig(), path: 'aFullPath/myFile.m4a');
+  // ... or to stream
+  final stream = await record.startStream(const RecordConfig(encoder: AudioEncoder.pcm16bits));
+}
+
+// Stop recording...
+final path = await record.stop();
+// ... or cancel it (and implicitly remove file/blob).
+await record.cancel();
+
+record.dispose(); // As always, don't forget this one.
+```
+
+## Setup, permissions and others
+
+Background recording: See [docs](https://github.com/llfbandit/record/blob/main/doc/bg_recording.md).
+
+### Android
+[Setup](https://github.com/llfbandit/record/blob/main/record_android/README.md).
+
+- min SDK: 23 (amrNb/amrWb: 26, Opus: 29)
+
+### iOS
+Add this to the ios/Runner/Info.plist file:
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>Some message to describe why you need this permission</string>
+```
+- min SDK: 12.0
+
+### macOS
+Add this to the macos/Runner/Info.plist file:
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>Some message to describe why you need this permission</string>
+```
+
+- In capabilities, activate "Audio input" in debug AND release schemes.  
+- or directly in *.entitlements files
+```xml
+<key>com.apple.security.device.audio-input</key>
+<true/>
+```
+
+- min SDK: 10.15
+
+### Linux
+
+Requires `parecord` (capture), `pactl` (devices, route changes) and `ffmpeg` (encoding), with a PulseAudio or PipeWire (`pipewire-pulse`) server.
+
+```bash
+sudo apt install pulseaudio-utils ffmpeg  # Debian/Ubuntu
+```
+
+### Web
+
+`stop()` returns a blob URL that keeps the recording in memory. Revoke it with `URL.revokeObjectURL` once you are done with it. The same goes for the path in `onStopped()`: a take the browser or a new `start()` ends also gives a blob URL.
+
+`audioRouteChange` reacts when the browser reports that the input is gone. The browser can take 1 to 2 s to do so (Firefox), and may only report it while the page has the focus. The audio of that time is lost.

@@ -1,0 +1,360 @@
+## 7.2.0
+- feat: `RecordConfig.audioRouteChange` sets what a take does when its input goes away (pause, follow or stop).
+- feat: `onStopped()` reports the end of each take: why it ended (`RecordStopReason`) and its file.
+- chore: iOS and macOS now come from `record_darwin`, replacing `record_ios` and `record_macos`.
+    - see [changelog](https://github.com/llfbandit/record/blob/main/record_darwin/CHANGELOG.md).
+
+## 7.1.2
+- fix: The stream from `startStream()` now ends when the platform ends capture on its own (#632).
+
+## 7.1.1
+- fix(ios): Guard ios specific calls to avoid "Recorder has not yet been created..." exception.
+
+## 7.1.0
+
+This release marks the end of a long wait, finally completing developments that had been on hold for too long, resulting in countless fixes.
+
+
+Notables changes:
+- No more fuzzy or unknown changes from requested `RecordConfig`, you can retrieve the effective `RecordConfig` from `onConfigChanged` callback. Native platforms now eagerly clamp to device and codec capabilities. While not bullet proof, there's no more surprises.
+- `InputDevice` now provides preferred samples rates and type (sco, builtIn, etc.).
+- AAC encoding from Android now provides a stricter output. iOS should now be able to read those files.
+
+Changelog:
+* feat: Improve InputDevice description with sample rates and type.
+* fix: codec/device caps and surface `onConfigChanged` to dart side.
+* fix: Handles AudioRecorder initialization error.
+* fix: Semaphore issues.
+* fix: Amplitude interval change not taken into account.
+* fix: Amplitude stream potential StateError.
+* fix: Record stream doesn't propagate errors from platform.
+* fix: Nullify subscriptions when disposing.
+* chore: Add tests.
+* chore: Updates example project.
+
+## 7.0.0
+* chore: Updates minimum supported SDK version to Flutter 3.44/Dart 3.12.
+* Android:
+    * chore: **Breaking change** Remove background recording service. See [docs](https://github.com/llfbandit/record/blob/main/doc/bg_recording.md).
+    * chore: Move to AGP 9.x.
+    * chore: Move to Kotlin Gradle DSL.
+* iOS:
+    * fix: Respect `shouldResume` system flag on audio interruption and don't stop on resume failure.
+    * chore: **Breaking change** Remove `manageAudioSession` deprecated config property.
+    * chore: Completes Swift Package Manager integration.
+* macOS:
+    * chore: Completes Swift Package Manager integration.
+* web:
+    * feat: JS assets are now web platform-specific assets. No more js files in other platform builds.
+
+## 6.2.1
+__This version is the last before v7 which will raise SDK versions to Flutter 3.44/Dart 3.12.__
+
+* fix: Stop requesting for amplitude updates when recording is paused or stopped from native side.
+* chore: Code cleanup.
+* chore: Remove uuid package dependency.
+* chore: Updated transitive dependencies. See there for all related changes to dedicated platforms.
+* Android:
+    * fix: Potential `IndexOutOfBoundsException` for AAC ADTS streaming.
+    * chore: Many code improvements and cleanups.
+    * chore: Deprecate background Android service (will be removed in v7).
+* iOS:
+    * feat: Add `allowHapticsAndSystemSoundsDuringRecording` iOS option.
+    * fix: Fuzzy events firing for recording states.
+    * fix: AVAudioPCMBuffer frame capacity calculation.
+    * fix: Stay away from Flutter UI thread.
+    * fix: SPM description.
+    * chore: Code cleanup.
+    * chore: Update example project.
+* macOS:
+    * fix: Stay away from Flutter UI thread.
+    * fix: SPM description.
+    * chore: Code cleanup.
+* Linux:
+    * fix: Overriding the locale of `pactl` command for consistent parsing.
+
+## 6.2.0
+* feat: Add `request` parameter to `hasPermission()` method to check permission status without requesting.
+* feat: Improve `convertBytesToInt16` to allow pre-filled bytes array.
+* feat(iOS/macOS): Add AAC/ADTS streaming.
+* fix(Android/iOS): `AudioInterruptionMode` not pausing or resuming.
+
+## 6.1.2
+* chore: Updated transitive dependencies.
+* chore: Update README.md & bg_recording.md.
+
+## 6.1.1
+* fix: Calling stop never ends when not recording.
+
+## 6.1.0
+* feat: Allow background recording on Android & iOS.
+* feat: Add iOS specific methods for `AVAudioSession`.
+* feat: Add AudioInterruptionMode to `RecordConfig`.
+* feat: Add stream buffer size option.
+* feat(Linux): Implement amplitude (dBFS).
+* fix(Android): malformed AAC.
+* chore: Updated transitive dependencies.
+* chore: Update minimum supported SDK version to Flutter 3.24.0/Dart 3.5.0.
+* chore(Android): Update kotlin to 2.2.0 and AGP to 8.6.1, so Gradle 8.7+ is required.
+
+## 6.0.0
+* feat: Make all streams as broadcast streams.
+* chore: Split iOS & macOS platforms.
+* chore: Replace `fmedia` with `parecord` & `ffmpeg`.
+* chore: Update README.md.
+
+## 5.2.1
+* fix: Properly cancel platform streams before disposing others resources.
+* chore: Updates minimum supported SDK version to Flutter 3.22/Dart 3.4.
+
+## 5.2.0
+* chore: Updated transitive dependencies.
+* chore: Add some more documentation.
+
+## 5.1.3
+* fix: Operations can't be called concurrently anymore. (i.e. when operations are unawaited by caller).
+
+## 5.1.2
+* chore: Updated platform dependencies.
+* chore: Updated README.md.
+
+## 5.1.1
+* chore: Updated Android dependency.
+* chore: Updated README.md.
+
+## 5.1.0
+* chore: Updated Android and web dependencies.
+* chore: Updated README.md.
+
+## 5.0.5
+* fix: Expose cancel method to stop and discard the recording.
+* feat: Improve convertBytesToInt16 method by exposing endian parameter.
+
+## 5.0.4
+* fix: Regression on creation sequence when disposing `AudioRecorder` without using it.
+
+## 5.0.3
+* fix: Regression on creation sequence when disposing `AudioRecorder` without using it.
+
+## 5.0.2
+* fix: Creation sequence which may lead to unexpected behaviours.
+
+## 5.0.1
+* fix: close state stream controller on dispose.
+
+## 5.0.0
+* Chore:
+    * Massively reworked platform implementations.
+    * Android now uses MediaCodec. Package is now written with kotlin (well...).
+    * iOS, macOS code now shares almost the same codebase. Unified under record_darwin package.
+    * Windows now uses MediaFoundation shipped with all 10 & 11 versions (no more fmedia executable, yeah! Even if do appreciate the work of stsaz).
+
+* Features:
+    * feat: Add multiple instance support.
+    * feat: Add PCM streaming feature & AAC on Android only.
+    * feat: Add auto gain control, noise suppressor and echo cancellation where available.
+    * feat: Add amplitude on web (Thanks to [youssefali424](https://github.com/youssefali424)).
+    * feat: Add best effort to adjust sample and bit rates to supported values (Android, iOS, macOS).
+    * feat: Add `cancel()` method to stop and remove file if any.
+
+* Fix:
+    * iOS: Should pause/resume recording when interrupted by the system.
+    * web: Add duration metadata to created blob (Thanks to [youssefali424](https://github.com/youssefali424)).
+
+* Breaking changes:
+    * BREAK: `Record` has been renamed to `AudioRecorder` to avoid confusion with dart v3.
+    * BREAK: path is now required on all IO platforms. Set an empty String on web platform.
+    There no more temp file generation.
+    * BREAK: `start` and `startStream` method parameters are now wrapped in `RecordConfig` object.
+    * BREAK: `samplingRate` has been renamed to `sampleRate`.
+    * BREAK: vorbis support has been removed. Too few underlying support.
+
+## 5.0.0-beta.3+1
+* fix: Amplitude timer is not restarted for subsequent recordings.
+* chore: Allow UUID v3 & V4.
+
+## 5.0.0-beta.3
+* fix: Adding events to amplitude stream after close
+
+## 5.0.0-beta.2
+* chore: remove `pcm8bit`. Virtually still available since we have pcm 16 bits.
+* chore: throw exception when encoder is not supported.
+* fix(web): Multiple issues on web platform.
+* fix: Other minor fixes.
+* feat(web): Add WAVE encoder support (16 bits).
+* feat: add utility method `convertBytesToInt16` to convert Uint8List to signed int 16 bits.
+
+## 5.0.0-beta.1
+**Testers needed to reach release !**
+***
+
+* Chore:
+    * Massively reworked platform implementations.
+    * Android now uses MediaCodec. Package is now written with kotlin (well...).
+    * iOS, macOS code now shares almost the same codebase. Unified under record_darwin package.
+    * Windows now uses MediaFoundation shipped with all 10 & 11 versions (no more fmedia executable, yeah! Even if do appreciate the work of stsaz).
+
+* Features:
+    * feat: Add multiple instance support.
+    * feat: Add PCM streaming feature & AAC on Android only (for now).
+    * feat: Add auto gain control, noise suppressor and echo cancellation where available.
+    * feat: Add amplitude on web (Thanks to [youssefali424](https://github.com/youssefali424)).
+    * feat: Add best effort to adjust sample and bit rates to supported values (Android, iOS, macOS).
+    * feat: Add `cancel()` method to stop and remove file if any.
+
+* Fix:
+    * iOS: Should pause/resume recording when interrupted by the system.
+    * web: Add duration metadata to created blob (Thanks to [youssefali424](https://github.com/youssefali424)).
+
+* Breaking changes:
+    * BREAK: `Record` has been renamed to `AudioRecorder` to avoid confusion with dart v3.
+    * BREAK: path is now required on all IO platforms. Set an empty String on web platform.
+    There no more temp file generation.
+    * BREAK: `start` and `startStream` method parameters are now wrapped in `RecordConfig` object.
+    * BREAK: `samplingRate` has been renamed to `sampleRate`.
+    * BREAK: vorbis support has been removed. Too few underlying support.
+
+## 4.4.4
+* chore: Update linter rules.
+* chore: Update dependencies.
+* chore: Update readme.md.
+
+## 4.4.3
+* fix: Deprecation warning on Android.
+* fix: Android build issue.
+* fix: Don't report Android exception when stop is called just after start.
+
+## 4.4.2
+* fix: Android build issue with linter.
+
+## 4.4.1
+* fix: Android build issue with linter.
+
+## 4.4.0
+* feat: `onStateChanged()` stream is now filled by platform implementations.
+    * This allows more reliable updated record states.
+* fix: `onAmplitudeChanged` could result in computation error.
+* core: Updated flutter to min 2.8.1.
+* core: Updated example to use above streams.
+
+## 4.3.3
+* fix: WAV header overwrites first 44 data bytes.
+
+## 4.3.2
+* fix: Android `hasPermission()` method does not throw exception anymore when permission has been denied.
+
+## 4.3.1
+* fix: iOS compilation.
+
+## 4.3.0
+* feat: Add input devices listing and selection (linux / windows / macOS / web).
+* feat: Add number of channels.
+* core: fmedia updated to 1.28 (linux / windows).
+* feat: Add recorder state stream.
+* feat: Add recorder amplitude stream.
+* core: Update dependencies.
+* fix: Add error details on record start (ios).
+* fix: WAV recording header, resume-pause (Android).
+
+## 4.1.1
+* core: README.md updates.
+
+## 4.1.0
+* feat: Add linux platform. EXPERIMENTAL.
+
+## 4.0.2
+* core: Replace SFML by fmedia.
+* feat: More encoders and features on Windows.
+* fix: Windows build by removing SFML.
+* core: README.md updates.
+
+## 4.0.1
+* core: OPUS and vorbis formats are now in OGG containers (instead of MP4).
+* core: Relax dependencies version constraints.
+* core: README.md updates.
+
+## 4.0.0
+This contains very small breaking changes. See below.
+* core: BREAK: `AudioEncoder` values are now in lowerCamelCase.
+* core: BREAK? or fix: `start#samplingRate` is now an integer.
+* core: BREAK: `AudioEncoder.aac` is now `AudioEncoder.aacLc`.
+* core: Android minimum API level is now 19.
+* core: dart minimum version is now 2.15.
+* core: Update dependencies.
+* core: README.md updates.
+* core: License changed from Apache 2.0 to BSD-3-Clause.
+* 
+* feat: Add Windows platform support.
+* feat: Add macOS platform support.
+* feat: Codec is now applied in web platform (if available).
+* feat: Add vorbisOgg, WAV, FLAC, PCM 8 bits, PCM 16 bits.
+* feat: Add `isEncoderSupported` to check if the encoder is available on the platform.
+
+## 3.0.4
+* fix: iOS - hasPermission double check was needed when permission was undeterminated.
+
+## 3.0.3
+* core: Moved from jcenter to mavenCentral (Android).
+* feat: Use average instead of peak power (iOS).
+
+## 3.0.2
+* fix: web `pubspec.yaml` file.
+
+## 3.0.1
+* fix: Android request code is now frozen.
+* core: Update dependencies.
+
+## 3.0.0
+* feat: Add web support.
+* feat: Add `getAmplitude()` to get current and max dBFS.
+* core: static methods are no more! (but api is pretty much the same)
+* core: path param is now optional in `start` method to align behaviour with web platform.  
+If null is given, a temp file is generated for you.
+* core: `stop` method now returns the output path.
+
+## 2.1.1
+* fix: Android warning "mediarecorder went away with unhandled events".
+
+## 2.1.0+1
+* Relaxing dart/flutter constraints for pub.dev analysis.
+
+## 2.1.0
+* Add pause/resume/isPaused features.
+* Updated example to include pause.
+
+## 2.0.0
+* Add null safety support (based on v1.0.3).
+* Updated example. Moved from 'audioplayers' to 'just_audio'.
+
+## 1.0.3
+* Allow recording from bluetooth device on iOS.
+
+## 1.0.2
+* Fix (for good) potential exception when closing beofre recorder is actually started (Android).
+
+## 1.0.1
+* Fix potential exception when closing beofre recorder is actually started (Android).
+* Fix potential NPE on permission result (Android).
+* Updade dependencies.
+
+## 1.0.0
+
+* Flutter 1.12.0 is now minimum version (Flutter plugin API v2).
+* Finalize Record API.
+* Request permission on Android too.
+* Automatically stop recording when leaving activity / app.
+* Add all codecs with cross platform compatibility.
+
+## 0.2.1
+
+* Fix broken build on Android.
+
+## 0.2.0
+
+* Fix broken build on Android.
+
+## 0.1.0
+
+* Initial release.
+* Implementations for Android and iOs.
+* Example.

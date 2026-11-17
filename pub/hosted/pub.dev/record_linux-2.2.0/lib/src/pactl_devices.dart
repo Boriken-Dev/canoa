@@ -1,0 +1,149 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+
+import 'package:record_platform_interface/record_platform_interface.dart';
+
+/// Lists the input sources exposed by PulseAudio / PipeWire.
+Future<List<InputDevice>> listPactlInputDevices() async {
+  return parsePactlSources(await runPactl(['list', 'sources']));
+}
+
+/// Lists the names of the input sources, which `--device` takes.
+///
+/// Reads `pactl list short sources`, which plain PulseAudio fills too.
+Future<Set<String>> listPactlSourceNames() async {
+  return parseShortSourceNames(await runPactl(['list', 'short', 'sources']));
+}
+
+/// Runs pactl and returns its output, one entry per line; throws when pactl
+/// fails, e.g. without a server.
+Future<List<String>> runPactl(List<String> arguments) async {
+  // LC_ALL=C keeps the output parseable under any user locale.
+  final process = await Process.start(
+    'pactl',
+    arguments,
+    environment: {'LC_ALL': 'C'},
+  );
+
+  // Read stderr too, or a full pipe blocks pactl.
+  final errors = process.stderr.transform(utf8.decoder).join();
+
+  final lines = await process.stdout
+      .transform(utf8.decoder)
+      .transform(const LineSplitter())
+      .toList();
+
+  final error = (await errors).trim();
+  final exitCode = await process.exitCode;
+  // A failed pactl prints nothing, which must not read as "no sources".
+  // pactl 17 exits 0 from `list` without a server: only stderr tells.
+  if (exitCode != 0 || error.isNotEmpty) {
+    throw ProcessException('pactl', arguments, error, exitCode);
+  }
+
+  return lines;
+}
+
+/// Reads a `key = "value"` property; parecord wants the value unquoted.
+String _propertyValue(String line) {
+  final value = line.substring(line.indexOf('=') + 1).trim();
+
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    return value.substring(1, value.length - 1);
+  }
+
+  return value;
+}
+
+// Output can be retrieved with `pactl list sources`
+// --- Example ---
+// Source #2325
+// State: SUSPENDED
+// Name: alsa_output.usb-Generic_Blue_Microphones_LT_2201070607069D01069D_111000-00.analog-stereo.monitor
+// Description: Monitor of Blue Microphones Analog Stereo
+// Driver: PipeWire
+// Sample Specification: s16le 2ch 48000Hz
+// Channel Map: front-left,front-right
+// Owner Module: 4294967295
+// Mute: no
+// Volume: front-left: 65536 / 100% / 0.00 dB,   front-right: 65536 / 100% / 0.00 dB
+//         balance 0.00
+// Base Volume: 65536 / 100% / 0.00 dB
+// Monitor of Sink: alsa_output.usb-Generic_Blue_Microphones_LT_2201070607069D01069D_111000-00.analog-stereo
+// Latency: 0 usec, configured 0 usec
+// Flags: HARDWARE DECIBEL_VOLUME LATENCY
+// Properties:
+// 	alsa.card = "2"
+// 	alsa.card_name = "Blue Microphones"
+// 	alsa.class = "generic"
+// 	alsa.components = "USB046d:0ab7"
+//  node.name = "alsa_input.usb-Generic_Blue_Microphones_LT_2201070607069D01069D_111000-00.analog-stereo"
+@visibleForTesting
+List<InputDevice> parsePactlSources(List<String> output) {
+  final devices = <InputDevice>[];
+  String? currentNodeName;
+  // Plain PulseAudio has no node.name, only this name.
+  String? currentSourceName;
+  String? currentDeviceName;
+  List<int> currentSampleRates = [];
+
+  void commitDevice() {
+    final currentDeviceId = currentNodeName ?? currentSourceName;
+    if (currentDeviceId != null &&
+        currentDeviceName != null &&
+        !currentDeviceId.endsWith('.monitor') &&
+        !currentDeviceName.startsWith('Monitor of')) {
+      devices.add(
+        InputDevice(
+          id: currentDeviceId,
+          label: currentDeviceName,
+          sampleRates: currentSampleRates,
+        ),
+      );
+    }
+  }
+
+  for (final line in output) {
+    if (line.startsWith('Source #')) {
+      commitDevice();
+      currentNodeName = null;
+      currentSourceName = null;
+      currentDeviceName = null;
+      currentSampleRates = [];
+    } else if (line.trim().startsWith('node.name')) {
+      currentNodeName = _propertyValue(line);
+    } else if (line.trim().startsWith('Name:')) {
+      currentSourceName = line.substring(line.indexOf(':') + 1).trim();
+      currentDeviceName = currentSourceName;
+    } else if (line.trim().startsWith('Description:')) {
+      currentDeviceName = line.substring(line.indexOf(':') + 1).trim();
+    } else if (line.trim().startsWith('Sample Specification:')) {
+      final match = RegExp(r'(\d+)Hz').firstMatch(line);
+      if (match != null) {
+        currentSampleRates = [int.parse(match.group(1)!)];
+      }
+    }
+  }
+
+  commitDevice();
+
+  return devices;
+}
+
+// Output can be retrieved with `pactl list short sources`
+// --- Example ---
+// 54	alsa_input.pci-0000_00_1f.3.analog-stereo	PipeWire	s32le 2ch 48000Hz	SUSPENDED
+@visibleForTesting
+Set<String> parseShortSourceNames(List<String> output) {
+  return {
+    for (final line in output)
+      if (line.split('\t') case [
+        _,
+        final name,
+        ...,
+      ] when !name.endsWith('.monitor'))
+        name,
+  };
+}

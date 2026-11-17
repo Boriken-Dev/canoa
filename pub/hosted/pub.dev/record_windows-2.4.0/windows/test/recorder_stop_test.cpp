@@ -1,0 +1,151 @@
+#include "record/record.h"
+#include "recorder_dispatcher.h"
+#include "test/recorder_test_support.h"
+
+#include <gtest/gtest.h>
+
+#include <fstream>
+#include <iterator>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace record_windows
+{
+	namespace
+	{
+		// A take is only playable if the RIFF and data sizes match the file.
+		void ExpectValidWavHeader(const std::wstring& path)
+		{
+			std::ifstream file(path.c_str(), std::ios::binary);
+			ASSERT_TRUE(file.is_open());
+
+			std::vector<uint8_t> bytes(
+				(std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+			ASSERT_GT(bytes.size(), 12u);
+
+			auto u32 = [&bytes](size_t at) {
+				uint32_t value = 0;
+				memcpy(&value, bytes.data() + at, sizeof(value));
+				return value;
+			};
+
+			ASSERT_EQ(memcmp(bytes.data(), "RIFF", 4), 0);
+			ASSERT_EQ(memcmp(bytes.data() + 8, "WAVE", 4), 0);
+			EXPECT_EQ(u32(4), bytes.size() - 8);
+
+			// Walk to the data chunk, whose size is written the same way.
+			size_t offset = 12;
+			while (offset + 8 <= bytes.size())
+			{
+				const uint32_t chunkSize = u32(offset + 4);
+				if (memcmp(bytes.data() + offset, "data", 4) == 0)
+				{
+					EXPECT_EQ(chunkSize, bytes.size() - offset - 8);
+					EXPECT_GT(chunkSize, 0u);
+					return;
+				}
+				offset += 8 + chunkSize + (chunkSize & 1);
+			}
+
+			ADD_FAILURE() << "no data chunk";
+		}
+	}
+
+	// A take that wrote data must stop cleanly; MF teardown order used to leak
+	// MF_E_SHUTDOWN out of Stop().
+	TEST(RecorderStopTest, StopSucceedsAfterARealTake)
+	{
+		if (!HasCaptureDevice()) GTEST_SKIP() << "no capture device";
+
+		wchar_t temp[MAX_PATH];
+		GetTempPathW(MAX_PATH, temp);
+		std::wstring path = std::wstring(temp) + L"record_stop_test.wav";
+
+		auto dispatcher = std::make_shared<RecorderDispatcher>();
+
+		std::atomic<int> states{ 0 };
+		RecorderCallbacks callbacks;
+		callbacks.onState = [&states](RecordState) { states++; };
+		std::vector<RecordStop> stops;
+		callbacks.onStopped = [&states, &stops](const RecordStop& stop) { states++; stops.push_back(stop); };
+		Recorder recorder(dispatcher, std::move(callbacks));
+
+		HRESULT started = Call(*dispatcher, [&] {
+			return recorder.Start(MakeConfig(AudioEncoder::wav, AudioRouteChange::pause), path);
+		});
+		ASSERT_HRESULT_SUCCEEDED(started);
+
+		Sleep(3000);
+		EXPECT_TRUE(Call(*dispatcher, [&] { return recorder.IsRecording(); }));
+
+		StopResult stopped = Call(*dispatcher, [&] { return recorder.Stop(); });
+		EXPECT_HRESULT_SUCCEEDED(stopped.hr);
+		EXPECT_FALSE(stopped.path.empty());
+		ExpectValidWavHeader(path);
+		// Stop() answered, so the dispatcher already ran the callback.
+		ASSERT_EQ(stops.size(), 1u);
+		EXPECT_EQ(stops[0].reason, StopReason::stop);
+		EXPECT_EQ(stops[0].path, stopped.path);
+
+		Call(*dispatcher, [&] { return recorder.Dispose(); });
+		DeleteFileW(path.c_str());
+	}
+
+	// A device that delivers nothing leaves a sink writer without samples, and
+	// Finalize fails on that with E_UNEXPECTED.
+	TEST(RecorderStopTest, StopBeforeTheFirstSampleCancelsTheTake)
+	{
+		if (!HasCaptureDevice()) GTEST_SKIP() << "no capture device";
+
+		wchar_t temp[MAX_PATH];
+		GetTempPathW(MAX_PATH, temp);
+		std::wstring path = std::wstring(temp) + L"record_stop_empty_test.wav";
+		DeleteFileW(path.c_str());
+
+		auto dispatcher = std::make_shared<RecorderDispatcher>();
+		Recorder recorder(dispatcher, RecorderCallbacks());
+
+		// One dispatcher task: no sample can be processed between the two calls.
+		StopResult stopped = Call(*dispatcher, [&] {
+			HRESULT started = recorder.Start(MakeConfig(AudioEncoder::wav, AudioRouteChange::pause), path);
+			return SUCCEEDED(started) ? recorder.Stop() : StopResult{ started, std::wstring() };
+		});
+
+		EXPECT_HRESULT_SUCCEEDED(stopped.hr);
+		EXPECT_TRUE(stopped.path.empty());
+		EXPECT_FALSE(Call(*dispatcher, [&] { return recorder.IsRecording(); }));
+		EXPECT_EQ(GetFileAttributesW(path.c_str()), INVALID_FILE_ATTRIBUTES);
+
+		Call(*dispatcher, [&] { return recorder.Dispose(); });
+		DeleteFileW(path.c_str());
+	}
+
+	// Discarding skips Finalize, so the open writer must not keep the file alive.
+	TEST(RecorderStopTest, CancelAfterARealTakeRemovesTheFile)
+	{
+		if (!HasCaptureDevice()) GTEST_SKIP() << "no capture device";
+
+		wchar_t temp[MAX_PATH];
+		GetTempPathW(MAX_PATH, temp);
+		std::wstring path = std::wstring(temp) + L"record_cancel_test.wav";
+		DeleteFileW(path.c_str());
+
+		auto dispatcher = std::make_shared<RecorderDispatcher>();
+		Recorder recorder(dispatcher, RecorderCallbacks());
+
+		HRESULT started = Call(*dispatcher, [&] {
+			return recorder.Start(MakeConfig(AudioEncoder::wav, AudioRouteChange::pause), path);
+		});
+		ASSERT_HRESULT_SUCCEEDED(started);
+
+		Sleep(1000);
+
+		EXPECT_HRESULT_SUCCEEDED(Call(*dispatcher, [&] { return recorder.Cancel(); }));
+		EXPECT_FALSE(Call(*dispatcher, [&] { return recorder.IsRecording(); }));
+		EXPECT_EQ(GetFileAttributesW(path.c_str()), INVALID_FILE_ATTRIBUTES);
+
+		Call(*dispatcher, [&] { return recorder.Dispose(); });
+		DeleteFileW(path.c_str());
+	}
+}

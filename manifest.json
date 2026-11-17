@@ -1,7 +1,7 @@
 {
   "format": 2,
   "source": "Boriken-Dev/canoa",
-  "sourceCommit": "02e6ec79f2942073087dba3470c21b98115791e3",
+  "sourceCommit": "ff9f6a5e4395202f12ccb8ba42630b3b18a7230a",
   "status": "complete",
   "pubPackages": [
     ".cache",
@@ -55,6 +55,13 @@
     "pointycastle-4.0.0",
     "process-5.0.6",
     "quiver-3.2.2",
+    "record-7.2.0",
+    "record_android-2.3.0",
+    "record_darwin-2.0.0",
+    "record_linux-2.2.0",
+    "record_platform_interface-2.2.0",
+    "record_web-2.2.0",
+    "record_windows-2.4.0",
     "screen_retriever-0.2.2",
     "screen_retriever_linux-0.2.2",
     "screen_retriever_macos-0.2.2",
@@ -150,8 +157,8 @@
       "benchmark": 41,
       "benchmarks": 4,
       "doc": 307,
-      "example": 1655,
-      "test": 1847,
+      "example": 1790,
+      "test": 1875,
       "zip": 1
     },
     "deletedFlaggedFiles": [

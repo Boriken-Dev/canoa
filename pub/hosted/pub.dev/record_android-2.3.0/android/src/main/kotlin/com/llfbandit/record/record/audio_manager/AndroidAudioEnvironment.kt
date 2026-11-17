@@ -1,0 +1,36 @@
+package com.llfbandit.record.record.audio_manager
+
+import android.content.Context
+import android.media.AudioDeviceInfo
+import android.os.Handler
+import com.llfbandit.record.record.bluetooth.BluetoothManager
+import com.llfbandit.record.record.model.RecordConfig
+import com.llfbandit.record.record.util.InputDevices
+
+/** [AudioEnvironment] backed by the platform `AudioManager`. */
+class AndroidAudioEnvironment(
+  private val context: Context,
+  handler: Handler,
+) : AudioEnvironment {
+  override var onEvent: (EnvironmentEvent) -> Unit = {}
+
+  private val session = AudioSessionManager(
+    context,
+    handler,
+    onFocusLoss = { onEvent(EnvironmentEvent.FocusLost) },
+    onFocusGain = { onEvent(EnvironmentEvent.FocusRegained) },
+  )
+  private val bluetooth = BluetoothManager(context, handler)
+
+  override fun prepare(config: RecordConfig, onReady: () -> Unit) {
+    bluetooth.maybeStart(config) { onReady() }
+  }
+
+  override fun activate(config: RecordConfig) = session.apply(config)
+
+  override fun release(config: RecordConfig) = session.restore(config)
+
+  override fun dispose() = bluetooth.stop()
+
+  override fun findDevice(device: AudioDeviceInfo) = InputDevices.find(context, device)
+}

@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-api at eaa2a8c4b6d80520f5b7d868261a795c68a2720f, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-api at d8a3c10eb7499621333bdb307f9e8ce450a203ce, with what it inherits written out.
 bin = [{ name = "acp-harness-check", required-features = ["contract"] }, { name = "acp-account-check", required-features = ["contract"] }]
 example = [{ name = "echo_harness", crate-type = ["cdylib"] }, { name = "echo_account_provider", crate-type = ["cdylib"] }]
 test = [{ name = "echo", required-features = ["contract"] }, { name = "check", required-features = ["contract"] }, { name = "account_provider", required-features = ["contract"] }]
@@ -76,6 +76,7 @@ rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
 default-features = false
 [dev-dependencies.serde_json]
 version = "1"
+features = ["preserve_order"]
 [dev-dependencies.uuid]
 version = "1"
 default-features = false

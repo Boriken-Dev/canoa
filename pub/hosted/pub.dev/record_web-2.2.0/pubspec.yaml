@@ -1,0 +1,38 @@
+name: record_web
+description: Web specific implementation for record package called by record_platform_interface.
+version: 2.2.0
+homepage: https://github.com/llfbandit/record/tree/main/record_web
+
+environment:
+  sdk: ^3.12.0
+  flutter: ">=3.44.0"
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  flutter_web_plugins:
+    sdk: flutter
+
+  web: ^1.0.0
+  record_platform_interface: ^2.2.0
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      web:
+        pluginClass: RecordPluginWeb
+        fileName: 'record_web.dart'
+  
+  assets:
+    - path: assets/js/record.worklet.js
+      platforms: [web]
