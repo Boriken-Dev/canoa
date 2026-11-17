@@ -1657,7 +1657,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final remote = host == null ? null : _remoteReady[host];
     bool onHost(SessionPlace place, String? peer) =>
         connection == null ? place != SessionPlace.peer : place == SessionPlace.peer && peer?.toLowerCase() == connection.peer.toLowerCase();
-    final folders = {
+    final written = <String>{
       ?_lastFolders[host],
       for (final session in store.sessions)
         if (session.source != null && session.cwd != null && session.kind == SessionKind.workspace &&
@@ -1668,6 +1668,8 @@ class _CanoaAppState extends State<CanoaApp> {
             (connection == null ? (entry.place == SessionPlace.local || entry.place == SessionPlace.host) : onHost(entry.place, entry.peerId)))
           ?(entry.worktree?.repo ?? entry.cwd),
     };
+    // One entry per workspace, however the host wrote its path (a share's `\\?\UNC\...` or `//...` form, or another case).
+    final folders = distinctWorkspaces(written);
     if (connection != null) {
       // A saved host is asked about its own folders, and a path of another system's is never offered for it.
       return [

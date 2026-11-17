@@ -128,6 +128,15 @@ String workspaceIdentity(String path) {
   return text.toLowerCase();
 }
 
+/// [paths] with each workspace once, in the form it was first written, in order: one place written two ways is one.
+List<String> distinctWorkspaces(Iterable<String> paths) {
+  final seen = <String>{};
+  return [
+    for (final path in paths)
+      if (seen.add(workspaceIdentity(path))) path,
+  ];
+}
+
 /// [sessions] by workspace, in the order each workspace's first session is kept (newest first). Inside one, the sessions that
 /// need the person come first. Chats, which have no workspace of the person's, are one group, "Chats", first; sessions with no
 /// workspace follow the others; archived ones that are not active are folded into a last group.

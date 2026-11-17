@@ -35,6 +35,21 @@ void main() {
     expect(workspaceIdentity('/srv/App'), '/srv/App', reason: 'a path elsewhere is as it was');
   });
 
+  test('recent workspaces keep one entry for a share however it was written, the first way first', () {
+    expect(
+      distinctWorkspaces([
+        share,
+        r'\\?\UNC\localhost\C$\work\repo',
+        '//localhost/C\$/work/repo/',
+        r'C:\work\other',
+        r'c:\WORK\other',
+        '/srv/app',
+        '/srv/App',
+      ]),
+      [share, r'C:\work\other', '/srv/app', '/srv/App'],
+    );
+  });
+
   test('the list grouped by workspace shows one group for a share, named by its folder', () {
     final store = SessionStore();
     final shared = store.createDraft(cwd: share);
