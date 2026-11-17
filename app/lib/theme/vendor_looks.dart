@@ -13,6 +13,8 @@ typedef ChatTokens = ({Color user, Color notice, Color added, Color removed, Col
 /// is ignored.
 final class VendorLooks extends ChangeNotifier {
   final Map<LookId, _Document> _documents = {};
+  // One look per family and brightness until the answer changes: a theme compares its look by identity.
+  final Map<(LookId, Brightness), CanoaLook> _shells = {};
   bool _answered = false;
   String? _problem;
   int _revision = 0;
@@ -79,11 +81,20 @@ final class VendorLooks extends ChangeNotifier {
 
   void _changed() {
     _revision++;
+    _shells.clear();
     notifyListeners();
   }
 
   /// [id]'s shell tokens in [brightness], each one the document lacks taken from [fallback]; null when it has no such family.
   CanoaLook? shell(LookId id, Brightness brightness, CanoaLook fallback) {
+    final kept = _shells[(id, brightness)];
+    if (kept != null) return kept;
+    final built = _shell(id, brightness, fallback);
+    if (built != null) _shells[(id, brightness)] = built;
+    return built;
+  }
+
+  CanoaLook? _shell(LookId id, Brightness brightness, CanoaLook fallback) {
     final tokens = _documents[id]?.of(brightness);
     if (tokens == null) return null;
     final muted = tokens.color('muted') ?? fallback.muted;
