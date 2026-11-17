@@ -245,7 +245,7 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe,
+    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint,
   });
 
   /// Which section is shown and how each section's index is sized, kept across runs; the app keeps its own when none is given.
@@ -254,6 +254,9 @@ class CanoaApp extends StatefulWidget {
   /// How the Hosts section looks at a saved connection; the app's own reads the host's list or connects.
   @visibleForTesting
   final ConnectionProbe? probe;
+
+  /// How a chat reaches a host's endpoint; the browser's own proof unless a test stands in.
+  final ConnectEndpoint? connectEndpoint;
 
   /// The views the work panel can show; the app's own (details and changes) when none are given.
   @visibleForTesting
@@ -1020,7 +1023,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// The agent entries the canoa this app runs is serving now, as it lists them.
   /// The other sources of this computer a session that ran on one can be moved to, by name and as shown.
-  Map<String, String> _moveTargets(ChatSession session) => store.canMove(session) && _control != null
+  Map<String, String> _moveTargets(ChatSession session) => store.canMove(session) && _control != null && widget.served == null
       ? {
           for (final source in _hostedSources)
             if (source.local && source.label != session.agent) source.label: source.displayName,
@@ -1606,7 +1609,7 @@ class _CanoaAppState extends State<CanoaApp> {
               decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
               initializeMeta: _startMeta(draft),
             )
-          : await connectBrowserAcp(
+          : await (widget.connectEndpoint ?? connectBrowserAcp)(
               chatEndpoints(webSocket: listening.url, webTransport: '', preferWebTransport: config.preferWebTransport),
               pinnedPeerId: listening.peer, method: method,
               timeout: Duration(seconds: config.connectTimeout),
@@ -1787,6 +1790,21 @@ class _CanoaAppState extends State<CanoaApp> {
     String? account,
   }) async {
     final VerifiedAgent client;
+    if (widget.served != null && place == SessionPlace.local) {
+      // A page holds no host in its process: a session begun on the host's own computer is reached through its endpoint.
+      final listening = widget.host?.listening.where((each) => each.name == entryName).firstOrNull;
+      if (listening == null) throw StateError('canoa is not serving $entryName now: open Hosting to see why');
+      return _agentFor(
+        place: SessionPlace.host,
+        entryName: entryName,
+        address: listening.url,
+        methodId: listening.method ?? widget.host?.peerMethod,
+        peerId: listening.peer,
+        cacheLifetime: cacheLifetime,
+        overlays: overlays,
+        account: account,
+      );
+    }
     switch (place) {
       case SessionPlace.local when _hostedSources.any((source) => source.local && source.label == entryName) ||
           account != null ||
@@ -1821,7 +1839,7 @@ class _CanoaAppState extends State<CanoaApp> {
                 decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
                 initializeMeta: {...cacheMeta, ..._accountMeta(account)},
               )
-            : await connectBrowserAcp(
+            : await (widget.connectEndpoint ?? connectBrowserAcp)(
                 chatEndpoints(
                   webSocket: overWebTransport ? (fallback ?? '') : endpoint.toString(),
                   webTransport: overWebTransport ? endpoint.toString() : '',

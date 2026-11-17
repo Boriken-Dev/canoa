@@ -9,6 +9,7 @@ import 'package:canoa/shell/hosts/host_status.dart' show ConnectionProbe;
 import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/accounts/accounts_host.dart';
 import 'package:canoa/acp/agent_commands.dart';
+import 'package:canoa/acp/browser_connect.dart' show ConnectEndpoint;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity, ClipboardReader;
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/desktop_shell.dart';
@@ -102,6 +103,7 @@ Future<List<CanoaConfig>> pumpApp(
   AccountsHost? accountsHost,
   AgentMoves? agentMoves,
   ServedApp? served,
+  ConnectEndpoint? connectEndpoint,
   Future<CanoaConfig> Function()? readConfig,
   ShellLayout? layout,
   ConnectionProbe? probe,
@@ -146,6 +148,7 @@ Future<List<CanoaConfig>> pumpApp(
     accountsHost: accountsHost,
     agentMoves: agentMoves,
     served: served,
+    connectEndpoint: connectEndpoint,
     layout: layout,
     probe: probe,
   ));

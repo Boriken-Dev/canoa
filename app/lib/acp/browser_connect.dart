@@ -55,3 +55,15 @@ Future<String> pairBrowserAcp(Uri url, String pin, {Duration timeout = const Dur
   );
   return pairBrowserByPin(StagedChannel(source), pin);
 }
+
+/// The shape of [connectBrowserAcp], for a caller that lets another connection stand in for it.
+typedef ConnectEndpoint = Future<VerifiedAgent> Function(
+  WebEndpoints endpoints, {
+  required String pinnedPeerId,
+  required PeerMethod method,
+  Duration timeout,
+  AgentDecider? decider,
+  AgentElicitor? elicitor,
+  AgentSecrets? secrets,
+  Map<String, Object?> initializeMeta,
+});
