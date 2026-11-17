@@ -54,7 +54,7 @@ MemoryOverlays world() => MemoryOverlays()
   ..put(catalogRepo, {'catalog.toml': catalog})
   ..put(teamRepo, {'overlay.cfg': optionsCfg});
 
-const withCatalog = '[catalogs]\nmain = "$catalogRepo@main#catalog.toml"\n';
+const withCatalog = '[catalogs]\nboriken = false\nmain = "$catalogRepo@main#catalog.toml"\n';
 
 void main() {
   setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/loadout_options_test.dart')));

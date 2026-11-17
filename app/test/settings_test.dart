@@ -109,6 +109,7 @@ command = "own-mcp"
 args = ["--serve"]
 
 [catalogs]
+boriken = false
 main = "https://example.invalid/catalog.git@main#catalog.json"
 
 [store]
@@ -487,6 +488,17 @@ void main() {
       await tester.pumpAndSettle();
       expect(h.last.catalogs.keys, ['extra']);
       expect(CanoaConfig.parse(h.last.encode()).catalogs.keys, ['extra']);
+    });
+
+    testWidgets('the default catalog is listed first, and removing it writes false to the person\'s own file', (tester) async {
+      final h = await openSettings(tester, config: CanoaConfig.parse('[catalogs]\nmine = "https://example.invalid/m.git@main#c.toml"\n'), section: 'catalogs');
+      expect(find.byKey(const Key('catalog-boriken')), findsOneWidget);
+      expect(find.text(defaultCatalogSpec), findsOneWidget);
+      await tester.tap(find.byKey(const Key('catalog-remove-boriken')));
+      await tester.pumpAndSettle();
+      expect(h.last.catalogs.keys, ['mine']);
+      expect(tomlOf(h.last)['catalogs'], {'boriken': false, 'mine': 'https://example.invalid/m.git@main#c.toml'});
+      expect(CanoaConfig.parse(h.last.encode()).catalogs.keys, ['mine'], reason: 'it stays removed when the file is read again');
     });
 
     testWidgets('the limits are numbers written to [store], and one set back to its default is not written', (tester) async {

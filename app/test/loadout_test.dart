@@ -50,7 +50,7 @@ MemoryOverlays world() => MemoryOverlays()
   ..put(teamRepo, {'overlay.cfg': reviewCfg})
   ..putSkill('$skillsHost/pdf.git', pdfFiles);
 
-const withCatalog = '[catalogs]\nmain = "$catalogRepo@main#catalog.toml"\n';
+const withCatalog = '[catalogs]\nboriken = false\nmain = "$catalogRepo@main#catalog.toml"\n';
 
 final registryAnswer = page([
   npmServer(),
@@ -180,7 +180,7 @@ void main() {
   });
 
   testWidgets('with no catalog, Discover offers a known catalog and a spec to paste, and no bare repository field', (tester) async {
-    await open(tester, text: '');
+    await open(tester, text: '[catalogs]\nboriken = false\n');
     await tapKey(tester, 'overlays-discover');
     expect(find.byKey(const Key('catalogs-empty')), findsOneWidget);
     expect(find.byKey(const Key('known-catalog-aos-examples')), findsOneWidget);
@@ -194,11 +194,21 @@ void main() {
   });
 
   testWidgets('a known catalog is added in one tap, under its own label', (tester) async {
-    await open(tester, text: '');
+    await open(tester, text: '[catalogs]\nboriken = false\n');
     await tapKey(tester, 'overlays-discover');
     await tapKey(tester, 'known-catalog-add-aos-examples');
     expect(saved.last.catalogs.keys, ['aos-examples']);
     expect(saved.last.catalogs['aos-examples']!.path, 'examples/registry/catalog.toml');
+  });
+
+  testWidgets('the default catalog removed comes back from the empty state under its own label', (tester) async {
+    await open(tester, text: '[catalogs]\nboriken = false\n');
+    await tapKey(tester, 'overlays-discover');
+    expect(find.byKey(Key('known-catalog-$defaultCatalogLabel')), findsOneWidget);
+    await tapKey(tester, 'known-catalog-add-$defaultCatalogLabel');
+    expect(saved.last.catalogs.keys, [defaultCatalogLabel]);
+    expect(saved.last.catalogs[defaultCatalogLabel]!.spec, defaultCatalogSpec);
+    expect(saved.last.tables['catalogs'], {defaultCatalogLabel: defaultCatalogSpec});
   });
 
   testWidgets('a skill the catalog offers is shown with its source and pin, fetched on a yes, chosen and on for new sessions', (tester) async {
@@ -230,7 +240,7 @@ void main() {
   });
 
   testWidgets('a skill pasted as a source is reviewed before it is fetched, and refused when its directory is no name', (tester) async {
-    await open(tester, text: '');
+    await open(tester, text: '[catalogs]\nboriken = false\n');
     await openTab(tester, 'skills');
     await tapKey(tester, 'skills-discover');
     await tester.enterText(find.byKey(const Key('skills-paste')), 'https://example.invalid/skills.git@main#');

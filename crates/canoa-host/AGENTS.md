@@ -885,7 +885,7 @@ picture. `examples/sample_extension.rs` is a stand-in library; `tests/extension_
 **Installed runtimes** (Node, Python; Store type Runtimes) are put on the `PATH` of every program the host starts through `spawn::Command`
 (agents, their MCP servers, tools), after the person's own `PATH` entries so their own copy wins; a program started with no `PATH` gets none.
 
-**The catalog index** (`store/index`, `store::index`) lists every `[catalogs]` source of the host's canoa.cfg and every program store as
+**The catalog index** (`store/index`, `store::index`) lists every `[catalogs]` source of the host's canoa.cfg (and, first, `boriken` = `https://github.com/Boriken-Dev/agent-overlays.git@main#catalog.toml` unless `[catalogs] boriken = false` leaves it out or a source of that label replaces it) and every program store as
 one normalized list, so a client reads cards from one call and not one fetch an entry. `store/index` `{"refresh"?: bool, "icons"?: bool}`
 -> `{"schema": 1, "sources": [...], "entries": [...]}`. A source is `{"id": "catalog:LABEL" | "programs", "kind", "label"?, "spec"?,
 "commit"?, "checked" (ms), "stale", "refreshing", "name"?, "description"?, "problem"?, "entries"}`; an entry is `{"id", "kind": "overlay" |

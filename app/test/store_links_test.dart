@@ -42,9 +42,9 @@ about = { summary = "Docs.", homepage = "https://example.org/docs", repository =
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(MaterialApp(
       home: StoreSection(
-        config: CanoaConfig.parse('[catalogs]\nteam = "$repo@main#catalog.toml"\n'),
+        config: CanoaConfig.parse('[catalogs]\nboriken = false\nteam = "$repo@main#catalog.toml"\n'),
         home: MemoryHome(overlays),
-        index: standInIndex(overlays, () => CanoaConfig.parse('[catalogs]\nteam = "$repo@main#catalog.toml"\n')),
+        index: standInIndex(overlays, () => CanoaConfig.parse('[catalogs]\nboriken = false\nteam = "$repo@main#catalog.toml"\n')),
         onSave: (changed) async => changed,
       ),
     ));

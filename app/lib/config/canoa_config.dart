@@ -103,6 +103,11 @@ final class VoiceSettings {
 /// The id of the operating system's speech service, which `[voice] backend` names unless the person chose another.
 const defaultVoiceBackend = 'system';
 
+/// The label and source of the catalog Canoa offers first, until the person removes it (`[catalogs] boriken = false`) or gives
+/// that label a catalog of their own. The host reads the same pair.
+const defaultCatalogLabel = 'boriken';
+const defaultCatalogSpec = 'https://github.com/Boriken-Dev/agent-overlays.git@main#catalog.toml';
+
 /// Where a [CanoaConfig] was read from: the format and first-line marker of the person's own file, the layers below it (the
 /// installed copy and the system's file, lowest first), and the person's file as it was read. A save writes the person's
 /// file only, in its own format.
@@ -947,23 +952,34 @@ final class CanoaConfig {
     return _withTable('agents', raw);
   }
 
+  /// The catalogs in effect: the default first, unless the table names its label (`false` removes it, a source replaces it),
+  /// then the table's own, a label set to `false` listing nothing.
   static Map<String, GitOverlay> _catalogs(Object? raw) {
-    if (raw == null) return const {};
-    if (raw is! Map) throw const FormatException('canoa.cfg: catalogs must be a table');
-    final out = <String, GitOverlay>{};
+    if (raw != null && raw is! Map) throw const FormatException('canoa.cfg: catalogs must be a table');
+    final given = <String, GitOverlay>{};
     final normalized = <String>{};
-    for (final MapEntry(:key, :value) in raw.entries) {
+    for (final MapEntry(:key, :value) in (raw as Map? ?? const {}).entries) {
       final label = '$key';
       if (!isCatalogLabel(label) || !normalized.add(normalizeName(label))) {
         throw FormatException('canoa.cfg: catalogs.$label: a label is a letter, then letters, digits, - or _, at most '
             '64, unique when compared as AOS compares names');
       }
-      out[label] = switch (value) {
-        final String spec => _catalogSource(label, spec),
-        _ => throw FormatException('canoa.cfg: catalogs.$label is a git source, <repository>@<ref>#<catalog file>'),
-      };
+      switch (value) {
+        case false:
+          break;
+        case final String spec:
+          given[label] = _catalogSource(label, spec);
+        default:
+          throw FormatException('canoa.cfg: catalogs.$label is a git source, <repository>@<ref>#<catalog file>, or false');
+      }
     }
-    return out;
+    final own = given.keys.where((label) => normalizeName(label) == normalizeName(defaultCatalogLabel));
+    return {
+      if (!normalized.contains(normalizeName(defaultCatalogLabel))) defaultCatalogLabel: _catalogSource(defaultCatalogLabel, defaultCatalogSpec),
+      for (final label in own) label: given[label]!,
+      for (final MapEntry(:key, :value) in given.entries)
+        if (!own.contains(key)) key: value,
+    };
   }
 
   /// Whether [label] can name a catalog: a valid overlay name that is also a name Canoa gives a directory.
@@ -1021,9 +1037,17 @@ final class CanoaConfig {
     return _withTable('catalogs', raw);
   }
 
-  /// This configuration without the catalog [label].
-  CanoaConfig withoutCatalog(String label) =>
-      _withTable('catalogs', _deepCopy((tables['catalogs'] as Map?) ?? const {})..remove(label));
+  /// This configuration without the catalog [label]. The default one is recorded as `false` in this layer, so it stays gone
+  /// without touching a lower layer.
+  CanoaConfig withoutCatalog(String label) {
+    final raw = _deepCopy((tables['catalogs'] as Map?) ?? const {});
+    if (normalizeName(label) == normalizeName(defaultCatalogLabel)) {
+      raw[raw.keys.cast<String>().where((key) => normalizeName(key) == normalizeName(label)).firstOrNull ?? defaultCatalogLabel] = false;
+    } else {
+      raw.remove(label);
+    }
+    return _withTable('catalogs', raw);
+  }
 
   /// This configuration with the overlay [name] from [source], pinned to [pin]: `NAME = { source, pin }`.
   CanoaConfig withOverlay(String name, GitOverlay source, String pin) {

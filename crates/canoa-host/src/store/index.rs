@@ -52,7 +52,37 @@ pub(crate) struct CatalogSource {
 /// One `[catalogs]` row: the source, or why it is no source. A bad row still shows as a source with its reason.
 pub(crate) type Row = Result<CatalogSource, (String, String)>;
 
-/// Reads `[catalogs]`, a table of label to `<repository>@<ref>#<path>`, in the order of the labels.
+/// The label and source of the catalog offered first, until `[catalogs]` names the label: `false` removes it, a source
+/// replaces it. canoa.cfg's reader in the app holds the same pair.
+pub(crate) const DEFAULT_CATALOG_LABEL: &str = "boriken";
+pub(crate) const DEFAULT_CATALOG_SPEC: &str =
+    "https://github.com/Boriken-Dev/agent-overlays.git@main#catalog.toml";
+
+/// The catalogs in effect: the default one, unless `[catalogs]` names its label, then the table's own rows.
+pub(crate) fn catalog_rows(section: &Value) -> Vec<Row> {
+    let named = section.as_object().is_some_and(|table| {
+        table.keys().any(|label| {
+            coqui_aos::normalize_name(label) == coqui_aos::normalize_name(DEFAULT_CATALOG_LABEL)
+        })
+    });
+    let mut rows = if named {
+        Vec::new()
+    } else {
+        parse_sources(&json!({ DEFAULT_CATALOG_LABEL: DEFAULT_CATALOG_SPEC }))
+    };
+    rows.extend(parse_sources(section));
+    // The person's own catalog under the default's label still comes first.
+    rows.sort_by_key(|row| {
+        let label = row
+            .as_ref()
+            .map_or_else(|(label, _)| label, |source| &source.label);
+        coqui_aos::normalize_name(label) != coqui_aos::normalize_name(DEFAULT_CATALOG_LABEL)
+    });
+    rows
+}
+
+/// Reads `[catalogs]`, a table of label to `<repository>@<ref>#<path>`, in the order of the labels. A label set to
+/// `false` lists nothing.
 pub(crate) fn parse_sources(section: &Value) -> Vec<Row> {
     let Some(table) = section.as_object() else {
         return Vec::new();
@@ -60,6 +90,7 @@ pub(crate) fn parse_sources(section: &Value) -> Vec<Row> {
     let mut seen = BTreeSet::new();
     table
         .iter()
+        .filter(|(_, value)| **value != Value::Bool(false))
         .map(|(label, value)| {
             let problem = |why: &str| (label.clone(), why.to_owned());
             if !valid_overlay_name(label) || !seen.insert(coqui_aos::normalize_name(label)) {

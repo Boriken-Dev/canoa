@@ -517,8 +517,15 @@ the ref named, one commit deep, never checked out, with the same limits), and re
 a directory of the repository is a catalog too: each subdirectory is an overlay of that name, as `dotagents` reads a
 repository of overlays (`https://github.com/example/overlays.git@main#overlays`).
 
+Canoa offers one catalog of its own, first, with nothing configured: `boriken`, Boriken Dev's overlays
+(`https://github.com/Boriken-Dev/agent-overlays.git@main#catalog.toml`). It is fetched like any catalog, by the host,
+so a desktop app and a served page list the same. Yours add beside it. To remove it, use Remove in Settings, Catalogs, or
+set `boriken = false` in your own canoa.cfg: that is kept across restarts and never edits a lower layer. Giving the label
+`boriken` a source of yours replaces it, and Settings, Add, or the Store's own offer brings it back.
+
 ```toml
 [catalogs]
+boriken = false   # leave out the catalog Canoa offers by default
 team = "https://github.com/example/overlays.git@main#catalog.toml"   # a label of yours = <repository>@<ref>#<catalog file>
 
 [store]

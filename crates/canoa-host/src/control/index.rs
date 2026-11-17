@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 
 use super::{Caller, Control, DENIED, Grant, bad};
-use crate::store::index::parse_sources;
+use crate::store::index::catalog_rows;
 
 type Outcome = Result<Value, (i32, String)>;
 
@@ -54,7 +54,7 @@ impl Control {
                 .ok()
                 .and_then(|answer| answer.get("value").cloned())
                 .unwrap_or(Value::Null);
-            let rows = parse_sources(&section);
+            let rows = catalog_rows(&section);
             for (row, answer) in
                 rows.iter().zip(
                     self.index

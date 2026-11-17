@@ -378,7 +378,11 @@ fn a_row_that_is_no_source_shows_with_its_reason() {
 fn configured(rig: &Rig, cfg_catalogs: &str) -> Control {
     let config = rig.tmp.join("cfg").join("canoa.cfg");
     std::fs::create_dir_all(config.parent().expect("parent")).expect("dir");
-    std::fs::write(&config, format!("[catalogs]\n{cfg_catalogs}\n")).expect("config");
+    std::fs::write(
+        &config,
+        format!("[catalogs]\nboriken = false\n{cfg_catalogs}\n"),
+    )
+    .expect("config");
     Control::open(
         None,
         DEFAULT_MAX_RECORDS,
@@ -519,4 +523,34 @@ fn the_tools_read_the_index_with_the_grants_they_were_given_and_never_more() {
         backend.installed().overlays.is_empty(),
         "nothing is named in this canoa.cfg"
     );
+}
+
+#[test]
+fn the_default_catalog_is_offered_first_and_a_false_label_removes_it() {
+    use crate::store::index::{DEFAULT_CATALOG_LABEL, DEFAULT_CATALOG_SPEC, catalog_rows};
+    let labels = |section: serde_json::Value| -> Vec<String> {
+        catalog_rows(&section)
+            .into_iter()
+            .map(|row| row.map_or_else(|(label, _)| label, |source| source.label))
+            .collect()
+    };
+    assert_eq!(labels(json!({})), [DEFAULT_CATALOG_LABEL]);
+    assert_eq!(labels(json!(null)), [DEFAULT_CATALOG_LABEL]);
+    assert_eq!(
+        labels(json!({"aaa": "https://example.org/a.git@main#c.toml"})),
+        [DEFAULT_CATALOG_LABEL, "aaa"],
+        "a person's own catalog sits beside it, after it"
+    );
+    assert!(labels(json!({"Boriken": false})).is_empty());
+    assert_eq!(
+        labels(json!({"boriken": false, "mine": "https://example.org/a.git@main#c.toml"})),
+        ["mine"]
+    );
+    let own = catalog_rows(&json!({"boriken": "https://example.org/b.git@dev#x.toml"}));
+    assert_eq!(own.len(), 1, "{own:?}");
+    assert_eq!(own[0].as_ref().expect("source").reference, "dev");
+    let default = catalog_rows(&json!({}));
+    let default = default[0].as_ref().expect("source");
+    assert_eq!(default.spec, DEFAULT_CATALOG_SPEC);
+    assert_eq!(default.path, "catalog.toml");
 }

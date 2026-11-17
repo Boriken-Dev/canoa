@@ -204,7 +204,7 @@ void main() {
     final again = CanoaConfig.parse(config.encode());
     expect(again.catalogs['team']!.spec, 'https://example.invalid/c.git@main#catalog.toml');
     expect(again.store.iconMaxBytes, 1024);
-    expect(config.withoutCatalog('team').catalogs, isEmpty);
+    expect(config.withoutCatalog('team').catalogs.keys, ['boriken'], reason: 'only the default is left');
     expect(const StoreSettings(iconMaxWidth: 4096).nonDefaults, ['icon_max_width = 4096 (default 1024)']);
     for (final bad in [
       '[catalogs]\nteam = "https://example.invalid/c.git@main"\n',
@@ -216,6 +216,30 @@ void main() {
     ]) {
       expect(() => CanoaConfig.parse(bad), throwsFormatException, reason: bad);
     }
+  });
+
+  test('a fresh configuration offers the default catalog first, and removing it is kept in the person\'s own file', () {
+    const fresh = CanoaConfig();
+    expect(fresh.catalogs.keys, [defaultCatalogLabel]);
+    expect(fresh.catalogs[defaultCatalogLabel]!.spec, defaultCatalogSpec);
+    expect(fresh.catalogs[defaultCatalogLabel]!.path, 'catalog.toml');
+
+    final beside = CanoaConfig.parse('[catalogs]\nzeta = "https://example.invalid/z.git@main#c.toml"\n');
+    expect(beside.catalogs.keys, [defaultCatalogLabel, 'zeta'], reason: 'the default stays first, the person\'s own beside it');
+
+    final removed = beside.withoutCatalog(defaultCatalogLabel);
+    expect(removed.catalogs.keys, ['zeta']);
+    expect(removed.tables['catalogs'], {defaultCatalogLabel: false, 'zeta': 'https://example.invalid/z.git@main#c.toml'});
+    // A restart reads the same file again.
+    expect(CanoaConfig.parse(removed.encode()).catalogs.keys, ['zeta']);
+    expect(CanoaConfig.parse(const CanoaConfig().withoutCatalog(defaultCatalogLabel).encode()).catalogs, isEmpty);
+
+    // Adding the label again brings a catalog back; a source of the person's own under that label replaces the default.
+    expect(removed.withCatalog(defaultCatalogLabel, defaultCatalogSpec).catalogs.keys, ['boriken', 'zeta']);
+    final replaced = CanoaConfig.parse('[catalogs]\nboriken = "https://example.invalid/mine.git@dev#c.toml"\n');
+    expect(replaced.catalogs.keys, ['boriken']);
+    expect(replaced.catalogs['boriken']!.reference, 'dev');
+    expect(() => CanoaConfig.parse('[catalogs]\nboriken = true\n'), throwsFormatException);
   });
 
   group('the store\'s pages', () {
