@@ -54,13 +54,14 @@ class SourceMark extends StatelessWidget {
     }
     return SizedBox.square(
       dimension: side,
-      child: CustomPaint(painter: _MarkPainter(mark, color ?? theme.color ?? Theme.of(context).colorScheme.onSurface)),
+      child: CustomPaint(painter: MarkPainter(mark, color ?? theme.color ?? Theme.of(context).colorScheme.onSurface)),
     );
   }
 }
 
-class _MarkPainter extends CustomPainter {
-  _MarkPainter(this.mark, this.color);
+/// Draws an [AgentMark] in its own colours, or in [color] where a shape has none.
+class MarkPainter extends CustomPainter {
+  MarkPainter(this.mark, this.color);
 
   final AgentMark mark;
   final Color color;
@@ -76,5 +77,5 @@ class _MarkPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_MarkPainter old) => old.mark != mark || old.color != color;
+  bool shouldRepaint(MarkPainter old) => old.mark != mark || old.color != color;
 }
