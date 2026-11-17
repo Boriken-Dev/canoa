@@ -951,10 +951,10 @@ void main() {
       expect(s.rules.rules, isEmpty);
     });
 
-    testWidgets('offers no rule for a path that is relative, starts with ~, names a stream or is a network path', (tester) async {
+    testWidgets('offers no rule for a path that is relative, starts with ~ or names a stream', (tester) async {
       final s = await _shown(tester);
       var id = 1;
-      for (final path in ['src/a.js', '~/a.js', '/work/calc/a.js:stream', r'\\server\share\a.js', 'C:a.js']) {
+      for (final path in ['src/a.js', '~/a.js', '/work/calc/a.js:stream', 'C:a.js']) {
         s.agent.editFile(id, path);
         await _settle(tester);
         expect(_offer, findsNothing, reason: path);
@@ -962,6 +962,13 @@ void main() {
         s.store.cancelPermission(s.session);
         id++;
       }
+    });
+
+    testWidgets('offers a rule for a path on a share, as for one on a drive', (tester) async {
+      final s = await _shown(tester);
+      s.agent.editFile(1, r'\\server\share\work\a.js');
+      await _settle(tester);
+      expect(_offer, findsOneWidget);
     });
 
     testWidgets('keeps commands and file changes apart for one source and folder', (tester) async {
