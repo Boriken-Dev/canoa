@@ -129,7 +129,6 @@ impl Overlays {
         repo: &str,
         reference: &str,
     ) -> Result<String, (i32, String)> {
-        refuse_network_source(repo)?;
         if full_commit_id(reference) {
             return Ok(reference.to_owned());
         }
@@ -241,7 +240,6 @@ impl Overlays {
         let name = checked_name(text_param(params, "name")?.ok_or_else(|| bad("name is needed"))?)?;
         let pin = pin_of(params)?;
         let (repo, reference, path, source) = git_source(params)?;
-        refuse_network_source(&repo)?;
         if is_local(&repo) && !local(&repo) {
             return Err(refused(
                 "a source on this computer must be in a folder this key may browse",
@@ -573,7 +571,6 @@ impl Overlays {
         let label =
             checked_name(text_param(params, "label")?.ok_or_else(|| bad("label is needed"))?)?;
         let (repo, reference, _path, _spec) = git_source(params)?;
-        refuse_network_source(&repo)?;
         if is_local(&repo) && !local(&repo) {
             return Err(refused(
                 "a source on this computer must be in a folder this key may browse",
@@ -1381,14 +1378,6 @@ fn same_digest(a: &str, b: &str) -> bool {
 }
 
 /// Whether a repository is a place on this computer, which only a key allowed to browse it may name.
-/// Refuses a local `repo` that names a network share, which a filesystem call would open.
-fn refuse_network_source(repo: &str) -> Result<(), (i32, String)> {
-    if is_local(repo) && super::files::network_path(&local_path(repo).to_string_lossy()) {
-        return Err(bad("a network path is no source"));
-    }
-    Ok(())
-}
-
 fn is_local(repo: &str) -> bool {
     if let Some((scheme, _)) = repo.split_once("://") {
         return scheme == "file";

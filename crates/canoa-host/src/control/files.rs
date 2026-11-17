@@ -235,7 +235,14 @@ impl Files {
             return false;
         }
         let path = super::overlays::local_path(repo);
-        let Ok(resolved) = confined(&path.to_string_lossy(), &self.roots_of(caller, false)) else {
+        // The person running the host names any place their account reaches, a network share included; a key only a working root.
+        let resolved = match caller {
+            Caller::Owner => fs::canonicalize(&path).map(plain).ok(),
+            Caller::Peer { .. } => {
+                confined(&path.to_string_lossy(), &self.roots_of(caller, false)).ok()
+            }
+        };
+        let Some(resolved) = resolved else {
             return false;
         };
         let kept = self
@@ -986,12 +993,6 @@ fn visible_name(name: &str) -> String {
         }
     }
     out
-}
-
-/// Whether `text` opens with `\` or `//`: a network share, a verbatim path or a device path, which a filesystem call would open.
-pub(crate) fn network_path(text: &str) -> bool {
-    let text = text.replace('/', "\\");
-    text.starts_with("\\\\") || text.starts_with("\\??\\")
 }
 
 /// `asked` resolved, when it is plain and under one of `roots`.

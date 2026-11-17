@@ -740,8 +740,8 @@ in `overlays/.cache/<name>.git` (a catalog's in `overlays/.catalogs/<label>.git`
   only `https`, `http`, `ssh`, `git` and `file` allowed, no hooks, no fsmonitor, no prompts, 5 minutes at most, and a fetch ended once its
   cache holds 256 MiB. A source on this computer (`file://` or a path) is named by a key only with the `folders` grant, under a working root of an
   entry the key may use (not the home), never in the host's own folders (canoa.cfg's, the overlays', the home it keeps state in) and
-  only a repository whose `.git` is a folder; the owner names any. A path or source naming a network share (`\\`, `//`), a verbatim or
-  a device path is refused by its text before any file is opened. Git runs from the overlays folder with `GIT_CEILING_DIRECTORIES`
+  only a repository whose `.git` is a folder; the owner names any. A source on a network share is a place like any other: the owner names it as the file explorer opens it, and a key needs a working root that holds it.
+  Git runs from the overlays folder with `GIT_CEILING_DIRECTORIES`
   set to it. At most 64 fetched caches, and 1 GiB in the overlays folder; the history fetched for a check whose plan expired with
   nothing installed is removed. A fetch locks its own overlay or catalog only. A failure says git's first 300 characters, controls made spaces.
 - Skills fetched from elsewhere are not part of this: a page gets none, and an overlay that names one reports it as not delivered.

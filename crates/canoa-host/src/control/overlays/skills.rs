@@ -14,8 +14,8 @@ use coqui_aos::{
 use serde_json::{Map, Value, json};
 
 use super::{
-    Outcome, Overlays, PoisonError, bad, git_source, is_local, refuse_network_source, refused,
-    text_param, valid_skill_name, write_beside,
+    Outcome, Overlays, PoisonError, bad, git_source, is_local, refused, text_param,
+    valid_skill_name, write_beside,
 };
 use crate::profile::full_commit_id;
 
@@ -183,7 +183,6 @@ impl Overlays {
             git_source(params)?
         };
         let (repo, reference, path, _spec) = named;
-        refuse_network_source(&repo)?;
         if is_local(&repo) && !local(&repo) {
             return Err(refused(
                 "a source on this computer must be in a folder this key may browse",
