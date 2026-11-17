@@ -519,48 +519,28 @@ fn a_key_names_a_source_on_this_computer_only_under_a_working_root_and_with_the_
     let blind = key("sha256:bb", &BOTH);
     let denied = check(&s, &blind, "mine2", &source(&inside, ""));
     assert_eq!(denied["error"]["code"], REFUSED, "{denied}");
-    // A network share, however it is written, is refused by its text.
-    for repo in [
-        "file:////attacker/share/x",
-        "file://///attacker/share",
-        "//attacker/share",
-        "\\\\attacker\\share",
-    ] {
+    // A network share is a place on this computer like any other: a key reaches it only under a working root, and none has one.
+    for repo in ["file:////attacker/share/x", "file://///attacker/share"] {
         let denied = check(
             &s,
             &who,
             "unc",
             &json!({"repo": repo, "ref": "main", "path": ""}),
         );
-        assert_eq!(denied["error"]["code"], BAD_PARAMS, "{repo}: {denied}");
-        // The file:// forms reach the host's own text check; the bare ones are refused earlier, as no git source.
+        assert_eq!(denied["error"]["code"], REFUSED, "{repo}: {denied}");
         assert!(
-            repo.starts_with("file:") || denied["error"].is_object(),
-            "{denied}"
-        );
-        assert!(
-            !repo.starts_with("file:")
-                || denied["error"]["message"]
-                    .as_str()
-                    .is_some_and(|m| m.contains("network")),
+            denied["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("must be in a folder")),
             "{repo}: {denied}"
         );
-    }
-    // A catalog is fetched with the same refusal, before anything is opened.
-    for repo in ["file:////attacker/share/x", "file://///attacker/share"] {
         let denied = ask(
             &s.control,
             &who,
             "catalog/fetch",
             json!({"label": "unc", "repo": repo, "ref": "main", "path": ""}),
         );
-        assert_eq!(denied["error"]["code"], BAD_PARAMS, "{repo}: {denied}");
-        assert!(
-            denied["error"]["message"]
-                .as_str()
-                .is_some_and(|m| m.contains("network")),
-            "{repo}: {denied}"
-        );
+        assert_eq!(denied["error"]["code"], REFUSED, "{repo}: {denied}");
     }
     // A folder that is no repository is no source, though a sibling `<folder>.git` would be found by git beside it.
     git(&home, &["init", "--quiet", "--bare", "work.git"]);
@@ -579,6 +559,17 @@ fn a_key_names_a_source_on_this_computer_only_under_a_working_root_and_with_the_
     // The person running the host names any.
     let owner = check(&s, &Caller::Owner, "private", &source(&outside, ""));
     assert!(owner["result"]["token"].is_string(), "{owner}");
+    // The person running the host names a share as the file explorer opens one: here this machine's administrative share.
+    #[cfg(windows)]
+    {
+        let text = outside.to_string_lossy().into_owned();
+        let (drive, rest) = text.split_at(2);
+        let shared = PathBuf::from(format!(r"\\localhost\{}${rest}", &drive[..1]));
+        if shared.is_dir() {
+            let owner = check(&s, &Caller::Owner, "shared", &source(&shared, ""));
+            assert!(owner["result"]["token"].is_string(), "{owner}");
+        }
+    }
     let _ = fs::remove_dir_all(tmp);
     let _ = fs::remove_dir_all(s.tmp);
 }
@@ -868,5 +859,256 @@ fn a_batch_of_entries_is_read_here_and_one_that_cannot_be_read_is_noted_against_
     let key = key("k", &[Grant::OverlayRead]);
     let refused = ask(&s.control, &key, "store/read_ahead", json!({"entries": []}));
     assert_eq!(refused["error"]["code"], DENIED);
+    let _ = fs::remove_dir_all(s.tmp);
+}
+
+/// `git mktree` over `lines`, which git's own index would refuse for a name like `.git`: the tree's id.
+fn mktree(repo: &Path, lines: &str) -> String {
+    piped(repo, &["mktree"], lines)
+}
+
+fn hash_blob(repo: &Path, text: &str) -> String {
+    piped(repo, &["hash-object", "-w", "--stdin"], text)
+}
+
+fn piped(repo: &Path, args: &[&str], input: &str) -> String {
+    use std::io::Write;
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("git runs");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(input.as_bytes())
+        .expect("written");
+    let out = child.wait_with_output().expect("git ends");
+    assert!(out.status.success(), "git {args:?} failed");
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// The tree of `files` (`a/b` nests), written to `repo`'s objects without a checkout or the index's name rules.
+fn crafted_tree(repo: &Path, files: &[(&str, &str)]) -> String {
+    let mut lines = String::new();
+    let mut seen: Vec<&str> = Vec::new();
+    for (path, text) in files {
+        match path.split_once('/') {
+            None => {
+                let blob = hash_blob(repo, text);
+                lines.push_str(&format!("100644 blob {blob}\t{path}\n"));
+            }
+            Some((head, _)) if !seen.contains(&head) => {
+                seen.push(head);
+                let below: Vec<(&str, &str)> = files
+                    .iter()
+                    .filter_map(|(p, t)| {
+                        p.strip_prefix(head)
+                            .and_then(|rest| rest.strip_prefix('/'))
+                            .map(|rest| (rest, *t))
+                    })
+                    .collect();
+                let id = crafted_tree(repo, &below);
+                lines.push_str(&format!("040000 tree {id}\t{head}\n"));
+            }
+            Some(_) => {}
+        }
+    }
+    mktree(repo, &lines)
+}
+
+/// A bare repository whose `main` is the commit of `tree`.
+fn commit_tree_on_main(repo: &Path, tree: &str) {
+    let commit = git(repo, &["commit-tree", tree, "-m", "crafted"]);
+    git(repo, &["update-ref", "refs/heads/main", &commit]);
+}
+
+fn bare_source(s: &Setup, name: &str) -> PathBuf {
+    let dir = s.tmp.join(name);
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("dir");
+    git(&dir, &["init", "--quiet", "--bare", "-b", "main"]);
+    dir
+}
+
+#[test]
+fn a_hostile_name_refuses_the_whole_overlay() {
+    let s = setup(None, OverlayLimits::default());
+    let cases: [(&str, &[(&str, &str)]); 7] = [
+        (
+            "a .git directory in another case, deeper",
+            &[("skills/.GIT/config", "x")],
+        ),
+        (
+            "the short name Windows gives .git",
+            &[("git~1/config", "x")],
+        ),
+        (
+            "two names that differ only in case",
+            &[("CONTEXT.md", "benign"), ("context.md", "evil")],
+        ),
+        (
+            "two directories that differ only in case",
+            &[("Kb/a.md", "benign"), ("kb/b.md", "evil")],
+        ),
+        (
+            "a short name Windows could give another file",
+            &[("1234567890.md", "benign"), ("123456~1.MD", "evil")],
+        ),
+        ("a character Windows refuses in a name", &[("a|b.md", "x")]),
+        ("a wildcard Windows refuses in a name", &[("what?.md", "x")]),
+    ];
+    for (what, files) in cases {
+        let dir = bare_source(&s, "hostile");
+        let mut all = vec![("overlay.cfg", "")];
+        all.extend_from_slice(files);
+        let tree = crafted_tree(&dir, &all);
+        commit_tree_on_main(&dir, &tree);
+        let answer = check(&s, &Caller::Owner, "hostile", &source(&dir, ""));
+        assert_eq!(answer["error"]["code"], REFUSED, "{what}: {answer}");
+        assert!(!s.overlays.join("hostile").exists(), "{what}");
+    }
+    let _ = fs::remove_dir_all(s.tmp);
+}
+
+#[test]
+fn a_git_directory_and_every_excluded_name_is_no_part_of_an_overlay() {
+    let s = setup(None, OverlayLimits::default());
+    let dir = bare_source(&s, "crafted");
+    let tree = crafted_tree(
+        &dir,
+        &[
+            ("overlay.cfg", ""),
+            (".git/config", "[core]\n\tfsmonitor = \"touch pwned #\"\n"),
+            (".git/HEAD", "ref: refs/heads/x\n"),
+            ("lib/__pycache__/m.cpython-312.pyc", "x"),
+            ("lib/node_modules/p/index.js", "x"),
+        ],
+    );
+    commit_tree_on_main(&dir, &tree);
+    let checked = check(&s, &Caller::Owner, "o", &source(&dir, ""));
+    let result = &checked["result"];
+    let files: Vec<&String> = result["files"].as_object().expect("files").keys().collect();
+    assert_eq!(files, ["overlay.cfg"], "{checked}");
+    let mut skipped: Vec<&str> = result["skipped"]
+        .as_array()
+        .expect("skipped")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    skipped.sort_unstable();
+    assert_eq!(
+        skipped,
+        [
+            ".git/HEAD",
+            ".git/config",
+            "lib/__pycache__/m.cpython-312.pyc",
+            "lib/node_modules/p/index.js"
+        ],
+        "{checked}"
+    );
+    let applied = ask(
+        &s.control,
+        &Caller::Owner,
+        "overlay/apply",
+        json!({"token": result["token"], "catalog": "mine"}),
+    );
+    assert!(applied["result"].is_object(), "{applied}");
+    assert!(!s.overlays.join("o/.git").exists());
+    assert!(!s.overlays.join("o/lib").exists());
+    let _ = fs::remove_dir_all(s.tmp);
+}
+
+/// 10^depth leaves as `depth` levels of one repeated subtree, so the repository holds a few objects.
+fn bomb_tree(repo: &Path, depth: usize) -> String {
+    let mut level = mktree(repo, &format!("100644 blob {}\tf\n", hash_blob(repo, "x")));
+    for _ in 0..depth {
+        let lines: String = (0..10)
+            .map(|i| format!("040000 tree {level}\td{i}\n"))
+            .collect();
+        level = mktree(repo, &lines);
+    }
+    level
+}
+
+#[test]
+fn a_tree_of_a_million_paths_is_refused_as_soon_as_it_passes_the_limit() {
+    let s = setup(None, OverlayLimits::default());
+    // 10^5 paths are read whole and hit the entry limit; 10^6 are cut off by what git may print.
+    for (hidden, depth) in [(false, 5), (true, 5), (false, 6)] {
+        let dir = bare_source(&s, "bomb");
+        let bomb = bomb_tree(&dir, depth);
+        // Counted as files, or under an excluded name: either way past the entry limit.
+        let name = if hidden { "node_modules" } else { "bomb" };
+        let root = mktree(
+            &dir,
+            &format!(
+                "100644 blob {}\toverlay.cfg\n040000 tree {bomb}\t{name}\n",
+                hash_blob(&dir, "")
+            ),
+        );
+        commit_tree_on_main(&dir, &root);
+        let started = std::time::Instant::now();
+        let answer = check(&s, &Caller::Owner, "bomb", &source(&dir, ""));
+        assert_eq!(answer["error"]["code"], REFUSED, "{name}: {answer}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(60),
+            "{name}: took {:?}",
+            started.elapsed()
+        );
+        assert!(!s.overlays.join("bomb").exists());
+    }
+    let _ = fs::remove_dir_all(s.tmp);
+}
+
+#[test]
+fn a_transport_a_source_may_not_name_is_never_run() {
+    let s = setup(None, OverlayLimits::default());
+    let marker = s.tmp.join("ran");
+    let command = format!(
+        "ext::sh -c touch% {}",
+        marker.to_string_lossy().replace('\\', "/")
+    );
+    let answer = check(
+        &s,
+        &Caller::Owner,
+        "ext",
+        &json!({"repo": command, "ref": "main", "path": ""}),
+    );
+    assert!(answer["error"].is_object(), "{answer}");
+    assert!(!marker.exists(), "the source's own command ran");
+    let _ = fs::remove_dir_all(s.tmp);
+}
+
+#[test]
+fn a_commit_id_pins_that_commit_whatever_branch_carries_its_name_and_a_short_id_names_none() {
+    let s = setup(None, OverlayLimits::default());
+    let up = repo(&s.tmp, "up", &[("overlay.cfg", "name = \"pinned\"\n")]);
+    let pinned = git(&up, &["rev-parse", "HEAD"]);
+    change(&up, &[("overlay.cfg", "name = \"other\"\n")], "second");
+    git(&up, &["branch", &pinned, "main"]);
+    let at = |reference: &str| {
+        ask(
+            &s.control,
+            &Caller::Owner,
+            "overlay/check",
+            plus(
+                json!({"name": "o"}),
+                json!({"repo": source(&up, "")["repo"], "ref": reference, "path": ""}),
+            ),
+        )
+    };
+    let answer = at(&pinned);
+    assert_eq!(answer["result"]["commit"], pinned, "{answer}");
+    assert_eq!(
+        answer["result"]["manifest"], "name = \"pinned\"\n",
+        "{answer}"
+    );
+    let short = at(&pinned[..7]);
+    assert!(short["error"].is_object(), "{short}");
     let _ = fs::remove_dir_all(s.tmp);
 }
