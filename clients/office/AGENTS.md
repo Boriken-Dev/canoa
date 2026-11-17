@@ -16,9 +16,16 @@ serves them under `/office/` when `[host.web] office = true`. [`README.md`](READ
   `office.rs` (`JS_ORIGIN`); a page that loads it from another address fails under the policy.
 - `render.mjs` keeps one add-in id per manifest kind (`IDS`): changing one makes Office treat the add-in as a new one.
 - Manifest comments must not hold two hyphens in a row (XML); the render tests check it.
+- `sideload.ps1` writes only the one value under `HKCU\Software\Microsoft\Office\16.0\WEF\Developer`; its tests pass `-Key` a
+  scratch key under `HKCU:\Software\CanoaTest\` and remove it, and nothing in the repository runs the script against the real key.
+- The page on the person's own computer is accepted by `[host.web] office_local` (`POST /office/admit`, see
+  `crates/canoa-host/AGENTS.md`); `taskpane.js` watches a host whose `/canoa.json` names `admit` and says when it stops answering, and `app/lib/served/local_admission.dart`
+  is the app's side of the request.
 
 ```sh
 cd clients/office && npm test          # node --test, no dependencies
 cargo test -p canoa-host --lib -- web:: office     # the routes' policies
 cargo test -p canoa-host --features portal --lib -- portal::tests::office     # the portal's side (Unix only)
+cargo test -p canoa-host --test web                # a real host: HTTPS, and the page's key accepted with no pairing
+CANOA_E2E_BROWSER=<Edge> CANOA_E2E_HOST=<canoa> CANOA_E2E_AGENT=<stdio_agent> CANOA_E2E_WEB=<flutter build web --csp output> node e2e/local.mjs
 ```

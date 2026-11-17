@@ -84,3 +84,13 @@ test('no comment holds two hyphens, which XML forbids there', () => {
     }
   }
 });
+
+test('a manifest for the Canoa on this computer names the loopback origin with its port, for Word and Excel only', () => {
+  const xml = render('documents', { origin: 'https://localhost:7800', hosts: ['Document', 'Workbook'] });
+  assert.ok(xml.includes('<SourceLocation DefaultValue="https://localhost:7800/office/taskpane.html"/>'));
+  assert.ok(xml.includes('<AppDomain>https://localhost:7800</AppDomain>'));
+  assert.ok(xml.includes('<Host Name="Document"/>') && xml.includes('<Host Name="Workbook"/>'));
+  assert.ok(!xml.includes('Presentation'));
+  assert.equal(checkOrigin('https://localhost:7800/'), 'https://localhost:7800');
+  assert.throws(() => checkOrigin('http://localhost:7800'), /https/);
+});

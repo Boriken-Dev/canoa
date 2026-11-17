@@ -126,6 +126,48 @@ function documentRelation(app) {
 
 let refresh = async () => {};
 
+/** How often a pane on the host's own computer asks whether the host still answers. */
+const WATCH_MS = 5000;
+
+/** What this host says about itself at `/canoa.json`, or null when it does not answer. */
+async function hostIndex() {
+  try {
+    const response = await fetch('/canoa.json', { cache: 'no-store' });
+    return response.ok ? await response.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether the host offers to accept this page's key itself, which it does only to a page on its own computer. */
+let onThisComputer = false;
+const indexAtLoad = hostIndex().then((index) => {
+  onThisComputer = typeof index?.admit === 'string';
+  return index;
+});
+
+/**
+ * On the host's own computer there is nothing to sign in to and nothing to pair: the pane says when that Canoa stops answering
+ * and loads the chat again when it does. A page cannot start a program, so it says what starts one.
+ */
+function watchHost() {
+  let down = false;
+  setInterval(async () => {
+    const answered = (await hostIndex()) !== null;
+    if (!answered && !down) {
+      down = true;
+      say('Canoa is not running on this computer. Start the Canoa app, or run "canoa serve --web": this pane reconnects.');
+    } else if (answered && down) {
+      down = false;
+      loaded = false;
+      shown = undefined;
+      listening = false;
+      await checkGate();
+      if (gate !== 'signed-out') await refresh();
+    }
+  }, WATCH_MS);
+}
+
 /** Hands the dialog's string to the host, which opens this frame's session. Whether it did. */
 async function claim(string) {
   try {
@@ -178,7 +220,9 @@ if (typeof Office === 'undefined') {
   say('Office.js did not load');
 } else {
   Office.onReady(async (info) => {
+    await indexAtLoad;
     signIn.addEventListener('click', openSignIn);
+    if (onThisComputer) watchHost();
     if (info.host === Office.HostType.Outlook) {
       refresh = async () => show(await mailRelation());
       // A pinned pane stays open while the person moves between messages; the item is already the new one when this runs.
