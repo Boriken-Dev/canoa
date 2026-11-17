@@ -134,7 +134,7 @@ void main() {
           by: 'by Ana',
           summary: 'A dark theme.',
           installed: installs.contains('dusk'),
-          install: () async => installs.add('dusk'),
+          install: (_) async => installs.add('dusk'),
         ),
         const ExtensionStoreItem(catalog: 'other', name: 'dawn', by: 'by Bo', summary: 'A light theme.'),
       ],

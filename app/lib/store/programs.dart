@@ -442,6 +442,7 @@ class ProgramStores extends ChangeNotifier {
     this.latestLife = const Duration(hours: 1),
     this.afterChange,
     this.kind,
+    this.type,
   }) : _control = control,
        _open = open,
        _now = now ?? DateTime.now;
@@ -459,6 +460,9 @@ class ProgramStores extends ChangeNotifier {
 
   /// Which stores the host lists: `runtimes` for the Runtimes type; none lists the agents' programs.
   final String? kind;
+
+  /// With kind `extension`, the type an extension adds whose stores are listed.
+  final String? type;
 
   final _status = <String, ProgramStatus>{};
   List<String> _order = const [];
@@ -511,7 +515,7 @@ class ProgramStores extends ChangeNotifier {
     notifyListeners();
     try {
       final client = await _control();
-      final listed = _map(await client.call('store/list', {'kind': ?kind}));
+      final listed = _map(await client.call('store/list', {'kind': ?kind, 'type': ?type}));
       final infos = [for (final each in listed['stores'] is List ? listed['stores'] as List : const []) ?ProgramStoreInfo.parse(each)];
       _order = [for (final each in infos) each.provider];
       _listed = true;

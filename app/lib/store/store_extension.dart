@@ -17,14 +17,21 @@ final class ExtensionStoreItem {
   final List<String> tags;
   final bool installed;
 
-  /// What + does; null leaves the tile without one that works.
-  final Future<void> Function()? install;
+  /// What + does, given the context a confirmation dialog is shown in; null leaves the tile without one that works.
+  final Future<void> Function(BuildContext context)? install;
 }
 
 /// A store type an extension adds, listed in the Store's index after the built-in ones. Its page is the same as theirs: a banner,
 /// "Top …" and a tile for each item with a +, and a filter for the catalogs the items come from.
 final class ExtensionStoreType {
-  const ExtensionStoreType({required this.id, required this.label, required this.items, this.icon = Icons.extension_outlined});
+  const ExtensionStoreType({
+    required this.id,
+    required this.label,
+    required this.items,
+    this.icon = Icons.extension_outlined,
+    this.changes,
+    this.load,
+  });
 
   /// A word of letters and digits that no built-in type uses; the index keeps its choice by it.
   final String id;
@@ -35,6 +42,12 @@ final class ExtensionStoreType {
 
   /// The items now, asked when the page is drawn.
   final List<ExtensionStoreItem> Function() items;
+
+  /// Tells when [items] changed, so the page and the index's counts are drawn again.
+  final Listenable? changes;
+
+  /// Asks where the items come from; run when the page opens.
+  final Future<void> Function()? load;
 }
 
 /// The page of a store type an extension adds.
@@ -55,8 +68,20 @@ class _ExtensionBodyState extends State<ExtensionBody> with AutomaticKeepAliveCl
   bool get wantKeepAlive => true;
 
   @override
+  void initState() {
+    super.initState();
+    final load = widget.type.load;
+    if (load != null) unawaited(load());
+  }
+
+  @override
   Widget build(BuildContext context) {
     super.build(context);
+    final changes = widget.type.changes;
+    return changes == null ? _page(context) : ListenableBuilder(listenable: changes, builder: (context, _) => _page(context));
+  }
+
+  Widget _page(BuildContext context) {
     final view = widget.view;
     final type = widget.type;
     final all = type.items();
@@ -133,7 +158,7 @@ class _ExtensionBodyState extends State<ExtensionBody> with AutomaticKeepAliveCl
     final key = '${item.catalog}/${item.name}';
     setState(() => _installing.add(key));
     try {
-      await item.install!();
+      await item.install!(context);
     } finally {
       if (mounted) setState(() => _installing.remove(key));
     }

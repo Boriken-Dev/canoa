@@ -68,7 +68,11 @@ final class FakeStore {
     this.plan,
     this.latestFails,
     this.runtime = false,
+    this.extensionType,
   });
+
+  /// The id of the type an extension adds that the store belongs to, which `store/list` gives only for that type.
+  final String? extensionType;
 
   final String provider, title;
 
@@ -90,6 +94,9 @@ final class FakeStoreHost {
   FakeStoreHost(this.stores);
 
   final List<FakeStore> stores;
+
+  /// The types `store/extensions` answers with.
+  List<Map<String, Object?>> extensionTypes = const [];
 
   /// Every line the app sent on any link, whole, to look for what must never be in one.
   final wire = <String>[];
@@ -139,10 +146,16 @@ final class FakeStoreHost {
     calls.add(key);
     params.putIfAbsent(method, () => []).add(given);
     if (failures[method] ?? failures[key] case final failure?) throw failure;
+    if (method == 'store/extensions') return {'types': extensionTypes};
     if (method == 'store/list') {
+      final extension = given['kind'] == 'extension';
       return {
         'stores': [
-          for (final each in stores.where((each) => each.runtime == (given['kind'] == 'runtimes')))
+          for (final each in stores.where(
+            (each) => extension
+                ? each.extensionType == given['type']
+                : each.extensionType == null && each.runtime == (given['kind'] == 'runtimes'),
+          ))
             {
               'provider': each.provider,
               'program': each.provider.replaceAll('_store', ''),

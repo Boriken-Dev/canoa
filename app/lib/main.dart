@@ -118,6 +118,8 @@ import 'store/store_index_view.dart';
 import 'store/store_section.dart';
 import 'store/store_selection.dart';
 import 'store/programs.dart';
+import 'store/store_extension.dart' show ExtensionStoreType;
+import 'store/store_extensions.dart';
 import 'store/store_index.dart';
 import 'welcome/welcome_view.dart';
 import 'drafts/draft_backend.dart';
@@ -767,6 +769,7 @@ class _CanoaAppState extends State<CanoaApp> {
     onSave: _saveLoadout,
     agents: _profileAgents,
     programs: _programs,
+    extensionTypes: _storeTypes(),
     // The host reads registries and looks programs up; the page never does, and a desktop whose host is down reads them itself.
     fetchRegistry: _control == null
         ? (kIsWeb ? null : fetchRegistry)
@@ -774,6 +777,14 @@ class _CanoaAppState extends State<CanoaApp> {
     findProgram: _control == null ? findProgram : controlFindProgram(_control, direct: kIsWeb ? null : findProgram, hostUp: () => _hostUp),
     index: ControlStoreIndex.over(_control)?.catalogs,
   );
+
+  /// The store types after the built-in ones: Runtimes and what extensions add, where the host grants installing programs.
+  List<ExtensionStoreType> _storeTypes() {
+    final held = _programs == null ? null : _extensionsHeld;
+    if (held == null) return const [];
+    unawaited(held.ensure());
+    return held.types;
+  }
 
   /// Saves what Loadout changed. The host reads the profile again when each session starts, so nothing is restarted and no open
   /// session ends: the change reaches the next one.
@@ -1336,6 +1347,15 @@ class _CanoaAppState extends State<CanoaApp> {
       ? null
       : (ProgramStores(control: () => _control.ready(wait: false), open: _control.open, afterChange: _hostReadsPrograms)
           ..addListener(_programsChanged));
+
+  /// Runtimes and the types extensions add, which the host lists and installs from; asked only once the Store is shown.
+  late final StoreExtensions? _extensionsHeld = _control == null
+      ? null
+      : (StoreExtensions(control: () => _control.ready(wait: false), open: _control.open)..addListener(_extensionsChanged));
+
+  void _extensionsChanged() {
+    if (mounted) setState(() {});
+  }
 
   /// The host reads which program a source runs when it starts: after one was installed, updated or removed it starts again, so the
   /// source runs the new one. The person is asked first when sessions are open on it.

@@ -151,15 +151,28 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
       viewOf(id);
     }
     widget.programs?.addListener(_changed);
+    _typeChanges = _merged(widget.extensionTypes)?..addListener(_changed);
     selection?.addListener(_selectionChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _publish();
     });
   }
 
+  /// Tells when what any extension type lists changed.
+  Listenable? _typeChanges;
+
+  static Listenable? _merged(List<ExtensionStoreType> types) {
+    final each = [for (final type in types) ?type.changes];
+    return each.isEmpty ? null : Listenable.merge(each);
+  }
+
   @override
   void didUpdateWidget(StoreSection oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.extensionTypes != widget.extensionTypes) {
+      _typeChanges?.removeListener(_changed);
+      _typeChanges = _merged(widget.extensionTypes)?..addListener(_changed);
+    }
     if (oldWidget.selection != widget.selection) {
       oldWidget.selection?.removeListener(_selectionChanged);
       widget.selection?.addListener(_selectionChanged);
@@ -228,6 +241,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
   @override
   void dispose() {
     widget.programs?.removeListener(_changed);
+    _typeChanges?.removeListener(_changed);
     selection?.removeListener(_selectionChanged);
     controller
       ..removeListener(_changed)
