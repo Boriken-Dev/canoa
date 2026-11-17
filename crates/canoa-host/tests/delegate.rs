@@ -2038,3 +2038,229 @@ fn what_the_person_sets_narrows_the_targets_and_sets_a_default_and_a_limit() {
     drop(link);
     host.stop();
 }
+
+/// `_canoa/delegate/context` as the person's client asks it.
+fn preview(convo: &mut Convo<'_>, session: &str, kind: &str) -> Result<Value, Value> {
+    convo.request(
+        "_canoa/delegate/context",
+        json!({"sessionId": session, "kind": kind}),
+        &|_| None,
+    )
+}
+
+#[test]
+fn a_task_is_handed_the_conversation_only_as_the_person_allowed_or_was_shown() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let config = format!(
+        "{}{}",
+        agent("parent", "default,manual", ""),
+        agent("child", "default,manual", "")
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+    convo.prompt(&session, "Chosen");
+
+    // Nothing is handed on by the agent's own call until the person lets the session do it, and the refusal names the kind.
+    let asked = json!({"source": "child", "task": "Verbatim now", "context": "messages"});
+    let refused = called(&mut convo, &session, "delegate_task", &asked).expect_err("not allowed");
+    assert!(
+        refused.contains("messages") && refused.contains("setup"),
+        "{refused}"
+    );
+
+    // The person is shown the text, and a task they start with that preview is given exactly it.
+    let shown = preview(&mut convo, &session, "messages").expect("a preview");
+    let text = shown["text"].as_str().expect("its text").to_owned();
+    assert!(text.contains("[person]\nChosen"), "{text}");
+    assert!(text.contains("[agent]\nmodel=default effort=low"), "{text}");
+    // The refused call above is a turn of the conversation too.
+    assert_eq!(shown["items"].as_array().map(Vec::len), Some(4), "{shown}");
+    let started = convo
+        .request(
+            "_canoa/delegate/start",
+            json!({"sessionId": session, "requestId": "c-1", "source": "child", "task": "Verbatim now",
+                "context": "messages", "contextId": shown["contextId"]}),
+            &|_| None,
+        )
+        .expect("started");
+    let task = started["taskId"].as_str().expect("an id").to_owned();
+    let status = convo.status(&session, &task, 20_000);
+    assert_eq!(status["state"], "completed", "{status}");
+    let received = status["result"].as_str().expect("what the child got");
+    assert!(received.contains("text=Verbatim now"), "{received}");
+    assert!(received.contains(&text), "{received}");
+
+    // A preview that was never shown is no preview, and a kind the host does not build is refused by name.
+    let unknown = convo
+        .request(
+            "_canoa/delegate/start",
+            json!({"sessionId": session, "source": "child", "task": "x", "context": "messages", "contextId": "nope"}),
+            &|_| None,
+        )
+        .expect_err("no such preview");
+    assert!(
+        unknown["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("preview"),
+        "{unknown}"
+    );
+    let history = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"source": "child", "task": "x", "context": "history"}),
+    )
+    .expect_err("not a kind");
+    assert!(history.contains("history"), "{history}");
+
+    // Once the person lets the session, its own call takes the turns so far, and the setup reads back as they set it.
+    convo
+        .request(
+            "_canoa/delegate/setup",
+            json!({"sessionId": session, "context": ["messages"]}),
+            &|_| None,
+        )
+        .expect("set");
+    let listed = convo
+        .request(
+            "_canoa/delegate/targets",
+            json!({"sessionId": session}),
+            &|_| None,
+        )
+        .expect("targets");
+    assert_eq!(listed["context"], json!(["messages"]), "{listed}");
+    assert!(
+        listed["offered"]
+            .as_array()
+            .is_some_and(|offered| offered.iter().any(|each| each["source"] == "child")),
+        "{listed}"
+    );
+    let handed = called(&mut convo, &session, "delegate_task", &asked).expect("allowed");
+    let task = handed["taskId"].as_str().expect("an id").to_owned();
+    let status = convo.status(&session, &task, 20_000);
+    assert_eq!(status["state"], "completed", "{status}");
+    assert!(
+        status["result"]
+            .as_str()
+            .is_some_and(|result| result.contains("[person]\nChosen")),
+        "{status}"
+    );
+    // The kind the person did not allow stays refused.
+    let files = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"source": "child", "task": "Verbatim now", "context": "files"}),
+    )
+    .expect_err("files are not allowed");
+    assert!(files.contains("files"), "{files}");
+    drop(link);
+    host.stop();
+}
+
+#[test]
+fn the_files_the_agents_tools_touched_are_handed_on_from_inside_its_folder_only() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    std::fs::create_dir_all(work.join("src")).expect("a folder");
+    std::fs::write(work.join("src").join("calc.js"), "return a - b;").expect("a file");
+    let config = format!(
+        "{}{}",
+        agent("parent", "default,manual", ""),
+        agent("child", "default,manual", "")
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+
+    let none = preview(&mut convo, &session, "files").expect_err("nothing touched yet");
+    assert!(
+        none["message"].as_str().unwrap_or("").contains("no file"),
+        "{none}"
+    );
+    convo.prompt_answering(&session, "The tests fails", &|_| {
+        Some(json!({"outcome": {"outcome": "selected", "optionId": "yes"}}))
+    });
+    let shown = preview(&mut convo, &session, "files").expect("a preview");
+    let text = shown["text"].as_str().expect("its text").to_owned();
+    assert!(text.contains("return a - b;"), "{text}");
+    let first = shown["items"][0]["name"].as_str().expect("a name");
+    assert!(first.ends_with("calc.js"), "{shown}");
+    let started = convo
+        .request(
+            "_canoa/delegate/start",
+            json!({"sessionId": session, "source": "child", "task": "Verbatim now",
+                "context": "files", "contextId": shown["contextId"]}),
+            &|_| None,
+        )
+        .expect("started");
+    let task = started["taskId"].as_str().expect("an id").to_owned();
+    let status = convo.status(&session, &task, 20_000);
+    assert_eq!(status["state"], "completed", "{status}");
+    assert!(
+        status["result"]
+            .as_str()
+            .is_some_and(|result| result.contains("return a - b;")),
+        "{status}"
+    );
+    drop(link);
+    host.stop();
+}
+
+#[test]
+fn a_profile_the_entry_offers_is_taken_and_one_it_does_not_is_refused_by_name() {
+    let dir = Scratch::new();
+    let work = directory(&dir.0, "work");
+    let config = format!(
+        "{}[host.agents.child]\nprogram = {}\nargs = [\"--scripted\", \"--mcp-http\", \"--modes=default,manual\"]\nlisten = \"127.0.0.1:0\"\nprofiles = [\"main\"]\n[host.profiles.main]\n",
+        agent("parent", "default,manual", ""),
+        quoted(&example("stdio_agent", false).to_string_lossy()),
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(true, &work);
+
+    let listed = called(&mut convo, &session, "delegate_targets", &json!({})).expect("targets");
+    let child = listed["targets"]
+        .as_array()
+        .and_then(|targets| targets.iter().find(|target| target["source"] == "child"))
+        .expect("child");
+    assert_eq!(child["profiles"][0]["name"], "main", "{listed}");
+    let handed = called(
+        &mut convo,
+        &session,
+        "delegate_task",
+        &json!({"source": "child", "task": "Chosen", "profile": "main"}),
+    )
+    .expect("a task");
+    let task = handed["taskId"].as_str().expect("an id").to_owned();
+    let status = convo.status(&session, &task, 20_000);
+    assert_eq!(status["state"], "completed", "{status}");
+    for (key, named) in [
+        ("profile", "no-such-profile"),
+        ("loadout", "no-such-loadout"),
+    ] {
+        let mut asked = json!({"source": "child", "task": "Chosen", "profile": "main"});
+        asked[key] = json!(named);
+        match called(&mut convo, &session, "delegate_task", &asked) {
+            Err(refusal) => assert!(refusal.contains(named), "{refusal}"),
+            Ok(handed) => {
+                let task = handed["taskId"].as_str().expect("an id").to_owned();
+                let status = convo.status(&session, &task, 20_000);
+                assert_eq!(status["state"], "rejected", "{status}");
+                assert!(
+                    status["message"].as_str().unwrap_or("").contains(named),
+                    "{status}"
+                );
+            }
+        }
+    }
+    drop(link);
+    host.stop();
+}

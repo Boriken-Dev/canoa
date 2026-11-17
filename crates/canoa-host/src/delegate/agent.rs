@@ -21,6 +21,7 @@ use serde_json::{Map, Value, json};
 
 use super::child::{self, Child, Job};
 use super::choice::Choice;
+use super::context;
 use super::{Engine, Session, Who, lock, privilege};
 
 /// The longest title a task is shown by, in characters.
@@ -56,19 +57,26 @@ impl DelegationAgent {
     /// The sources `session` may name: what its connection may use, narrowed by `[host.delegate] sources` and by what the person
     /// set for the session.
     pub(super) fn allowed(engine: &Engine, session: &Session) -> Vec<super::Source> {
-        let (Some(host), Some(conn)) = (engine.host(), session.conn()) else {
-            return Vec::new();
-        };
         let narrowed = lock(&session.setup).sources.clone();
-        privilege::sources(host.as_ref(), &engine.config, conn.principal())
+        Self::offered(engine, session)
             .into_iter()
-            // A key from another machine is shown only what it can run: a source with no working root has no place for its task.
-            .filter(|source| !session.is_remote() || !source.roots.is_empty())
             .filter(|source| {
                 narrowed
                     .as_ref()
                     .is_none_or(|names| names.contains(&source.name))
             })
+            .collect()
+    }
+
+    /// The sources `session`'s connection may use, before the person narrowed the session: what its setup can choose among.
+    pub(super) fn offered(engine: &Engine, session: &Session) -> Vec<super::Source> {
+        let (Some(host), Some(conn)) = (engine.host(), session.conn()) else {
+            return Vec::new();
+        };
+        privilege::sources(host.as_ref(), &engine.config, conn.principal())
+            .into_iter()
+            // A key from another machine is shown only what it can run: a source with no working root has no place for its task.
+            .filter(|source| !session.is_remote() || !source.roots.is_empty())
             .collect()
     }
 
@@ -240,6 +248,10 @@ impl DelegationAgent {
                     .map_err(|why| A2aError::new(ErrorKind::PermissionDenied, why))?,
             )
         };
+        let handed = context::attach(&engine, &session, &choice, to_remote || session.is_remote())?;
+        let text = handed
+            .as_ref()
+            .map_or_else(|| text.clone(), |handed| handed.with_task(&text));
         let title = title_of(
             request
                 .metadata
@@ -267,6 +279,9 @@ impl DelegationAgent {
             metadata.insert("remote".to_owned(), json!(true));
         }
         choice.record(&mut metadata);
+        if let Some(handed) = &handed {
+            metadata.insert("context".to_owned(), handed.describe(false));
+        }
         if session.is_remote() {
             tracing::info!(key = caller.peer, %source, "a task from another machine started");
         }

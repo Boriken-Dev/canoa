@@ -550,6 +550,8 @@ pub struct DelegateConfig {
     pub result_bytes: usize,
     /// `history_bytes`: the updates of a task the host keeps, oldest dropped first.
     pub history_bytes: usize,
+    /// `context_bytes`: the most of a conversation's turns, or of the files it touched, a task may be handed as its context.
+    pub context_bytes: usize,
 }
 
 impl DelegateConfig {
@@ -565,6 +567,8 @@ impl DelegateConfig {
     pub const DEFAULT_RESULT_BYTES: usize = 64 * 1024;
     /// The default of `history_bytes`.
     pub const DEFAULT_HISTORY_BYTES: usize = 1024 * 1024;
+    /// The default of `context_bytes`.
+    pub const DEFAULT_CONTEXT_BYTES: usize = 32 * 1024;
 }
 
 impl Default for DelegateConfig {
@@ -579,6 +583,7 @@ impl Default for DelegateConfig {
             task_bytes: Self::DEFAULT_TASK_BYTES,
             result_bytes: Self::DEFAULT_RESULT_BYTES,
             history_bytes: Self::DEFAULT_HISTORY_BYTES,
+            context_bytes: Self::DEFAULT_CONTEXT_BYTES,
         }
     }
 }
@@ -595,6 +600,7 @@ struct RawDelegate {
     task_bytes: Option<usize>,
     result_bytes: Option<usize>,
     history_bytes: Option<usize>,
+    context_bytes: Option<usize>,
 }
 
 impl RawDelegate {
@@ -628,6 +634,7 @@ impl RawDelegate {
             task_bytes: self.task_bytes.unwrap_or(defaults.task_bytes),
             result_bytes: self.result_bytes.unwrap_or(defaults.result_bytes),
             history_bytes: self.history_bytes.unwrap_or(defaults.history_bytes),
+            context_bytes: self.context_bytes.unwrap_or(defaults.context_bytes),
         })
     }
 }

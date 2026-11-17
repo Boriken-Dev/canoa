@@ -1916,6 +1916,22 @@ impl Serving {
                     Some(EntryKind::Harness { accounts, .. }) => accounts.clone(),
                     _ => Vec::new(),
                 },
+                profiles: match config.entry(&listening.name).map(|entry| &entry.kind) {
+                    Some(
+                        EntryKind::Agent { profiles, .. } | EntryKind::Harness { profiles, .. },
+                    ) => profiles
+                        .iter()
+                        .map(|name| {
+                            let loadouts = config
+                                .profiles
+                                .get(name)
+                                .map(|profile| profile.loadouts.keys().cloned().collect())
+                                .unwrap_or_default();
+                            (name.clone(), loadouts)
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                },
                 missing: listening.missing.clone(),
                 remote: None,
             })
@@ -1926,6 +1942,7 @@ impl Serving {
             harness: None,
             roots: Vec::new(),
             accounts: Vec::new(),
+            profiles: Vec::new(),
             missing: Vec::new(),
             remote: Some(delegate::Remote {
                 url: agent.url.clone(),

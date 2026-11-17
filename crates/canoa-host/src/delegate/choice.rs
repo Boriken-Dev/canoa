@@ -5,6 +5,7 @@
 use coqui_a2a::error::{A2aError, ErrorKind};
 use serde_json::{Map, Value};
 
+use super::context::Kind;
 use super::{Host, Principal, Source};
 
 /// The choices a request carries, as the host read them from its metadata.
@@ -17,6 +18,10 @@ pub(crate) struct Choice {
     pub(crate) loadout: Option<String>,
     /// Where an agent on another machine works, as that machine names it.
     pub(crate) workspace: Option<String>,
+    /// What the task is handed besides its text.
+    pub(crate) context: Kind,
+    /// The preview of that context the person was shown and the task is to be given exactly.
+    pub(crate) context_id: Option<String>,
 }
 
 fn invalid(what: impl Into<String>) -> A2aError {
@@ -24,12 +29,12 @@ fn invalid(what: impl Into<String>) -> A2aError {
 }
 
 impl Choice {
-    /// Reads the choices out of a request's metadata. `context` is read too: the task's text is the only context a task is
-    /// given, so any other is refused rather than quietly dropped.
+    /// Reads the choices out of a request's metadata. `context` is read too: a kind that is not one the host builds is refused
+    /// rather than quietly dropped.
     ///
     /// # Errors
     ///
-    /// A choice that is not text, or a `context` that is not `task`.
+    /// A choice that is not text, or a `context` that is not `task`, `messages` or `files`.
     pub(crate) fn read(metadata: Option<&Map<String, Value>>) -> Result<Self, A2aError> {
         let text = |key: &str| -> Result<Option<String>, A2aError> {
             match metadata.and_then(|metadata| metadata.get(key)) {
@@ -39,13 +44,14 @@ impl Choice {
                 Some(_) => Err(invalid(format!("{key} is text"))),
             }
         };
-        if let Some(context) = text("context")?
-            && context != "task"
-        {
-            return Err(invalid(format!(
-                "context {context:?} is not available: a task is given its text only (context \"task\")"
-            )));
-        }
+        let context = match text("context")? {
+            None => Kind::Task,
+            Some(name) => Kind::parse(&name).ok_or_else(|| {
+                invalid(format!(
+                    "context {name:?} is not one of task, messages and files"
+                ))
+            })?,
+        };
         Ok(Self {
             model: text("model")?,
             effort: text("effort")?,
@@ -53,6 +59,8 @@ impl Choice {
             profile: text("profile")?,
             loadout: text("loadout")?,
             workspace: text("workspace")?,
+            context,
+            context_id: text("contextId")?,
         })
     }
 
@@ -105,6 +113,37 @@ impl Choice {
                 source.name,
                 listed(&source.accounts)
             )));
+        }
+        let names: Vec<String> = source
+            .profiles
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        if let Some(profile) = &self.profile
+            && !names.contains(profile)
+        {
+            return Err(invalid(format!(
+                "profile {profile:?} is not one {} offers{}",
+                source.name,
+                listed(&names)
+            )));
+        }
+        if let Some(loadout) = &self.loadout {
+            // The loadouts are those of the profile named, or of the entry's first, which is the one a task with none runs as.
+            let held = match &self.profile {
+                Some(profile) => source.profiles.iter().find(|(name, _)| name == profile),
+                None => source.profiles.first(),
+            };
+            let offered = held
+                .map(|(_, loadouts)| loadouts.clone())
+                .unwrap_or_default();
+            if !offered.contains(loadout) {
+                return Err(invalid(format!(
+                    "loadout {loadout:?} is not one {} offers{}",
+                    source.name,
+                    listed(&offered)
+                )));
+            }
         }
         if self.model.is_none() && self.effort.is_none() {
             return Ok(());
@@ -185,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn choices_are_read_as_text_and_a_context_other_than_the_task_is_refused_by_name() {
+    fn choices_are_read_as_text_and_a_context_the_host_does_not_build_is_refused_by_name() {
         let read = Choice::read(Some(&metadata(
             &json!({"model": "fast", "effort": "high", "account": "work", "context": "task"}),
         )))
@@ -193,9 +232,12 @@ mod tests {
         assert_eq!(read.model.as_deref(), Some("fast"));
         assert!(read.names_a_run());
         assert!(!Choice::default().names_a_run());
+        let messages =
+            Choice::read(Some(&metadata(&json!({"context": "messages"})))).expect("read");
+        assert_eq!(messages.context, Kind::Messages);
         let refused =
-            Choice::read(Some(&metadata(&json!({"context": "messages"})))).expect_err("refused");
-        assert!(refused.message.contains("messages"), "{}", refused.message);
+            Choice::read(Some(&metadata(&json!({"context": "history"})))).expect_err("refused");
+        assert!(refused.message.contains("history"), "{}", refused.message);
         assert!(Choice::read(Some(&metadata(&json!({"model": 3})))).is_err());
         assert!(Choice::read(Some(&metadata(&json!({"model": " "})))).is_err());
     }

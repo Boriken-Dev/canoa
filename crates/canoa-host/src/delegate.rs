@@ -18,6 +18,7 @@ pub(crate) mod bridge;
 mod channel;
 mod child;
 mod choice;
+mod context;
 mod person;
 pub(crate) mod privilege;
 mod remote;
@@ -63,6 +64,8 @@ const DELEGATE_START: &str = "_canoa/delegate/start";
 const DELEGATE_TARGETS: &str = "_canoa/delegate/targets";
 /// The client's request to narrow what the session may delegate to, and to set its default and its limit.
 const DELEGATE_SETUP: &str = "_canoa/delegate/setup";
+/// The client's request for what handing its conversation or files on would give a task.
+const DELEGATE_CONTEXT: &str = "_canoa/delegate/context";
 /// Notifications of a task's updates the outbox holds before the host drops the next ones (the history keeps them).
 const MAX_QUEUED_UPDATES: usize = 1024;
 /// The name of the MCP server the host adds to a session.
@@ -95,6 +98,8 @@ pub(crate) struct Source {
     pub(crate) roots: Vec<PathBuf>,
     /// The `[host.accounts]` names its entry offers: the only accounts a task on it may name.
     pub(crate) accounts: Vec<String>,
+    /// The `[host.profiles]` its entry offers, each with the names of its loadouts: the only ones a task on it may name.
+    pub(crate) profiles: Vec<(String, Vec<String>)>,
     /// The programs it needs that were not found; it is not ready while any is missing.
     pub(crate) missing: Vec<String>,
     /// Where it runs, when it is another machine's agent.
@@ -533,6 +538,11 @@ pub(crate) struct Session {
     pub(crate) starting: Mutex<()>,
     /// What the person narrowed this session's delegation to.
     pub(crate) setup: Mutex<person::Setup>,
+    /// The turns and touched files of the session, as far as the host saw them go by.
+    pub(crate) record: Mutex<context::Record>,
+    /// What the person was shown to hand over, by the id the preview gave it, oldest first: the task they start with that id is
+    /// given exactly that.
+    pub(crate) prepared: Mutex<Vec<(String, context::Bundle)>>,
 }
 
 impl Session {
@@ -835,6 +845,7 @@ impl Conn {
                 Some(session) => match method.as_str() {
                     DELEGATE_START => person::start(&conn.engine, &session, &params),
                     DELEGATE_TARGETS => person::targets(&conn.engine, &session, &params),
+                    DELEGATE_CONTEXT => person::context(&conn.engine, &session, &params),
                     _ => person::setup(&session, &params),
                 },
             };
@@ -924,6 +935,15 @@ impl Conn {
                     self.remember(id, pending);
                 }
             }
+            ("session/prompt", _) => {
+                if let Some(session) = value
+                    .pointer("/params/sessionId")
+                    .and_then(Value::as_str)
+                    .and_then(|id| self.session(id))
+                {
+                    lock(&session.record).person(&context::prompt_text(&value["params"]));
+                }
+            }
             ("session/cancel", _) => {
                 if let Some(id) = value.pointer("/params/sessionId").and_then(Value::as_str)
                     && let Some(session) = self.session(id)
@@ -936,7 +956,7 @@ impl Conn {
                 self.client_request(&method, id, &value["params"]);
                 return None;
             }
-            (DELEGATE_START | DELEGATE_TARGETS | DELEGATE_SETUP, request) => {
+            (DELEGATE_START | DELEGATE_TARGETS | DELEGATE_SETUP | DELEGATE_CONTEXT, request) => {
                 let id = request.map(|_| value["id"].clone());
                 self.person_request(method, id, value["params"].take());
                 return None;
@@ -1051,11 +1071,24 @@ impl Conn {
         true
     }
 
+    /// Keeps what an update of the agent says for the context a task may be handed.
+    fn record_update(&self, params: &Value) {
+        let Some(session) = params
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .and_then(|id| self.session(id))
+        else {
+            return;
+        };
+        context::note_update(&mut lock(&session.record), &session.cwd, params);
+    }
+
     /// A message from the agent, before it goes to the client.
     pub(crate) fn agent_said(&self, message: &[u8]) {
         let marked =
             contains(message, b"current_mode_update") || contains(message, b"config_option_update");
-        if !marked && lock(&self.state).pending.is_empty() {
+        let recorded = contains(message, b"agent_message_chunk") || contains(message, b"tool_call");
+        if !marked && !recorded && lock(&self.state).pending.is_empty() {
             return;
         }
         let Ok(value) = serde_json::from_slice::<Value>(message) else {
@@ -1064,6 +1097,9 @@ impl Conn {
         if value.get("method").is_some() {
             if marked {
                 self.mode_notice(&value);
+            }
+            if recorded && value.get("method") == Some(&json!("session/update")) {
+                self.record_update(&value["params"]);
             }
             return;
         }
@@ -1319,6 +1355,8 @@ impl Engine {
                 submitted: Mutex::new(HashMap::new()),
                 starting: Mutex::new(()),
                 setup: Mutex::new(person::Setup::default()),
+                record: Mutex::new(context::Record::default()),
+                prepared: Mutex::new(Vec::new()),
             }
         })
     }
@@ -1378,6 +1416,11 @@ impl Delegation {
                 "history_bytes",
                 config.history_bytes,
                 defaults.history_bytes,
+            ),
+            (
+                "context_bytes",
+                config.context_bytes,
+                defaults.context_bytes,
             ),
         ] {
             if value != default {

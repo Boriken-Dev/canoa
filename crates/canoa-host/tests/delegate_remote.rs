@@ -852,3 +852,32 @@ fn a_task_for_the_far_host_needs_a_workspace_there_which_the_far_host_checks() {
     near.stop();
     far.host.stop();
 }
+
+#[test]
+fn what_stays_on_this_machine_is_never_handed_to_a_task_for_another() {
+    let (scratch, key) = scratch_with_identity();
+    let other = Identity::generate(method()).expect("a key");
+    let far = far(&key, &other, &[&key]);
+    let work = directory(&scratch.0, "work");
+    let near = near(scratch, &far, "sources = [\"far\"]");
+    let link = near.local.open("parent").expect("a link");
+    let mut convo = Convo::new(&link);
+    let session = convo.open(&work);
+    for kind in ["messages", "files"] {
+        let said = convo.prompt(
+            &session,
+            &format!(
+                "Call delegate_task {}",
+                json!({"source": "far", "task": "hi", "workspace": far.root.to_string_lossy(), "context": kind})
+            ),
+        );
+        assert!(said.starts_with("error:"), "{said}");
+        assert!(
+            said.contains(kind) && said.contains("stays on this machine"),
+            "{said}"
+        );
+    }
+    drop(link);
+    near.stop();
+    far.host.stop();
+}

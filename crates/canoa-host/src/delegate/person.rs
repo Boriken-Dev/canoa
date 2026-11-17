@@ -12,6 +12,7 @@ use std::sync::Arc;
 use serde_json::{Map, Value, json};
 
 use super::agent::DelegationAgent;
+use super::context::{self, Kind};
 use super::{Engine, Session, Source, lock, tools};
 
 /// What the person narrowed a session's delegation to.
@@ -23,9 +24,12 @@ pub(crate) struct Setup {
     pub(crate) default: Option<String>,
     /// Tasks of the session running at once, at most; `None` leaves `max_children`.
     pub(crate) max_running: Option<usize>,
+    /// What its agent may hand a task besides the task text, by its own call: nothing unless the person lets it. The person's own
+    /// start never needs this, since they are shown what goes.
+    pub(crate) context: Vec<Kind>,
 }
 
-/// `_canoa/delegate/setup {sessionId, sources?, default?, maxRunning?}`: each key present replaces the setting, `null` clears
+/// `_canoa/delegate/setup {sessionId, sources?, default?, maxRunning?, context?}`: each key present replaces the setting, `null` clears
 /// it. It only narrows: a source the connection may not use stays out whatever the list says.
 pub(crate) fn setup(session: &Session, params: &Value) -> Result<Value, String> {
     let mut held = lock(&session.setup);
@@ -64,9 +68,53 @@ pub(crate) fn setup(session: &Session, params: &Value) -> Result<Value, String> 
             ),
         };
     }
+    if let Some(kinds) = params.get("context") {
+        next.context = match kinds {
+            Value::Null => Vec::new(),
+            Value::Array(names) => names
+                .iter()
+                .map(|name| {
+                    name.as_str()
+                        .and_then(Kind::parse)
+                        .filter(|kind| *kind != Kind::Task)
+                        .ok_or("context is a list of messages and files")
+                })
+                .collect::<Result<_, _>>()?,
+            _ => return Err("context is a list of messages and files".to_owned()),
+        };
+    }
     *held = next;
     Ok(json!({}))
 }
+
+/// `_canoa/delegate/context {sessionId, kind}`: what handing `kind` on would give a task now, as the text it would be given and
+/// what it is made of, with an `contextId` that a `start` names to be given exactly that.
+pub(crate) fn context(
+    engine: &Arc<Engine>,
+    session: &Arc<Session>,
+    params: &Value,
+) -> Result<Value, String> {
+    let kind = params
+        .get("kind")
+        .and_then(Value::as_str)
+        .and_then(Kind::parse)
+        .ok_or("kind is messages or files")?;
+    let bundle = context::build(session, kind, engine.config.context_bytes)?;
+    let mut secret = [0_u8; 16];
+    getrandom::fill(&mut secret).map_err(|error| error.to_string())?;
+    let id: String = secret.iter().map(|byte| format!("{byte:02x}")).collect();
+    let mut shown = bundle.describe(true);
+    shown["contextId"] = json!(id);
+    let mut held = lock(&session.prepared);
+    held.push((id, bundle));
+    if held.len() > PREPARED {
+        held.remove(0);
+    }
+    Ok(shown)
+}
+
+/// Previews a session keeps for a start to name.
+const PREPARED: usize = 8;
 
 /// `_canoa/delegate/start {sessionId, source?, task, requestId?, folder?, workspace?, title?, model?, effort?, account?,
 /// profile?, loadout?, context?}`: `{taskId, state}`. A request sent again with the `requestId` of one that was made finds that
@@ -159,6 +207,16 @@ pub(crate) fn listing(
         );
         target.insert("remote".to_owned(), json!(source.remote.is_some()));
         target.insert("accounts".to_owned(), json!(source.accounts));
+        target.insert(
+            "profiles".to_owned(),
+            json!(
+                source
+                    .profiles
+                    .iter()
+                    .map(|(name, loadouts)| json!({"name": name, "loadouts": loadouts}))
+                    .collect::<Vec<_>>()
+            ),
+        );
         target.insert("ready".to_owned(), json!(source.missing.is_empty()));
         if !source.missing.is_empty() {
             target.insert("missing".to_owned(), json!(source.missing));
@@ -199,5 +257,32 @@ pub(crate) fn listing(
     if let Some(limit) = setup.max_running {
         out.insert("maxRunning".to_owned(), json!(limit));
     }
+    if let Some(sources) = setup.sources {
+        out.insert("sources".to_owned(), json!(sources));
+    }
+    out.insert(
+        "context".to_owned(),
+        json!(
+            setup
+                .context
+                .iter()
+                .map(|kind| kind.name())
+                .collect::<Vec<_>>()
+        ),
+    );
+    out.insert(
+        "contextBytes".to_owned(),
+        json!(engine.config.context_bytes),
+    );
+    // Every source the connection may use, narrowed or not: what the setup chooses among.
+    out.insert(
+        "offered".to_owned(),
+        json!(
+            DelegationAgent::offered(engine, session)
+                .iter()
+                .map(|source| json!({"source": source.name, "title": source.title.as_ref().unwrap_or(&source.name)}))
+                .collect::<Vec<_>>()
+        ),
+    );
     Ok(Value::Object(out))
 }

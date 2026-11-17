@@ -440,6 +440,30 @@ fn drive(
     }
 }
 
+/// What a task's agent is sent in `initialize`: the account, profile and loadout the task chose, under the keys its entry's host
+/// reads, and nothing else about the person.
+fn initialize_params(choice: &Choice) -> Value {
+    let mut meta = serde_json::Map::new();
+    for (key, value) in [
+        (crate::ACCOUNT_META, &choice.account),
+        (crate::profile::hosted::PROFILE_META, &choice.profile),
+        (crate::profile::hosted::LOADOUT_META, &choice.loadout),
+    ] {
+        if let Some(value) = value {
+            meta.insert(key.to_owned(), json!(value));
+        }
+    }
+    let mut initialize = json!({
+        "protocolVersion": 1,
+        "clientCapabilities": {},
+        "clientInfo": {"name": "canoa-delegate", "version": env!("CARGO_PKG_VERSION")},
+    });
+    if !meta.is_empty() {
+        initialize["_meta"] = Value::Object(meta);
+    }
+    initialize
+}
+
 /// The host as the ACP client of a task's agent.
 struct Work<'a> {
     engine: &'a Arc<Engine>,
@@ -457,25 +481,7 @@ impl Work<'_> {
     fn exchange(&mut self, folder: &Path, text: &str) -> Result<Outcome, Outcome> {
         // The account, profile and loadout are the entry's to accept: its host refuses one it does not offer, and the task then
         // ends saying so.
-        let mut meta = serde_json::Map::new();
-        for (key, value) in [
-            (crate::ACCOUNT_META, &self.choice.account),
-            (crate::profile::hosted::PROFILE_META, &self.choice.profile),
-            (crate::profile::hosted::LOADOUT_META, &self.choice.loadout),
-        ] {
-            if let Some(value) = value {
-                meta.insert(key.to_owned(), json!(value));
-            }
-        }
-        let mut initialize = json!({
-            "protocolVersion": 1,
-            "clientCapabilities": {},
-            "clientInfo": {"name": "canoa-delegate", "version": env!("CARGO_PKG_VERSION")},
-        });
-        if !meta.is_empty() {
-            initialize["_meta"] = serde_json::Value::Object(meta);
-        }
-        self.call("initialize", initialize)?;
+        self.call("initialize", initialize_params(self.choice))?;
         let opened = self.call(
             "session/new",
             json!({"cwd": folder.to_string_lossy(), "mcpServers": []}),
@@ -778,8 +784,30 @@ impl Work<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::chosen;
+    use super::{Choice, chosen, initialize_params};
     use serde_json::json;
+
+    #[test]
+    fn the_account_profile_and_loadout_a_task_chose_reach_its_agents_initialize_and_nothing_else_does()
+     {
+        let none = initialize_params(&Choice::default());
+        assert!(none.get("_meta").is_none(), "{none}");
+        let chosen = initialize_params(&Choice {
+            account: Some("work".to_owned()),
+            profile: Some("review".to_owned()),
+            loadout: Some("strict".to_owned()),
+            model: Some("fast".to_owned()),
+            workspace: Some("/elsewhere".to_owned()),
+            ..Choice::default()
+        });
+        let meta = chosen["_meta"].as_object().expect("a _meta");
+        assert_eq!(meta[crate::ACCOUNT_META], "work");
+        assert_eq!(meta[crate::profile::hosted::PROFILE_META], "review");
+        assert_eq!(meta[crate::profile::hosted::LOADOUT_META], "strict");
+        // The model is chosen once its session is open, and a workspace is for another machine: neither is in `initialize`.
+        assert_eq!(meta.len(), 3, "{chosen}");
+        assert_eq!(chosen["method"], json!(null));
+    }
 
     #[test]
     fn a_key_answers_with_an_option_the_agent_offered_or_it_is_a_cancel() {

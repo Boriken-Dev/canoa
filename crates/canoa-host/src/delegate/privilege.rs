@@ -306,6 +306,7 @@ mod tests {
             harness: None,
             roots: Vec::new(),
             accounts: Vec::new(),
+            profiles: Vec::new(),
             missing: Vec::new(),
             remote: remote.then(|| Remote {
                 url: "ws://127.0.0.1:1".to_owned(),

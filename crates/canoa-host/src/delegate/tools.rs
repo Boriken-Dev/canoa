@@ -63,7 +63,7 @@ pub(crate) fn list(engine: &Engine, session: &Session) -> Value {
                 "account": {"type": "string", "description": "One of the accounts delegate_targets lists for the source."},
                 "profile": {"type": "string", "description": "A profile the source offers."},
                 "loadout": {"type": "string", "description": "A loadout of that profile."},
-                "context": {"type": "string", "enum": ["task"], "description": "What the other agent is given besides the task text: nothing (task)."},
+                "context": {"type": "string", "enum": ["task", "messages", "files"], "description": "What the other agent is given besides the task text: nothing (task), this conversation's recent turns (messages) or the files you touched (files). The last two work only when the person allowed them for this session, and never reach another machine."},
             }, "required": ["task"], "additionalProperties": false},
         },
         {
@@ -175,6 +175,7 @@ pub(super) fn delegate(
         "profile",
         "loadout",
         "context",
+        "contextId",
     ] {
         if let Some(text) = text_arg(args, key)? {
             metadata.insert(key.to_owned(), json!(text));
