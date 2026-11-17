@@ -106,16 +106,22 @@ class WorkPanel extends StatelessWidget {
             },
             itemBuilder: (_) => [
               if (canMove) PopupMenuItem(value: 'move', child: Text(_right ? 'Move to the bottom panel' : 'Move to the right panel')),
-              if (!focused) const PopupMenuItem(value: 'focus', child: Text('Focus this panel')),
-              if (focused) const PopupMenuItem(value: 'restore', child: Text('Restore layout')),
+              if (!focused) const PopupMenuItem(value: 'focus', child: Text('Maximise this panel')),
+              if (focused) const PopupMenuItem(value: 'restore', child: Text('Restore the panel to its size')),
             ],
           ),
           if (focused)
-            TextButton(key: const ValueKey('panel-restore'), onPressed: layout.restore, child: const Text('Restore layout'))
+            IconButton(
+              key: const ValueKey('panel-restore'),
+              tooltip: 'Restore the panel to its size',
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.close_fullscreen, size: 18, color: scheme.onSurfaceVariant),
+              onPressed: layout.restore,
+            )
           else if (!narrow)
             IconButton(
               key: const ValueKey('panel-focus'),
-              tooltip: 'Focus this panel',
+              tooltip: 'Maximise the panel to the whole conversation area',
               visualDensity: VisualDensity.compact,
               icon: Icon(Icons.open_in_full, size: 18, color: scheme.onSurfaceVariant),
               onPressed: () => layout.focusOn(_mine),

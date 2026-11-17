@@ -317,18 +317,20 @@ void main() {
       expect(rig.layout.rightWidth, ShellLayout.rightDefault);
     });
 
-    testWidgets('Focus fills the window with it and Restore layout returns to the arrangement it left', (tester) async {
+    testWidgets('Maximise fills the conversation area with the panel and Restore returns to the arrangement it left', (tester) async {
       final rig = await _show(tester, _both);
       rig.layout
         ..setRightOpen(true)
         ..setRightWidth(500);
       await tester.pump();
+      expect(find.byTooltip('Maximise the panel to the whole conversation area'), findsOneWidget);
       await tester.tap(_key('panel-focus'));
       await tester.pumpAndSettle();
       expect(rig.layout.focus, PanelFocus.right);
       expect(_rightWidth(tester), 1200);
       expect(find.text('conversation of One'), findsNothing);
       expect(_key('panel-restore'), findsOneWidget);
+      expect(find.byTooltip('Restore the panel to its size'), findsOneWidget);
       await tester.tap(_key('panel-restore'));
       await tester.pumpAndSettle();
       expect(rig.layout.focus, PanelFocus.none);
