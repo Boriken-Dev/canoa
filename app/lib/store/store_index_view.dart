@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/look.dart';
+import 'store_icon.dart';
 import 'store_selection.dart';
 
 /// The Store section's index: the store types (Overlays, Skills, Agents, MCP servers, then those extensions add), each with its
@@ -29,6 +30,8 @@ class StoreIndex extends StatelessWidget {
                 _Row(
                   rowKey: Key('store-index-${type.id}'),
                   icon: type.icon,
+                  image: type.image,
+                  imageKey: Key('store-index-${type.id}-image'),
                   title: type.label,
                   detail: '${type.installed} installed${type.available == null ? '' : ' · ${type.available} to discover'}',
                   selected: chosen == type.id,
@@ -51,10 +54,12 @@ class StoreIndex extends StatelessWidget {
 
 class _Row extends StatelessWidget {
   const _Row({required this.rowKey, required this.icon, required this.title, required this.detail, required this.selected,
-      required this.onTap});
+      required this.onTap, this.image, this.imageKey});
 
   final Key rowKey;
   final IconData icon;
+  final StoreMarkImage? image;
+  final Key? imageKey;
   final String title, detail;
   final bool selected;
   final VoidCallback onTap;
@@ -72,7 +77,10 @@ class _Row extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
             child: Row(children: [
-              Icon(icon, size: 20, color: scheme.onSurfaceVariant),
+              if (image case final image?)
+                StillIcon(key: imageKey, name: title, path: image.path, bytes: image.bytes, size: 20)
+              else
+                Icon(icon, size: 20, color: scheme.onSurfaceVariant),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

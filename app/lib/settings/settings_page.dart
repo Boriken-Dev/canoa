@@ -17,6 +17,7 @@ import 'agent_sections.dart';
 import 'app_sections.dart';
 import '../shell/shell.dart' show ShellScope;
 import 'overlay_sections.dart';
+import 'extension_settings.dart';
 import 'setting_layers.dart';
 import 'settings_controller.dart';
 
@@ -46,6 +47,7 @@ const _sections = [
   SettingsSection(id: 'accounts', group: 'Agents', title: 'Accounts', icon: Icons.manage_accounts_outlined, keywords: 'login sign in api key subscription claude codex grok credentials add remove several'),
   SettingsSection(id: 'usage', group: 'Agents', title: 'Usage', icon: Icons.speed, keywords: 'limit warn percent quota'),
   SettingsSection(id: 'catalogs', group: 'Overlays', title: 'Catalogs', icon: Icons.storefront_outlined, keywords: 'store limits catalog sources icons size'),
+  SettingsSection(id: 'extensions', group: 'Store', title: 'Extensions', icon: Icons.extension_outlined, keywords: 'store types runtimes add library provider host restart'),
   SettingsSection(id: 'about', group: 'About', title: 'About', icon: Icons.info_outline, keywords: 'version canoa boriken licence'),
 ];
 
@@ -71,6 +73,7 @@ class SettingsPage extends StatefulWidget {
     this.onPin,
     this.onLoadout,
     this.accounts,
+    this.extensions,
     this.usageSection = false,
     this.voiceBackends = const [],
     this.hostSpeech,
@@ -123,6 +126,9 @@ class SettingsPage extends StatefulWidget {
   /// The accounts of this computer's host, for the Accounts section; none where the app runs no host.
   final AccountsController? accounts;
 
+  /// The store extensions the host loads, for the Extensions section; none where the key may not change the host's settings.
+  final ExtensionSettings? extensions;
+
   /// Whether the app has a Usage section of its own, which then holds the usage warning.
   final bool usageSection;
 
@@ -146,7 +152,7 @@ class SettingsPageState extends State<SettingsPage> {
 
   List<SettingsSection> get _available => [
     for (final section in _sections)
-      if ((section.id != 'accounts' || widget.accounts != null) && (section.id != 'usage' || !widget.usageSection)) section,
+      if ((section.id != 'accounts' || widget.accounts != null) && (section.id != 'extensions' || widget.extensions != null) && (section.id != 'usage' || !widget.usageSection)) section,
   ];
 
   @override
@@ -249,6 +255,7 @@ class SettingsPageState extends State<SettingsPage> {
       'accounts' => AccountsSection(controller: widget.accounts!),
       'usage' => UsageWarning(controller: controller),
       'catalogs' => CatalogsSection(controller: controller),
+      'extensions' => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!),
       _ => AboutSection(version: widget.version),
     };
     return Align(

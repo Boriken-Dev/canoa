@@ -100,6 +100,7 @@ import 'acp/usage_wire.dart' show ProfileApprover, noApproval;
 import 'profile/approval_dialog.dart';
 import 'profile/effective_setup.dart';
 import 'profile/report.dart';
+import 'settings/extension_settings.dart';
 import 'settings/settings_page.dart';
 import 'rail/session_groups.dart';
 import 'desktop/hosting_panel.dart' show HostingPanel;
@@ -431,22 +432,63 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// Has the host that served this page end and start again, which a host run with `--supervised` does, and waits for it: the
   /// sessions open on it end, and the control channel is dialled again by the next request.
-  Future<void> _restartHost() async {
+  Future<bool> _restartHost() async {
     final served = widget.served;
-    if (served == null) return;
+    if (served == null) return false;
     final messenger = _messenger.currentState;
     try {
-      if (_openOnHost() > 0 && !await _confirmRestart()) return;
+      if (_openOnHost() > 0 && !await _confirmRestart()) return false;
       await served.files.restart().onError<Object>((error, stack) {
         // The link ends with the host, which may be before its answer arrives; only a refusal is a failure.
         if (error is ControlFailed) throw error;
       });
       await served.files.awaitHost();
       messenger?.showSnackBar(const SnackBar(content: Text('The host restarted.')));
+      return true;
     } on ControlFailed catch (error) {
       messenger?.showSnackBar(SnackBar(content: Text('The host would not restart: ${error.message}')));
     } on Object catch (error) {
       messenger?.showSnackBar(SnackBar(content: Text('The host did not come back: $error')));
+    }
+    return false;
+  }
+
+  /// The store extensions of the host's canoa.cfg, edited in Settings where this key may change the host's own settings.
+  late final ExtensionSettings? _extensionSettingsHeld = _hostFiles == null
+      ? null
+      : ExtensionSettings(
+          files: _hostFiles,
+          types: () async {
+            final held = _extensionsHeld;
+            if (held == null) return const {};
+            await held.refresh();
+            return held.addedBy;
+          },
+          restart: _restartForExtensions,
+          saved: _extensionsSaved,
+        );
+
+  ExtensionSettings? get _extensionSettings => _grants?.may(HostGrants.hosting) ?? false ? _extensionSettingsHeld : null;
+
+  /// Has the host start again so that it loads the extensions canoa.cfg now names; true when it did.
+  Future<bool> _restartForExtensions() async {
+    if (widget.served != null) return _restartHost();
+    final host = widget.host, path = _configPath;
+    if (host == null || path == null) return false;
+    if (_openOnHost() > 0 && !await _confirmRestart()) return false;
+    await host.apply(configPath: path);
+    return true;
+  }
+
+  /// canoa.cfg was changed through the host: the app reads its copy again, so a later save of another table writes nothing of it back.
+  Future<void> _extensionsSaved() async {
+    try {
+      final changed = widget.served != null ? await widget.served!.loadConfig() : await _readConfig();
+      if (changed == null || !mounted) return;
+      setState(() => config = changed);
+      _settingsKey.currentState?.controller.adopt(changed);
+    } on Object {
+      // The change is written; what the app holds of it catches up the next time canoa.cfg is read.
     }
   }
 
@@ -646,6 +688,7 @@ class _CanoaAppState extends State<CanoaApp> {
       },
       onLoadout: _showLoadout,
       accounts: _accounts,
+      extensions: _extensionSettings,
       usageSection: _usage != null,
       voiceBackends: _speech,
       hostSpeech: _hostSpeech,

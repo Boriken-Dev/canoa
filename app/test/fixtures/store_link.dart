@@ -98,6 +98,15 @@ final class FakeStoreHost {
   /// The types `store/extensions` answers with.
   List<Map<String, Object?>> extensionTypes = const [];
 
+  /// The host's `[host]` table as `config/get`, `config/check` and `config/set` have it; null when canoa.cfg has none.
+  Map<String, Object?>? hostTable;
+
+  /// The grants `host/grants` says this key holds.
+  List<String> grants = ['store.read', 'store.programs'];
+
+  /// What `config/check` refuses with, in the host's words; null accepts.
+  String? checkRefusal;
+
   /// Every line the app sent on any link, whole, to look for what must never be in one.
   final wire = <String>[];
 
@@ -140,13 +149,22 @@ final class FakeStoreHost {
 
   Object? _answer(String method, Map<String, Object?> given) {
     // What the host grants this key is not a store request, so it is not in [calls].
-    if (method == 'host/grants') return {'grants': ['store.read', 'store.programs']};
+    if (method == 'host/grants') return {'grants': grants};
     final provider = given['provider'] as String?;
     final key = '$method ${provider ?? ''}'.trim();
     calls.add(key);
     params.putIfAbsent(method, () => []).add(given);
     if (failures[method] ?? failures[key] case final failure?) throw failure;
     if (method == 'store/extensions') return {'types': extensionTypes};
+    if (method == 'config/get') return {'section': given['section'], 'value': hostTable, 'restart': true};
+    if (method == 'config/check') {
+      if (checkRefusal != null) throw ControlFailed(-32002, checkRefusal!);
+      return {'valid': true};
+    }
+    if (method == 'config/set') {
+      hostTable = given['value'] is Map ? {for (final MapEntry(:key, :value) in (given['value'] as Map).entries) '$key': value} : null;
+      return {'section': given['section'], 'restart': true};
+    }
     if (method == 'store/list') {
       final extension = given['kind'] == 'extension';
       return {

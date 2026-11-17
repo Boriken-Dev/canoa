@@ -2,19 +2,30 @@ import 'package:flutter/material.dart';
 
 import '../shell/layout_state.dart';
 
+/// A small picture an extension ships as its type's icon: the bytes of a PNG or WebP and a file name whose extension says which.
+final class StoreMarkImage {
+  const StoreMarkImage({required this.path, required this.bytes});
+
+  final String path;
+  final List<int> bytes;
+}
+
 /// One store type the Store section's index lists: its id, its name, its icon and how much of it there is.
 final class StoreTypeRow {
-  const StoreTypeRow({required this.id, required this.label, required this.icon, required this.installed, this.available});
+  const StoreTypeRow({required this.id, required this.label, required this.icon, required this.installed, this.available, this.image});
 
   final String id, label;
   final IconData icon;
+
+  /// A picture drawn in place of [icon], for a type whose extension ships one.
+  final StoreMarkImage? image;
 
   /// How many are installed, and how many the catalogs (or the registry) offer; null while that is not known.
   final int installed;
   final int? available;
 
   bool same(StoreTypeRow other) =>
-      id == other.id && label == other.label && icon == other.icon && installed == other.installed && available == other.available;
+      id == other.id && label == other.label && icon == other.icon && identical(image, other.image) && installed == other.installed && available == other.available;
 }
 
 /// The store type chosen in the Store section's index, which the section's content shows.

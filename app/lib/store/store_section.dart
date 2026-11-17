@@ -218,6 +218,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
         id: id,
         label: _labelOf(id),
         icon: _iconOf(id),
+        image: _extension(id)?.image,
         installed: _installedCount(id),
         available: _discoverCount(id),
       ),

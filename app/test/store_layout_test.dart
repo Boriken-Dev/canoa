@@ -194,6 +194,22 @@ void main() {
       expect(find.byKey(const Key('store-tabs')), findsNothing, reason: 'the index chooses the type');
     });
 
+    testWidgets('an extension\'s own picture is drawn in the index and on its page in place of an icon', (tester) async {
+      final plain = themes();
+      final pictured = ExtensionStoreType(
+        id: 'pictured',
+        label: 'Pictured',
+        image: const StoreMarkImage(path: 'icon.png', bytes: [1, 2, 3]),
+        items: () => const [],
+      );
+      await open(tester, extensions: [plain, pictured]);
+      expect(find.byKey(const Key('store-index-pictured-image')), findsOneWidget);
+      expect(find.byKey(const Key('store-index-themes-image')), findsNothing, reason: 'a type with no picture keeps its icon');
+      await tester.tap(find.byKey(const Key('store-index-pictured')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('store-banner-image')), findsOneWidget);
+    });
+
     testWidgets('a type shows its items across every catalog, and the catalog filter narrows them', (tester) async {
       await open(tester);
       expect(find.byKey(const Key('store-banner')), findsOneWidget);

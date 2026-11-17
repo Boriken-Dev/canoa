@@ -5,6 +5,7 @@ import '../config/canoa_config.dart';
 import 'overlay_page.dart' show oneLine;
 import 'store.dart';
 import 'store_icon.dart';
+import 'store_selection.dart' show StoreMarkImage;
 
 /// One item a banner can feature: its name and icon, the catalog it is listed in, its tags, and what opens it.
 final class BannerItem {
@@ -81,13 +82,16 @@ List<BannerSpec> bannersFor({
 /// The wide card at the top of a type's page: a soft gradient of the look's own accent, a small line, a title, a sentence, the
 /// icons it features and Explore. Arrows page through several on a wide window, with dots under; a narrow one swipes.
 class StoreBanner extends StatefulWidget {
-  const StoreBanner({super.key, required this.specs, required this.iconLimits, this.mark = Icons.storefront_outlined});
+  const StoreBanner({super.key, required this.specs, required this.iconLimits, this.mark = Icons.storefront_outlined, this.markImage});
 
   final List<BannerSpec> specs;
   final aos.Settings? iconLimits;
 
   /// The icon shown when nothing is featured.
   final IconData mark;
+
+  /// A picture shown in place of [mark], which an extension's type may ship.
+  final StoreMarkImage? markImage;
 
   @override
   State<StoreBanner> createState() => _StoreBannerState();
@@ -183,7 +187,9 @@ class _StoreBannerState extends State<StoreBanner> {
         Text(spec.about, style: text.bodyMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
         const Spacer(),
         Row(children: [
-          if (spec.featured.isEmpty)
+          if (spec.featured.isEmpty && widget.markImage != null)
+            StillIcon(key: const Key('store-banner-image'), name: spec.title, path: widget.markImage!.path, bytes: widget.markImage!.bytes, size: 32)
+          else if (spec.featured.isEmpty)
             Icon(widget.mark, size: 32)
           else
             for (final item in spec.featured.take(narrow ? 4 : 6))
@@ -209,7 +215,8 @@ class _StoreBannerState extends State<StoreBanner> {
 /// right that installs it, which is a check once it is here. The card opens the item's page.
 class StoreTile extends StatelessWidget {
   const StoreTile({super.key, required this.leading, required this.title, required this.by, required this.installed,
-      required this.onOpen, required this.onInstall, this.summary, this.needs, this.busy = false, this.installKey});
+      required this.onOpen, required this.onInstall, this.summary, this.needs, this.busy = false, this.installKey, this.onRemove,
+      this.removeKey});
 
   final Widget leading;
   final String title;
@@ -219,9 +226,12 @@ class StoreTile extends StatelessWidget {
   final String? needs;
   final String by;
   final bool installed, busy;
-  final Key? installKey;
+  final Key? installKey, removeKey;
   final VoidCallback onOpen;
   final VoidCallback? onInstall;
+
+  /// Takes an installed item away, shown beside the check; null for an item that has no copy of the host's to remove.
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -249,6 +259,20 @@ class StoreTile extends StatelessWidget {
               ]),
             ),
             const SizedBox(width: 8),
+            if (installed && !busy && onRemove != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: SizedBox.square(
+                  dimension: 36,
+                  child: IconButton(
+                    key: removeKey,
+                    tooltip: 'Remove',
+                    style: IconButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                    onPressed: onRemove,
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                  ),
+                ),
+              ),
             SizedBox.square(
               dimension: 36,
               child: busy
