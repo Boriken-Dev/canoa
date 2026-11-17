@@ -2091,3 +2091,40 @@ fn a_harness_entry_configures_its_account_provider_apart_from_the_harness() {
         "{refused}"
     );
 }
+
+#[test]
+fn a_shared_entrys_permission_window_is_off_unless_set_and_needs_shared() {
+    let config = parse(
+        "[host.agents.a]
+program = \"x\"
+shared = true
+[host.agents.b]
+program = \"x\"
+shared = true
+shared_permission_window_seconds = 0
+[host.agents.c]
+program = \"x\"
+shared = true
+shared_permission_window_seconds = 120
+",
+    )
+    .expect("parses");
+    let windows: Vec<_> = config
+        .entries
+        .iter()
+        .map(|entry| entry.shared_permission_window)
+        .collect();
+    assert_eq!(
+        windows,
+        [None, None, Some(core::time::Duration::from_secs(120))]
+    );
+    assert!(
+        parse(
+            "[host.agents.a]
+program = \"x\"
+shared_permission_window_seconds = 5
+"
+        )
+        .is_err()
+    );
+}

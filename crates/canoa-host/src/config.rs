@@ -994,6 +994,10 @@ pub struct Entry {
     /// How long a shared session that no client is attached to is kept, after which the host ends it
     /// (`shared_idle_seconds`, a day by default); `None` keeps it until a client ends it or the host stops (`0`).
     pub shared_idle: Option<core::time::Duration>,
+    /// How long a permission request of a shared session may wait with nobody answering before the host logs that it does
+    /// (`shared_permission_window_seconds`); `None` (unset or `0`) logs nothing. The request stays open: nothing is answered
+    /// for the people attached.
+    pub shared_permission_window: Option<core::time::Duration>,
 }
 
 /// How long a shared session with no client attached is kept unless the entry says otherwise.
@@ -1588,6 +1592,7 @@ struct RawAgent {
     title: Option<String>,
     shared: Option<bool>,
     shared_idle_seconds: Option<u64>,
+    shared_permission_window_seconds: Option<u64>,
     listen: Option<String>,
     transport: Option<String>,
     transport_library: Option<String>,
@@ -1851,6 +1856,16 @@ impl Config {
                     "shared_idle_seconds goes with shared = true",
                 ));
             }
+            if !shared && agent.shared_permission_window_seconds.is_some() {
+                return Err(invalid(
+                    &name,
+                    "shared_permission_window_seconds goes with shared = true",
+                ));
+            }
+            let shared_permission_window = agent
+                .shared_permission_window_seconds
+                .filter(|seconds| *seconds > 0)
+                .map(core::time::Duration::from_secs);
             let shared_idle = match agent.shared_idle_seconds {
                 _ if !shared => None,
                 Some(0) => None,
@@ -2085,6 +2100,7 @@ impl Config {
             served.title = title;
             served.shared = shared;
             served.shared_idle = shared_idle;
+            served.shared_permission_window = shared_permission_window;
             entries.push(served);
         }
         for (name, provider) in host.providers {
@@ -3593,6 +3609,7 @@ fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, Conf
         local: false,
         shared: false,
         shared_idle: None,
+        shared_permission_window: None,
     })
 }
 

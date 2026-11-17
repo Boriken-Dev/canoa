@@ -300,9 +300,25 @@ impl core::fmt::Debug for Sealer {
     }
 }
 
+/// What lists the sessions a host keeps running for the key that asks: given the key's id, or `None` for this process's own
+/// link, it answers the sessions that key may attach to.
+#[derive(Clone)]
+pub(crate) struct RunningSessions(pub(crate) Arc<ListRunning>);
+
+/// Asks a host for the sessions a key may attach to.
+pub(crate) type ListRunning = dyn Fn(Option<&str>) -> Vec<Value> + Send + Sync;
+
+impl core::fmt::Debug for RunningSessions {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("RunningSessions").finish_non_exhaustive()
+    }
+}
+
 /// The ledger and its limits.
 #[derive(Debug)]
 pub(crate) struct Control {
+    /// The shared sessions running in this host, once it keeps any.
+    sessions: Option<RunningSessions>,
     /// The program stores, built on the first request that needs them unless handed in.
     stores: OnceLock<Result<Stores, String>>,
     /// The recorded histories and the harnesses a session may be moved to.
@@ -420,6 +436,7 @@ impl Control {
             }
         }
         Ok(Self {
+            sessions: None,
             stores: OnceLock::new(),
             history: None,
             accounts: None,
@@ -574,6 +591,24 @@ impl Control {
         self
     }
 
+    /// Answers `sessions/running` from the sessions this host keeps.
+    #[must_use]
+    pub(crate) fn with_sessions(mut self, sessions: RunningSessions) -> Self {
+        self.sessions = Some(sessions);
+        self
+    }
+
+    /// `sessions/running`: the shared sessions running now that this caller may attach to, as the attach itself would admit it.
+    fn running_sessions(&self, caller: &Caller) -> Result<Value, (i32, String)> {
+        let list = self.sessions.as_ref().map_or_else(Vec::new, |sessions| {
+            (sessions.0)(match caller {
+                Caller::Owner => None,
+                Caller::Peer { id, .. } => Some(id.as_str()),
+            })
+        });
+        Ok(json!({"sessions": list}))
+    }
+
     /// Answers `usage/*` from this log.
     #[must_use]
     pub(crate) fn with_usage(mut self, usage: Arc<crate::usage_log::UsageLog>) -> Self {
@@ -660,6 +695,9 @@ impl Control {
         let outcome =
             match request.get("method").and_then(Value::as_str) {
                 Some("ledger/list") => self.list(caller, &params),
+                Some("sessions/running") => {
+                    allow(caller, Grant::LedgerRead).and_then(|()| self.running_sessions(caller))
+                }
                 Some("ledger/put") => self.put(caller, &params),
                 Some("ledger/remove") => self.remove(caller, &params),
                 Some("ledger/clear") => self.clear(caller),

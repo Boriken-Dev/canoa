@@ -44,15 +44,39 @@ const ATTACH_ID: &str = "canoa-attach";
 pub(super) struct Keep {
     /// How long a session nobody is attached to is kept; `None` keeps it until it is ended.
     pub(super) idle: Option<Duration>,
+    /// How long a permission request may wait with nobody answering before the host logs it; `None` logs nothing.
+    pub(super) permission_window: Option<Duration>,
 }
 
 /// The shared sessions the host holds, across entries.
-#[derive(Default)]
 pub(super) struct Hosted {
+    /// This host's own key, which the person's own link speaks as.
+    owner: PeerId,
     sessions: Mutex<Vec<Arc<Session>>>,
 }
 
 impl Hosted {
+    pub(super) fn new(owner: PeerId) -> Self {
+        Self {
+            owner,
+            sessions: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// What each running session `who` may attach to says of itself, newest activity first: `who` is a key's id, or `None` for
+    /// the host's own link. A session the policy would turn the key away from is not listed.
+    pub(super) fn running(&self, who: Option<&str>) -> Vec<Value> {
+        let id = who.map_or_else(|| self.owner.to_string(), str::to_owned);
+        let asker = Client::new(id).role("operator");
+        let sessions: Vec<Arc<Session>> = self.lock().clone();
+        let mut listed: Vec<(u64, Value)> = sessions
+            .iter()
+            .filter_map(|session| session.describe(&asker))
+            .collect();
+        listed.sort_by_key(|entry| core::cmp::Reverse(entry.0));
+        listed.into_iter().map(|(_, session)| session).collect()
+    }
+
     fn lock(&self) -> MutexGuard<'_, Vec<Arc<Session>>> {
         self.sessions.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -201,6 +225,8 @@ struct Boot {
     opening: Option<(Value, Option<String>)>,
     /// Ids whose answers go nowhere: requests the host already answered for the client.
     swallow: Vec<Value>,
+    /// The `cwd` of the request that opens the session.
+    cwd: Option<String>,
 }
 
 enum Phase {
@@ -215,6 +241,10 @@ struct State {
     next_generation: u64,
     /// The session's id once the agent has opened it.
     id: Option<String>,
+    /// The folder the session was opened in, as its opener named it.
+    cwd: Option<String>,
+    /// What the agent last called the session.
+    title: Option<String>,
     /// What `initialize` answers once the agent has said it, with what the hub adds.
     initialize: Option<Value>,
 }
@@ -224,6 +254,10 @@ pub(super) struct Session {
     entry: String,
     epoch: Instant,
     idle: Option<Duration>,
+    /// How long a permission request waits for an answer before the hub says so, in milliseconds.
+    permission_window_ms: Option<u64>,
+    /// When `epoch` was, in milliseconds since the Unix epoch, so that the hub's clock can be told as a date.
+    started_unix_ms: u64,
     /// The driver's end of the link the agent flow serves.
     agent: Link,
     access: Arc<dyn Policy>,
@@ -237,6 +271,41 @@ impl Session {
 
     fn now_ms(&self) -> u64 {
         u64::try_from(self.epoch.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// What this session says of itself to `asker`, with when it was last active, or `None` when it is not open or the policy
+    /// would turn `asker` away from attaching.
+    fn describe(&self, asker: &Client) -> Option<(u64, Value)> {
+        if !matches!(self.access.check(asker, &Action::Attach), Verdict::Allow) {
+            return None;
+        }
+        let state = self.lock();
+        let Phase::Live(hub) = &state.phase else {
+            return None;
+        };
+        let active = self.started_unix_ms.saturating_add(hub.last_activity());
+        let clients: Vec<Value> = hub
+            .attached()
+            .map(|client| {
+                json!({"id": client.id.as_str(), "label": client.label, "role": client.role})
+            })
+            .collect();
+        let mut out = json!({
+            "entry": self.entry,
+            "session": hub.session_id(),
+            "clients": clients,
+            "lastActivity": active,
+            "cursor": hub.head().to_string(),
+            "turnRunning": hub.turn_running(),
+            "permissionsWaiting": hub.pending_permissions().count(),
+        });
+        if let Some(title) = &state.title {
+            out["title"] = json!(title);
+        }
+        if let Some(cwd) = &state.cwd {
+            out["cwd"] = json!(cwd);
+        }
+        Some((active, out))
     }
 
     fn has_id(&self, id: &str) -> bool {
@@ -311,6 +380,11 @@ impl Session {
                     message.get("method").and_then(Value::as_str),
                     message.get("id"),
                 ) {
+                    boot.cwd = message
+                        .pointer("/params/cwd")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .or_else(|| boot.cwd.take());
                     match method {
                         "session/new" => boot.opening = Some((request.clone(), None)),
                         "session/load" | "session/resume" => {
@@ -361,6 +435,9 @@ impl Session {
         };
         let mut state = self.lock();
         let now = self.now_ms();
+        if let Some(title) = named_by(&message) {
+            state.title = Some(title);
+        }
         match &mut state.phase {
             Phase::Boot(_) => self.boot_from_agent(&mut state, bytes, &message, now),
             Phase::Live(hub) => {
@@ -379,6 +456,7 @@ impl Session {
             clients,
             id: session_id,
             initialize,
+            cwd,
             ..
         } = state;
         let Phase::Boot(boot) = phase else { return };
@@ -437,6 +515,7 @@ impl Session {
         let mut hub = Hub::builder(opened.clone())
             .initialize_result(answer.clone())
             .policy(Arc::clone(&self.access))
+            .permission_window_ms(self.permission_window_ms)
             .build();
         hub.poll(now);
         if let Err(error) = hub.connect(boot.who.clone()) {
@@ -452,6 +531,7 @@ impl Session {
         let outputs = hub.from_client(&creator, &attach).unwrap_or_default();
         *initialize = Some(with_loading(answer));
         *session_id = Some(opened.clone());
+        *cwd = boot.cwd.clone();
         *phase = Phase::Live(Box::new(hub));
         tracing::info!(
             entry = self.entry,
@@ -536,7 +616,7 @@ impl Session {
                 entry = self.entry,
                 request,
                 waiting_ms,
-                "a permission is waiting for an answer"
+                "a permission request has waited for an answer past the entry's window; it stays open"
             ),
             Note::Ended => tracing::info!(entry = self.entry, "the agent ended the session"),
             _ => {}
@@ -611,6 +691,26 @@ impl Session {
         }
         self.finish();
     }
+}
+
+/// The name an agent's `session_info_update` gives its session, cleaned for a person to read: control characters out, cut to 200.
+fn named_by(message: &Value) -> Option<String> {
+    if message.get("method").and_then(Value::as_str) != Some("session/update") {
+        return None;
+    }
+    let update = message.pointer("/params/update")?;
+    if update.get("sessionUpdate").and_then(Value::as_str) != Some("session_info_update") {
+        return None;
+    }
+    let title: String = update
+        .get("title")?
+        .as_str()?
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(200)
+        .collect();
+    let title = title.trim();
+    (!title.is_empty()).then(|| title.to_owned())
 }
 
 /// `initialize`'s answer as the hub gives it.
@@ -779,6 +879,12 @@ fn open<C: Channel>(
         entry: served.name.clone(),
         epoch: Instant::now(),
         idle: keep.idle,
+        permission_window_ms: keep
+            .permission_window
+            .map(|window| u64::try_from(window.as_millis()).unwrap_or(u64::MAX)),
+        started_unix_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| u64::try_from(since.as_millis()).unwrap_or(0)),
         agent: driver,
         access,
         state: Mutex::new(State {
@@ -789,10 +895,13 @@ fn open<C: Channel>(
                 answer: None,
                 opening: None,
                 swallow,
+                cwd: None,
             })),
             clients: BTreeMap::new(),
             next_generation: 0,
             id: None,
+            cwd: None,
+            title: None,
             initialize: None,
         }),
     });

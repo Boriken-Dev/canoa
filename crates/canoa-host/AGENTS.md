@@ -38,6 +38,7 @@ usage = "antigravity"                 # optional, with program: read the agent's
 title = "Claude for review"             # optional: what a client shows for this entry instead of its name; 1 to 64 characters, not blank, no control characters (MAX_TITLE)
 shared = false                        # optional: a session outlives its connection and any key the entry admits attaches to it; see Shared sessions
 shared_idle_seconds = 86400           # optional, with shared: how long a session nobody is attached to is kept; 0 keeps it until a client ends it
+shared_permission_window_seconds = 0  # optional, with shared: log a permission request nobody has answered for this long (it stays open; nothing is answered for anyone); 0 or unset logs nothing
 
 [host.agents.OTHER]                   # an acp_harness provider chosen by id, run by the host itself; see Serving
 harness = "claude"                    # "claude", "codex" (built in) or the id of an outside provider that library or source loads; takes no args
@@ -293,6 +294,8 @@ An agent or harness entry with `shared = true` keeps each session's agent runnin
 - **Taking part.** Every attached client gets every update, a prompt is stamped with the client that sent it (`_meta[...] = { client, label, prompt }`) and queued behind a running turn, a permission request goes to every attached client and the first answer wins (the others get `_dev.boriken.coqui.acp/hub_permission_closed`), `session/cancel` from any client cancels the turn, presence is `_dev.boriken.coqui.acp/hub_presence`. A client's id is its key's id, its label the entry's name, its role `operator`, its subject `owner` for this host's own key and `key:<id>` for any other.
 - **Who may attach.** The hub's policy is the host's own, asked again at each action: the key must still be paired (`peers` store) and listed by the entry (`peers`), and, to attach, trusted with at least the control grants of the key that opened the session, since the session's tools, secrets and delegation are the opener's. Every key an entry admits and that passes these may read, prompt, answer permissions in and end every session of that entry. A task another agent handed out is never kept.
 - **Ending.** `session/close` `{ sessionId }` from an attached client answers `{}` and ends the session. `shared_idle_seconds` (86400; `0` never) ends one nobody is attached to for that long, counted from the hub's `last_activity` (an agent's update, a client's message, an attach or detach); the hub itself never reaps. The agent exiting, or the host stopping, ends it, and the attached clients are told (`_dev.boriken.coqui.acp/hub_ended`). A session ends for good: it is not kept across a host restart. At most `max_peers` sessions of an entry are kept at once (the same bound as connections); a client that stops reading is detached once 256 MiB wait for it.
+- **Listing.** `sessions/running` `{}` on the control channel (`ledger.read`) -> `{"sessions": [{"entry", "session", "clients": [{"id", "label", "role"}], "lastActivity", "cursor", "turnRunning", "permissionsWaiting", "title"?, "cwd"?}]}`, newest activity first: the sessions of every shared entry that are open now and that the asking key could attach to under the rules above (an unpaired or unlisted key, or one trusted with less than the opener, sees none of them). `lastActivity` is the host's clock in milliseconds since the Unix epoch, `cursor` the log's head (an attach from it replays nothing), `title` the last `session_info_update` the agent sent and `cwd` the folder its opener named; the app's own link is listed as the host's own key.
+- `shared_permission_window_seconds` is the hub's `permission_window_ms`: once a permission request has waited that long with nobody answering, the host logs it at `info` (`has waited for an answer past the entry's window`) and leaves it open for whoever attaches next.
 - The hub's notes (a refused action, a permission answered, an unanswered one) are logged at `info` with the entry; nothing is auto-denied. Two sessions of one entry whose agent gave the same id are both kept, but only the older can be attached to.
 
 ## A transport provider (`transport = "<id>"`)
@@ -624,7 +627,7 @@ max_uploads = 256                                   # files one key may keep upl
 
 | Grant | Methods |
 | --- | --- |
-| `ledger.read` | `ledger/list` |
+| `ledger.read` | `ledger/list`, `sessions/running` |
 | `ledger.write` | `ledger/put`, `ledger/remove`, `ledger/clear` |
 | `worktree` | `worktree/new`, `worktree/status`, `worktree/remove`, `worktree/diff` |
 | `store.read` | `store/list`, `store/report`, `store/latest`, `store/plan`, `host/which` |

@@ -281,3 +281,135 @@ fn an_unshared_entry_gives_each_connection_an_agent_of_its_own() {
     }
     assert!(!running(pid), "the agent ended with its connection");
 }
+
+fn running_sessions(
+    url: &str,
+    key: &coqui_agentic_peer::auth::Identity,
+    host: &Host,
+) -> Result<Value, Value> {
+    with_link(url, key, host.peer, |rpc| {
+        rpc.request("sessions/running", json!({}))
+    })
+    .expect("a link")
+}
+
+#[test]
+fn the_running_sessions_a_key_may_attach_to_are_listed_with_who_is_attached() {
+    let (reader, other, lesser, stranger) = (
+        support::key(),
+        support::key(),
+        support::key(),
+        support::key(),
+    );
+    let config = format!(
+        "{}[host.control]\nlisten = \"127.0.0.1:0\"\ngrants = {{ \"{}\" = [\"ledger.read\", \"state\"], \"{}\" = [\"ledger.read\", \"state\"], \"{}\" = [\"ledger.read\"], \"{}\" = [\"state\"] }}\n",
+        shared_entry("shared", ""),
+        reader.peer_id(),
+        other.peer_id(),
+        lesser.peer_id(),
+        stranger.peer_id(),
+    );
+    let host = Host::start(&config, 2);
+    for key in [&reader, &other, &lesser, &stranger] {
+        host.pair(key);
+    }
+    let dir = cwd(&host.scratch);
+    let url = host.url("shared").to_owned();
+    let control = host.url("@control").to_owned();
+
+    assert_eq!(
+        running_sessions(&control, &reader, &host).expect("answers")["sessions"],
+        json!([]),
+        "nothing runs yet"
+    );
+    with_link(&url, &reader, host.peer, |a| {
+        let session = open_session(a, &dir);
+        assert_eq!(a.prompt(&session, "one").expect("a turn"), "echo: one");
+
+        let listed = running_sessions(&control, &reader, &host).expect("answers");
+        let [one] = listed["sessions"].as_array().expect("a list").as_slice() else {
+            panic!("one session runs: {listed}");
+        };
+        assert_eq!(one["entry"], "shared");
+        assert_eq!(one["session"], session.as_str());
+        assert_eq!(one["cwd"], dir.as_str());
+        assert_eq!(one["turnRunning"], false);
+        assert_eq!(one["clients"][0]["id"], reader.peer_id().to_string());
+        assert_eq!(one["clients"][0]["label"], "shared");
+        assert_eq!(one["clients"][0]["role"], "operator");
+        assert!(one["lastActivity"].as_u64().is_some_and(|ms| ms > 0));
+        let head = one["cursor"].as_str().expect("a cursor").to_owned();
+
+        // A second key that attaches shows beside the first, and the head moves with what is said.
+        with_link(&url, &other, host.peer, |b| {
+            attach(b, &session, &dir, None);
+            let both = running_sessions(&control, &reader, &host).expect("answers");
+            assert_eq!(
+                both["sessions"][0]["clients"].as_array().map(Vec::len),
+                Some(2),
+                "{both}"
+            );
+            assert_eq!(b.prompt(&session, "two").expect("a turn"), "echo: two");
+        })
+        .expect("B's link");
+        // A link's end detaches it a moment later.
+        let until = Instant::now() + Duration::from_secs(20);
+        let after = loop {
+            let answer = running_sessions(&control, &other, &host).expect("answers");
+            let attached = answer["sessions"][0]["clients"].as_array().map(Vec::len);
+            if attached == Some(1) || Instant::now() >= until {
+                break answer;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        assert_eq!(
+            after["sessions"][0]["clients"].as_array().map(Vec::len),
+            Some(1),
+            "B left: {after}"
+        );
+        assert_ne!(after["sessions"][0]["cursor"], head.as_str(), "{after}");
+
+        // A key trusted with something else than the opener's grants is not shown the session it could not attach to.
+        let none = running_sessions(&control, &lesser, &host).expect("answers");
+        assert_eq!(none["sessions"], json!([]), "{none}");
+    })
+    .expect("A's link");
+
+    // A key the control table gives no ledger read is refused outright.
+    let refused = running_sessions(&control, &stranger, &host);
+    assert!(
+        !matches!(&refused, Ok(answer) if answer.get("sessions").is_some()),
+        "{refused:?}"
+    );
+}
+
+#[test]
+fn a_permission_that_waits_past_the_entrys_window_is_logged_and_stays_open() {
+    let entry = shared_entry("shared", "shared_permission_window_seconds = 1");
+    let (host, log) = {
+        let scratch = support::Scratch::new();
+        Host::start_logged(scratch, &entry, 1, &[])
+    };
+    let key = support::key();
+    host.pair(&key);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("shared"), &key, host.peer, |rpc| {
+        let session = open_session(rpc, &dir);
+        rpc.send(
+            &json!({"jsonrpc": "2.0", "id": 800, "method": "session/prompt",
+            "params": {"sessionId": session, "prompt": [{"type": "text", "text": "ask first"}]}}),
+        )
+        .expect("sends");
+        let (asked, _) = read_until(rpc, |m| m["method"] == "session/request_permission");
+        let written = support::log_holding(&log, &["has waited for an answer"]);
+        let line = support::line_saying(&written, "has waited for an answer");
+        assert!(line.contains("shared"), "{line}");
+        // Nothing answered it: the same request is still open, and an answer still ends the turn.
+        rpc.send(&json!({"jsonrpc": "2.0", "id": asked["id"],
+            "result": {"outcome": {"outcome": "selected", "optionId": "allow"}}}))
+            .expect("answers");
+        let (ended, _) = read_until(rpc, |m| m["id"] == 800);
+        assert_eq!(ended["result"]["stopReason"], "end_turn", "{ended}");
+    })
+    .expect("a link");
+}

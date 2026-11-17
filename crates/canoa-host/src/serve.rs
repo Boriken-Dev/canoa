@@ -544,7 +544,7 @@ struct Shared {
     control_grants: IndexMap<PeerId, BTreeSet<control::Grant>>,
     control_everyone: Option<BTreeSet<control::Grant>>,
     /// The sessions kept for more than one connection.
-    hosted: sessions::Hosted,
+    hosted: Arc<sessions::Hosted>,
 }
 
 impl Shared {
@@ -1530,6 +1530,7 @@ impl Serving {
                 running: Gate::new(entry.max_peers),
                 keep: entry.shared.then_some(sessions::Keep {
                     idle: entry.shared_idle,
+                    permission_window: entry.shared_permission_window,
                 }),
             });
             match listener {
@@ -1601,6 +1602,7 @@ impl Serving {
         ));
         let stopped = Arc::new(AtomicBool::new(false));
         let trust = Arc::clone(&store);
+        let hosted = Arc::new(sessions::Hosted::new(method.peer_id()));
         let serving = Self {
             shared: Arc::new(Shared {
                 history: Arc::clone(&recorded),
@@ -1614,7 +1616,7 @@ impl Serving {
                     options.state_dir.clone(),
                     delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
                 ),
-                hosted: sessions::Hosted::default(),
+                hosted: Arc::clone(&hosted),
                 control_grants: config
                     .control
                     .as_ref()
@@ -1740,6 +1742,10 @@ impl Serving {
                             },
                         ));
                     let kept = kept.with_trust(Arc::clone(&trust));
+                    let kept = kept.with_sessions(control::RunningSessions(Arc::new({
+                        let hosted = Arc::clone(&hosted);
+                        move |who| hosted.running(who)
+                    })));
                     let kept = match &options.state_dir {
                         Some(home) => kept.with_pairing(control::hosting::Pairing {
                             identity: Arc::clone(&pairing_identity),
