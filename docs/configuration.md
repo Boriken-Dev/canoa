@@ -71,7 +71,7 @@ Configuration tables:
 - `title` on a `[host.agents.NAME]` entry (text, 1 to 64 characters, not blank, no control characters; optional): what the app shows for the entry in its source picker instead of the entry's name. A provider or tool entry takes none. It is listed beside `harness` (the provider id) in the host's lines and in `/canoa.json`, which is how the app learns both.
 - `usage` on a `[host.agents.NAME]` entry with `program`: `"antigravity"` (the only value) makes `canoa` read that agent's quota as `reported` usage buckets, the way [usage](acp-client.md#usage) describes. The app's Add an agent sets it when the command is `agy acp`.
 - [overlays], [profile] and `[agents.NAME.profile]`: profiles, described [below](#profiles).
-- [catalogs] and [store]: the overlay store's catalogs and limits, described [below](#the-overlay-store).
+- [catalogs] and [store]: the overlay store's catalogs and limits, described [below](#the-overlay-store); `[store.extension_catalogs]` lists [extensions catalogs](#extensions-catalogs).
 
 The session list is `sessions.json` beside canoa.cfg on a desktop, and this origin's IndexedDB in a web build, a PWA or the extension. Removing a session from it never deletes the agent's own session. It also keeps, per source, what its agent offered (model, effort, mode and its other choices) and took with a prompt when it last ran, and the last model, effort and mode the agent took from you.
 
@@ -539,6 +539,92 @@ default, use Remove this source or set `anthropics = false`; giving the label a 
 anthropics = false                                  # leave out the source Canoa offers by default
 web = "addyosmani/web-quality-skills"               # a label of yours = a source as above
 ```
+
+### Extensions catalogs
+
+An extension is code the host loads to add to Canoa: today a library that adds store types. Store, Extensions lists the extensions of
+the **extensions catalogs** you name in `[store.extension_catalogs]`, a label of yours for each, written as a catalog is in
+`[catalogs]` (`<repository>@<ref>#<file>`) but a list of its own: none is offered until you add one, and a catalog of overlays is
+never read as one of extensions. Canoa's own format, described here, is not the overlay catalog's.
+
+```toml
+[store.extension_catalogs]
+team = "https://github.com/example/canoa-extensions.git@main#extensions.toml"
+```
+
+The file is TOML in a git repository (at most 4 MiB). Its `[extensions.NAME]` tables are the entries; `name` and `description` at the top
+are shown as the catalog's own, and any other top-level key is ignored. A `NAME` is 1 to 64 letters, digits, hyphens or underscores
+(it becomes `[host.extensions.NAME]`), and two that differ only in case are both refused.
+
+```toml
+name = "Team extensions"
+description = "What the team installs."
+
+[extensions.speech-kit]                  # a tree of files in a git repository, pinned by its digest
+source = "https://github.com/example/extensions.git"
+ref = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+pin = "sha256:8280aaf5de7c4f61342f648586d534e481ae095cef223dded70f5b1db5bd84a1"
+load = "bin/speech_kit.dll"              # the library file in the tree the host loads
+provider = "example_speech"
+description = "Adds a speech engine."
+
+[extensions.speech-kit.needs]
+kind = "store_extension"
+version = "1"
+platforms = ["windows-x86_64"]
+
+[extensions.speech-kit.about]
+summary = "Speech engines, as an extension."
+tags = ["speech"]
+
+[extensions.speech-lib]                  # one file at a URL, pinned by its SHA-256
+source = "https://github.com/example/extensions/releases/download/v1.2.0/speech_lib.so"
+sha256 = "<64 hexadecimal digits>"
+provider = "example_speech"
+
+[extensions.local-kit]                   # a folder of this catalog's own repository, at its ref
+source = "./kits/local"
+pin = "sha256:8280aaf5de7c4f61342f648586d534e481ae095cef223dded70f5b1db5bd84a1"
+load = "local.dll"
+provider = "example_local"
+```
+
+| Key | Meaning |
+| --- | --- |
+| `source` | Required. A git repository wherever git reads one (a folder of this computer by its path, `file:`, `ssh`, `git@host:path`, `https` with the credentials the address holds), written `<repository>` with an optional `@<ref>` and `#<folder>` (a `git+` before it names git when the address does not end in `.git`); a folder of the catalog's own repository (`./kits/x`, `../x`), at the catalog's ref and from the catalog file's folder; or an `http` or `https` URL of one file, with any query or credentials it needs |
+| `ref` | The branch, tag or commit of a git `source` written without `@<ref>` (a branch may hold `/`). The repository's head when neither is given |
+| `pin` | Required with a git or relative `source`, refused with a URL: the tree digest of the folder (`sha256:` and 64 hexadecimal digits), the same digest an overlay's `pin` is |
+| `sha256` | Required with a URL, refused with a git `source`: the SHA-256 of the file, 64 hexadecimal digits |
+| `load` | The library file in the tree the host loads (a `/`-separated path of plain names). Required for a tree by this host, refused with a URL, whose file is the library |
+| `provider` | Required. The id of the `store_extension` provider the library offers: letters, digits, `_`, `.`, `-` |
+| `needs` | Optional. `kind` (a name; this host offers `store_extension`), `version` (compared as written; this host offers `1`; needs a `kind`) and `platforms` (a list of `windows`, `linux`, `macos` or the same with an architecture, `linux-aarch64`; the host's own OS, or its OS and architecture, must be one) |
+| `description`, `about` | Informational: `about` takes `summary`, `icon` (a PNG or WebP file beside the catalog), `homepage`, `repository` (web addresses), `license`, `authors` and `tags`; one that is not valid is left out and the entry is still listed |
+
+Where an extension comes from is yours to choose: the catalog may be a folder of this computer, a `file:` address, `ssh` or an
+address that needs your own git credentials, and it is fetched with your own git settings, as an overlay catalog is. A source the
+catalog names is not restricted either, and is fetched as follows: one in the catalog's own repository (a relative one) with your own git
+settings, one anywhere else with none of them, no credential helper, ssh key or agent, since its author, not you, chose where it points
+(the plan says which). What the format refuses, each for a reason it cannot work without:
+
+| Refused | Why |
+| --- | --- |
+| a name that is not 1 to 64 letters, digits, hyphens or underscores, or two that differ only in case (`invalid-name`, `duplicate-name`) | the name becomes the key `[host.extensions.NAME]` and a folder; two names would share both |
+| an entry that is not a table, has a key this list does not, or a value of the wrong form (`invalid-entry`) | a misspelt `pin` or `load` would otherwise be read as no pin or no file |
+| a source that is empty, holds a control character, names a scheme neither git nor the download speaks (`s3:`, `ftp:`), or a folder with an empty, `.` or `..` name (`invalid-source`) | it cannot be handed to git or the download, or names nothing |
+| a relative source that leaves the repository (`leaves-repository`) | there is nothing there to fetch |
+| a `ref` beside a relative source, a URL, or an `@<ref>` of the source's own (`ref-not-allowed`), or a `ref` git cannot be asked for (`:`, `\`, `@`, `#`, `?`, `*`, `[`, `^`, `~`, `..`, white space, a leading `-`) | the source would have two refs or none to put it on, and git would read the others as a refspec or an option |
+| a `pin` or `sha256` that is not a digest (`invalid-pin`), a `pin` with a URL or a `sha256` with a git source, a `load` with a URL (`invalid-entry`), no digest (`unpinned`) | the digest is the install's integrity, not a restriction: what is fetched is checked against it before anything is kept, so an entry that gives none, or one its source cannot be checked by, has nothing to check |
+| a `needs` this host does not offer: another `kind` or `version`, or other `platforms` | the library cannot run here |
+| a tree with no `load` | this host loads one library file; with no name it cannot choose |
+| a file larger than 4 MiB for the catalog, more than 2000 entries, a download over 256 MiB | so a hostile or broken source cannot take the host's memory or disk |
+
+Installing needs the `hosting` grant, which already names the libraries the host loads. The host shows a plan first: the source, the
+digest, the provider, where the files will be kept (`<home>/extensions/NAME`) and the `[host.extensions.NAME]` it will write, and the
+notice that an extension runs with your access. Only after you confirm does it fetch, and it keeps nothing unless what it fetched has the
+tree digest or the SHA-256 the entry gives. It then writes `library`, `provider` and `pin` and `root` (or `sha256`) into
+`[host.extensions.NAME]`, and the host restarts to load it. The digest is checked again each time the host loads the extension, before
+the file is opened, and an extension whose bytes changed is skipped and logged. Settings, Extensions lists what is installed (marking
+what the Store installed) and removes an extension with its files; one you name there by hand has no digest and is loaded as it is.
 
 ### The overlay store
 
