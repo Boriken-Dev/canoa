@@ -58,7 +58,6 @@ pub struct Contract {
     holds: Vec<Requirement>,
     message_limit: Option<usize>,
     imports: bool,
-    logins: bool,
     account: Option<String>,
     program_agent: bool,
 }
@@ -109,7 +108,6 @@ impl Contract {
             holds: alloc::vec![Requirement::new(READ_ONLY), Requirement::new(NO_COMMANDS)],
             message_limit: None,
             imports: true,
-            logins: true,
             account: None,
             program_agent: false,
         }
@@ -139,13 +137,6 @@ impl Contract {
     /// `import_session` with `GUATIAO_ERR_UNSUPPORTED` and a reason.
     pub const fn imports(mut self, imports: bool) -> Self {
         self.imports = imports;
-        self
-    }
-
-    /// Whether the provider offers login methods (the default). One that does not must list none
-    /// in its catalog and refuse `login` with `GUATIAO_ERR_UNSUPPORTED` and a reason.
-    pub const fn logins(mut self, logins: bool) -> Self {
-        self.logins = logins;
         self
     }
 

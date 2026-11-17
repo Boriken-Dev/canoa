@@ -50,10 +50,10 @@ pub use compose::{
     Resolution, compose, composition_order, environments, resolve,
 };
 pub use defaults::{
-    DEFAULT_KEYS, Dependency, INTERPRETERS, OverlayTree, PartialLock, SkillEntry, SkillOrigin,
-    bundled_skills, check_requirements, context_ignored, context_of, default_on, default_paths,
-    dependencies_of, env_files_of, harness_context_of, paths_of, rules_of, skill_entries,
-    skills_of,
+    DEFAULT_KEYS, DelegateHint, Dependency, INTERPRETERS, OverlayTree, PartialLock, SkillEntry,
+    SkillOrigin, bundled_skills, check_requirements, context_ignored, context_of, default_on,
+    default_paths, dependencies_of, env_files_of, harness_context_of, harness_delegate_of,
+    paths_of, rules_of, skill_entries, skills_of,
 };
 pub use digest::{Digest, TreeDigest, TreeEntry, digest_entries, read_tree, tree_digest};
 pub use error::{Class, Error};

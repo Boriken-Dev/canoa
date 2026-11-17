@@ -1,4 +1,4 @@
-# coqui-aos/rust at c4babfd9f15347a7d35d0fc25fa28cbe398ac02f, with what it inherits written out.
+# coqui-aos/rust at caa9bf6dcf8485fb179f092bbd2cd9db17861670, with what it inherits written out.
 test = [{ name = "tree", required-features = ["fs"] }, { name = "knowledge_index", required-features = ["index"] }]
 [package]
 name = "coqui-aos"

@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-bridge at d8a3c10eb7499621333bdb307f9e8ce450a203ce, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-bridge at cf01e16e59bf637e2466ff2a82aa1089cf8500c6, with what it inherits written out.
 [package]
 name = "coqui-acp-bridge"
 description = "Put a stdio Agent Client Protocol agent on the network, under a proven peer identity"

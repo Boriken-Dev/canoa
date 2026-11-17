@@ -8,17 +8,16 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::time::Duration;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, Secret, Status, ToValue};
 use coqui_acp_api::{
-    AccountCatalog, AccountGrant, AccountKeeper, AccountRef, AcpHarness, Channel, ChannelSink,
-    Environment, ExportPage, HarnessInfo, ImportReport, LoginOutcome, LoginPrompter, LoginRequest,
-    ModelInfo, ModelListing, ModelsRequest, Narrowing, ProcessSpawner, RenewReport, RenewRequest,
-    Requirement, SessionExport, SessionImport, StartRequest, UnknownKind, UsageQuery, UsageReport,
+    AccountCatalog, AccountGrant, AccountRef, AcpHarness, Channel, ChannelSink, Environment,
+    ExportPage, HarnessInfo, ImportReport, ModelInfo, ModelListing, ModelsRequest, Narrowing,
+    ProcessSpawner, Requirement, SessionExport, SessionImport, StartRequest, UnknownKind,
+    UsageQuery, UsageReport,
 };
 use coqui_acp_harness::Mode;
 use coqui_acp_harness::account::{Accounts, Files, Hold, Watched, same_name};
@@ -86,10 +85,6 @@ pub struct ProviderSettings {
     /// The largest message a connection takes, in bytes; one more ends it.
     #[map(default = 67_108_864)]
     pub max_message_bytes: u64,
-    /// How often, in milliseconds, a connection on an account that keeps its login in a file looks at the file for a
-    /// renewal or a loss; 0 looks only when a call is made on the account and when the connection closes.
-    #[map(default = 30_000)]
-    pub renew_poll_ms: u64,
 }
 
 impl Default for ProviderSettings {
@@ -111,7 +106,6 @@ impl Default for ProviderSettings {
             max_sessions: 8,
             max_requests: 32,
             max_message_bytes: 64 * 1024 * 1024,
-            renew_poll_ms: 30_000,
         }
     }
 }
@@ -130,7 +124,7 @@ impl Default for ProviderSettings {
 )]
 pub struct PiProvider {
     settings: ProviderSettings,
-    /// What the provider knows of its accounts' files, and who hears of them.
+    /// What the provider knows of the files it placed for its accounts.
     accounts: Arc<Accounts>,
 }
 
@@ -175,10 +169,6 @@ impl PiProvider {
         Self::new(ProviderSettings::default())
     }
 
-    fn poll(&self) -> Duration {
-        Duration::from_millis(self.settings.renew_poll_ms)
-    }
-
     /// What a session starts with: the settings and the host's environment.
     fn launch(&self, environment: &Environment) -> PiLaunch {
         let mut launch = PiLaunch::new(".");
@@ -200,13 +190,13 @@ impl PiProvider {
         launch
     }
 
-    /// Takes the hold on the account's login file for a call or a connection, when the kind has one.
+    /// Takes the hold on the account's login file for a call or a connection, when the kind has one: the grant's copy is
+    /// placed there. What happens to the file afterwards is for the account provider's watch to tell.
     fn hold(
         grant: &AccountGrant,
         applied: &Applied,
         spawner: &Arc<Object<dyn ProcessSpawner>>,
         accounts: &Arc<Accounts>,
-        keeper: Option<Object<dyn AccountKeeper>>,
     ) -> Result<Option<Hold>, ProviderError> {
         let files = Files::new(Arc::clone(spawner));
         if applied.needs_files && !files.available() {
@@ -221,7 +211,7 @@ impl PiProvider {
         accounts
             .hold(
                 files,
-                keeper,
+                None,
                 &grant.id,
                 dir,
                 grant.revision,
@@ -241,7 +231,6 @@ impl PiProvider {
         &self,
         account: Option<&AccountGrant>,
         spawner: &Arc<Object<dyn ProcessSpawner>>,
-        keeper: Object<dyn AccountKeeper>,
         launch: &mut PiLaunch,
     ) -> Result<Option<Hold>, ProviderError> {
         let Some(grant) = account else {
@@ -260,7 +249,7 @@ impl PiProvider {
         for (name, value) in applied.environment.expose().iter() {
             launch.env.insert(name.into(), value.into());
         }
-        Self::hold(grant, &applied, spawner, &self.accounts, Some(keeper))
+        Self::hold(grant, &applied, spawner, &self.accounts)
     }
 
     /// Whether the spawner starts programs on this machine, where the permission gate is written.
@@ -274,24 +263,10 @@ impl PiProvider {
         }
     }
 
-    /// What a call that runs nothing does for an account: reads it, and looks at its login file so that a renewal or a
-    /// loss that happened since is told.
-    fn glance(
-        &self,
-        account: Option<&AccountGrant>,
-        spawner: Object<dyn ProcessSpawner>,
-        keeper: Object<dyn AccountKeeper>,
-    ) -> Result<(), ProviderError> {
-        let Some(grant) = account else {
-            return Ok(());
-        };
-        let Some(applied) = apply(&DEF, grant)? else {
-            return Ok(());
-        };
-        let spawner = Arc::new(spawner);
-        if let Some(hold) = Self::hold(grant, &applied, &spawner, &self.accounts, Some(keeper))? {
-            let _ = hold.look();
-            hold.finish();
+    /// Reads the account of a call that runs nothing, so that a grant the kind refuses is refused as it is everywhere.
+    fn glance(account: Option<&AccountGrant>) -> Result<(), ProviderError> {
+        if let Some(grant) = account {
+            apply(&DEF, grant)?;
         }
         Ok(())
     }
@@ -326,7 +301,6 @@ impl AcpHarness for PiProvider {
         request: StartRequest,
         spawner: Object<dyn ProcessSpawner>,
         sink: Object<dyn ChannelSink>,
-        keeper: Object<dyn AccountKeeper>,
     ) -> Result<Object<dyn Channel>, ProviderError> {
         if let Some(why) = narrow(&request.requirements)? {
             return Err(unsupported(&why));
@@ -334,7 +308,7 @@ impl AcpHarness for PiProvider {
         Self::local(&spawner)?;
         let mut launch = self.launch(request.environment.expose());
         let spawner = Arc::new(spawner);
-        let hold = self.apply(request.account.as_ref(), &spawner, keeper, &mut launch)?;
+        let hold = self.apply(request.account.as_ref(), &spawner, &mut launch)?;
         let mut settings = Settings::new();
         settings.max_sessions = usize::try_from(self.settings.max_sessions).unwrap_or(usize::MAX);
         settings.max_requests = usize::try_from(self.settings.max_requests).unwrap_or(usize::MAX);
@@ -351,11 +325,7 @@ impl AcpHarness for PiProvider {
         let limit = usize::try_from(self.settings.max_message_bytes).unwrap_or(usize::MAX);
         let mut serving = Serving::new(settings, limit);
         if let Some(hold) = hold {
-            let watcher = (self.settings.renew_poll_ms > 0).then(|| hold.watch(self.poll()));
-            serving = serving.ending(move || {
-                drop(watcher);
-                hold.finish();
-            });
+            serving = serving.ending(move || hold.finish());
         }
         serving.open_shared(spawner, sink, move |spawn| {
             Ok(shared(PiAgent::new().defaults(launch).spawn(spawn)))
@@ -390,7 +360,6 @@ impl AcpHarness for PiProvider {
         &self,
         session: SessionImport,
         spawner: Object<dyn ProcessSpawner>,
-        _keeper: Object<dyn AccountKeeper>,
     ) -> Result<ImportReport, ProviderError> {
         if let Some(account) = &session.account {
             known(&DEF, &account.reference())?;
@@ -412,7 +381,6 @@ impl AcpHarness for PiProvider {
         &self,
         export: SessionExport,
         spawner: Object<dyn ProcessSpawner>,
-        _keeper: Object<dyn AccountKeeper>,
     ) -> Result<ExportPage, ProviderError> {
         if let Some(account) = &export.account {
             known(&DEF, &account.reference())?;
@@ -434,11 +402,10 @@ impl AcpHarness for PiProvider {
         &self,
         request: ModelsRequest,
         spawner: Object<dyn ProcessSpawner>,
-        keeper: Object<dyn AccountKeeper>,
     ) -> Result<ModelListing, ProviderError> {
         let mut launch = self.launch(request.environment.expose());
         let spawner = Arc::new(spawner);
-        let hold = self.apply(request.account.as_ref(), &spawner, keeper, &mut launch)?;
+        let hold = self.apply(request.account.as_ref(), &spawner, &mut launch)?;
         let spawn = ThroughSpawner::shared(spawner);
         let listing = match PiSession::read_models(&launch, &spawn, PiSettings::new()) {
             Ok(models) if models.is_empty() => {
@@ -475,7 +442,6 @@ impl AcpHarness for PiProvider {
                 format!("Pi could not be asked: {error}"),
             ),
         };
-        // The last look: a refresh Pi made while it was asked is told before the call returns.
         if let Some(hold) = hold {
             hold.finish();
         }
@@ -486,36 +452,9 @@ impl AcpHarness for PiProvider {
         &self,
         query: UsageQuery,
         spawner: Object<dyn ProcessSpawner>,
-        keeper: Object<dyn AccountKeeper>,
     ) -> Result<UsageReport, ProviderError> {
-        self.glance(query.account.as_ref(), spawner, keeper)?;
+        drop(spawner);
+        Self::glance(query.account.as_ref())?;
         Ok(UsageReport::unsupported("Pi reports no usage allowances"))
-    }
-
-    fn login(
-        &self,
-        _request: LoginRequest,
-        _spawner: Object<dyn ProcessSpawner>,
-        _prompter: Object<dyn LoginPrompter>,
-    ) -> Result<LoginOutcome, ProviderError> {
-        Err(unsupported(DEF.login_unsupported))
-    }
-
-    fn renew(
-        &self,
-        request: RenewRequest,
-        _spawner: Object<dyn ProcessSpawner>,
-    ) -> Result<RenewReport, ProviderError> {
-        let grant = request.account;
-        // The grant is read first, so that one the kind refuses is refused as it is everywhere.
-        if apply(&DEF, &grant)?.is_none() {
-            return Err(unsupported(
-                "the harness's own login is the harness's to renew",
-            ));
-        }
-        let why = DEF
-            .kind(&grant.kind)
-            .map_or("this login is not renewed", |kind| kind.renew_unsupported);
-        Err(unsupported(why))
     }
 }

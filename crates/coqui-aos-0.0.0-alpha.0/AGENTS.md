@@ -187,6 +187,8 @@ pub struct OverlayTree     // paths and the bytes of those read; Default, from_p
 pub fn rules_of / context_of / paths_of / env_files_of / skills_of(manifest: &Document, tree: &OverlayTree) -> ...
 pub fn default_paths(manifest, tree) -> Vec<Value>;  pub fn default_on(manifest: &Document, key: &str) -> bool
 pub fn context_ignored(manifest, tree) -> Vec<String>;  pub fn harness_context_of(manifest, harness: &str, tree) -> Vec<String>
+#[non_exhaustive] pub struct DelegateHint { pub default: Option<String>, pub sources: Option<Vec<String>>, pub max_running: Option<u32> }   // Default, Clone, Eq
+pub fn harness_delegate_of(manifest: &Document, harness: &str) -> Option<DelegateHint>   // `[harness.ID.delegate]`: suggestions that only choose among what the consumer allows; a key of the wrong type is left out, so validate first
 pub fn skill_entries(manifest, tree) -> Vec<SkillEntry>   // SkillEntry { name, origin: SkillOrigin, source, key, pin }
 pub fn dependencies_of(manifest, tree, os: &str) -> Result<Vec<Dependency>, PartialLock>
 pub fn check_requirements(text: &str, locked: bool) -> Result<(), Error>   // `invalid-requirements`; never quotes the line

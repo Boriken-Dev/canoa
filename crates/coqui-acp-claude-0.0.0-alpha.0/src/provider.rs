@@ -7,17 +7,15 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::time::Duration;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, Secret, Status, ToValue};
 use coqui_acp_api::{
-    AccountCatalog, AccountGrant, AccountKeeper, AccountRef, AcpHarness, CacheChoice,
-    CacheLifetime, Channel, ChannelSink, Environment, ExportPage, HarnessInfo, ImportReport,
-    LoginOutcome, LoginPrompter, LoginRequest, ModelInfo, ModelListing, ModelsRequest, Narrowing,
-    ProcessSpawner, RenewReport, RenewRequest, Requirement, SessionExport, SessionImport,
+    AccountCatalog, AccountGrant, AccountRef, AcpHarness, CacheChoice, CacheLifetime, Channel,
+    ChannelSink, Environment, ExportPage, HarnessInfo, ImportReport, ModelInfo, ModelListing,
+    ModelsRequest, Narrowing, ProcessSpawner, Requirement, SessionExport, SessionImport,
     StartRequest, UnknownKind, UsageQuery, UsageReport,
 };
 use coqui_acp_harness::Mode;
@@ -26,8 +24,8 @@ use coqui_acp_harness::acp::Harness;
 use coqui_acp_harness::provider::{Reports, Serving, shared, takes_of};
 use coqui_acp_harness::{Settings, ThroughSpawner};
 
+use crate::accounts;
 use crate::{ClaudeAgent, ClaudeLaunch, ClaudeSession, ClaudeSettings};
-use crate::{accounts, signin};
 
 /// What a connection with `cache_lifetime` short sets `CLAUDE_CODE_PROMPT_CACHE_TTL` and its sub-agent twin to.
 const SHORT_TTL: &str = "5m";
@@ -111,14 +109,6 @@ pub struct ProviderSettings {
     /// Whether a client may give a session MCP servers, which start programs.
     #[map(default = true)]
     pub client_mcp_servers: bool,
-    /// How often, in milliseconds, a connection on an account that keeps its login in a file looks at the file for a
-    /// renewal or a loss; 0 looks only when a call is made on the account and when the connection closes.
-    #[map(default = 30_000)]
-    pub renew_poll_ms: u64,
-    /// The longest, in milliseconds, a command Claude Code is asked to run for an account (`auth status`) may take;
-    /// 0 ends it at once.
-    #[map(default = 60_000)]
-    pub command_timeout_ms: u64,
 }
 
 impl Default for ProviderSettings {
@@ -137,8 +127,6 @@ impl Default for ProviderSettings {
             max_message_bytes: 64 * 1024 * 1024,
             allow_client_plugins: false,
             client_mcp_servers: true,
-            renew_poll_ms: 30_000,
-            command_timeout_ms: 60_000,
         }
     }
 }
@@ -159,7 +147,7 @@ pub struct ClaudeProvider {
     settings: ProviderSettings,
     /// What the connections learned of each account's usage.
     reports: Arc<Reports>,
-    /// What the provider knows of its accounts' files, and who hears of them.
+    /// What the provider knows of the files it placed for its accounts.
     accounts: Arc<Accounts>,
     /// The ids a host seeded with no history, which their first start makes sessions.
     fresh: crate::FreshSessions,
@@ -277,7 +265,8 @@ struct Applying {
 
 impl ClaudeProvider {
     /// Applies `account` to `launch`: the variables Claude Code is given, every credential variable removed first, and
-    /// the files of a login placed in the account's directory through `files`.
+    /// the files of a login placed in the account's directory through `files`. What happens to the files afterwards
+    /// is for the account provider's watch to tell, and this provider tells nothing.
     ///
     /// # Errors
     ///
@@ -286,7 +275,6 @@ impl ClaudeProvider {
         &self,
         account: Option<&AccountGrant>,
         files: &Files,
-        keeper: Object<dyn AccountKeeper>,
         launch: &mut ClaudeLaunch,
     ) -> Result<Applying, ProviderError> {
         let Some(grant) = account else {
@@ -319,12 +307,11 @@ impl ClaudeProvider {
             if launch.setting_sources.is_none() {
                 launch.setting_sources = Some(vec!["project".to_string(), "local".to_string()]);
             }
-            drop(keeper);
             return Ok(Applying { hold: None });
         }
         let hold = self.accounts.hold(
             files.clone(),
-            Some(keeper),
+            None,
             &grant.id,
             applied.dir.as_deref().unwrap_or_default(),
             grant.revision,
@@ -373,7 +360,6 @@ impl AcpHarness for ClaudeProvider {
         request: StartRequest,
         spawner: Object<dyn ProcessSpawner>,
         sink: Object<dyn ChannelSink>,
-        keeper: Object<dyn AccountKeeper>,
     ) -> Result<Object<dyn Channel>, ProviderError> {
         let (mut launch, refusal) = self.launch(
             request.environment.expose(),
@@ -385,7 +371,7 @@ impl AcpHarness for ClaudeProvider {
         }
         let spawner = Arc::new(spawner);
         let files = Files::new(Arc::clone(&spawner));
-        let applying = self.apply(request.account.as_ref(), &files, keeper, &mut launch)?;
+        let applying = self.apply(request.account.as_ref(), &files, &mut launch)?;
         drop(files);
         let account_id = request.account.as_ref().map(|account| account.id.clone());
         let mut settings = Settings::new();
@@ -408,12 +394,7 @@ impl AcpHarness for ClaudeProvider {
         let plugins = self.settings.allow_client_plugins;
         let mut serving = Serving::new(settings, limit);
         if let Some(hold) = applying.hold {
-            let watcher = (self.settings.renew_poll_ms > 0)
-                .then(|| hold.watch(Duration::from_millis(self.settings.renew_poll_ms)));
-            serving = serving.ending(move || {
-                drop(watcher);
-                hold.finish();
-            });
+            serving = serving.ending(move || hold.finish());
         }
         let fresh = Arc::clone(&self.fresh);
         serving.open_shared(spawner, sink, move |spawn| {
@@ -451,7 +432,6 @@ impl AcpHarness for ClaudeProvider {
         &self,
         session: SessionImport,
         spawner: Object<dyn ProcessSpawner>,
-        _keeper: Object<dyn AccountKeeper>,
     ) -> Result<ImportReport, ProviderError> {
         if let Some(account) = &session.account {
             accounts::plan(account)?;
@@ -473,7 +453,6 @@ impl AcpHarness for ClaudeProvider {
         &self,
         export: SessionExport,
         spawner: Object<dyn ProcessSpawner>,
-        _keeper: Object<dyn AccountKeeper>,
     ) -> Result<ExportPage, ProviderError> {
         if let Some(account) = &export.account {
             accounts::plan(account)?;
@@ -495,13 +474,12 @@ impl AcpHarness for ClaudeProvider {
         &self,
         request: ModelsRequest,
         spawner: Object<dyn ProcessSpawner>,
-        keeper: Object<dyn AccountKeeper>,
     ) -> Result<ModelListing, ProviderError> {
         let (mut launch, _) =
             self.launch(request.environment.expose(), CacheLifetime::Default, &[])?;
         let spawner = Arc::new(spawner);
         let files = Files::new(Arc::clone(&spawner));
-        let applying = self.apply(request.account.as_ref(), &files, keeper, &mut launch)?;
+        let applying = self.apply(request.account.as_ref(), &files, &mut launch)?;
         drop(files);
         let spawn = ThroughSpawner::shared(spawner);
         let listing = match ClaudeSession::start(&launch, &spawn, ClaudeSettings::new(), |_| true) {
@@ -558,7 +536,6 @@ impl AcpHarness for ClaudeProvider {
                 format!("Claude Code could not be asked: {error}"),
             ),
         };
-        // The last look: a refresh Claude Code made while it was asked is told before the call returns.
         if let Some(hold) = applying.hold {
             hold.finish();
         }
@@ -569,7 +546,6 @@ impl AcpHarness for ClaudeProvider {
         &self,
         query: UsageQuery,
         _spawner: Object<dyn ProcessSpawner>,
-        _keeper: Object<dyn AccountKeeper>,
     ) -> Result<UsageReport, ProviderError> {
         // Claude Code learns usage only during a turn: this is what the connections last saw.
         if let Some(account) = &query.account {
@@ -579,34 +555,5 @@ impl AcpHarness for ClaudeProvider {
         Ok(self
             .reports
             .report(&self.support(), account.as_ref().map(|a| a.id.as_str())))
-    }
-
-    fn login(
-        &self,
-        request: LoginRequest,
-        spawner: Object<dyn ProcessSpawner>,
-        prompter: Object<dyn LoginPrompter>,
-    ) -> Result<LoginOutcome, ProviderError> {
-        signin::login(
-            &OsString::from(&self.settings.executable),
-            Duration::from_millis(self.settings.command_timeout_ms),
-            &request,
-            spawner,
-            prompter,
-        )
-    }
-
-    fn renew(
-        &self,
-        request: RenewRequest,
-        spawner: Object<dyn ProcessSpawner>,
-    ) -> Result<RenewReport, ProviderError> {
-        signin::renew(
-            &self.accounts,
-            &OsString::from(&self.settings.executable),
-            Duration::from_millis(self.settings.command_timeout_ms),
-            &request,
-            spawner,
-        )
     }
 }
