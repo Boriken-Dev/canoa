@@ -260,7 +260,7 @@ fn entry_of(
         quoted(preset.name)
     );
     if let Some(harness) = preset.harness {
-        text.push_str(&format!("harness = {}\nbypass = true\n", quoted(harness)));
+        text.push_str(&format!("harness = {}\n", quoted(harness)));
         if found.is_some() {
             text.push_str(&format!("executable = {}\n", quoted(&program)));
         }

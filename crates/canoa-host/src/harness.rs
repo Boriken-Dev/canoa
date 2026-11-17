@@ -54,22 +54,14 @@ pub(crate) struct AgentOptions {
     pub(crate) executable: Option<OsString>,
     pub(crate) model: Option<String>,
     pub(crate) effort: Option<String>,
-    /// Claude Code's `--permission-mode`.
-    pub(crate) permission_mode: Option<String>,
+    /// What every session starts with: the sandbox, the network and the approvals, in the words every harness shares.
+    pub(crate) access: coqui_acp_harness::Access,
     /// Claude Code's `--setting-sources`; `None` is its own default.
     pub(crate) setting_sources: Option<Vec<String>>,
     /// Claude Code's `--strict-mcp-config`.
     pub(crate) strict_mcp_config: bool,
-    /// Codex's approval policy.
-    pub(crate) approval_policy: Option<String>,
-    /// Codex's sandbox.
-    pub(crate) sandbox: Option<String>,
     /// Claude Code's permission prompts asked through ACP, rather than refused where nothing granted them.
     pub(crate) permission_prompts: bool,
-    /// Whether a client may put a session in Bypass, which asks for nothing. Off, the mode is not offered and is refused.
-    pub(crate) allow_bypass: bool,
-    /// The modes a client may choose; `None` is the mode the settings amount to and every stricter one.
-    pub(crate) modes: Option<Vec<coqui_acp_harness::Mode>>,
     /// Claude Code plugins named in a session's `_meta`; their hooks and MCP servers run with nothing asked.
     pub(crate) client_plugins: bool,
     /// Directories a session's `cwd`, more directories and plugins must lie in; none takes any.
@@ -108,13 +100,9 @@ impl core::fmt::Debug for AgentOptions {
             .field("executable", &self.executable)
             .field("model", &self.model)
             .field("effort", &self.effort)
-            .field("permission_mode", &self.permission_mode)
+            .field("access", &self.access)
             .field("setting_sources", &self.setting_sources)
-            .field("approval_policy", &self.approval_policy)
-            .field("sandbox", &self.sandbox)
             .field("permission_prompts", &self.permission_prompts)
-            .field("allow_bypass", &self.allow_bypass)
-            .field("modes", &self.modes)
             .field("client_plugins", &self.client_plugins)
             .field("working_roots", &self.working_roots)
             .field("resume_roots", &self.resume_roots)
@@ -134,14 +122,10 @@ impl AgentOptions {
             executable: None,
             model: None,
             effort: None,
-            permission_mode: None,
+            access: coqui_acp_harness::Access::STANDARD,
             setting_sources: None,
             strict_mcp_config: false,
-            approval_policy: None,
-            sandbox: None,
             permission_prompts: true,
-            allow_bypass: false,
-            modes: None,
             client_plugins: false,
             working_roots: Vec::new(),
             resume_roots: Vec::new(),
@@ -182,11 +166,12 @@ impl AgentOptions {
         }
         launch.model.clone_from(&self.model);
         launch.effort.clone_from(&self.effort);
-        launch.permission_mode.clone_from(&self.permission_mode);
+        launch.access = Some(self.access);
         launch.setting_sources.clone_from(&self.setting_sources);
         launch.strict_mcp_config = self.strict_mcp_config;
-        launch.allow_bypass = self.allow_bypass;
-        launch.modes.clone_from(&self.modes);
+        // Every mode the agent has is offered, Bypass included.
+        launch.allow_bypass = true;
+        launch.modes = Some(coqui_acp_harness::Mode::ALL.to_vec());
         launch.permission_prompts = self.permission_prompts;
         launch.env.extend(self.env.iter().cloned());
         let ttl = match self.cache_lifetime {
@@ -224,11 +209,10 @@ impl AgentOptions {
         }
         launch.model.clone_from(&self.model);
         launch.effort.clone_from(&self.effort);
-        launch.approval_policy.clone_from(&self.approval_policy);
-        launch.sandbox.clone_from(&self.sandbox);
+        launch.apply_access(self.access);
         launch.working_roots.clone_from(&self.resume_roots);
-        launch.allow_bypass = self.allow_bypass;
-        launch.modes.clone_from(&self.modes);
+        launch.allow_bypass = true;
+        launch.modes = Some(coqui_acp_harness::Mode::ALL.to_vec());
         launch.env.extend(self.env.iter().cloned());
         launch
     }

@@ -86,14 +86,11 @@ fn entries_of(config: &Config, portal: bool) -> Vec<Value> {
     entries
 }
 
-/// The keys an entry made by an offer starts with. A built-in source keeps what it was (its title, its bypass, the profile it is
+/// The keys an entry made by an offer starts with. A built-in source keeps what it was (its title, the profile it is
 /// launched with) and reaches no paired key unless the host is a portal's; any other entry made here is titled by its name and no
 /// paired key reaches it.
 fn made_keys(entry: &str, built_in: bool, portal: bool) -> Vec<(&'static str, toml::Value)> {
     let mut keys = vec![("title", toml::Value::String(entry.to_owned()))];
-    if built_in {
-        keys.push(("bypass", toml::Value::Boolean(true)));
-    }
     if !(built_in && portal) {
         keys.push(("peers", toml::Value::Array(Vec::new())));
         // The profile is the person's own for a built-in source; a portal host gives it to its harness entries whatever the file
@@ -755,7 +752,7 @@ mod offer_tests {
         let codex = entry(&after, "Codex");
         assert_eq!(codex.peers.as_ref().map(Vec::len), Some(0), "{written}");
         assert!(codex.own_profile, "{written}");
-        assert!(written.contains("bypass = true"), "{written}");
+        assert!(!written.contains("bypass"), "{written}");
         assert!(written.contains("title = \"Codex\""), "{written}");
         let (answer, written, after) = offered(true, &params);
         answer.expect("offered");

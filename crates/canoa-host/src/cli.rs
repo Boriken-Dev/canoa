@@ -497,9 +497,6 @@ enum AgentHarness {
         /// The Claude Code program.
         #[arg(long, env = "COQUI_ACP_CLAUDE_EXECUTABLE", default_value = "claude")]
         executable: OsString,
-        /// The permission mode: default, acceptEdits, plan, dontAsk, bypassPermissions, auto or manual.
-        #[arg(long)]
-        permission_mode: Option<String>,
         /// The setting sources Claude Code loads, comma-separated, of user, project and local; empty loads none.
         #[arg(long)]
         setting_sources: Option<String>,
@@ -522,12 +519,6 @@ enum AgentHarness {
         /// The Codex program.
         #[arg(long, env = "COQUI_ACP_CODEX_EXECUTABLE", default_value = "codex")]
         executable: OsString,
-        /// The approval policy: untrusted, on-failure, on-request or never.
-        #[arg(long)]
-        approval_policy: Option<String>,
-        /// The sandbox: read-only, workspace-write or danger-full-access.
-        #[arg(long)]
-        sandbox: Option<String>,
         #[command(flatten)]
         common: AgentArgs,
     },
@@ -557,13 +548,28 @@ struct AgentArgs {
     /// Take a network path (`\\host\share`) as a session's cwd or more directories.
     #[arg(long)]
     allow_network_paths: bool,
-    /// Offer the Bypass mode, which asks for nothing: for a person running the agent for themselves, as the app does.
+    /// How much a command may reach: none (the default), workspace or read-only. The same for every harness.
+    #[arg(long, value_name = "SANDBOX", default_value = "none", value_parser = parse_sandbox)]
+    sandbox: coqui_acp_harness::Sandbox,
+    /// Take the network from the commands a session runs, where the harness can.
     #[arg(long)]
-    allow_bypass: bool,
+    no_network: bool,
+    /// What is asked first: ask (the default), edits or never. The same for every harness.
+    #[arg(long, value_name = "APPROVALS", default_value = "ask", value_parser = parse_approvals)]
+    approvals: coqui_acp_harness::Approvals,
     /// How long the prompt cache should live: default (the harness's own), short (about five minutes, for one-shot and
     /// background runs) or long (about an hour, for an interactive session). Claude Code takes it; Codex has no such setting.
     #[arg(long, value_name = "LIFETIME", default_value = "default", value_parser = parse_lifetime)]
     cache_lifetime: coqui_acp_api::CacheLifetime,
+}
+
+fn parse_sandbox(text: &str) -> Result<coqui_acp_harness::Sandbox, String> {
+    coqui_acp_harness::Sandbox::from_id(text)
+        .ok_or_else(|| "one of none, workspace, read-only".to_owned())
+}
+
+fn parse_approvals(text: &str) -> Result<coqui_acp_harness::Approvals, String> {
+    coqui_acp_harness::Approvals::from_id(text).ok_or_else(|| "one of ask, edits, never".to_owned())
 }
 
 fn parse_lifetime(text: &str) -> Result<coqui_acp_api::CacheLifetime, String> {
@@ -578,7 +584,6 @@ impl AgentHarness {
         let (mut options, common) = match self {
             Self::Claude {
                 executable,
-                permission_mode,
                 setting_sources,
                 strict_mcp_config,
                 no_permission_prompts,
@@ -587,7 +592,6 @@ impl AgentHarness {
             } => {
                 let mut options = AgentOptions::new(Harness::Claude);
                 options.executable = Some(executable);
-                options.permission_mode = permission_mode;
                 options.setting_sources = setting_sources.map(|sources| {
                     sources
                         .split(',')
@@ -600,16 +604,9 @@ impl AgentHarness {
                 options.client_plugins = allow_client_plugins;
                 (options, common)
             }
-            Self::Codex {
-                executable,
-                approval_policy,
-                sandbox,
-                common,
-            } => {
+            Self::Codex { executable, common } => {
                 let mut options = AgentOptions::new(Harness::Codex);
                 options.executable = Some(executable);
-                options.approval_policy = approval_policy;
-                options.sandbox = sandbox;
                 (options, common)
             }
         };
@@ -617,10 +614,12 @@ impl AgentHarness {
         options.effort = common.effort;
         options.max_version = common.max_acp_version;
         options.max_sessions = common.max_sessions;
-        options.allow_bypass = common.allow_bypass;
         options.cache_lifetime = common.cache_lifetime;
-        // `canoa agent` is the person's own command line: it offers every mode, Bypass when asked for.
-        options.modes = Some(coqui_acp_harness::Mode::ALL.to_vec());
+        let mut access = coqui_acp_harness::Access::STANDARD;
+        access.sandbox = common.sandbox;
+        access.network = !common.no_network;
+        access.approvals = common.approvals;
+        options.access = access;
         options.resume_roots.clone_from(&common.working_roots);
         options.working_roots = common.working_roots;
         options.client_mcp_servers = !common.no_client_mcp_servers;
@@ -2175,23 +2174,33 @@ mod tests {
 
     #[test]
     fn agent_serves_codex_with_its_own_flags_and_holds_a_resumed_thread_to_the_roots() {
+        use coqui_acp_harness::{Access, Approvals, Sandbox};
         let options = agent_options(&[
             "codex",
-            "--approval-policy",
-            "on-request",
+            "--approvals",
+            "edits",
             "--sandbox",
-            "workspace-write",
+            "workspace",
+            "--no-network",
             "--working-root",
             "/w",
         ]);
         assert_eq!(options.harness, crate::Harness::Codex);
-        assert_eq!(options.approval_policy.as_deref(), Some("on-request"));
-        assert_eq!(options.sandbox.as_deref(), Some("workspace-write"));
+        assert_eq!(options.access.approvals, Approvals::Edits);
+        assert_eq!(options.access.sandbox, Sandbox::Workspace);
+        assert!(!options.access.network);
         assert_eq!(options.resume_roots, [PathBuf::from("/w")]);
+        assert_eq!(
+            agent_options(&["claude"]).access,
+            Access::STANDARD,
+            "no flag asks for the standard access, the same for every harness"
+        );
         for wrong in [
             &["codex", "--permission-mode", "plan"][..],
+            &["codex", "--approval-policy", "never"],
+            &["claude", "--allow-bypass"],
             &["codex", "--allow-client-plugins"],
-            &["claude", "--sandbox", "read-only"],
+            &["claude", "--sandbox", "workspace-write"],
             &["gemini"],
             &["claude", "--max-acp-version", "3"],
         ] {

@@ -188,16 +188,19 @@ pub struct Preset {
     pub cache_lifetime: Option<String>,
     /// The loadout it starts with, by name; the default loadout when none is named.
     pub loadout: Option<String>,
+    /// The access it runs the agent with (`access = { sandbox, network, approvals }`), part by part.
+    pub access: crate::profile::AccessSetting,
 }
 
 impl Preset {
-    /// This preset as the session's layer: its model, effort, mode and starting instructions.
+    /// This preset as the session's layer: its model, effort, mode, access and starting instructions.
     #[must_use]
     pub fn session_layer(&self) -> Profile {
         let mut profile = Profile {
             model: self.model.clone(),
             effort: self.effort.clone(),
             mode: self.mode.clone(),
+            access: self.access,
             ..Profile::default()
         };
         if let Some(text) = &self.context {
@@ -1054,29 +1057,14 @@ pub struct Entry {
 /// How long a shared session with no client attached is kept unless the entry says otherwise.
 pub const DEFAULT_SHARED_IDLE_SECONDS: u64 = 24 * 60 * 60;
 
-/// What a `claude` or `codex` harness entry's keys ask before the command line acts. Each one unset is the host's own value,
-/// never the person's configuration on this machine: Claude Code's permission mode `default`, Codex's approval policy
-/// `on-request` and sandbox `workspace-write`. They are the provider's settings of the same names; an outside provider
-/// takes its own through `settings`.
+/// What a built-in harness entry's own keys ask of its command line. The access (sandbox, network, approvals) is not here: it
+/// is the profile's, the same for every harness, and each provider turns it into its command line's own words. An outside
+/// provider takes its own settings through `settings`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct HarnessOptions {
-    /// Claude Code's permission mode: `default`, `acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`, `auto` or `manual`.
-    pub permission_mode: Option<String>,
-    /// Codex's approval policy: `untrusted`, `on-failure`, `on-request` or `never`.
-    pub approval_policy: Option<String>,
-    /// Codex's sandbox: `read-only`, `workspace-write` or `danger-full-access`.
-    pub sandbox: Option<String>,
-    /// Whether a client may put a session in Bypass, the mode that asks for nothing (`bypass = true`). Off, the `mode`
-    /// option does not offer it and a client that sets it is refused. A key paired to someone else's machine reaches this
-    /// entry, so on is the host person's decision for that entry: with it, that key could take full control of this machine.
-    pub bypass: bool,
     /// The setting sources Claude Code loads, of `user`, `project` and `local`; empty loads none, `None` its own default.
     pub setting_sources: Option<Vec<String>>,
-    /// The modes a paired client may choose (`modes = ["manual", "accept_edits", ...]`), ids as `coqui_acp_harness::Mode`
-    /// names them. Unset, a client may choose the mode the entry's own settings amount to and every stricter one, so it
-    /// cannot loosen what canoa.cfg set; naming modes widens that, and Bypass still needs `bypass = true`.
-    pub modes: Option<Vec<coqui_acp_harness::Mode>>,
     /// How long the provider's prompt cache should live for this entry's sessions (`cache_lifetime = "default" | "off" |
     /// "short" | "long"`), when the harness has such a control. A client's own choice for one session wins; unset leaves the client's
     /// default for its kind of session (the chat asks `long`), and the harness's own where it names none.
@@ -1111,21 +1099,6 @@ pub const fn cache_lifetime_name(lifetime: CacheLifetime) -> &'static str {
 
 /// Claude Code's setting sources.
 pub const SETTING_SOURCES: &[&str] = &["user", "project", "local"];
-
-/// Claude Code's permission modes, as `--permission-mode` takes them.
-pub const PERMISSION_MODES: &[&str] = &[
-    "default",
-    "acceptEdits",
-    "plan",
-    "dontAsk",
-    "bypassPermissions",
-    "auto",
-    "manual",
-];
-/// Codex's approval policies.
-pub const APPROVAL_POLICIES: &[&str] = &["untrusted", "on-failure", "on-request", "never"];
-/// Codex's sandboxes.
-pub const SANDBOXES: &[&str] = &["read-only", "workspace-write", "danger-full-access"];
 
 /// Where the host reads a stdio agent's usage figures from, beyond its failed turns (`usage = "..."` on the entry).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1633,12 +1606,7 @@ struct RawAgent {
     settings: Option<toml::Table>,
     account_settings: Option<toml::Table>,
     executable: Option<String>,
-    permission_mode: Option<String>,
-    approval_policy: Option<String>,
-    sandbox: Option<String>,
-    bypass: Option<bool>,
     setting_sources: Option<Vec<String>>,
-    modes: Option<Vec<String>>,
     cache_lifetime: Option<String>,
     shell: Option<String>,
     profiles: Option<Vec<String>>,
@@ -1665,12 +1633,7 @@ struct RawAgent {
 
 /// A harness entry's keys for what its command line asks, taken out of [`RawAgent`].
 struct RawAsks {
-    permission_mode: Option<String>,
-    approval_policy: Option<String>,
-    sandbox: Option<String>,
-    bypass: Option<bool>,
     setting_sources: Option<Vec<String>>,
-    modes: Option<Vec<String>>,
 }
 
 /// `[host.extensions.NAME]`.
@@ -1976,12 +1939,7 @@ impl Config {
                 max_peers: agent.max_peers,
             };
             let asks = RawAsks {
-                permission_mode: agent.permission_mode,
-                approval_policy: agent.approval_policy,
-                sandbox: agent.sandbox,
-                bypass: agent.bypass,
                 setting_sources: agent.setting_sources,
-                modes: agent.modes,
             };
             let cache_lifetime = agent
                 .cache_lifetime
@@ -2014,12 +1972,7 @@ impl Config {
                         return Err(invalid(&name, "executable goes with harness, not program"));
                     }
                     for (set, key) in [
-                        (asks.permission_mode.is_some(), "permission_mode"),
-                        (asks.approval_policy.is_some(), "approval_policy"),
-                        (asks.sandbox.is_some(), "sandbox"),
-                        (asks.bypass.is_some(), "bypass"),
                         (asks.setting_sources.is_some(), "setting_sources"),
-                        (asks.modes.is_some(), "modes"),
                         (agent.cache_lifetime.is_some(), "cache_lifetime"),
                         (agent.shell.is_some(), "shell"),
                         (agent.library.is_some(), "library"),
@@ -2116,12 +2069,7 @@ impl Config {
                         harness_options(&name, &harness, &asks, settings.as_ref())?
                     } else {
                         for (set, key) in [
-                            (asks.permission_mode.is_some(), "permission_mode"),
-                            (asks.approval_policy.is_some(), "approval_policy"),
-                            (asks.sandbox.is_some(), "sandbox"),
-                            (asks.bypass.is_some(), "bypass"),
                             (asks.setting_sources.is_some(), "setting_sources"),
-                            (asks.modes.is_some(), "modes"),
                             (agent.executable.is_some(), "executable"),
                             (agent.shell.is_some(), "shell"),
                         ] {
@@ -2596,9 +2544,9 @@ fn origin_of(
     }
 }
 
-/// The `settings` of a `claude` or `codex` entry: each of its keys that an entry key also says is caught as set twice, a mode,
-/// policy or sandbox must be text and one the provider takes, and a relative `executable` is made absolute against canoa.cfg's
-/// directory, as the entry's own key is, since the command line runs in a session's directory, which a client chooses.
+/// The `settings` of a built-in entry: a key the profile's access replaces is refused, since access is the same for every
+/// harness, and a relative `executable` is made absolute against canoa.cfg's directory, as the entry's own key is, since the
+/// command line runs in a session's directory, which a client chooses.
 fn built_in_settings(
     name: &str,
     harness: &str,
@@ -2609,6 +2557,7 @@ fn built_in_settings(
     let Some(settings) = settings else {
         return Ok(None);
     };
+    let _ = harness;
     let mut map = settings.as_map().clone();
     if executable_key && map.contains_key("executable") {
         return Err(invalid(
@@ -2616,25 +2565,20 @@ fn built_in_settings(
             "executable is set twice: as a key and in settings",
         ));
     }
-    let checked: &[(&str, &[&str])] = match harness {
-        "claude" => &[("permission_mode", PERMISSION_MODES)],
-        "codex" => &[
-            ("approval_policy", APPROVAL_POLICIES),
-            ("sandbox", SANDBOXES),
-        ],
-        _ => &[],
-    };
-    for (key, allowed) in checked {
-        match map.get(*key) {
-            None => {}
-            Some(serde_json::Value::String(value)) if allowed.contains(&value.as_str()) => {}
-            Some(serde_json::Value::String(_)) => {
-                return Err(invalid(
-                    name,
-                    &format!("settings.{key} is one of {}", allowed.join(", ")),
-                ));
-            }
-            Some(_) => return Err(invalid(name, &format!("settings.{key} must be text"))),
+    for key in [
+        "permission_mode",
+        "approval_policy",
+        "sandbox",
+        "access",
+        "allow_client_access",
+    ] {
+        if map.contains_key(key) {
+            return Err(invalid(
+                name,
+                &format!(
+                    "settings.{key} is not taken: the access is the profile's (access = {{ sandbox, network, approvals }}), the same for every harness"
+                ),
+            ));
         }
     }
     match map.get("executable") {
@@ -2661,54 +2605,20 @@ fn harness_options(
     agent: &RawAsks,
     settings: Option<&Settings>,
 ) -> Result<HarnessOptions, ConfigError> {
-    let claudes = [
-        ("permission_mode", agent.permission_mode.is_some()),
-        ("setting_sources", agent.setting_sources.is_some()),
-    ];
-    let codexs = [
-        ("approval_policy", agent.approval_policy.is_some()),
-        ("sandbox", agent.sandbox.is_some()),
-    ];
-    let theirs: Vec<(&str, bool)> = match harness {
-        "claude" => codexs.to_vec(),
-        "codex" => claudes.to_vec(),
-        _ => [claudes, codexs].concat(),
-    };
-    if let Some((key, _)) = theirs.iter().find(|(_, set)| *set) {
+    if agent.setting_sources.is_some() && harness != "claude" {
         return Err(invalid(
             name,
-            &format!("{key} is not a setting of harness {harness}"),
+            &format!("setting_sources is not a setting of harness {harness}"),
         ));
     }
-    if let Some(settings) = settings {
-        for (key, set) in [
-            ("permission_mode", agent.permission_mode.is_some()),
-            ("approval_policy", agent.approval_policy.is_some()),
-            ("sandbox", agent.sandbox.is_some()),
-            ("setting_sources", agent.setting_sources.is_some()),
-            ("modes", agent.modes.is_some()),
-        ] {
-            if set && settings.as_map().contains_key(key) {
-                return Err(invalid(
-                    name,
-                    &format!("{key} is set twice: as a key and in settings"),
-                ));
-            }
-        }
-        if agent.bypass.is_some() && settings.as_map().contains_key("allow_bypass") {
-            return Err(invalid(
-                name,
-                "bypass is set twice: as a key and as allow_bypass in settings",
-            ));
-        }
-    }
-    let one_of = |value: &Option<String>, allowed: &[&str], key: &str| match value {
-        Some(value) if !allowed.contains(&value.as_str()) => Err(invalid(
+    if agent.setting_sources.is_some()
+        && settings.is_some_and(|settings| settings.as_map().contains_key("setting_sources"))
+    {
+        return Err(invalid(
             name,
-            &format!("{key} is one of {}", allowed.join(", ")),
-        )),
-        _ => Ok(value.clone()),
-    };
+            "setting_sources is set twice: as a key and in settings",
+        ));
+    }
     if let Some(sources) = &agent.setting_sources
         && sources
             .iter()
@@ -2719,34 +2629,8 @@ fn harness_options(
             &format!("setting_sources holds only {}", SETTING_SOURCES.join(", ")),
         ));
     }
-    let modes = agent
-        .modes
-        .as_ref()
-        .map(|ids| {
-            ids.iter()
-                .map(|id| {
-                    coqui_acp_harness::Mode::from_id(id).ok_or_else(|| {
-                        invalid(
-                            name,
-                            &format!(
-                                "modes holds only {}",
-                                coqui_acp_harness::Mode::ALL
-                                    .map(coqui_acp_harness::Mode::id)
-                                    .join(", ")
-                            ),
-                        )
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .transpose()?;
     Ok(HarnessOptions {
         setting_sources: agent.setting_sources.clone(),
-        modes,
-        permission_mode: one_of(&agent.permission_mode, PERMISSION_MODES, "permission_mode")?,
-        approval_policy: one_of(&agent.approval_policy, APPROVAL_POLICIES, "approval_policy")?,
-        sandbox: one_of(&agent.sandbox, SANDBOXES, "sandbox")?,
-        bypass: agent.bypass.unwrap_or(false),
         cache_lifetime: None,
     })
 }
@@ -3059,6 +2943,14 @@ fn presets_of(
         let mut scalars = toml::Table::new();
         for (key, value) in table {
             let refused = |what: &str| invalid(format!("profiles.{name}.{key} {what}"));
+            if key == "access" {
+                let mut only = toml::Table::new();
+                only.insert(key.clone(), value.clone());
+                let own = Profile::from_table(only, LayerKind::Session)
+                    .map_err(|error| invalid(format!("profiles.{name}: {error}")))?;
+                preset.access = own.access;
+                continue;
+            }
             let toml::Value::String(text) = value else {
                 return Err(refused("is not text"));
             };
@@ -3085,7 +2977,7 @@ fn presets_of(
                 }
                 _ => {
                     return Err(refused(
-                        "is not a profile setting: source, model, effort, mode, context, cache_lifetime and loadout are",
+                        "is not a profile setting: source, model, effort, mode, access, context, cache_lifetime and loadout are",
                     ));
                 }
             }

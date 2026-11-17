@@ -20,7 +20,6 @@ fn claude_code_starts_with_what_the_options_say_and_its_environment_only_in_the_
     options.executable = Some(OsString::from("/opt/claude"));
     options.model = Some("claude-haiku-5-5".to_owned());
     options.effort = Some("low".to_owned());
-    options.permission_mode = Some("default".to_owned());
     options.setting_sources = Some(Vec::new());
     options.strict_mcp_config = true;
     options.env = vec![("CANOA_TEST_TOKEN".into(), "never-on-a-command-line".into())];
@@ -65,17 +64,16 @@ fn claude_codes_defaults_are_the_translators_own() {
             .any(|arg| arg == "--permission-prompt-tool=stdio"),
         "{args:?}"
     );
-    for absent in [
-        "--model=",
-        "--effort=",
-        "--setting-sources=",
-        "--permission-mode=",
-    ] {
+    for absent in ["--model=", "--effort=", "--setting-sources="] {
         assert!(
             !args.iter().any(|arg| arg.starts_with(absent)),
             "{absent}: {args:?}"
         );
     }
+    assert!(
+        args.iter().any(|arg| arg == "--permission-mode=default"),
+        "the standard access asks, whatever the person's own settings say: {args:?}"
+    );
     assert!(!options.client_plugins, "plugins from a client are off");
     let mut off = AgentOptions::new(Harness::Claude);
     off.permission_prompts = false;
@@ -94,8 +92,8 @@ fn codex_starts_its_app_server_with_the_options_and_holds_a_resumed_thread_to_th
     options.executable = Some(OsString::from("/opt/codex"));
     options.model = Some("gpt-5.6-luna".to_owned());
     options.effort = Some("low".to_owned());
-    options.approval_policy = Some("on-request".to_owned());
-    options.sandbox = Some("workspace-write".to_owned());
+    options.access.sandbox = coqui_acp_harness::Sandbox::Workspace;
+    options.access.approvals = coqui_acp_harness::Approvals::Edits;
     options.resume_roots = vec![PathBuf::from("/work")];
     options.env = vec![("CODEX_HOME".into(), "/codex-home".into())];
     let launch = options.codex_launch();
@@ -155,24 +153,38 @@ fn its_debug_names_the_environment_and_never_shows_a_value() {
 }
 
 #[test]
-fn bypass_is_offered_only_when_the_options_allow_it() {
-    for allowed in [false, true] {
-        let mut options = AgentOptions::new(Harness::Claude);
-        options.allow_bypass = allowed;
-        let claude = options.claude_launch();
-        assert_eq!(claude.allow_bypass, allowed);
+fn every_mode_is_offered_and_the_access_reaches_each_command_line() {
+    use coqui_acp_harness::{Access, Approvals, Mode, Sandbox};
+    for harness in [Harness::Claude, Harness::Codex] {
+        let options = AgentOptions::new(harness);
         assert_eq!(
-            args_of(&claude.launch())
-                .iter()
-                .any(|arg| arg == "--allow-dangerously-skip-permissions"),
-            allowed
+            options.access,
+            Access::STANDARD,
+            "no flag, the same for all"
         );
-        let mut options = AgentOptions::new(Harness::Codex);
-        options.allow_bypass = allowed;
-        assert_eq!(options.codex_launch().allow_bypass, allowed);
     }
+    let claude = AgentOptions::new(Harness::Claude).claude_launch();
+    assert!(claude.allow_bypass, "Bypass is offered with no key for it");
+    assert_eq!(claude.modes.as_deref(), Some(&Mode::ALL[..]));
     assert!(
-        !AgentOptions::new(Harness::Claude).allow_bypass,
-        "off by default"
+        args_of(&claude.launch())
+            .iter()
+            .any(|arg| arg == "--allow-dangerously-skip-permissions")
+    );
+    let mut options = AgentOptions::new(Harness::Codex);
+    assert_eq!(
+        options.codex_launch().thread_params()["sandbox"],
+        "danger-full-access",
+        "the standard access has no sandbox"
+    );
+    options.access.sandbox = Sandbox::ReadOnly;
+    options.access.approvals = Approvals::Never;
+    let thread = options.codex_launch().thread_params();
+    assert_eq!(
+        (
+            thread["sandbox"].as_str(),
+            thread["approvalPolicy"].as_str()
+        ),
+        (Some("read-only"), Some("never"))
     );
 }

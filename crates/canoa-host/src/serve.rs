@@ -1545,6 +1545,15 @@ impl Serving {
                         }
                     }
                     for (setting, value, default) in provider.non_defaults() {
+                        if matches!(
+                            setting.as_str(),
+                            "allow_bypass" | "allow_client_access" | "modes" | "access"
+                        ) && !settings
+                            .as_ref()
+                            .is_some_and(|own| own.as_map().contains_key(setting.as_str()))
+                        {
+                            continue;
+                        }
                         tracing::info!(
                             "non-default: host.agents.{}: {setting} is {value}, default {default}",
                             entry.name
@@ -3037,9 +3046,9 @@ fn say_origin_of(name: &str, table: &str, prefix: &str, origin: &Origin) {
 }
 
 /// The settings a harness entry's provider is configured with: the entry's `settings`, then the entry's own keys of the
-/// same names, and for the built-in `claude`, `codex` and `pi` the host's own values where nothing is set, never the person's
-/// configuration on this machine, because a paired key reaches it. What a client may choose stays within the entry's mode.
-/// A setting that acts with nothing asked is logged as configuration.
+/// same names, and for the built-in `claude`, `codex` and `pi` what is the same for every agent: the standard access, which a
+/// session's profile replaces through the request's `_meta`, and every mode the agent has, Bypass included. A setting the
+/// entry's `settings` names is the person's own and stays.
 pub(crate) fn harness_settings(
     entry: &Entry,
     harness: &str,
@@ -3072,69 +3081,34 @@ pub(crate) fn harness_settings(
             serde_json::Value::from(sources.clone()),
         );
     }
-    if let Some(modes) = &asks.modes {
-        map.insert(
-            "modes".to_owned(),
-            serde_json::Value::from(modes.iter().map(|mode| mode.id()).collect::<Vec<_>>()),
-        );
+    if let Some(modes) = map.get("modes") {
         tracing::info!(
-            "host.agents.{}.modes is {}: a paired client may choose those, beyond the entry's own mode and stricter ones",
-            entry.name,
-            modes
-                .iter()
-                .map(|mode| mode.id())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    }
-    if asks.bypass {
-        map.insert("allow_bypass".to_owned(), serde_json::Value::Bool(true));
-        tracing::info!(
-            "host.agents.{}.bypass is on: a paired client may put a session in Bypass, which asks for nothing",
+            "host.agents.{}.settings.modes is {modes}: a paired client may choose those besides the entry's own mode and stricter ones",
             entry.name
         );
     }
+    // The access is the profile's, the same for every harness: this is the built-in layer's, for a session whose entry offers
+    // no profile. A session that has one is given its own through `_meta`, which the scope has stripped of a client's.
+    map.entry("access".to_owned())
+        .or_insert_with(|| coqui_acp_harness::Access::STANDARD.to_json());
+    map.insert(
+        "allow_client_access".to_owned(),
+        serde_json::Value::Bool(true),
+    );
+    // Every mode the agent has is offered, Bypass included: the person's own account runs it, and a paired key is theirs.
+    map.entry("allow_bypass".to_owned())
+        .or_insert(serde_json::Value::Bool(true));
+    map.entry("modes".to_owned()).or_insert_with(|| {
+        serde_json::Value::from(
+            coqui_acp_harness::Mode::ALL
+                .iter()
+                .map(|mode| mode.id())
+                .collect::<Vec<_>>(),
+        )
+    });
     // Requests a connection works on at once: what the host always allowed, not the provider's smaller default.
     map.entry("max_requests".to_owned())
         .or_insert_with(|| serde_json::Value::from(HARNESS_MAX_REQUESTS));
-    // The entry's own settings, so each is configuration; a client's choice stays within the entry's mode.
-    let mut chosen = |key: &str, from_key: Option<&String>, loose: &[&str], default: &str| {
-        let (value, label) = match (from_key, map.get(key).and_then(serde_json::Value::as_str)) {
-            (Some(value), _) => (value.clone(), format!("host.agents.{}.{key}", entry.name)),
-            (None, Some(value)) => (
-                value.to_owned(),
-                format!("host.agents.{}.settings.{key}", entry.name),
-            ),
-            (None, None) => (default.to_owned(), String::new()),
-        };
-        if loose.contains(&value.as_str()) {
-            tracing::info!(
-                "non-default: {label} is {value}, default {default}: the command line acts with nothing asked"
-            );
-        }
-        map.insert(key.to_owned(), serde_json::Value::String(value));
-    };
-    if harness == "claude" {
-        chosen(
-            "permission_mode",
-            asks.permission_mode.as_ref(),
-            &["bypassPermissions", "acceptEdits", "auto"],
-            "default",
-        );
-    } else if harness == "codex" {
-        chosen(
-            "approval_policy",
-            asks.approval_policy.as_ref(),
-            &["never", "on-failure"],
-            "on-request",
-        );
-        chosen(
-            "sandbox",
-            asks.sandbox.as_ref(),
-            &["danger-full-access"],
-            "workspace-write",
-        );
-    }
     Settings::new(map)
 }
 

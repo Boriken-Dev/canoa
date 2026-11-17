@@ -810,35 +810,26 @@ executable = "codex"
 }
 
 #[test]
-fn a_harness_entry_names_the_modes_a_client_may_choose_or_leaves_the_default() {
-    use coqui_acp_harness::Mode;
-    let config = parse(
-        r#"
-[host.agents.Default]
-harness = "claude"
-[host.agents.Named]
-harness = "codex"
-modes = ["plan", "accept_edits"]
-"#,
-    )
-    .expect("parses");
-    let modes = |name: &str| match config.entry(name).map(|entry| &entry.kind) {
-        Some(EntryKind::Harness { options, .. }) => options.modes.clone(),
-        _ => panic!("a harness"),
-    };
-    assert_eq!(
-        modes("Default"),
-        None,
-        "a client is capped at the entry's own mode"
-    );
-    assert_eq!(modes("Named"), Some(vec![Mode::Plan, Mode::AcceptEdits]));
-    for text in [
-        "[host.agents.a]\nharness = \"claude\"\nmodes = [\"yolo\"]\n",
-        "[host.agents.a]\nprogram = \"x\"\nmodes = [\"plan\"]\n",
-        "[host.agents.a]\nharness = \"x\"\nlibrary = \"l\"\nmodes = [\"plan\"]\n",
-        "[host.agents.a]\nharness = \"claude\"\nmodes = [\"plan\"]\nsettings = { modes = [\"auto\"] }\n",
+fn the_keys_the_profiles_access_replaces_are_refused_with_no_shim() {
+    for key in [
+        "modes = [\"plan\"]",
+        "bypass = true",
+        "permission_mode = \"plan\"",
+        "approval_policy = \"never\"",
+        "sandbox = \"read-only\"",
     ] {
-        assert!(parse(text).is_err(), "{text}");
+        let text = format!("[host.agents.a]\nharness = \"claude\"\n{key}\n");
+        let error = parse(&text).expect_err(&text).to_string();
+        assert!(error.contains("does not know"), "{text}: {error}");
+    }
+    for key in ["permission_mode", "approval_policy", "sandbox", "access"] {
+        let text =
+            format!("[host.agents.a]\nharness = \"codex\"\nsettings = {{ {key} = \"x\" }}\n");
+        let error = parse(&text).expect_err(&text).to_string();
+        assert!(
+            error.contains("the access is the profile's"),
+            "{text}: {error}"
+        );
     }
 }
 
@@ -942,8 +933,8 @@ dirs = ["manifests"]
             "import_search",
         ),
         (
-            "[host.agents.a]\nharness = \"x\"\nlibrary = \"l\"\npermission_mode = \"plan\"\n",
-            "permission_mode",
+            "[host.agents.a]\nharness = \"x\"\nlibrary = \"l\"\nsetting_sources = []\n",
+            "setting_sources",
         ),
         (
             "[host.agents.a]\nharness = \"x\"\nlibrary = \"l\"\nexecutable = \"e\"\n",
@@ -957,14 +948,6 @@ dirs = ["manifests"]
             "[host.agents.a]\nprogram = \"x\"\nsettings = { a = 1 }\n",
             "harness",
         ),
-        (
-            "[host.agents.a]\nharness = \"claude\"\npermission_mode = \"plan\"\nsettings = { permission_mode = \"auto\" }\n",
-            "twice",
-        ),
-        (
-            "[host.agents.a]\nharness = \"claude\"\nbypass = true\nsettings = { allow_bypass = false }\n",
-            "twice",
-        ),
     ] {
         let error = parse(text).expect_err(text).to_string();
         assert!(error.contains(what), "{text}: {error}");
@@ -974,101 +957,61 @@ dirs = ["manifests"]
 }
 
 #[test]
-fn a_harness_entry_offers_bypass_only_when_its_canoa_cfg_says_so() {
-    let config = parse(
-        r#"
-[host.agents.Off]
-harness = "claude"
-[host.agents.On]
-harness = "codex"
-bypass = true
-"#,
-    )
-    .expect("parses");
-    let bypass = |name: &str| match config.entry(name).map(|entry| &entry.kind) {
-        Some(EntryKind::Harness { options, .. }) => options.bypass,
-        _ => panic!("a harness"),
-    };
-    assert!(!bypass("Off"), "off unless the entry turns it on");
-    assert!(bypass("On"));
-    for text in [
-        "[host.agents.a]\nprogram = \"x\"\nbypass = true\n",
-        "[host.agents.a]\nharness = \"claude\"\nbypass = \"yes\"\n",
-    ] {
-        assert!(parse(text).is_err(), "{text}");
-    }
-}
-
-#[test]
-fn a_harness_entry_holds_its_command_lines_permissions_and_its_program_to_canoa_cfg() {
+fn a_harness_entry_holds_its_program_to_canoa_cfg() {
     let config = parse(
         r#"
 [host.agents.Claude]
 harness = "claude"
 executable = "bin/claude"
-permission_mode = "acceptEdits"
 [host.agents.Codex]
 harness = "codex"
 executable = "codex-nightly"
-approval_policy = "untrusted"
-sandbox = "read-only"
 "#,
     )
     .expect("parses");
-    let Some(EntryKind::Harness {
-        executable,
-        options,
-        ..
-    }) = config.entry("Claude").map(|entry| &entry.kind)
-    else {
-        panic!("a harness");
+    let executable_of = |name: &str| match config.entry(name).map(|entry| &entry.kind) {
+        Some(EntryKind::Harness { executable, .. }) => executable.clone(),
+        _ => panic!("a harness"),
     };
     assert_eq!(
-        executable.as_deref(),
+        executable_of("Claude").as_deref(),
         Some(directory_of(&base()).join("bin/claude").as_os_str()),
         "a path is taken from canoa.cfg's directory, never a session's"
     );
-    assert_eq!(options.permission_mode.as_deref(), Some("acceptEdits"));
-    let Some(EntryKind::Harness {
-        executable,
-        options,
-        ..
-    }) = config.entry("Codex").map(|entry| &entry.kind)
-    else {
-        panic!("a harness");
-    };
     assert_eq!(
-        executable.as_deref(),
+        executable_of("Codex").as_deref(),
         Some(std::ffi::OsStr::new("codex-nightly")),
         "a bare name is found as a command is"
     );
-    assert_eq!(options.approval_policy.as_deref(), Some("untrusted"));
-    assert_eq!(options.sandbox.as_deref(), Some("read-only"));
-    for (text, what) in [
-        (
-            "[host.agents.a]\nharness = \"claude\"\napproval_policy = \"never\"\n",
-            "approval_policy",
-        ),
-        (
-            "[host.agents.a]\nharness = \"codex\"\npermission_mode = \"plan\"\n",
-            "permission_mode",
-        ),
-        (
-            "[host.agents.a]\nharness = \"claude\"\npermission_mode = \"yolo\"\n",
-            "permission_mode",
-        ),
-        (
-            "[host.agents.a]\nharness = \"codex\"\nsandbox = \"open\"\n",
-            "sandbox",
-        ),
-        (
-            "[host.agents.a]\nprogram = \"x\"\nsandbox = \"read-only\"\n",
-            "harness",
-        ),
-    ] {
-        let error = parse(text).expect_err(text).to_string();
-        assert!(error.contains(what), "{text}: {error}");
-    }
+    let error = parse("[host.agents.a]\nprogram = \"x\"\nexecutable = \"e\"\n")
+        .expect_err("a program has no executable")
+        .to_string();
+    assert!(error.contains("harness"), "{error}");
+}
+
+#[test]
+fn a_preset_may_set_the_access_and_it_is_the_session_layers() {
+    use coqui_acp_harness::{Approvals, Sandbox};
+    let config = parse(
+        "[profiles.Strict]\naccess = { sandbox = \"read-only\", approvals = \"never\" }\nmodel = \"m\"\n",
+    )
+    .expect("parses");
+    let preset = config
+        .local_profiles
+        .presets
+        .get("Strict")
+        .expect("a preset");
+    let layer = preset.session_layer();
+    assert_eq!(layer.access.sandbox, Some(Sandbox::ReadOnly));
+    assert_eq!(layer.access.approvals, Some(Approvals::Never));
+    assert_eq!(
+        layer.access.network, None,
+        "a part left out is a lower layer's"
+    );
+    assert!(
+        parse("[profiles.Bad]\naccess = { sandbox = \"open\" }\n").is_err(),
+        "a sandbox that is none of the three"
+    );
 }
 
 #[test]
@@ -1142,7 +1085,7 @@ fn claude_and_codex_are_built_in_and_a_library_or_source_cannot_stand_for_them()
 #[test]
 fn the_settings_of_a_built_in_harness_are_held_to_what_its_keys_are() {
     let config = parse(
-        "[host.agents.a]\nharness = \"claude\"\nsettings = { executable = \"bin/claude\", permission_mode = \"plan\" }\n",
+        "[host.agents.a]\nharness = \"claude\"\nsettings = { executable = \"bin/claude\", model = \"m\" }\n",
     )
     .expect("parses");
     let Some(EntryKind::Harness {
@@ -1161,22 +1104,6 @@ fn the_settings_of_a_built_in_harness_are_held_to_what_its_keys_are() {
         (
             "[host.agents.a]\nharness = \"claude\"\nexecutable = \"x\"\nsettings = { executable = \"y\" }\n",
             "twice",
-        ),
-        (
-            "[host.agents.a]\nharness = \"claude\"\nsettings = { permission_mode = 3 }\n",
-            "text",
-        ),
-        (
-            "[host.agents.a]\nharness = \"claude\"\nsettings = { permission_mode = \"yolo\" }\n",
-            "permission_mode",
-        ),
-        (
-            "[host.agents.a]\nharness = \"codex\"\nsettings = { sandbox = \"open\" }\n",
-            "sandbox",
-        ),
-        (
-            "[host.agents.a]\nharness = \"codex\"\nsettings = { approval_policy = true }\n",
-            "text",
         ),
         (
             "[host.agents.a]\nharness = \"codex\"\nsettings = { executable = \"\" }\n",

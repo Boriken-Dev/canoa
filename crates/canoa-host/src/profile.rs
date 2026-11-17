@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 use core::fmt;
 use std::path::{Path, PathBuf};
 
+use coqui_acp_harness::{Access, Approvals, Sandbox};
 use indexmap::IndexMap;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -25,7 +26,7 @@ pub const MAX_SECRET_FILE: u64 = 1024 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum LayerKind {
-    /// Canoa's own defaults.
+    /// Canoa's own defaults: standard access, and nothing else.
     BuiltIn,
     /// A named overlay, from a git source or a local directory.
     Overlay,
@@ -254,6 +255,36 @@ impl Delegate {
     }
 }
 
+/// What a layer says of the access every harness is run with, part by part; a part it leaves out is a lower layer's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AccessSetting {
+    /// How much a command may reach: `none`, `workspace` or `read-only`.
+    pub sandbox: Option<Sandbox>,
+    /// Whether a command may use the network.
+    pub network: Option<bool>,
+    /// What is asked first: `ask`, `edits` or `never`.
+    pub approvals: Option<Approvals>,
+}
+
+impl AccessSetting {
+    /// Whether it says nothing.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.sandbox.is_none() && self.network.is_none() && self.approvals.is_none()
+    }
+
+    /// The standard access a built-in layer states: no sandbox, the network on, everything asked.
+    #[must_use]
+    pub const fn standard() -> Self {
+        Self {
+            sandbox: Some(Sandbox::Unrestricted),
+            network: Some(true),
+            approvals: Some(Approvals::Ask),
+        }
+    }
+}
+
 /// One profile document: what one layer sets and removes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -268,6 +299,9 @@ pub struct Profile {
     pub context: Option<Context>,
     /// What it suggests about delegation, key by key.
     pub delegate: Delegate,
+    /// The access the agent is run with. Only the person's own layers may set it: an overlay or a project may not loosen
+    /// it, so neither sets any.
+    pub access: AccessSetting,
     /// Values of lower layers this one takes back.
     pub unset: Vec<Scalar>,
     /// Environment variables, by name.
@@ -351,7 +385,7 @@ pub enum Rule {
     /// A value that is empty or holds a control character, or an MCP URL that is not HTTP.
     Value,
     /// An environment variable the AOS specification reserves for the consumer (`AOS_*`, `*_OVERLAY_ROOT`,
-    /// `*_OVERLAY_STATE`) in a layer from elsewhere.
+    /// `*_OVERLAY_STATE`) in a layer from elsewhere, or the `access` setting, which only your own layers set.
     Reserved,
 }
 
@@ -391,7 +425,7 @@ impl fmt::Display for ProfileError {
                         "a value is empty, holds a control character, or is not an HTTP URL"
                     }
                     Rule::Reserved => {
-                        "a layer from elsewhere may not set a variable the AOS specification reserves for the host (AOS_*, *_OVERLAY_ROOT, *_OVERLAY_STATE)"
+                        "a layer from elsewhere may not set a variable the AOS specification reserves for the host (AOS_*, *_OVERLAY_ROOT, *_OVERLAY_STATE), or the access"
                     }
                 };
                 write!(f, "profile {key}: {what}")
@@ -411,6 +445,7 @@ struct RawProfile {
     mode: Option<String>,
     context: Option<RawContext>,
     delegate: Option<RawDelegate>,
+    access: Option<RawAccess>,
     #[serde(default)]
     unset: Vec<String>,
     #[serde(default)]
@@ -419,6 +454,14 @@ struct RawProfile {
     skills: IndexMap<String, RawSkill>,
     #[serde(default)]
     mcp: IndexMap<String, RawMcp>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAccess {
+    sandbox: Option<String>,
+    network: Option<bool>,
+    approvals: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -525,6 +568,13 @@ impl Profile {
         if let Some(delegate) = raw.delegate {
             profile.delegate = checked_delegate(delegate)?;
         }
+        if let Some(access) = raw.access {
+            // A layer from elsewhere could loosen it: only the person's own layers say how much a command may reach.
+            if confined {
+                return Err(invalid("access", Rule::Reserved));
+            }
+            profile.access = checked_access(access)?;
+        }
         for name in raw.unset {
             let scalar = Scalar::ALL
                 .into_iter()
@@ -604,6 +654,22 @@ impl Profile {
         }
         Ok(profile)
     }
+}
+
+fn checked_access(raw: RawAccess) -> Result<AccessSetting, ProfileError> {
+    let sandbox = raw
+        .sandbox
+        .map(|id| Sandbox::from_id(&id).ok_or_else(|| invalid("access.sandbox", Rule::Value)))
+        .transpose()?;
+    let approvals = raw
+        .approvals
+        .map(|id| Approvals::from_id(&id).ok_or_else(|| invalid("access.approvals", Rule::Value)))
+        .transpose()?;
+    Ok(AccessSetting {
+        sandbox,
+        network: raw.network,
+        approvals,
+    })
 }
 
 fn checked_delegate(raw: RawDelegate) -> Result<Delegate, ProfileError> {
@@ -818,6 +884,36 @@ pub struct EffectiveDelegate {
     pub max_running: Option<Sourced<u32>>,
 }
 
+/// The access every layer adds up to, each part with its layer; a part no layer set is [`Access::STANDARD`]'s.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EffectiveAccess {
+    /// How much a command may reach.
+    pub sandbox: Option<Sourced<Sandbox>>,
+    /// Whether a command may use the network.
+    pub network: Option<Sourced<bool>>,
+    /// What is asked first.
+    pub approvals: Option<Sourced<Approvals>>,
+}
+
+impl EffectiveAccess {
+    /// The access to run an agent with.
+    #[must_use]
+    pub fn resolved(&self) -> Access {
+        let mut access = Access::STANDARD;
+        if let Some(sandbox) = &self.sandbox {
+            access.sandbox = sandbox.value;
+        }
+        if let Some(network) = &self.network {
+            access.network = network.value;
+        }
+        if let Some(approvals) = &self.approvals {
+            access.approvals = approvals.value;
+        }
+        access
+    }
+}
+
 /// The profile every layer adds up to, each value with its layer.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -832,6 +928,8 @@ pub struct Effective {
     pub context: Option<Sourced<Context>>,
     /// What the layers suggest about delegation, each part with the layer that set it.
     pub delegate: EffectiveDelegate,
+    /// The access, each part with the layer that set it.
+    pub access: EffectiveAccess,
     /// Environment variables, in the order they were first set.
     pub env: IndexMap<String, Sourced<EnvValue>>,
     /// Skills, likewise.
@@ -902,6 +1000,27 @@ pub fn merge(layers: &[Layer]) -> Effective {
             });
         }
         let from_here = |layer: &Layer| (layer.id.clone(), layer.dir.clone());
+        if let Some(value) = profile.access.sandbox {
+            out.access.sandbox = Some(Sourced {
+                value,
+                layer: layer.id.clone(),
+                dir: layer.dir.clone(),
+            });
+        }
+        if let Some(value) = profile.access.network {
+            out.access.network = Some(Sourced {
+                value,
+                layer: layer.id.clone(),
+                dir: layer.dir.clone(),
+            });
+        }
+        if let Some(value) = profile.access.approvals {
+            out.access.approvals = Some(Sourced {
+                value,
+                layer: layer.id.clone(),
+                dir: layer.dir.clone(),
+            });
+        }
         if let Some(default) = &profile.delegate.default {
             let (layer, dir) = from_here(layer);
             out.delegate.default = Some(Sourced {
@@ -1030,6 +1149,28 @@ impl Effective {
         }
         if !hint.is_empty() {
             out.insert("delegate".to_owned(), Value::Object(hint));
+        }
+        let mut access = Map::new();
+        if let Some(sandbox) = &self.access.sandbox {
+            access.insert(
+                "sandbox".to_owned(),
+                json!({"value": sandbox.value.id(), "layer": sandbox.layer.to_string()}),
+            );
+        }
+        if let Some(network) = &self.access.network {
+            access.insert(
+                "network".to_owned(),
+                json!({"value": network.value, "layer": network.layer.to_string()}),
+            );
+        }
+        if let Some(approvals) = &self.access.approvals {
+            access.insert(
+                "approvals".to_owned(),
+                json!({"value": approvals.value.id(), "layer": approvals.layer.to_string()}),
+            );
+        }
+        if !access.is_empty() {
+            out.insert("access".to_owned(), Value::Object(access));
         }
         out.insert("env".to_owned(), entries(&self.env, env_json));
         out.insert(

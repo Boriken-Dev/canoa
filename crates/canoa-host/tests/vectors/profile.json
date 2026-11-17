@@ -1429,6 +1429,150 @@
         "layer": 0,
         "code": "parse"
       }
+    },
+    {
+      "name": "the access is set part by part and a later layer wins per part, each with its layer",
+      "layers": [
+        {
+          "kind": "built-in",
+          "toml": "access = { sandbox = \"none\", network = true, approvals = \"ask\" }\n"
+        },
+        {
+          "kind": "user",
+          "toml": "access = { sandbox = \"workspace\", network = false }\n"
+        },
+        {
+          "kind": "agent",
+          "name": "Codex",
+          "toml": "access = { approvals = \"edits\" }\n"
+        },
+        {
+          "kind": "session",
+          "toml": "access = { sandbox = \"read-only\" }\n"
+        }
+      ],
+      "effective": {
+        "env": [],
+        "skills": [],
+        "mcp": [],
+        "removed": [],
+        "access": {
+          "sandbox": {
+            "value": "read-only",
+            "layer": "session"
+          },
+          "network": {
+            "value": false,
+            "layer": "user"
+          },
+          "approvals": {
+            "value": "edits",
+            "layer": "agent:Codex"
+          }
+        }
+      }
+    },
+    {
+      "name": "a layer with no access says nothing about it",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "model = \"a\"\n"
+        }
+      ],
+      "effective": {
+        "env": [],
+        "skills": [],
+        "mcp": [],
+        "removed": [],
+        "model": {
+          "value": "a",
+          "layer": "user"
+        }
+      }
+    },
+    {
+      "name": "an overlay may not set the access",
+      "layers": [
+        {
+          "kind": "overlay",
+          "name": "team",
+          "toml": "access = { sandbox = \"none\" }\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "reserved",
+        "key": "access"
+      }
+    },
+    {
+      "name": "a project may not set the access",
+      "layers": [
+        {
+          "kind": "project",
+          "toml": "access = { approvals = \"never\" }\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "reserved",
+        "key": "access"
+      }
+    },
+    {
+      "name": "a sandbox that is no sandbox",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "access = { sandbox = \"danger-full-access\" }\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "value",
+        "key": "access.sandbox"
+      }
+    },
+    {
+      "name": "approvals that are no approvals",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "access = { approvals = \"auto\" }\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "value",
+        "key": "access.approvals"
+      }
+    },
+    {
+      "name": "a network that is not true or false",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "access = { network = \"off\" }\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "parse"
+      }
+    },
+    {
+      "name": "an access setting that is not one of the three",
+      "layers": [
+        {
+          "kind": "user",
+          "toml": "access = { mode = \"plan\" }\n"
+        }
+      ],
+      "error": {
+        "layer": 0,
+        "code": "parse"
+      }
     }
   ],
   "sources": [

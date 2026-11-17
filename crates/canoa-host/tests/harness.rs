@@ -177,22 +177,16 @@ fn modes_of(opened: &Value) -> (String, Vec<String>) {
     )
 }
 
-/// A paired key reaches an entry whose person never asked for Bypass: without this, a key paired to someone else could
-/// take full control of the machine by choosing the mode that asks for nothing.
+/// Every mode the agent has is offered to a paired client, Bypass included, with no key for it in canoa.cfg: the host's
+/// account is the person's own, and the keys that reach it are theirs.
 #[test]
-fn a_paired_client_does_not_see_bypass_on_an_entry_that_has_it_off_and_is_refused_if_it_sets_it() {
-    for (key, harness, allowed) in [
-        ("", "claude", false),
-        ("bypass = false\n", "claude", false),
-        ("bypass = true\n", "claude", true),
-        ("", "codex", false),
-        ("bypass = true\n", "codex", true),
-    ] {
+fn every_mode_of_every_agent_is_offered_with_no_bypass_key() {
+    for harness in ["claude", "codex"] {
         let scratch = Scratch::new();
         let program = standin(&scratch, harness);
         let (record, env) = env_of(&scratch);
         let config = format!(
-            "[host.agents.Agent]\nharness = \"{harness}\"\nexecutable = {}\n{key}",
+            "[host.agents.Agent]\nharness = \"{harness}\"\nexecutable = {}\n",
             quoted(&program.to_string_lossy())
         );
         let host = Host::start_in(scratch, &config, 1, &env);
@@ -212,97 +206,220 @@ fn a_paired_client_does_not_see_bypass_on_an_entry_that_has_it_off_and_is_refuse
             (modes_of(&opened).1, set)
         })
         .expect("a paired key is served");
+        let offered: Vec<String> = offered.into_iter().filter(|id| id != "custom").collect();
         assert_eq!(
-            offered.contains(&"bypass".to_owned()),
-            allowed,
-            "{harness} {key}: {offered:?}"
+            offered,
+            ["manual", "accept_edits", "auto", "plan", "bypass"],
+            "{harness}"
         );
-        assert_eq!(set.is_ok(), allowed, "{harness} {key}: {set:?}");
-        let started = records(&record);
-        let flagged = started[0]["args"]
-            .as_array()
-            .expect("its arguments")
-            .iter()
-            .any(|arg| arg == "--allow-dangerously-skip-permissions");
+        assert!(set.is_ok(), "{harness}: {set:?}");
         if harness == "claude" {
-            assert_eq!(
-                flagged, allowed,
-                "Claude Code is started allowing it only then"
+            let started = records(&record);
+            assert!(
+                started[0]["args"]
+                    .as_array()
+                    .expect("its arguments")
+                    .iter()
+                    .any(|arg| arg == "--allow-dangerously-skip-permissions"),
+                "Claude Code is started allowing it"
             );
         }
     }
 }
 
-/// A paired key can only choose the mode canoa.cfg configured and stricter ones, unless the entry names more.
+/// An entry's profile and the first message's thread or arguments: what the stand-in recorded.
+fn access_host(harness: &str, profile: &str) -> (Host, PathBuf) {
+    let scratch = Scratch::new();
+    let program = standin(&scratch, harness);
+    let (record, env) = env_of(&scratch);
+    let (offer, table) = if profile.is_empty() {
+        (String::new(), String::new())
+    } else {
+        (
+            "profiles = [\"p\"]\n".to_owned(),
+            format!("[host.profiles.p]\n{profile}\n"),
+        )
+    };
+    let config = format!(
+        "[host.agents.Agent]\nharness = \"{harness}\"\nexecutable = {}\n{offer}{table}",
+        quoted(&program.to_string_lossy())
+    );
+    (Host::start_in(scratch, &config, 1, &env), record)
+}
+
+fn open_session(host: &Host) -> Value {
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url("Agent"), &client, host.peer, |rpc| {
+        let initialized = rpc.initialize().expect("initialize is answered");
+        rpc.request("session/new", json!({"cwd": dir, "mcpServers": []}))
+            .expect("a session opens");
+        initialized
+    })
+    .expect("a paired key is served")
+}
+
+/// The standard access is no sandbox and everything asked, for Claude Code and Codex alike, whatever the person's own
+/// settings say; a profile's access is turned into each command line's words.
 #[test]
-fn a_paired_client_cannot_loosen_what_canoa_cfg_set() {
-    for (harness, key, offered, loosening, allowed) in [
-        ("claude", "", vec!["manual", "plan"], "accept_edits", false),
-        ("claude", "", vec!["manual", "plan"], "auto", false),
-        (
-            "claude",
-            "permission_mode = \"acceptEdits\"\n",
-            vec!["manual", "accept_edits", "plan"],
-            "auto",
-            false,
-        ),
-        (
-            "claude",
-            "modes = [\"accept_edits\"]\n",
-            vec!["manual", "accept_edits", "plan"],
-            "accept_edits",
-            true,
-        ),
-        (
-            "claude",
-            "modes = [\"auto\"]\n",
-            vec!["manual", "auto", "plan"],
-            "bypass",
-            false,
-        ),
-        (
-            "codex",
-            "modes = [\"auto\"]\n",
-            vec!["manual", "accept_edits", "auto", "plan"],
-            "auto",
-            true,
-        ),
-        (
-            "codex",
-            "",
-            vec!["manual", "accept_edits", "plan"],
-            "auto",
-            false,
-        ),
+fn the_same_access_reaches_codex_and_claude_in_each_ones_words() {
+    // Codex: the standard access, then a read-only profile.
+    let (host, record) = access_host("codex", "");
+    open_session(&host);
+    let thread = records(&record)
+        .into_iter()
+        .find(|entry| entry["method"] == "thread/start")
+        .expect("a thread started");
+    assert_eq!(
+        thread["params"]["sandbox"], "danger-full-access",
+        "{thread}"
+    );
+    assert_eq!(thread["params"]["approvalPolicy"], "untrusted", "{thread}");
+    drop(host);
+    let (host, record) = access_host(
+        "codex",
+        "access = { sandbox = \"workspace\", network = false, approvals = \"edits\" }",
+    );
+    let initialized = open_session(&host);
+    let thread = records(&record)
+        .into_iter()
+        .find(|entry| entry["method"] == "thread/start")
+        .expect("a thread started");
+    assert_eq!(thread["params"]["sandbox"], "workspace-write", "{thread}");
+    assert_eq!(thread["params"]["approvalPolicy"], "on-request", "{thread}");
+    assert_eq!(
+        thread["params"]["config"]["sandbox_workspace_write"]["network_access"], false,
+        "{thread}"
+    );
+    let report = &initialized["_meta"][PROFILE_META];
+    for key in ["access.sandbox", "access.network", "access.approvals"] {
+        assert_eq!(item(report, key)["state"], "applied", "{key}: {report}");
+    }
+    drop(host);
+    let (host, record) = access_host("codex", "access = { sandbox = \"read-only\" }");
+    open_session(&host);
+    let thread = records(&record)
+        .into_iter()
+        .find(|entry| entry["method"] == "thread/start")
+        .expect("a thread started");
+    assert_eq!(thread["params"]["sandbox"], "read-only", "{thread}");
+    drop(host);
+
+    // Claude Code: the standard access passes its default mode and no sandbox settings.
+    let args_of_start = |record: &Path| {
+        records(record)[0]["args"]
+            .as_array()
+            .expect("its arguments")
+            .iter()
+            .map(|arg| arg.as_str().expect("text").to_owned())
+            .collect::<Vec<String>>()
+    };
+    let (host, record) = access_host("claude", "");
+    open_session(&host);
+    let args = args_of_start(&record);
+    assert!(
+        args.contains(&"--permission-mode=default".to_owned()),
+        "{args:?}"
+    );
+    assert!(
+        !args.iter().any(|arg| arg.starts_with("--settings")),
+        "{args:?}"
+    );
+    drop(host);
+    let (host, record) = access_host(
+        "claude",
+        "access = { sandbox = \"read-only\", network = false }",
+    );
+    let initialized = open_session(&host);
+    let args = args_of_start(&record);
+    assert!(
+        args.contains(&"--permission-mode=plan".to_owned()),
+        "{args:?}"
+    );
+    assert!(
+        args.iter().any(|arg| arg.starts_with("--settings={")),
+        "{args:?}"
+    );
+    let report = &initialized["_meta"][PROFILE_META];
+    assert_eq!(
+        item(report, "access.sandbox")["state"],
+        "applied",
+        "{report}"
+    );
+    drop(host);
+}
+
+/// Pi has no sandbox and no approvals of its own, so its permission gate starts in the mode the access amounts to: Manual for
+/// the standard access, Plan for a read-only sandbox.
+#[test]
+fn pi_starts_its_gate_in_the_mode_the_access_amounts_to() {
+    for (profile, mode) in [
+        ("", "manual"),
+        ("access = { approvals = \"edits\" }", "accept_edits"),
+        ("access = { sandbox = \"read-only\" }", "plan"),
     ] {
         let scratch = Scratch::new();
-        let program = standin(&scratch, harness);
-        let (_, env) = env_of(&scratch);
+        let program = scratch
+            .0
+            .join(format!("pi{}", std::env::consts::EXE_SUFFIX));
+        std::fs::copy(example("fake_pi", false), &program).expect("the Pi stand-in is copied");
+        let agent_dir = scratch.0.join("pi-agent");
+        std::fs::create_dir_all(&agent_dir).expect("made");
+        let env = vec![
+            ("PI_CODING_AGENT_DIR", agent_dir.clone().into_os_string()),
+            ("ACP_HARNESS_CHECK_HOME", scratch.0.clone().into_os_string()),
+        ];
+        let (offer, table) = if profile.is_empty() {
+            (String::new(), String::new())
+        } else {
+            (
+                "profiles = [\"p\"]\n".to_owned(),
+                format!("[host.profiles.p]\n{profile}\n"),
+            )
+        };
         let config = format!(
-            "[host.agents.Agent]\nharness = \"{harness}\"\nexecutable = {}\n{key}",
+            "[host.agents.Agent]\nharness = \"pi\"\nexecutable = {}\n{offer}{table}",
             quoted(&program.to_string_lossy())
         );
         let host = Host::start_in(scratch, &config, 1, &env);
         let client = support::key();
         host.pair(&client);
         let dir = cwd(&host.scratch);
-        let (seen, set) = with_link(host.url("Agent"), &client, host.peer, |rpc| {
+        let (current, offered) = with_link(host.url("Agent"), &client, host.peer, |rpc| {
             rpc.initialize().expect("initialize is answered");
             let opened = rpc
                 .request("session/new", json!({"cwd": dir, "mcpServers": []}))
                 .expect("a session opens");
-            let session = opened["sessionId"].as_str().expect("an id").to_owned();
-            let set = rpc.request(
-                "session/set_config_option",
-                json!({"sessionId": session, "configId": "mode", "value": loosening}),
-            );
-            (modes_of(&opened).1, set)
+            modes_of(&opened)
         })
         .expect("a paired key is served");
-        let seen: Vec<String> = seen.into_iter().filter(|id| id != "custom").collect();
-        assert_eq!(seen, offered, "{harness} {key}");
-        assert_eq!(set.is_ok(), allowed, "{harness} {key} {loosening}: {set:?}");
+        assert_eq!(current, mode, "{profile}");
+        assert!(offered.contains(&"bypass".to_owned()), "{offered:?}");
     }
+}
+
+/// What a harness cannot express is said in the profile line.
+#[test]
+fn what_a_harness_cannot_express_is_reported_in_the_profile_line() {
+    let (host, _) = access_host("codex", "access = { sandbox = \"none\", network = false }");
+    let report = open_session(&host)["_meta"][PROFILE_META].clone();
+    assert_eq!(
+        item(&report, "access.network")["state"],
+        "not supported",
+        "{report}"
+    );
+    assert!(
+        item(&report, "access.network")["how"]
+            .as_str()
+            .is_some_and(|how| how.contains("danger-full-access")),
+        "{report}"
+    );
+    assert_eq!(
+        item(&report, "access.sandbox")["state"],
+        "applied",
+        "{report}"
+    );
 }
 
 #[test]
@@ -524,8 +641,8 @@ fn codex_runs_in_the_host_and_asks_its_approval_through_acp() {
         .expect("a thread started");
     let given = thread["params"].to_string();
     assert!(
-        given.contains("on-request") && given.contains("workspace-write"),
-        "an entry asks whatever the person's own configuration says: {given}"
+        given.contains("untrusted") && given.contains("danger-full-access"),
+        "an entry runs with the standard access, whatever the person's own configuration says: {given}"
     );
 }
 
