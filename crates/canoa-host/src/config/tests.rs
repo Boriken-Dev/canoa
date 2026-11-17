@@ -708,6 +708,7 @@ executable = "codex"
             executable: None,
             options: HarnessOptions::default(),
             settings: None,
+            account_settings: None,
             profiles: vec!["plain".to_owned()],
             accounts: Vec::new(),
         }
@@ -720,6 +721,7 @@ executable = "codex"
             executable: Some("codex".into()),
             options: HarnessOptions::default(),
             settings: None,
+            account_settings: None,
             profiles: Vec::new(),
             accounts: Vec::new(),
         }
@@ -2003,6 +2005,32 @@ fn account_store_is_auto_unless_the_file_says_otherwise() {
     let refused = parse("[host]\naccount_store = \"vault\"\n").expect_err("refused");
     assert!(
         refused.to_string().contains("auto, os or file"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn a_harness_entry_configures_its_account_provider_apart_from_the_harness() {
+    let config = parse(
+        "[host.agents.Claude]\nharness = \"claude\"\naccount_settings = { renew_poll_ms = 100 }\n",
+    )
+    .expect("parses");
+    let EntryKind::Harness {
+        settings,
+        account_settings,
+        ..
+    } = &config.entry("Claude").expect("there").kind
+    else {
+        panic!("a harness entry");
+    };
+    assert!(settings.is_none());
+    let account_settings = account_settings.as_ref().expect("the account provider's");
+    assert_eq!(account_settings.as_map()["renew_poll_ms"], 100);
+    let refused =
+        parse("[host.agents.a]\nprogram = \"x\"\naccount_settings = { renew_poll_ms = 1 }\n")
+            .expect_err("a program has no account provider");
+    assert!(
+        refused.to_string().contains("account_settings"),
         "{refused}"
     );
 }

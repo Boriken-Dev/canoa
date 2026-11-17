@@ -14,29 +14,36 @@ use alloc::vec::Vec;
 use core::fmt;
 use std::path::Path;
 
-use canoa_claude::acp::ClaudeProvider;
-use canoa_codex::acp::CodexProvider;
-use canoa_pi::acp::PiProvider;
+use canoa_claude::acp::{ClaudeAccounts, ClaudeProvider};
+use canoa_codex::acp::{CodexAccounts, CodexProvider};
+use canoa_pi::acp::{PiAccounts, PiProvider};
 use coqui_acp_api::guatiao::Value;
 use coqui_acp_api::guatiao::library::Object;
 use coqui_acp_api::guatiao::library::Registry;
 use coqui_acp_api::guatiao::library::kind::InstantiateError;
 use coqui_acp_api::guatiao::schema::{SchemaRef, differences, inline_refs};
 use coqui_acp_api::{
-    AccountCatalog, AccountKeeper, AccountKindInfo, AcpHarness, CacheLifetime, Environment,
-    HarnessNotice, ProcessSpawner, StartRequest,
+    AccountCatalog, AccountKeeper, AccountKindInfo, AccountProvider, AcpHarness, CacheLifetime,
+    Environment, HarnessNotice, ProcessSpawner, StartRequest,
 };
 
 use crate::accounts::matching::Runs;
-use crate::accounts::{ACCOUNT_META, Accounts, Held, NoAccounts};
+use crate::accounts::{ACCOUNT_META, Accounts, Held, NoAccounts, Watcher};
 use crate::config::{AccountConfig, Origin, Settings, cache_lifetime_named};
 use crate::provider::{ProviderError, map_of, open};
 
-// What `Registry::register_local` takes: the three built-in providers, linked into this binary.
+// What `Registry::register_local` takes: the three built-in harness providers and their account providers, linked into this binary.
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-built-in",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [ClaudeProvider, CodexProvider, PiProvider]
+    providers = [
+        ClaudeProvider,
+        ClaudeAccounts,
+        CodexProvider,
+        CodexAccounts,
+        PiProvider,
+        PiAccounts
+    ]
 );
 
 /// The `_meta` key of a client's `initialize` that says how long its session's prompt cache should live: an object
@@ -85,8 +92,13 @@ pub(crate) struct Harness {
     profiled: Option<Arc<dyn AcpHarness>>,
     roots: Vec<String>,
     departures: Vec<Departure>,
-    /// What the provider says of its accounts; `None` when it could not say.
+    /// What the provider says of the accounts it applies: the standards it accepts and how; `None` when it could not say.
     catalog: Option<AccountCatalog>,
+    /// The account kinds and sign-in methods the harness's account provider offers, with the host's own beside them: what an
+    /// account of this provider can be, and how it is made.
+    listing: AccountCatalog,
+    /// The harness's account provider, which signs in, renews, watches and reads plan limits; `None` when it offers none.
+    accounts_of: Option<Arc<dyn AccountProvider>>,
     /// The accounts the entry offers, when it offers any.
     accounts: Option<Offer>,
     /// The entry's `cache_lifetime`: what its sessions ask when the client does not choose.
@@ -118,6 +130,9 @@ pub(crate) struct Connection {
     pub(crate) request: StartRequest,
     pub(crate) spawner: Object<dyn ProcessSpawner>,
     pub(crate) keeper: Object<dyn AccountKeeper>,
+    /// What begins the watch of the account's login, for one that rotates and is the provider's own: begun once the harness has
+    /// placed the login, and held until the account is given back.
+    pub(crate) watch: Option<Watcher>,
 }
 
 impl fmt::Debug for Harness {
@@ -132,16 +147,18 @@ impl fmt::Debug for Harness {
 impl Harness {
     /// The provider `id` of `registry`, configured with `settings`; with `profiles`, also the same with client plugins
     /// allowed. `roots` are the entry's working roots, which every connection's provider holds a session and a resumed
-    /// thread to.
+    /// thread to. The account provider the same library offers as `<id>_accounts` is configured with the second of
+    /// `settings`, and with the harness's `executable` and `harness` settings where it declares them.
     ///
     /// # Errors
     ///
     /// [`ProviderError::Missing`] for an id nothing offers, [`ProviderError::WrongKind`] for one that is not an
-    /// `acp_harness`, and [`ProviderError::Settings`] and its kin for a configuration it refuses, the profiled one included.
+    /// `acp_harness`, and [`ProviderError::Settings`] and its kin for a configuration it refuses, the profiled one and
+    /// the account provider's included.
     pub(crate) fn new(
         registry: &Arc<Registry>,
         id: &str,
-        settings: &Settings,
+        (settings, account_settings): (&Settings, &Settings),
         profiles: bool,
         roots: Vec<String>,
     ) -> Result<Self, ProviderError> {
@@ -150,10 +167,8 @@ impl Harness {
                 ProviderError::Schema(why) => ProviderError::Settings(why),
                 other => other,
             })?;
-        let catalog = plain.accounts().ok().map(|mut catalog| {
-            crate::accounts::foundry::extend(&mut catalog, id);
-            catalog
-        });
+        let catalog = plain.accounts().ok();
+        let (accounts_of, listing) = account_side(registry, id, settings, account_settings)?;
         let profiled = if profiles {
             let mut map = settings.as_map().clone();
             map.insert(CLIENT_PLUGINS.to_owned(), serde_json::Value::Bool(true));
@@ -173,6 +188,8 @@ impl Harness {
             roots,
             departures,
             catalog,
+            listing,
+            accounts_of,
             accounts: None,
             lifetime: None,
             entry: String::new(),
@@ -247,9 +264,15 @@ impl Harness {
         &self.roots
     }
 
-    /// What the provider says of its accounts and sign-ins.
+    /// What the provider says of the accounts it applies: the standards it accepts, and the variables it clears.
     pub(crate) const fn catalog(&self) -> Option<&AccountCatalog> {
         self.catalog.as_ref()
+    }
+
+    /// The kinds of account and the ways to sign in that the harness's account provider offers, with the host's own beside
+    /// them, each kind saying the standards it provides.
+    pub(crate) const fn listing(&self) -> &AccountCatalog {
+        &self.listing
     }
 
     /// This harness as an account is held for it.
@@ -260,9 +283,18 @@ impl Harness {
         }
     }
 
-    /// The provider as configured, for the commands that sign in.
-    pub(crate) fn provider(&self) -> &Arc<dyn AcpHarness> {
-        &self.plain
+    /// The account provider as configured, for what signs in, renews and reads plan limits.
+    ///
+    /// # Errors
+    ///
+    /// Why this harness has none: its library offers no `<id>_accounts`.
+    pub(crate) fn account_provider(&self) -> Result<&Arc<dyn AccountProvider>, String> {
+        self.accounts_of.as_ref().ok_or_else(|| {
+            format!(
+                "{} has no account provider, so it signs no one in and reads no plan limits",
+                self.id
+            )
+        })
     }
 
     /// This harness offering `offered`, each by name with its configuration and its kind in the catalog, kept in `host`.
@@ -457,9 +489,11 @@ impl Harness {
             None => Arc::clone(&self.plain),
         };
         request = request.cache_lifetime(honoured(harness.as_ref(), lifetime));
+        let mut watch = None;
         let (spawner, keeper) = match (account, &self.accounts) {
             (Some(held), Some(_)) => {
                 request = request.account(held.grant());
+                watch = self.watcher(held, source);
                 (held.spawner(self.log_notices()), held.keeper(source))
             }
             _ => (
@@ -474,7 +508,25 @@ impl Harness {
             request: request.build(),
             spawner,
             keeper,
+            watch,
         }
+    }
+
+    /// What watches `held` while a connection or a call runs on it: only an account of this harness's own provider that
+    /// rotates and keeps its login in a directory has a login the program renews behind the host's back, and the
+    /// provider's account provider is the one that reads it.
+    fn watcher(&self, held: &Held, source: u64) -> Option<Watcher> {
+        let grant = held.grant();
+        if !held.rotates() || held.owner() != self.id || grant.state_dir.is_none() {
+            return None;
+        }
+        let provider = Arc::clone(self.accounts_of.as_ref()?);
+        Some(Watcher::new(
+            provider,
+            grant,
+            held.spawner(self.log_notices()),
+            held.keeper(source),
+        ))
     }
 
     /// How the configured instance departs from the provider's defaults: what its schema shows, then what the provider
@@ -553,3 +605,84 @@ fn instance(
         Err(ProviderError::TakesNoSettings)
     }
 }
+
+/// The account provider the library of harness `harness` offers as `<harness>_accounts`, what it offers listed with the host's
+/// own kind. `own` configures it; the harness's `executable` and `harness` settings are
+/// given to it where it declares them, so that it runs the program the harness runs. A library with no such provider has no
+/// accounts to make, and its listing holds only the login a program has where it runs.
+fn account_side(
+    registry: &Registry,
+    harness: &str,
+    settings: &Settings,
+    own: &Settings,
+) -> Result<(Option<Arc<dyn AccountProvider>>, AccountCatalog), ProviderError> {
+    let mut listing = AccountCatalog::new();
+    let provider = account_provider(registry, harness, settings, own)?;
+    if let Some(provider) = &provider {
+        let offer = provider
+            .offers()
+            .map_err(|error| ProviderError::Settings(error.message().to_owned()))?;
+        listing.kinds.extend(offer.kinds);
+        listing.logins = offer.logins;
+    }
+    crate::accounts::foundry::extend(&mut listing, harness);
+    Ok((provider, listing))
+}
+
+fn account_provider(
+    registry: &Registry,
+    harness: &str,
+    settings: &Settings,
+    own: &Settings,
+) -> Result<Option<Arc<dyn AccountProvider>>, ProviderError> {
+    let Some(Ok(offer)) = registry.offer::<dyn AccountProvider>(&format!("{harness}_accounts"))
+    else {
+        return Ok(None);
+    };
+    let accounts = |error: ProviderError| match error {
+        ProviderError::Schema(why) | ProviderError::Settings(why) => {
+            ProviderError::Settings(format!("account provider: {why}"))
+        }
+        other => other,
+    };
+    if offer.builds_instances() {
+        let schema = offer
+            .config_schema()
+            .and_then(|schema| inline_refs(schema).ok());
+        let declares = |key: &str| {
+            schema
+                .as_ref()
+                .and_then(SchemaRef::new)
+                .is_some_and(|schema| schema.find(key).is_some())
+        };
+        let mut map = own.as_map().clone();
+        for key in ["executable", "harness"] {
+            if !map.contains_key(key)
+                && declares(key)
+                && let Some(value) = settings.as_map().get(key)
+            {
+                map.insert(key.to_owned(), value.clone());
+            }
+        }
+        let config = Value::from(
+            map_of(&Settings::new(map)).map_err(|why| accounts(ProviderError::Settings(why)))?,
+        );
+        let built = offer.instantiate(&config).map_err(|error| {
+            accounts(match error {
+                InstantiateError::Invalid(error) => ProviderError::Schema(error.to_string()),
+                InstantiateError::Refused(error) => {
+                    ProviderError::Settings(error.message().to_owned())
+                }
+                other => ProviderError::Settings(other.to_string()),
+            })
+        })?;
+        Ok(Some(Arc::new(built)))
+    } else if own.as_map().is_empty() {
+        Ok(offer.shared())
+    } else {
+        Err(accounts(ProviderError::TakesNoSettings))
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -40,7 +40,7 @@ impl Fixture {
         std::fs::write(
             &config,
             format!(
-                "[host]\naccount_store = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\nsettings = {{ renew_poll_ms = 100 }}\n",
+                "[host]\naccount_store = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\naccount_settings = {{ renew_poll_ms = 100 }}\n",
                 quoted(&claude.to_string_lossy())
             ),
         )
@@ -60,8 +60,8 @@ impl Fixture {
         std::fs::write(
             &fixture.config,
             cfg.replace(
-                "settings = { renew_poll_ms = 100 }",
-                "accounts = [\"work\"]\nsettings = { renew_poll_ms = 100 }",
+                "account_settings = { renew_poll_ms = 100 }",
+                "accounts = [\"work\"]\naccount_settings = { renew_poll_ms = 100 }",
             ),
         )
         .expect("the entry offers the account");
@@ -584,8 +584,8 @@ fn a_credential_written_in_canoa_cfg_is_refused_naming_its_key() {
     let fixture = Fixture::bare();
     let cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
     let cfg = cfg.replace(
-        "settings = { renew_poll_ms = 100 }",
-        "accounts = [\"work\"]\nsettings = { renew_poll_ms = 100 }",
+        "account_settings = { renew_poll_ms = 100 }",
+        "accounts = [\"work\"]\naccount_settings = { renew_poll_ms = 100 }",
     );
     std::fs::write(
         &fixture.config,
@@ -671,8 +671,8 @@ fn offering(method: &str, input: &str, extra: &str) -> Fixture {
     std::fs::write(
         &fixture.config,
         cfg.replace(
-            "settings = { renew_poll_ms = 100 }",
-            &format!("accounts = [\"one\"]\n{extra}settings = {{ renew_poll_ms = 100 }}"),
+            "account_settings = { renew_poll_ms = 100 }",
+            &format!("accounts = [\"one\"]\n{extra}account_settings = {{ renew_poll_ms = 100 }}"),
         ),
     )
     .expect("the entry offers the account");

@@ -22,6 +22,7 @@ mod spawner;
 pub(crate) mod store;
 #[cfg(test)]
 mod tests;
+mod watch;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -48,6 +49,7 @@ use matching::Runs;
 pub(crate) use gate::Gated;
 use spawner::Recording;
 use store::{FileStore, KeyringStore, SecretStore, StoreError};
+pub(crate) use watch::Watcher;
 
 /// The `_meta` key a client names an account under in `initialize`, and the host reports the account under in its answer.
 pub const ACCOUNT_META: &str = "dev.boriken.canoa/account";
@@ -513,7 +515,9 @@ impl Accounts {
             .settings(settings)
             .provides(info.provides.iter().cloned());
         if config.kind == HARNESS_LOGIN {
-            return Ok(Held::new(self, name, grant, None, Arc::default(), false));
+            let mut held = Held::new(self, name, grant, None, Arc::default(), false);
+            held.owner.clone_from(&config.harness);
+            return Ok(held);
         }
         let foundry = config.kind == canoa_foundry::account::KIND;
         let record = self
@@ -560,6 +564,7 @@ impl Accounts {
             }
         }
         let mut held = Held::new(self, name, grant, Some(lock), files, rotates);
+        held.owner.clone_from(&config.harness);
         held.session = session;
         if foundry {
             held.kind.clone_from(&config.kind);
@@ -797,6 +802,8 @@ pub(crate) struct Held {
     rotates: bool,
     /// The account's own kind, which a Foundry Local account's grant does not carry: the harness is given its own.
     kind: String,
+    /// The provider that made the account, whose account provider signs it in, renews it and watches it.
+    owner: String,
     /// The session's bearer on a gateway, ended when the account is let go.
     session: Option<Ticket>,
 }
@@ -823,6 +830,7 @@ impl Held {
         Self {
             accounts: Arc::clone(accounts),
             name: name.to_owned(),
+            owner: String::new(),
             kind: grant.kind.clone(),
             grant,
             lock,
@@ -843,6 +851,11 @@ impl Held {
 
     pub(crate) const fn rotates(&self) -> bool {
         self.rotates
+    }
+
+    /// The provider that made the account.
+    pub(crate) fn owner(&self) -> &str {
+        &self.owner
     }
 
     /// The grant for a call that runs the harness.

@@ -19,6 +19,8 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::{AccountKeeper, AcpHarness, ChannelSink, ProcessSpawner, StartRequest};
 use coqui_transport::{Channel, Failure};
 
+use crate::accounts::Watcher;
+
 /// How often each direction looks up to see whether the other has ended.
 const POLL: Duration = Duration::from_millis(50);
 /// How long a message may wait on a full queue to the client, after which the client has stopped taking them.
@@ -177,6 +179,7 @@ pub(crate) fn serve_kind<C: Channel + ?Sized>(
         Object<dyn ProcessSpawner>,
         Object<dyn AccountKeeper>,
     ),
+    watch: Option<Watcher>,
     max_line: usize,
     control: &InProcess,
 ) -> End {
@@ -203,6 +206,8 @@ pub(crate) fn serve_kind<C: Channel + ?Sized>(
             return End::AgentFailed;
         }
     };
+    // The harness has placed the account's login by now, which the watch reads from its first look.
+    let watching = watch.map(Watcher::begin);
     let finished = AtomicBool::new(false);
     let end = thread::scope(|scope| {
         let (gone, finished) = (&*gone, &finished);
@@ -283,6 +288,8 @@ pub(crate) fn serve_kind<C: Channel + ?Sized>(
         }
     });
     drop(provider);
+    // Its last look sees what the program renewed as it ended.
+    drop(watching);
     control.finish();
     end
 }

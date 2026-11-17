@@ -12,8 +12,8 @@ use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_api::guatiao::schema::{SchemaRef, inline_refs};
 use coqui_acp_api::guatiao::{Status, Value};
 use coqui_acp_api::{
-    AcpHarness, Credentials, LoginAnswer, LoginForm, LoginOutcome, LoginPrompter, LoginRequest,
-    OpenUrl, ProcessSpawner,
+    AccountProvider, Credentials, LoginAnswer, LoginForm, LoginOutcome, LoginPrompter,
+    LoginRequest, OpenUrl, ProcessSpawner,
 };
 use coqui_acp_harness::LocalSpawner;
 
@@ -86,11 +86,11 @@ impl fmt::Display for SignInError {
 
 impl core::error::Error for SignInError {}
 
-/// Runs the login `method` of `provider` with `inputs`, relaying its prompts to `interaction`. The provider works in a
+/// Runs the login `method` of the account provider `provider` with `inputs`, relaying its prompts to `interaction`. The provider works in a
 /// directory made for this sign-in, which is removed however it ended.
 pub(crate) fn sign_in(
     accounts: &Accounts,
-    provider: &dyn AcpHarness,
+    provider: &dyn AccountProvider,
     method: &str,
     inputs: &serde_json::Map<String, serde_json::Value>,
     interaction: Arc<dyn Interaction>,
@@ -115,7 +115,7 @@ pub(crate) fn sign_in(
 }
 
 fn run(
-    provider: &dyn AcpHarness,
+    provider: &dyn AccountProvider,
     method: &str,
     inputs: &serde_json::Map<String, serde_json::Value>,
     dir: &std::path::Path,

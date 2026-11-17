@@ -157,7 +157,7 @@ fn sign_in(
         });
         let outcome = login::sign_in(
             accounts,
-            &**provider.provider(),
+            &**provider.account_provider().map_err(Failed::run)?,
             method,
             inputs,
             relay.clone(),
@@ -249,7 +249,7 @@ pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harne
     let entry = config.entries.iter().find(
         |entry| matches!(&entry.kind, EntryKind::Harness { harness: id, .. } if id == harness),
     );
-    let (origin, settings) = match entry.map(|entry| (entry, &entry.kind)) {
+    let (origin, settings, account_settings) = match entry.map(|entry| (entry, &entry.kind)) {
         Some((
             entry,
             EntryKind::Harness {
@@ -257,6 +257,7 @@ pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harne
                 executable,
                 options,
                 settings,
+                account_settings,
                 ..
             },
         )) => (
@@ -268,8 +269,11 @@ pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harne
                 options,
                 settings.as_ref(),
             ),
+            account_settings.clone().unwrap_or_default(),
         ),
-        _ if BUILT_IN_HARNESSES.contains(&harness) => (None, installed_program(harness)),
+        _ if BUILT_IN_HARNESSES.contains(&harness) => {
+            (None, installed_program(harness), Settings::default())
+        }
         _ => {
             return Err(Failed::usage(format!(
                 "no entry runs a provider called {harness}: add an agent entry with harness = \"{harness}\" and its library or source"
@@ -277,8 +281,14 @@ pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harne
         }
     };
     let registry = kind::registry(origin.as_ref()).map_err(Failed::run)?;
-    kind::Harness::new(&Arc::new(registry), harness, &settings, false, Vec::new())
-        .map_err(|error| Failed::run(format!("the {harness} provider is unusable: {error}")))
+    kind::Harness::new(
+        &Arc::new(registry),
+        harness,
+        (&settings, &account_settings),
+        false,
+        Vec::new(),
+    )
+    .map_err(|error| Failed::run(format!("the {harness} provider is unusable: {error}")))
 }
 
 /// The settings of a built-in provider no entry configures: the program the Store installed, when it installed one.
@@ -296,10 +306,7 @@ fn installed_program(harness: &str) -> Settings {
 }
 
 fn methods_of(provider: &kind::Harness) -> Result<Vec<LoginMethodInfo>, Failed> {
-    provider
-        .catalog()
-        .map(|catalog| catalog.logins.clone())
-        .ok_or_else(|| Failed::run("the provider did not list its sign-in methods"))
+    Ok(provider.listing().logins.clone())
 }
 
 fn describe_methods(methods: &[LoginMethodInfo]) -> String {
@@ -544,10 +551,7 @@ pub(crate) fn add_with(
     check_inputs(method, inputs)?;
     let accounts = accounts_of(cfg)?;
     let outcome = signer(&accounts, &provider, &method.id)?;
-    let catalog = provider
-        .catalog()
-        .ok_or_else(|| Failed::run("the provider did not list its account kinds"))?;
-    let kind = catalog.kind(&outcome.kind).ok_or_else(|| {
+    let kind = provider.listing().kind(&outcome.kind).ok_or_else(|| {
         Failed::run(format!(
             "the sign-in made a {} account, which the provider does not list",
             outcome.kind
@@ -726,10 +730,8 @@ pub(crate) fn catalog_of(
     harness: &str,
 ) -> Result<(Vec<AccountKindInfo>, Vec<LoginMethodInfo>), Failed> {
     let provider = provider_for(config, harness)?;
-    let catalog = provider
-        .catalog()
-        .ok_or_else(|| Failed::run("the provider did not list its account kinds"))?;
-    Ok((catalog.kinds.clone(), catalog.logins.clone()))
+    let listing = provider.listing();
+    Ok((listing.kinds.clone(), listing.logins.clone()))
 }
 
 /// Runs a sign-in whose prompts a [`Relay`] carries, for a caller that shows them itself.
@@ -742,7 +744,7 @@ pub(crate) fn sign_in_relayed(
 ) -> Result<coqui_acp_api::LoginOutcome, Failed> {
     login::sign_in(
         accounts,
-        &**provider.provider(),
+        &**provider.account_provider().map_err(Failed::run)?,
         method,
         inputs,
         relay,

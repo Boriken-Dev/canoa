@@ -27,6 +27,7 @@ use crate::spawn::{Command, Stdio};
 pub(crate) mod limits;
 mod probe;
 
+use crate::accounts::Watcher;
 use crate::config::{Config, EntryKind, Settings, cache_lifetime_name};
 use crate::harness::Harness;
 use crate::kind;
@@ -229,7 +230,7 @@ pub fn preset(harness: Harness, executable: Option<&OsStr>) -> Choices {
     match kind::Harness::new(
         &registry,
         harness.as_str(),
-        &Settings::new(map),
+        (&Settings::new(map), &Settings::default()),
         false,
         Vec::new(),
     ) {
@@ -239,7 +240,7 @@ pub fn preset(harness: Harness, executable: Option<&OsStr>) -> Choices {
                 connection.harness.as_ref(),
                 connection.spawner,
                 connection.keeper,
-                None,
+                (None, connection.watch),
             )
         }
         Err(error) => Choices::failed(error.to_string()),
@@ -265,6 +266,7 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
             executable,
             options,
             settings,
+            account_settings,
             accounts,
             ..
         } => {
@@ -279,11 +281,16 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
                 Ok(registry) => Arc::new(registry),
                 Err(error) => return Some(Choices::failed(error.to_string())),
             };
-            let mut built =
-                match kind::Harness::new(&registry, harness, &configured, false, Vec::new()) {
-                    Ok(built) => built,
-                    Err(error) => return Some(Choices::failed(error.to_string())),
-                };
+            let mut built = match kind::Harness::new(
+                &registry,
+                harness,
+                (&configured, &account_settings.clone().unwrap_or_default()),
+                false,
+                Vec::new(),
+            ) {
+                Ok(built) => built,
+                Err(error) => return Some(Choices::failed(error.to_string())),
+            };
             let mut held = None;
             if let Some((account, store)) = &asking.account {
                 if !accounts.contains(account) && !asking.any_account {
@@ -313,7 +320,10 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
                 connection.harness.as_ref(),
                 connection.spawner,
                 connection.keeper,
-                held.as_ref().map(crate::accounts::Held::grant),
+                (
+                    held.as_ref().map(crate::accounts::Held::grant),
+                    connection.watch,
+                ),
             );
             choices.configured_cache_lifetime = options
                 .cache_lifetime
@@ -379,7 +389,7 @@ fn ask(
     harness: &dyn AcpHarness,
     spawner: Object<dyn ProcessSpawner>,
     keeper: Object<dyn AccountKeeper>,
-    account: Option<AccountGrant>,
+    (account, watch): (Option<AccountGrant>, Option<Watcher>),
 ) -> Choices {
     let mut request = ModelsRequest::new();
     if let Some(account) = account {
@@ -388,6 +398,9 @@ fn ask(
     let listing = harness
         .models(request, spawner, keeper)
         .unwrap_or_else(|error| ModelListing::unavailable(UnknownKind::Failed, error.message()));
+    // The harness placed the login for the call, and a program that ran on it may have renewed it: the account provider looks
+    // when its watch begins and again when it ends, and the keeper stores what it finds.
+    drop(watch.map(Watcher::begin));
     let info = harness.describe().ok();
     let program = harness.program().ok().flatten();
     let program_version = program.as_deref().and_then(version_of);
@@ -477,7 +490,7 @@ pub(crate) fn usage_at(
             matches!(&entry.kind, EntryKind::Harness { accounts, .. } if accounts.iter().any(|each| each == name))
         })
         .or_else(|| config.entries.iter().find(runs));
-    let (origin, configured) = match entry.map(|entry| (entry, &entry.kind)) {
+    let (origin, configured, mut account_settings) = match entry.map(|entry| (entry, &entry.kind)) {
         Some((
             entry,
             EntryKind::Harness {
@@ -485,6 +498,7 @@ pub(crate) fn usage_at(
                 executable,
                 options,
                 settings,
+                account_settings,
                 ..
             },
         )) => (
@@ -496,15 +510,32 @@ pub(crate) fn usage_at(
                 options,
                 settings.as_ref(),
             ),
+            account_settings
+                .clone()
+                .unwrap_or_default()
+                .as_map()
+                .clone(),
         ),
-        _ => (None, Settings::new(Map::new())),
+        _ => (None, Settings::new(Map::new()), Map::new()),
     };
+    // A stand-in for the provider's usage endpoint is the account provider's own setting.
+    if let Some(endpoint) = endpoints.of(harness) {
+        account_settings
+            .entry("usage_endpoint")
+            .or_insert_with(|| Value::String(endpoint.to_owned()));
+    }
     let registry = Arc::new(kind::registry(origin).map_err(|error| error.to_string())?);
-    let built = kind::Harness::new(&registry, harness, &configured, false, Vec::new())
-        .map_err(|error| error.to_string())?;
+    let built = kind::Harness::new(
+        &registry,
+        harness,
+        (&configured, &Settings::new(account_settings)),
+        false,
+        Vec::new(),
+    )
+    .map_err(|error| error.to_string())?;
     let listed = crate::serve::offered_accounts(config, harness, &[name.to_owned()], &built)?;
     let built = built.offering(store, listed, Vec::new());
-    if let Some(report) = limits::read(&built, harness, name, account, endpoints) {
+    if let Some(report) = limits::read(&built, name, account) {
         return serde_json::to_value(report?).map_err(|error| error.to_string());
     }
     let held = built

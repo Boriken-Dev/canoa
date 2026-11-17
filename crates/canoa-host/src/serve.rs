@@ -1351,6 +1351,7 @@ impl Serving {
                     executable,
                     options: asks,
                     settings,
+                    account_settings,
                     profiles,
                     accounts: offered,
                 } => {
@@ -1382,7 +1383,7 @@ impl Serving {
                         kind::Harness::new(
                             &registry,
                             harness,
-                            settings,
+                            (settings, &account_settings.clone().unwrap_or_default()),
                             !profiles.is_empty() || local_profile.is_some(),
                             roots.clone(),
                         )
@@ -2873,7 +2874,7 @@ pub(crate) fn offered_accounts(
     let catalog = provider
         .catalog()
         .ok_or_else(|| "the provider did not list the accounts it takes".to_owned())?;
-    let catalogs = Catalogs::with(config, harness, catalog);
+    let catalogs = Catalogs::with(config, harness, catalog, provider.listing());
     let mut listed = Vec::new();
     for name in names {
         let Some(account) = config.accounts.get(name) else {
@@ -2906,7 +2907,7 @@ pub(crate) fn other_accounts(
     let Some(catalog) = provider.catalog() else {
         return Vec::new();
     };
-    let catalogs = Catalogs::with(config, harness, catalog);
+    let catalogs = Catalogs::with(config, harness, catalog, provider.listing());
     let mut others = Vec::new();
     for (name, account) in &config.accounts {
         if listed.iter().any(|(each, ..)| each == name) {
@@ -2940,7 +2941,7 @@ pub(crate) fn unfit_accounts(
     let Some(catalog) = provider.catalog() else {
         return Vec::new();
     };
-    let catalogs = Catalogs::with(config, harness, catalog);
+    let catalogs = Catalogs::with(config, harness, catalog, provider.listing());
     config
         .accounts
         .iter()
@@ -3053,6 +3054,7 @@ fn give_harness<C: Channel>(
             ),
             &*started.harness,
             to_provider,
+            started.watch,
             MAX_LINE,
             &control,
         ),
@@ -3077,6 +3079,7 @@ fn give_harness<C: Channel>(
             ),
             &*started.harness,
             to_provider,
+            started.watch,
             MAX_LINE,
             &control,
         ),

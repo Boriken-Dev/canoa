@@ -1110,6 +1110,9 @@ pub enum EntryKind {
         options: HarnessOptions,
         /// The provider's own configuration (`settings`), checked against the schema it declares when the host starts.
         settings: Option<Settings>,
+        /// The configuration of the account provider the same library offers (`account_settings`), which signs in, renews,
+        /// watches and reads plan limits for the provider's accounts; checked against its schema when the host starts.
+        account_settings: Option<Settings>,
         /// The `[host.profiles]` a client may choose among, as an agent's.
         profiles: Vec<String>,
         /// The `[host.accounts]` a client may choose among, the first when it names none; empty runs the harness on
@@ -1559,6 +1562,7 @@ struct RawAgent {
     source_settings: Option<toml::Table>,
     import_search: Option<String>,
     settings: Option<toml::Table>,
+    account_settings: Option<toml::Table>,
     executable: Option<String>,
     permission_mode: Option<String>,
     approval_policy: Option<String>,
@@ -1912,6 +1916,7 @@ impl Config {
                         (agent.source_settings.is_some(), "source_settings"),
                         (agent.import_search.is_some(), "import_search"),
                         (agent.settings.is_some(), "settings"),
+                        (agent.account_settings.is_some(), "account_settings"),
                         (!offered_accounts.is_empty(), "accounts"),
                     ] {
                         if set {
@@ -1981,6 +1986,10 @@ impl Config {
                         .settings
                         .map(|table| settings_of(&name, table))
                         .transpose()?;
+                    let account_settings = agent
+                        .account_settings
+                        .map(|table| settings_of(&name, table))
+                        .transpose()?;
                     let settings = if built_in {
                         built_in_settings(
                             &name,
@@ -2034,6 +2043,7 @@ impl Config {
                         executable,
                         options,
                         settings,
+                        account_settings,
                         profiles: offered,
                         accounts: offered_accounts,
                     }

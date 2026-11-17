@@ -257,7 +257,7 @@ fn a_codex_chatgpt_login_reads_and_pi_says_it_offers_none() {
     store
         .store_login(
             "id-pi",
-            &Credentials::from_iter([("api_key", "pi-key-canary")]),
+            &Credentials::from_iter([("auth_json", "{\"pi\": \"pi-login-canary\"}")]),
             None,
         )
         .expect("stored");
@@ -269,8 +269,7 @@ fn a_codex_chatgpt_login_reads_and_pi_says_it_offers_none() {
     );
     let config = config(
         "[host.accounts.chat]\nharness = \"codex\"\nkind = \"codex-chatgpt\"\nid = \"id-codex\"\n\
-         [host.accounts.pi]\nharness = \"pi\"\nkind = \"pi-api-key\"\nid = \"id-pi\"\n\
-         [host.accounts.pi.settings]\nvariable = \"OPENAI_API_KEY\"\n",
+         [host.accounts.pi]\nharness = \"pi\"\nkind = \"pi-oauth\"\nid = \"id-pi\"\n",
     );
     let endpoints = Endpoints {
         codex: Some(server.address.clone()),
@@ -292,4 +291,31 @@ fn a_codex_chatgpt_login_reads_and_pi_says_it_offers_none() {
     let pi = super::super::usage_at(&config, "pi", &store, &endpoints).expect("pi");
     assert_eq!(pi["supported"], false, "{pi}");
     assert!(pi["unsupported_because"].is_string(), "{pi}");
+}
+
+#[test]
+fn a_refused_login_is_renewed_from_the_directory_the_stored_copy_was_written_to() {
+    let dir = Dir::new();
+    let store = accounts(&dir);
+    store
+        .store_login(
+            "id-work",
+            &Credentials::from_iter([("credentials_file", login_file(1_000))]),
+            None,
+        )
+        .expect("stored");
+    let server = standin(401, json!({"error": "no"}));
+    let endpoints = Endpoints {
+        claude: Some(server.address.clone()),
+        ..Endpoints::default()
+    };
+    let config = config(
+        "[host.agents.Claude]\nharness = \"claude\"\nexecutable = \"canoa-no-such-claude\"\naccounts = [\"work\"]\n\
+         [host.accounts.work]\nharness = \"claude\"\nkind = \"claude-login\"\nid = \"id-work\"\n",
+    );
+    let why = super::super::usage_at(&config, "work", &store, &endpoints).expect_err("refused");
+    // The login was there for the account provider to look at, so what stopped it was the program, not a missing login.
+    assert!(why.contains("renewing it failed"), "{why}");
+    assert!(why.contains("could not be started"), "{why}");
+    assert!(!why.contains("canary"), "{why}");
 }

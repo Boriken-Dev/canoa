@@ -318,6 +318,7 @@ fn served(
             &*channel,
             &*harness,
             (request, spawner, keeper),
+            None,
             1024 * 1024,
             &control,
         )

@@ -143,6 +143,7 @@ fn app_made_accounts_entry(entry: &crate::config::Entry, harness: &str) -> Optio
         executable,
         options,
         settings,
+        account_settings,
         profiles,
         accounts,
     } = &entry.kind
@@ -162,6 +163,7 @@ fn app_made_accounts_entry(entry: &crate::config::Entry, harness: &str) -> Optio
         && executable.is_none()
         && *options == crate::config::HarnessOptions::default()
         && settings.is_none()
+        && account_settings.is_none()
         && profiles.is_empty();
     plain.then(|| accounts.clone())
 }
@@ -772,7 +774,7 @@ mod offer_tests {
             "{ACCOUNTS}
 [host.accounts.p]
 harness = \"pi\"
-kind = \"pi-api-key\"
+kind = \"pi-oauth\"
 id = \"id-p\"
 "
         );

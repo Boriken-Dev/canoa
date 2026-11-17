@@ -15,10 +15,17 @@ use coqui_acp_api::{AccountCatalog, AccountKindInfo};
 use super::commands::provider_for;
 use crate::config::{AccountConfig, Config};
 
+/// What a provider says of its accounts: the standards it accepts, and the kinds and sign-in methods its account provider offers.
+#[derive(Clone)]
+struct Known {
+    catalog: AccountCatalog,
+    listing: AccountCatalog,
+}
+
 /// The account catalogs of the providers canoa.cfg's accounts and entries name, each read once.
 pub(crate) struct Catalogs<'a> {
     config: &'a Config,
-    known: RefCell<BTreeMap<String, Option<AccountCatalog>>>,
+    known: RefCell<BTreeMap<String, Option<Known>>>,
 }
 
 impl<'a> Catalogs<'a> {
@@ -30,32 +37,50 @@ impl<'a> Catalogs<'a> {
         }
     }
 
-    /// As [`Catalogs::new`], with the catalog of `harness` already in hand.
-    pub(crate) fn with(config: &'a Config, harness: &str, catalog: &AccountCatalog) -> Self {
+    /// As [`Catalogs::new`], with what the provider `harness` says already in hand: the standards it accepts and the kinds
+    /// its account provider offers.
+    pub(crate) fn with(
+        config: &'a Config,
+        harness: &str,
+        catalog: &AccountCatalog,
+        listing: &AccountCatalog,
+    ) -> Self {
         let catalogs = Self::new(config);
-        catalogs
-            .known
-            .borrow_mut()
-            .insert(harness.to_owned(), Some(catalog.clone()));
+        catalogs.known.borrow_mut().insert(
+            harness.to_owned(),
+            Some(Known {
+                catalog: catalog.clone(),
+                listing: listing.clone(),
+            }),
+        );
         catalogs
     }
 
-    /// The catalog of the provider `harness`; `None` when it cannot be built or lists none.
-    pub(crate) fn of(&self, harness: &str) -> Option<AccountCatalog> {
+    fn known(&self, harness: &str) -> Option<Known> {
         self.known
             .borrow_mut()
             .entry(harness.to_owned())
             .or_insert_with(|| {
-                provider_for(self.config, harness)
-                    .ok()
-                    .and_then(|provider| provider.catalog().cloned())
+                let provider = provider_for(self.config, harness).ok()?;
+                Some(Known {
+                    catalog: provider.catalog().cloned()?,
+                    listing: provider.listing().clone(),
+                })
             })
             .clone()
     }
 
-    /// The kind `account` is of, in the catalog of the provider that made it.
+    /// The catalog of the provider `harness`; `None` when it cannot be built or lists none.
+    pub(crate) fn of(&self, harness: &str) -> Option<AccountCatalog> {
+        self.known(harness).map(|known| known.catalog)
+    }
+
+    /// The kind `account` is of, as the account provider of the provider that made it offers it.
     pub(crate) fn kind(&self, account: &AccountConfig) -> Option<AccountKindInfo> {
-        self.of(&account.harness)?.kind(&account.kind).cloned()
+        self.known(&account.harness)?
+            .listing
+            .kind(&account.kind)
+            .cloned()
     }
 
     /// The standards the provider `harness` accepts, most preferred first.
