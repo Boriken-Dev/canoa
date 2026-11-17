@@ -209,6 +209,13 @@ fn unpack(payload: &Payload<'_>, manifest: &Manifest, into: &Path) -> Result<()>
                 entry.path
             )));
         }
+        // The archive carries no modes, so the program the launcher starts is made runnable by its owner alone.
+        #[cfg(unix)]
+        if entry.path == crate::APP_PROGRAM {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&target, fs::Permissions::from_mode(0o700))
+                .map_err(|e| Error::io(format!("make {} runnable", target.display()), e))?;
+        }
     }
     fs::write(into.join(MARKER), manifest.text())
         .map_err(|e| Error::io("write the manifest copy", e))

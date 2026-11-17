@@ -356,6 +356,22 @@ fn only_a_listed_file_is_a_program() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn a_fresh_unpacks_program_can_be_started() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let root = scratch("exec");
+    let built = Built::new(&app(&root, "1"), "1.0.0");
+    let installed = install(&root.join("base"), &built.payload()).unwrap();
+    let program = installed.program("CanoaUI.exe").unwrap();
+    let mode = fs::metadata(&program).unwrap().permissions().mode();
+    assert_eq!(mode & 0o700, 0o700, "the owner cannot run it");
+    assert_eq!(mode & 0o077, 0, "others can reach it");
+    let library = installed.dir.join("canoa_ffi.dll");
+    assert_eq!(fs::metadata(library).unwrap().permissions().mode() & 0o111, 0);
+    fs::remove_dir_all(&root).unwrap();
+}
+
 // --- payloads the launcher must not trust ---
 
 /// A payload archive of `files` (name, body) under a manifest line list `lines`, as if a hostile builder made it.
