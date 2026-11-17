@@ -11,7 +11,7 @@
 )]
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
 use canoa_foundry::Engine;
@@ -69,6 +69,8 @@ fn sdk_engine(_: &Foundry) -> Result<Arc<dyn Engine>, String> {
 #[derive(Default)]
 pub(crate) struct Gateways {
     engines: OnceLock<Engines>,
+    /// The file each gateway records its requests in.
+    log: Option<PathBuf>,
     up: Mutex<BTreeMap<String, Weak<Running>>>,
 }
 
@@ -78,7 +80,18 @@ impl core::fmt::Debug for Gateways {
     }
 }
 
+/// The file in the host's home that the gateways record their requests in.
+pub(crate) const GATEWAY_LOG: &str = "foundry-gateway.log";
+
 impl Gateways {
+    /// Gateways that record their requests in `log`.
+    pub(crate) fn logging_to(log: Option<PathBuf>) -> Self {
+        Self {
+            log,
+            ..Self::default()
+        }
+    }
+
     /// Chooses what opens engines, once; a host that never does opens what each account's settings ask for.
     #[cfg(test)]
     pub(crate) fn engines(&self, engines: Engines) {
@@ -97,7 +110,7 @@ impl Gateways {
                     .cloned()
                     .unwrap_or_else(|| Arc::new(default_engine));
                 let engine = engines(settings)?;
-                let running = Running::start(engine)
+                let running = Running::start(engine, self.log.clone())
                     .map_err(|error| format!("the gateway could not listen: {error}"))?;
                 up.insert(id.to_owned(), Arc::downgrade(&running));
                 running

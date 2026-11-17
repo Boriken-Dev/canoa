@@ -78,8 +78,8 @@ struct Up {
 
 fn up(stub: Stub, keep_alive: Duration) -> Up {
     let stub = Arc::new(stub);
-    let running =
-        Running::start_with(Arc::clone(&stub) as Arc<dyn Engine>, keep_alive).expect("starts");
+    let running = Running::start_with(Arc::clone(&stub) as Arc<dyn Engine>, keep_alive, None)
+        .expect("starts");
     let ticket = running.mint().expect("mints");
     Up {
         stub,
@@ -529,4 +529,86 @@ fn a_page_cannot_reach_the_gateway() {
     let mut said = String::new();
     let _ = stream.read_to_string(&mut said);
     assert!(said.starts_with("HTTP/1.1 403"), "{said}");
+}
+
+/// The lines of the log at `path` once it has `count` of them: a stream's line is written after its last byte.
+fn log_lines(path: &std::path::Path, count: usize) -> Vec<Value> {
+    for _ in 0..200 {
+        let lines: Vec<Value> = std::fs::read_to_string(path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        if lines.len() >= count {
+            return lines;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("the log has fewer than {count} lines");
+}
+
+#[test]
+fn every_request_is_logged_with_how_it_ended_and_never_what_was_said() {
+    let dir = std::env::temp_dir().join(format!("canoa-gateway-log-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("makes");
+    let path = dir.join("gateway.log");
+    let mut stub = Stub::new(Value::Null);
+    stub.answer = Err(EngineError::Failed("the model crashed".to_owned()));
+    let stub = Arc::new(stub);
+    let running = Running::start_with(
+        Arc::clone(&stub) as Arc<dyn Engine>,
+        Duration::from_secs(10),
+        Some(path.clone()),
+    )
+    .expect("starts");
+    let ticket = running.mint().expect("mints");
+    let secret = "a sentence that must not reach the log";
+    let ask = json!({"model": "claude-x", "messages": [{"role": "user", "content": secret}]});
+    let whole = fetch(
+        &running,
+        "POST",
+        "/v1/messages",
+        Some(ticket.bearer()),
+        Some(&ask),
+    );
+    assert_eq!(whole.status, 502);
+    let mut streaming = ask.clone();
+    streaming["stream"] = json!(true);
+    let streamed = fetch(
+        &running,
+        "POST",
+        "/v1/chat/completions",
+        Some(ticket.bearer()),
+        Some(&streaming),
+    );
+    assert!(streamed.body.contains("the model crashed"));
+    let lines = log_lines(&path, 2);
+    let whole = &lines[0];
+    assert_eq!(whole["route"], "/v1/messages");
+    assert_eq!(whole["model"], "claude-x");
+    assert_eq!(whole["stream"], false);
+    assert_eq!(whole["status"], 502);
+    assert!(
+        whole["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("the model crashed"))
+    );
+    assert!(whole["total_ms"].is_u64() && whole["first_byte_ms"].is_u64());
+    let streamed = &lines[1];
+    assert_eq!(streamed["route"], "/v1/chat/completions");
+    assert_eq!(streamed["stream"], true);
+    assert!(
+        streamed["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("the model crashed"))
+    );
+    assert!(
+        streamed["first_byte_ms"].as_u64() <= streamed["total_ms"].as_u64(),
+        "{streamed}"
+    );
+    let text = std::fs::read_to_string(&path).expect("reads");
+    assert!(!text.contains(secret), "the prompt is not logged");
+    drop(ticket);
+    drop(running);
+    std::fs::remove_dir_all(&dir).expect("removes");
 }

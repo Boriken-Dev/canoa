@@ -289,6 +289,7 @@ impl Accounts {
         note: Option<String>,
     ) -> Result<Arc<Self>, StoreError> {
         private::create_root(&dir).map_err(|error| io_error(&dir, &error))?;
+        let gateway_log = dir.parent().map(|home| home.join(foundry::GATEWAY_LOG));
         let accounts = Arc::new(Self {
             dir,
             store,
@@ -296,7 +297,7 @@ impl Accounts {
             sources: AtomicU64::new(1),
             writing: Mutex::new(()),
             note,
-            gateways: foundry::Gateways::default(),
+            gateways: foundry::Gateways::logging_to(gateway_log),
         });
         accounts.sweep();
         Ok(accounts)

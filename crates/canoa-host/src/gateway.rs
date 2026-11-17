@@ -12,6 +12,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -22,6 +23,9 @@ use canoa_foundry::{
 };
 use serde_json::Value;
 
+mod log;
+
+use self::log::{Log, Track};
 use crate::loopback::{self, Caller, Listener, Reply, Request, Route, Service};
 
 /// The header that says what a request carried that the model could not be given.
@@ -64,6 +68,7 @@ pub(crate) struct Gateway {
     engine: Arc<dyn Engine>,
     sessions: Mutex<BTreeMap<[u8; 32], Arc<Session>>>,
     keep_alive: Duration,
+    log: Log,
 }
 
 impl Gateway {
@@ -127,28 +132,45 @@ impl Gateway {
         Ok(done)
     }
 
-    fn complete(self: &Arc<Self>, api: Api, body: &[u8]) -> Reply {
+    /// An error reply, and the line that says the request ended in it.
+    fn fail(&self, api: Api, track: Track, error: &ApiError) -> Reply {
+        track.finish(&self.log, error.status, None, Some(&error.message));
+        Self::error(api, error)
+    }
+
+    fn complete(self: &Arc<Self>, api: Api, body: &[u8], mut track: Track) -> Reply {
         let request = match serde_json::from_slice::<Value>(body) {
             Ok(request) if request.is_object() => request,
             _ => {
-                return Self::error(api, &ApiError::invalid("the request body is a JSON object"));
+                return self.fail(
+                    api,
+                    track,
+                    &ApiError::invalid("the request body is a JSON object"),
+                );
             }
         };
+        track.asked(
+            request.get("model").and_then(Value::as_str).unwrap_or(""),
+            request.get("stream").and_then(Value::as_bool) == Some(true),
+        );
         let made = match self.translate(api, &request) {
             Ok(made) => made,
-            Err(error) => return Self::error(api, &error),
+            Err(error) => return self.fail(api, track, &error),
         };
         if !made.stream {
             return match self.run(&made) {
-                Ok(done) => Self::json(
-                    &match api {
-                        Api::Chat => openai::completion(&done),
-                        Api::Responses => responses::response(&done),
-                        Api::Messages => anthropic::message(&done, made.show_thinking),
-                    },
-                    &made.dropped,
-                ),
-                Err(error) => Self::error(api, &error),
+                Ok(done) => {
+                    track.finish(&self.log, 200, None, None);
+                    Self::json(
+                        &match api {
+                            Api::Chat => openai::completion(&done),
+                            Api::Responses => responses::response(&done),
+                            Api::Messages => anthropic::message(&done, made.show_thinking),
+                        },
+                        &made.dropped,
+                    )
+                }
+                Err(error) => self.fail(api, track, &error),
             };
         }
         let mut headers = vec!["Content-Type: text/event-stream".to_owned()];
@@ -159,7 +181,7 @@ impl Gateway {
         let input = anthropic::count_tokens(&request);
         Reply::Stream {
             headers,
-            run: Box::new(move |out| gateway.stream(api, &made, (usage, input), out)),
+            run: Box::new(move |out| gateway.stream(api, &made, (usage, input), track, out)),
         }
     }
 
@@ -170,6 +192,7 @@ impl Gateway {
         api: Api,
         made: &Translated,
         (usage, input): (bool, u64),
+        track: Track,
         out: &mut (dyn Write + Send),
     ) -> std::io::Result<()> {
         let model = self.engine.model().map(|m| m.id).unwrap_or_default();
@@ -183,6 +206,7 @@ impl Gateway {
             .as_bytes(),
         )?;
         out.flush()?;
+        let first = track.elapsed();
         let shared = Mutex::new(out);
         let finished = AtomicBool::new(false);
         let tick = (self.keep_alive / 4).max(Duration::from_millis(5));
@@ -214,6 +238,7 @@ impl Gateway {
             finished.store(true, Ordering::SeqCst);
             outcome
         });
+        let failure = outcome.as_ref().err().map(|error| error.message.clone());
         let text = match (outcome, api) {
             (Ok(done), Api::Chat) => openai::stream_body(&done, usage),
             (Ok(done), Api::Responses) => responses::stream_body(&done),
@@ -223,24 +248,33 @@ impl Gateway {
             (Err(error), Api::Messages) => anthropic::stream_error(&error),
         };
         let out = shared.into_inner().unwrap_or_else(PoisonError::into_inner);
-        out.write_all(text.as_bytes())?;
-        out.flush()
+        let written = out.write_all(text.as_bytes()).and_then(|()| out.flush());
+        // The status line went out before the model was asked, so it is 200 whatever the model did; the error says the rest.
+        let error = match (&failure, &written) {
+            (Some(message), _) => Some(message.clone()),
+            (None, Err(error)) => Some(format!("the client went away: {error}")),
+            (None, Ok(())) => None,
+        };
+        track.finish(&self.log, 200, Some(first), error.as_deref());
+        written
     }
 
-    fn models(&self, which: Option<&str>) -> Reply {
+    fn models(&self, which: Option<&str>, track: Track) -> Reply {
         let models = self.engine.models();
         let body = match which {
             None => openai::model_list(&models),
             Some(id) => match models.iter().find(|model| model.id == id) {
                 Some(model) => openai::model_entry(model),
                 None => {
-                    return Self::error(
+                    return self.fail(
                         Api::Chat,
+                        track,
                         &ApiError::not_found(format!("no model called {id} is served here")),
                     );
                 }
             },
         };
+        track.finish(&self.log, 200, None, None);
         Self::json(&body, &[])
     }
 }
@@ -280,22 +314,27 @@ impl Service for Gateway {
     }
 
     fn respond(self: &Arc<Self>, _caller: &Arc<Session>, request: &Request<'_>) -> Reply {
+        let track = Track::new(request.path);
         match request.path {
-            "/v1/chat/completions" => self.complete(Api::Chat, request.body),
-            "/v1/responses" => self.complete(Api::Responses, request.body),
-            "/v1/messages" => self.complete(Api::Messages, request.body),
+            "/v1/chat/completions" => self.complete(Api::Chat, request.body, track),
+            "/v1/responses" => self.complete(Api::Responses, request.body, track),
+            "/v1/messages" => self.complete(Api::Messages, request.body, track),
             "/v1/messages/count_tokens" => match serde_json::from_slice::<Value>(request.body) {
-                Ok(body) if body.is_object() => Self::json(
-                    &serde_json::json!({"input_tokens": anthropic::count_tokens(&body)}),
-                    &[],
-                ),
-                _ => Self::error(
+                Ok(body) if body.is_object() => {
+                    track.finish(&self.log, 200, None, None);
+                    Self::json(
+                        &serde_json::json!({"input_tokens": anthropic::count_tokens(&body)}),
+                        &[],
+                    )
+                }
+                _ => self.fail(
                     Api::Messages,
+                    track,
                     &ApiError::invalid("the request body is a JSON object"),
                 ),
             },
-            "/v1/models" => self.models(None),
-            other => self.models(other.strip_prefix("/v1/models/")),
+            "/v1/models" => self.models(None, track),
+            other => self.models(other.strip_prefix("/v1/models/"), track),
         }
     }
 }
@@ -307,20 +346,28 @@ pub(crate) struct Running {
 }
 
 impl Running {
-    /// Listens on a loopback port of the system's choosing, for `engine`.
+    /// Listens on a loopback port of the system's choosing, for `engine`, and records each request in `log` when it is given.
     ///
     /// # Errors
     ///
     /// The port could not be bound.
-    pub(crate) fn start(engine: Arc<dyn Engine>) -> std::io::Result<Arc<Self>> {
-        Self::start_with(engine, KEEP_ALIVE_EVERY)
+    pub(crate) fn start(
+        engine: Arc<dyn Engine>,
+        log: Option<PathBuf>,
+    ) -> std::io::Result<Arc<Self>> {
+        Self::start_with(engine, KEEP_ALIVE_EVERY, log)
     }
 
-    fn start_with(engine: Arc<dyn Engine>, keep_alive: Duration) -> std::io::Result<Arc<Self>> {
+    fn start_with(
+        engine: Arc<dyn Engine>,
+        keep_alive: Duration,
+        log: Option<PathBuf>,
+    ) -> std::io::Result<Arc<Self>> {
         let gateway = Arc::new(Gateway {
             engine,
             sessions: Mutex::new(BTreeMap::new()),
             keep_alive,
+            log: Log::new(log),
         });
         let listener = Listener::start(&gateway)?;
         Ok(Arc::new(Self { gateway, listener }))
