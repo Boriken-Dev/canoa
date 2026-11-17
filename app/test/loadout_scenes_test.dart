@@ -82,7 +82,8 @@ void main() {
       });
 
       testWidgets('no catalog yet: a catalog to start from and a spec to paste', (tester) async {
-        await open(tester, text: '');
+        // The built-in catalog taken away, so the Store has none to read.
+        await open(tester, text: '[catalogs]\nboriken = false\n');
         await tap(tester, 'overlays-discover');
         await golden(tester, 'empty');
       });
