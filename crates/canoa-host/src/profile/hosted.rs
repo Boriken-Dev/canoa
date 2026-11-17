@@ -663,12 +663,14 @@ impl Connection {
         let layers = layers_of(host, &overlays, &chosen, None, &mut notes);
         let model = starting(&layers, Scalar::Model);
         let effort = starting(&layers, Scalar::Effort);
+        let effective = merge(&layers);
         let session = Session::new(
             Who {
                 model: model.as_deref().or(starting_with.who.model),
                 effort: effort.as_deref().or(starting_with.who.effort),
                 profile: Some(name.as_str()),
                 loadout: role.as_deref(),
+                access: Some(effective.access.resolved()),
                 ..starting_with.who
             },
             starting_with.host,
@@ -676,7 +678,6 @@ impl Connection {
         );
         let seen = session.lookup(lookup);
         let lookup: &dyn Fn(&str) -> Option<String> = &seen;
-        let effective = merge(&layers);
         let mut hooks = Hooks::new(host, &effective.aos, &overlays, lookup);
         // Before the agent starts nobody can be asked, so only what canoa.cfg allows runs.
         let directory = host.directory.clone();

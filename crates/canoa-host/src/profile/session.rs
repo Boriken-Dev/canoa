@@ -2,8 +2,8 @@
 //! applied.
 //!
 //! Two kinds go in. The identity variables name what the session runs on, as dotagents stamps them (`AGENTS_HARNESS`,
-//! `AGENTS_VENDOR`, `AGENT`, `AGENTS_MODEL`, `AGENTS_PROJECT_ROOT`, plus `AGENTS_ACCOUNT`), so one overlay adapts to every
-//! harness; the agent is given them too, and a layer's own value for one replaces them. The host's own variables are
+//! `AGENTS_VENDOR`, `AGENT`, `AGENTS_MODEL`, `AGENTS_PROJECT_ROOT`, plus `AGENTS_ACCOUNT`, and the session's access as
+//! `AGENTS_SANDBOX`, `AGENTS_NETWORK` and `AGENTS_APPROVALS`), so one overlay adapts to every harness; the agent is given them too, and a layer's own value for one replaces them. The host's own variables are
 //! those the host sets for the session itself; a layer reads them and may set its own from them, and the host does not
 //! hand them on a second time.
 
@@ -62,6 +62,9 @@ pub(crate) struct Who<'a> {
     pub(crate) role: Option<&'a str>,
     /// The folder the session works in, where one is known.
     pub(crate) project: Option<&'a str>,
+    /// The access the session runs with, where the profile's layers are known: `AGENTS_SANDBOX` (`none`, `workspace` or
+    /// `read-only`), `AGENTS_NETWORK` (`true` or `false`) and `AGENTS_APPROVALS` (`ask`, `edits` or `never`).
+    pub(crate) access: Option<coqui_acp_harness::Access>,
 }
 
 /// The kind and provider of an account, in the words the identity variables use, from the account kind's id and the standards
@@ -185,6 +188,14 @@ impl Session {
         put("AGENTS_LOADOUT", who.loadout);
         put("AGENTS_ROLE", who.role);
         put("AGENTS_PROJECT_ROOT", who.project);
+        if let Some(access) = who.access {
+            put("AGENTS_SANDBOX", Some(access.sandbox.id()));
+            put(
+                "AGENTS_NETWORK",
+                Some(if access.network { "true" } else { "false" }),
+            );
+            put("AGENTS_APPROVALS", Some(access.approvals.id()));
+        }
         Self {
             identity: found,
             host,
@@ -327,6 +338,46 @@ mod tests {
         assert_eq!(value(&session, "AGENTS_MODEL"), Some("claude-x"));
         assert_eq!(value(&session, "AGENTS_ACCOUNT"), Some("work"));
         assert_eq!(value(&session, "AGENTS_PROJECT_ROOT"), None);
+    }
+
+    #[test]
+    fn the_access_is_in_the_environment_only_when_the_session_has_one() {
+        use coqui_acp_harness::{Access, Approvals, Sandbox};
+        let none_known = Session::new(Who::default(), Vec::new(), &none);
+        for name in ["AGENTS_SANDBOX", "AGENTS_NETWORK", "AGENTS_APPROVALS"] {
+            assert_eq!(value(&none_known, name), None, "{name}");
+        }
+        let standard = Session::new(
+            Who {
+                access: Some(Access::STANDARD),
+                ..Who::default()
+            },
+            Vec::new(),
+            &none,
+        );
+        assert_eq!(value(&standard, "AGENTS_SANDBOX"), Some("none"));
+        assert_eq!(value(&standard, "AGENTS_NETWORK"), Some("true"));
+        assert_eq!(value(&standard, "AGENTS_APPROVALS"), Some("ask"));
+        let mut strict = Access::STANDARD;
+        strict.sandbox = Sandbox::ReadOnly;
+        strict.network = false;
+        strict.approvals = Approvals::Never;
+        let own = |name: &str| (name == "AGENTS_APPROVALS").then(|| "mine".to_owned());
+        let session = Session::new(
+            Who {
+                access: Some(strict),
+                ..Who::default()
+            },
+            Vec::new(),
+            &own,
+        );
+        assert_eq!(value(&session, "AGENTS_SANDBOX"), Some("read-only"));
+        assert_eq!(value(&session, "AGENTS_NETWORK"), Some("false"));
+        assert_eq!(
+            value(&session, "AGENTS_APPROVALS"),
+            Some("mine"),
+            "a value the person already has is kept, as for the others"
+        );
     }
 
     #[test]

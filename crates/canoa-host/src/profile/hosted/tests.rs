@@ -2214,6 +2214,50 @@ fn an_overlay_reads_the_identity_variables_of_every_harness_and_the_agent_is_giv
 }
 
 #[test]
+fn the_sessions_access_is_in_its_environment_and_an_overlay_reads_it() {
+    let starting = || Starting {
+        who: Who {
+            harness: Some("codex"),
+            ..Who::default()
+        },
+        host: Vec::new(),
+    };
+    // Nothing in a layer above the built-in one: the standard access.
+    let connection = session_connection(
+        "[env]\nWHO = \"${AGENTS_SANDBOX}/${AGENTS_NETWORK}/${AGENTS_APPROVALS}\"\n",
+        starting(),
+    );
+    assert_eq!(env_value(&connection, "WHO"), Some("none/true/ask"));
+    assert_eq!(env_value(&connection, "AGENTS_SANDBOX"), Some("none"));
+    // The person's layer sets some parts: those, and the standard for the rest. An overlay's own cannot (its file is refused).
+    let temp = temp_with_skill();
+    install_files(
+        &temp,
+        "team",
+        &[(
+            "overlay.cfg",
+            "[env]
+WHO = \"${AGENTS_SANDBOX}/${AGENTS_NETWORK}/${AGENTS_APPROVALS}\"
+",
+        )],
+    );
+    let offer = offer_of(
+        &temp,
+        &config_with(
+            "overlays = [\"team\"]
+access = { sandbox = \"workspace\", network = false }
+",
+        ),
+    );
+    let connection =
+        Connection::prepare_with(&offer, 0, "a", &lookup, Choices::default(), starting())
+            .expect("prepared");
+    assert_eq!(env_value(&connection, "WHO"), Some("workspace/false/ask"));
+    assert_eq!(env_value(&connection, "AGENTS_NETWORK"), Some("false"));
+    assert_eq!(env_value(&connection, "AGENTS_APPROVALS"), Some("ask"));
+}
+
+#[test]
 fn the_account_model_and_run_variables_are_set_only_when_they_have_a_value() {
     let connection = session_connection(
         "[env]\nSAME = \"${AGENTS_ACCOUNT}:${AGENTS_ACCOUNT_KIND}:${AGENTS_ACCOUNT_PROVIDER}:${AGENTS_MODEL}\"\n",

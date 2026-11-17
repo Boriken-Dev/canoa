@@ -249,6 +249,7 @@ value, and never empty; a value already set in the host's own environment is kep
 | `AGENTS_ACCOUNT_KIND` | `subscription`, `api-key`, `gateway` or `local` |
 | `AGENTS_ACCOUNT_PROVIDER` | `anthropic`, `openai`, `xai`, `google` or `microsoft-foundry` |
 | `AGENTS_PROFILE`, `AGENTS_LOADOUT` | the profile the connection runs and the loadout it started with |
+| `AGENTS_SANDBOX`, `AGENTS_NETWORK`, `AGENTS_APPROVALS` | the session's [access](#access): `none`, `workspace` or `read-only`; `true` or `false`; `ask`, `edits` or `never` |
 | `AGENTS_ROLE` | `delegate` when another agent started the session as a task |
 | `AGENTS_PROJECT_ROOT`, `AGENTS_SESSION_ID` | the session's folder and id, for the hooks that run for it |
 
