@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 
-use super::{Overlays, Trust, refused};
+use super::{OverlayLimits, Overlays, Trust, refused};
 use crate::profile::full_commit_id;
 
 /// What a source held at one commit under one path.
@@ -18,7 +18,7 @@ pub(crate) struct FetchedTree {
 
 impl Overlays {
     /// The tree `path` names in the git source `repo` at `reference` (the source's head when none), one commit deep, as the
-    /// source holds it: nothing under an excluded name, no link, and no more than this host keeps of an overlay. `trust` is how
+    /// source holds it: nothing under an excluded name, no link, and no more than `limits` allows. `trust` is how
     /// the fetch is made: the person's own git settings for a source in the catalog they added, or none of them for a source a
     /// catalog names, as a skill an overlay lists is fetched. Nothing is kept.
     pub(crate) fn fetch_tree(
@@ -27,6 +27,7 @@ impl Overlays {
         reference: Option<&str>,
         path: &str,
         trust: Trust,
+        limits: &OverlayLimits,
     ) -> Result<FetchedTree, (i32, String)> {
         let mut token = [0_u8; 8];
         getrandom::fill(&mut token).map_err(|_| refused("no randomness to name the fetch"))?;
@@ -34,7 +35,7 @@ impl Overlays {
             ".fetch-{}.git",
             data_encoding::HEXLOWER.encode(&token)
         ));
-        let answer = self.fetch_tree_into(&cache, repo, reference, path, trust);
+        let answer = self.fetch_tree_into(&cache, repo, reference, path, trust, limits);
         let _ = fs::remove_dir_all(&cache);
         answer
     }
@@ -46,6 +47,7 @@ impl Overlays {
         reference: Option<&str>,
         path: &str,
         trust: Trust,
+        limits: &OverlayLimits,
     ) -> Result<FetchedTree, (i32, String)> {
         fs::create_dir_all(cache)
             .map_err(|error| refused(format!("the fetch could not be made: {error}")))?;
@@ -68,12 +70,12 @@ impl Overlays {
         if !full_commit_id(&commit) {
             return Err(refused("the source gave no commit"));
         }
-        let (listed, _skipped, digest, _bytes) = self.list(cache, &commit, path)?;
+        let (listed, _skipped, digest, _bytes) = self.list_within(cache, &commit, path, limits)?;
         if listed.is_empty() {
             return Err(refused("the source holds no file at that path"));
         }
         let ids: Vec<String> = listed.values().cloned().collect();
-        let blobs = self.blobs(cache, &super::unique(ids.iter()))?;
+        let blobs = self.blobs_within(cache, &super::unique(ids.iter()), limits)?;
         let mut files = BTreeMap::new();
         for (name, blob) in &listed {
             let bytes = blobs

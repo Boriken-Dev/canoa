@@ -22,7 +22,7 @@ use canoa::store::{Check, FetchRequest, InstallTools};
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 
-use super::overlays::Trust;
+use super::overlays::{OverlayLimits, Trust};
 use super::{Caller, Control, DENIED, Grant, REFUSED, bad};
 use crate::store::extension_catalog::{Digest, Entry, Source, Unfit};
 use crate::store::index::{Answer, Row, parse_extension_sources};
@@ -32,6 +32,22 @@ type Outcome = Result<Value, (i32, String)>;
 
 /// The largest file an extension's URL may serve, in bytes.
 const MAX_DOWNLOAD: u64 = 256 * 1024 * 1024;
+
+/// What a tree extension may hold: it is a native library, often far over what an overlay may, so its files and the tree
+/// each go up to what a URL extension may serve.
+pub(super) fn tree_limits() -> OverlayLimits {
+    OverlayLimits {
+        bytes: MAX_DOWNLOAD,
+        ..OverlayLimits::default()
+    }
+}
+
+/// The same limits for reading a folder on disk, as the check at load time does.
+pub(super) fn tree_settings() -> coqui_aos::Settings {
+    coqui_aos::Settings::default()
+        .tree_bytes(coqui_aos::Limit::at(MAX_DOWNLOAD))
+        .file_bytes(coqui_aos::Limit::at(MAX_DOWNLOAD))
+}
 
 /// Where the host keeps the extensions it installed, and how it reaches the network to fetch one.
 #[derive(Clone)]
@@ -515,6 +531,7 @@ impl Control {
                     } else {
                         Trust::Isolated
                     },
+                    &tree_limits(),
                 )?;
                 if !tree.digest.eq_ignore_ascii_case(pin) {
                     return Err((

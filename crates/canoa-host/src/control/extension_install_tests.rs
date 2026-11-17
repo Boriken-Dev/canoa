@@ -56,10 +56,14 @@ fn sha256_of(bytes: &[u8]) -> String {
 }
 
 fn tree_digest(folder: &Path) -> String {
-    coqui_aos::tree_digest(&coqui_aos::StdFs, folder, &coqui_aos::Settings::default())
-        .expect("a digest")
-        .digest
-        .to_string()
+    coqui_aos::tree_digest(
+        &coqui_aos::StdFs,
+        folder,
+        &super::extension_install::tree_settings(),
+    )
+    .expect("a digest")
+    .digest
+    .to_string()
 }
 
 struct Rig {
@@ -72,12 +76,17 @@ struct Rig {
 }
 
 fn rig(served: &[(&str, &[u8])]) -> Rig {
+    rig_with(served, LIBRARY)
+}
+
+/// A rig whose `pack` extension holds `library` as `lib.bin`.
+fn rig_with(served: &[(&str, &[u8])], library: &str) -> Rig {
     let tmp = dir("extensions");
     let upstream = repo(
         &tmp,
         "catalog",
         &[
-            ("ext/pack/lib.bin", LIBRARY),
+            ("ext/pack/lib.bin", library),
             ("ext/pack/notes/readme.txt", "what it is"),
         ],
     );
@@ -330,6 +339,34 @@ fn a_tree_is_kept_and_named_in_canoa_cfg_once_it_has_the_digest_and_removed_with
         json!({"name": "pack"}),
     );
     assert_eq!(again["error"]["code"], REFUSED, "{again}");
+    let _ = std::fs::remove_dir_all(&rig.tmp);
+}
+
+#[test]
+fn an_extension_library_larger_than_an_overlay_may_be_is_installed_and_loads() {
+    use crate::config::{Extension, ExtensionCheck, Origin};
+    // A native library is often far over what an overlay may hold, in the file and in the tree.
+    let library =
+        "x".repeat(usize::try_from(super::overlays::DEFAULT_MAX_BYTES).expect("fits") + 1);
+    let rig = rig_with(&[], &library);
+    let applied = rig.apply(&rig.plan("pack"));
+    assert_eq!(applied["result"]["installed"], true, "{applied}");
+    let folder = rig.home.join("pack");
+    assert_eq!(
+        tree_digest(&folder),
+        rig.pin,
+        "what is kept is what was pinned"
+    );
+    let kept = Extension {
+        name: "pack".to_owned(),
+        origin: Origin::Library(folder.join("lib.bin")),
+        provider: "p".to_owned(),
+        check: Some(ExtensionCheck::Tree {
+            root: folder,
+            pin: rig.pin.clone(),
+        }),
+    };
+    assert_eq!(super::stores::verify_extension(&kept), Ok(()));
     let _ = std::fs::remove_dir_all(&rig.tmp);
 }
 

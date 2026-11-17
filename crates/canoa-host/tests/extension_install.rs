@@ -63,7 +63,11 @@ fn catalog(scratch: &Scratch) -> (PathBuf, String) {
         .to_string_lossy()
         .into_owned();
     std::fs::copy(&library, folder.join(&name)).expect("the library");
-    let pin = coqui_aos::tree_digest(&coqui_aos::StdFs, &folder, &coqui_aos::Settings::default())
+    // A native library, far over an overlay's file limit in a debug build, so the limits are the ones the installer reads with.
+    let limits = coqui_aos::Settings::default()
+        .tree_bytes(coqui_aos::Limit::at(256 * 1024 * 1024))
+        .file_bytes(coqui_aos::Limit::at(256 * 1024 * 1024));
+    let pin = coqui_aos::tree_digest(&coqui_aos::StdFs, &folder, &limits)
         .expect("a digest")
         .digest
         .to_string();

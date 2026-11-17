@@ -71,9 +71,12 @@ pub(super) fn verify_extension(extension: &crate::config::Extension) -> Result<(
                 return Err("the library is not inside the folder the Store recorded".to_owned());
             }
             let wanted = coqui_aos::Digest::parse(pin).map_err(|error| error.to_string())?;
-            let found =
-                coqui_aos::tree_digest(&coqui_aos::StdFs, root, &coqui_aos::Settings::default())
-                    .map_err(|error| format!("{} cannot be read: {error}", root.display()))?;
+            let found = coqui_aos::tree_digest(
+                &coqui_aos::StdFs,
+                root,
+                &super::extension_install::tree_settings(),
+            )
+            .map_err(|error| format!("{} cannot be read: {error}", root.display()))?;
             if found.digest == wanted {
                 Ok(())
             } else {

@@ -1021,6 +1021,17 @@ impl Overlays {
     /// digested as AOS defines: a link, a submodule, a name that is not a relative path or two names equal without ASCII case
     /// refuse the whole overlay. Entries under an excluded name are left out, never installed.
     fn list(&self, cache: &Path, commit: &str, path: &str) -> Result<Listing, (i32, String)> {
+        self.list_within(cache, commit, path, &self.limits)
+    }
+
+    /// [`Self::list`] under `limits` in place of this host's overlay limits.
+    fn list_within(
+        &self,
+        cache: &Path,
+        commit: &str,
+        path: &str,
+        limits: &OverlayLimits,
+    ) -> Result<Listing, (i32, String)> {
         let prefix: Vec<u8> = if path.is_empty() {
             Vec::new()
         } else {
@@ -1133,16 +1144,16 @@ impl Overlays {
                 }
                 count += 1;
                 bytes += size.parse::<u64>().unwrap_or(0);
-                if count > self.limits.files {
+                if count > limits.files {
                     return Err(refused(format!(
                         "The overlay holds more than {} files",
-                        self.limits.files
+                        limits.files
                     )));
                 }
-                if bytes > self.limits.bytes {
+                if bytes > limits.bytes {
                     return Err(refused(format!(
                         "The overlay holds more than {} bytes",
-                        self.limits.bytes
+                        limits.bytes
                     )));
                 }
             }
@@ -1156,7 +1167,7 @@ impl Overlays {
             return Err(refused("The source has no files at that path and commit"));
         }
         let ids: Vec<String> = unique(members.iter().map(|entry| &entry.blob));
-        let blobs = self.blobs(cache, &ids)?;
+        let blobs = self.blobs_within(cache, &ids, limits)?;
         let tree: Vec<(Vec<&[u8]>, TreeEntry)> = entries
             .iter()
             .map(|entry| {
@@ -1195,6 +1206,16 @@ impl Overlays {
         cache: &Path,
         ids: &[String],
     ) -> Result<BTreeMap<String, Vec<u8>>, (i32, String)> {
+        self.blobs_within(cache, ids, &self.limits)
+    }
+
+    /// [`Self::blobs`] with room for what `limits` allows an overlay to hold.
+    fn blobs_within(
+        &self,
+        cache: &Path,
+        ids: &[String],
+        limits: &OverlayLimits,
+    ) -> Result<BTreeMap<String, Vec<u8>>, (i32, String)> {
         if ids.is_empty() {
             return Ok(BTreeMap::new());
         }
@@ -1208,8 +1229,8 @@ impl Overlays {
             .iter()
             .flat_map(|id| format!("{id}\n").into_bytes())
             .collect();
-        let ceiling = usize::try_from(self.limits.bytes.saturating_add(64 * 1024 * 1024))
-            .unwrap_or(usize::MAX);
+        let ceiling =
+            usize::try_from(limits.bytes.saturating_add(64 * 1024 * 1024)).unwrap_or(usize::MAX);
         let data = self.run(
             &[
                 format!("--git-dir={}", cache.display()).into(),
