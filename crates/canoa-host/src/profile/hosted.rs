@@ -590,8 +590,18 @@ impl Connection {
         if loadout.is_none()
             && !preset_decides
             && let Some(kind) = client
+            && let Some(named) = listed.client_loadout(kind)
         {
-            loadout = listed.client_loadout(kind);
+            if listed.loadouts.contains_key(named) {
+                loadout = Some(named);
+            } else {
+                notes.push(Item::new(
+                    "loadout",
+                    LayerId::new(LayerKind::Session, ""),
+                    State::Unsupported,
+                    format!("canoa.cfg gives {kind} clients the loadout {named}, which it no longer holds: the default applies"),
+                ));
+            }
         }
         let resolved = listed
             .resolve_loadout(loadout)

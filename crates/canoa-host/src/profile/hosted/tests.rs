@@ -1677,6 +1677,34 @@ fn a_client_kind_has_a_default_loadout_below_what_the_session_or_its_preset_name
 }
 
 #[test]
+fn a_client_default_naming_a_loadout_the_file_lost_says_so_and_the_default_applies() {
+    let temp = temp_with_skill();
+    let offer = loadout_offer(
+        &temp,
+        "[loadouts.full]\nmcp = []\n[defaults]\nloadout = \"full\"\n\
+         [defaults.clients]\noutlook = \"gone\"\n",
+    );
+    let (role, report) = client_start(&offer, None, None, Some("outlook"));
+    assert_eq!(role.as_deref(), Some("full"));
+    let line = item(&report, "loadout");
+    assert_eq!(line["state"], "not supported", "{report}");
+    assert!(
+        line["how"].as_str().expect("text").contains("gone"),
+        "{report}"
+    );
+    // A kind with no entry is not told anything.
+    let (_, other) = client_start(&offer, None, None, Some("word"));
+    assert!(
+        other["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .all(|item| item["key"] != "loadout"),
+        "{other}"
+    );
+}
+
+#[test]
 fn a_client_that_names_its_kind_in_text_is_heard_and_anything_else_is_refused() {
     let first = |value: Value| {
         serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",

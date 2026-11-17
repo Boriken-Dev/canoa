@@ -1138,6 +1138,9 @@ class _CanoaAppState extends State<CanoaApp> {
       await store.applyHostProfile(local, expected: _hasProfiles);
       // The browser's link hides the host's own report from the page, so the loadout is said here, from what canoa.cfg names.
       if (local.profile == null && local.loadout != null) local.chat.note('Loadout ${local.loadout}');
+      if (config.lostClientLoadout(meta[clientMeta] as String?) case final lost? when meta[loadoutMeta] == null && meta[presetMeta] == null) {
+        local.chat.note('canoa.cfg gives ${meta[clientMeta]} clients the loadout $lost, which it no longer holds: the default applies');
+      }
     } catch (_) {
       await client.close();
       rethrow;

@@ -1826,16 +1826,24 @@ fn a_kind_of_client_has_a_default_loadout_of_its_own() {
 }
 
 #[test]
-fn a_client_default_that_names_no_kind_or_no_loadout_refuses_the_file() {
+fn a_client_default_that_names_no_kind_or_is_not_text_refuses_the_file() {
     for text in [
         "[loadouts.x]\n[defaults.clients]\nfridge = \"x\"\n",
-        "[loadouts.x]\n[defaults.clients]\noutlook = \"y\"\n",
         "[loadouts.x]\n[defaults.clients]\noutlook = 1\n",
         "[loadouts.x]\n[defaults]\nclients = \"x\"\n",
-        "[defaults.clients]\noutlook = \"x\"\n",
     ] {
         assert!(Config::from_str_in(text, Path::new(".")).is_err(), "{text}");
     }
+}
+
+#[test]
+fn a_client_default_that_names_a_loadout_the_file_lost_does_not_refuse_it() {
+    let config = Config::from_str_in(
+        "[loadouts.x]\n[defaults.clients]\noutlook = \"y\"\n",
+        Path::new("."),
+    )
+    .expect("a hand-deleted loadout leaves the rest of the file readable");
+    assert_eq!(config.local_profiles.client_loadouts["outlook"], "y");
 }
 
 #[test]

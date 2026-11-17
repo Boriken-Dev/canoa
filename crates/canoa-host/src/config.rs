@@ -161,7 +161,7 @@ pub struct LocalProfiles {
     /// `[defaults] loadout`: the loadout a session starts with when it names none.
     pub default_loadout: Option<String>,
     /// `[defaults.clients]`: the loadout a session starts with when it names none and its client says which kind it is, by kind
-    /// (see [`CLIENT_KINDS`]). It wins over `[defaults] loadout`.
+    /// (see [`CLIENT_KINDS`]). It wins over `[defaults] loadout`. A name `[loadouts]` does not hold is kept, so a connection can say so.
     pub client_loadouts: BTreeMap<String, String>,
     /// `[profiles.NAME]`: the named presets of a session's own values, in the file's order.
     pub presets: IndexMap<String, Preset>,
@@ -1805,8 +1805,7 @@ impl Config {
         local_profiles.presets = presets_of(&raw.profiles)?;
         local_profiles.default_loadout =
             default_loadout_of(raw.defaults.as_ref(), &local_profiles.loadouts)?;
-        local_profiles.client_loadouts =
-            client_loadouts_of(raw.defaults.as_ref(), &local_profiles.loadouts)?;
+        local_profiles.client_loadouts = client_loadouts_of(raw.defaults.as_ref())?;
         local_profiles.protected.clone_from(&protected_paths);
         let Some(host) = raw.host else {
             return Ok(Self {
@@ -3106,10 +3105,10 @@ fn presets_of(
 pub const CLIENT_KINDS: [&str; 5] = ["browser", "outlook", "word", "excel", "powerpoint"];
 
 /// `[defaults.clients]`: the loadout a session whose client is of each kind starts with when it names none. A kind that is not
-/// one of [`CLIENT_KINDS`], and a loadout `[loadouts]` does not hold, refuse the file.
+/// one of [`CLIENT_KINDS`], and a value that is not text, refuse the file. A name `[loadouts]` no longer holds (deleted by hand) does
+/// not: a connection of that kind says so in its report and gets the default.
 fn client_loadouts_of(
     defaults: Option<&toml::Table>,
-    loadouts: &IndexMap<String, Loadout>,
 ) -> Result<BTreeMap<String, String>, ConfigError> {
     let invalid = |what: String| ConfigError::Invalid { entry: None, what };
     let Some(value) = defaults.and_then(|table| table.get("clients")) else {
@@ -3126,14 +3125,11 @@ fn client_loadouts_of(
                 CLIENT_KINDS.join(", ")
             )));
         }
-        let named = value
-            .as_str()
-            .filter(|name| loadouts.contains_key(*name))
-            .ok_or_else(|| {
-                invalid(format!(
-                    "[defaults.clients] {kind} is not the name of a loadout in [loadouts]"
-                ))
-            })?;
+        let named = value.as_str().ok_or_else(|| {
+            invalid(format!(
+                "[defaults.clients] {kind} is the name of a loadout"
+            ))
+        })?;
         out.insert(kind.clone(), named.to_owned());
     }
     Ok(out)

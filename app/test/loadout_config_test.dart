@@ -154,16 +154,23 @@ void main() {
     expect(CanoaConfig.parse(base).clientLoadouts, isEmpty);
   });
 
-  test('a client default that names no kind of client or no loadout is refused, naming it', () {
+  test('a client default that names no kind of client or is not text is refused, naming it', () {
     for (final (text, word) in [
       ('[loadouts.a]\n[defaults.clients]\nfridge = "a"\n', 'fridge'),
-      ('[loadouts.a]\n[defaults.clients]\noutlook = "ghost"\n', 'outlook'),
       ('[loadouts.a]\n[defaults.clients]\noutlook = 1\n', 'outlook'),
       ('[loadouts.a]\n[defaults]\nclients = "a"\n', 'clients'),
-      ('[defaults.clients]\noutlook = "a"\n', 'outlook'),
     ]) {
       expect(() => CanoaConfig.parse(text), throwsA(isA<FormatException>().having((e) => e.message, 'message', contains(word))), reason: text);
     }
+  });
+
+  test('a client default that names a loadout deleted by hand does not refuse the file, and the default applies', () {
+    final config = CanoaConfig.parse('[loadouts.a]\n[defaults]\nloadout = "a"\n[defaults.clients]\noutlook = "ghost"\n');
+    expect(config.defaultLoadoutFor('outlook'), 'a');
+    expect(config.loadoutOfStart(client: 'outlook'), 'a');
+    expect(config.lostClientLoadout('outlook'), 'ghost');
+    expect(config.lostClientLoadout('word'), isNull);
+    expect(config.lostClientLoadout(null), isNull);
   });
 
   test('deleting a loadout drops the client defaults that named it, and renaming one carries them', () {

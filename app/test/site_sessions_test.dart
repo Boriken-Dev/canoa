@@ -683,6 +683,20 @@ void chatOnlyTests() {
       }
     });
 
+    testWidgets('a kind\'s default naming a loadout canoa.cfg lost starts with the default and says so', (tester) async {
+      final provider = _Provider();
+      final store = await _panel(
+        tester, ledger: SessionLedger(MemoryLedgerBackend()), provider: provider,
+        config: CanoaConfig.parse('[loadouts.writing]\n[defaults]\nloadout = "writing"\n[defaults.clients]\noutlook = "gone"\n'),
+        mode: const ClientMode(chatOnly: true, client: 'outlook'),
+        relations: ManualRelation(const Relation(kind: Relation.conversationKind, key: 'c1', label: 'Plan')),
+      );
+      await _tap(tester, const Key('related-new'));
+      await until(tester, () => store.sessions.isNotEmpty && store.sessions.first.remoteSessionId != null, 'the session to open');
+      expect(store.sessions.single.loadout, 'writing');
+      expect(find.textContaining('the loadout gone, which it no longer holds'), findsOneWidget);
+    });
+
     testWidgets('a profile that names a loadout of its own wins over the kind\'s default', (tester) async {
       final provider = _Provider();
       final store = await _panel(

@@ -688,12 +688,23 @@ final class CanoaConfig {
   String? get defaultLoadout => _defaultLoadout(tables['defaults'], loadouts);
 
   /// `[defaults.clients]`: the loadout a session starts with when it names none and its client is of that kind (see [clientKinds]),
-  /// by kind. A kind with none starts with [defaultLoadout].
-  Map<String, String> get clientLoadouts => _clientLoadouts(tables['defaults'], loadouts);
+  /// by kind, as written: a name `[loadouts]` no longer holds (deleted by hand) is kept, and is no default. A kind with none starts
+  /// with [defaultLoadout].
+  Map<String, String> get clientLoadouts => _clientLoadouts(tables['defaults']);
 
   /// The loadout a session that names none starts with when its client is of kind [client] (null for a client with none): the kind's
-  /// own when canoa.cfg gives it one, else [defaultLoadout].
-  String? defaultLoadoutFor(String? client) => (client == null ? null : clientLoadouts[client]) ?? defaultLoadout;
+  /// own when canoa.cfg gives it one that it holds, else [defaultLoadout].
+  String? defaultLoadoutFor(String? client) {
+    final named = client == null ? null : clientLoadouts[client];
+    return named != null && loadouts.containsKey(named) ? named : defaultLoadout;
+  }
+
+  /// The loadout canoa.cfg gives clients of kind [client] that it no longer holds, which the default replaces; null when there is
+  /// none such.
+  String? lostClientLoadout(String? client) {
+    final named = client == null ? null : clientLoadouts[client];
+    return named != null && !loadouts.containsKey(named) ? named : null;
+  }
 
   /// The loadout a session starts with, as the host resolves it: [loadout] when canoa.cfg holds it, else the one the profile
   /// [preset] names (the default when canoa.cfg no longer holds that), else the one for a client of kind [client], else the default.
@@ -750,7 +761,7 @@ final class CanoaConfig {
     if (raw is! Map || raw.keys.any((key) => key != 'loadout' && key != 'clients')) {
       throw const FormatException('canoa.cfg: defaults is a table with the keys loadout and clients');
     }
-    _clientLoadouts(raw, loadouts);
+    _clientLoadouts(raw);
     final name = raw['loadout'];
     if (name == null) return null;
     if (name is! String || !loadouts.containsKey(name)) {
@@ -759,7 +770,7 @@ final class CanoaConfig {
     return name;
   }
 
-  static Map<String, String> _clientLoadouts(Object? raw, Map<String, Loadout> loadouts) {
+  static Map<String, String> _clientLoadouts(Object? raw) {
     final clients = raw is Map ? raw['clients'] : null;
     if (clients == null) return const {};
     if (clients is! Map) throw const FormatException('canoa.cfg: defaults.clients must be a table');
@@ -768,9 +779,7 @@ final class CanoaConfig {
       if (!clientKinds.contains(key)) {
         throw FormatException('canoa.cfg: defaults.clients.$key is not a kind of client: ${clientKinds.join(', ')}');
       }
-      if (value is! String || !loadouts.containsKey(value)) {
-        throw FormatException('canoa.cfg: defaults.clients.$key is the name of a loadout in loadouts');
-      }
+      if (value is! String) throw FormatException('canoa.cfg: defaults.clients.$key is the name of a loadout');
       out['$key'] = value;
     }
     return out;
