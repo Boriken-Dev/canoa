@@ -959,6 +959,11 @@ class _CanoaAppState extends State<CanoaApp> {
       return null;
     },
     voice: () => config.voice,
+    // What the service noted goes with the message as a block the agent reads.
+    onFrontMatter: (notes) {
+      final session = store.selected;
+      return session == null ? 'There is no conversation to send it with.' : store.addDictationNotes(session, notes);
+    },
   );
 
   late final HostFiles? _hostFiles = widget.served?.files ?? (_control == null ? null : HostFiles(_control));

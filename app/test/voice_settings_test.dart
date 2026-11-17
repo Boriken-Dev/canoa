@@ -87,6 +87,23 @@ void main() {
       expect(h.last.encode(), contains('[voice]'));
     });
 
+    testWidgets('the person\'s own voice profile is written to [voice], and cleared when its fields are emptied', (tester) async {
+      final system = local();
+      final h = await openSettings(tester, section: 'voice', voiceBackends: [system]);
+      await choose(tester, 'voice-profile-voice', 'female');
+      await tester.enterText(find.byKey(const Key('voice-profile-accent')), 'Puerto Rican Spanish');
+      await tester.enterText(find.byKey(const Key('voice-profile-vocabulary')), 'Canoa, Boriken ,, ');
+      await tester.pump();
+      expect(h.last.voice.profile, const VoiceProfile(accent: 'Puerto Rican Spanish', voice: 'female', vocabulary: ['Canoa', 'Boriken']));
+      expect(h.last.encode(), allOf(contains('voice = "female"'), contains('accent = "Puerto Rican Spanish"'), contains('vocabulary = ["Canoa","Boriken"]')));
+      expect(system.starts, 0, reason: 'writing a profile opens no microphone');
+      await tester.enterText(find.byKey(const Key('voice-profile-accent')), '');
+      await tester.enterText(find.byKey(const Key('voice-profile-vocabulary')), '');
+      await choose(tester, 'voice-profile-voice', 'Not said');
+      expect(h.last.voice.profile.isEmpty, isTrue);
+      expect(h.last.encode(), isNot(contains('[voice]')));
+    });
+
     testWidgets('the test opens the microphone only when pressed, shows a level and what was heard, and stops', (tester) async {
       final system = local();
       await openSettings(tester, section: 'voice', voiceBackends: [system]);

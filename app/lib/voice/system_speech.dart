@@ -55,7 +55,7 @@ final class SystemSpeech implements SpeechBackend {
   Stream<double> get levels => _levels.stream;
 
   @override
-  Stream<Transcript> start({String? device, String? language, String? model}) {
+  Stream<Transcript> start({String? device, String? language, String? model, VoiceProfile? profile}) {
     final capture = StreamController<Transcript>();
     _capture = capture;
     _run(capture, language);

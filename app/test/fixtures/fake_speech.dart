@@ -25,10 +25,12 @@ final class FakeSpeech implements SpeechBackend {
 
   int starts = 0, stops = 0, cancels = 0;
   String? lastDevice, lastLanguage, lastModel;
+  VoiceProfile? lastProfile;
   StreamController<Transcript>? _capture;
   final _levels = StreamController<double>.broadcast();
 
-  void hear(String text, {bool isFinal = false}) => _capture!.add(Transcript(text, isFinal: isFinal));
+  void hear(String text, {bool isFinal = false, Map<String, Object?> frontMatter = const {}}) =>
+      _capture!.add(Transcript(text, isFinal: isFinal, frontMatter: frontMatter));
   void level(double value) => _levels.add(value);
 
   @override
@@ -41,11 +43,12 @@ final class FakeSpeech implements SpeechBackend {
   Stream<double> get levels => _levels.stream;
 
   @override
-  Stream<Transcript> start({String? device, String? language, String? model}) {
+  Stream<Transcript> start({String? device, String? language, String? model, VoiceProfile? profile}) {
     starts++;
     lastDevice = device;
     lastLanguage = language;
     lastModel = model;
+    lastProfile = profile;
     final capture = _capture = StreamController<Transcript>();
     if (failWith case final failure?) {
       scheduleMicrotask(() {

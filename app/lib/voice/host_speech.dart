@@ -149,6 +149,14 @@ final class HostSpeechCatalog extends ChangeNotifier {
   }
 }
 
+/// The parts of `speech/open` that carry what the person wrote of their own voice in Settings; nothing for what they left empty.
+Map<String, Object?> _profileParams(VoiceProfile? profile) => profile == null || profile.isEmpty
+    ? const {}
+    : {
+        if (profile.vocabulary.isNotEmpty) 'vocabulary': profile.vocabulary,
+        if (profile.accent != null || profile.voice != null) 'profile': {'accent': ?profile.accent, 'voice': ?profile.voice},
+      };
+
 /// The id a host provider has in `[voice] backend`.
 String hostSpeechId(String name) => 'host:$name';
 
@@ -194,15 +202,15 @@ final class HostSpeech implements SpeechBackend {
   Stream<double> get levels => _levels.stream;
 
   @override
-  Stream<Transcript> start({String? device, String? language, String? model}) {
+  Stream<Transcript> start({String? device, String? language, String? model, VoiceProfile? profile}) {
     final out = StreamController<Transcript>();
     _out = out;
     _ending = false;
-    unawaited(_run(out, language));
+    unawaited(_run(out, language, profile));
     return out.stream;
   }
 
-  Future<void> _run(StreamController<Transcript> out, String? language) async {
+  Future<void> _run(StreamController<Transcript> out, String? language, VoiceProfile? profile) async {
     final capture = _catalog.capture;
     if (capture == null) {
       out.addError(const SpeechFailure('This build cannot record audio yet.'));
@@ -211,7 +219,7 @@ final class HostSpeech implements SpeechBackend {
     }
     try {
       const rate = 16000;
-      final opened = await _catalog.call('speech/open', {'provider': provider.name, 'rate': rate, 'language': ?language});
+      final opened = await _catalog.call('speech/open', {'provider': provider.name, 'rate': rate, 'language': ?language, ..._profileParams(profile)});
       final session = opened['session'] as String;
       _session = session;
       if (_ending) {

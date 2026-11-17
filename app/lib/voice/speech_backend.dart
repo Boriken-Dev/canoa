@@ -41,6 +41,41 @@ final class SpeechChoice {
   final String id, label;
 }
 
+/// What the person says of their own voice, so a provider can understand them better. It is only what they wrote in Settings,
+/// never something worked out from their audio.
+final class VoiceProfile {
+  const VoiceProfile({this.accent, this.voice, this.vocabulary = const []});
+
+  /// How they speak the language, in their words (`Puerto Rican Spanish`).
+  final String? accent;
+
+  /// Their voice, in their words (`female`, `male`, `child`).
+  final String? voice;
+
+  /// Names and words they say that a recognizer may get wrong.
+  final List<String> vocabulary;
+
+  bool get isEmpty => accent == null && voice == null && vocabulary.isEmpty;
+
+  VoiceProfile copyWith({String? accent, bool clearAccent = false, String? voice, bool clearVoice = false, List<String>? vocabulary}) =>
+      VoiceProfile(
+        accent: clearAccent ? null : accent ?? this.accent,
+        voice: clearVoice ? null : voice ?? this.voice,
+        vocabulary: vocabulary ?? this.vocabulary,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is VoiceProfile &&
+      other.accent == accent &&
+      other.voice == voice &&
+      other.vocabulary.length == vocabulary.length &&
+      [for (var i = 0; i < vocabulary.length; i++) other.vocabulary[i] == vocabulary[i]].every((same) => same);
+
+  @override
+  int get hashCode => Object.hash(accent, voice, Object.hashAll(vocabulary));
+}
+
 /// What a backend has heard so far. A provisional transcript is replaced by the next one; a final one ends a phrase.
 final class Transcript {
   const Transcript(this.text, {required this.isFinal, this.frontMatter = const {}});
@@ -82,8 +117,9 @@ abstract interface class SpeechBackend {
   Future<List<SpeechChoice>> devices();
 
   /// Opens the microphone and turns what it hears into text until [stop] or [cancel], or the service ends the capture. The
-  /// stream closes when the capture is over and carries a [SpeechFailure] when it failed.
-  Stream<Transcript> start({String? device, String? language, String? model});
+  /// stream closes when the capture is over and carries a [SpeechFailure] when it failed. [profile] is what the person said of
+  /// their own voice; a backend with no use for it ignores it.
+  Stream<Transcript> start({String? device, String? language, String? model, VoiceProfile? profile});
 
   /// How loud the input is, from 0 to 1, while a capture runs.
   Stream<double> get levels;

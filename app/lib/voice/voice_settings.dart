@@ -36,6 +36,17 @@ class _Choices {
 class _VoiceSectionState extends State<VoiceSection> {
   SpeechBackend? _loadedFor;
   Future<_Choices>? _choices;
+  late final _accent = TextEditingController(text: widget.controller.config.voice.profile.accent ?? '');
+  late final _vocabulary = TextEditingController(text: widget.controller.config.voice.profile.vocabulary.join(', '));
+
+  @override
+  void dispose() {
+    _accent.dispose();
+    _vocabulary.dispose();
+    super.dispose();
+  }
+
+  void _profile(VoiceProfile Function(VoiceProfile) change) => _set((v) => v.copyWith(profile: change(v.profile)));
 
   List<SpeechBackend> get _all => [...widget.backends, ...?widget.host?.backends];
 
@@ -173,16 +184,65 @@ class _VoiceSectionState extends State<VoiceSection> {
                   device: voice.device,
                   language: voice.language,
                   model: voice.model,
+                  profile: voice.profile,
                   onDone: () => _reload(backend),
                 ),
               ]);
             },
           ),
+        if (backend != null)
+          SettingsGroup(title: 'Your voice', children: [
+            SettingsRow(
+              key: const Key('voice-profile-note'),
+              title: 'Told to the speech service',
+              description: 'What you write here goes to the service as hints, and nowhere else. Nothing is worked out from your audio',
+              child: true,
+            ),
+            ChoiceRow<String>(
+              title: 'Voice',
+              configKey: const ['voice', 'voice'],
+              fieldKey: const Key('voice-profile-voice'),
+              value: voice.profile.voice ?? _own,
+              choices: [
+                (_own, 'Not said'),
+                for (final each in _voices) (each, each),
+                if (voice.profile.voice != null && !_voices.contains(voice.profile.voice)) (voice.profile.voice!, voice.profile.voice!),
+              ],
+              onChanged: (id) => _profile((p) => id == _own ? p.copyWith(clearVoice: true) : p.copyWith(voice: id)),
+            ),
+            SettingsRow(
+              title: 'Accent',
+              configKey: const ['voice', 'accent'],
+              description: 'How you speak the language, in your words, such as Puerto Rican Spanish',
+              below: TextField(
+                key: const Key('voice-profile-accent'),
+                controller: _accent,
+                decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
+                onChanged: (text) => _profile((p) => text.trim().isEmpty ? p.copyWith(clearAccent: true) : p.copyWith(accent: text.trim())),
+              ),
+            ),
+            SettingsRow(
+              title: 'Words and names',
+              configKey: const ['voice', 'vocabulary'],
+              description: 'Ones you say that a recognizer may get wrong, separated by commas',
+              below: TextField(
+                key: const Key('voice-profile-vocabulary'),
+                controller: _vocabulary,
+                decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
+                onChanged: (text) => _profile((p) => p.copyWith(vocabulary: [
+                  for (final word in text.split(',')) if (word.trim().isNotEmpty) word.trim(),
+                ])),
+              ),
+            ),
+          ]),
         if (host != null) HostProvidersGroup(catalog: host),
       ]);
     },
   );
 }
+
+/// The voices offered by name; a profile written in canoa.cfg may hold another word, which is kept and shown.
+const _voices = ['female', 'male'];
 
 /// What Voice says when this build has no speech service, with what would give it one.
 class _NoSpeechService extends StatelessWidget {
@@ -217,10 +277,11 @@ class _NoSpeechService extends StatelessWidget {
 /// A short test: the microphone opens when Test is pressed, shows its level and what the service heard, and closes when it is
 /// stopped, when the service ends it or when the page goes away.
 class MicrophoneTest extends StatefulWidget {
-  const MicrophoneTest({super.key, required this.backend, this.device, this.language, this.model, this.onDone});
+  const MicrophoneTest({super.key, required this.backend, this.device, this.language, this.model, this.profile, this.onDone});
 
   final SpeechBackend backend;
   final String? device, language, model;
+  final VoiceProfile? profile;
 
   /// Called when a test ends, for the page to read again what the backend now knows.
   final VoidCallback? onDone;
@@ -248,7 +309,7 @@ class _MicrophoneTestState extends State<MicrophoneTest> {
       if (mounted) setState(() => _level = level);
     });
     _heard = widget.backend
-        .start(device: widget.device, language: widget.language, model: widget.model)
+        .start(device: widget.device, language: widget.language, model: widget.model, profile: widget.profile)
         .listen(
           (transcript) {
             if (mounted) setState(() => _text = transcript.text);

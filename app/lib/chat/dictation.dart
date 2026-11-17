@@ -22,13 +22,17 @@ enum DictationState {
 /// Turns speech into text in the message being written. It records only between [start] and [stop] or [cancel], keeps nothing, and
 /// never sends: the text it hears lands in the message at the cursor for the person to edit and send.
 final class Dictation extends ChangeNotifier {
-  Dictation({required this.backend, required this.voice});
+  Dictation({required this.backend, required this.voice, this.onFrontMatter});
 
   /// The speech service `[voice] backend` names, or null when this build has none of that name.
   final SpeechBackend? Function() backend;
 
   /// The person's choices for it: model, language and device.
   final VoiceSettings Function() voice;
+
+  /// Told what the service said besides the words, when a dictation put text in the message and the service had something to say;
+  /// the message then carries it to the agent. Returns why it could not, in words, or null.
+  final String? Function(Map<String, Object?> frontMatter)? onFrontMatter;
 
   TextEditingController? _target;
   Future<bool> Function(SpeechBackend backend)? _confirm;
@@ -41,6 +45,7 @@ final class Dictation extends ChangeNotifier {
   StreamSubscription<Transcript>? _heard;
   SpeechBackend? _using;
   final _finals = <String>[];
+  final _notes = <String, Object?>{};
   Object? _failure;
   bool _cancelled = false;
   Future<void> _over = Future.value();
@@ -97,6 +102,7 @@ final class Dictation extends ChangeNotifier {
     }
     if (busy || !identical(_target, target)) return;
     _finals.clear();
+    _notes.clear();
     _provisional = '';
     _failure = null;
     _error = null;
@@ -113,11 +119,12 @@ final class Dictation extends ChangeNotifier {
     notifyListeners();
     final settings = voice();
     try {
-      _heard = service.start(device: settings.device, language: settings.language, model: settings.model).listen(
+      _heard = service.start(device: settings.device, language: settings.language, model: settings.model, profile: settings.profile).listen(
         (heard) {
           if (_cancelled) return;
           if (heard.isFinal) {
             if (heard.text.trim().isNotEmpty) _finals.add(heard.text.trim());
+            _notes.addAll(heard.frontMatter);
             _provisional = '';
           } else {
             _provisional = heard.text;
@@ -176,6 +183,8 @@ final class Dictation extends ChangeNotifier {
     final failure = _failure;
     _failure = null;
     final text = _finals.join(' ');
+    final notes = Map<String, Object?>.of(_notes);
+    _notes.clear();
     _finals.clear();
     _provisional = '';
     final dropped = _cancelled || !identical(_target, target);
@@ -186,6 +195,10 @@ final class Dictation extends ChangeNotifier {
     } else {
       _state = DictationState.idle;
       _insert(target, text);
+      if (text.isNotEmpty && notes.isNotEmpty) {
+        final why = onFrontMatter?.call(notes);
+        if (why != null) _fail('The text is in your message, but what the service noted about it was not attached: $why');
+      }
     }
     _cancelled = false;
     notifyListeners();

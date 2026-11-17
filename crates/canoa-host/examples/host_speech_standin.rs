@@ -1,6 +1,6 @@
 //! A stand-in speech-to-text program the tests run: it reads all of its standard input and answers what its first argument
 //! says. `fixed` (the default) answers a fixed transcript for any audio, `echo` answers the other arguments and how many bytes
-//! it read, `hints` answers the language, accent and voice the host told it.
+//! it read, `hints` answers the language, accent, voice and vocabulary the host told it.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -29,7 +29,7 @@ fn main() {
     match mode {
         "echo" => write!(stdout, "{} bytes={total}", args[1..].join(" ")),
         "hints" => {
-            let said: Vec<String> = ["LANGUAGE", "ACCENT", "VOICE"]
+            let said: Vec<String> = ["LANGUAGE", "ACCENT", "VOICE", "VOCABULARY"]
                 .iter()
                 .map(|name| {
                     let value = std::env::var(format!("CANOA_SPEECH_{name}")).unwrap_or_default();

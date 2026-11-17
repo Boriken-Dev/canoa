@@ -41,7 +41,7 @@ final class _Service implements SpeechBackend {
   Stream<double> get levels => const Stream.empty();
 
   @override
-  Stream<Transcript> start({String? device, String? language, String? model}) {
+  Stream<Transcript> start({String? device, String? language, String? model, VoiceProfile? profile}) {
     started++;
     return (out = StreamController<Transcript>()).stream;
   }

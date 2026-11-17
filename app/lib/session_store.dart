@@ -40,6 +40,7 @@ import 'profile/report.dart';
 import 'sources/source_choices.dart';
 import 'sources/source_options.dart';
 import 'sources/sources.dart';
+import 'voice/front_matter.dart';
 import 'workspace/site_meta.dart' show siteSetup;
 import 'workspace/workspace_template.dart' show newSessionUuid;
 import 'worktree/worktree.dart';
@@ -3223,6 +3224,16 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       return '$name is not text, and only text files and images can be sent.';
     }
     return _add(session, Attachment.text(name, text, mimeType: mimeType));
+  }
+
+  /// Puts what a speech service said about a dictation ([notes], its front matter) with [session]'s next message, as a small file
+  /// the agent reads; the person sees it among the attachments and can take it off. Why it cannot go, for them to read, or null.
+  String? addDictationNotes(ChatSession session, Map<String, Object?> notes) {
+    var number = 1;
+    while (session.attachments.any((item) => item.name == dictationNotesName(number))) {
+      number++;
+    }
+    return _add(session, Attachment.text(dictationNotesName(number), dictationFrontMatter(notes), mimeType: 'text/markdown'));
   }
 
   /// [addAttachment], except that an image over the cap is first made smaller (a PNG at a 2048 px, else a 1536 px long edge)

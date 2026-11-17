@@ -136,6 +136,21 @@ void main() {
       expect(recorder.calls.last, 'dispose');
     });
 
+    test('the person\'s voice profile and language reach the provider as hints, and nothing is told when they wrote nothing', () async {
+      await catalog.refresh();
+      final program = exampleBinary('host_speech_standin')!.replaceAll(r'\', '/');
+      await catalog.save('hears', 'speech_command', {'program': program, 'args': ['hints']});
+      final backend = catalog.backends.firstWhere((b) => b.id == 'host:hears');
+
+      final told = await backend
+          .start(language: 'es-PR', profile: const VoiceProfile(accent: 'Puerto Rican', voice: 'female', vocabulary: ['Canoa', 'Boriken']))
+          .toList();
+      expect(told.last.text, 'LANGUAGE=es-PR;ACCENT=Puerto Rican;VOICE=female;VOCABULARY=Canoa, Boriken');
+
+      final silent = await backend.start().toList();
+      expect(silent.last.text, 'LANGUAGE=;ACCENT=;VOICE=;VOCABULARY=');
+    });
+
     test('a provider written from the form is in canoa.cfg, listed without its key, and keeps the key when saved again', () async {
       await catalog.refresh();
       await catalog.save('cloud', 'speech_endpoint', {
