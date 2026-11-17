@@ -122,3 +122,34 @@ fn a_share_folder_is_a_repository_and_mentions_its_files() {
     assert!(said.get("error").is_none(), "{said}");
     clean(&work);
 }
+
+#[test]
+fn a_chats_folder_is_made_and_taken_back_on_a_share() {
+    let parent = shared("scratch");
+    let local = local_of(&parent);
+    let template = format!("{}\\${{session}}", text(&parent));
+    let config = local.join("canoa.cfg");
+    fs::write(&config, format!("[sessions]\nworkspace = {template:?}\n")).expect("config");
+    let files = Files::new(
+        Some(local.clone()),
+        Vec::new(),
+        Some(config),
+        None,
+        UploadLimits::default(),
+    );
+    let c = Control::open(
+        None,
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens")
+    .with_files(files);
+    let made = ask(&c, "fs/scratch", json!({"session": "unc1"}));
+    assert_eq!(made["result"]["made"], true, "{made}");
+    let folder = local.join("unc1");
+    assert!(folder.is_dir(), "{made}");
+    let gone = ask(&c, "fs/scratch_remove", json!({"session": "unc1"}));
+    assert_eq!(gone["result"]["removed"], true, "{gone}");
+    clean(&parent);
+}

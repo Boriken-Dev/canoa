@@ -327,3 +327,30 @@ fn the_computers_own_starter_runs_a_program_detached_and_names_one_it_cannot_sta
         .expect_err("is not there");
     assert!(why.contains("could not start"), "{why}");
 }
+
+#[cfg(windows)]
+#[test]
+fn open_in_takes_a_folder_on_a_share_written_plain() {
+    let local = dir("share");
+    let text_local = text(&local);
+    let (drive, rest) = text_local.split_at(2);
+    let share = PathBuf::from(format!(r"\\localhost\{}${rest}", &drive[..1]));
+    let machine = Arc::new(StandIn::new(Os::Windows));
+    let control = control_on(&machine, &std::env::temp_dir());
+    for written in [text(&share), format!(r"\\?\UNC\{}", &text(&share)[2..])] {
+        let said = ask(
+            &control,
+            &Caller::Owner,
+            "workspace/open",
+            json!({"path": written, "opener": "file_manager"}),
+        );
+        assert_eq!(said["result"]["started"], true, "{said}");
+    }
+    let started = machine.started.lock().expect("lock");
+    assert_eq!(started.len(), 2);
+    for plan in started.iter() {
+        assert_eq!(plan.args, vec![text(&share)], "{plan:?}");
+    }
+    drop(started);
+    let _ = fs::remove_dir_all(local);
+}

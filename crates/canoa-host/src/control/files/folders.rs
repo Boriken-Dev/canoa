@@ -698,7 +698,9 @@ fn expand_workspace(template: &str, values: &Values, separator: &str) -> String 
         }
         text.push_str(rest);
         // A leading empty part is the root of an absolute template.
-        if text.is_empty() && (had_variable || index > 0) {
+        // The second of two leading separators is a share's (`\\server\share`), kept.
+        let share_lead = index == 1 && !had_variable && out.len() == 1 && out[0].is_empty();
+        if text.is_empty() && (had_variable || index > 0) && !share_lead {
             continue;
         }
         out.push(text);
