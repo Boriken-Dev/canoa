@@ -202,6 +202,8 @@ class EntryDetails extends StatelessWidget {
     this.facts,
     this.requirements = const [],
     this.technical = const {},
+    this.contents = true,
+    this.sections = const [],
     this.action,
   });
 
@@ -223,6 +225,13 @@ class EntryDetails extends StatelessWidget {
   final EntryFacts? facts;
   final List<String> requirements;
   final Map<String, String> technical;
+
+  /// Whether the page lists what the entry provides and requires, as a skill's or a server's does. An entry that provides
+  /// nothing of the kind (a runtime) turns it off and says what it has in [sections].
+  final bool contents;
+
+  /// Further sections, after the source and version, each laid out as the page's own: a title in `titleSmall` and its lines.
+  final List<Widget> sections;
 
   /// The labelled button that goes on, such as `Review and install…`; null when nothing can be done.
   final Widget? action;
@@ -246,19 +255,29 @@ class EntryDetails extends StatelessWidget {
           Text('Overview', style: text.titleSmall),
           Text('What $from says', style: text.bodySmall),
           if (summary != null) Padding(padding: const EdgeInsets.only(top: 4), child: SelectableText(visible(summary!))),
-          for (final MapEntry(:key, :value) in overview.entries) _fieldOrLink(key, value),
+          for (final MapEntry(:key, :value) in overview.entries) DetailField(label: key, value: value),
           const SizedBox(height: 12),
           Text('Source and version', style: text.titleSmall),
-          for (final MapEntry(:key, :value) in source.entries) _fieldOrLink(key, value),
+          for (final MapEntry(:key, :value) in source.entries) DetailField(label: key, value: value),
           const SizedBox(height: 12),
-          EntryFactsView(facts: facts, requirements: requirements, technical: technical),
+          if (contents) EntryFactsView(facts: facts, requirements: requirements, technical: technical),
+          ...sections,
           if (action != null) ...[const SizedBox(height: 16), Align(alignment: Alignment.centerLeft, child: action)],
         ],
       ),
     );
   }
+}
 
-  static Widget _fieldOrLink(String label, String value) {
+/// A labelled line of an entry's page: the label in bold and the value as one line of text, or, for a Homepage or Repository that is
+/// a plain web address, a link that opens when tapped.
+class DetailField extends StatelessWidget {
+  const DetailField({super.key, required this.label, required this.value});
+
+  final String label, value;
+
+  @override
+  Widget build(BuildContext context) {
     final uri = label == 'Homepage' || label == 'Repository' ? webLink(value) : null;
     if (uri != null) return LinkField(key: Key('details-link-${label.toLowerCase()}'), label: label, uri: uri, shown: oneLine(value));
     return Padding(
@@ -269,4 +288,21 @@ class EntryDetails extends StatelessWidget {
       ])),
     );
   }
+}
+
+/// A titled section of an entry's page, in the page's own spacing: [title] as the other sections write theirs, then [children].
+class DetailSection extends StatelessWidget {
+  const DetailSection({super.key, required this.title, required this.children});
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 12),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title, style: Theme.of(context).textTheme.titleSmall),
+      ...children,
+    ]),
+  );
 }

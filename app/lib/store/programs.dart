@@ -38,6 +38,10 @@ final class ProgramStoreInfo {
     required this.title,
     this.publisher = '',
     this.homepage,
+    this.summary,
+    this.icon,
+    this.commands = const [],
+    this.endpoints = const [],
     this.serves = const [],
     this.channels = const [],
   });
@@ -46,6 +50,18 @@ final class ProgramStoreInfo {
   final String provider;
   final String program, title, publisher;
   final String? homepage;
+
+  /// What the program is, in a sentence, as the store says it.
+  final String? summary;
+
+  /// The name of the glyph the store picked for it; `runtimeGlyphs` draws it, and a name it lacks draws the default.
+  final String? icon;
+
+  /// The commands it puts on a `PATH` when the host starts something with it.
+  final List<String> commands;
+
+  /// The places it downloads from, and no others.
+  final List<String> endpoints;
   final List<ProgramServes> serves;
   final List<String> channels;
 
@@ -59,6 +75,10 @@ final class ProgramStoreInfo {
       title: _text(map['title']) ?? _text(map['program']) ?? provider,
       publisher: _text(map['publisher']) ?? '',
       homepage: _text(map['homepage']),
+      summary: _text(map['summary']),
+      icon: _text(map['icon']),
+      commands: [if (map['commands'] is List) for (final each in map['commands'] as List) ?_text(each)],
+      endpoints: [if (map['endpoints'] is List) for (final each in map['endpoints'] as List) ?_text(each)],
       serves: [for (final each in _maps(map['serves'])) ProgramServes(_text(each['provider']) ?? '', _map(each['when']))],
       channels: [if (map['channels'] is List) for (final each in map['channels'] as List) ?_text(each)],
     );
@@ -235,10 +255,13 @@ final class ProgramStatus {
 
 /// One file a plan fetches.
 final class PlanDownload {
-  const PlanDownload({required this.url, this.bytes, required this.verified, this.how = ''});
+  const PlanDownload({required this.url, this.bytes, required this.verified, this.how = '', this.digest});
 
   final String url;
   final int? bytes;
+
+  /// The checksum it is checked against, in hexadecimal, when the publisher gives one.
+  final String? digest;
 
   /// Whether the publisher gives a checksum to check it against; false is an unverified download, which the person sees.
   final bool verified;
@@ -299,6 +322,7 @@ final class ProgramPlan {
             bytes: each['bytes'] is int ? each['bytes'] as int : null,
             verified: _map(each['check'])['kind'] != 'unverified',
             how: _text(_map(each['check'])['why']) ?? _text(_map(each['check'])['kind']) ?? '',
+            digest: _text(_map(each['check'])['value']),
           ),
       ],
       steps: [if (map['steps'] is List) for (final each in map['steps'] as List) ?_text(each)],

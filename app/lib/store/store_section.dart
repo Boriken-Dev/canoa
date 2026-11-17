@@ -410,7 +410,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
                     StoreType.overlays => OverlaysBody(controller: controller, view: viewOf(each)),
                     StoreType.skills => SkillsBody(controller: controller, view: viewOf(each)),
                     StoreType.mcps => McpsBody(controller: controller, view: viewOf(each)),
-                    null => ExtensionBody(type: _extension(each)!, view: viewOf(each)),
+                    null => ExtensionBody(type: _extension(each)!, view: viewOf(each), config: controller.config),
                   },
               ],
             ),

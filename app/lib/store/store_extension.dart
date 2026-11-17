@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../config/canoa_config.dart';
+import '../selectable.dart';
 import 'store_banner.dart';
 import 'store_cards.dart';
 import 'store_icon.dart';
@@ -11,7 +13,7 @@ import 'store_view.dart';
 /// One item of a store type an extension adds: what its tile shows, the catalog that lists it and what + does.
 final class ExtensionStoreItem {
   const ExtensionStoreItem({required this.catalog, required this.name, required this.by, this.summary, this.tags = const [],
-      this.installed = false, this.install, this.remove});
+      this.installed = false, this.install, this.remove, this.leading, this.details});
 
   final String catalog, name, by;
   final String? summary;
@@ -24,6 +26,12 @@ final class ExtensionStoreItem {
   /// What the tile's remove button does, once the person confirms the host's plan; null when the host holds no copy of its own to
   /// take away.
   final Future<void> Function(BuildContext context)? remove;
+
+  /// The icon on its tile; null draws the first letter of its name on a colour.
+  final Widget? leading;
+
+  /// The page the tile opens, given canoa.cfg as the Store has it; null leaves the tile opening nothing.
+  final Widget Function(BuildContext context, CanoaConfig? config)? details;
 }
 
 /// A store type an extension adds, listed in the Store's index after the built-in ones. Its page is the same as theirs: a banner,
@@ -61,10 +69,13 @@ final class ExtensionStoreType {
 
 /// The page of a store type an extension adds.
 class ExtensionBody extends StatefulWidget {
-  const ExtensionBody({super.key, required this.type, required this.view});
+  const ExtensionBody({super.key, required this.type, required this.view, this.config});
 
   final ExtensionStoreType type;
   final StoreView view;
+
+  /// canoa.cfg as the Store holds it, for the pages items open.
+  final CanoaConfig? config;
 
   @override
   State<ExtensionBody> createState() => _ExtensionBodyState();
@@ -150,14 +161,16 @@ class _ExtensionBodyState extends State<ExtensionBody> with AutomaticKeepAliveCl
         for (final item in shown)
           StoreTile(
             key: Key('store-entry-${item.catalog}-${item.name}'),
-            leading: StillIcon(name: item.name, path: null, bytes: null, size: 48),
+            leading: item.leading ?? StillIcon(name: item.name, path: null, bytes: null, size: 48),
             title: item.name,
             summary: item.summary,
             by: item.by,
             installed: item.installed,
             busy: _installing.contains('${item.catalog}/${item.name}'),
             installKey: Key('store-entry-install-${item.catalog}-${item.name}'),
-            onOpen: () {},
+            onOpen: item.details == null
+                ? () {}
+                : () => unawaited(Navigator.of(context).push<void>(selectablePage(builder: (page) => item.details!(page, widget.config)))),
             onInstall: item.install == null ? null : () => unawaited(_install(item)),
             removeKey: Key('store-entry-remove-${item.catalog}-${item.name}'),
             onRemove: item.remove == null ? null : () => unawaited(_run(item, item.remove!)),

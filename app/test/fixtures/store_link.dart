@@ -69,7 +69,16 @@ final class FakeStore {
     this.latestFails,
     this.runtime = false,
     this.extensionType,
+    this.summary,
+    this.icon,
+    this.commands = const [],
+    this.endpoints = const [],
+    this.homepage,
   });
+
+  /// What `store/list` says of the program besides its name, when the store says it.
+  final String? summary, icon, homepage;
+  final List<String> commands, endpoints;
 
   /// The id of the type an extension adds that the store belongs to, which `store/list` gives only for that type.
   final String? extensionType;
@@ -203,6 +212,11 @@ final class FakeStoreHost {
               'publisher': 'A Publisher',
               'serves': each.serves,
               'channels': <String>[],
+              'summary': ?each.summary,
+              'icon': ?each.icon,
+              'homepage': ?each.homepage,
+              'commands': each.commands,
+              'endpoints': each.endpoints,
             },
         ],
       };

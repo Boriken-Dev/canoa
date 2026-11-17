@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import '../desktop/control_client.dart';
 import 'programs.dart';
 import 'programs_view.dart';
+import 'runtime_mark.dart';
+import 'runtime_page.dart';
 import 'store_extension.dart';
 import 'store_foundry.dart';
 import 'store_runtimes.dart';
@@ -76,6 +78,8 @@ ExtensionStoreType programsStoreType({
         catalog: catalog,
         name: status.info.title,
         by: status.info.publisher,
+        leading: RuntimeMark(icon: status.info.icon),
+        details: (context, config) => RuntimePage(programs: programs, provider: status.info.provider, config: config),
         summary: status.installed
             ? 'Installed${status.version == null ? '' : ' ${status.version!}'}${status.hasManaged ? '' : ' (found on this computer)'}'
             : 'Not installed',
