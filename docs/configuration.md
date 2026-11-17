@@ -466,7 +466,7 @@ adds one.
 - **Skills.** Installed: the skills fetched, with the overlays that name each or that you chose it, source and pin; one
   you chose has a switch for new sessions, which adds or takes away its name in the starting loadout's `skills`. The host delivers
   such a skill from its record at each session, only when the record says you chose it and its files have the digest the
-  record names (and the pin in `[skill_pins]`, if any); otherwise it is left out and the session's report says why. Discover: the skills your catalogs list, and a spec to paste (`<repository>@<ref>#<skill directory>`). A
+  record names (and the pin in `[skill_pins]`, if any); otherwise it is left out and the session's report says why. Discover: the skills your catalogs list, the sources you read skills from (see [Skill sources](#skill-sources)), and a spec to paste (`<repository>@<ref>#<skill directory>`). A
   skill is an [Agent Skills](https://agentskills.io/specification) directory: a `SKILL.md` with YAML front matter whose
   `name` is the directory's. It is fetched only on a yes, after its source and pin are shown, and checked against the
   pin before any file is read.
@@ -505,6 +505,37 @@ registry = "https://registry.modelcontextprotocol.io"
 server = "io.github.ana/files"
 version = "1.2.0"
 digest = "sha256:..."         # of the server.json that was shown
+```
+
+### Skill sources
+
+Skills are looked for the way `npx skills add` looks, in their own list beside `[catalogs]`: `[store.skill_sources]`, a label of yours
+for each source written as that command takes it. In Store, Skills, Discover the sources are chips beside Catalogs; choosing one is what
+fetches its repository (nothing is fetched by listing it), reads which skills it holds and lists them, and installing one asks first, with
+the commit that was read shown, and fetches exactly that commit.
+
+| Written | Means |
+| --- | --- |
+| `anthropics/skills` | GitHub `owner/repo` |
+| `owner/repo/skills/pdf` | a folder in it |
+| `owner/repo#dev`, `owner/repo@v1.2.3` | a branch, tag or whole commit (`@` names a skill instead when it is not a version or a commit: `owner/repo@pdf`) |
+| `https://github.com/owner/repo`, `.../tree/main/skills` | a URL, or a GitHub or GitLab tree URL |
+| `git@host:owner/repo.git`, `ssh://`, `git://`, `https://host/x.git` | any git source |
+| `/home/ana/skills`, `C:\skills`, `file:///...` | a folder on this computer |
+
+A link to one `SKILL.md`, an archive, and a site's `/.well-known/` list are not read yet: name the git repository. A source is searched
+for `SKILL.md` as `npx skills` searches: the source's own, else the folders under `skills/` and the ones agents read
+(`.claude/skills`, `.agents/skills`, ...), else any within five folders. A skill's name has to be its folder's, as the
+[Agent Skills specification](https://agentskills.io/specification) says, and one that is not is listed with why it cannot be installed.
+
+Canoa offers `anthropics` (`anthropics/skills`) first. It is fetched with none of your git settings, credentials or keys; a source you
+add is yours, so it is fetched as you would from a shell, which reads a private repository with your credentials. To remove the
+default, use Remove this source or set `anthropics = false`; giving the label a source of yours replaces it.
+
+```toml
+[store.skill_sources]
+anthropics = false                                  # leave out the source Canoa offers by default
+web = "addyosmani/web-quality-skills"               # a label of yours = a source as above
 ```
 
 ### The overlay store
