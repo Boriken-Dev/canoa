@@ -67,7 +67,7 @@ enum DictationMode { toggle, hold }
 
 /// `[voice]`: where speech is turned into text and how. Nothing is recorded until the person starts a dictation.
 final class VoiceSettings {
-  const VoiceSettings({this.backend = defaultVoiceBackend, this.model, this.language, this.device, this.mode = DictationMode.toggle, this.profile = const VoiceProfile()});
+  const VoiceSettings({this.backend = defaultVoiceBackend, this.model, this.language, this.device, this.mode = DictationMode.toggle, this.profile = const VoiceProfile(), this.acknowledged = const {}});
 
   /// The speech service, by the id it has in the app; [defaultVoiceBackend] is the operating system's.
   final String backend;
@@ -85,14 +85,18 @@ final class VoiceSettings {
   /// What the person says of their own voice, sent to a provider as hints; they write it, nothing infers it.
   final VoiceProfile profile;
 
+  /// The services whose "where the audio goes" notice the person has accepted, by id; the notice is not shown again for them.
+  final Set<String> acknowledged;
+
   VoiceSettings copyWith({String? backend, String? model, bool clearModel = false, String? language, bool clearLanguage = false,
-      String? device, bool clearDevice = false, DictationMode? mode, VoiceProfile? profile}) => VoiceSettings(
+      String? device, bool clearDevice = false, DictationMode? mode, VoiceProfile? profile, Set<String>? acknowledged}) => VoiceSettings(
     backend: backend ?? this.backend,
     model: clearModel ? null : model ?? this.model,
     language: clearLanguage ? null : language ?? this.language,
     device: clearDevice ? null : device ?? this.device,
     mode: mode ?? this.mode,
     profile: profile ?? this.profile,
+    acknowledged: acknowledged ?? this.acknowledged,
   );
 }
 
@@ -1126,7 +1130,7 @@ final class CanoaConfig {
     final sources = table('sources', {'hidden'});
     final attachments = table('attachments', {'paste_as_file', 'embed_limit'});
     final usage = table('usage', {'warn_permille', 'limit_phrases'});
-    final voiceTable = table('voice', {'backend', 'model', 'language', 'device', 'mode', 'accent', 'voice', 'vocabulary'});
+    final voiceTable = table('voice', {'backend', 'model', 'language', 'device', 'mode', 'accent', 'voice', 'vocabulary', 'acknowledged'});
     String? voiceText(String key) {
       final raw = voiceTable[key];
       if (raw == null) return null;
@@ -1136,6 +1140,10 @@ final class CanoaConfig {
     final vocabulary = voiceTable['vocabulary'] ?? const [];
     if (vocabulary is! List || vocabulary.any((word) => word is! String || word.trim().isEmpty)) {
       throw const FormatException('canoa.cfg: voice.vocabulary must be a list of text');
+    }
+    final acknowledged = voiceTable['acknowledged'] ?? const [];
+    if (acknowledged is! List || acknowledged.any((id) => id is! String || id.trim().isEmpty)) {
+      throw const FormatException('canoa.cfg: voice.acknowledged must be a list of text');
     }
     final voiceMode = voiceTable['mode'] ?? 'toggle';
     if (voiceMode is! String || !{'toggle', 'hold'}.contains(voiceMode)) {
@@ -1347,6 +1355,7 @@ final class CanoaConfig {
         device: voiceText('device'),
         mode: voiceMode == 'hold' ? DictationMode.hold : DictationMode.toggle,
         profile: VoiceProfile(accent: voiceText('accent'), voice: voiceText('voice'), vocabulary: [for (final word in vocabulary) (word as String).trim()]),
+        acknowledged: {for (final id in acknowledged) id as String},
       ),
       notifications: NotificationSettings(
         permission: flag(notifications, 'permission', true),
@@ -1376,6 +1385,7 @@ final class CanoaConfig {
       if (voice.profile.accent != null) 'accent = ${jsonEncode(voice.profile.accent)}',
       if (voice.profile.voice != null) 'voice = ${jsonEncode(voice.profile.voice)}',
       if (voice.profile.vocabulary.isNotEmpty) 'vocabulary = ${jsonEncode(voice.profile.vocabulary)}',
+      if (voice.acknowledged.isNotEmpty) 'acknowledged = ${jsonEncode(voice.acknowledged.toList()..sort())}',
     ];
     return lines.isEmpty ? '' : '\n[voice]\n${lines.join('\n')}\n';
   }

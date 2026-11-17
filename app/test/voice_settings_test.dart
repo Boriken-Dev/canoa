@@ -44,6 +44,15 @@ void main() {
       expect((back.backend, back.model, back.language, back.device, back.mode), ('x', 'm', 'es-PR', 'usb', DictationMode.hold));
     });
 
+    test('the services whose notice was accepted are kept, sorted, and written only when there are some', () {
+      final config = CanoaConfig.parse('[voice]\nacknowledged = ["system", "host"]\n');
+      expect(config.voice.acknowledged, {'system', 'host'});
+      expect(config.encode(), contains('acknowledged = ["host","system"]'));
+      expect(CanoaConfig.parse(config.encode()).voice.acknowledged, {'system', 'host'});
+      expect(CanoaConfig.parse('').encode(), isNot(contains('acknowledged')));
+      expect(() => CanoaConfig.parse('[voice]\nacknowledged = "system"\n'), throwsFormatException);
+    });
+
     test('a mode that is neither toggle nor hold, and a key it does not have, are refused', () {
       expect(() => CanoaConfig.parse('[voice]\nmode = "always"\n'), throwsFormatException);
       expect(() => CanoaConfig.parse('[voice]\nmicrophone = "on"\n'), throwsFormatException);

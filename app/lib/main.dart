@@ -74,7 +74,7 @@ import 'chat/palette.dart';
 import 'chat/source_trouble.dart';
 import 'chat/agent_events.dart' show AgentCommandInfo;
 import 'chat/session_views.dart';
-import 'package:flutter/services.dart' show LogicalKeyboardKey;
+import 'package:flutter/services.dart' show KeyUpEvent, LogicalKeyboardKey;
 import 'chat/update_log.dart';
 import 'auth/peer_proof.dart' show PeerMethod;
 import 'history/agent_switch.dart';
@@ -1008,6 +1008,13 @@ class _CanoaAppState extends State<CanoaApp> {
       return null;
     },
     voice: () => config.voice,
+    // Where the audio goes is told once per service, and kept.
+    acknowledge: (id) {
+      final changed = config.copyWith(voice: config.voice.copyWith(acknowledged: {...config.voice.acknowledged, id}));
+      setState(() => config = changed);
+      _settingsKey.currentState?.controller.adopt(changed);
+      unawaited(_write(changed));
+    },
     // What the service noted goes with the message as a block the agent reads.
     onFrontMatter: (notes) {
       final session = store.selected;
@@ -3094,7 +3101,7 @@ class _CanoaHome extends StatelessWidget {
     chord(LogicalKeyboardKey.tab): () => _step(1),
     chord(LogicalKeyboardKey.tab, shift: true): () => _step(-1),
     chord(LogicalKeyboardKey.keyL): () => conversation.focusComposer?.call(),
-    chord(LogicalKeyboardKey.space, shift: true): () => unawaited(kit.dictation?.toggle() ?? Future.value()),
+    chord(LogicalKeyboardKey.space, shift: true): () => unawaited(kit.dictation?.press() ?? Future.value()),
     chord(LogicalKeyboardKey.period): _stop,
     chord(LogicalKeyboardKey.keyA, shift: true): () => _answer('allow_once'),
     chord(LogicalKeyboardKey.keyR, shift: true): () => _answer('reject_once'),
@@ -3106,7 +3113,15 @@ class _CanoaHome extends StatelessWidget {
   Widget build(BuildContext context) {
     return CallbackShortcuts(
       bindings: _shortcuts(context),
-      child: Focus(autofocus: true, child: _layout(context)),
+      child: Focus(
+        autofocus: true,
+        // Push to talk ends when any key of the shortcut comes up.
+        onKeyEvent: (_, event) {
+          if (event is KeyUpEvent && kit.dictation?.holding == true) unawaited(kit.dictation!.release());
+          return KeyEventResult.ignored;
+        },
+        child: _layout(context),
+      ),
     );
   }
 

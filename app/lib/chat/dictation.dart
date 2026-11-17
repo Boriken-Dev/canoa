@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../config/canoa_config.dart' show VoiceSettings;
+import '../config/canoa_config.dart' show DictationMode, VoiceSettings;
 import '../voice/speech_backend.dart';
 
 /// Where a dictation is.
@@ -22,7 +22,7 @@ enum DictationState {
 /// Turns speech into text in the message being written. It records only between [start] and [stop] or [cancel], keeps nothing, and
 /// never sends: the text it hears lands in the message at the cursor for the person to edit and send.
 final class Dictation extends ChangeNotifier {
-  Dictation({required this.backend, required this.voice, this.onFrontMatter});
+  Dictation({required this.backend, required this.voice, this.onFrontMatter, this.acknowledge});
 
   /// The speech service `[voice] backend` names, or null when this build has none of that name.
   final SpeechBackend? Function() backend;
@@ -33,6 +33,10 @@ final class Dictation extends ChangeNotifier {
   /// Told what the service said besides the words, when a dictation put text in the message and the service had something to say;
   /// the message then carries it to the agent. Returns why it could not, in words, or null.
   final String? Function(Map<String, Object?> frontMatter)? onFrontMatter;
+
+  /// Called with a service's id once the person has accepted where its audio goes, so the notice can be kept (in canoa.cfg) and not
+  /// shown again for that service, in this run or the next. The services already in [voice]'s `acknowledged` are not asked about.
+  final void Function(String id)? acknowledge;
 
   TextEditingController? _target;
   Future<bool> Function(SpeechBackend backend)? _confirm;
@@ -50,6 +54,8 @@ final class Dictation extends ChangeNotifier {
   bool _cancelled = false;
   Future<void> _over = Future.value();
   final _told = <String>{};
+  bool _held = false;
+  bool _starting = false;
 
   DictationState get state => _state;
 
@@ -83,24 +89,56 @@ final class Dictation extends ChangeNotifier {
   /// Starts when idle, ends and keeps the text when listening.
   Future<void> toggle() => _state == DictationState.listening ? stop() : start();
 
-  Future<void> start() async {
-    if (busy) return;
+  /// A press of the microphone or its shortcut: starts or ends a dictation in click-to-toggle mode, starts one in push-to-talk mode
+  /// (where [release] ends it). Key repeats while held do nothing.
+  Future<void> press() {
+    if (voice().mode == DictationMode.toggle) return toggle();
+    if (_held || busy) return Future.value();
+    _held = true;
+    return start(hold: true);
+  }
+
+  /// The microphone or its shortcut let go: in push-to-talk mode ends the dictation and keeps the text; one still waiting on the
+  /// first-use notice does not open the microphone afterwards.
+  Future<void> release() {
+    if (!_held) return Future.value();
+    _held = false;
+    return _state == DictationState.listening ? stop() : Future.value();
+  }
+
+  /// Whether the shortcut is down for a push-to-talk dictation, so a key-up handler knows to call [release].
+  bool get holding => _held;
+
+  Future<void> start({bool hold = false}) async {
+    if (busy || _starting) return;
     final target = _target;
     if (target == null) return;
+    _starting = true;
+    try {
+      await _begin(target, hold);
+    } finally {
+      _starting = false;
+    }
+  }
+
+  Future<void> _begin(TextEditingController target, bool hold) async {
     await _over;
     final service = backend();
     if (service == null) {
       _fail('No speech service is chosen. Choose one in Settings, under Voice.');
       return;
     }
-    if (_told.add(service.id)) {
+    if (!voice().acknowledged.contains(service.id) && _told.add(service.id)) {
       final go = await (_confirm?.call(service) ?? Future.value(true));
       if (!go) {
         _told.remove(service.id);
         return;
       }
+      acknowledge?.call(service.id);
     }
     if (busy || !identical(_target, target)) return;
+    if (hold && !_held) return;
+    if (!hold) _held = false;
     _finals.clear();
     _notes.clear();
     _provisional = '';
@@ -309,18 +347,41 @@ class _DictationButtonState extends State<DictationButton> {
   String _clock(int seconds) => '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
+  Widget build(BuildContext context) => Listener(
+    // The press lands on the microphone and the release anywhere: the microphone is replaced by Stop while it listens, so the
+    // release is read here, above both.
+    onPointerDown: (event) {
+      if (widget.dictation.voice().mode == DictationMode.hold && widget.dictation.state == DictationState.idle && _overMic(event.position)) {
+        unawaited(widget.dictation.press());
+      }
+    },
+    onPointerUp: (_) => unawaited(widget.dictation.release()),
+    onPointerCancel: (_) => unawaited(widget.dictation.release()),
+    child: _body(),
+  );
+
+  bool _overMic(Offset at) {
+    final box = _micKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.attached) return false;
+    return (box.localToGlobal(Offset.zero) & box.size).contains(at);
+  }
+
+  final _micKey = GlobalKey();
+
+  Widget _body() => ListenableBuilder(
     listenable: widget.dictation,
     builder: (context, _) {
       final d = widget.dictation;
       final scheme = Theme.of(context).colorScheme;
-      final mic = IconButton(
+      final hold = widget.dictation.voice().mode == DictationMode.hold;
+      final mic = SizedBox(key: _micKey, child: IconButton(
         key: const Key('dictate'),
-        tooltip: 'Dictate (${widget.shortcut})',
+        tooltip: hold ? 'Hold to dictate, release to stop (${widget.shortcut})' : 'Dictate (${widget.shortcut})',
         icon: const Icon(Icons.mic_none, size: 20),
         visualDensity: VisualDensity.compact,
-        onPressed: () => unawaited(d.start()),
-      );
+        // Push to talk starts on the press, below; a click has nothing more to do.
+        onPressed: hold ? () {} : () => unawaited(d.start()),
+      ));
       switch (d.state) {
         case DictationState.idle:
           return mic;

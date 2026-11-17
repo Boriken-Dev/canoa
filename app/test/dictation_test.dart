@@ -75,9 +75,10 @@ final class _Rig {
   int sent = 0;
 }
 
-Future<_Rig> _pump(WidgetTester tester, {_Service? service, SpeechBackend? Function()? backend}) async {
+Future<_Rig> _pump(WidgetTester tester,
+    {_Service? service, SpeechBackend? Function()? backend, VoiceSettings voice = const VoiceSettings(backend: 'stand-in'), void Function(String id)? acknowledge}) async {
   final stand = service ?? _Service();
-  final dictation = Dictation(backend: backend ?? () => stand, voice: () => const VoiceSettings(backend: 'stand-in'));
+  final dictation = Dictation(backend: backend ?? () => stand, voice: () => voice, acknowledge: acknowledge);
   final store = SessionStore();
   final session = store.createDraft()..agent = 'Desk';
   final input = TextEditingController();
@@ -148,6 +149,96 @@ void main() {
     expect(rig.service.started, 2);
     await tester.tap(find.byKey(const Key('dictate-cancel')));
     await tester.pump();
+  });
+
+  testWidgets('push to talk listens while the microphone is held and keeps the text when it is let go', (tester) async {
+    final rig = await _pump(tester, voice: const VoiceSettings(backend: 'stand-in', mode: DictationMode.hold, acknowledged: {'stand-in'}));
+    rig.input.text = 'hello';
+    final press = await tester.startGesture(tester.getCenter(find.byKey(const Key('dictate'))));
+    await tester.pump();
+    await tester.pump();
+    expect(rig.service.started, 1);
+    expect(rig.dictation.state, DictationState.listening);
+    await tester.pump(const Duration(seconds: 2));
+    expect(rig.dictation.state, DictationState.listening, reason: 'still held');
+    rig.service.say('and more');
+    await tester.pump();
+    await press.up();
+    await tester.pump();
+    await tester.pump();
+    expect(rig.service.stopped, 1);
+    expect(rig.dictation.state, DictationState.idle);
+    expect(rig.input.text, 'hello run the tests');
+    expect(rig.sent, 0);
+  });
+
+  testWidgets('push to talk: the shortcut held and released does the same, and key repeats open no second capture', (tester) async {
+    final rig = await _pump(tester, voice: const VoiceSettings(backend: 'stand-in', mode: DictationMode.hold, acknowledged: {'stand-in'}));
+    await rig.dictation.press();
+    await rig.dictation.press();
+    await rig.dictation.press();
+    expect(rig.service.started, 1);
+    expect(rig.dictation.holding, isTrue);
+    await rig.dictation.release();
+    await tester.pump();
+    await tester.pump();
+    expect(rig.dictation.holding, isFalse);
+    expect(rig.service.stopped, 1);
+    expect(rig.input.text, 'run the tests');
+  });
+
+  testWidgets('push to talk let go before the first-use notice is answered opens no microphone', (tester) async {
+    final rig = await _pump(tester, voice: const VoiceSettings(backend: 'stand-in', mode: DictationMode.hold));
+    final press = await tester.startGesture(tester.getCenter(find.byKey(const Key('dictate'))));
+    await tester.pump();
+    await tester.pump();
+    await press.up();
+    await tester.pump();
+    expect(find.byKey(const Key('dictate-accept')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('dictate-accept')));
+    await tester.pump();
+    await tester.pump();
+    expect(rig.service.started, 0);
+    expect(rig.dictation.state, DictationState.idle);
+  });
+
+  testWidgets('click to toggle still toggles through the shortcut', (tester) async {
+    final rig = await _pump(tester, voice: const VoiceSettings(backend: 'stand-in', acknowledged: {'stand-in'}));
+    await rig.dictation.press();
+    expect(rig.dictation.state, DictationState.listening);
+    await rig.dictation.press();
+    await tester.pump();
+    await tester.pump();
+    expect(rig.service.stopped, 1);
+    expect(rig.input.text, 'run the tests');
+  });
+
+  testWidgets('accepting where the audio goes is recorded for that service, and a service already recorded is not asked about again', (tester) async {
+    final kept = <String>[];
+    await _pump(tester, acknowledge: kept.add);
+    await _begin(tester);
+    expect(kept, ['stand-in']);
+    await tester.tap(find.byKey(const Key('dictate-cancel')));
+    await tester.pump();
+
+    // A new run, with canoa.cfg's record read back: nothing is asked.
+    final saved = CanoaConfig.parse(CanoaConfig(voice: VoiceSettings(backend: 'stand-in', acknowledged: kept.toSet())).encode()).voice;
+    expect(saved.acknowledged, {'stand-in'});
+    final next = await _pump(tester, voice: saved);
+    await tester.tap(find.byKey(const Key('dictate')));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const Key('dictate-accept')), findsNothing);
+    expect(next.service.started, 1);
+    await tester.tap(find.byKey(const Key('dictate-cancel')));
+    await tester.pump();
+  });
+
+  testWidgets('declining records nothing', (tester) async {
+    final kept = <String>[];
+    await _pump(tester, acknowledge: kept.add);
+    await _begin(tester, accept: false);
+    expect(kept, isEmpty);
   });
 
   testWidgets('start shows the time and what is heard so far apart from the message, and stop puts the text at the cursor, unsent', (tester) async {
