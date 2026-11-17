@@ -241,10 +241,14 @@ fn an_extension_is_added_changed_and_removed_through_the_host_table() {
 
 #[test]
 fn a_host_write_made_from_a_table_the_file_no_longer_holds_is_refused() {
-    let (path, control) = editing("[host.agents.echo]\nprogram = \"echo\"\nlisten = \"127.0.0.1:0\"\n");
+    let (path, control) =
+        editing("[host.agents.echo]\nprogram = \"echo\"\nlisten = \"127.0.0.1:0\"\n");
     let who = key(&[Grant::Hosting]);
     let read = ask(&control, &who, "config/get", json!({"section": "host"}));
-    let digest = read["result"]["digest"].as_str().expect("a digest").to_owned();
+    let digest = read["result"]["digest"]
+        .as_str()
+        .expect("a digest")
+        .to_owned();
     assert!(!digest.is_empty(), "{read}");
 
     // Another writer adds an agent after the page read the table.
@@ -263,7 +267,10 @@ fn a_host_write_made_from_a_table_the_file_no_longer_holds_is_refused() {
 
     // A check changes nothing and is not refused; read again, the same write goes through and names the new table.
     let reread = ask(&control, &who, "config/get", json!({"section": "host"}));
-    let fresh = reread["result"]["digest"].as_str().expect("a digest").to_owned();
+    let fresh = reread["result"]["digest"]
+        .as_str()
+        .expect("a digest")
+        .to_owned();
     assert_ne!(fresh, digest);
     let mut both = reread["result"]["value"].clone();
     both["origins"] = json!(["https://canoa.example"]);
@@ -276,7 +283,10 @@ fn a_host_write_made_from_a_table_the_file_no_longer_holds_is_refused() {
     assert_eq!(set["result"]["restart"], true, "{set}");
     assert_ne!(set["result"]["digest"], json!(fresh), "{set}");
     let text = fs::read_to_string(&path).expect("canoa.cfg");
-    assert!(text.contains("later") && text.contains("canoa.example"), "{text}");
+    assert!(
+        text.contains("later") && text.contains("canoa.example"),
+        "{text}"
+    );
 
     // Without a digest the write is the caller's whole word, as before.
     let plain = ask(
@@ -290,23 +300,52 @@ fn a_host_write_made_from_a_table_the_file_no_longer_holds_is_refused() {
 
 #[test]
 fn the_app_the_host_runs_in_writes_the_tables_no_key_edits() {
-    let (path, control) = editing("[desktop]\nstart_hidden = true\n\n[sessions]\nqueue_delivery = \"now\"\n");
+    let (path, control) =
+        editing("[desktop]\nstart_hidden = true\n\n[sessions]\nqueue_delivery = \"now\"\n");
     let owner = Caller::Owner;
     for section in ["agents", "desktop", "profile", "skill_pins"] {
-        let key = key(&[Grant::ConfigRead, Grant::ConfigWrite, Grant::ConfigWriteSessions, Grant::Hosting]);
+        let key = key(&[
+            Grant::ConfigRead,
+            Grant::ConfigWrite,
+            Grant::ConfigWriteSessions,
+            Grant::Hosting,
+        ]);
         for method in ["config/get", "config/set", "config/check"] {
-            let answer = ask(&control, &key, method, json!({"section": section, "value": {}}));
+            let answer = ask(
+                &control,
+                &key,
+                method,
+                json!({"section": section, "value": {}}),
+            );
             assert!(answer["error"].is_object(), "{method} {section}: {answer}");
         }
     }
-    let read = ask(&control, &owner, "config/get", json!({"section": "desktop"}));
+    let read = ask(
+        &control,
+        &owner,
+        "config/get",
+        json!({"section": "desktop"}),
+    );
     assert_eq!(read["result"]["value"]["start_hidden"], true, "{read}");
     let before = fs::read_to_string(&path).expect("canoa.cfg");
-    let checked = ask(&control, &owner, "config/check", json!({"section": "desktop", "value": {"start_hidden": false}}));
+    let checked = ask(
+        &control,
+        &owner,
+        "config/check",
+        json!({"section": "desktop", "value": {"start_hidden": false}}),
+    );
     assert_eq!(checked["result"]["valid"], true, "{checked}");
     assert_eq!(fs::read_to_string(&path).expect("canoa.cfg"), before);
-    let set = ask(&control, &owner, "config/set", json!({"section": "desktop", "value": {"start_hidden": false}}));
+    let set = ask(
+        &control,
+        &owner,
+        "config/set",
+        json!({"section": "desktop", "value": {"start_hidden": false}}),
+    );
     assert!(set["result"].is_object(), "{set}");
     let text = fs::read_to_string(&path).expect("canoa.cfg");
-    assert!(text.contains("start_hidden = false") && text.contains("queue_delivery"), "{text}");
+    assert!(
+        text.contains("start_hidden = false") && text.contains("queue_delivery"),
+        "{text}"
+    );
 }

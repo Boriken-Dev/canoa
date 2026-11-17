@@ -722,15 +722,23 @@ impl Control {
                     .and_then(|()| self.files.trust_set(caller, &params)),
                 Some("trust/revoke") => allow(caller, Grant::ConfigWrite)
                     .and_then(|()| self.files.trust_revoke(caller, &params)),
-                Some("config/get") if owner_section(caller, &params).is_some() => {
-                    self.files.owner_get(owner_section(caller, &params).unwrap_or_default())
+                Some("config/get") if owner_section(caller, &params).is_some() => self
+                    .files
+                    .owner_get(owner_section(caller, &params).unwrap_or_default()),
+                Some("config/set") if owner_section(caller, &params).is_some() => {
+                    self.files.owner_set(
+                        &params,
+                        owner_section(caller, &params).unwrap_or_default(),
+                        true,
+                    )
                 }
-                Some("config/set") if owner_section(caller, &params).is_some() => self
-                    .files
-                    .owner_set(&params, owner_section(caller, &params).unwrap_or_default(), true),
-                Some("config/check") if owner_section(caller, &params).is_some() => self
-                    .files
-                    .owner_set(&params, owner_section(caller, &params).unwrap_or_default(), false),
+                Some("config/check") if owner_section(caller, &params).is_some() => {
+                    self.files.owner_set(
+                        &params,
+                        owner_section(caller, &params).unwrap_or_default(),
+                        false,
+                    )
+                }
                 Some("config/get") if names_host(&params) => {
                     allow(caller, Grant::Hosting).and_then(|()| self.files.host_get())
                 }

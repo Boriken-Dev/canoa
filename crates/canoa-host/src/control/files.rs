@@ -557,7 +557,8 @@ impl Files {
                 ));
             }
         }
-        let mut done = self.change_section(HOST, params.get("value").unwrap_or(&Value::Null), write)?;
+        let mut done =
+            self.change_section(HOST, params.get("value").unwrap_or(&Value::Null), write)?;
         if write {
             done["digest"] = Value::String(host_digest(self.hidden_section(HOST)?.as_ref()));
         }
