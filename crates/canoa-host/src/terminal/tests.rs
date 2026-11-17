@@ -581,3 +581,45 @@ fn a_shell_whose_path_has_spaces_starts() {
     });
     std::fs::remove_dir_all(&folder).expect("removed");
 }
+
+/// A new folder on this machine's own administrative share.
+#[cfg(windows)]
+fn share_folder(name: &str) -> PathBuf {
+    let local = std::env::temp_dir().join(name);
+    std::fs::create_dir_all(&local).expect("a folder");
+    let text = local.to_string_lossy().into_owned();
+    let (drive, rest) = text.split_at(2);
+    PathBuf::from(format!(r"\\localhost\{}${rest}", &drive[..1]))
+}
+
+#[cfg(windows)]
+#[test]
+fn a_terminal_opens_in_a_folder_on_a_share_and_a_shell_that_cannot_says_so() {
+    let name = format!("canoa-terminal-share-{}", std::process::id());
+    let folder = share_folder(&name);
+    let verbatim = format!(r"\\?\UNC\{}", &folder.to_string_lossy()[2..]);
+    let powershell = Terminals::new(Some("powershell.exe".to_owned()), Some(std::env::temp_dir()));
+    let ((), _) = on_a_link(&control(powershell), &Caller::Owner, |page| {
+        for written in [folder.to_string_lossy().into_owned(), verbatim.clone()] {
+            let opened = page.ask("terminal/open", &json!({"cwd": written}));
+            assert_eq!(opened["result"]["cwd"], folder.to_string_lossy().as_ref(), "{opened}");
+            assert!(opened["result"].get("notice").is_none(), "{opened}");
+            let id = opened["result"]["id"].as_u64().expect("an id");
+            page.type_in(
+                id,
+                &format!(
+                    "\"canoa_\"+\"here_\"+(Split-Path -Leaf (Get-Location).Path){}",
+                    newline()
+                ),
+            );
+            page.until_output(&format!("canoa_here_{name}"));
+        }
+    });
+    let cmd = Terminals::new(Some(shell()), Some(std::env::temp_dir()));
+    let ((), _) = on_a_link(&control(cmd), &Caller::Owner, |page| {
+        let opened = page.ask("terminal/open", &json!({"cwd": folder.to_string_lossy()}));
+        assert!(opened["result"]["notice"].is_string(), "{opened}");
+        assert!(opened["result"]["notice"].as_str().unwrap_or("").contains("cmd.exe"));
+    });
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join(&name));
+}

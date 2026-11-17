@@ -286,7 +286,8 @@ impl<'scope, 'env: 'scope, C: Channel> Link<'scope, 'env, C> {
         let size = size_of(params)?;
         let cwd = match text(params, "cwd")? {
             Some(path) => {
-                let path = PathBuf::from(path);
+                // A share is an ordinary folder, written plain; a device namespace is no folder.
+                let path = crate::share::plain(std::path::Path::new(path)).into_owned();
                 if !path.is_absolute() {
                     return Err(bad("cwd is an absolute path"));
                 }
@@ -363,7 +364,21 @@ impl<'scope, 'env: 'scope, C: Channel> Link<'scope, 'env, C> {
                 input: typed,
             },
         );
-        Ok(json!({"id": id, "shell": program.to_string_lossy(), "cwd": cwd.to_string_lossy()}))
+        let mut opened =
+            json!({"id": id, "shell": program.to_string_lossy(), "cwd": cwd.to_string_lossy()});
+        // cmd.exe refuses a folder on a share as its working directory and starts in Windows' own folder instead: say so, the
+        // terminal is not moved by this host.
+        if cfg!(windows)
+            && crate::share::is_share(&cwd)
+            && std::path::Path::new(&program)
+                .file_stem()
+                .is_some_and(|stem| stem.eq_ignore_ascii_case("cmd"))
+        {
+            opened["notice"] = json!(
+                "cmd.exe cannot start in a folder on a share and opened in its own folder; use PowerShell or run pushd there"
+            );
+        }
+        Ok(opened)
     }
 
     fn spawn_threads(
