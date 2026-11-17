@@ -38,10 +38,11 @@ final class _Tree {
 /// What the host lists for an `@`: the files under [folder] as paths relative to it, a folder's ending in a slash.
 Future<List<String>> _list(String folder) async {
   final root = Directory(folder);
+  int depth(String entry) => '/'.allMatches(entry.endsWith('/') ? entry.substring(0, entry.length - 1) : entry).length;
   return [
     await for (final entry in root.list(recursive: true, followLinks: false))
       '${entry.path.substring(root.path.length + 1).replaceAll(Platform.pathSeparator, '/')}${entry is Directory ? '/' : ''}',
-  ];
+  ]..sort((a, b) => depth(a) != depth(b) ? depth(a).compareTo(depth(b)) : a.compareTo(b));
 }
 
 /// What the host answers for a name picked: the file under [folder] it names.

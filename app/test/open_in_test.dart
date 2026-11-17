@@ -170,7 +170,7 @@ void main() {
 
     testWidgets('an app with no host shows no button', (tester) async {
       workspaceOpener = const WorkspaceOpener.none();
-      await pumpApp(tester, store(SessionPlace.local));
+      await pumpApp(tester, store(SessionPlace.local), openIn: false);
       expect(find.byTooltip('Open the workspace'), findsNothing);
       expect(find.byIcon(Icons.folder_open), findsNothing);
     });

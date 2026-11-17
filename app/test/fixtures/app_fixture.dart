@@ -21,6 +21,7 @@ import 'package:canoa/main.dart';
 import 'package:canoa/popout/popout_hub.dart' show PopoutWindows;
 import 'package:canoa/served/served_app.dart' show ServedApp;
 import 'package:canoa/session_store.dart';
+import 'package:canoa/workspace/open_in.dart' show workspaceOpener;
 import 'package:canoa/sources/source_choices.dart';
 import 'package:canoa/worktree/worktree.dart';
 import 'package:file_selector/file_selector.dart' show XFile;
@@ -29,6 +30,7 @@ import 'package:canoa/config/connection.dart' show Connection;
 import 'package:canoa/workspace/remote_host.dart' show RemoteHost;
 import 'package:flutter_test/flutter_test.dart';
 
+import 'open_host.dart';
 import 'fake_host.dart' show defaultLocalSources, linkedHost;
 import 'source_choices.dart';
 
@@ -109,6 +111,8 @@ Future<List<CanoaConfig>> pumpApp(
   ConnectEndpoint? connectEndpoint,
   Future<CanoaConfig> Function()? readConfig,
   Future<List<String>> Function(String folder)? listFolder,
+  // The app's host can start an editor and the file manager, as the desktop's does; a test of an app without one says false.
+  bool openIn = true,
   Future<InsideFile?> Function(String folder, String relative)? resolveInside,
   ShellLayout? layout,
   ConnectionProbe? probe,
@@ -122,6 +126,7 @@ Future<List<CanoaConfig>> pumpApp(
   final home = Directory.systemTemp.createTempSync('canoa-documents');
   addTearDown(() => home.deleteSync(recursive: true));
   final written = <CanoaConfig>[];
+  if (openIn && !workspaceOpener.canOpen) workspaceOpener = await OpenHost().opener();
   await tester.pumpWidget(CanoaApp(
     documents: documents ?? home.path,
     store: store,
