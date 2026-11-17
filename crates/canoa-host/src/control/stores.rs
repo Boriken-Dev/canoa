@@ -41,6 +41,49 @@ pub(crate) struct Stores {
     types: Vec<AddedType>,
 }
 
+/// Checks the bytes of an extension the Store installed against the digest it recorded, before any of it is loaded, so a file that
+/// changed since is not run. An extension named by hand has no digest to check.
+pub(super) fn verify_extension(extension: &crate::config::Extension) -> Result<(), String> {
+    use sha2::Digest as _;
+
+    use crate::config::{ExtensionCheck, Origin};
+    let Some(check) = &extension.check else {
+        return Ok(());
+    };
+    match (check, &extension.origin) {
+        (ExtensionCheck::File { sha256 }, Origin::Library(path)) => {
+            let bytes = std::fs::read(path)
+                .map_err(|error| format!("{} cannot be read: {error}", path.display()))?;
+            let got = format!("{:x}", sha2::Sha256::digest(&bytes));
+            if got.eq_ignore_ascii_case(sha256) {
+                Ok(())
+            } else {
+                Err("the library no longer has the SHA-256 the Store recorded for it".to_owned())
+            }
+        }
+        (ExtensionCheck::Tree { root, pin }, origin) => {
+            if let Origin::Library(path) = origin
+                && (!path.starts_with(root)
+                    || path
+                        .components()
+                        .any(|part| part == std::path::Component::ParentDir))
+            {
+                return Err("the library is not inside the folder the Store recorded".to_owned());
+            }
+            let wanted = coqui_aos::Digest::parse(pin).map_err(|error| error.to_string())?;
+            let found =
+                coqui_aos::tree_digest(&coqui_aos::StdFs, root, &coqui_aos::Settings::default())
+                    .map_err(|error| format!("{} cannot be read: {error}", root.display()))?;
+            if found.digest == wanted {
+                Ok(())
+            } else {
+                Err("the folder no longer has the tree digest the Store recorded for it".to_owned())
+            }
+        }
+        _ => Err("a SHA-256 check goes with a library file".to_owned()),
+    }
+}
+
 /// A store type an extension adds, with the extension it comes from.
 #[derive(Clone, Debug)]
 struct AddedType {
@@ -83,6 +126,7 @@ impl Stores {
     }
 
     fn load_extension(&mut self, extension: &crate::config::Extension) -> Result<(), String> {
+        verify_extension(extension)?;
         let mut registry =
             coqui_acp_api::guatiao::library::Registry::new("canoa", env!("CARGO_PKG_VERSION"));
         crate::provider::open(&mut registry, &extension.origin).map_err(|e| e.to_string())?;

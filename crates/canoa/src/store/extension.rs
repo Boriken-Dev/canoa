@@ -12,8 +12,21 @@ use alloc::vec::Vec;
 use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_api::guatiao::{FromValue, Schema, ToValue};
 
+/// The name of the `store_extension` kind, which a catalog's extension names in its `needs.kind`.
+pub const KIND: &str = "store_extension";
+
+/// The versions of the `store_extension` kind this host offers, as a catalog's extension names one in its `needs.version`.
+pub const KIND_VERSIONS: [&str; 1] = ["1"];
+
 /// The type ids the Store has of its own, which an extension cannot add.
-pub const RESERVED_TYPES: [&str; 5] = ["overlays", "skills", "agents", "mcps", "runtimes"];
+pub const RESERVED_TYPES: [&str; 6] = [
+    "overlays",
+    "skills",
+    "agents",
+    "mcps",
+    "runtimes",
+    "extensions",
+];
 
 /// The most characters an image icon's address may have: a small image, not a picture.
 pub const MAX_ICON_TEXT: usize = 64 * 1024;

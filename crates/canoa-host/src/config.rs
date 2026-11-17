@@ -96,6 +96,26 @@ pub struct Extension {
     pub origin: Origin,
     /// The `store_extension` provider id.
     pub provider: String,
+    /// What the extension's bytes must have each time the host loads them, when the Store installed it.
+    pub check: Option<ExtensionCheck>,
+}
+
+/// What an installed extension's bytes must have, as the Store recorded when it checked them against its catalog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ExtensionCheck {
+    /// The tree digest (`sha256:` and 64 hexadecimal digits) of the folder `root`, which holds the library.
+    Tree {
+        /// The folder, absolute.
+        root: PathBuf,
+        /// The digest.
+        pin: String,
+    },
+    /// The SHA-256 of the library file, as 64 hexadecimal digits.
+    File {
+        /// The digest.
+        sha256: String,
+    },
 }
 
 /// One `[agents.NAME] a2a = { url, peer, source, title }`: an agent on another machine that a task may be handed to.
@@ -1637,6 +1657,9 @@ struct RawExtension {
     source_settings: Option<toml::Table>,
     import_search: Option<String>,
     provider: String,
+    pin: Option<String>,
+    sha256: Option<String>,
+    root: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -2190,10 +2213,19 @@ impl Config {
             else {
                 return Err(invalid(&name, "an extension needs library or source"));
             };
+            let check = extension_check(
+                &name,
+                base,
+                &origin,
+                extension.pin,
+                extension.sha256,
+                extension.root,
+            )?;
             extensions.push(Extension {
                 name,
                 origin,
                 provider: extension.provider,
+                check,
             });
         }
         for (name, table) in host.tools {
@@ -2427,6 +2459,47 @@ struct OriginKeys<'a> {
     source: Option<&'a str>,
     source_settings: Option<toml::Table>,
     import_search: Option<&'a str>,
+}
+
+/// `pin` with `root`, or `sha256` alone: what the Store recorded of an extension it installed.
+fn extension_check(
+    name: &str,
+    base: &Path,
+    origin: &Origin,
+    pin: Option<String>,
+    sha256: Option<String>,
+    root: Option<String>,
+) -> Result<Option<ExtensionCheck>, ConfigError> {
+    let hex = |text: &str| text.len() == 64 && text.bytes().all(|byte| byte.is_ascii_hexdigit());
+    match (pin, sha256, root) {
+        (None, None, None) => Ok(None),
+        (Some(pin), None, Some(root)) => {
+            if !pin.strip_prefix("sha256:").is_some_and(hex) {
+                return Err(invalid(name, "pin is sha256: and 64 hexadecimal digits"));
+            }
+            if root.is_empty() {
+                return Err(invalid(name, "root must not be empty"));
+            }
+            let root = base.join(root);
+            Ok(Some(ExtensionCheck::Tree {
+                root: std::path::absolute(&root).unwrap_or(root),
+                pin,
+            }))
+        }
+        (None, Some(sha256), None) => {
+            if !hex(&sha256) {
+                return Err(invalid(name, "sha256 is 64 hexadecimal digits"));
+            }
+            if !matches!(origin, Origin::Library(_)) {
+                return Err(invalid(name, "sha256 goes with library, not source"));
+            }
+            Ok(Some(ExtensionCheck::File { sha256 }))
+        }
+        _ => Err(invalid(
+            name,
+            "pin goes with root, and sha256 stands alone: an extension has one or the other",
+        )),
+    }
 }
 
 /// Where an entry's provider is loaded from, `None` when the entry names no library or source. Relative paths are taken

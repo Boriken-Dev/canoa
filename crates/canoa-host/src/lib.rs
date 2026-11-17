@@ -49,10 +49,10 @@ mod worktree;
 pub use accounts::ACCOUNT_META;
 pub use config::{
     AccountConfig, AccountStore, CACHE_LIFETIMES, Config, ConfigError, ControlConfig,
-    DelegateConfig, ENTRIES, Entry, EntryKind, Extension, HarnessOptions, INSTALLED_DIR_VARIABLE,
-    KbConfig, Layers, Listen, Loadout, NativeConfig, Origin, Preset, ResolvedLoadout, Settings,
-    StoreConfig, TransportListen, UnknownLoadout, UnknownPreset, UsageSource, WebConfig, WebMode,
-    cache_lifetime_name, cache_lifetime_named, merge_into,
+    DelegateConfig, ENTRIES, Entry, EntryKind, Extension, ExtensionCheck, HarnessOptions,
+    INSTALLED_DIR_VARIABLE, KbConfig, Layers, Listen, Loadout, NativeConfig, Origin, Preset,
+    ResolvedLoadout, Settings, StoreConfig, TransportListen, UnknownLoadout, UnknownPreset,
+    UsageSource, WebConfig, WebMode, cache_lifetime_name, cache_lifetime_named, merge_into,
 };
 /// The `_meta` key of `initialize` that asks a host for the delegation tools, and that a task's permission request carries
 /// with its task id, title and source.
