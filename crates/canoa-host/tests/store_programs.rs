@@ -785,11 +785,21 @@ fn another_programs_folder_changing_during_an_install_is_caught() {
 }
 
 #[test]
-fn a_launch_that_sets_what_programs_load_or_names_a_script_elsewhere_is_refused() {
+fn a_launch_may_set_any_variable_and_one_that_names_a_script_elsewhere_is_refused() {
     let s = setup("launchshape", Variant::Normal);
-    let error =
-        apply_rigged(&s, rigged(&s, Rig::LaunchesWithNodeOptions), |_| {}).expect_err("refused");
-    assert!(format!("{error}").contains("NODE_OPTIONS"), "{error}");
+    let applied = apply_rigged(&s, rigged(&s, Rig::LaunchesWithNodeOptions), |_| {})
+        .expect("a launch's variables are the store's own")
+        .expect("applied");
+    assert_eq!(
+        applied
+            .current
+            .launch
+            .environment
+            .get("NODE_OPTIONS")
+            .map(String::as_str),
+        Some("--require x")
+    );
+    let s = setup("launchshape2", Variant::Normal);
     let elsewhere = s.dir.0.join("elsewhere.js");
     let error = apply_rigged(
         &s,

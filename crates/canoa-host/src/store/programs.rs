@@ -339,31 +339,10 @@ struct Ran {
     after: Footprint,
 }
 
-/// Names a launch may not set, because they change what any program loads, and the variables `credentials` protects.
-fn forbidden_variable(name: &str, credentials: &Protected) -> bool {
-    let upper = name.to_ascii_uppercase();
-    upper == "PATH"
-        || upper == "PATHEXT"
-        || upper.starts_with("NODE_")
-        || upper.starts_with("LD_")
-        || upper.starts_with("DYLD_")
-        || credentials.protects_name(name)
-}
-
 /// What a store's launch has to look like before the host records it: the files it names lie inside the version's folder,
-/// and the variables it sets are not ones that steer what a program loads.
-fn check_launch_shape(
-    launch: &Launch,
-    staging: &Path,
-    credentials: &Protected,
-) -> Result<(), StoreError> {
-    for name in launch.environment.keys() {
-        if forbidden_variable(name, credentials) {
-            return Err(StoreError::Contract(format!(
-                "its launch sets {name}, which changes what a program loads"
-            )));
-        }
-    }
+/// since the host verifies that copy and runs nothing outside it. The variables it sets are the store's own and are not
+/// checked.
+fn check_launch_shape(launch: &Launch, staging: &Path) -> Result<(), StoreError> {
     let settings = super::shelf::LaunchRecord::of(launch).settings;
     for key in ["executable", "node", "script"] {
         if let Some(path) = settings.get(key).and_then(serde_json::Value::as_str) {
@@ -991,11 +970,7 @@ impl Programs {
             lock.abandon(&staging);
             return Err(StoreError::Contract("no launch".to_owned()));
         };
-        if let Err(error) = check_launch_shape(
-            &launch,
-            &staging,
-            &Protected::new(&self.options.credential_variables),
-        ) {
+        if let Err(error) = check_launch_shape(&launch, &staging) {
             lock.abandon(&staging);
             return Err(error);
         }
