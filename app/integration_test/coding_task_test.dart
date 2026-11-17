@@ -159,7 +159,7 @@ void main() {
         _real == null
             ? '[agents.Scripted]\nprogram = ${jsonEncode(scripted.program)}\nargs = ${jsonEncode(scripted.args)}\n'
             : _real == 'Claude'
-            ? '[host.agents.Claude]\nharness = "claude"\nbypass = true\nsetting_sources = ["project", "local"]\n'
+            ? '[host.agents.Claude]\nharness = "claude"\nsetting_sources = ["project", "local"]\n'
             : '',
       );
     final host = HostSupervisor(LibraryHostTool(CanoaNative.open(), home: '${dir.path}${Platform.pathSeparator}home'));

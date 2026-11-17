@@ -9,8 +9,9 @@ import 'profile_home.dart';
 import 'project_trust.dart';
 import 'skill_copies.dart';
 
-/// Canoa's own layer, lowest of all. It sets nothing: every value comes from a layer the person can see and change.
-const builtInProfile = Profile();
+/// Canoa's own layer, lowest of all. It sets the standard access, the same for every agent: no sandbox, the network on and
+/// everything asked first. Every other value comes from a layer the person can see and change.
+const builtInProfile = Profile(access: ProfileAccess(sandbox: 'none', network: true, approvals: 'ask'));
 
 /// The AOS harness id of each of Canoa's agent presets, whose `[harness.<id>]` hints apply to it.
 const presetHarnesses = {'Claude': 'claude-code', 'Codex': 'codex', 'Grok': 'grok', 'Pi': 'pi'};

@@ -1797,7 +1797,7 @@ const presetNameRule = 'A profile is named with 1 to 64 letters, digits, spaces,
 /// One `[profiles.NAME]`: the values a new session starts with, chosen by name in its footer. It is the session's layer: above the
 /// person's `[profile]` and the agent's entry. The account and the permission mode's rules are never part of one.
 final class Preset {
-  const Preset({this.source, this.model, this.effort, this.mode, this.context, this.cacheLifetime, this.loadout});
+  const Preset({this.source, this.model, this.effort, this.mode, this.context, this.cacheLifetime, this.loadout, this.access = const ProfileAccess()});
 
   /// The label of the source it runs on; a session keeps its own when this is null.
   final String? source;
@@ -1812,7 +1812,10 @@ final class Preset {
   /// The loadout it starts with; the default loadout when null.
   final String? loadout;
 
-  static const _keys = {'source', 'model', 'effort', 'mode', 'context', 'cache_lifetime', 'loadout'};
+  /// The access it runs the agent with, part by part.
+  final ProfileAccess access;
+
+  static const _keys = {'source', 'model', 'effort', 'mode', 'access', 'context', 'cache_lifetime', 'loadout'};
   static const _lifetimes = {'default', 'off', 'short', 'long'};
 
   /// The preset [name] as canoa.cfg has it. Throws [FormatException] for a key it does not have, a value that is not text or a name
@@ -1820,9 +1823,10 @@ final class Preset {
   factory Preset.read(String name, Map<dynamic, dynamic> table) {
     for (final MapEntry(:key, :value) in table.entries) {
       if (!_keys.contains(key)) {
-        throw FormatException('canoa.cfg: profiles.$name.$key is not a profile setting: source, model, effort, mode, context, '
+        throw FormatException('canoa.cfg: profiles.$name.$key is not a profile setting: source, model, effort, mode, access, context, '
             'cache_lifetime and loadout are');
       }
+      if (key == 'access') continue;
       if (value is! String) throw FormatException('canoa.cfg: profiles.$name.$key is not text');
       if (value.isEmpty || value.contains('\u0000')) throw FormatException('canoa.cfg: profiles.$name.$key is empty or holds a NUL');
     }
@@ -1840,6 +1844,7 @@ final class Preset {
       own = Profile.fromMap({
         for (final key in const ['model', 'effort', 'mode'])
           if (table[key] != null) key: table[key],
+        if (table['access'] != null) 'access': table['access'],
       }, LayerKind.session);
     } on ProfileException catch (error) {
       throw FormatException('canoa.cfg: profiles.$name: $error');
@@ -1852,6 +1857,7 @@ final class Preset {
       context: table['context'] as String?,
       cacheLifetime: lifetime as String?,
       loadout: loadout,
+      access: own.access,
     );
   }
 
@@ -1864,6 +1870,7 @@ final class Preset {
     String? context,
     String? cacheLifetime,
     String? loadout,
+    ProfileAccess? access,
     Set<String> clear = const {},
   }) => Preset(
     source: clear.contains('source') ? null : source ?? this.source,
@@ -1873,6 +1880,7 @@ final class Preset {
     context: clear.contains('context') ? null : context ?? this.context,
     cacheLifetime: clear.contains('cache_lifetime') ? null : cacheLifetime ?? this.cacheLifetime,
     loadout: clear.contains('loadout') ? null : loadout ?? this.loadout,
+    access: clear.contains('access') ? const ProfileAccess() : access ?? this.access,
   );
 
   /// The session's layer this preset makes: its model, effort and mode, and its starting instructions added to the context.
@@ -1880,6 +1888,7 @@ final class Preset {
     model: model,
     effort: effort,
     mode: mode,
+    access: access,
     contexts: [if (context case final text?) ProfileContext.text(text)],
   );
 
@@ -1891,6 +1900,12 @@ final class Preset {
     'context': ?context,
     'cache_lifetime': ?cacheLifetime,
     'loadout': ?loadout,
+    if (!access.isEmpty)
+      'access': {
+        'sandbox': ?access.sandbox,
+        'network': ?access.network,
+        'approvals': ?access.approvals,
+      },
   };
 
   @override
@@ -1902,10 +1917,14 @@ final class Preset {
       other.mode == mode &&
       other.context == context &&
       other.cacheLifetime == cacheLifetime &&
-      other.loadout == loadout;
+      other.loadout == loadout &&
+      other.access.sandbox == access.sandbox &&
+      other.access.network == access.network &&
+      other.access.approvals == access.approvals;
 
   @override
-  int get hashCode => Object.hash(source, model, effort, mode, context, cacheLifetime, loadout);
+  int get hashCode =>
+      Object.hash(source, model, effort, mode, context, cacheLifetime, loadout, access.sandbox, access.network, access.approvals);
 }
 
 /// What a session starts with once its loadout is resolved, as the host resolves it when the session starts.

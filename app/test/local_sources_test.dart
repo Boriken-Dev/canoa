@@ -48,18 +48,18 @@ void main() {
     expect(Icons.dns_outlined, providerIcon(null));
   });
 
-  test('a served page\'s harness entry offers its provider\'s modes before it starts, without the Bypass the host gates', () {
+  test('every agent offers every mode it has before it starts, Bypass included, local or reached by address', () {
     // What a served page gets from canoa.json: an entry that is not local, whose `harness` names the provider.
     final entry = _line('{"name":"Claude","kind":"agent","url":"ws://127.0.0.1:1","harness":"claude","peer":"$_peer"}');
     final source = hostedSources([entry]).single;
     expect(source.local, isFalse);
     List<String> ids(AgentSource each) => [for (final option in knownModes(each)) ...option.choices.map((choice) => choice.value)];
-    expect(ids(source), ['manual', 'accept_edits', 'auto', 'plan']);
-    const codex = AgentSource.hosted('Codex review', harness: 'codex');
-    expect(ids(codex), ['manual', 'accept_edits', 'auto', 'plan']);
-    // A local source keeps the agent-side Bypass its app runs it with, and an entry with another provider offers none.
-    expect(ids(const AgentSource.hosted('Claude', harness: 'claude', local: true)), contains('bypass'));
-    expect(ids(const AgentSource.hosted('Pi', harness: 'pi')), isEmpty);
+    const all = ['manual', 'accept_edits', 'auto', 'plan', 'bypass'];
+    expect(ids(source), all);
+    expect(ids(const AgentSource.hosted('Codex review', harness: 'codex')), all);
+    expect(ids(const AgentSource.hosted('Claude', harness: 'claude', local: true)), all);
+    // Pi has nothing to back an automatic reviewer; an entry with another provider offers none until it runs.
+    expect(ids(const AgentSource.hosted('Pi', harness: 'pi')), ['manual', 'accept_edits', 'plan', 'bypass']);
     expect(ids(const AgentSource.hosted('mine')), isEmpty);
   });
 

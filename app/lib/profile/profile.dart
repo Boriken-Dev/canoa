@@ -222,6 +222,25 @@ final class ProfileDelegate {
   bool get isEmpty => defaultSource == null && sources == null && maxRunning == null;
 }
 
+/// What a layer says of the access every agent is run with, part by part; a part it leaves out is a lower layer's.
+final class ProfileAccess {
+  const ProfileAccess({this.sandbox, this.network, this.approvals});
+
+  /// How much a command may reach: `none`, `workspace` or `read-only`.
+  final String? sandbox;
+
+  /// Whether a command may use the network.
+  final bool? network;
+
+  /// What is asked first: `ask`, `edits` or `never`.
+  final String? approvals;
+
+  static const sandboxes = ['none', 'workspace', 'read-only'];
+  static const approvalChoices = ['ask', 'edits', 'never'];
+
+  bool get isEmpty => sandbox == null && network == null && approvals == null;
+}
+
 /// One profile document: what one layer sets and removes. In [env], [skills] and [mcp], null removes a lower layer's.
 final class Profile {
   const Profile({
@@ -230,6 +249,7 @@ final class Profile {
     this.mode,
     this.context,
     this.delegate = const ProfileDelegate(),
+    this.access = const ProfileAccess(),
     this.unset = const [],
     this.env = const {},
     this.skills = const {},
@@ -241,6 +261,9 @@ final class Profile {
 
   /// What it suggests about delegation, key by key.
   final ProfileDelegate delegate;
+
+  /// The access agents are run with. Only the person's own layers may set it: an overlay or a project may not loosen it.
+  final ProfileAccess access;
 
   /// What an AOS overlay adds to the initial context, in order: its rules, routing lines, context files and the
   /// harness's own. Every layer's adds up, and `unset = ["context"]` takes them back with `context`.
@@ -258,10 +281,10 @@ final class Profile {
 
   /// This profile with [skills] in place of its own.
   Profile withSkills(Map<String, Skill?> skills) => Profile(model: model, effort: effort, mode: mode, context: context,
-      delegate: delegate, unset: unset, env: env, skills: skills, mcp: mcp, contexts: contexts);
+      delegate: delegate, access: access, unset: unset, env: env, skills: skills, mcp: mcp, contexts: contexts);
 
   bool get isEmpty =>
-      model == null && effort == null && mode == null && context == null && delegate.isEmpty && unset.isEmpty && env.isEmpty &&
+      model == null && effort == null && mode == null && context == null && delegate.isEmpty && access.isEmpty && unset.isEmpty && env.isEmpty &&
       skills.isEmpty && mcp.isEmpty && contexts.isEmpty;
 
   /// Parses a profile document for a layer of [kind]. Touches no file.
@@ -282,7 +305,7 @@ final class Profile {
   }
 }
 
-const _top = {'model', 'effort', 'mode', 'context', 'delegate', 'unset', 'env', 'skills', 'mcp'};
+const _top = {'model', 'effort', 'mode', 'context', 'delegate', 'access', 'unset', 'env', 'skills', 'mcp'};
 const _envKeys = {'value', 'from_env', 'from_file', 'remove'};
 const _mcpKeys = {'type', 'command', 'args', 'env', 'url', 'headers', 'remove'};
 
@@ -319,6 +342,13 @@ void _shape(Map<dynamic, dynamic> map) {
       final list = delegate['sources'];
       if (list is! List || list.any((item) => item is! String)) _parseError();
     }
+  }
+  if (map.containsKey('access')) {
+    final access = _tableOf(map['access']);
+    _keys(access, {'sandbox', 'network', 'approvals'});
+    _optional<String>(access, 'sandbox');
+    _optional<bool>(access, 'network');
+    _optional<String>(access, 'approvals');
   }
   if (map.containsKey('unset')) {
     final list = map['unset'];
@@ -424,6 +454,16 @@ Profile _checked(Map<dynamic, dynamic> map, bool confined) {
     if (limit != null && (limit < 0 || limit > 2147483647)) _invalid('value', 'delegate.max_running');
     delegate = ProfileDelegate(defaultSource: source, sources: sources == null ? null : List.unmodifiable(sources), maxRunning: limit);
   }
+  var access = const ProfileAccess();
+  if (map['access'] case final Map<dynamic, dynamic> raw) {
+    // A layer from elsewhere could loosen it: only the person's own layers say how much a command may reach.
+    if (confined) _invalid('reserved', 'access');
+    final sandbox = raw['sandbox'] as String?;
+    if (sandbox != null && !ProfileAccess.sandboxes.contains(sandbox)) _invalid('value', 'access.sandbox');
+    final approvals = raw['approvals'] as String?;
+    if (approvals != null && !ProfileAccess.approvalChoices.contains(approvals)) _invalid('value', 'access.approvals');
+    access = ProfileAccess(sandbox: sandbox, network: raw['network'] as bool?, approvals: approvals);
+  }
   final unset = <String>[];
   for (final name in (map['unset'] as List<dynamic>?) ?? const []) {
     if (!Profile.scalars.contains(name)) _invalid('form', 'unset');
@@ -462,6 +502,7 @@ Profile _checked(Map<dynamic, dynamic> map, bool confined) {
     mode: scalar['mode'],
     context: context,
     delegate: delegate,
+    access: access,
     unset: List.unmodifiable(unset),
     env: Map.unmodifiable(env),
     skills: Map.unmodifiable(skills),
@@ -565,6 +606,12 @@ final class EffectiveProfile {
   Sourced<String>? delegateDefault;
   Sourced<List<String>>? delegateSources;
   Sourced<int>? delegateMaxRunning;
+
+  /// The access, each part with the layer that set it; a part no layer set is the standard access's: no sandbox, the
+  /// network on, everything asked.
+  Sourced<String>? accessSandbox;
+  Sourced<bool>? accessNetwork;
+  Sourced<String>? accessApprovals;
   final env = <String, Sourced<EnvValue>>{};
   final skills = <String, Sourced<Skill>>{};
   final mcp = <String, Sourced<McpServer>>{};
@@ -595,6 +642,12 @@ final class EffectiveProfile {
           if (delegateDefault case final value?) 'default': one(value.value, value.layer),
           if (delegateSources case final value?) 'sources': one(value.value, value.layer),
           if (delegateMaxRunning case final value?) 'max_running': one(value.value, value.layer),
+        },
+      if (accessSandbox != null || accessNetwork != null || accessApprovals != null)
+        'access': {
+          if (accessSandbox case final value?) 'sandbox': one(value.value, value.layer),
+          if (accessNetwork case final value?) 'network': one(value.value, value.layer),
+          if (accessApprovals case final value?) 'approvals': one(value.value, value.layer),
         },
       'env': entries(env, (value) => value.toJson()),
       'skills': entries(skills, (skill) => skill.toJson()),
@@ -722,6 +775,9 @@ EffectiveProfile mergeProfiles(List<Layer> layers) {
     if (profile.delegate.defaultSource case final source?) out.delegateDefault = sourced(source);
     if (profile.delegate.sources case final sources?) out.delegateSources = sourced(sources);
     if (profile.delegate.maxRunning case final limit?) out.delegateMaxRunning = sourced(limit);
+    if (profile.access.sandbox case final value?) out.accessSandbox = sourced(value);
+    if (profile.access.network case final value?) out.accessNetwork = sourced(value);
+    if (profile.access.approvals case final value?) out.accessApprovals = sourced(value);
     void entries<T extends Object>(Map<String, Sourced<T>> into, Map<String, T?> changes, String table) {
       for (final MapEntry(:key, :value) in changes.entries) {
         if (value != null) {

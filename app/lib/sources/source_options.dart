@@ -4,27 +4,26 @@ import '../chat/session_options.dart';
 import 'source_icons.dart';
 import 'sources.dart';
 
-/// The modes a source's agent is known to offer before it has run: those of `coqui-acp-claude` and `coqui-acp-codex` (the
-/// presets start them with Bypass allowed) and Antigravity's three, which `agy acp` advertises in session/new. Models and
+/// The modes a source's agent is known to offer before it has run: those of `coqui-acp-claude`, `coqui-acp-codex` and
+/// `coqui-acp-pi`, every mode the agent has, Bypass included, and Antigravity's three, which `agy acp` advertises in session/new. Models and
 /// efforts are not here: the host asks the source's provider for them (see `SourceChoices`). An agent the app knows nothing of
 /// has nothing here, and the composer says its choices come after it starts.
 ///
 /// What the agent then offers wins: a choice made here that it does not offer is reported when it starts, not applied.
 ///
 /// A source is known by its provider ([sourceProvider]), so an entry a served page reaches by address, which names its `harness`,
-/// offers them as the host's own source does. Bypass is listed only where the app runs the agent allowing it (a local source): a
-/// host's entry offers it only when its canoa.cfg says `bypass = true`, which a page cannot read, so the chat's own Bypass stands
-/// for it until the agent says.
+/// offers them as the host's own source does: the same for every agent, with no key in canoa.cfg to gate Bypass.
 List<ConfigOption> knownModes(AgentSource source) {
   final provider = sourceProvider(source);
   return switch (provider?.toLowerCase()) {
-    'claude' || 'codex' => [
+    'claude' || 'codex' || 'pi' => [
       ConfigOption(
         id: 'mode',
         label: 'Mode',
         current: '',
         category: 'mode',
-        choices: [for (final id in modeOrder) if (source.local || id != 'bypass') Choice(id, modeLabels[id]!)],
+        // Pi has nothing to back an automatic reviewer, so Auto is not one of its modes.
+        choices: [for (final id in modeOrder) if (provider?.toLowerCase() != 'pi' || id != 'auto') Choice(id, modeLabels[id]!)],
       ),
     ],
     _ when !source.local => const [],

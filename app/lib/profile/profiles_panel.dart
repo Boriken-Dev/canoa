@@ -126,6 +126,8 @@ class ProfilesPanelState extends State<ProfilesPanel> {
     ?preset.source,
     if (preset.model != null || preset.effort != null) [?preset.model, ?preset.effort].join(' / '),
     if (preset.mode case final mode?) 'mode $mode',
+    if (!preset.access.isEmpty)
+      'access ${[?preset.access.sandbox, if (preset.access.network case final net?) net ? 'network' : 'no network', ?preset.access.approvals].join(' ')}',
     if (preset.context != null) 'starting instructions',
     if (preset.loadout case final loadout?) 'loadout $loadout',
   ].join(' · ');
@@ -528,6 +530,9 @@ class EffectiveTable extends StatelessWidget {
       if (effective.model case final value?) ('model', value.value, '${value.layer}'),
       if (effective.effort case final value?) ('effort', value.value, '${value.layer}'),
       if (effective.mode case final value?) ('mode', value.value, '${value.layer}'),
+      if (effective.accessSandbox case final value?) ('access.sandbox', value.value, '${value.layer}'),
+      if (effective.accessNetwork case final value?) ('access.network', '${value.value}', '${value.layer}'),
+      if (effective.accessApprovals case final value?) ('access.approvals', value.value, '${value.layer}'),
       if (effective.context case final value?) ('context', describe(value.value), '${value.layer}'),
       if (effective.delegateDefault case final value?) ('delegate.default', value.value, '${value.layer}'),
       if (effective.delegateSources case final value?)
