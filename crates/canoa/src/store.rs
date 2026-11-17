@@ -113,6 +113,9 @@ fn empty_object() -> Value {
     Value::from(coqui_acp_api::guatiao::Map::new())
 }
 
+/// The glyphs the application draws for [`StoreInfo::icon`]: simple original pictures, none a project's logo.
+pub const STORE_GLYPHS: [&str; 5] = ["nodes", "indent", "crucible", "brackets", "chip"];
+
 /// Who a store's program is, from [`ProgramStore::describe`]. Cheap, and the same on every call.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
@@ -126,6 +129,15 @@ pub struct StoreInfo {
     pub publisher: String,
     /// Its home page.
     pub homepage: Option<String>,
+    /// What it is, in a sentence, for the page that opens it.
+    pub summary: Option<String>,
+    /// The name of one of the application's glyphs ([`STORE_GLYPHS`]) that suggests the program; an application draws its
+    /// default for none or a name it does not know.
+    pub icon: Option<String>,
+    /// The commands the host's copy puts on the `PATH` of what the host starts: `node`, `npm` and `npx` for Node. What names
+    /// one of them (an agent's or an MCP server's command) is a user of the program. None for a program that is on no `PATH`.
+    #[map(default)]
+    pub commands: Vec<String>,
     /// The harness providers that start it.
     #[map(default)]
     pub serves: Vec<Serves>,
@@ -706,6 +718,9 @@ impl StoreInfo {
             title: title.into(),
             publisher: publisher.into(),
             homepage: None,
+            summary: None,
+            icon: None,
+            commands: Vec::new(),
             serves: Vec::new(),
             platforms: Vec::new(),
             channels: Vec::new(),

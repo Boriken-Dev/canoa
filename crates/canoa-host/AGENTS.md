@@ -844,7 +844,7 @@ The params and results are the JSON of `canoa::store`'s models:
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `store/list` | `kind`? (`agents`, the default, or `runtimes`) | `{"stores": [StoreInfo + "provider"]}`: the agents' programs, or the Runtimes type's (`node_store`, `python_store`, `foundry_store`); every other `store/*` method takes either kind's provider |
+| `store/list` | `kind`? (`agents`, the default, or `runtimes`) | `{"stores": [StoreInfo + "provider"]}`: the agents' programs, or the Runtimes type's (`node_store`, `python_store`, `foundry_store`, each with its `summary`, `icon` and `commands`); every other `store/*` method takes either kind's provider |
 | `store/list` | `kind`: `extension`, `type`: a type's id | the same shape for the stores of a type an extension adds; an unknown type is `-32003` |
 | `store/extensions` | none | `{"types": [{"id", "title", "icon"?, "stores": [provider ids], "extension", "extension_title", "publisher"}]}`: the types the `[host.extensions]` add, in canoa.cfg's order; needs `store.read` |
 | `foundry/models` | none | `{"installed": bool, "program"?, "models": [{"id", "alias"?, "task"?, "device"?, "size_mb"?, "description", "cached", "loaded"}]}`: Foundry Local's catalog (its variants) with what is downloaded and what is in memory marked, loaded first, read by running its command line (`model list --variants [--cached\|--loaded] -o json`; what is loaded is asked only while `~/.foundry/daemon.json` names a running service, so listing starts none); without Foundry Local `{"installed": false, "models": []}`. Needs `store.programs`: it runs a program as this user |

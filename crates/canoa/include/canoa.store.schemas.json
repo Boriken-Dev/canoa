@@ -1510,6 +1510,14 @@
         },
         "type": "array"
       },
+      "commands": {
+        "default": [],
+        "description": "The commands the host's copy puts on the `PATH` of what the host starts: `node`, `npm` and `npx` for Node. What names one of them (an agent's or an MCP server's command) is a user of the program. None for a program that is on no `PATH`.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
       "endpoints": {
         "default": [],
         "description": "The `https` places it fetches from, and the only ones the host lets a download or a redirect reach: an origin (`https://host`), or a prefix with a path (`https://host/bucket/`) that a URL has to start with.",
@@ -1520,6 +1528,13 @@
       },
       "homepage": {
         "description": "Its home page.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "icon": {
+        "description": "The name of one of the application's glyphs ([`STORE_GLYPHS`]) that suggests the program; an application draws its default for none or a name it does not know.",
         "type": [
           "string",
           "null"
@@ -1577,6 +1592,13 @@
           "type": "object"
         },
         "type": "array"
+      },
+      "summary": {
+        "description": "What it is, in a sentence, for the page that opens it.",
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "title": {
         "description": "Its name for people.",

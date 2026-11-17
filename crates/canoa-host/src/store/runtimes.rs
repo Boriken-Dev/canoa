@@ -95,6 +95,11 @@ impl Recipe for NodeRecipe {
     fn info(&self) -> StoreInfo {
         let mut info = StoreInfo::new("node", "Node.js", "OpenJS Foundation");
         info.homepage = Some("https://nodejs.org".to_owned());
+        info.summary = Some(
+            "A JavaScript runtime: what MCP servers and agents written for it start with node, npm or npx.".to_owned(),
+        );
+        info.icon = Some("nodes".to_owned());
+        info.commands = ["node", "npm", "npx", "corepack"].map(str::to_owned).into();
         info.platforms = measured_platforms();
         info.channels = vec!["lts".to_owned(), "current".to_owned()];
         info.endpoints = vec![NODE_ORIGIN.to_owned()];
@@ -318,6 +323,13 @@ impl Recipe for PythonRecipe {
     fn info(&self) -> StoreInfo {
         let mut info = StoreInfo::new("python", "Python", "Python Software Foundation");
         info.homepage = Some("https://www.python.org".to_owned());
+        info.summary = Some(
+            "A Python interpreter: what MCP servers and agents written in Python start with python or pip.".to_owned(),
+        );
+        info.icon = Some("indent".to_owned());
+        info.commands = ["python", "python3", "pip", "pip3"]
+            .map(str::to_owned)
+            .into();
         info.platforms = measured_platforms();
         info.channels = PYTHON_CHANNELS.iter().map(|c| (*c).to_owned()).collect();
         info.endpoints = std::iter::once(PYTHON_RELEASES.to_owned())

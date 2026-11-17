@@ -14,12 +14,14 @@ use canoa::store::recipe::Recipe;
 use canoa::store::{
     Action, ApplyOutcome, ApplyRequest, Check, InstallPlan, InstallPrompter, InstallTools,
     LatestQuery, LatestReport, PlanRequest, Platform, ProgramQuery, ProgramReport, ProgramStore,
-    StoreInfo, StoreSettings,
+    STORE_GLYPHS, StoreInfo, StoreSettings,
 };
 use canoa_foundry::store::{DOWNLOADS, FoundryRecipe, RELEASES_API};
 use canoa_host::store::contract::{Fixture, Variant, World, WorldTransport, run, standin_bytes};
 use canoa_host::store::engine::Engine;
-use canoa_host::store::runtimes::{NODE_ORIGIN, NodeRecipe, PYTHON_RELEASES, PythonRecipe};
+use canoa_host::store::runtimes::{
+    NODE_ORIGIN, NodeRecipe, PYTHON_RELEASES, PythonRecipe, RUNTIME_PROGRAMS,
+};
 use canoa_host::store::tools::LocalTools;
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
@@ -548,4 +550,33 @@ fn the_runtimes_stores_name_the_publishers_endpoints_and_nothing_wider() {
         );
     }
     assert_eq!(NodeRecipe.info().endpoints, [NODE_ORIGIN]);
+}
+
+#[test]
+fn each_runtime_says_what_it_is_names_a_glyph_and_the_commands_it_puts_on_a_path() {
+    for info in [NodeRecipe.info(), PythonRecipe.info(), FoundryRecipe.info()] {
+        let program = &info.program;
+        let icon = info.icon.as_deref().unwrap_or_default();
+        assert!(
+            STORE_GLYPHS.contains(&icon),
+            "{program} names {icon:?}, which the application does not draw"
+        );
+        assert!(
+            info.summary
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty()),
+            "{program} has no summary"
+        );
+        // Foundry Local's folder holds libraries a program should not find, so it is on no `PATH`.
+        assert_eq!(
+            info.commands.contains(program),
+            RUNTIME_PROGRAMS.contains(&program.as_str()),
+            "{program} provides {:?}",
+            info.commands
+        );
+    }
+    assert_eq!(
+        NodeRecipe.info().commands,
+        ["node", "npm", "npx", "corepack"]
+    );
 }

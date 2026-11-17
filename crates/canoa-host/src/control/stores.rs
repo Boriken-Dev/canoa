@@ -695,6 +695,18 @@ mod runtimes_tests {
                 ("foundry_store".to_owned(), "foundry".to_owned())
             ]
         );
+        let listed = runtimes["stores"].as_array().expect("a list");
+        let icons: Vec<&str> = listed
+            .iter()
+            .map(|store| store["icon"].as_str().expect("an icon"))
+            .collect();
+        assert_eq!(icons, ["nodes", "indent", "crucible"]);
+        assert!(
+            listed
+                .iter()
+                .all(|store| store["summary"].is_string() && store["commands"].is_array()),
+            "each runtime says what it is and which commands it provides: {listed:?}"
+        );
         let bad = stores.read("store/list", &json!({"kind": "toys"}), None);
         assert_eq!(bad.expect_err("refused").0, BAD_PARAMS);
         // Nothing is installed: a report asks the shelf and the search path, and a runtime's store answers it.

@@ -98,6 +98,10 @@ impl Recipe for FoundryRecipe {
     fn info(&self) -> StoreInfo {
         let mut info = StoreInfo::new("foundry", "Foundry Local", "Microsoft");
         info.homepage = Some("https://github.com/microsoft/Foundry-Local".to_owned());
+        info.summary = Some(
+            "Runs language models on this computer, for the agents that use a Foundry Local account.".to_owned(),
+        );
+        info.icon = Some("crucible".to_owned());
         info.platforms = measured_platforms();
         info.endpoints = [RELEASES_API.to_owned(), DOWNLOADS.to_owned()]
             .into_iter()
