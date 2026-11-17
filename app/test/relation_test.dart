@@ -1,9 +1,18 @@
 // What a session relates to, how it is keyed for a webpage, and how a page asks for the chat alone.
 import 'package:canoa/client/client_mode.dart';
+import 'package:canoa/client/related_rail.dart';
 import 'package:canoa/client/relation.dart';
+import 'package:canoa/client/relation_source.dart';
+import 'package:canoa/ledger/running_sessions.dart';
+import 'package:canoa/ledger/session_ledger.dart';
+import 'package:canoa/session_store.dart';
+import 'package:canoa/theme/look.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  railTests();
+
   group('originRelation', () {
     test('keys a page by its origin and scopes it by its path', () {
       final relation = originRelation('https://Example.COM/a/b?q=1#top', title: '  Docs  ')!;
@@ -96,5 +105,43 @@ void main() {
       expect(link.hasFragment, isFalse);
       expect(ClientMode.fullAppOf(Uri.parse('https://canoa.example/app/')).queryParameters, {'view': 'full'});
     });
+  });
+}
+
+void railTests() {
+  testWidgets('the chat-only index offers the sessions the host keeps running to join, below the page\'s own', (tester) async {
+    final ledger = SessionLedger(MemoryLedgerBackend());
+    ledger.record(
+      peerId: 'local:Claude', sessionId: 'old', entry: 'Claude', place: SessionPlace.local, reopenBy: 'session/load', cwd: '/w', title: 'An old one',
+    );
+    await ledger.flush();
+    final store = SessionStore(ledger: ledger);
+    addTearDown(store.dispose);
+    final running = RunningSessions(() async => [
+      RunningSession.parse({'entry': 'Claude', 'session': 's1', 'title': 'Fix the build', 'cwd': '/w', 'cursor': '9'})!,
+    ]);
+    addTearDown(running.dispose);
+    final source = ManualRelation(originRelation('https://example.com/a'));
+    addTearDown(source.dispose);
+    final joined = <String>[];
+    await tester.pumpWidget(MaterialApp(
+      theme: themeFor(LookId.canoa, Brightness.dark),
+      home: Scaffold(body: RelatedRail(
+        source: source, store: store, ledger: ledger, running: running,
+        onAttach: (session) async => joined.add(session.sessionId),
+        onNew: (_) async {}, onNewSession: () {}, onResume: (_) async {},
+      )),
+    ));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Running now'), findsOneWidget);
+    expect(find.text('Fix the build'), findsOneWidget);
+    expect(find.text('An old one'), findsOneWidget);
+    expect(tester.getTopLeft(find.byKey(const Key('related-name'))).dy, lessThan(tester.getTopLeft(find.text('Running now')).dy));
+    await tester.tap(find.byTooltip('Join'));
+    await tester.pump();
+    expect(joined, ['s1']);
+    await tester.pump(SessionLedger.saveDelay);
   });
 }
