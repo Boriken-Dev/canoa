@@ -7,6 +7,9 @@ serves them under `/office/` when `[host.web] office = true`. [`README.md`](READ
 - `taskpane/relation.js` is pure and imports nothing from Office.js: keep it that way, it is what `npm test` covers. The relation
   kinds (`conversation`, `document`) and the address parameters (`mode=chat`, `relation=<kind>:<key>`, `label=`) are the app's
   (`app/lib/client/`): change both sides together.
+- The pane and the app talk by two short JSON strings through `postMessage` (`relationMessage`, `parsePaneMessage` in
+  `relation.js`; `app/lib/client/pane_message.dart`): change both sides together. The portal's half is
+  `crates/canoa-host/src/portal/office.rs`; its routes and cookies are in the host's `AGENTS.md`.
 - A page added under `taskpane/` is served only once `office.rs` lists it, with the policy it needs; a new route there needs a
   test in `crates/canoa-host/src/web/tests.rs` saying what it relaxes and that every other route keeps its headers.
 - Inline script is refused by the policy: scripts are files of this origin. Office.js is loaded from `<head>` at the address in
@@ -17,4 +20,5 @@ serves them under `/office/` when `[host.web] office = true`. [`README.md`](READ
 ```sh
 cd clients/office && npm test          # node --test, no dependencies
 cargo test -p canoa-host --lib -- web:: office     # the routes' policies
+cargo test -p canoa-host --features portal --lib -- portal::tests::office     # the portal's side (Unix only)
 ```

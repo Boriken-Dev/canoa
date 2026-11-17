@@ -473,6 +473,9 @@ idle_seconds = 1800
 max_hosts = 64
 max_message_bytes = 4194304
 ping_seconds = 20                      # a ping on each relayed channel this often (0: none); two unanswered close it
+# office = false                       # serve the Office add-in under /office/ and let a sign-in end in the Office dialog, see "The Office add-in"
+# office_frames = ["https://*.officeapps.live.com"]   # with office: origins besides the built-in ones that may frame the add-in's pages
+# office_handoff_seconds = 60          # with office: how long a sign-in that ended in the dialog waits for the task pane to claim it
 max_failures_per_pair = 3
 max_failures_per_address = 10
 slow_after_user_failures = 4
@@ -673,6 +676,7 @@ server {
 | `GET /portal/ws/entry/NAME`, `GET /portal/ws/control` | a WebSocket to that entry or the control channel of the person's own host |
 | `POST /portal/pair` `{"peer": ID}` | accepts the browser's key once it has connected and waits in the host |
 | `GET /manifest.json`, `/favicon.ico`, `/icons/NAME` | given to anyone, signed in or not: a browser fetches the web manifest with no cookie, and they hold nothing of anyone's |
+| `GET /office/...`, `POST /office/session` | the Office add-in, only with `office = true`: see "The Office add-in" |
 | anything else, `GET` | the web app, to a signed-in browser; to any other `303 /portal/login` |
 
 A page connects to an entry once, which the host turns away and remembers as waiting, asks `/portal/pair` to accept its key,
@@ -684,6 +688,44 @@ request, from `/portal/session` or from `/portal/pair` sends the browser to `/po
 channel is turned away, so it checks `GET /portal/session` (still signed in), posts `{"peer": ID}` to `/portal/pair` with its own key
 and connects again. The rail shows the account and a **Sign out**, which posts `/portal/logout` and returns to the sign-in form. No
 token is in the page: the cookie is `HttpOnly`, and `fetch` and the WebSocket send it by themselves.
+
+## The Office add-in
+
+With `office = true` the portal serves the add-in's task pane for the signed-in person's own host, so Outlook, Word, Excel and
+PowerPoint can show the chat beside a message or a document. The add-in's folder in the repository, `clients/office/`, has the
+manifests and the steps to sideload them. Off, `/office/...` is an ordinary path of the site, behind the sign-in.
+
+| Request | Answer |
+| --- | --- |
+| `GET /office/taskpane.html`, `/office/dialog.html`, `/office/taskpane.js`, `/office/relation.js`, `/office/dialog.js`, `/office/icon-N.png` | given to anyone (they hold nothing of anyone's), each with the policy it needs: Office.js may load in the two pages, Office on the web may frame the task pane, the dialog keeps its link to Office (no `Cross-Origin-Opener-Policy`), the icon is `Cross-Origin-Resource-Policy: cross-origin` |
+| `GET /office/app/` | the web app's page, the one the task pane frames, to a browser that holds a session (else `401`); `frame-ancestors` names the same origins as the task pane |
+| `GET /office/session` | JSON, `200 {"signed_in": true, "user"}` for a browser that holds a session, else `401 {"signed_in": false}` |
+| `GET /office/signin` | the Office dialog's first request: marks the browser as signing in for the dialog and sends it to `/portal/login`; only from this site's own page (`Sec-Fetch-Site` absent or `same-origin`, else `403`) |
+| `POST /office/session` `{"handoff": STRING}` | claims the sign-in the dialog made, from this site's own page (`Origin` and `Sec-Fetch-Site` as for any post), and answers `200` with the task pane's session cookie; `401` for a string that is unknown, used or too old |
+
+Every other route keeps its headers, `X-Frame-Options: DENY` and `Cross-Origin-Opener-Policy: same-origin` included, and its
+sign-in. A path under `/office/` the add-in does not name is the site's.
+
+**Why the sign-in is not the site's.** The session cookie is `SameSite=Strict`, which a browser does not send from inside
+Outlook's page (another site), and Office on the web shows the task pane in a frame of that page. The sign-in page cannot be
+framed, so it runs in the dialog Office opens, a window of its own that shares no cookies with the frame. What can cross is a
+string, which Office carries from the dialog to the pane. So:
+
+1. The dialog goes to `/office/signin`, which sets `__Host-canoa-office` (`SameSite=Strict`, ten minutes) and sends the browser to
+   the sign-in page. While that cookie is held, no page of the portal sends `Cross-Origin-Opener-Policy` (Office refuses a message from
+   a dialog whose pages do).
+2. A sign-in that passes every step the policy asks, by any method, finds the cookie and opens no session. It keeps the account,
+   the steps passed and the time of its code in memory (`office_handoff_seconds`, one claim, at most `max_sessions_per_user` for
+   one account), clears the cookie and ends at `/office/dialog.html#done=STRING`, which sends the string to the pane.
+3. The pane's frame posts the string to `POST /office/session`. The portal opens a session with what the sign-in recorded, asks
+   the policy about it again from the address this request comes from (an account that is gone, or a method no longer accepted
+   from there, gets nothing) and sets `__Host-canoa-pane`, `Secure; HttpOnly; Path=/; SameSite=None; Partitioned`: a third-party
+   frame carries it, and a browser that blocks third-party cookies keeps one for this top-level site alone. It names a session as
+   `__Host-canoa` does; a request holding both is the site's.
+
+A state-changing request never relied on `SameSite`: each `POST` and WebSocket upgrade checks `Origin` and `Sec-Fetch-Site`, and
+`/canoa.json` refuses a request the browser says crossed sites, so the weaker cookie opens nothing a cross-site page could use. Safari
+and WKWebView block third-party cookies, and a pane in them is expected to ask for the sign-in again at once.
 
 ## What to know
 

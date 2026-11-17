@@ -557,7 +557,9 @@ you can read, or reach the host from the browser extension.
 address may load in the pane and the dialog, and Outlook on the web may frame the pane and the app's page. Every other path keeps the
 policy above. Office on the web needs HTTPS, so it is used behind a certificate the browser trusts. The add-in's folder in the
 repository, `clients/office/`, says how to render the manifests for your address and sideload them; `office_frames` names further
-origins that may frame the pages (Word, Excel and PowerPoint on the web, once you have seen which ones your account uses).
+origins that may frame the pages (Word, Excel and PowerPoint on the web, once you have seen which ones your account uses). A
+portal serves the same pages with `office = true` in its own settings, and signs in through Office's dialog: see
+[The portal](portal.md).
 
 The API header lists every setting.
 
