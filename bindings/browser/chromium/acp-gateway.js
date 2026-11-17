@@ -102,16 +102,6 @@ export function hereAddress(hostname, names = []) {
   return a === 127 || host === "0.0.0.0";
 }
 
-/** The session a forwarded `session/cancel` is for, and undefined for any other message. */
-function cancelledSession(text) {
-  try {
-    const message = JSON.parse(text);
-    return message?.method === "session/cancel" && typeof message.params?.sessionId === "string" ? message.params.sessionId : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /** An agent reached on this computer's own address. */
 function loopbackAgent(agent, names) {
   try {
@@ -606,7 +596,7 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
           return;
         }
         const step = link.scope.fromPage(message.msg);
-        const cancelled = step.forward === undefined ? undefined : cancelledSession(step.forward);
+        const cancelled = step.cancelled;
         if (cancelled !== undefined) {
           for (const wait of link.waits) {
             if (wait.session === cancelled) wait.stop.abort();
