@@ -182,3 +182,163 @@ fn a_chats_folder_is_made_and_taken_back_on_a_share() {
     assert_eq!(gone["result"]["removed"], true, "{gone}");
     clean(&parent);
 }
+
+fn overlay_host(tmp: &Path) -> Control {
+    Control::open(
+        None,
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens")
+    .with_files(Files::new(
+        Some(tmp.to_path_buf()),
+        Vec::new(),
+        None,
+        None,
+        UploadLimits::default(),
+    ))
+    .with_overlays(super::overlays::Overlays::new(
+        Some(tmp.join("cfg").join("overlays")),
+        super::overlays::OverlayLimits::default(),
+    ))
+}
+
+/// A repository made on this machine's disk and named through the administrative share.
+fn shared_repo(files: &[(&str, &str)]) -> (PathBuf, PathBuf) {
+    let share = shared("repo-source");
+    let local = local_of(&share);
+    super::overlays_tests::repo(&local, "tools", files);
+    (share.join("tools"), share)
+}
+
+#[test]
+fn a_skill_is_fetched_from_a_git_source_on_a_share() {
+    let (upstream, repo) = shared_repo(&[
+        (
+            "skills/review/SKILL.md",
+            "---\nname: review\ndescription: Reviews.\n---\nbody\n",
+        ),
+        ("skills/review/run.sh", "echo hi\n"),
+    ]);
+    let tmp = std::env::temp_dir().join(format!("canoa-unc-skill-{}", std::process::id()));
+    fs::create_dir_all(&tmp).expect("folder");
+    let c = overlay_host(&tmp);
+    let said = ask(
+        &c,
+        "skill/fetch",
+        super::overlays_tests::source(&upstream, "skills/review"),
+    );
+    let files = said["result"]["files"]
+        .as_object()
+        .unwrap_or_else(|| panic!("{said}"));
+    assert!(
+        files.contains_key("SKILL.md") && files.contains_key("run.sh"),
+        "{said}"
+    );
+    let _ = fs::remove_dir_all(&tmp);
+    clean(&repo);
+}
+
+#[test]
+fn an_overlay_is_checked_from_a_git_source_on_a_share() {
+    let (upstream, repo) = shared_repo(&[("OVERLAY.md", "# team\n")]);
+    let tmp = std::env::temp_dir().join(format!("canoa-unc-overlay-{}", std::process::id()));
+    fs::create_dir_all(&tmp).expect("folder");
+    let c = overlay_host(&tmp);
+    let mut params = super::overlays_tests::source(&upstream, "");
+    params["name"] = json!("team");
+    let said = ask(&c, "overlay/check", params);
+    assert!(said["result"]["token"].is_string(), "{said}");
+    let _ = fs::remove_dir_all(&tmp);
+    clean(&repo);
+}
+
+#[test]
+fn an_upload_is_kept_in_a_folder_on_a_share() {
+    let uploads = shared("uploads");
+    let local = local_of(&uploads);
+    let files = Files::new(
+        Some(local.clone()),
+        Vec::new(),
+        None,
+        Some(uploads.clone()),
+        UploadLimits::default(),
+    );
+    let c = Control::open(
+        None,
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens")
+    .with_files(files);
+    let put = ask(
+        &c,
+        "upload/put",
+        json!({"name": "report.pdf", "data": data_encoding::BASE64.encode(b"hello")}),
+    );
+    let path = PathBuf::from(
+        put["result"]["path"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{put}")),
+    );
+    assert_eq!(fs::read(&path).expect("kept"), b"hello", "{put}");
+    assert!(
+        path.to_string_lossy().starts_with(r"\\localhost\"),
+        "written plain, on the share: {put}"
+    );
+    let id = put["result"]["id"].as_str().expect("an id").to_owned();
+    let gone = ask(&c, "upload/remove", json!({"id": id}));
+    assert_eq!(gone["result"]["removed"], true, "{gone}");
+    clean(&uploads);
+}
+
+#[test]
+fn an_overlay_dir_on_a_share_is_read_and_named_plain() {
+    let folder = shared("overlay-dir");
+    let local = local_of(&folder);
+    fs::create_dir_all(local.join("team").join("rules")).expect("folder");
+    fs::write(local.join("team").join("rules").join("a.md"), "hi").expect("file");
+    let config = local.join("canoa.cfg");
+    let team = folder.join("team");
+    fs::write(
+        &config,
+        format!("[overlays.team]\ndir = {:?}\n", team.to_string_lossy()),
+    )
+    .expect("config");
+    let files = Files::new(
+        Some(local.clone()),
+        Vec::new(),
+        Some(config),
+        None,
+        UploadLimits::default(),
+    );
+    let c = Control::open(
+        None,
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens")
+    .with_files(files);
+    let reader = Caller::Peer {
+        id: "sha256:aa".to_owned(),
+        grants: [Grant::OverlayRead].into_iter().collect(),
+    };
+    let ask_as = |method: &str, params: Value| {
+        let line = serde_json::to_vec(
+            &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}),
+        )
+        .expect("encodes");
+        serde_json::from_slice::<Value>(&c.handle(&reader, &line).expect("answered")).expect("JSON")
+    };
+    let verbatim = format!(r"\\?\UNC\{}", &text(&team)[2..]);
+    for written in [text(&team), verbatim] {
+        let said = ask_as("profile/canonical", json!({"path": written}));
+        assert_eq!(said["result"]["directory"], text(&team), "{said}");
+        let said = ask_as("profile/tree", json!({"directory": written}));
+        assert!(said["result"]["files"]["rules/a.md"].is_string(), "{said}");
+    }
+    clean(&folder);
+}

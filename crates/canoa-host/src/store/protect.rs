@@ -346,7 +346,6 @@ mod tests {
     }
 }
 
-
 #[cfg(all(test, windows))]
 mod share_tests {
     use super::*;
