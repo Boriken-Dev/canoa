@@ -200,8 +200,9 @@ class ShellSettings extends ChangeNotifier {
       _change((host) {
         final agents = host['agents'];
         final table = agents is Map ? agents[entry] : null;
-        if (table is! Map)
+        if (table is! Map) {
           return 'There is no agent called $entry in the host\'s canoa.cfg.';
+        }
         final next = {
           for (final MapEntry(:key, :value) in table.entries) '$key': value,
         };
@@ -412,11 +413,13 @@ class _ShellsSectionState extends State<ShellsSection> {
 
   static String _agentDescription(AgentShell agent) {
     if (agent.problem case final problem?) return problem;
-    if (agent.setting == null)
+    if (agent.setting == null) {
       return 'No shell is chosen: ${agent.harness} uses its own.';
+    }
     final from = agent.own ? 'Its own choice' : 'The host\'s shell';
-    if (agent.env.isNotEmpty)
+    if (agent.env.isNotEmpty) {
       return '$from, told to ${agent.harness} as ${agent.env.join(', ')}.';
+    }
     return '$from. ${agent.notice ?? ''}'.trim();
   }
 
