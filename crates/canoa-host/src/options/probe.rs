@@ -29,6 +29,9 @@ const CLOSE_WAIT: Duration = Duration::from_secs(2);
 pub(crate) struct Probed {
     /// The models, each with the efforts the session lists; empty when its session lists none.
     pub(crate) models: Vec<ModelInfo>,
+    /// The modes the session lists, as (id, name), and the one it started in.
+    pub(crate) modes: Vec<(String, String)>,
+    pub(crate) default_mode: Option<String>,
 }
 
 /// Why a program could not be asked.
@@ -148,6 +151,7 @@ fn converse(child: &mut Child, folder: &Path, wait: Duration) -> Result<Probed, 
         deadline,
     )?;
     let models = models_of(&opened);
+    let (modes, default_mode) = modes_of(&opened);
     let closes = initialized
         .pointer("/agentCapabilities/sessionCapabilities/close")
         .is_some_and(|close| !close.is_null());
@@ -158,7 +162,11 @@ fn converse(child: &mut Child, folder: &Path, wait: Duration) -> Result<Probed, 
             Instant::now() + CLOSE_WAIT,
         );
     }
-    Ok(Probed { models })
+    Ok(Probed {
+        models,
+        modes,
+        default_mode,
+    })
 }
 
 /// The models a `session/new` answer lists, each with the efforts the session lists beside them.
@@ -260,6 +268,50 @@ pub(crate) fn models_of(opened: &Value) -> Vec<ModelInfo> {
         .collect()
 }
 
+/// The modes a `session/new` answer lists, as (id, name), and the one it is in: the `mode` option of `configOptions` wins over
+/// the older `modes` block.
+pub(crate) fn modes_of(opened: &Value) -> (Vec<(String, String)>, Option<String>) {
+    let text = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
+    let option = opened
+        .get("configOptions")
+        .and_then(Value::as_array)
+        .and_then(|options| {
+            options.iter().find(|option| {
+                text(option, "category").as_deref() == Some("mode")
+                    || text(option, "id").as_deref() == Some("mode")
+            })
+        });
+    if let Some(option) = option {
+        let listed = option
+            .get("options")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|choice| {
+                let id = text(choice, "value")?;
+                let name = text(choice, "name").unwrap_or_else(|| id.clone());
+                Some((id, name))
+            })
+            .collect();
+        return (listed, text(option, "currentValue"));
+    }
+    let Some(block) = opened.get("modes") else {
+        return (Vec::new(), None);
+    };
+    let listed = block
+        .get("availableModes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|mode| {
+            let id = text(mode, "id")?;
+            let name = text(mode, "name").unwrap_or_else(|| id.clone());
+            Some((id, name))
+        })
+        .collect();
+    (listed, text(block, "currentModeId"))
+}
+
 /// A directory of its own for the probe's session, removed when it goes.
 struct Folder(PathBuf);
 
@@ -311,6 +363,29 @@ mod tests {
         let models = models_of(&opened);
         assert_eq!(models[0].id, "m1");
         assert!(models[0].is_default && models[0].efforts.is_empty());
+    }
+
+    #[test]
+    fn modes_come_from_the_option_or_the_older_block() {
+        let option = json!({"configOptions": [{"id": "mode", "category": "mode", "currentValue": "plan",
+            "options": [{"value": "default", "name": "Manual"}, {"value": "plan"}]}]});
+        assert_eq!(
+            modes_of(&option),
+            (
+                vec![
+                    ("default".into(), "Manual".into()),
+                    ("plan".into(), "plan".into())
+                ],
+                Some("plan".into())
+            )
+        );
+        let block =
+            json!({"modes": {"currentModeId": "a", "availableModes": [{"id": "a", "name": "A"}]}});
+        assert_eq!(
+            modes_of(&block),
+            (vec![("a".into(), "A".into())], Some("a".into()))
+        );
+        assert_eq!(modes_of(&json!({"sessionId": "s"})), (Vec::new(), None));
     }
 
     #[test]

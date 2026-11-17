@@ -80,6 +80,11 @@ pub struct Choices {
     pub signed_out: bool,
     /// The models in the provider's order, each with its own efforts.
     pub models: Vec<ModelInfo>,
+    /// The modes a probe session listed, as (id, name), for a program that lists them only in its session; empty for any
+    /// other source.
+    pub modes: Vec<(String, String)>,
+    /// The mode the probe session started in.
+    pub default_mode: Option<String>,
     /// The program the source runs, as the provider names it.
     pub program: Option<String>,
     /// The first line of the program's `--version`, when it answered: what a cache of these choices is keyed by.
@@ -101,6 +106,8 @@ impl Choices {
             unknown_kind: None,
             signed_out: false,
             models: Vec::new(),
+            modes: Vec::new(),
+            default_mode: None,
             program: None,
             program_version: None,
             cache_lifetime: None,
@@ -121,6 +128,7 @@ impl Choices {
     /// not known, `signed_out` when true, `program`, `program_version`,
     /// `cache_lifetime` (the provider's sentence on what it does with the prompt-cache lifetime),
     /// `cache_choices` (`[{id, label}]`, the lifetimes it honours beyond the default; absent when none) and
+    /// `modes` (`[{id, name}]`, with `default_mode`, for a program that lists them in its session) and
     /// `models`, each `{id, name?, description?, resolved?, version?, efforts, default_effort?, is_default?}`.
     #[must_use]
     pub fn to_json(&self) -> Value {
@@ -136,6 +144,7 @@ impl Choices {
         put("program_version", &self.program_version);
         put("cache_lifetime", &self.cache_lifetime);
         put("cache_lifetime_setting", &self.configured_cache_lifetime);
+        put("default_mode", &self.default_mode);
         if !self.cache_choices.is_empty() {
             out.insert(
                 "cache_choices".into(),
@@ -154,6 +163,17 @@ impl Choices {
         }
         if self.signed_out {
             out.insert("signed_out".into(), json!(true));
+        }
+        if !self.modes.is_empty() {
+            out.insert(
+                "modes".into(),
+                Value::Array(
+                    self.modes
+                        .iter()
+                        .map(|(id, name)| json!({"id": id, "name": name}))
+                        .collect(),
+                ),
+            );
         }
         out.insert(
             "models".into(),
@@ -333,6 +353,8 @@ fn probed(name: &str, program: &OsString, args: &[OsString], wait: Duration) -> 
             known: true,
             unknown_because: None,
             models: probed.models,
+            modes: probed.modes,
+            default_mode: probed.default_mode,
             ..Choices::unknown("")
         },
         Err(probe::Failure::NotInstalled(why)) => Choices {
@@ -378,6 +400,8 @@ fn ask(
         }),
         signed_out: listing.signed_out,
         models: listing.models,
+        modes: Vec::new(),
+        default_mode: None,
         program,
         program_version,
         cache_lifetime: info.as_ref().and_then(|info| info.cache_lifetime.clone()),
