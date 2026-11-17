@@ -1038,6 +1038,21 @@ fn bomb_tree(repo: &Path, depth: usize) -> String {
 #[test]
 fn a_tree_of_a_million_paths_is_refused_as_soon_as_it_passes_the_limit() {
     let s = setup(None, OverlayLimits::default());
+    // What a check of a one-file source costs here: git's process starts dominate it, and they cost far more on Windows.
+    // The bound is that many round-trips, so it follows the platform and still fails for a refusal that reads a whole tree.
+    let small = bare_source(&s, "small");
+    let root = mktree(
+        &small,
+        &format!(
+            "100644 blob {}	overlay.cfg
+",
+            hash_blob(&small, "")
+        ),
+    );
+    commit_tree_on_main(&small, &root);
+    let measured = std::time::Instant::now();
+    let _ = check(&s, &Caller::Owner, "small", &source(&small, ""));
+    let bound = (measured.elapsed() * 40).max(std::time::Duration::from_secs(60));
     // 10^5 paths are read whole and hit the entry limit; 10^6 are cut off by what git may print.
     for (hidden, depth) in [(false, 5), (true, 5), (false, 6)] {
         let dir = bare_source(&s, "bomb");
@@ -1056,8 +1071,8 @@ fn a_tree_of_a_million_paths_is_refused_as_soon_as_it_passes_the_limit() {
         let answer = check(&s, &Caller::Owner, "bomb", &source(&dir, ""));
         assert_eq!(answer["error"]["code"], REFUSED, "{name}: {answer}");
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(60),
-            "{name}: took {:?}",
+            started.elapsed() < bound,
+            "{name}: took {:?}, bound {bound:?}",
             started.elapsed()
         );
         assert!(!s.overlays.join("bomb").exists());
