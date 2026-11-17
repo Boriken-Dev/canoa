@@ -72,12 +72,12 @@ where
     Ok(Arc::new(P::from(settings)))
 }
 
-fn schema_of<S: Schema>() -> Result<Value, String> {
+pub(super) fn schema_of<S: Schema>() -> Result<Value, String> {
     let value = S::schema().map_err(|error| error.to_string())?;
     serde_json::to_value(guatiao_serde::Serializable::from(&value)).map_err(|e| e.to_string())
 }
 
-fn form_of<S: Screen>() -> Result<Value, String> {
+pub(super) fn form_of<S: Screen>() -> Result<Value, String> {
     let value = S::form(Alloc::rust()).map_err(|error| error.to_string())?;
     serde_json::to_value(guatiao_serde::Serializable::from(&value)).map_err(|e| e.to_string())
 }
@@ -106,7 +106,7 @@ fn kind(id: &str) -> Option<&'static Kind> {
 }
 
 /// The settings a schema marks as secrets: a read never answers them.
-fn secrets_of(schema: &Value) -> BTreeSet<String> {
+pub(super) fn secrets_of(schema: &Value) -> BTreeSet<String> {
     schema["properties"]
         .as_object()
         .into_iter()
@@ -116,7 +116,7 @@ fn secrets_of(schema: &Value) -> BTreeSet<String> {
         .collect()
 }
 
-fn members_of(schema: &Value) -> BTreeSet<String> {
+pub(super) fn members_of(schema: &Value) -> BTreeSet<String> {
     schema["properties"]
         .as_object()
         .into_iter()
@@ -337,7 +337,7 @@ fn end_all(stale: Vec<Open>) {
     }
 }
 
-fn text_list(params: &Value, key: &str) -> Result<Vec<String>, (i32, String)> {
+pub(super) fn text_list(params: &Value, key: &str) -> Result<Vec<String>, (i32, String)> {
     match params.get(key) {
         None | Some(Value::Null) => Ok(Vec::new()),
         Some(Value::Array(items)) => items

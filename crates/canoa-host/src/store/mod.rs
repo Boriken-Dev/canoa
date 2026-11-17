@@ -12,6 +12,7 @@ mod extension_catalog_tests;
 pub mod footprint;
 pub(crate) mod index;
 pub(crate) mod mcp;
+pub mod piper;
 pub mod programs;
 pub mod protect;
 pub mod registry;

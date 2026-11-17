@@ -11,6 +11,7 @@ use alloc::sync::Arc;
 use coqui_acp_api::guatiao::library::Registry;
 
 use super::builtin::store_provider;
+use super::piper::PiperStore;
 use super::runtimes::{FoundryStore, NodeStore, PythonStore};
 use super::shell_stores::{GitBashStore, PowerShellStore};
 use super::whisper::WhisperStore;
@@ -58,6 +59,7 @@ coqui_acp_api::guatiao::local_providers!(
         PythonStore,
         FoundryStore,
         WhisperStore,
+        PiperStore,
         GitBashStore,
         PowerShellStore
     ]

@@ -342,6 +342,8 @@ pub(crate) struct Control {
     shells: crate::shells::Plan,
     /// The speech providers canoa.cfg defines, and the recordings open on them.
     speech: speech::Speech,
+    /// The text-to-speech providers canoa.cfg defines, and the utterances open on them.
+    say: say::Say,
     overlays: Arc<Overlays>,
     /// Registry reads and the cache of what catalogs provide.
     registry: Registry,
@@ -454,6 +456,7 @@ impl Control {
             terminals: Terminals::default(),
             shells: crate::shells::Plan::default(),
             speech: speech::Speech::default(),
+            say: say::Say::default(),
             overlays: Arc::new(Overlays::default()),
             registry: Registry::default(),
             index: Arc::new(crate::store::index::StoreIndex::default()),
@@ -513,6 +516,19 @@ impl Control {
     #[cfg(test)]
     pub(crate) fn age_recordings(&self, by: Duration) {
         self.speech.age(by);
+    }
+
+    /// Makes the open utterances look `by` older.
+    #[cfg(test)]
+    pub(crate) fn age_utterances(&self, by: Duration) {
+        self.say.age(by);
+    }
+
+    /// Where the Store's Piper is, as a test says.
+    #[cfg(test)]
+    pub(crate) fn with_managed_piper(mut self, path: Option<PathBuf>) -> Self {
+        self.say = core::mem::take(&mut self.say).managed_at(path);
+        self
     }
 
     /// The terminals this host runs.
@@ -980,6 +996,13 @@ impl Control {
                 Some(method @ ("speech/offers" | "speech/enable")) => {
                     speech_offers::call(caller, &self.files, self.stores(), method, &params)
                 }
+                Some(
+                    method @ ("speech/voices"
+                    | "speech/say"
+                    | "speech/audio"
+                    | "speech/stop"
+                    | "speech/say_configure"),
+                ) => self.say.call(caller, &self.files, method, &params),
                 Some(method) if method.starts_with("speech/") => {
                     self.speech.call(caller, &self.files, method, &params)
                 }
@@ -1518,6 +1541,9 @@ mod index;
 mod looks;
 #[cfg(test)]
 mod looks_tests;
+mod say;
+#[cfg(test)]
+mod say_tests;
 mod speech;
 mod speech_offers;
 #[cfg(test)]
