@@ -1,0 +1,9 @@
+{
+  "name": "@boriken/canoa-office",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-timeout=60000 test/*.test.js"
+  }
+}

@@ -1,0 +1,143 @@
+// What an open Office item relates a chat to: a mail conversation, or a document. Pure: it reads plain values the task pane
+// took from Office.js and imports nothing from it, so it runs under `node --test`.
+//
+// The app keeps the result beside each session it starts and lists the sessions with the same relation first. The key is a hash
+// of the item's identity, so the app's session list holds no address, subject or path in it; the label is what the person calls the
+// item in that list. Neither is sent to the agent.
+
+/** The kinds the app's `Relation` names for an Office task pane. */
+export const CONVERSATION = 'conversation';
+export const DOCUMENT = 'document';
+
+/** The page of the chat-only app, under this add-in's own route, and the parameters that ask for the chat alone. */
+export const APP_PATH = '/office/app/';
+
+const LABEL_MAX = 80;
+const KEY_HEX = 32;
+
+/**
+ * The key a relation is stored under: the first 128 bits of SHA-256 over the kind and the item's identity, in hexadecimal.
+ * The same input gives the same key on every call and in every client of the same mailbox or document.
+ * @param {string} kind
+ * @param {string} identity
+ * @returns {Promise<string>}
+ */
+export async function hashKey(kind, identity) {
+  const bytes = new TextEncoder().encode(`${kind}\n${identity}`);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  let hex = '';
+  for (const byte of new Uint8Array(digest)) hex += byte.toString(16).padStart(2, '0');
+  return hex.slice(0, KEY_HEX);
+}
+
+/** Whether `value` is a non-blank string. */
+function present(value) {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+/** `text` on one line, trimmed and cut to what a list shows; undefined when nothing is left. */
+function tidy(text) {
+  if (!present(text)) return undefined;
+  const line = text.replace(/\s+/g, ' ').trim();
+  return line.length > LABEL_MAX ? `${line.slice(0, LABEL_MAX - 1)}…` : line;
+}
+
+/**
+ * The relation of an open mail item, or null when it has none: a new message in compose has no conversation id until it has a
+ * subject and is saved, and `item.conversationId` is null or empty then. A reply whose subject the person changes gets a new
+ * id, and so a new relation.
+ * @param {{conversationId?: string|null, subject?: string|null}} item
+ * @returns {Promise<{kind: string, key: string, label?: string}|null>}
+ */
+export async function relationForMail(item) {
+  if (!item || !present(item.conversationId)) return null;
+  const relation = { kind: CONVERSATION, key: await hashKey(CONVERSATION, item.conversationId.trim()) };
+  const label = tidy(item.subject);
+  return label === undefined ? relation : { ...relation, label };
+}
+
+/**
+ * `url` as one string a document is known by: its fragment left out, since a fragment is a place inside the document, and its
+ * scheme and host in lower case. A query is kept: a SharePoint address names its document there, and two openings that differ
+ * only in a query are then not related, which is the safe way to be wrong. A path that is not a URL (a local file's) is kept as
+ * written.
+ * @param {string} url
+ * @returns {string}
+ */
+export function normalizeDocumentUrl(url) {
+  const text = url.trim();
+  try {
+    const parsed = new URL(text);
+    parsed.hash = '';
+    return parsed.href;
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * What the person calls a document: the last part of its address, decoded; undefined for one with none.
+ * @param {string} url
+ * @returns {string|undefined}
+ */
+export function documentName(url) {
+  let path = url.trim();
+  try {
+    path = new URL(path).pathname;
+  } catch {
+    // A local path, read as it is.
+  }
+  const last = path.split(/[\\/]/).filter((part) => part !== '').pop();
+  if (last === undefined) return undefined;
+  try {
+    return tidy(decodeURIComponent(last));
+  } catch {
+    return tidy(last);
+  }
+}
+
+/**
+ * The relation of the open document, or null when it has none: `Office.context.document.url` is null where the address is
+ * unavailable and empty for a file not saved yet. `app` names the Office application (`word`, `excel`, `powerpoint`), since a
+ * `.docx` and an `.xlsx` never share an address but a pane might be shown for either.
+ * @param {{app?: string, url?: string|null}} document
+ * @returns {Promise<{kind: string, key: string, label?: string}|null>}
+ */
+export async function relationForDocument(document) {
+  if (!document || !present(document.url)) return null;
+  const app = present(document.app) ? document.app.trim().toLowerCase() : 'office';
+  const relation = {
+    kind: DOCUMENT,
+    key: await hashKey(DOCUMENT, `${app}\n${normalizeDocumentUrl(document.url)}`),
+  };
+  const label = documentName(document.url);
+  return label === undefined ? relation : { ...relation, label };
+}
+
+/**
+ * Whether two relations name the same thing: the same kind and key. A label does not count.
+ * @param {{kind: string, key: string}|null|undefined} a
+ * @param {{kind: string, key: string}|null|undefined} b
+ * @returns {boolean}
+ */
+export function sameRelation(a, b) {
+  if (!a || !b) return !a && !b;
+  return a.kind === b.kind && a.key === b.key;
+}
+
+/**
+ * The address of the chat-only app for `relation` (or for none), on `origin`: `mode=chat`, and `relation=<kind>:<key>` with
+ * `label=` as the app's `ClientMode` reads them.
+ * @param {string} origin
+ * @param {{kind: string, key: string, label?: string}|null} relation
+ * @returns {string}
+ */
+export function appAddress(origin, relation) {
+  const address = new URL(APP_PATH, origin);
+  address.searchParams.set('mode', 'chat');
+  if (relation) {
+    address.searchParams.set('relation', `${relation.kind}:${relation.key}`);
+    if (relation.label) address.searchParams.set('label', relation.label);
+  }
+  return address.href;
+}

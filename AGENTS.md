@@ -28,6 +28,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI; the only crate with `unsafe`, bar one module of `canoa-host` (`usage_splice/members/win32.rs`, the Windows process table) |
 | `crates/canoa-launch/` | The Windows portable launcher: carries the built app folder, unpacks it once per version, verifies and starts it; `app/tool/portable.py` builds it and the Linux AppImage |
 | `clients/browser/chromium/` | MV3 browser extension code and permission policy |
+| `clients/office/` | The Office add-in: manifests for Outlook and for Word, Excel and PowerPoint, rendered for an origin by `render.mjs`; the task pane page that frames the chat-only app for the open item; `canoa-host` carries the pages and serves them with `[host.web] office = true` |
 | `docs/` | Architecture and interoperability contracts; `docs/roadmap.md` is the one status table |
 | `tools/` | Offline dependency mirroring |
 
@@ -76,6 +77,7 @@ cargo build -p canoa-ffi --lib
 # main.dart's own main in the built app, one step a run on a new empty DIR: first (no canoa.cfg), flag, config, hosted
 (cd app && CANOA_TEST_LAUNCH_STEP=first CANOA_CONFIG=DIR/canoa.cfg COQUI_AGENTIC_PEER_HOME=DIR/home flutter test integration_test/launch_test.dart -d windows)
 (cd clients/browser/chromium && npm test)
+(cd clients/office && npm test)
 # the built web app in a real browser: no service worker, every request to its own origin, symbols, emoji and CJK drawn from the fonts `build.py` copies in
 (cd clients/browser/chromium && CANOA_E2E_BROWSER=<Edge> CANOA_E2E_HOST=<canoa> CANOA_E2E_AGENT=<stdio_agent> CANOA_E2E_WEB=../../../app/build/web [CANOA_E2E_SHOT=<png>] node e2e/web_fonts.mjs)
 mkdocs build --strict

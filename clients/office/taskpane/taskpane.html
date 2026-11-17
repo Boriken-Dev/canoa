@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Canoa</title>
+    <!-- Office.js is loaded from the head, from Microsoft's own address; the host's policy allows that origin on this page only. -->
+    <script src="https://officeapis.public.onecdn.static.microsoft/1/office.js"></script>
+    <style>
+      html, body { height: 100%; margin: 0; background: #101820; color: #e6eef2; font: 14px system-ui, sans-serif; }
+      body { display: flex; flex-direction: column; }
+      #bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: 12px; background: #17232d; }
+      #status { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      button { font: inherit; color: inherit; background: #24394a; border: 1px solid #3a5469; border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+      iframe { flex: 1; width: 100%; border: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <span id="status" role="status">Loading Canoa</span>
+      <button id="signin" type="button" hidden>Sign in</button>
+    </div>
+    <iframe id="canoa" title="Canoa"></iframe>
+    <script type="module" src="taskpane.js"></script>
+  </body>
+</html>
