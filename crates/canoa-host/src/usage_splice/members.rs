@@ -2,30 +2,30 @@
 //! process table. Antigravity may sit below a launcher (`canoa launch` with a profile), so its listening port is
 //! owned by a grandchild of the process the host started.
 //!
-//! The table is read by Windows' Toolhelp snapshot in this process, and by `ps` elsewhere, which runs on a worker thread
-//! bounded in time and size. A snapshot that cannot be had leaves the agent's own process alone, which is the answer for an
+//! The table is read in this process by Windows' Toolhelp snapshot and on Linux from `/proc`, and by `ps` elsewhere, which
+//! runs on a worker thread bounded in time and size. A snapshot that cannot be had leaves the agent's own process alone, which is the answer for an
 //! agent that is not below anything.
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 use core::time::Duration;
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 use std::io::Read as _;
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 use std::thread;
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 use std::time::Instant;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 use crate::spawn::{Command, Stdio};
 
 /// The longest `ps` may run.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 const LIMIT: Duration = Duration::from_secs(5);
 /// The most of its output that is read.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 const MAX_LISTING: u64 = 4 * 1024 * 1024;
 
 /// `root` and the processes below it, by parent, plus on Unix the ones in its process group (the agent leads a group of
@@ -108,13 +108,44 @@ fn snapshot() -> Option<String> {
     win32::listing()
 }
 
-#[cfg(not(windows))]
+/// Every process's `PID PPID PGID START` from `/proc`, where START is the start time in clock ticks since boot. A process
+/// that ends while the table is read is left out.
+#[cfg(target_os = "linux")]
+fn snapshot() -> Option<String> {
+    use core::fmt::Write as _;
+    let mut listing = String::new();
+    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+            continue;
+        };
+        // The command name is in parentheses and may hold spaces and parentheses: the fields follow the last one.
+        let Some((_, rest)) = stat.rsplit_once(')') else {
+            continue;
+        };
+        let fields: Vec<&str> = rest.split_whitespace().collect();
+        if let (Some(parent), Some(group), Some(start)) =
+            (fields.get(1), fields.get(2), fields.get(19))
+        {
+            let _ = writeln!(listing, "{pid} {parent} {group} {start}");
+        }
+    }
+    Some(listing)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn snapshot() -> Option<String> {
     run(Command::new("/bin/ps").args(["-A", "-o", "pid=,ppid=,pgid="]))
 }
 
 /// What `command` writes to its standard output, if it ended well within [`LIMIT`].
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn run(command: &mut Command) -> Option<String> {
     let mut child = command
         .stdin(Stdio::Null)
@@ -200,7 +231,15 @@ mod tests {
             .stdout(Stdio::Null)
             .spawn()
             .expect("a child that waits");
-        let found = members(std::process::id());
+        // A loaded machine may not show the child at the first read.
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        let found = loop {
+            let found = members(std::process::id());
+            if found.contains(&child.id()) || std::time::Instant::now() >= until {
+                break found;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
         let _ = child.kill();
         let _ = child.wait();
         assert!(found.contains(&child.id()), "{found:?}");
@@ -240,6 +279,7 @@ mod tests {
         assert!(found.len() >= 3, "{found:?}");
     }
 
+    #[cfg(any(windows, target_os = "linux"))]
     #[test]
     fn the_process_table_is_read_without_starting_a_program() {
         // A program started for the table costs hundreds of milliseconds; reading it in process costs a few.
