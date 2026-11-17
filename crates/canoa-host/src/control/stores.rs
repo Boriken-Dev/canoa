@@ -436,6 +436,24 @@ impl Stores {
             .map_err(|error| refusal(&error))
     }
 
+    /// The start of the managed copy of `provider`'s program, once its files check out against what was recorded; `None` when the
+    /// host manages no copy of it.
+    pub(crate) fn managed_launch(&self, provider: &str) -> Result<Option<String>, Failed> {
+        let (_, store) = self.store(&json!({"provider": provider}))?;
+        if self
+            .programs
+            .managed_version(&*store)
+            .map_err(|error| refusal(&error))?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        self.programs
+            .launch(&*store)
+            .map(|launch| Some(launch.path))
+            .map_err(|error| refusal(&error))
+    }
+
     /// Carries out the plan kept for `owner` under `token` with no one to ask: an install that needs a typed answer fails.
     pub(crate) fn apply_kept(
         &self,
@@ -736,7 +754,8 @@ mod runtimes_tests {
             [
                 ("node_store".to_owned(), "node".to_owned()),
                 ("python_store".to_owned(), "python".to_owned()),
-                ("foundry_store".to_owned(), "foundry".to_owned())
+                ("foundry_store".to_owned(), "foundry".to_owned()),
+                ("whisper_store".to_owned(), "whisper".to_owned())
             ]
         );
         let listed = runtimes["stores"].as_array().expect("a list");
@@ -744,7 +763,7 @@ mod runtimes_tests {
             .iter()
             .map(|store| store["icon"].as_str().expect("an icon"))
             .collect();
-        assert_eq!(icons, ["nodes", "indent", "crucible"]);
+        assert_eq!(icons, ["nodes", "indent", "crucible", "chip"]);
         assert!(
             listed
                 .iter()

@@ -38,7 +38,12 @@ const GITHUB_ASSET_HOSTS: [&str; 2] = [
 ];
 
 /// The provider ids of the runtimes' stores, in the order the app lists them.
-pub const RUNTIMES: [&str; 3] = ["node_store", "python_store", "foundry_store"];
+pub const RUNTIMES: [&str; 4] = [
+    "node_store",
+    "python_store",
+    "foundry_store",
+    "whisper_store",
+];
 
 /// The names of the programs the runtimes are kept under on the programs folder, and so the folders put on the `PATH` of what
 /// the host starts. Foundry Local is kept beside them but is not one: its folder holds libraries a program should not find.

@@ -185,6 +185,7 @@ pub trait Recipe: Send + Sync + 'static {
     fn self_updates(&self) -> bool { false }
     fn launch(&self, path: &str, staging: &str, release: &Release) -> Launch;  // default: `Launch::new(path)`, `executable_settings(path)`, `launch_environment()`
     fn version_command(&self, path: &str, staging: &str, release: &Release) -> (String, Vec<String>);  // default: `(path, version_args)`
+    fn channel_of(&self, plan: &InstallPlan) -> Option<String> { None }  // the channel a confirmed plan was made for, when it changes the files but not the version (a model); the engine plans again with it at apply
     fn finish(&self, finish: &Finish<'_>) -> Result<(), ProviderError> { Ok(()) } // the step after the files are placed
 }
 pub struct Release { pub version: String, pub parts: Vec<Part>, pub launch: String, pub steps: Vec<String>,

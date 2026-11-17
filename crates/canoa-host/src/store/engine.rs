@@ -308,7 +308,10 @@ impl<R: Recipe> Engine<R> {
         }
         let info = spawner.describe()?;
         let platform = Platform::new(info.os, info.arch);
-        let release = self.recipe.release(Some(version), None, &platform, tools)?;
+        let channel = self.recipe.channel_of(plan);
+        let release = self
+            .recipe
+            .release(Some(version), channel.as_deref(), &platform, tools)?;
         if token_of(
             &release,
             &platform,

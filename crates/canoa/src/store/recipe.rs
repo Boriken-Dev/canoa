@@ -10,7 +10,8 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, Status, Value};
 
 use super::{
-    Change, Download, InstallTools, LatestReport, Launch, Platform, Serves, StoreInfo, Updatable,
+    Change, Download, InstallPlan, InstallTools, LatestReport, Launch, Platform, Serves, StoreInfo,
+    Updatable,
 };
 
 /// What to unpack a fetched file with.
@@ -266,6 +267,13 @@ pub trait Recipe: Send + Sync + 'static {
                 .map(|a| (*a).to_owned())
                 .collect(),
         )
+    }
+
+    /// The channel a confirmed `plan` was made for, for a recipe whose channel changes what is fetched without changing the version
+    /// (a model, say): a plan holds the version and the files, not the channel, and the engine plans the release again at apply.
+    /// Nothing by default, which is the store's own default channel.
+    fn channel_of(&self, _plan: &InstallPlan) -> Option<String> {
+        None
     }
 
     /// What runs after the files are placed: nothing, for a program that is one file.

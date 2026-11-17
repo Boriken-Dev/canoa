@@ -23,6 +23,10 @@ use canoa_host::store::runtimes::{
     NODE_ORIGIN, NodeRecipe, PYTHON_RELEASES, PythonRecipe, RUNTIME_PROGRAMS,
 };
 use canoa_host::store::tools::LocalTools;
+use canoa_host::store::whisper::{
+    DOWNLOADS as WHISPER_DOWNLOADS, MODELS, MODELS_ORIGIN, Model, RELEASES_API as WHISPER_RELEASES,
+    WhisperRecipe,
+};
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use sha2::{Digest, Sha256};
@@ -579,4 +583,308 @@ fn each_runtime_says_what_it_is_names_a_glyph_and_the_commands_it_puts_on_a_path
         NodeRecipe.info().commands,
         ["node", "npm", "npx", "corepack"]
     );
+}
+
+// whisper.cpp: the program from a release listing and one model from a folder of its own, both served from a world of documents.
+
+const MODEL_BYTES: &[u8] = b"a stand-in model, a few bytes of it";
+
+fn models() -> &'static [Model] {
+    static MODELS: std::sync::OnceLock<Vec<Model>> = std::sync::OnceLock::new();
+    MODELS.get_or_init(|| {
+        let digest: &'static str = Box::leak(sha256(MODEL_BYTES).into_boxed_str());
+        ["base", "tiny.en"]
+            .into_iter()
+            .map(|id| Model {
+                id,
+                label: "a stand-in",
+                file: if id == "base" {
+                    "ggml-base.bin"
+                } else {
+                    "ggml-tiny.en.bin"
+                },
+                bytes: MODEL_BYTES.len() as u64,
+                sha256: digest,
+            })
+            .collect()
+    })
+}
+
+fn whisper_recipe() -> WhisperRecipe {
+    WhisperRecipe::with_models(models())
+}
+
+struct WhisperFixture;
+
+impl WhisperFixture {
+    fn name() -> &'static str {
+        match (cfg!(windows), cfg!(target_arch = "aarch64")) {
+            (true, true) => "whisper-bin-win-cpu-arm64.zip",
+            (true, false) => "whisper-bin-x64.zip",
+            (false, true) => "whisper-bin-ubuntu-arm64.tar.gz",
+            (false, false) => "whisper-bin-ubuntu-x64.tar.gz",
+        }
+    }
+
+    fn archive(version: &str, exit: u32, extra: &[u8]) -> Vec<u8> {
+        let mut program = standin_bytes(
+            &standin(),
+            &format!("whisper.cpp version: {version}"),
+            exit,
+            None,
+        );
+        program.extend_from_slice(extra);
+        if cfg!(windows) {
+            zipped(&[
+                ("Release/whisper-cli.exe", &program),
+                ("Release/whisper.dll", b"library"),
+            ])
+        } else {
+            tar_gz(&[
+                ("whisper-bin-ubuntu/whisper-cli", &program),
+                ("whisper-bin-ubuntu/libwhisper.so", b"library"),
+            ])
+        }
+    }
+}
+
+impl Fixture for WhisperFixture {
+    fn older(&self) -> String {
+        "1.9.4".to_owned()
+    }
+
+    fn newer(&self) -> String {
+        "1.9.5".to_owned()
+    }
+
+    fn platform(&self) -> Platform {
+        here()
+    }
+
+    fn auto_update_var(&self) -> Option<String> {
+        None
+    }
+
+    fn world(&self, variant: Variant) -> World {
+        let mut world = World::new();
+        // 1.9.4 carries its files itself; 1.9.5 has none, and the build made a few minutes before it does.
+        let mut releases = Vec::new();
+        for (version, newer, tag, published) in [
+            ("1.9.4", false, "v1.9.4", "2026-09-11T05:31:55Z"),
+            ("1.9.5", true, "b5454", "2026-10-06T16:51:27Z"),
+        ] {
+            let (exit, extra, claim_good) = bytes_for(variant, version, newer);
+            let bytes = Self::archive(version, exit, extra);
+            let claimed = if claim_good {
+                sha256(&Self::archive(version, 0, b""))
+            } else {
+                sha256(&bytes)
+            };
+            releases.push(serde_json::json!({
+                "tag_name": tag, "draft": false, "published_at": published,
+                "assets": [
+                    {"name": Self::name(), "digest": format!("sha256:{claimed}")},
+                    {"name": "whisper-other.zip", "digest": format!("sha256:{}", "0".repeat(64))},
+                ],
+            }));
+            world.put(format!("{WHISPER_DOWNLOADS}{tag}/{}", Self::name()), bytes);
+        }
+        releases.push(serde_json::json!({
+            "tag_name": "v1.9.5", "draft": false, "published_at": "2026-10-06T17:39:17Z", "assets": [],
+        }));
+        world.put(
+            format!("{WHISPER_RELEASES}?per_page=40"),
+            serde_json::Value::Array(releases).to_string().into_bytes(),
+        );
+        for each in models() {
+            world.put(
+                format!("{MODELS_ORIGIN}{}", each.file),
+                MODEL_BYTES.to_vec(),
+            );
+        }
+        if variant == Variant::DownloadFails {
+            world.fail_big(1024);
+        }
+        if variant == Variant::Slow {
+            world.slow();
+        }
+        world
+    }
+}
+
+forwarding!(Whisper, WhisperRecipe);
+
+#[test]
+fn the_whisper_store_passes_every_check() {
+    let _alone = ONE_SUITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let store: Arc<dyn ProgramStore> = Arc::new(Whisper(Engine::new(
+        whisper_recipe(),
+        StoreSettings::default(),
+    )));
+    let failures = run(store, &WhisperFixture);
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn the_whisper_plan_fetches_the_program_of_this_system_and_the_chosen_model_and_checks_both() {
+    let store = Whisper(Engine::new(whisper_recipe(), StoreSettings::default()));
+    let plan = plan_of(&store, &WhisperFixture, None);
+    assert_eq!(
+        plan.version.as_deref(),
+        Some("1.9.5"),
+        "the newest version, whose files are on the build release made before it"
+    );
+    let [program, weights] = plan.downloads.as_slice() else {
+        panic!("a program and a model: {plan:#?}");
+    };
+    assert_eq!(
+        program.url,
+        format!("{WHISPER_DOWNLOADS}b5454/{}", WhisperFixture::name())
+    );
+    assert_eq!(
+        program.check,
+        Check::Sha256 {
+            value: sha256(&WhisperFixture::archive("1.9.5", 0, b""))
+        },
+        "the digest GitHub lists for this very file"
+    );
+    assert_eq!(weights.url, format!("{MODELS_ORIGIN}ggml-base.bin"));
+    assert_eq!(
+        weights.check,
+        Check::Sha256 {
+            value: sha256(MODEL_BYTES)
+        }
+    );
+    assert!(plan.changes.is_empty(), "nothing outside the folder");
+
+    let tools = tools_for(&store, WhisperFixture.world(Variant::Normal));
+    let mut request = PlanRequest::new(Action::Install, here());
+    request.channel = Some("tiny.en".to_owned());
+    let small = store.plan(request, tools).expect("a plan");
+    assert_eq!(
+        small.downloads[1].url,
+        format!("{MODELS_ORIGIN}ggml-tiny.en.bin"),
+        "the channel names the model"
+    );
+
+    let older = plan_of(&store, &WhisperFixture, Some("1.9.4"));
+    assert_eq!(
+        older.downloads[0].url,
+        format!("{WHISPER_DOWNLOADS}v1.9.4/{}", WhisperFixture::name()),
+        "an older release carries its own files"
+    );
+}
+
+#[test]
+fn a_model_the_list_lacks_a_version_it_lacks_and_a_system_it_has_no_program_for_are_refused() {
+    let store = Whisper(Engine::new(whisper_recipe(), StoreSettings::default()));
+    let tools = tools_for(&store, WhisperFixture.world(Variant::Normal));
+    let mut request = PlanRequest::new(Action::Install, here());
+    request.channel = Some("huge".to_owned());
+    assert!(store.plan(request, tools).is_err(), "no such model");
+
+    let tools = tools_for(&store, WhisperFixture.world(Variant::Normal));
+    let mut request = PlanRequest::new(Action::Install, here());
+    request.version = Some("9.9.9".to_owned());
+    assert!(store.plan(request, tools).is_err(), "no such release");
+
+    let tools = tools_for(&store, WhisperFixture.world(Variant::Normal));
+    let request = PlanRequest::new(Action::Install, Platform::new("macos", "aarch64"));
+    let refused = store.plan(request, tools).expect_err("no program for it");
+    assert!(
+        refused.message().contains("macos"),
+        "the answer names the system: {}",
+        refused.message()
+    );
+}
+
+#[test]
+fn the_whisper_store_names_the_publishers_hosts_and_a_glyph_the_application_draws() {
+    let info = WhisperRecipe::default().info();
+    assert!(info.endpoints.iter().all(|e| e.starts_with("https://")));
+    assert!(info.endpoints.iter().any(|e| e == MODELS_ORIGIN));
+    assert!(STORE_GLYPHS.contains(&info.icon.as_deref().unwrap_or_default()));
+    assert!(info.commands.is_empty(), "its folder is on no search path");
+    assert_eq!(info.channels.first().map(String::as_str), Some("base"));
+    assert_eq!(info.channels.len(), MODELS.len());
+}
+
+#[test]
+fn an_installed_whisper_copy_lays_out_its_program_and_the_chosen_model_where_a_speech_provider_reads_them()
+ {
+    use canoa_host::store::programs::{Options, Programs, Recorder};
+    use canoa_host::store::shelf::Shelf;
+    use canoa_host::store::whisper::{held_model, model_path, program_file};
+
+    let _alone = ONE_SUITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let root = std::env::temp_dir().join(format!("canoa-whisper-layout-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let home = root.join("home");
+    std::fs::create_dir_all(&home).expect("home");
+    let mut options = Options::default();
+    options.home = Some(home);
+    options.watch_registry = false;
+    options.allow_elevated = true;
+    options.environment = {
+        let mut env = coqui_acp_api::Environment::new();
+        for name in ["PATH", "Path", "SystemRoot"] {
+            if let Ok(value) = std::env::var(name) {
+                env.insert(name, value);
+            }
+        }
+        env
+    };
+    let transport = WorldTransport::new(WhisperFixture.world(Variant::Normal));
+    let programs = Programs::new(
+        Shelf::unchecked(root.join("programs")),
+        canoa_host::store::registry::built_in().expect("the built-in stores"),
+    )
+    .transport(transport)
+    .options(options);
+    let store: Arc<dyn ProgramStore> = Arc::new(Whisper(Engine::new(
+        whisper_recipe(),
+        StoreSettings::default(),
+    )));
+    let plan = programs
+        .plan(
+            "whisper_store",
+            &*store,
+            Action::Install,
+            Some("tiny.en".to_owned()),
+            None,
+        )
+        .expect("a plan");
+    programs
+        .apply_store(
+            Arc::clone(&store),
+            "whisper_store",
+            &plan,
+            Arc::new(Recorder::default()),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .expect("installed");
+    let launch = programs.launch(&*store).expect("a copy that checks out");
+    let program = std::path::Path::new(&launch.path);
+    assert_eq!(
+        program.file_name().and_then(|name| name.to_str()),
+        Some(program_file(std::env::consts::OS))
+    );
+    let version = program
+        .parent()
+        .and_then(|bin| bin.parent())
+        .expect("a version folder");
+    assert!(version.join("bin").join("whisper.dll").is_file() || !cfg!(windows));
+    let held = held_model(version);
+    let weights = held.map(|model| version.join(model_path(model)));
+    assert_eq!(held.map(|model| model.id), Some("tiny.en"));
+    assert_eq!(
+        std::fs::read(weights.expect("a model file")).expect("readable"),
+        MODEL_BYTES,
+        "the model the plan chose, whole"
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }

@@ -19,3 +19,4 @@ pub mod runtimes;
 pub mod shelf;
 pub(crate) mod text;
 pub mod tools;
+pub mod whisper;
