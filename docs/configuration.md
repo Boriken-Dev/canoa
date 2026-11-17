@@ -453,7 +453,7 @@ adds one.
   start with, it writes a loadout named `Default` that holds that. The old `[loadout]` table (`off`, `skills`,
   `registries`, `mcp`) is not read: `registries` and the notes on installed servers are `[store] registries` and
   `[store.mcp.NAME]` now.
-- **Editing loadouts.** The Loadouts section lists them (what each holds and whether it can start), and edits, duplicates and deletes
+- **Editing loadouts.** The Loadouts section lists them in the index beside the main area (the default marked, a search when there are many, New loadout at the top) and shows the chosen one there: what it holds, whether it can start, and what a new session gets from it. The choice is kept across a restart. It edits, duplicates and deletes
   them, makes one the default and starts a session with one. Its editor adds installed overlays, skills and servers from a
   searchable list, and leads to the Store for more without losing what was typed. Overlays stay whole: nothing there switches
   an item inside one.
