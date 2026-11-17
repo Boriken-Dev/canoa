@@ -4,6 +4,8 @@ import 'dart:math';
 
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' as pkg;
 
+import 'delegate_targets.dart';
+
 /// The `_meta` key of `initialize` with which a client tells the host it can show a delegated task, answer what the task's agent
 /// asks of the person and stop it. Without it the host gives its agents no delegation tool.
 const delegateMeta = 'dev.boriken.canoa/delegate';
@@ -16,6 +18,21 @@ const delegateHistoryMethod = '_canoa/delegate/history';
 
 /// The request to stop a session's tasks, or one of them.
 const delegateStopMethod = '_canoa/delegate/stop';
+
+/// The request for what a session may hand a task to.
+const delegateTargetsMethod = '_canoa/delegate/targets';
+
+/// The request that starts a task of the person's own, as a task of the session.
+const delegateStartMethod = '_canoa/delegate/start';
+
+/// The request that narrows what a session may delegate to, and sets its default and its limit.
+const delegateSetupMethod = '_canoa/delegate/setup';
+
+/// A request of the app's that the host refused, with its words.
+final class DelegateRefusal {
+  const DelegateRefusal(this.message);
+  final String message;
+}
 
 /// Where a task is, in A2A's names.
 enum TaskPhase {
@@ -462,13 +479,22 @@ final class DelegateWire {
     if (decoded['method'] == null && id is String) {
       final waiting = _waiting.remove(id);
       if (waiting == null) return false;
-      if (!waiting.isCompleted) waiting.complete(decoded['error'] == null ? (decoded['result'] ?? const <String, Object?>{}) : null);
+      if (!waiting.isCompleted) {
+        final error = decoded['error'];
+        waiting.complete(error == null ? (decoded['result'] ?? const <String, Object?>{}) : DelegateRefusal(error is Map && error['message'] is String ? error['message'] as String : 'The host refused it.'));
+      }
       return true;
     }
     return false;
   }
 
+  /// What the host answered: its result, a [DelegateRefusal] when it refused, or null when it did not answer.
   Future<Object?> _ask(String method, Map<String, Object?> params, Duration timeout) async {
+    final answer = await _askRaw(method, params, timeout);
+    return answer is DelegateRefusal ? null : answer;
+  }
+
+  Future<Object?> _askRaw(String method, Map<String, Object?> params, Duration timeout) async {
     // Unguessable, so no message of the agent's can pass for the host's answer.
     final nonce = [for (var i = 0; i < 8; i++) _random.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
     final id = 'canoa-delegate-${_next++}-$nonce';
@@ -487,6 +513,24 @@ final class DelegateWire {
   /// Asks the host to stop [sessionId]'s tasks, or only [taskId]. Whether the host said it did.
   Future<bool> stop(String sessionId, {String? taskId, Duration timeout = const Duration(seconds: 10)}) async =>
       await _ask(delegateStopMethod, {'sessionId': sessionId, 'taskId': ?taskId}, timeout) != null;
+
+  /// What [sessionId] may hand a task to; null when the host did not say. [source] asks for that agent's models too.
+  Future<DelegateTargets?> targets(String sessionId, {String? source, Duration timeout = const Duration(seconds: 45)}) async =>
+      DelegateTargets.parse(await _ask(delegateTargetsMethod, {'sessionId': sessionId, 'source': ?source}, timeout));
+
+  /// Asks the host to start [request] as a task of [sessionId]. A refusal says why; no answer is uncertain, since the task may have
+  /// been made: nothing is sent again here.
+  Future<DelegateOutcome> start(String sessionId, DelegateRequest request, {Duration timeout = const Duration(seconds: 60)}) async {
+    final answer = await _askRaw(delegateStartMethod, request.params(sessionId), timeout);
+    if (answer is DelegateRefusal) return DelegateRefused(answer.message);
+    if (answer is Map && answer['taskId'] is String) return DelegateStarted(answer['taskId'] as String, repeated: answer['repeated'] == true);
+    return const DelegateUncertain();
+  }
+
+  /// Narrows what [sessionId] may delegate to ([sources]), sets the agent a task with none named goes to ([defaultSource]) and how
+  /// many tasks run at once ([maxRunning]); each is left alone when null. Whether the host took it.
+  Future<bool> setup(String sessionId, {List<String>? sources, String? defaultSource, int? maxRunning, Duration timeout = const Duration(seconds: 10)}) async =>
+      await _ask(delegateSetupMethod, {'sessionId': sessionId, 'sources': ?sources, 'default': ?defaultSource, 'maxRunning': ?maxRunning}, timeout) != null;
 
   /// The updates the host kept of [taskId]; null when it has none to give or did not answer.
   Future<List<Map<String, Object?>>?> history(String sessionId, String taskId, {Duration timeout = const Duration(seconds: 10)}) async {

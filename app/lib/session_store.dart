@@ -2,6 +2,7 @@ import 'dart:async';
 import 'acp/chat_connection.dart';
 import 'acp/client.dart';
 import 'acp/delegate.dart';
+import 'acp/delegate_targets.dart';
 import 'acp/local_agent.dart' show readLocalFile;
 import 'chat/timing_log.dart';
 import 'config/canoa_config.dart' show Preset;
@@ -3686,6 +3687,28 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (session.openChild == null) return;
     session.openChild = null;
     notifyListeners();
+  }
+
+  /// Whether the person can hand [session] a task of their own: its agent is running on a host that takes tasks.
+  bool canDelegate(ChatSession session) =>
+      session.remoteSessionId != null && (_clients[session.id]?.takesTasks ?? false);
+
+  /// What [session] may hand a task to, as its host lists it; with [source], that agent's models too. Null when the host did not say.
+  Future<DelegateTargets?> delegateTargets(ChatSession session, {String? source}) async {
+    final client = _clients[session.id];
+    final remote = session.remoteSessionId;
+    if (client == null || remote == null) return null;
+    return client.delegateTargets(remote, source: source);
+  }
+
+  /// Hands [request] to the host as a task of [session]: the same A2A task the agent's own `delegate_task` makes, so the agent's
+  /// `task_status` sees it and the lists here show it as the host's events arrive. Never sent again by itself; a [DelegateUncertain]
+  /// is the person's to settle.
+  Future<DelegateOutcome> delegateTask(ChatSession session, DelegateRequest request) async {
+    final client = _clients[session.id];
+    final remote = session.remoteSessionId;
+    if (client == null || remote == null) return const DelegateRefused('This conversation is not running, so it cannot hand a task on.');
+    return client.delegateStart(remote, request);
   }
 
   /// Ends one of [session]'s tasks, which need not be running its turn.

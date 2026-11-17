@@ -48,6 +48,7 @@ import 'chat/agent_events.dart' show Choice;
 import 'chat/cache_lifetime.dart';
 import 'chat/modes.dart' show modeEntries, modeOptionIn;
 import 'chat/session_options.dart' show OptionRole, optionIn;
+import 'chat/delegate_dialog.dart';
 import 'chat/git_changes.dart' show GitReader;
 import 'chat/inspector.dart';
 import 'chat/timing_log.dart';
@@ -2783,6 +2784,10 @@ class _CanoaAppState extends State<CanoaApp> {
     portable: _portable,
     programs: _programs,
     extension: _tabs,
+    onDelegate: (session) {
+      final above = _navigator.currentContext;
+      if (above != null) unawaited(showDelegateDialog(above, store, session));
+    },
     onProfile: (session) {
       final above = _navigator.currentContext;
       final report = session.profile;
@@ -2983,6 +2988,9 @@ class _CanoaHome extends StatelessWidget {
         if (session != null && conversation.showChanges != null && (changeTotals(session) != null))
           PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
         if (session?.status == SessionStatus.working) PaletteItem('Stop the turn', _stop, icon: Icons.stop_circle_outlined),
+        if (session != null && store.canDelegate(session))
+          PaletteItem('Delegate task', () => unawaited(showDelegateDialog(context, store, session)),
+              detail: 'Hand a task to another agent, model or host', icon: Icons.account_tree_outlined),
         if (session != null)
           if (workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint, peerId: session.peerId).target case final target?)
             for (final action in workspaceOpener.actionsFor(WorkspaceContext.palette, target))

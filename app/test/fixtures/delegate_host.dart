@@ -60,6 +60,13 @@ final class DelegateHost {
   /// What the host answers a `history` request with, by task.
   final histories = <String, List<Object?>>{};
 
+  /// What the host answers a `targets` request with, and what it does with a `start`: an error message, or null to make the task;
+  /// [silent] leaves a start unanswered.
+  Map<String, Object?> targets = {'targets': <Object?>[]};
+  String? refuseStart;
+  bool silent = false;
+  final started = <String, String>{};
+
   Future<ChatSession> start(SessionStore store, {String label = 'Scripted', bool decide = true}) async {
     client = VerifiedAgent.fromChild(
       label: label,
@@ -77,6 +84,26 @@ final class DelegateHost {
             reply(id, {'sessionId': 's1'});
           case delegateStopMethod:
             reply(id, <String, Object?>{});
+          case delegateTargetsMethod:
+            final only = message['params']['source'];
+            reply(id, {
+              'targets': [
+                for (final target in (targets['targets'] as List).cast<Map<String, Object?>>())
+                  if (only == null || target['source'] == only) target,
+              ],
+              if (targets['default'] != null) 'default': targets['default'],
+            });
+          case delegateStartMethod:
+            final params = message['params'] as Map<String, dynamic>;
+            if (silent) break;
+            if (refuseStart != null) {
+              incoming.add(jsonEncode({'jsonrpc': '2.0', 'id': id, 'error': {'code': -32602, 'message': refuseStart}}));
+              break;
+            }
+            final key = params['requestId'] as String;
+            final repeated = started.containsKey(key);
+            final task = started.putIfAbsent(key, () => 'task-${started.length + 1}');
+            reply(id, {'taskId': task, 'state': 'working', if (repeated) 'repeated': true});
           case delegateHistoryMethod:
             reply(id, {'updates': histories[message['params']['taskId']] ?? const []});
           case 'session/prompt' || 'session/cancel' || null:

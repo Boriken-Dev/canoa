@@ -65,6 +65,7 @@ final class ComposerKit {
     this.onSourceSettings,
     this.onSettings,
     this.onProfile,
+    this.onDelegate,
     this.accounts,
     this.accountsOf,
     this.onAccountSettings,
@@ -236,6 +237,9 @@ final class ComposerKit {
 
   /// Shows what a session was given of its profile.
   final void Function(ChatSession session)? onProfile;
+
+  /// Opens the dialog in which the person hands a task to another agent; null where the app has none.
+  final void Function(ChatSession session)? onDelegate;
 }
 
 /// Adds the files at [paths] to [session]: an image by its bytes, anything else by its path. Answers what went wrong, by file.
@@ -485,6 +489,8 @@ class SessionComposer extends StatelessWidget {
     if (kit.onSettings != null) ComposerAction(name: 'settings', description: 'Open Settings', run: kit.onSettings!),
     if (kit.onSourceSettings != null) ComposerAction(name: 'sources', description: 'Open the source settings', run: kit.onSourceSettings!),
     if (kit.onLoadout != null) ComposerAction(name: 'loadout', description: 'Open Loadouts', run: kit.onLoadout!),
+    if (kit.onDelegate != null && store.canDelegate(session))
+      ComposerAction(name: 'delegate', description: 'Hand a task to another agent', run: () => kit.onDelegate!(session)),
     if (kit.onProfile != null && session.profile != null)
       ComposerAction(name: 'profile', description: 'Show what this session was given', run: () => kit.onProfile!(session)),
   ];

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
 import '../chat/child_thread.dart';
+import '../chat/delegate_dialog.dart';
 import '../chat/delegation_row.dart';
 import '../chat/delegation_view.dart';
 import '../session_store.dart';
@@ -143,6 +146,13 @@ class _SubagentsPanelState extends State<SubagentsPanel> {
               padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
               child: Row(children: [
                 Expanded(child: Text(all.children.isEmpty ? 'No subagents' : all.summary, key: const Key('subagents-summary'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
+                if (store.canDelegate(session))
+                  TextButton.icon(
+                    key: const Key('subagents-delegate'),
+                    onPressed: () => unawaited(showDelegateDialog(context, store, session)),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Delegate task'),
+                  ),
                 TextButton.icon(
                   key: const Key('subagents-stop-all'),
                   onPressed: canStopAll ? () => _stopAll(store) : null,

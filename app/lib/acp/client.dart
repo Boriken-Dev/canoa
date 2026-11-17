@@ -8,6 +8,7 @@ import 'package:coqui_web/coqui_web.dart';
 import '../chat/agent_events.dart';
 import '../chat/timing_log.dart';
 import 'delegate.dart';
+import 'delegate_targets.dart';
 import 'link_secret.dart';
 import 'noise_secret.dart';
 import 'secret_wire.dart';
@@ -151,6 +152,13 @@ final class VerifiedAgent {
 
   /// Asks the host to stop [sessionId]'s tasks, or only [taskId]. Whether the host said it did.
   Future<bool> stopTasks(String sessionId, {String? taskId}) async => await _delegate?.stop(sessionId, taskId: taskId) ?? false;
+
+  /// What [sessionId] may hand a task to; null when the host did not say. [source] asks for that agent's models as well.
+  Future<DelegateTargets?> delegateTargets(String sessionId, {String? source}) async => await _delegate?.targets(sessionId, source: source);
+
+  /// Asks the host to start the person's own task in [sessionId].
+  Future<DelegateOutcome> delegateStart(String sessionId, DelegateRequest request) async =>
+      await _delegate?.start(sessionId, request) ?? const DelegateRefused('This connection takes no tasks.');
 
   /// The updates the host kept of [taskId]; null when it has none to give.
   Future<List<Map<String, Object?>>?> taskHistory(String sessionId, String taskId) async => _delegate?.history(sessionId, taskId);
