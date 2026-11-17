@@ -5,6 +5,7 @@
 extern crate alloc;
 
 mod account;
+mod account_provider;
 pub mod batch;
 #[cfg(feature = "contract")]
 #[cfg_attr(docsrs, doc(cfg(feature = "contract")))]
@@ -13,6 +14,9 @@ mod environment;
 pub mod files;
 mod kind;
 mod models;
+#[cfg(feature = "reader")]
+#[cfg_attr(docsrs, doc(cfg(feature = "reader")))]
+pub mod reader;
 mod requirement;
 mod roots;
 mod spawner;
@@ -22,19 +26,24 @@ pub use guatiao;
 pub use guatiao_channel::{Channel, ChannelSink, ChannelSinkVtable, ChannelVtable};
 
 pub use account::{
-    ACCOUNT_ID_MAX, ASK, AUTH, AccountCatalog, AccountGrant, AccountKeeper, AccountKeeperVtable,
-    AccountKindInfo, AccountLoss, AccountRef, AccountRenewal, Credentials,
+    ACCOUNT_ID_MAX, ASK, AUTH, Accepted, AcceptedSlot, AccountCatalog, AccountGrant, AccountKeeper,
+    AccountKeeperVtable, AccountKindInfo, AccountLoss, AccountRef, AccountRenewal, Credentials,
     DEFAULT_LOGIN_TIMEOUT_MS, EndpointSlot, HARNESS_LOGIN, LoginAnswer, LoginForm, LoginMethodInfo,
     LoginOutcome, LoginPrompter, LoginPrompterVtable, LoginRequest, MODEL_API, ModelsRequest,
     OPEN_URL, OpenUrl, PASTE_CODE, PROXY, RenewReport, RenewRequest, USER_CODE, is_account_id,
 };
+pub use account_provider::{
+    AccountOffer, AccountProvider, AccountProviderInfo, AccountProviderVtable, AccountUsage,
+    AccountUsageQuery, AccountWatch, AccountWatchVtable, WatchRequest,
+};
 pub use environment::Environment;
+pub mod standard;
 pub use files::PrivateDir;
 pub use kind::{AcpHarness, AcpHarnessVtable};
 pub use models::{
-    CacheLifetime, DEFAULT_PAGE_BYTES, ExportPage, HarnessInfo, HistoryLoss, ImportReport,
-    LINE_TOO_LARGE, ModelInfo, ModelListing, NonDefault, REPLAYED_AS_PROMPT, SeedPoint,
-    SessionExport, SessionImport, SessionQuery, SessionRecordFile, StartRequest,
+    CacheChoice, CacheLifetime, DEFAULT_PAGE_BYTES, ExportPage, HarnessInfo, HistoryLoss,
+    ImportReport, LINE_TOO_LARGE, ModelInfo, ModelListing, NonDefault, REPLAYED_AS_PROMPT,
+    SeedPoint, SessionExport, SessionImport, SessionQuery, SessionRecordFile, StartRequest,
     StartRequestBuilder, Takes, UnknownKind, line_too_large,
 };
 pub use requirement::{

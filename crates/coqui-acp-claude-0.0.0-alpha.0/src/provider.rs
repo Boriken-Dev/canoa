@@ -14,11 +14,11 @@ use std::path::PathBuf;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, Secret, Status, ToValue};
 use coqui_acp_api::{
-    AccountCatalog, AccountGrant, AccountKeeper, AccountRef, AcpHarness, CacheLifetime, Channel,
-    ChannelSink, Environment, ExportPage, HarnessInfo, ImportReport, LoginOutcome, LoginPrompter,
-    LoginRequest, ModelInfo, ModelListing, ModelsRequest, Narrowing, ProcessSpawner, RenewReport,
-    RenewRequest, Requirement, SessionExport, SessionImport, StartRequest, UnknownKind, UsageQuery,
-    UsageReport,
+    AccountCatalog, AccountGrant, AccountKeeper, AccountRef, AcpHarness, CacheChoice,
+    CacheLifetime, Channel, ChannelSink, Environment, ExportPage, HarnessInfo, ImportReport,
+    LoginOutcome, LoginPrompter, LoginRequest, ModelInfo, ModelListing, ModelsRequest, Narrowing,
+    ProcessSpawner, RenewReport, RenewRequest, Requirement, SessionExport, SessionImport,
+    StartRequest, UnknownKind, UsageQuery, UsageReport,
 };
 use coqui_acp_harness::Mode;
 use coqui_acp_harness::account::{Accounts, Files, Hold, same_name};
@@ -33,6 +33,8 @@ use crate::{accounts, signin};
 const SHORT_TTL: &str = "5m";
 /// The same for `long`.
 const LONG_TTL: &str = "1h";
+/// The variable that turns Claude Code's prompt cache off for a connection with `cache_lifetime` off.
+const CACHE_OFF_VARIABLE: &str = "DISABLE_PROMPT_CACHING";
 /// Claude Code's variables for how long its prompt cache lives, for the conversation and for its sub-agents.
 const TTL_VARIABLES: [&str; 2] = [
     "CLAUDE_CODE_PROMPT_CACHE_TTL",
@@ -219,6 +221,9 @@ impl ClaudeProvider {
             CacheLifetime::Long => Some(LONG_TTL),
             _ => None,
         };
+        if cache_lifetime == CacheLifetime::Off {
+            launch.env.insert(CACHE_OFF_VARIABLE.into(), "1".into());
+        }
         if let Some(ttl) = ttl {
             for name in TTL_VARIABLES {
                 launch.env.insert(name.into(), ttl.into());
@@ -287,6 +292,7 @@ impl ClaudeProvider {
         let Some(grant) = account else {
             return Ok(Applying { hold: None });
         };
+        let grant = &accounts::resolved(grant)?;
         let mut applied = accounts::plan(grant)?;
         if grant.kind == coqui_acp_api::HARNESS_LOGIN {
             return Ok(Applying { hold: None });
@@ -347,9 +353,14 @@ impl AcpHarness for ClaudeProvider {
         info.resumes_wider = true;
         info.usage = agent.usage();
         info.cache_lifetime = Some(format!(
-            "sets {} and {} to {SHORT_TTL} for short and {LONG_TTL} for long, and leaves both as the environment has them for default",
+            "sets {} and {} to {SHORT_TTL} for short and {LONG_TTL} for long, sets {CACHE_OFF_VARIABLE} for off, and leaves them as the environment has them for default",
             TTL_VARIABLES[0], TTL_VARIABLES[1]
         ));
+        info.cache_choices = vec![
+            CacheChoice::new(CacheLifetime::Off, "Off"),
+            CacheChoice::new(CacheLifetime::Short, "5 minutes"),
+            CacheChoice::new(CacheLifetime::Long, "1 hour"),
+        ];
         Ok(info)
     }
 
@@ -497,7 +508,21 @@ impl AcpHarness for ClaudeProvider {
             Ok(session) => {
                 let signed_out = session.signed_out();
                 let listing = session.models().map_or_else(
-                    || ModelListing::unknown("Claude Code listed no model"),
+                    || {
+                        // A Claude Code with nobody signed in can list none; that is the person's next step, not a
+                        // list that waits for a session.
+                        if signed_out {
+                            ModelListing::unknown(
+                                "nobody is signed in to Claude Code, which lists its models once someone is",
+                            )
+                            .signed_out()
+                        } else {
+                            ModelListing::unavailable(
+                                UnknownKind::Failed,
+                                "Claude Code listed no model",
+                            )
+                        }
+                    },
                     |models| {
                         ModelListing::of(
                             models

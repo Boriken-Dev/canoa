@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-claude at a5eabdc23347967ee95cb3aaff1b8841b7c981b4, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-claude at eaa2a8c4b6d80520f5b7d868261a795c68a2720f, with what it inherits written out.
 bin = [{ name = "coqui-acp-claude", path = "src/main.rs" }]
 example = [{ name = "claude_provider", crate-type = ["cdylib"] }]
 [package]
@@ -29,6 +29,7 @@ version = "4"
 features = ["derive", "env"]
 [dependencies.coqui-acp-api]
 path = "../coqui-acp-api"
+features = ["reader"]
 [dependencies.coqui-acp-harness]
 path = "../coqui-acp-harness"
 features = ["kind"]

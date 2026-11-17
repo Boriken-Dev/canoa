@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-pi at a5eabdc23347967ee95cb3aaff1b8841b7c981b4, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-pi at eaa2a8c4b6d80520f5b7d868261a795c68a2720f, with what it inherits written out.
 bin = [{ name = "coqui-acp-pi", path = "src/main.rs" }]
 example = [{ name = "pi_provider", crate-type = ["cdylib"] }]
 [package]
@@ -20,6 +20,9 @@ publish = false
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+[features]
+default = []
+history = ["dep:coqui-acp-history"]
 [dependencies]
 [dependencies.clap]
 version = "4"
@@ -29,6 +32,9 @@ path = "../coqui-acp-api"
 [dependencies.coqui-acp-harness]
 path = "../coqui-acp-harness"
 features = ["kind"]
+[dependencies.coqui-acp-history]
+path = "../coqui-acp-history"
+optional = true
 [dependencies.serde_json]
 version = "1"
 [dependencies.uuid]
@@ -38,6 +44,11 @@ features = ["v4"]
 [dev-dependencies]
 [dev-dependencies.coqui-acp]
 path = "../coqui-acp"
+[dev-dependencies.coqui-acp-claude]
+path = "../coqui-acp-claude"
+features = ["history"]
+[dev-dependencies.coqui-acp-history]
+path = "../coqui-acp-history"
 [dev-dependencies.coqui-acp-api]
 path = "../coqui-acp-api"
 features = ["contract"]
