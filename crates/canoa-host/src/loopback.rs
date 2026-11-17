@@ -99,6 +99,8 @@ pub(crate) enum Route {
 
 /// One request, after its head was checked and its body read.
 pub(crate) struct Request<'a> {
+    /// The method, as the client wrote it.
+    pub(crate) method: &'a str,
     /// The path, with no query.
     pub(crate) path: &'a str,
     pub(crate) body: &'a [u8],
@@ -456,6 +458,7 @@ fn request<S: Service>(
         read_more(stream, &mut buffer, body_by)?;
     }
     let request = Request {
+        method: &head.method,
         path,
         body: &buffer[body_start..end],
     };
@@ -524,8 +527,23 @@ fn bearer<S: Service>(service: &Arc<S>, head: &Head) -> Option<Arc<S::Caller>> {
     service.caller(token.trim())
 }
 
-fn error(id: &Value, code: i64, message: &str) -> Value {
+pub(crate) fn error(id: &Value, code: i64, message: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+}
+
+/// The result of `initialize` for a server of tools called `server`: the newest protocol version both speak, and whether the
+/// server says its tool list may change.
+pub(crate) fn initialize(server: &str, params: &Value, list_changed: bool) -> Value {
+    let asked = params.get("protocolVersion").and_then(Value::as_str);
+    let version = VERSIONS
+        .iter()
+        .find(|version| Some(**version) == asked)
+        .unwrap_or(&VERSIONS[0]);
+    json!({
+        "protocolVersion": version,
+        "capabilities": {"tools": {"listChanged": list_changed}},
+        "serverInfo": {"name": server, "version": env!("CARGO_PKG_VERSION")},
+    })
 }
 
 /// The answer to one JSON-RPC message of the client's for a server of tools, called `server`: its tools as `list` gives them, a
@@ -551,18 +569,7 @@ pub(crate) fn rpc(
     };
     let params = object.get("params").cloned().unwrap_or(Value::Null);
     let result = match method {
-        "initialize" => {
-            let asked = params.get("protocolVersion").and_then(Value::as_str);
-            let version = VERSIONS
-                .iter()
-                .find(|version| Some(**version) == asked)
-                .unwrap_or(&VERSIONS[0]);
-            json!({
-                "protocolVersion": version,
-                "capabilities": {"tools": {"listChanged": false}},
-                "serverInfo": {"name": server, "version": env!("CARGO_PKG_VERSION")},
-            })
-        }
+        "initialize" => initialize(server, &params, false),
         "ping" => json!({}),
         "tools/list" => list(),
         "tools/call" => {

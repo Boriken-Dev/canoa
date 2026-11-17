@@ -6,6 +6,7 @@ extern crate alloc;
 mod accounts;
 mod child;
 pub mod cli;
+mod client_tools;
 pub mod config;
 pub mod control;
 mod delegate;

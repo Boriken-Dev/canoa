@@ -34,6 +34,7 @@ use indexmap::IndexMap;
 use crate::accounts::matching::{Catalogs, fits};
 use crate::accounts::{Accounts, Gated, Held};
 use crate::child::{self, Running};
+use crate::client_tools::{self, ToolsLayer, ToolsPeek};
 use crate::config::{
     BUILT_IN_HARNESSES, Config, Entry, EntryKind, HarnessOptions, HostProfile, ImportSearch,
     Layers, Listen, Origin, Settings, UsageSource,
@@ -460,6 +461,9 @@ enum Run {
         /// every page grant, and the native door gives a browser key the grants of `[host.native] control`.
         everyone: Option<BTreeSet<control::Grant>>,
     },
+    /// `@tools`: where a program offers its tools to this host's sessions, for the keys that hold `tools.provide`. Only the
+    /// native door and this process open it.
+    Tools { grants: BTreeSet<control::Grant> },
 }
 
 /// What builds a local entry's offer again from canoa.cfg's layers, so that installing an overlay, skill or server reaches
@@ -540,6 +544,8 @@ struct Shared {
     /// What gives a connection's sessions the store tools (search and inspect).
     store_tools: Arc<store_mcp::Hub>,
     kb_tools: Arc<kb_mcp::Hub>,
+    /// What gives a connection's sessions the tools programs offer (a browser extension's), and takes their offers.
+    client_tools: Arc<client_tools::Hub>,
     /// What `[host.control]` grants each key, and what every key holds beside it: the store tools are given only to a key that
     /// may read what they read.
     control_grants: IndexMap<PeerId, BTreeSet<control::Grant>>,
@@ -832,6 +838,14 @@ impl Local {
                 Err(LocalError::NoEntry)
             };
         }
+        if entry == client_tools::NAME {
+            // A program in this process offering its tools; a task's connection has no such entry.
+            return if context.is_none() {
+                self.open_tools()
+            } else {
+                Err(LocalError::NoEntry)
+            };
+        }
         let served = self
             .served
             .iter()
@@ -862,6 +876,27 @@ fn reaches_control(entry: &str, context: Option<&delegate::ChildContext>) -> boo
 }
 
 impl Local {
+    /// `@tools`, as this process: it offers its tools to the host's sessions.
+    fn open_tools(&self) -> Result<Link, LocalError> {
+        if self.shared.stopped.load(Ordering::SeqCst) {
+            return Err(LocalError::Stopped);
+        }
+        let (client, host) =
+            local::pair(client_tools::MAX_MESSAGE, Arc::clone(&self.shared.stopped));
+        let shared = Arc::clone(&self.shared);
+        thread::Builder::new()
+            .name("canoa-tools".to_owned())
+            .spawn(move || {
+                let grants = control::Grant::all().into_iter().collect();
+                shared
+                    .client_tools
+                    .provide(&shared.method.peer_id().to_string(), &grants, &host);
+                host.close();
+            })
+            .map_err(|_| LocalError::Thread)?;
+        Ok(client)
+    }
+
     /// The control channel, as its owner.
     fn open_control(&self) -> Result<Link, LocalError> {
         if self.shared.stopped.load(Ordering::SeqCst) {
@@ -1641,6 +1676,10 @@ impl Serving {
                     options.state_dir.clone(),
                     delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
                 ),
+                client_tools: client_tools::Hub::new(delegate::BridgeCommand::new(
+                    &options.provider_program,
+                    &options.program_args,
+                )),
                 hosted: Arc::clone(&hosted),
                 control_grants: config
                     .control
@@ -1944,11 +1983,21 @@ impl Serving {
             running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
             keep: None,
         });
+        let tools = Arc::new(Served {
+            name: client_tools::NAME.to_owned(),
+            restricted: false,
+            delegable: false,
+            run: Run::Tools {
+                grants: config.native.control.clone(),
+            },
+            running: Gate::new(crate::config::DEFAULT_MAX_PEERS),
+            keep: None,
+        });
         Some(Door::new(
             listener,
             hello,
             self.local().served,
-            control,
+            (control, tools),
             home.clone(),
         ))
     }
@@ -2465,6 +2514,17 @@ fn give_agent_flow<C: Channel>(
             };
             return control::serve(&shared.control, &caller, channel);
         }
+        Run::Tools { grants } => {
+            // The grants are the door's: a connection that reached it from this process holds all of them.
+            let grants = if in_process {
+                control::Grant::all().into_iter().collect()
+            } else {
+                grants.clone()
+            };
+            return shared
+                .client_tools
+                .provide(&peer.to_string(), &grants, channel);
+        }
     };
     // A task's connection records what its agent spends as the child of the session that started it.
     let child_scope;
@@ -2514,7 +2574,20 @@ fn give_agent_flow<C: Channel>(
     let peeked = Peek::new(channel, conn.as_ref());
     let raw = Raw::new(&peeked, link.as_ref());
     let store_peek = StorePeek::new(&raw, store.as_ref());
-    let channel = &store_peek;
+    // The tools programs offer, for a connection whose key may use them and which is not a task another agent handed out.
+    let tools = shared.client_tools.for_connection(
+        shared.store_grants(peer, context.is_some()).as_ref(),
+        client_tools::Who {
+            agent: served.name.clone(),
+            via: if in_process {
+                client_tools::Via::App
+            } else {
+                client_tools::Via::Paired(peer.to_string())
+            },
+        },
+    );
+    let tools_peek = ToolsPeek::new(&store_peek, tools.as_ref());
+    let channel = &tools_peek;
     let fresh = refresh
         .as_ref()
         .map_or_else(|| offer.clone(), |refresh| refresh.offer());
@@ -2612,6 +2685,7 @@ fn give_agent_flow<C: Channel>(
                     link.as_ref(),
                     store.as_ref(),
                     kb.as_ref(),
+                    tools.as_ref(),
                 ),
             );
         }
@@ -2627,12 +2701,15 @@ fn give_agent_flow<C: Channel>(
         };
         let scoped = Scoped::new(channel, scope).agent(agent.pid());
         let end = relay(
-            &KbLayer::new(
-                &StoreLayer::new(
-                    &Layer::new(&Delegating::new(&scoped, conn.as_ref()), link.as_ref()),
-                    store.as_ref(),
+            &ToolsLayer::new(
+                &KbLayer::new(
+                    &StoreLayer::new(
+                        &Layer::new(&Delegating::new(&scoped, conn.as_ref()), link.as_ref()),
+                        store.as_ref(),
+                    ),
+                    kb.as_ref(),
                 ),
-                kb.as_ref(),
+                tools.as_ref(),
             ),
             &agent,
         );
@@ -2658,12 +2735,15 @@ fn give_agent_flow<C: Channel>(
     };
     let hosted = Hosted::new(channel, scope, &connection).agent(agent.pid());
     let end = relay(
-        &KbLayer::new(
-            &StoreLayer::new(
-                &Layer::new(&Delegating::new(&hosted, conn.as_ref()), link.as_ref()),
-                store.as_ref(),
+        &ToolsLayer::new(
+            &KbLayer::new(
+                &StoreLayer::new(
+                    &Layer::new(&Delegating::new(&hosted, conn.as_ref()), link.as_ref()),
+                    store.as_ref(),
+                ),
+                kb.as_ref(),
             ),
-            kb.as_ref(),
+            tools.as_ref(),
         ),
         &agent,
     );
@@ -3073,6 +3153,7 @@ type Joined<'a> = (
     Option<&'a Arc<secrets::Link>>,
     Option<&'a Arc<store_mcp::Link>>,
     Option<&'a Arc<kb_mcp::Link>>,
+    Option<&'a Arc<client_tools::Link>>,
 );
 
 /// Serves one connection with an `acp_harness` provider in this process, which [`Stopper::stop_agents`] ends like any agent.
@@ -3086,7 +3167,7 @@ fn give_harness<C: Channel>(
     (peer, first, any_account): (&PeerId, &[u8], bool),
     harness: &kind::Harness,
     scope: &Scope,
-    (connection, conn, link, store, kb): Joined<'_>,
+    (connection, conn, link, store, kb, tools): Joined<'_>,
 ) {
     let turn_away = |why: String| {
         let id = serde_json::from_slice::<serde_json::Value>(first)
@@ -3146,23 +3227,26 @@ fn give_harness<C: Channel>(
     let to_provider = (started.request, started.spawner);
     let end = match connection {
         Some(connection) => inproc::serve_kind(
-            &KbLayer::new(
-                &StoreLayer::new(
-                    &Layer::new(
-                        &Delegating::new(
-                            &Recording::new(
-                                &Hosted::in_process(&gated, scope, connection),
-                                &shared.history,
-                                &served.name,
-                                harness.id(),
+            &ToolsLayer::new(
+                &KbLayer::new(
+                    &StoreLayer::new(
+                        &Layer::new(
+                            &Delegating::new(
+                                &Recording::new(
+                                    &Hosted::in_process(&gated, scope, connection),
+                                    &shared.history,
+                                    &served.name,
+                                    harness.id(),
+                                ),
+                                conn,
                             ),
-                            conn,
+                            link,
                         ),
-                        link,
+                        store,
                     ),
-                    store,
+                    kb,
                 ),
-                kb,
+                tools,
             ),
             &*started.harness,
             to_provider,
@@ -3171,23 +3255,26 @@ fn give_harness<C: Channel>(
             &control,
         ),
         None => inproc::serve_kind(
-            &KbLayer::new(
-                &StoreLayer::new(
-                    &Layer::new(
-                        &Delegating::new(
-                            &Recording::new(
-                                &Scoped::new(&gated, scope),
-                                &shared.history,
-                                &served.name,
-                                harness.id(),
+            &ToolsLayer::new(
+                &KbLayer::new(
+                    &StoreLayer::new(
+                        &Layer::new(
+                            &Delegating::new(
+                                &Recording::new(
+                                    &Scoped::new(&gated, scope),
+                                    &shared.history,
+                                    &served.name,
+                                    harness.id(),
+                                ),
+                                conn,
                             ),
-                            conn,
+                            link,
                         ),
-                        link,
+                        store,
                     ),
-                    store,
+                    kb,
                 ),
-                kb,
+                tools,
             ),
             &*started.harness,
             to_provider,

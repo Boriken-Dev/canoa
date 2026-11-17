@@ -1107,3 +1107,173 @@ fn the_relay_discovers_with_no_host_running() {
     assert_eq!(reply["reply"], "discover", "{reply}");
     found(&reply, &nearby);
 }
+
+const SITE: &str = "dev.boriken.canoa/site";
+
+/// What a provider is for: answers one stream's MCP messages as the extension does, from a grant it keeps for that stream.
+fn provide_until(
+    rpc: &support::Rpc<'_, Link<'_>>,
+    done: &std::sync::atomic::AtomicBool,
+    seen: &mut Vec<Value>,
+) {
+    use std::sync::atomic::Ordering;
+    let mut granted = std::collections::HashSet::new();
+    loop {
+        let Ok(message) = rpc.next_message(Duration::from_millis(200)) else {
+            if done.load(Ordering::SeqCst) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        };
+        seen.push(message.clone());
+        let stream = message["stream"].as_str().unwrap_or_default().to_owned();
+        if message["type"] != "mcp" {
+            continue;
+        }
+        let (id, method) = (&message["message"]["id"], &message["message"]["method"]);
+        let result = match method.as_str() {
+            Some("tools/list") => {
+                let mut tools = vec![
+                    json!({"name": "browser_request_access", "inputSchema": {"type": "object"}}),
+                ];
+                if granted.contains(&stream) {
+                    tools.push(
+                        json!({"name": "browser_read_page", "inputSchema": {"type": "object"}}),
+                    );
+                }
+                json!({"tools": tools})
+            }
+            Some("tools/call")
+                if message["message"]["params"]["name"] == "browser_request_access" =>
+            {
+                granted.insert(stream.clone());
+                json!({"isError": false, "content": [{"type": "text", "text": "allowed"}]})
+            }
+            _ => json!({"isError": true, "content": [{"type": "text", "text": "denied"}]}),
+        };
+        let _ = rpc.send(&json!({"type": "mcp", "stream": stream,
+            "message": {"jsonrpc": "2.0", "id": id, "result": result}}));
+    }
+}
+
+#[test]
+fn a_browser_offers_its_tools_through_the_door_to_a_paired_key_that_may_use_them_and_never_to_a_page()
+ {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let client = support::key();
+    let scratch = Scratch::new();
+    let documents = scratch.0.join("documents");
+    let config = format!(
+        "{}args = [\"--scripted\", \"--mcp-http\"]\n[host.control]\nlisten = \"127.0.0.1:0\"\ngrants = {{ \"{}\" = [\"tools.use\"] }}\n",
+        agent_entry(),
+        client.peer_id()
+    );
+    let host = Host::start_in(
+        scratch,
+        &config,
+        2,
+        &[("XDG_DOCUMENTS_DIR", documents.into_os_string())],
+    );
+    host.pair(&client);
+    let (home, peer) = (host.home(), host.peer);
+    let dir = cwd(&host.scratch);
+
+    let relay = Relay::start(&home, ORIGIN);
+    let link = Link::open(&relay, "@tools").expect("the door opens @tools");
+    let done = AtomicBool::new(false);
+    let mut seen = Vec::new();
+    let told = support::with_channel(link, &client, peer, |rpc| {
+        rpc.send(&json!({"type": "register", "provider": "browser"}))
+            .expect("sent");
+        let registered = rpc.next_message(WAIT).expect("the host answers");
+        assert_eq!(registered["type"], "registered", "{registered}");
+        std::thread::scope(|scope| {
+            let session = scope.spawn(|| {
+                let relay = Relay::start(&home, ORIGIN);
+                let link = Link::open(&relay, "fixture").expect("the door opens the entry");
+                let told = support::with_channel(link, &client.clone(), peer, |rpc| {
+                    rpc.initialize().expect("initialize");
+                    let new = |meta: Value| {
+                        let mut params = json!({"cwd": dir, "mcpServers": []});
+                        if !meta.is_null() {
+                            params["_meta"] = json!({ SITE: meta });
+                        }
+                        rpc.request("session/new", params).expect("a session")["sessionId"]
+                            .as_str()
+                            .expect("an id")
+                            .to_owned()
+                    };
+                    let (own, page, extension) = (
+                        new(Value::Null),
+                        new(json!({"site": "example.com"})),
+                        new(json!({"site": "canoa-extension", "own": true})),
+                    );
+                    let listed = rpc.prompt(&own, "ListOn canoa-browser").expect("a turn");
+                    let page = rpc
+                        .prompt(&page, "ServerBearer canoa-browser")
+                        .expect("a turn");
+                    let extension = rpc
+                        .prompt(&extension, "ListOn canoa-browser")
+                        .expect("a turn");
+                    (listed, page, extension)
+                })
+                .expect("the paired key is served");
+                done.store(true, Ordering::SeqCst);
+                told
+            });
+            provide_until(rpc, &done, &mut seen);
+            session.join().expect("the session ran")
+        })
+    })
+    .expect("the browser's key is served");
+    let (listed, page, extension) = told;
+    assert_eq!(
+        listed, "browser_request_access",
+        "a paired key that holds tools.use"
+    );
+    assert_eq!(
+        page, "no bearer",
+        "a session a page started is given nothing"
+    );
+    assert_eq!(
+        extension, "browser_request_access",
+        "the extension's own pages are the person's own"
+    );
+    let opened: Vec<&Value> = seen
+        .iter()
+        .filter(|message| message["type"] == "open")
+        .collect();
+    assert_eq!(
+        opened.len(),
+        2,
+        "one stream for each session that was given the server: {seen:?}"
+    );
+    for open in opened {
+        assert_eq!(
+            open["session"],
+            json!({"agent": "fixture", "via": "paired", "peer": client.peer_id().to_string()})
+        );
+    }
+}
+
+#[test]
+fn a_key_that_may_not_offer_tools_is_refused_and_so_is_one_through_a_door_that_gives_none() {
+    let client = support::key();
+    let config = format!(
+        "{}[host.native]\ncontrol = [\"ledger.read\"]\n",
+        agent_entry()
+    );
+    let host = Host::start(&config, 1);
+    host.pair(&client);
+    let relay = Relay::start(&host.home(), ORIGIN);
+    let link = Link::open(&relay, "@tools").expect("the door opens @tools");
+    let refused = support::with_channel(link, &client, host.peer, |rpc| {
+        rpc.send(&json!({"type": "register", "provider": "browser"}))
+            .expect("sent");
+        rpc.next_message(WAIT).expect("the host answers")
+    })
+    .expect("the key is served");
+    assert_eq!(refused["type"], "refused", "{refused}");
+}

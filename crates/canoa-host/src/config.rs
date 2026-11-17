@@ -398,8 +398,9 @@ pub struct NativeConfig {
 
 impl NativeConfig {
     /// The grants a browser key has on the door's control channel when the file says nothing: its own session records, its own
-    /// worktrees, folders, settings of the app's own tables, and what the program stores find. It never installs, restarts the
-    /// host, uploads, or changes what an agent may do.
+    /// worktrees, folders, settings of the app's own tables, and what the program stores find, and the right to offer the
+    /// browser's tools to this host's sessions (`tools.provide`). It never installs, restarts the host, uploads, or changes what
+    /// an agent may do.
     #[must_use]
     pub fn default_control() -> BTreeSet<crate::control::Grant> {
         use crate::control::Grant;
@@ -412,6 +413,7 @@ impl NativeConfig {
             Grant::ConfigRead,
             Grant::ConfigWrite,
             Grant::Discover,
+            Grant::ToolsProvide,
         ]
         .into_iter()
         .collect()

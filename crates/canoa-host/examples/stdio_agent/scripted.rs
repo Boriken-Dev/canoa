@@ -712,6 +712,27 @@ impl Shared {
                     Err(said) => said,
                 }
             }
+            "ListOn" => match self.server_request(session, rest.trim(), "tools/list", &json!({})) {
+                Ok(answer) if answer.get("error").is_some() => format!(
+                    "rpc error: {}",
+                    answer["error"]["message"].as_str().unwrap_or("")
+                ),
+                Ok(answer) => answer["result"]["tools"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|tool| tool["name"].as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                Err(said) => said,
+            },
+            "ServerBearer" => match lock(&self.servers)
+                .get(session)
+                .and_then(|named| named.get(rest.trim()))
+            {
+                Some((url, token)) => format!("{url} {token}"),
+                None => "no bearer".to_owned(),
+            },
             "PromptOn" => {
                 let (server, name) = rest.split_once(' ').unwrap_or((rest, ""));
                 match self.server_request(session, server, "prompts/get", &json!({"name": name})) {

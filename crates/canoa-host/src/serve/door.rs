@@ -21,13 +21,17 @@ const PREAMBLE_WAIT: Duration = Duration::from_secs(5);
 /// How often the accept loop looks to see whether the host is stopping.
 const STOP_POLL: Duration = Duration::from_millis(100);
 
+/// What `@control` and `@tools` run.
+pub(super) type Doors = (Arc<Served>, Arc<Served>);
+
 /// What the door serves.
 pub(super) struct Door {
     listener: pipe::Listener,
     /// What `@hello` answers: a claim, with no proof, to a process of this user.
     hello: Value,
     served: Vec<Arc<Served>>,
-    control: Arc<Served>,
+    /// `@control` and `@tools`.
+    control: Doors,
     home: PathBuf,
 }
 
@@ -36,7 +40,7 @@ impl Door {
         listener: pipe::Listener,
         hello: Value,
         served: Vec<Arc<Served>>,
-        control: Arc<Served>,
+        control: Doors,
         home: PathBuf,
     ) -> Self {
         Self {
@@ -70,7 +74,7 @@ impl Door {
             let shared = Arc::clone(shared);
             let hello = self.hello.clone();
             let served = self.served.clone();
-            let control = Arc::clone(&self.control);
+            let control = self.control.clone();
             let home = self.home.clone();
             let spawned = thread::Builder::new()
                 .name("canoa-door".to_owned())
@@ -97,7 +101,7 @@ fn reply(channel: &pipe::PipeChannel, value: &Value) -> bool {
 
 fn meet(
     shared: &Arc<Shared>,
-    (hello, served, control): (&Value, &[Arc<Served>], &Arc<Served>),
+    (hello, served, (control, tools)): (&Value, &[Arc<Served>], &Doors),
     home: &Path,
     channel: &pipe::PipeChannel,
     entered: Entered,
@@ -115,6 +119,7 @@ fn meet(
             return;
         }
         crate::control::NAME => control,
+        native::TOOLS => tools,
         name => match served.iter().find(|served| served.name == name) {
             Some(served) => served,
             None => {

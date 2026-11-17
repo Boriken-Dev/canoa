@@ -40,6 +40,8 @@ pub const MAX_PREAMBLE: usize = 64 * 1024;
 pub const MAX_PIECE: usize = 768_000;
 /// What `@hello` is opened as.
 pub const HELLO: &str = "@hello";
+/// What a program opens to offer its tools to the host's sessions.
+pub const TOOLS: &str = "@tools";
 /// What the pairing door is opened as.
 pub const PAIR: &str = "@pair";
 /// How long a relay waits for the door to answer.
