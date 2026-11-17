@@ -602,11 +602,11 @@ fn start(fields: &mut Fields<'_>, mut fds: Vec<OwnedFd>) -> io::Result<(u32, boo
         .stdin(std::process::Stdio::from(stdin))
         .stdout(std::process::Stdio::from(stdout))
         .stderr(std::process::Stdio::from(stderr));
-    let child = {
+    let child = super::retry_busy(|| {
         // No frame's descriptors are being made close-on-exec while this process starts.
         let _gate = FORK_GATE.read().unwrap_or_else(PoisonError::into_inner);
-        command.spawn()?
-    };
+        command.spawn()
+    })?;
     let pid = child.id();
     // The command holds the child's ends of its pipes: let go of them, or the host never sees them end.
     drop(command);

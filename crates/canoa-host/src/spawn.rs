@@ -284,7 +284,7 @@ impl Command {
         }
         #[cfg(windows)]
         std::os::windows::process::CommandExt::creation_flags(&mut command, self.flags);
-        let mut child = command.spawn()?;
+        let mut child = retry_busy(|| command.spawn())?;
         Ok(Child {
             stdin: child.stdin.take(),
             stdout: child.stdout.take(),
@@ -327,6 +327,23 @@ impl core::fmt::Debug for Command {
             .field("own_group", &self.own_group)
             .finish_non_exhaustive()
     }
+}
+
+/// Runs `start`, again after a short wait while it fails with "text file busy" (Unix `ETXTBSY`): a program just written is
+/// refused by `exec` while another thread's `fork` still holds a copy of its write descriptor, which it drops at its own `exec`.
+pub(crate) fn retry_busy<T>(
+    #[cfg_attr(not(unix), allow(unused_mut))] mut start: impl FnMut() -> io::Result<T>,
+) -> io::Result<T> {
+    #[cfg(unix)]
+    for wait in [50, 100, 200, 300, 350] {
+        match start() {
+            Err(error) if error.raw_os_error() == Some(26) => {
+                thread::sleep(core::time::Duration::from_millis(wait));
+            }
+            other => return other,
+        }
+    }
+    start()
 }
 
 fn own(how: &Stdio) -> io::Result<std::process::Stdio> {
@@ -641,6 +658,33 @@ fn lost() -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn a_start_refused_as_busy_is_tried_again_and_any_other_error_is_not() {
+        let mut calls = 0;
+        let started = retry_busy(|| {
+            calls += 1;
+            if calls < 3 {
+                Err(io::Error::from_raw_os_error(26))
+            } else {
+                Ok(calls)
+            }
+        });
+        assert_eq!(started.expect("started on the third try"), 3);
+        let mut calls = 0;
+        let refused = retry_busy(|| -> io::Result<()> {
+            calls += 1;
+            Err(io::Error::from_raw_os_error(2))
+        });
+        assert_eq!((calls, refused.is_err()), (1, true));
+        let mut calls = 0;
+        let busy = retry_busy(|| -> io::Result<()> {
+            calls += 1;
+            Err(io::Error::from_raw_os_error(26))
+        });
+        assert_eq!((calls, busy.is_err()), (6, true));
+    }
 
     #[test]
     fn a_command_shows_what_it_runs_and_never_its_environment() {
