@@ -13,15 +13,12 @@ import 'settings_row.dart';
 
 /// Tray and window, the network, and what the session list keeps.
 class GeneralSection extends StatefulWidget {
-  const GeneralSection({super.key, required this.controller, this.ledger, this.workspacePreview, this.hostWorkspacePreview});
+  const GeneralSection({super.key, required this.controller, this.ledger, this.hostWorkspacePreview});
 
   final SettingsController controller;
   final SessionLedger? ledger;
 
-  /// The folder a template makes for a session, as the app would make it now; null where this build has no folders.
-  final String? Function(String template)? workspacePreview;
-
-  /// What the host would make of a template, for a page whose chat folders are the host's.
+  /// What the host would make of a template; null where there is no host to ask.
   final Future<String?> Function(String template)? hostWorkspacePreview;
 
   @override
@@ -34,7 +31,7 @@ class _GeneralSectionState extends State<GeneralSection> {
   String? _hostAskedFor;
   Future<String?>? _hostAsked;
 
-  /// What the host makes of [template], asked once for each text the field holds; null where the folders are this computer's.
+  /// What the host makes of [template], asked once for each text the field holds; null where there is no host to ask.
   Future<String?>? _hostPreviewOf(String template) {
     final ask = widget.hostWorkspacePreview;
     if (ask == null) return null;
@@ -81,7 +78,6 @@ class _GeneralSectionState extends State<GeneralSection> {
       final c = widget.controller;
       final config = c.config;
       final problem = _workspaceProblem;
-      final preview = problem == null ? widget.workspacePreview?.call(_workspace.text) : null;
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         if (!kIsWeb)
           SettingsGroup(title: 'Window', children: [
@@ -183,10 +179,9 @@ class _GeneralSectionState extends State<GeneralSection> {
             choices: const [(QueueDelivery.merge, 'Together'), (QueueDelivery.each, 'One at a time')],
             onChanged: (v) => c.change((x) => x.copyWith(sessions: _sessions(x, queueDelivery: v))),
           ),
-          if (widget.workspacePreview != null || widget.hostWorkspacePreview != null)
+          if (widget.hostWorkspacePreview != null)
             FutureBuilder<String?>(
               future: problem == null ? _hostPreviewOf(_workspace.text) : null,
-              initialData: preview,
               builder: (context, shown) => SettingsRow(
               title: 'Where chats keep their files',
               configKey: const ['sessions', 'workspace'],
@@ -194,9 +189,9 @@ class _GeneralSectionState extends State<GeneralSection> {
                 widget.controller.change((c) => c.resetKey(const ['sessions', 'workspace']));
                 _setWorkspace(widget.controller.config.sessions.workspace, text: true);
               },
-              description: (shown.connectionState == ConnectionState.done ? shown.data : null) == null && preview == null
+              description: (shown.connectionState == ConnectionState.done ? shown.data : null) == null
                   ? 'A template; the workspace it makes is shown under the field'
-                  : 'Now: ${(shown.connectionState == ConnectionState.done ? shown.data : null) ?? preview}',
+                  : 'Now: ${(shown.connectionState == ConnectionState.done ? shown.data : null)}',
               machine: true,
               below: TextField(
                 key: const Key('settings-workspace'),

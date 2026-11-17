@@ -14,6 +14,7 @@ import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:canoa/profile/profile_home_io.dart';
 import 'package:canoa/profile/report.dart';
+import 'package:canoa/served/control_overlays.dart';
 import 'package:canoa/store/store.dart';
 import 'package:canoa/store/store_index.dart';
 import 'package:canoa_native/canoa_native.dart';
@@ -59,7 +60,7 @@ void main() {
       await _until(() => host!.phase == HostPhase.idle, 'the host to start');
 
       // Install it the way Loadout does: the catalog read, the overlay fetched and shown, then installed on a yes.
-      final home = IoProfileHome(config.path);
+      final home = IoProfileHome(config.path, overlays: ControlOverlayManager(HostControl(host)));
       // The catalogs come from the host's own index, the way Loadout reads them; the app fetches none.
       final loaded = (await ControlStoreIndex.over(HostControl(host))!.catalogs()).single;
       expect(loaded.problem, isNull);

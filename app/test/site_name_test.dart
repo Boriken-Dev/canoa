@@ -1,6 +1,7 @@
 // The host name a webpage's folder is named for: lower case, punycode, nothing but a name, and nothing that can leave the scratch
 // root. Each way a crafted name could do that is refused, and none is repaired.
 import 'package:canoa/workspace/scratch.dart';
+import 'fixtures/scratch_host.dart';
 import 'package:canoa/workspace/site.dart';
 import 'package:flutter_test/flutter_test.dart';
 

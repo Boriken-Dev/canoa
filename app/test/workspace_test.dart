@@ -7,6 +7,7 @@ import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/workspace/documents.dart';
 import 'package:canoa/workspace/scratch.dart';
+import 'fixtures/scratch_host.dart';
 import 'package:canoa/workspace/workspace_template.dart';
 import 'package:flutter_test/flutter_test.dart';
 

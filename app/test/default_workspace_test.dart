@@ -212,7 +212,7 @@ void main() {
   testWidgets('Settings shows the template with a preview, refuses a bad one and applies a good one', (tester) async {
     final documents = _documents();
     final store = SessionStore();
-    final written = await pumpApp(tester, store, documents: documents.path);
+    final written = await pumpApp(tester, store, documents: documents.path, linked: _Agent().openLink);
     await tester.tap(find.byTooltip('Canoa settings'));
     await tester.pumpAndSettle();
     final field = find.byKey(const Key('settings-workspace'));
@@ -228,6 +228,7 @@ void main() {
     expect(written.length, before, reason: 'a template that is refused is not applied');
 
     await tester.enterText(field, r'${documents}/day/${date}/${session}');
+    await tester.pump();
     await tester.pump();
     expect(find.textContaining(r'unknown variable'), findsNothing);
     final today = DateTime.now();

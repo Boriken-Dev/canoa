@@ -1,5 +1,4 @@
-// A desktop's overlay manager asks the host for the git work while the host is up, and does it on this computer's own disk while it
-// is not; what only the disk answers (what is installed, where) is always the disk's. A page has no disk and asks the host.
+// The overlay manager asks the host for all the git work, for a page and a desktop alike.
 @TestOn('vm')
 library;
 
@@ -10,7 +9,6 @@ import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
-import 'package:canoa/profile/skill_copies.dart';
 import 'package:canoa/served/control_overlays.dart';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter_test/flutter_test.dart';
@@ -43,62 +41,12 @@ final class _Host implements HostLink {
   Future<void> close() => _out.close();
 }
 
-final class _Disk extends Fake implements OverlayManager {
-  final used = <String>[];
-
-  @override
-  InstalledOverlay? installed(String name) => null;
-
-  @override
-  String directoryOf(String name) => '/disk/$name';
-
-  @override
-  Future<FetchedTree> fetchCatalog(String label, GitOverlay source) async {
-    used.add('fetchCatalog');
-    throw const OverlayException('disk');
-  }
-
-  @override
-  Future<void> removeCatalog(String label) async => used.add('removeCatalog');
-
-  @override
-  Future<Map<String, SkillCopy>> skillCopies() async {
-    used.add('skillCopies');
-    return const {};
-  }
-
-  @override
-  Future<void> removeSkill(String name) async => used.add('removeSkill');
-}
-
 const _skillText = '---\nname: review\ndescription: Does a thing.\n---\n# review\n';
 
 final _source = OverlaySource.parseGit('https://git.example/c.git@main#catalog.toml');
 
 void main() {
-  test('with the host up the catalog is fetched by the host, and the paths are the disk\'s', () async {
-    final host = _Host();
-    final disk = _Disk();
-    final manager = ControlOverlayManager(HostControl.dialing(() async => host), local: disk, hostUp: () => true);
-    final tree = await manager.fetchCatalog('main', _source);
-    expect(tree.commit, 'c' * 40);
-    await manager.removeCatalog('main');
-    expect(host.asked, ['catalog/fetch', 'catalog/remove']);
-    expect(disk.used, isEmpty);
-    expect(manager.directoryOf('x'), '/disk/x');
-  });
-
-  test('with the host down the disk does the work and the host is not asked', () async {
-    final host = _Host();
-    final disk = _Disk();
-    final manager = ControlOverlayManager(HostControl.dialing(() async => host), local: disk, hostUp: () => false);
-    await expectLater(manager.fetchCatalog('main', _source), throwsA(isA<OverlayException>().having((e) => e.message, 'message', 'disk')));
-    await manager.removeCatalog('main');
-    expect(disk.used, ['fetchCatalog', 'removeCatalog']);
-    expect(host.asked, isEmpty);
-  });
-
-  test('a page has no disk: the host fetches', () async {
+  test('the host fetches, and what is installed is what it last said', () async {
     final host = _Host();
     final manager = ControlOverlayManager(HostControl.dialing(() async => host));
     await manager.fetchCatalog('main', _source);
@@ -145,21 +93,5 @@ void main() {
     await manager.removeSkill('review');
     expect(host.asked.last, 'skill/remove');
     expect(host.params.last, {'name': 'review'});
-  });
-
-  test('a desktop whose host is down keeps its skills on its own disk, and asks the host while it is up', () async {
-    final host = _Host((method, params) => method == 'skill/list' ? {'skills': {}} : {'removed': true});
-    final disk = _Disk();
-    var up = false;
-    final manager = ControlOverlayManager(HostControl.dialing(() async => host), local: disk, hostUp: () => up);
-    await manager.skillCopies();
-    await manager.removeSkill('review');
-    expect(disk.used, ['skillCopies', 'removeSkill']);
-    expect(host.asked, isEmpty);
-    up = true;
-    await manager.skillCopies();
-    await manager.removeSkill('review');
-    expect(host.asked, ['skill/list', 'skill/remove']);
-    expect(disk.used, ['skillCopies', 'removeSkill']);
   });
 }

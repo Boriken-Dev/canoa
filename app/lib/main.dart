@@ -92,6 +92,7 @@ import 'popout/popout_app.dart';
 import 'popout/popout_hub.dart';
 import 'permissions/protected_paths.dart' show ProtectedPaths;
 import 'permissions/rule_log.dart';
+import 'profile/overlays.dart' show NoOverlays;
 import 'profile/profile_home.dart' show ProfileHome;
 import 'served/control_overlays.dart' show ControlOverlayManager;
 import 'served/control_profile_home.dart' show ControlProfileHome;
@@ -139,7 +140,7 @@ import 'theme/follow_provider.dart';
 import 'theme/look.dart';
 import 'theme/vendor_looks.dart';
 import 'auth/browser_peer.dart' show verifyBrowserPeer;
-import 'workspace/documents.dart' show hasWorkspaceFolders, homeFolder, makeFolder, removeEmptyFolder;
+import 'workspace/documents.dart' show homeFolder;
 import 'workspace/host_folders.dart';
 import 'workspace/open_in.dart';
 import 'workspace/open_in_host.dart' show HostedOpening;
@@ -147,7 +148,6 @@ import 'served/web_mode.dart' show WebMode;
 import 'workspace/open_in_ui.dart';
 import 'workspace/scratch.dart';
 import 'workspace/site_meta.dart';
-import 'workspace/workspace_template.dart' show exampleSessionId;
 import 'worktree/close_dialog.dart';
 import 'worktree/host.dart';
 import 'worktree/worktree.dart';
@@ -278,8 +278,8 @@ class CanoaApp extends StatefulWidget {
     super.key, this.store, this.config = const CanoaConfig(),
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
-    this.isGitRepository, this.folderExists, this.listFolder, this.resolveInside, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
-    this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
+    this.isGitRepository, this.folderExists, this.hostFolders, this.listFolder, this.resolveInside, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
+    this.worktrees, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
     this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection,
   });
 
@@ -344,6 +344,9 @@ class CanoaApp extends StatefulWidget {
   final bool Function(String folder)? isGitRepository;
   @visibleForTesting
   final bool Function(String folder)? folderExists;
+  /// The host's answers about folders, for a test that stands one in.
+  @visibleForTesting
+  final HostFolders? hostFolders;
   @visibleForTesting
   final Future<List<String>> Function(String folder)? listFolder;
   @visibleForTesting
@@ -356,10 +359,6 @@ class CanoaApp extends StatefulWidget {
   final Future<int?> Function(String path)? statFile;
   @visibleForTesting
   final chat.ClipboardReader? clipboard;
-
-  /// The Documents folder `${documents}` stands for; by default the system's.
-  @visibleForTesting
-  final String? documents;
 
   /// Makes worktrees for agents on this computer; by default through this app's host.
   @visibleForTesting
@@ -608,7 +607,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// Shows Settings, at [section] when one is named.
   Future<void> _showSettings({String? section}) async {
-    if (widget.served case final served?) await served.refreshOverlays();
+    await _refreshOverlays();
     if (!mounted) return;
     if (section != null) {
       // The page is built from what the app holds when it is first shown, so it is built again with the section to open at.
@@ -696,15 +695,8 @@ class _CanoaAppState extends State<CanoaApp> {
       section: _settingsFirst,
       ledger: store.ledger,
       rules: store.rules,
-      workspacePreview: hasWorkspaceFolders && canRunLocalAgents
-          ? (template) => scratchFolder(template, exampleSessionId, source: _lastSource, documents: widget.documents)
-          : null,
       hostWorkspacePreview: _viaHost
-          ? (template) async =>
-              await _hostFolders!.preview(template, source: _lastSource?.label ?? '', handler: _lastSource == null ? '' : handlerOf(_lastSource!)) ??
-              (widget.served == null && hasWorkspaceFolders && canRunLocalAgents
-                  ? scratchFolder(template, exampleSessionId, source: _lastSource, documents: widget.documents)
-                  : null)
+          ? (template) => _hostFolders!.preview(template, source: _lastSource?.label ?? '', handler: _lastSource == null ? '' : handlerOf(_lastSource!))
           : null,
       onAllowNotifications: kIsWeb ? widget.notifier?.requestPermission : null,
       presets: [
@@ -814,18 +806,29 @@ class _CanoaAppState extends State<CanoaApp> {
   ProfileHome? _desktopHomeHeld;
   String? _desktopHomeFor;
 
-  /// Beside canoa.cfg, with the overlay and catalog work and the reading of layers and trust done by this app's host while it is up and here while it is not.
+  /// Beside canoa.cfg, with the overlay and catalog work done by this app's host, and the reading of layers and trust by it while it
+  /// is up and here while it is not.
   ProfileHome? _desktopHome() {
     final path = _configPath;
     if (_desktopHomeFor == path && _desktopHomeHeld != null) return _desktopHomeHeld;
     final control = _control;
-    final local = platformProfileHome(
-      configPath: path,
-      overlays: control == null ? null : (local) => ControlOverlayManager(control, local: local, hostUp: () => _hostUp),
-    );
+    final local = platformProfileHome(configPath: path, overlays: control == null ? const NoOverlays() : ControlOverlayManager(control));
     _desktopHomeFor = path;
     if (control == null || local == null) return _desktopHomeHeld = local;
     return _desktopHomeHeld = ControlProfileHome(control, overlays: local.overlays, os: local.os, local: local, hostUp: () => _hostUp);
+  }
+
+  /// Reads which overlays the host has installed, which the store shows as installed: the host that served this page, or this app's own.
+  Future<void> _refreshOverlays() async {
+    if (widget.served case final served?) return served.refreshOverlays();
+    if (!_hostUp) return;
+    if (_home?.overlays case final ControlOverlayManager overlays) {
+      try {
+        await overlays.refresh();
+      } on Object catch (error) {
+        debugPrint("Canoa: the host's overlays cannot be read: $error");
+      }
+    }
   }
 
   /// Whether the host answers: the one that served this page, or this app's own once it runs.
@@ -835,7 +838,7 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Shows the Store: agents, overlays, skills and MCP servers, installed and to discover.
   Future<void> _showLoadout() async {
     // What the host has installed changes without this page, and the store shows it from what was last read.
-    if (widget.served case final served?) await served.refreshOverlays();
+    await _refreshOverlays();
     if (!mounted) return;
     _layout.select('store');
     if (_loadoutKey.currentState case final page?) unawaited(page.controller.adopt(config));
@@ -871,6 +874,7 @@ class _CanoaAppState extends State<CanoaApp> {
     embedded: true,
     selection: _storeSelection,
     contentsStorage: _control == null ? null : ControlContentsStorage(_control),
+    contentsReader: _control == null ? null : ControlContentsReader(_control, os: _home?.os ?? 'linux'),
     config: config,
     home: _home,
     onSave: _saveLoadout,
@@ -1058,7 +1062,7 @@ class _CanoaAppState extends State<CanoaApp> {
   late final HostFiles? _hostFiles = widget.served?.files ?? (_control == null ? null : HostFiles(_control));
 
   /// The host's answers about folders: whether one is there and in a repository, an `@`'s names, a chat's scratch folder.
-  late final HostFolders? _hostFolders = _control == null ? null : (HostFolders(_control)..addListener(_foldersChanged));
+  late final HostFolders? _hostFolders = (widget.hostFolders ?? (_control == null ? null : HostFolders(_control)))?..addListener(_foldersChanged);
 
   void _foldersChanged() {
     if (mounted) setState(() {});
@@ -2036,14 +2040,12 @@ class _CanoaAppState extends State<CanoaApp> {
     final scratchRequest = scratch && !hostMakes && _viaHost ? _scratchRequest(draft) : null;
     if (scratch && !hostMakes) {
       try {
-        final made = scratchRequest == null ? null : await _scratchViaHost(scratchRequest);
-        if (made != null) {
-          folder = made.path;
-          hostMade = true;
-          madeFolder = made.made;
-        } else {
-          madeFolder = await makeFolder(folder);
-        }
+        final request = scratchRequest;
+        if (request == null) throw StateError('Its folder is made by the host, which is not here');
+        final made = await _hostFolders!.makeScratch(request);
+        folder = made.path;
+        hostMade = true;
+        madeFolder = made.made;
       } on Object catch (error) {
         throw StateError('Cannot make its workspace $folder: ${reasonOf(error)}');
       }
@@ -2059,13 +2061,7 @@ class _CanoaAppState extends State<CanoaApp> {
     try {
       await _startHosted(draft, source.hostEntry!, folder, worktree, starting, hostMakes: hostMakes);
     } catch (_) {
-      if (madeFolder) {
-        if (hostMade && scratchRequest != null) {
-          await _hostFolders!.removeScratch(scratchRequest);
-        } else {
-          await removeEmptyFolder(folder);
-        }
-      }
+      if (madeFolder && hostMade && scratchRequest != null) await _hostFolders!.removeScratch(scratchRequest);
       rethrow;
     } finally {
       _inFlight.remove(starting);
@@ -2464,6 +2460,7 @@ class _CanoaAppState extends State<CanoaApp> {
       if (!vendorLooks.answered) unawaited(_loadLooks());
       unawaited(_grants?.refresh());
       unawaited(_accounts?.refresh());
+      unawaited(_refreshOverlays());
     }
     final serving = _hostedSources;
     if (_serving != null && _serving!.length == serving.length && _serving!.every(serving.contains)) return;
@@ -2677,23 +2674,6 @@ class _CanoaAppState extends State<CanoaApp> {
     super.dispose();
   }
 
-  /// The folder [session] works in when none is chosen, from canoa.cfg's `[sessions] workspace`; null for a session not made here.
-  String? _scratchOf(ChatSession session) {
-    final id = session.workspaceId;
-    return id == null ? null : scratchFolder(config.sessions.workspace, id, source: session.source, now: session.created, documents: widget.documents);
-  }
-
-  /// The folder the host made for a chat on a desktop, or null when its control channel does not answer and this computer makes it.
-  Future<({String path, bool made})?> _scratchViaHost(ScratchRequest request) async {
-    try {
-      return await _hostFolders!.makeScratch(request);
-    } on ControlFailed {
-      rethrow;
-    } on Object {
-      return null;
-    }
-  }
-
   /// The names an `@` offers in [folder], which the host lists; none while it does not answer.
   Future<List<String>> _mentionsOf(String folder) async {
     try {
@@ -2765,7 +2745,8 @@ class _CanoaAppState extends State<CanoaApp> {
       return _remoteReady[name]?.folders.inRepository(cwd) ?? false;
     },
     pathUnchecked: (session) => _connection(session.host)?.kind == ConnectionKind.acp,
-    scratchFolder: widget.served != null ? (_) => siteStandInFolder : hasWorkspaceFolders && canRunLocalAgents ? _scratchOf : null,
+    // The host makes a chat's folder when its session opens; what the composer holds is a stand-in for it.
+    scratchFolder: widget.served != null || _viaHost ? (_) => siteStandInFolder : null,
     pickFiles: widget.pickFiles ?? () => openFiles(),
     statFile: widget.statFile ?? (canRunLocalAgents ? localFileSize : null),
     uploadFile: widget.served == null ? null : _upload,

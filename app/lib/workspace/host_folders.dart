@@ -23,7 +23,7 @@ String localIso(DateTime time) {
 /// `fs/resolve`, `fs/scratch*`): the same calls from a served page and from the desktop app, which hold no file system of their own
 /// for this. The synchronous questions (does this recent folder still exist, is it in a repository) answer from what the host last
 /// said and ask again in the background, so a widget that built with a guess is built again with the answer.
-final class HostFolders extends ChangeNotifier {
+class HostFolders extends ChangeNotifier {
   HostFolders(this._control, {Duration keep = const Duration(seconds: 10)}) : _keep = keep;
 
   final HostControl _control;

@@ -6,7 +6,6 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
-import '../desktop/host_supervisor.dart' show HostCommandFailed;
 import '../profile/aos_support.dart' show holdsPassword;
 import '../profile/overlays.dart';
 import '../profile/profile.dart';
@@ -21,34 +20,11 @@ import '../profile/skill_copies.dart';
 /// Skills fetched from elsewhere go the same way (`skill/*`): the host fetches them with git and keeps their files, and the review
 /// of what was fetched stays this app's.
 ///
-/// A desktop app, whose host shares its disk, passes [local]: the same work is then done by the host while it is up, and by
-/// [local] while it is not, and what only this computer's files answer ([installed], [directoryOf]) is [local]'s.
+/// The desktop app works the same way over its own host's control channel.
 final class ControlOverlayManager implements OverlayManager {
-  ControlOverlayManager(this._control, {this.root = 'overlays', this.local, this.hostUp});
+  ControlOverlayManager(this._control, {this.root = 'overlays'});
 
   final HostControl _control;
-
-  /// The manager that reads this computer's own disk, for a desktop; none for a page.
-  final OverlayManager? local;
-
-  /// Whether the host answers now; absent means it does. While it does not, [local] does the work.
-  final bool Function()? hostUp;
-
-  /// The manager to use for the host's work: [local] while the host is down, else null.
-  OverlayManager? get _instead => (hostUp?.call() ?? true) ? null : local;
-
-  /// The manager to use instead of the host: [_instead], and [local] too when the host is up but serves no control channel now.
-  Future<OverlayManager?> _other() async {
-    if (_instead case final other?) return other;
-    final here = local;
-    if (here == null) return null;
-    try {
-      await _control.ready();
-      return null;
-    } on HostCommandFailed {
-      return here;
-    }
-  }
 
   /// Where the host keeps overlays, as it said; only for showing.
   final String root;
@@ -86,14 +62,13 @@ final class ControlOverlayManager implements OverlayManager {
   }
 
   @override
-  InstalledOverlay? installed(String name) => local?.installed(name) ?? _installed[name];
+  InstalledOverlay? installed(String name) => _installed[name];
 
   @override
-  String directoryOf(String name) => local?.directoryOf(name) ?? '$root/$name';
+  String directoryOf(String name) => '$root/$name';
 
   @override
   Future<OverlayUpdate> check(String name, GitOverlay given) async {
-    if (await _other() case final other?) return other.check(name, given);
     final answer = await _call('overlay/check', {
       'name': name,
       ..._sourceOf(given),
@@ -125,7 +100,6 @@ final class ControlOverlayManager implements OverlayManager {
 
   @override
   Future<InstalledOverlay> apply(OverlayUpdate update, {String? catalog}) async {
-    if (await _other() case final other?) return other.apply(update, catalog: catalog);
     final answer = await _call('overlay/apply', {'token': _planOf(update), 'catalog': ?catalog});
     final record = InstalledOverlay.fromJson(update.name, answer.cast<String, dynamic>());
     _installed[update.name] = record;
@@ -134,14 +108,12 @@ final class ControlOverlayManager implements OverlayManager {
 
   @override
   Future<void> remove(String name) async {
-    if (await _other() case final other?) return other.remove(name);
     await _call('overlay/remove', {'name': name});
     _installed.remove(name);
   }
 
   @override
   Future<Map<String, List<int>>> read(OverlayUpdate update) async {
-    if (await _other() case final other?) return other.read(update);
     final answer = await _call('overlay/read', {'token': _planOf(update)});
     return {
       for (final MapEntry(:key, :value) in (answer['files'] as Map<Object?, Object?>).entries) '$key': base64Decode('$value'),
@@ -150,20 +122,17 @@ final class ControlOverlayManager implements OverlayManager {
 
   @override
   Future<void> discard(String name) async {
-    if (await _other() case final other?) return other.discard(name);
     await _call('overlay/discard', {'name': name});
   }
 
   @override
   Future<FetchedTree> fetchCatalog(String label, GitOverlay source) async {
-    if (await _other() case final other?) return other.fetchCatalog(label, source);
     final answer = await _call('catalog/fetch', {'label': label, ..._sourceOf(source)});
     return _RemoteTree(this, label, answer['commit']! as String);
   }
 
   @override
   Future<void> removeCatalog(String label) async {
-    if (await _other() case final other?) return other.removeCatalog(label);
     await _call('catalog/remove', {'label': label});
   }
 
@@ -173,7 +142,6 @@ final class ControlOverlayManager implements OverlayManager {
 
   @override
   Future<Map<String, SkillCopy>> skillCopies() async {
-    if (await _other() case final other?) return other.skillCopies();
     final answer = await _call('skill/list', const {});
     final out = <String, SkillCopy>{};
     for (final MapEntry(:key, :value) in (answer['skills'] as Map<Object?, Object?>? ?? const {}).entries) {
@@ -211,7 +179,6 @@ final class ControlOverlayManager implements OverlayManager {
 
   @override
   Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source) async {
-    if (await _other() case final other?) return other.fetchSkillFiles(source);
     if (source.kind != 'git') throw const OverlayException('Canoa fetches skills from git only, and this source is not git');
     if (holdsPassword(source.location)) throw const OverlayException('A skill source holds a password, which none may');
     final answer = await _call('skill/fetch', {'repo': source.location, 'ref': source.reference, 'path': source.path ?? ''});
@@ -221,7 +188,6 @@ final class ControlOverlayManager implements OverlayManager {
 
   @override
   Future<void> saveSkill(SkillCopy copy) async {
-    if (await _other() case final other?) return other.saveSkill(copy);
     await _call('skill/save', {
       ...copy.toJson(),
       'files': {for (final MapEntry(:key, :value) in copy.files.entries) key: base64Encode(value)},
@@ -230,7 +196,6 @@ final class ControlOverlayManager implements OverlayManager {
 
   @override
   Future<void> removeSkill(String name) async {
-    if (await _other() case final other?) return other.removeSkill(name);
     await _call('skill/remove', {'name': name});
   }
 

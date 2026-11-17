@@ -10,7 +10,6 @@ import 'dart:io';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/loadout/loadout_controller.dart';
 import 'package:canoa/loadout/mcp_registry.dart';
-import 'package:canoa/profile/profile_home_io.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/store_fixtures.dart';
@@ -112,70 +111,52 @@ void main() {
   });
 
   test('a git repository holding a list file is a registry: read at its ref, with no network but the repository', () async {
-    final temp = await Directory.systemTemp.createTemp('canoa-registry-git');
+    // The repository is read through the host's catalog calls, which this stand-in answers from memory.
+    const location = 'https://git.example/lists.git';
+    final overlays = MemoryOverlays()..put(location, {'servers.json': page([teamServer(), npmServer()])});
+    final saved = <CanoaConfig>[];
+    final controller = LoadoutController(
+      config: CanoaConfig.parse(''),
+      home: MemoryHome(overlays),
+      save: (changed) async {
+        saved.add(changed);
+        return changed;
+      },
+      agents: const ['Claude'],
+      // The official registry is not reachable here: nothing may read it.
+      fetch: (uri) async => throw StateError('no HTTP registry is read: $uri'),
+    );
     try {
-      final root = temp.path.replaceAll(r'\', '/');
-      final repo = Repo(root, 'lists')
-        ..write('servers.json', page([teamServer(), npmServer()]))
-        ..commit('the team list');
-      final config = Directory('$root/config')..createSync();
-      final saved = <CanoaConfig>[];
-      final controller = LoadoutController(
-        config: CanoaConfig.parse(''),
-        home: IoProfileHome(config.path),
-        save: (changed) async {
-          saved.add(changed);
-          return changed;
-        },
-        agents: const ['Claude'],
-        // The official registry is not reachable here: nothing may read it.
-        fetch: (uri) async => throw StateError('no HTTP registry is read: $uri'),
-      );
-      try {
-        final spec = '${repo.location}@main#servers.json';
-        expect(await controller.addRegistry(spec), isNull);
-        expect(controller.registryProblem, isNull, reason: 'the list file was read');
-        expect(controller.registryEntries.map((entry) => entry.name), ['dev.team/tracker', 'io.github.ana/files']);
-        expect(controller.registryNext, isNull);
+      final spec = '$location@main#servers.json';
+      expect(await controller.addRegistry(spec), isNull);
+      expect(controller.registryProblem, isNull, reason: 'the list file was read');
+      expect(controller.registryEntries.map((entry) => entry.name), ['dev.team/tracker', 'io.github.ana/files']);
+      expect(controller.registryNext, isNull);
 
-        // A search narrows what the file lists.
-        await controller.loadRegistry(search: 'tracker');
-        expect(controller.registryEntries.map((entry) => entry.name), ['dev.team/tracker']);
+      // A search narrows what the file lists.
+      await controller.loadRegistry(search: 'tracker');
+      expect(controller.registryEntries.map((entry) => entry.name), ['dev.team/tracker']);
 
-        final entry = controller.registryEntries.single;
-        await controller.installMcp(entry, optionsOf(entry.server).single, 'tracker');
-        expect(saved.last.storeMcp['tracker']!.registry, spec);
+      final entry = controller.registryEntries.single;
+      await controller.installMcp(entry, optionsOf(entry.server).single, 'tracker');
+      expect(saved.last.storeMcp['tracker']!.registry, spec);
 
-        // The file moves on: the next read is of the new commit.
-        repo
-          ..write('servers.json', page([npmServer()]))
-          ..commit('the list changed');
-        await controller.loadRegistry();
-        expect(controller.registryEntries.map((entry) => entry.name), ['io.github.ana/files']);
+      // The file moves on: the next read is of the new commit.
+      overlays.put(location, {'servers.json': page([npmServer()])});
+      await controller.loadRegistry();
+      expect(controller.registryEntries.map((entry) => entry.name), ['io.github.ana/files']);
 
-        // A file the repository does not have is a line, not an exception.
-        expect(await controller.addRegistry('${repo.location}@main#missing.json'), isNull);
-        expect(controller.registryProblem, contains('missing.json'));
-        expect(controller.registryEntries, isEmpty);
+      // A file the repository does not have is a line, not an exception.
+      expect(await controller.addRegistry('$location@main#missing.json'), isNull);
+      expect(controller.registryProblem, contains('missing.json'));
+      expect(controller.registryEntries, isEmpty);
 
-        // A file that is not a list is refused as any registry's answer is.
-        repo
-          ..write('servers.json', jsonEncode({'not': 'a list'}))
-          ..commit('not a list');
-        await controller.selectRegistry(spec);
-        expect(controller.registryProblem, contains('not a list'));
-      } finally {
-        controller.dispose();
-      }
+      // A file that is not a list is refused as any registry's answer is.
+      overlays.put(location, {'servers.json': jsonEncode({'not': 'a list'})});
+      await controller.selectRegistry(spec);
+      expect(controller.registryProblem, contains('not a list'));
     } finally {
-      for (var i = 0; i < 10; i++) {
-        try {
-          temp.deleteSync(recursive: true);
-          break;
-        } on FileSystemException {
-          await Future<void>.delayed(const Duration(milliseconds: 200));
-        }
-      }
+      controller.dispose();
     }
-  }, skip: hasGit ? null : 'git is not on PATH');
+  });
 }

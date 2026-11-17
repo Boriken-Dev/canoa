@@ -27,10 +27,12 @@ import 'package:canoa/worktree/worktree.dart';
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
 import 'package:canoa/config/connection.dart' show Connection;
+import 'package:canoa/workspace/host_folders.dart' show HostFolders;
 import 'package:canoa/workspace/remote_host.dart' show RemoteHost;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'open_host.dart';
+import 'scratch_host.dart';
 import 'fake_host.dart' show defaultLocalSources, linkedHost;
 import 'source_choices.dart';
 
@@ -111,6 +113,7 @@ Future<List<CanoaConfig>> pumpApp(
   ConnectEndpoint? connectEndpoint,
   Future<CanoaConfig> Function()? readConfig,
   Future<List<String>> Function(String folder)? listFolder,
+  HostFolders? hostFolders,
   // The app's host can start an editor and the file manager, as the desktop's does; a test of an app without one says false.
   bool openIn = true,
   Future<InsideFile?> Function(String folder, String relative)? resolveInside,
@@ -128,7 +131,7 @@ Future<List<CanoaConfig>> pumpApp(
   final written = <CanoaConfig>[];
   if (openIn && !workspaceOpener.canOpen) workspaceOpener = await OpenHost().opener();
   await tester.pumpWidget(CanoaApp(
-    documents: documents ?? home.path,
+    hostFolders: hostFolders ?? ScratchHost(documents ?? home.path, template: config.sessions.workspace),
     store: store,
     config: config,
     configPath: '${dir.path}/canoa.cfg',

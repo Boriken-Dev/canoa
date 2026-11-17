@@ -160,3 +160,49 @@ abstract interface class FetchedTree {
   /// there is no regular file.
   Future<Map<String, TreeFile?>> readFiles(List<String> paths, {required int maxBytes});
 }
+
+/// The manager of an app with no host to do the git work: nothing is installed, and anything that would fetch is refused.
+class NoOverlays implements OverlayManager {
+  const NoOverlays();
+
+  static const _none = OverlayException('Overlays are installed by the host, and this app has none running');
+
+  @override
+  InstalledOverlay? installed(String name) => null;
+
+  @override
+  String directoryOf(String name) => '';
+
+  @override
+  Future<OverlayUpdate> check(String name, GitOverlay source) async => throw _none;
+
+  @override
+  Future<InstalledOverlay> apply(OverlayUpdate update, {String? catalog}) async => throw _none;
+
+  @override
+  Future<void> remove(String name) async => throw _none;
+
+  @override
+  Future<Map<String, List<int>>> read(OverlayUpdate update) async => throw _none;
+
+  @override
+  Future<FetchedTree> fetchCatalog(String label, GitOverlay source) async => throw _none;
+
+  @override
+  Future<void> removeCatalog(String label) async => throw _none;
+
+  @override
+  Future<void> discard(String name) async {}
+
+  @override
+  Future<Map<String, SkillCopy>> skillCopies() async => const {};
+
+  @override
+  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source) async => throw _none;
+
+  @override
+  Future<void> saveSkill(SkillCopy copy) async => throw _none;
+
+  @override
+  Future<void> removeSkill(String name) async => throw _none;
+}

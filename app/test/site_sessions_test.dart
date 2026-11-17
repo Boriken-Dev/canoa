@@ -122,7 +122,6 @@ Future<SessionStore> _panel(
   required SessionLedger ledger,
   required FakeTabBridge bridge,
   required _Provider provider,
-  String? documents,
   String? workspace,
 }) async {
   final store = SessionStore(ledger: ledger);
@@ -134,7 +133,6 @@ Future<SessionStore> _panel(
     config: workspace == null ? const CanoaConfig() : CanoaConfig(sessions: LedgerSettings(workspace: workspace)),
     tabBridge: bridge,
     browserProvider: Future.value(provider),
-    documents: documents,
   ));
   await settle(tester);
   return store;
