@@ -20,6 +20,10 @@ const loadoutMeta = 'dev.boriken.canoa/loadout';
 /// starting instructions the host makes the session's layer, and whose loadout is the one the session starts with unless it names one.
 const presetMeta = 'dev.boriken.canoa/preset';
 
+/// Where `initialize` says which kind of client this is (one of `clientKinds`): a session that names no loadout starts with the one
+/// canoa.cfg's `[defaults.clients]` gives that kind, else `[defaults] loadout`.
+const clientMeta = 'dev.boriken.canoa/client';
+
 /// Each harness's name, by its AOS harness id.
 const harnessLabels = {
   'claude-code': 'Claude Code',
@@ -54,11 +58,15 @@ final class ProfileItem {
 
 /// What a session was given of its profile, for the harness it went to.
 final class ProfileReport {
-  const ProfileReport(this.harness, this.items);
+  const ProfileReport(this.harness, this.items, {this.loadout});
 
   /// The harness's name, or the agent entry's when Canoa does not know it.
   final String harness;
   final List<ProfileItem> items;
+
+  /// The loadout the session started with, as the host resolved it (the one it was asked for, its profile's, its client kind's or
+  /// the default); null when none applied and the session started with everything the profile holds.
+  final String? loadout;
 
   Iterable<ProfileItem> get applied => items.where((item) => item.state == ItemState.applied);
   Iterable<ProfileItem> get notApplied => items.where((item) => item.state != ItemState.applied);
@@ -72,7 +80,7 @@ final class ProfileReport {
             ? '${item.layer.substring('overlay:'.length)}: ${item.key} (${item.state.label})'
             : '${item.key} (${item.state.label})',
     };
-    return 'Profile for ${harnessLabels[harness] ?? harness}: ${applied.length} applied'
+    return 'Profile for ${harnessLabels[harness] ?? harness}${loadout == null ? '' : ' (loadout $loadout)'}: ${applied.length} applied'
         '${missed.isEmpty ? '' : '; not applied: ${missed.join(', ')}'}';
   }
 }
@@ -93,8 +101,15 @@ HostProfile? hostProfileOf(Object? meta, {required String fallback}) {
     parsed.add(ProfileItem(key, layer, known, how));
     if (each['value'] case final String value when const {'model', 'effort', 'mode'}.contains(key)) values[key] = value;
   }
-  final harness = meta['harness'];
-  return HostProfile(ProfileReport(harness is String && harness.isNotEmpty ? harness : fallback, parsed), values);
+  final harness = meta['harness'], loadout = meta['loadout'];
+  return HostProfile(
+    ProfileReport(
+      harness is String && harness.isNotEmpty ? harness : fallback,
+      parsed,
+      loadout: loadout is String && loadout.isNotEmpty ? loadout : null,
+    ),
+    values,
+  );
 }
 
 /// What the host reported of a profile: the report, and what it asks of the session's options.
@@ -148,7 +163,18 @@ class ProfileReportDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: Text('Profile for ${harnessLabels[report.harness] ?? report.harness}'),
-    content: SizedBox(width: 640, child: SingleChildScrollView(child: ProfileItemsTable(items: report.items))),
+    content: SizedBox(
+      width: 640,
+      child: SingleChildScrollView(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (report.loadout case final loadout?) Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text('Loadout: $loadout', key: const Key('profile-loadout')),
+          ),
+          ProfileItemsTable(items: report.items),
+        ]),
+      ),
+    ),
     actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
   );
 }

@@ -18,4 +18,15 @@ void main() {
       'beta: setup: setup.sh (not supported), model (not supported)',
     );
   });
+
+  test('the line names the loadout the host started the session with, and says nothing of one when none applied', () {
+    const applied = ItemState.applied;
+    final items = [const ProfileItem('env.PATH', 'overlay:alpha', applied, 'the agent process environment')];
+    expect(ProfileReport('claude-code', items, loadout: 'mail').summary, 'Profile for Claude Code (loadout mail): 1 applied');
+    expect(ProfileReport('claude-code', items).summary, 'Profile for Claude Code: 1 applied');
+    final report = hostProfileOf({'harness': 'claude-code', 'loadout': 'mail', 'items': const []}, fallback: 'a')!.report;
+    expect(report.loadout, 'mail');
+    expect(hostProfileOf({'harness': 'claude-code', 'loadout': null, 'items': const []}, fallback: 'a')!.report.loadout, isNull);
+    expect(hostProfileOf({'harness': 'claude-code', 'loadout': 3, 'items': const []}, fallback: 'a')!.report.loadout, isNull);
+  });
 }

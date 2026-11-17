@@ -2087,6 +2087,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     String? site,
     Relation? relation,
     String? workspaceId,
+    String? loadout,
     bool agentNames = false,
   }) {
     if (peerId.isEmpty || remoteSessionId.isEmpty) {
@@ -2108,6 +2109,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         )
         ..site = site
         ..relation = relation
+        ..loadout = loadout
         ..kind = site == null ? SessionKind.workspace : SessionKind.chat
         ..workspaceId = workspaceId,
     );
@@ -3018,9 +3020,11 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
             );
     }
 
-    session.profile = ProfileReport(reported.report.harness, [
-      for (final item in reported.report.items) settled(item),
-    ]);
+    session.profile = ProfileReport(
+      reported.report.harness,
+      [for (final item in reported.report.items) settled(item)],
+      loadout: reported.report.loadout,
+    );
     chat.note(session.profile!.summary);
     notifyListeners();
   }

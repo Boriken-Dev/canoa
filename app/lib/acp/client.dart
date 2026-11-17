@@ -302,7 +302,12 @@ final class VerifiedAgent {
   }
 
   /// Over a connection a browser's provider holds. The proof is the provider's, and without one there is no client.
-  static Future<VerifiedAgent> fromProvider(AcpPageConnection connection, {AgentDecider? decider, AgentElicitor? elicitor}) async {
+  static Future<VerifiedAgent> fromProvider(
+    AcpPageConnection connection, {
+    AgentDecider? decider,
+    AgentElicitor? elicitor,
+    Map<String, Object?> initializeMeta = const {},
+  }) async {
     final agent = connection.agent;
     final peer = agent.peer;
     if (!agent.verified || peer == null) {
@@ -310,7 +315,7 @@ final class VerifiedAgent {
       throw const AcpFailure('The browser has not proven who this agent is');
     }
     final identity = AgentIdentity();
-    final usage = UsageWire(connection.send);
+    final usage = UsageWire(connection.send, initializeMeta: initializeMeta);
     final hub = HubWire();
     return VerifiedAgent._(
       (decider, elicitor) => AcpClient(

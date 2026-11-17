@@ -106,7 +106,11 @@ class LoadoutsSectionState extends State<LoadoutsSection> {
     final renamedDefault = draft.original != null && draft.original == _config.defaultLoadout ? name : null;
     final CanoaConfig changed;
     try {
-      changed = _config.withLoadouts(all, defaultName: renamedDefault);
+      changed = _config.withLoadouts(
+        all,
+        defaultName: renamedDefault,
+        renamed: draft.original == null || draft.original == name ? const {} : {draft.original!: name},
+      );
     } on FormatException catch (error) {
       setState(() => _problem = error.message);
       return;

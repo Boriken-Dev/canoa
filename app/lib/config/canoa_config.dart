@@ -140,6 +140,10 @@ final class VoiceSettings {
 /// The id of the operating system's speech service, which `[voice] backend` names unless the person chose another.
 const defaultVoiceBackend = 'system';
 
+/// The kinds of client that tell their host which they are, and so can have a default loadout of their own in
+/// `[defaults.clients]`: the browser's side panel, and the task panes of Outlook, Word, Excel and PowerPoint.
+const clientKinds = ['browser', 'outlook', 'word', 'excel', 'powerpoint'];
+
 /// The label and source of the catalog Canoa offers first, until the person removes it (`[catalogs] boriken = false`) or gives
 /// that label a catalog of their own. The host reads the same pair.
 const defaultCatalogLabel = 'boriken';
@@ -683,6 +687,23 @@ final class CanoaConfig {
   /// session with every overlay `[overlays]` names and every MCP server, as before there were loadouts.
   String? get defaultLoadout => _defaultLoadout(tables['defaults'], loadouts);
 
+  /// `[defaults.clients]`: the loadout a session starts with when it names none and its client is of that kind (see [clientKinds]),
+  /// by kind. A kind with none starts with [defaultLoadout].
+  Map<String, String> get clientLoadouts => _clientLoadouts(tables['defaults'], loadouts);
+
+  /// The loadout a session that names none starts with when its client is of kind [client] (null for a client with none): the kind's
+  /// own when canoa.cfg gives it one, else [defaultLoadout].
+  String? defaultLoadoutFor(String? client) => (client == null ? null : clientLoadouts[client]) ?? defaultLoadout;
+
+  /// The loadout a session starts with, as the host resolves it: [loadout] when canoa.cfg holds it, else the one the profile
+  /// [preset] names (the default when canoa.cfg no longer holds that), else the one for a client of kind [client], else the default.
+  String? loadoutOfStart({String? loadout, String? preset, String? client}) {
+    if (loadout != null && loadouts.containsKey(loadout)) return loadout;
+    final named = presets[preset]?.loadout;
+    if (named != null) return loadouts.containsKey(named) ? named : defaultLoadout;
+    return defaultLoadoutFor(client);
+  }
+
   /// What a session that names no loadout starts with: the default loadout, or when there is none, everything the profile
   /// holds. This is what the editors change, and a `Default` loadout is written the first time one of them does.
   Loadout get startingLoadout {
@@ -726,9 +747,10 @@ final class CanoaConfig {
 
   static String? _defaultLoadout(Object? raw, Map<String, Loadout> loadouts) {
     if (raw == null) return null;
-    if (raw is! Map || raw.keys.any((key) => key != 'loadout')) {
-      throw const FormatException('canoa.cfg: defaults is a table with the key loadout');
+    if (raw is! Map || raw.keys.any((key) => key != 'loadout' && key != 'clients')) {
+      throw const FormatException('canoa.cfg: defaults is a table with the keys loadout and clients');
     }
+    _clientLoadouts(raw, loadouts);
     final name = raw['loadout'];
     if (name == null) return null;
     if (name is! String || !loadouts.containsKey(name)) {
@@ -737,14 +759,38 @@ final class CanoaConfig {
     return name;
   }
 
+  static Map<String, String> _clientLoadouts(Object? raw, Map<String, Loadout> loadouts) {
+    final clients = raw is Map ? raw['clients'] : null;
+    if (clients == null) return const {};
+    if (clients is! Map) throw const FormatException('canoa.cfg: defaults.clients must be a table');
+    final out = <String, String>{};
+    for (final MapEntry(:key, :value) in clients.entries) {
+      if (!clientKinds.contains(key)) {
+        throw FormatException('canoa.cfg: defaults.clients.$key is not a kind of client: ${clientKinds.join(', ')}');
+      }
+      if (value is! String || !loadouts.containsKey(value)) {
+        throw FormatException('canoa.cfg: defaults.clients.$key is the name of a loadout in loadouts');
+      }
+      out['$key'] = value;
+    }
+    return out;
+  }
+
   /// This configuration with [loadouts] as `[loadouts]`, and [defaultName] as `[defaults] loadout` (kept as it is when omitted;
-  /// dropped when it names a loadout that is gone).
-  CanoaConfig withLoadouts(Map<String, Loadout> loadouts, {String? defaultName}) {
+  /// dropped when it names a loadout that is gone). A client's default that names a loadout that is gone is dropped too, and one
+  /// that names a loadout in [renamed] (old name to new) follows it.
+  CanoaConfig withLoadouts(Map<String, Loadout> loadouts, {String? defaultName, Map<String, String> renamed = const {}}) {
     final keep = defaultName ?? defaultLoadout;
     final named = keep != null && loadouts.containsKey(keep) ? keep : null;
-    final defaults = {...((tables['defaults'] as Map?) ?? const {}).cast<String, dynamic>()}..remove('loadout');
+    final defaults = {...((tables['defaults'] as Map?) ?? const {}).cast<String, dynamic>()}
+      ..remove('loadout')
+      ..remove('clients');
+    final clients = {
+      for (final MapEntry(:key, :value) in clientLoadouts.entries)
+        if (loadouts.containsKey(renamed[value] ?? value)) key: renamed[value] ?? value,
+    };
     return _withTable('loadouts', {for (final MapEntry(:key, :value) in loadouts.entries) key: value.toTable()})
-        ._withTable('defaults', {...defaults, 'loadout': ?named});
+        ._withTable('defaults', {...defaults, 'loadout': ?named, if (clients.isNotEmpty) 'clients': clients});
   }
 
   /// `[profiles.NAME]`: the named presets of a session's own values (source, model, effort, mode, starting instructions, cache

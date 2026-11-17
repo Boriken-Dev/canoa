@@ -342,6 +342,48 @@ class CacheChooser extends StatelessWidget {
   }
 }
 
+/// The items that choose a loadout by name, a radio each with the default marked. The composer's loadout control and the chat-only
+/// client's picker list them alike.
+List<Widget> loadoutChoices({
+  required Iterable<String> names,
+  required String? chosen,
+  required String? defaultName,
+  required ValueChanged<String> onChoose,
+}) => [
+  for (final name in names)
+    MenuItemButton(
+      key: Key('loadout-choice $name'),
+      closeOnActivate: false,
+      leadingIcon: Icon(name == chosen ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18),
+      onPressed: () => onChoose(name),
+      child: Text(name == defaultName ? '$name (default)' : name),
+    ),
+];
+
+/// The items that choose a profile by name, led by one for none; [onChoose] gets null for it. Listed alike by the composer's
+/// profile control and the chat-only client's picker.
+List<Widget> profileChoices({
+  required Iterable<String> names,
+  required String? chosen,
+  required ValueChanged<String?> onChoose,
+}) => [
+  MenuItemButton(
+    key: const Key('profile-choice-none'),
+    closeOnActivate: false,
+    leadingIcon: Icon(chosen == null ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18),
+    onPressed: () => onChoose(null),
+    child: const Text('No profile'),
+  ),
+  for (final name in names)
+    MenuItemButton(
+      key: Key('profile-choice $name'),
+      closeOnActivate: false,
+      leadingIcon: Icon(name == chosen ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18),
+      onPressed: () => onChoose(name),
+      child: Text(name),
+    ),
+];
+
 /// The loadout a draft starts with and, for this session alone, which of its whole overlays are on. A loadout is chosen here by
 /// name; what is inside it is edited in Loadouts, and nothing here switches an item inside an overlay.
 class OverlaysChooser extends StatelessWidget {
@@ -374,14 +416,12 @@ class OverlaysChooser extends StatelessWidget {
     return MenuAnchor(
       menuChildren: [
         if (kit.loadouts.isNotEmpty) ...[
-          for (final name in kit.loadouts.keys)
-            MenuItemButton(
-              key: Key('loadout-choice $name'),
-              closeOnActivate: false,
-              leadingIcon: Icon(name == named ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18),
-              onPressed: () => store.updateDraft(session, loadout: name),
-              child: Text(name == kit.defaultLoadout ? '$name (default)' : name),
-            ),
+          ...loadoutChoices(
+            names: kit.loadouts.keys,
+            chosen: named,
+            defaultName: kit.defaultLoadout,
+            onChoose: (name) => store.updateDraft(session, loadout: name),
+          ),
           const Divider(height: 1),
         ],
         for (final name in kit.overlays)
@@ -493,21 +533,11 @@ class PresetChooser extends StatelessWidget {
     ];
     return MenuAnchor(
       menuChildren: [
-        MenuItemButton(
-          key: const Key('profile-choice-none'),
-          closeOnActivate: false,
-          leadingIcon: Icon(name == null ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18),
-          onPressed: () => store.usePreset(session, null, null),
-          child: const Text('No profile'),
+        ...profileChoices(
+          names: kit.presets.keys,
+          chosen: name,
+          onChoose: (chosen) => chosen == null ? store.usePreset(session, null, null) : _use(chosen),
         ),
-        for (final entry in kit.presets.entries)
-          MenuItemButton(
-            key: Key('profile-choice ${entry.key}'),
-            closeOnActivate: false,
-            leadingIcon: Icon(entry.key == name ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18),
-            onPressed: () => _use(entry.key),
-            child: Text(entry.key),
-          ),
         const Divider(height: 1),
         if (kit.savePreset != null && name != null && held != null && modified)
           MenuItemButton(

@@ -11,6 +11,7 @@ import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/extension/tab_bridge.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/main.dart';
+import 'package:canoa/profile/report.dart' show clientMeta, loadoutMeta, presetMeta;
 import 'package:canoa/session_store.dart';
 import 'package:canoa/workspace/site_meta.dart';
 import 'package:coqui_acp/page.dart';
@@ -77,6 +78,9 @@ final class _Provider implements AcpPage {
   /// Everything each `session/new` carried, as the agent's host read it.
   final sent = <String>[];
 
+  /// The `_meta` each `initialize` carried, where the host reads the loadout and profile a session starts with.
+  final initialized = <Map<String, Object?>>[];
+
   /// Whether the host leaves its folder out of its answer, as one that does not know the extension would.
   var forgets = false;
   var requests = 0;
@@ -125,6 +129,7 @@ final class _Connection implements AcpPageConnection {
     Object? result = <String, Object?>{};
     switch (request['method']) {
       case 'initialize':
+        owner.initialized.add((params['_meta'] as Map?)?.cast<String, Object?>() ?? const {});
         result = {'protocolVersion': 1, 'agentCapabilities': {'loadSession': true}, 'agentInfo': {'name': 'site-agent', 'version': '1.0.0'}};
       case 'session/new':
         final site = ((params['_meta'] as Map<String, dynamic>?)?[siteMeta] as Map<String, dynamic>?)?['site'] as String?;
@@ -155,6 +160,7 @@ Future<SessionStore> _panel(
   FakeTabBridge? bridge,
   required _Provider provider,
   String? workspace,
+  CanoaConfig? config,
   ClientMode? mode,
   RelationSource? relations,
   bool Function(Uri)? openPage,
@@ -166,7 +172,7 @@ Future<SessionStore> _panel(
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(CanoaApp(
     store: store,
-    config: workspace == null ? const CanoaConfig() : CanoaConfig(sessions: LedgerSettings(workspace: workspace)),
+    config: config ?? (workspace == null ? const CanoaConfig() : CanoaConfig(sessions: LedgerSettings(workspace: workspace))),
     tabBridge: bridge,
     browserProvider: Future.value(provider),
     mode: mode,
@@ -351,6 +357,23 @@ void main() {
 }
 
 const _chatOnly = ClientMode(chatOnly: true);
+
+/// A canoa.cfg with loadouts and profiles, a default loadout and a default of its own for each of three kinds of client.
+final _withLoadouts = CanoaConfig.parse(
+  '[loadouts.writing]\n[loadouts.review]\nskills = ["audit"]\n[loadouts.mail]\n[loadouts.docs]\n'
+  '[profiles.deep]\nmodel = "big"\nloadout = "review"\n[profiles.careful]\nmodel = "small"\n'
+  '[defaults]\nloadout = "writing"\n[defaults.clients]\noutlook = "mail"\nword = "docs"\n',
+);
+
+/// Opens the menu of [pill] and chooses [item], then closes the menu.
+Future<void> _pick(WidgetTester tester, Key pill, Key item) async {
+  await tester.tap(find.byKey(pill));
+  await settle(tester);
+  await tester.tap(find.byKey(item));
+  await settle(tester);
+  await tester.tapAt(const Offset(370, 700));
+  await settle(tester);
+}
 
 Future<void> _openDrawer(WidgetTester tester) async {
   await tester.tap(find.byTooltip('Sessions'));
@@ -607,6 +630,102 @@ void chatOnlyTests() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await settle(tester);
       expect(opened, hasLength(1), reason: 'Ctrl+, is Settings there');
+    });
+
+    testWidgets('the loadout and profile are chosen beside New session, and the session starts with them', (tester) async {
+      final provider = _Provider();
+      final store = await _panel(
+        tester, ledger: SessionLedger(MemoryLedgerBackend()), bridge: _bridge('https://example.com/a'), provider: provider,
+        mode: _chatOnly, config: _withLoadouts,
+      );
+      expect(find.descendant(of: find.byKey(const Key('start-loadout')), matching: find.text('writing')), findsOneWidget,
+          reason: 'the default until one is chosen');
+      await _pick(tester, const Key('start-loadout'), const Key('loadout-choice review'));
+      await _pick(tester, const Key('start-profile'), const Key('profile-choice deep'));
+      expect(find.descendant(of: find.byKey(const Key('start-loadout')), matching: find.text('review')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('start-profile')), matching: find.text('deep')), findsOneWidget);
+
+      await _tap(tester, const Key('related-new'));
+      await until(tester, () => store.sessions.isNotEmpty && store.sessions.first.remoteSessionId != null, 'the session to open');
+      expect(provider.initialized.single[loadoutMeta], 'review', reason: 'the host starts it with this loadout\'s skills');
+      expect(provider.initialized.single[presetMeta], 'deep');
+      expect(provider.initialized.single[clientMeta], 'browser');
+      expect(store.sessions.single.loadout, 'review');
+      expect(find.textContaining('Loadout review'), findsOneWidget, reason: 'the conversation says which loadout it started with');
+
+      // The next session starts from the defaults again.
+      await _openDrawer(tester);
+      expect(find.descendant(of: find.byKey(const Key('start-loadout')), matching: find.text('writing')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('start-profile')), matching: find.text('Profile')), findsOneWidget);
+    });
+
+    testWidgets('a kind of client\'s default loadout applies when none is chosen, and the host is told the kind', (tester) async {
+      for (final (client, relation, expected) in [
+        ('browser', null, 'writing'),
+        ('outlook', const Relation(kind: Relation.conversationKind, key: 'c1', label: 'Plan'), 'mail'),
+        ('word', const Relation(kind: Relation.documentKind, key: 'd1', label: 'Budget.docx'), 'docs'),
+        ('excel', const Relation(kind: Relation.documentKind, key: 'd2', label: 'Sheet.xlsx'), 'writing'),
+      ]) {
+        final provider = _Provider();
+        final store = await _panel(
+          tester, ledger: SessionLedger(MemoryLedgerBackend()), bridge: client == 'browser' ? _bridge('https://example.com/a') : null,
+          provider: provider, config: _withLoadouts,
+          mode: ClientMode(chatOnly: true, client: client == 'browser' ? null : client),
+          relations: relation == null ? null : ManualRelation(relation),
+        );
+        expect(find.descendant(of: find.byKey(const Key('start-loadout')), matching: find.text(expected)), findsOneWidget, reason: client);
+        await _tap(tester, const Key('related-new'));
+        await until(tester, () => store.sessions.isNotEmpty && store.sessions.first.remoteSessionId != null, '$client\'s session to open');
+        expect(provider.initialized.single[clientMeta], client);
+        expect(provider.initialized.single.containsKey(loadoutMeta), isFalse, reason: 'none chosen: the host applies the default for the kind');
+        expect(store.sessions.single.loadout, expected, reason: client);
+        await tester.pumpWidget(const SizedBox());
+      }
+    });
+
+    testWidgets('a profile that names a loadout of its own wins over the kind\'s default', (tester) async {
+      final provider = _Provider();
+      final store = await _panel(
+        tester, ledger: SessionLedger(MemoryLedgerBackend()), provider: provider, config: _withLoadouts,
+        mode: const ClientMode(chatOnly: true, client: 'outlook'),
+        relations: ManualRelation(const Relation(kind: Relation.conversationKind, key: 'c1', label: 'Plan')),
+      );
+      expect(find.descendant(of: find.byKey(const Key('start-loadout')), matching: find.text('mail')), findsOneWidget);
+      await _pick(tester, const Key('start-profile'), const Key('profile-choice careful'));
+      expect(find.descendant(of: find.byKey(const Key('start-loadout')), matching: find.text('mail')), findsOneWidget,
+          reason: 'a profile with no loadout leaves the kind\'s');
+      await _pick(tester, const Key('start-profile'), const Key('profile-choice deep'));
+      expect(find.descendant(of: find.byKey(const Key('start-loadout')), matching: find.text('review')), findsOneWidget,
+          reason: 'the profile\'s own loadout, not Outlook\'s default');
+      await _tap(tester, const Key('related-new'));
+      await until(tester, () => store.sessions.isNotEmpty && store.sessions.first.remoteSessionId != null, 'the session to open');
+      expect(provider.initialized.single.containsKey(loadoutMeta), isFalse);
+      expect(provider.initialized.single[presetMeta], 'deep');
+      expect(store.sessions.single.loadout, 'review');
+    });
+
+    testWidgets('canoa.cfg with no loadout and no profile offers nothing to choose, and the session starts as before', (tester) async {
+      final provider = _Provider();
+      final store = await _panel(
+        tester, ledger: SessionLedger(MemoryLedgerBackend()), bridge: _bridge('https://example.com/a'), provider: provider, mode: _chatOnly,
+      );
+      expect(find.byKey(const Key('start-loadout')), findsNothing);
+      expect(find.byKey(const Key('start-profile')), findsNothing);
+      await _tap(tester, const Key('related-new'));
+      await until(tester, () => store.sessions.isNotEmpty && store.sessions.first.remoteSessionId != null, 'the session to open');
+      expect(provider.initialized.single, {clientMeta: 'browser'}, reason: 'only its kind');
+      expect(store.sessions.single.loadout, isNull);
+    });
+
+    testWidgets('sample: the side panel chooses the loadout and profile beside New session', (tester) async {
+      if (samplesDir == null) return;
+      await _panel(
+        tester, ledger: SessionLedger(MemoryLedgerBackend()), bridge: _bridge('https://example.com/docs', title: 'Docs'), provider: _Provider(),
+        mode: _chatOnly, config: _withLoadouts,
+      );
+      await tester.tap(find.byKey(const Key('start-loadout')));
+      await settle(tester);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('ext_panel_start_loadout.png'));
     });
 
     testWidgets('sample: the chat-only drawer lists the page\'s sessions first', (tester) async {

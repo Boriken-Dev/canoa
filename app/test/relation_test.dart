@@ -98,7 +98,24 @@ void main() {
       expect(ClientMode.fromUri(Uri.parse('https://canoa.example/?relation=document:x')).chatOnly, isFalse);
     });
 
+    test('knows which kind of client it is from the address, else from what is in front', () {
+      ClientMode mode(String query) => ClientMode.fromUri(Uri.parse('https://canoa.example/?mode=chat$query'));
+      expect(mode('&client=word').kind, 'word');
+      expect(mode('&client=excel&relation=document:h').kind, 'excel', reason: 'a document is Word\'s or Excel\'s: the address says');
+      expect(mode('&relation=document:h').kind, isNull, reason: 'a document alone does not');
+      expect(mode('&relation=conversation:h').kind, 'outlook');
+      expect(mode('&relation=origin:https://a.test').kind, 'browser');
+      expect(mode('&client=outlook&relation=origin:https://a.test').kind, 'outlook', reason: 'the address wins over the relation');
+      expect(mode('&client=fridge').kind, isNull, reason: 'a kind canoa.cfg has no name for is none');
+      expect(mode('').kind, isNull);
+      expect(ClientMode.full.kind, isNull);
+    });
+
     test('a link to the whole app drops the mode and the relation and keeps the rest', () {
+      expect(
+        ClientMode.fullAppOf(Uri.parse('https://canoa.example/?mode=chat&client=word&relation=document:h')).queryParameters,
+        {'view': 'full'},
+      );
       final link = ClientMode.fullAppOf(Uri.parse('chrome-extension://abc/ui/index.html?view=panel&mode=chat&relation=origin:https://a.test&label=A&look=canoa#x'));
       expect(link.path, '/ui/index.html');
       expect(link.queryParameters, {'view': 'full', 'look': 'canoa'});

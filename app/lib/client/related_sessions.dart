@@ -25,6 +25,7 @@ class RelatedSessions extends StatefulWidget {
     required this.onResume,
     this.showOpen = false,
     this.onChosen,
+    this.startOptions,
   });
 
   final RelationSource source;
@@ -40,6 +41,9 @@ class RelatedSessions extends StatefulWidget {
 
   /// Told when the person chose an open session, so a drawer holding the list can close.
   final VoidCallback? onChosen;
+
+  /// What the next new session starts with, chosen beside its button: the loadout and the profile.
+  final Widget? startOptions;
 
   @override
   State<RelatedSessions> createState() => _RelatedSessionsState();
@@ -106,6 +110,7 @@ class _RelatedSessionsState extends State<RelatedSessions> {
                   child: const Text('New session'),
                 ),
               ]),
+              ?widget.startOptions,
               if (relation.label != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 2, left: 26),

@@ -132,4 +132,47 @@ void main() {
     expect(() => config.resolveLoadout('ghost'), throwsA(isA<UnknownLoadout>().having((e) => e.toString(), 'message', contains('ghost'))));
     expect(config.resolveLoadout('review')!.overlays, isEmpty);
   });
+
+  test('a kind of client has a default loadout of its own, which the loadout a session names and its profile\'s both win over', () {
+    final config = CanoaConfig.parse(
+      '$base[loadouts.main]\n[loadouts.mail]\n[loadouts.docs]\n[profiles.deep]\nloadout = "docs"\n[profiles.orphan]\nloadout = "gone"\n'
+      '[profiles.plain]\nmodel = "m"\n[defaults]\nloadout = "main"\n[defaults.clients]\noutlook = "mail"\nword = "docs"\n',
+    );
+    expect(config.clientLoadouts, {'outlook': 'mail', 'word': 'docs'});
+    expect(config.defaultLoadoutFor('outlook'), 'mail');
+    expect(config.defaultLoadoutFor('excel'), 'main', reason: 'a kind with none starts with the default');
+    expect(config.defaultLoadoutFor(null), 'main');
+    expect(config.loadoutOfStart(client: 'outlook'), 'mail');
+    expect(config.loadoutOfStart(client: 'outlook', loadout: 'docs'), 'docs', reason: 'a loadout the session names wins');
+    expect(config.loadoutOfStart(client: 'outlook', loadout: 'ghost'), 'mail', reason: 'a name the file lacks is not one');
+    expect(config.loadoutOfStart(client: 'outlook', preset: 'deep'), 'docs', reason: 'so does its profile\'s');
+    expect(config.loadoutOfStart(client: 'outlook', preset: 'plain'), 'mail', reason: 'a profile with none leaves the kind\'s');
+    expect(config.loadoutOfStart(client: 'outlook', preset: 'orphan'), 'main', reason: 'a profile\'s that is gone leaves the default');
+    final again = CanoaConfig.parse(config.encode());
+    expect(again.clientLoadouts, config.clientLoadouts, reason: 'it reads back as written');
+    expect(again.defaultLoadout, 'main');
+    expect(CanoaConfig.parse(base).clientLoadouts, isEmpty);
+  });
+
+  test('a client default that names no kind of client or no loadout is refused, naming it', () {
+    for (final (text, word) in [
+      ('[loadouts.a]\n[defaults.clients]\nfridge = "a"\n', 'fridge'),
+      ('[loadouts.a]\n[defaults.clients]\noutlook = "ghost"\n', 'outlook'),
+      ('[loadouts.a]\n[defaults.clients]\noutlook = 1\n', 'outlook'),
+      ('[loadouts.a]\n[defaults]\nclients = "a"\n', 'clients'),
+      ('[defaults.clients]\noutlook = "a"\n', 'outlook'),
+    ]) {
+      expect(() => CanoaConfig.parse(text), throwsA(isA<FormatException>().having((e) => e.message, 'message', contains(word))), reason: text);
+    }
+  });
+
+  test('deleting a loadout drops the client defaults that named it, and renaming one carries them', () {
+    final config = CanoaConfig.parse('[loadouts.a]\n[loadouts.b]\n[defaults]\nloadout = "a"\n[defaults.clients]\noutlook = "b"\nword = "a"\n');
+    final gone = config.withLoadouts({...config.loadouts}..remove('b'));
+    expect(gone.clientLoadouts, {'word': 'a'});
+    expect(CanoaConfig.parse(gone.encode()).clientLoadouts, {'word': 'a'}, reason: 'and the file still reads');
+    final renamed = config.withLoadouts({'a': config.loadouts['a']!, 'c': config.loadouts['b']!}, renamed: {'b': 'c'});
+    expect(renamed.clientLoadouts, {'outlook': 'c', 'word': 'a'});
+    expect(config.withLoadouts(config.loadouts, defaultName: 'b').clientLoadouts, config.clientLoadouts, reason: 'a new default leaves them');
+  });
 }

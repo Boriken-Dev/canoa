@@ -26,6 +26,7 @@ class RelatedRail extends StatelessWidget {
     this.onOpenFullApp,
     this.running,
     this.onAttach,
+    this.startOptions,
   });
 
   final RelationSource source;
@@ -45,6 +46,9 @@ class RelatedRail extends StatelessWidget {
   /// The sessions the host keeps running for several clients, which the list offers to join below the page's own; and what joins one.
   final RunningSessions? running;
   final Future<void> Function(RunningSession)? onAttach;
+
+  /// What a session started for what is in front starts with, chosen beside its button.
+  final Widget? startOptions;
 
   void _closeDrawer(BuildContext context) {
     if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) Navigator.pop(context);
@@ -92,6 +96,7 @@ class RelatedRail extends StatelessWidget {
                     ledger: ledger!,
                     store: store,
                     showOpen: true,
+                    startOptions: startOptions,
                     onChosen: () => _closeDrawer(context),
                     onNew: (relation) async {
                       await onNew(relation);

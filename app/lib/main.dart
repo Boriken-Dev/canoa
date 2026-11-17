@@ -136,6 +136,7 @@ import 'session_store.dart';
 import 'sources/readiness.dart';
 import 'sources/source_checks.dart';
 import 'sources/sources.dart';
+import 'client/start_picker.dart';
 import 'loadout/loadouts_index.dart';
 import 'loadout/loadouts_section.dart';
 import 'store/store_index_view.dart';
@@ -194,6 +195,20 @@ Future<bool> _localHostKeepsSessions(LocalHostBridge? bridge) async {
   }
 }
 
+/// canoa.cfg on the Canoa on this computer, read through the extension's worker; null when the host is not reached or will not give
+/// it whole, which leaves the panel with no loadouts to choose among.
+Future<CanoaConfig?> _localHostConfig(LocalHostBridge bridge) async {
+  final control = localHostControl(bridge);
+  try {
+    return await HostConfigStore(HostFiles(control)).load().timeout(const Duration(seconds: 8));
+  } on Object catch (error) {
+    debugPrint('Canoa: canoa.cfg on this computer cannot be read: $error');
+    return null;
+  } finally {
+    await control.close();
+  }
+}
+
 /// This desktop's own host. Let the browser extension reach this app too: the app registers itself as the extension's native
 /// messaging host, so the extension's Start button starts the app.
 HostSupervisor _desktopSupervisor(CanoaConfig config, List<String> args) {
@@ -225,7 +240,7 @@ Future<void> main(List<String> args) async {
   final hostCfg = served != null && served.reachable ? await served.loadConfig() : null;
   // The chat alone shows no Store or Settings, and a browser key is not granted what the overlays list needs.
   if (hostCfg != null && !ClientMode.fromUri(Uri.base).chatOnly) await served?.refreshOverlays();
-  final config = hostCfg ?? await loadConfig();
+  var config = hostCfg ?? await loadConfig();
   final shell = createDesktopShell();
   final host = served?.supervisor ??
       (shell.isDesktop ? _desktopSupervisor(config, args) : null);
@@ -236,6 +251,10 @@ Future<void> main(List<String> args) async {
   final keptByHost = host != null && host.phase != HostPhase.off && host.phase != HostPhase.absent;
   // The extension's panel uses the Canoa on this computer by default, once its key is paired with it.
   final localHost = served == null && !keptByHost ? platformLocalHostBridge() : null;
+  // The chat alone in the extension's panel chooses among the loadouts and profiles of the person's canoa.cfg on this computer.
+  if (localHost != null && ClientMode.fromUri(Uri.base).chatOnly && await _localHostKeepsSessions(localHost)) {
+    config = await _localHostConfig(localHost) ?? config;
+  }
   final LedgerBackend ledgerBackend;
   if (served != null && served.reachable) {
     ledgerBackend = served.ledger;
@@ -1015,6 +1034,22 @@ class _CanoaAppState extends State<CanoaApp> {
 
   late final ClientMode _mode = widget.mode ?? ClientMode.fromUri(Uri.base);
 
+  /// What the next session started for what is in front of the chat-only app starts with, as the person chose it.
+  final _start = StartChoice();
+
+  /// The kind of client this is when it is a chat-only one (one of [clientKinds]): the one its address names, else what its
+  /// relation shows, else a browser's when the page in front of a tab is what it follows; null for the whole app.
+  String? get _clientKind => !_mode.chatOnly ? null : _mode.kind ?? (_relations is FrontTabRelation ? 'browser' : null);
+
+  /// What `initialize` carries for a session started through the browser's provider: the loadout and the profile the person chose
+  /// for it and the kind of client this is, which the host resolves against canoa.cfg's loadouts and `[defaults.clients]` once,
+  /// when the session starts.
+  Map<String, Object?> _providerMeta() => {
+    if (_start.loadout case final name? when config.loadouts.containsKey(name)) loadoutMeta: name,
+    if (_start.preset case final name? when config.presets.containsKey(name)) presetMeta: name,
+    clientMeta: ?_clientKind,
+  };
+
   /// What is in front of the client: the one the app was given, else the one its address names, else the page in front in the
   /// extension's window; null where nothing is.
   RelationSource? _relations;
@@ -1073,7 +1108,8 @@ class _CanoaAppState extends State<CanoaApp> {
 
   Future<void> _openProviderSession(
     AcpPage acp, AcpPageAgent agent, {required String cwd, required String title, String? site, Relation? relation}) async {
-    final client = await connectProviderAgent(acp, agent, decider: store.askPermission, elicitor: store.askQuestion);
+    final meta = _providerMeta();
+    final client = await connectProviderAgent(acp, agent, decider: store.askPermission, elicitor: store.askQuestion, initializeMeta: meta);
     try {
       // A site's session works in a folder the agent's host makes and names in its answer; the page names none.
       final opened = await client.openSession(cwd: cwd, setup: site == null ? AcpSessionSetup.none : siteSetup(site));
@@ -1089,12 +1125,19 @@ class _CanoaAppState extends State<CanoaApp> {
         site: site,
         relation: relation,
         workspaceId: made?.id,
+        loadout: config.loadoutOfStart(
+          loadout: meta[loadoutMeta] as String?,
+          preset: meta[presetMeta] as String?,
+          client: meta[clientMeta] as String?,
+        ),
         agentNames: title.isEmpty,
       );
       store.applyOpened(local, opened);
       store.attachVerifiedClient(local.id, client);
       _ownedClients.add(client);
       await store.applyHostProfile(local, expected: _hasProfiles);
+      // The browser's link hides the host's own report from the page, so the loadout is said here, from what canoa.cfg names.
+      if (local.profile == null && local.loadout != null) local.chat.note('Loadout ${local.loadout}');
     } catch (_) {
       await client.close();
       rethrow;
@@ -1113,6 +1156,8 @@ class _CanoaAppState extends State<CanoaApp> {
     for (final agent in agents) {
       await _openProviderSession(acp, agent, cwd: siteStandInFolder, title: '', site: site, relation: relation);
     }
+    // The next session starts from the defaults again, as a new draft does in the whole app.
+    _start.clear();
   }
 
   /// Opens a session related to something again, in its own folder, through the browser's provider: the agent it ran on must
@@ -2339,7 +2384,7 @@ class _CanoaAppState extends State<CanoaApp> {
   Map<String, Object?> _startMeta(ChatSession draft) {
     final cache = {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account)};
     final asked = draft.overlays;
-    final withLoadout = {...cache, ..._loadoutMeta(draft), ..._presetMeta(draft)};
+    final withLoadout = {...cache, ..._loadoutMeta(draft), ..._presetMeta(draft), clientMeta: ?_clientKind};
     if (widget.served == null || asked == null || config.overlays.isEmpty) return withLoadout;
     final chosen = asked.where(config.overlays.containsKey).toSet();
     return {...withLoadout, overlaysMeta: _overlaysNamed(chosen)};
@@ -2933,6 +2978,7 @@ class _CanoaAppState extends State<CanoaApp> {
     _terminalSection.dispose();
     _grouping.dispose();
     _loadoutsSelection.dispose();
+    _start.dispose();
     _popout.dispose();
     unawaited(_paneRelations?.cancel());
     _pane?.dispose();
@@ -3056,7 +3102,7 @@ class _CanoaAppState extends State<CanoaApp> {
     overlays: config.overlays.keys.toList(),
     defaultOverlays: config.defaultOverlays,
     loadouts: {for (final name in config.loadouts.keys) name: config.resolveLoadout(name)!},
-    defaultLoadout: config.defaultLoadout,
+    defaultLoadout: config.defaultLoadoutFor(_clientKind),
     onLoadout: _showLoadouts,
     presets: config.presets,
     savePreset: _savePreset,
@@ -3135,6 +3181,10 @@ class _CanoaAppState extends State<CanoaApp> {
     },
   );
 
+  /// The loadout and profile the chat-only app's next session starts with, chosen beside its New session button; none in the whole
+  /// app, whose composer chooses them on each new session.
+  Widget? _startOptions() => _mode.chatOnly ? StartPicker(choice: _start, config: config, client: _clientKind) : null;
+
   /// Where the client has something in front of it, the sessions related to it above the welcome page.
   Widget _withRelated(Widget welcome) {
     final listed = _relatedAbove(welcome);
@@ -3160,6 +3210,7 @@ class _CanoaAppState extends State<CanoaApp> {
           child: RelatedSessions(
             source: relations, ledger: ledger, store: store,
             onNew: _newRelatedSession, onResume: _resumeRelated,
+            startOptions: _startOptions(),
           ),
         ),
       ),
@@ -3237,6 +3288,7 @@ class _CanoaAppState extends State<CanoaApp> {
           onNewRelated: _newRelatedSession,
           onResumeRelated: _resumeRelated,
           onOpenFullApp: _openFullApp,
+          startOptions: _startOptions(),
           grouping: _grouping,
           kit: _kit,
           renderers: widget.renderers,
@@ -3260,7 +3312,7 @@ class _CanoaHome extends StatelessWidget {
     required this.layout, required this.surfaces, required this.settings, required this.loadout, required this.loadouts,
     required this.hostsIndex, required this.hostsPage, required this.storeIndex, required this.loadoutsIndex, this.usageIndex, this.usagePage, this.sessionSpend,
     required this.terminalIndex, required this.terminalMain,
-    this.chatOnly = false, this.relations, required this.onNewRelated, required this.onResumeRelated, this.onOpenFullApp,
+    this.chatOnly = false, this.relations, required this.onNewRelated, required this.onResumeRelated, this.onOpenFullApp, this.startOptions,
   });
 
   /// The extension's bridge to the Canoa on this computer; null where this is not the extension.
@@ -3291,6 +3343,9 @@ class _CanoaHome extends StatelessWidget {
   final Future<void> Function(Relation relation) onNewRelated;
   final Future<void> Function(LedgerEntry entry) onResumeRelated;
   final VoidCallback? onOpenFullApp;
+
+  /// The loadout and profile the next session started for what is in front starts with, chosen beside its button.
+  final Widget? startOptions;
   final Future<SpendRow?> Function(String sessionId)? sessionSpend;
 
   final SessionStore store;
@@ -3507,6 +3562,7 @@ class _CanoaHome extends StatelessWidget {
     onOpenFullApp: onOpenFullApp,
     running: running,
     onAttach: onAttach,
+    startOptions: startOptions,
   );
 }
 

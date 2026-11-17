@@ -43,6 +43,10 @@ overlays = ["docs"]
 
 [defaults]
 loadout = "writing"
+
+[defaults.clients]
+outlook = "writing"
+word = "review"
 ''';
 
 SkillCopy _skill(String name) =>
@@ -293,6 +297,7 @@ void main() {
         expect(saved.loadouts['prose']!.overlays, isEmpty);
         expect(saved.loadouts['prose']!.mcp, ['tracker']);
         expect(saved.defaultLoadout, 'prose');
+        expect(saved.clientLoadouts, {'outlook': 'prose', 'word': 'review'}, reason: 'a default of a client follows the rename');
         expect(find.byKey(const Key('loadout-page-prose')), findsOneWidget);
       });
 
@@ -345,6 +350,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(world.saved.single.loadouts.keys, ['review']);
         expect(world.saved.single.defaultLoadout, isNull, reason: 'the default goes with its loadout');
+        expect(world.saved.single.clientLoadouts, {'word': 'review'}, reason: 'and so does one of a client');
         expect(find.byKey(const Key('loadout-page-review')), findsOneWidget, reason: 'the one before it, there being none after');
         await tap(tester, 'loadout-default-set-review');
         expect(world.saved.last.defaultLoadout, 'review');

@@ -1,14 +1,16 @@
 // How the page that hosts the app asks for it: the whole app, or the chat alone with the sessions of what the host page is
 // showing first. The extension's side panel and an Office task pane both ask for the second.
+import '../config/canoa_config.dart' show clientKinds;
 import 'relation.dart';
 
 /// Which app a page shows, from its address.
 ///
 /// `mode=chat` asks for the chat alone: the conversation and the sessions related to what is in front of the client, with no
 /// workspace, terminal, Store or Settings. `relation=<kind>:<key>` (with `scope=` and `label=`) names what is in front when the
-/// client knows it at load; a client that learns it later gives the app a [RelationSource] instead.
+/// client knows it at load; a client that learns it later gives the app a [RelationSource] instead. `client=<kind>` says which
+/// kind of client it is (one of [clientKinds]), which canoa.cfg may give a default loadout of its own.
 final class ClientMode {
-  const ClientMode({this.chatOnly = false, this.relation});
+  const ClientMode({this.chatOnly = false, this.relation, this.client});
 
   /// The whole app.
   static const full = ClientMode();
@@ -19,11 +21,27 @@ final class ClientMode {
   /// The parameters of a relation, which a link to the whole app leaves out.
   static const relationParameters = ['relation', 'scope', 'label'];
 
+  /// The address parameter that says which kind of client asked for the chat.
+  static const clientParameter = 'client';
+
   /// Whether the page shows the chat alone.
   final bool chatOnly;
 
   /// What was in front of the client when the page loaded, if its address said.
   final Relation? relation;
+
+  /// The kind of client the address names, one of [clientKinds]; null when it names none or one this app does not know.
+  final String? client;
+
+  /// The kind of client this is: the one the address names, else what the relation shows (a webpage's origin is a browser's, a mail
+  /// conversation Outlook's); null where neither says, as for an Office document, which a Word and an Excel pane both relate to.
+  String? get kind =>
+      client ??
+      switch (relation?.kind) {
+        Relation.originKind => 'browser',
+        Relation.conversationKind => 'outlook',
+        _ => null,
+      };
 
   /// The mode [address] asks for; the whole app when it asks for none.
   factory ClientMode.fromUri(Uri address) {
@@ -32,6 +50,7 @@ final class ClientMode {
     return ClientMode(
       chatOnly: true,
       relation: Relation.parse(query['relation'], scope: query['scope'], label: query['label']),
+      client: clientKinds.contains(query[clientParameter]) ? query[clientParameter] : null,
     );
   }
 
@@ -39,7 +58,7 @@ final class ClientMode {
   static Uri fullAppOf(Uri address) {
     final query = {
       for (final entry in address.queryParameters.entries)
-        if (entry.key != parameter && !relationParameters.contains(entry.key)) entry.key: entry.value,
+        if (entry.key != parameter && entry.key != clientParameter && !relationParameters.contains(entry.key)) entry.key: entry.value,
       'view': 'full',
     };
     return address.removeFragment().replace(queryParameters: query);
