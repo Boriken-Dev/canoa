@@ -85,7 +85,7 @@ pub enum Grant {
     /// repository of a folder starts, and `fs/guards`: the home folder and the folder of canoa.cfg, which the app asks to judge a
     /// remembered rule for a path. Also `profile/project`: a folder's project profile file, read to be shown and trusted.
     Folders,
-    /// `config/get`: a named section of canoa.cfg, the app's own tables only. Also `trust/list`: the projects whose profiles the person trusts.
+    /// `config/get`: a named section of canoa.cfg, the app's own tables only. Also `trust/list`: the projects whose profiles the person trusts, and `looks/list`: the vendor families' colour tokens.
     ConfigRead,
     /// `config/set`: a named section of canoa.cfg, the app's own tables only; never `host`, `agents` or `profile`. Also `trust/revoke`.
     ConfigWrite,
@@ -715,6 +715,7 @@ impl Control {
                 Some("config/set") if names_host(&params) => {
                     allow(caller, Grant::Hosting).and_then(|()| self.files.host_set(&params, true))
                 }
+                Some("looks/list") => allow(caller, Grant::ConfigRead).and_then(|()| looks::list()),
                 Some("config/set") => allow(caller, Grant::ConfigWrite).and_then(|()| {
                     self.files
                         .config_set(&params, caller.may(Grant::ConfigWriteSessions))
@@ -1373,6 +1374,9 @@ mod import;
 #[cfg(test)]
 mod import_tests;
 mod index;
+mod looks;
+#[cfg(test)]
+mod looks_tests;
 mod speech;
 #[cfg(test)]
 mod speech_tests;

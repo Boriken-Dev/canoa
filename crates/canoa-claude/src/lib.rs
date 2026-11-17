@@ -26,6 +26,10 @@ use canoa::store::recipe::{
 
 const BASE: &str = "https://downloads.claude.ai/claude-code-releases";
 
+/// Claude's look as the JSON document `looks/list` serves: colour tokens for each brightness, an original palette in the spirit of
+/// the product, with no logo or font of it.
+pub const LOOK: &str = include_str!("../looks/claude.json");
+
 /// How the host starts Claude Code when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Claude", "claude").harness("claude");
 

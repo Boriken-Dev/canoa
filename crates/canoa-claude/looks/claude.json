@@ -1,0 +1,55 @@
+{
+  "id": "claude",
+  "label": "Claude",
+  "vendor": "claude",
+  "dark": {
+    "page": "#1F1E1D",
+    "rail": "#181817",
+    "bar": "#1C1B1A",
+    "selected": "#33312F",
+    "surface": "#262524",
+    "raised": "#2D2C2A",
+    "text": "#F0EEE9",
+    "muted": "#B5B1AA",
+    "accent": "#E08A66",
+    "onAccent": "#241006",
+    "success": "#7FC48A",
+    "warning": "#E2B455",
+    "danger": "#EA8F85",
+    "radius": 14,
+    "controlRadius": 10,
+    "railWidth": 270,
+    "chat": {
+      "user": "#302F2D",
+      "notice": "#282725",
+      "added": "#2F4A34",
+      "removed": "#5C3030",
+      "code": "#191817"
+    }
+  },
+  "light": {
+    "page": "#FAF9F5",
+    "rail": "#F0EEE6",
+    "bar": "#F5F4EE",
+    "selected": "#E6E3D8",
+    "surface": "#F3F1EA",
+    "raised": "#FFFFFF",
+    "text": "#29261F",
+    "muted": "#66625A",
+    "accent": "#B04E2B",
+    "onAccent": "#FFFFFF",
+    "success": "#276B37",
+    "warning": "#8A5A00",
+    "danger": "#B3261E",
+    "radius": 14,
+    "controlRadius": 10,
+    "railWidth": 270,
+    "chat": {
+      "user": "#EDEAE0",
+      "notice": "#F0EDE4",
+      "added": "#D5EDD7",
+      "removed": "#F6D6D3",
+      "code": "#F0EEE6"
+    }
+  }
+}

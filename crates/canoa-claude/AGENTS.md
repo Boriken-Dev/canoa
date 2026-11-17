@@ -7,6 +7,9 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No C
 ## Exports
 
 ```rust
+pub const LOOK: &str;
+// = the contents of looks/claude.json: Claude's look as the JSON document `looks/list` serves
+
 pub const PRESET: SourcePreset;
 // = SourcePreset::new("Claude", "claude").harness("claude")
 
@@ -25,6 +28,7 @@ Each item is public at this one path. `ClaudeRecipe` is not a Store provider: `c
 
 ## Gotchas
 
+- `LOOK` is colour tokens only, an original palette in the spirit of the product: no logo, no font. The host serves it unchanged; its token names are those of `canoa-host`'s `looks/list`.
 - The recipe only describes: where the publisher serves the program, how a download is checked and how its version is read. It never runs a publisher's installer and changes nothing outside the version's folder; the host's engine downloads, checks, places and reads the version back.
 - A recipe fetches only through the `InstallTools` it is handed, so a download is bounded and checked by the host, and starts no process of its own (a test in `canoa-host` scans this crate for `std::process::Command`).
 - The preset's name is what a client lists; a name `canoa.cfg` already uses is left to the config. Its program is `ClaudeRecipe`'s first name, which a test keeps true.

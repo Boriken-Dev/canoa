@@ -1,0 +1,55 @@
+{
+  "id": "chatgpt",
+  "label": "ChatGPT",
+  "vendor": "codex",
+  "dark": {
+    "page": "#181818",
+    "rail": "#121212",
+    "bar": "#151515",
+    "selected": "#2F2F2F",
+    "surface": "#212121",
+    "raised": "#2B2B2B",
+    "text": "#ECECEC",
+    "muted": "#AEAEAE",
+    "accent": "#5A9BFF",
+    "onAccent": "#04122B",
+    "success": "#7FC48A",
+    "warning": "#E2B455",
+    "danger": "#EA8F85",
+    "radius": 18,
+    "controlRadius": 20,
+    "railWidth": 260,
+    "chat": {
+      "user": "#303030",
+      "notice": "#212121",
+      "added": "#1F4A2A",
+      "removed": "#5A2A2A",
+      "code": "#0F0F0F"
+    }
+  },
+  "light": {
+    "page": "#FFFFFF",
+    "rail": "#F4F4F4",
+    "bar": "#FAFAFA",
+    "selected": "#E6E6E6",
+    "surface": "#F7F7F7",
+    "raised": "#FFFFFF",
+    "text": "#1A1A1A",
+    "muted": "#5E5E5E",
+    "accent": "#1F5FD0",
+    "onAccent": "#FFFFFF",
+    "success": "#276B37",
+    "warning": "#8A5A00",
+    "danger": "#B3261E",
+    "radius": 18,
+    "controlRadius": 20,
+    "railWidth": 260,
+    "chat": {
+      "user": "#EFEFEF",
+      "notice": "#F4F4F4",
+      "added": "#D5EDD7",
+      "removed": "#F6D6D3",
+      "code": "#F4F4F4"
+    }
+  }
+}
