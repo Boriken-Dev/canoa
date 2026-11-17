@@ -138,7 +138,7 @@ final class PromptTakes {
 /// [attachment] as ACP carries it to an agent that takes [takes]. [read] gives a file's bytes; a file that is not UTF-8
 /// text goes as a link. Throws [StateError] with a person's reason for one the agent cannot be given.
 Future<AcpAttachment> toAcp(Attachment attachment, PromptTakes takes,
-    {required int embedLimit, required Future<List<int>> Function(String path) read, String agent = 'The agent'}) async {
+    {required int embedLimit, required Future<List<int>> Function(String path, {int? maxBytes}) read, String agent = 'The agent'}) async {
   final (route, why) = routeOf(attachment, takes, embedLimit: embedLimit, agent: agent);
   AcpAttachment link() => AcpAttachment.link(attachment.name, attachment.uri!, mimeType: attachment.mimeType,
       size: attachment.kind == AttachmentKind.folder ? null : attachment.size);
@@ -151,7 +151,8 @@ Future<AcpAttachment> toAcp(Attachment attachment, PromptTakes takes,
       return link();
     case AttachmentRoute.embedded:
       if (attachment.text case final text?) return AcpAttachment.text(attachment.name, text, mimeType: attachment.mimeType);
-      final bytes = await read(attachment.path!);
+      // At most one byte past the limit is read: that is enough to know it has grown, and a file grown to gigabytes costs no more.
+      final bytes = await read(attachment.path!, maxBytes: embedLimit + 1);
       // It can have grown since it was added.
       if (bytes.length > embedLimit) {
         if (!takes.links) throw StateError('${attachment.name} is larger than ${sizeLabel(embedLimit)}, and $agent cannot read this computer\'s files by a link');

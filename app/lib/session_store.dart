@@ -578,7 +578,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     bool bypassOnceOnly = false,
     this.drafts,
     this.embedLimit = maxAttachedText,
-    Future<List<int>> Function(String path)? readFile,
+    Future<List<int>> Function(String path, {int? maxBytes})? readFile,
   }) : _bypassOnceOnly = bypassOnceOnly,
        readFile = readFile ?? readLocalFile;
 
@@ -738,7 +738,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   }
 
   /// A file's bytes, read when it is sent.
-  final Future<List<int>> Function(String path) readFile;
+  final Future<List<int>> Function(String path, {int? maxBytes}) readFile;
 
   /// The mode a new session starts in, as an agent names it (one of [modeOrder] for the translators Canoa runs); null leaves
   /// each agent's own. It wins over the person's last choice for the source, and a profile's mode wins over it.

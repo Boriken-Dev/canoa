@@ -1,4 +1,7 @@
 // How each kind of attachment reaches an agent, by what it takes and where it runs.
+import 'dart:io';
+
+import 'package:canoa/acp/local_agent.dart' show readLocalFile;
 import 'package:canoa/chat/attachments.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -34,17 +37,44 @@ void main() {
   });
 
   test('a file that is not text goes as a link, and to an agent elsewhere not at all', () async {
-    Future<List<int>> read(String path) async => [0xff, 0xfe];
+    Future<List<int>> read(String path, {int? maxBytes}) async => [0xff, 0xfe];
     final linked = await toAcp(small, _all, embedLimit: 100, read: read);
     expect(linked.isLink, isTrue);
     await expectLater(toAcp(small, _elsewhere, embedLimit: 100, read: read), throwsStateError);
   });
 
   test('a file that grew past the limit since it was added goes as a link', () async {
-    Future<List<int>> read(String path) async => List.filled(200, 97);
+    Future<List<int>> read(String path, {int? maxBytes}) async => List.filled(200, 97);
     final grown = await toAcp(small, _all, embedLimit: 100, read: read);
     expect(grown.isLink, isTrue);
     await expectLater(toAcp(small, _elsewhere, embedLimit: 100, read: read), throwsStateError);
+  });
+
+  test('a file is read at most one byte past the limit, and a small file that grew in the draft goes as a link', () async {
+    final dir = await Directory.systemTemp.createTemp('canoa_attach');
+    try {
+      final file = File('${dir.path}/notes.txt');
+      await file.writeAsString('small');
+      final attached = Attachment.file('notes.txt', file.path, 5);
+      await file.writeAsBytes(List.filled(5000, 97));
+      var asked = -1;
+      var got = -1;
+      Future<List<int>> read(String path, {int? maxBytes}) async {
+        asked = maxBytes ?? -1;
+        final bytes = await readLocalFile(path, maxBytes: maxBytes);
+        got = bytes.length;
+        return bytes;
+      }
+
+      final grown = await toAcp(attached, _all, embedLimit: 100, read: read);
+      expect(asked, 101);
+      expect(got, 101);
+      expect(grown.isLink, isTrue);
+      await expectLater(toAcp(attached, _elsewhere, embedLimit: 100, read: read), throwsStateError);
+      expect((await readLocalFile(file.path)).length, 5000);
+    } finally {
+      await dir.delete(recursive: true);
+    }
   });
 
   test('sizes read as a person reads them', () {

@@ -1,7 +1,7 @@
 /// A page has no file system of its own: it picks files in the browser and the host holds the folders.
 const bool canRunLocalAgents = false;
 
-Future<List<int>> readLocalFile(String path) => throw UnsupportedError('A page cannot read a file by its path');
+Future<List<int>> readLocalFile(String path, {int? maxBytes}) => throw UnsupportedError('A page cannot read a file by its path');
 
 Future<int?> localFileSize(String path) async => null;
 
