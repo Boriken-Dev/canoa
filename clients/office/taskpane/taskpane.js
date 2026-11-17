@@ -1,32 +1,104 @@
 // The task pane: reads what is open in Outlook, Word, Excel or PowerPoint through Office.js, works out its relation with
 // relation.js, and shows the chat-only app for it in a frame of this same origin. The app is a Flutter page with its own
 // router, which Office.js would break (it removes history.pushState and replaceState), so Office.js lives only in this page.
-import { appAddress, relationForDocument, relationForMail, sameRelation } from './relation.js';
+//
+// Behind a portal the frame needs a session of its own: the site's cookie is not sent from inside Office's page, and the dialog
+// that signs in shares no cookies with this frame. The dialog sends a string, this page hands it to the host, and the answer sets
+// the frame's cookie. A host with no sign-in answers `GET /office/session` with its own page, and the chat is shown as it is.
+import {
+  appAddress,
+  handoffFrom,
+  parsePaneMessage,
+  portalState,
+  relationForDocument,
+  relationForMail,
+  relationMessage,
+  sameRelation,
+} from './relation.js';
 
 const frame = document.getElementById('canoa');
 const status = document.getElementById('status');
 const signIn = document.getElementById('signin');
+const origin = window.location.origin;
 
-/** The relation the frame shows now (null for none, undefined before the first), and the address it was given. */
+/** The relation the frame shows now (null for none, undefined before the first). */
 let shown;
-let loaded = '';
+/** Whether the app in the frame has said it listens for a relation, so a change goes to it and not into a reload. */
+let listening = false;
+/** Whether the frame has been given the app's address yet. */
+let loaded = false;
+/** `open` (no sign-in on this host), `signed-in` or `signed-out`, from the host's answer. */
+let gate = 'open';
 
 /** Sets what the bar says. */
 function say(text) {
   status.textContent = text;
 }
 
-/** Shows the chat for `relation`; the same relation again changes nothing, so a pinned pane does not reload on a reselect. */
+/** What the bar says of a relation. */
+function describe(relation) {
+  return relation ? `Sessions of ${relation.label ?? 'this item'} first` : 'Not tied to an item';
+}
+
+/**
+ * Shows the chat for `relation`. The first time the frame is loaded with the relation in its address; after that the app is told
+ * through a message and keeps its place, so a pinned pane moving between messages does not reload the chat. The same relation
+ * again changes nothing.
+ */
 function show(relation) {
+  if (gate === 'signed-out') return;
   if (shown !== undefined && sameRelation(shown, relation)) return;
   shown = relation;
-  const address = appAddress(window.location.origin, relation);
-  if (address !== loaded) {
-    loaded = address;
-    frame.src = address;
+  say(describe(relation));
+  if (!loaded) {
+    loaded = true;
+    listening = false;
+    frame.hidden = false;
+    frame.src = appAddress(origin, relation);
+    return;
   }
-  say(relation ? `Sessions of ${relation.label ?? 'this item'} first` : 'Not tied to an item');
+  tell(relation);
 }
+
+/** Tells the app what is in front, when it is listening; it asks for it by `ready` when it starts. */
+function tell(relation) {
+  if (listening && frame.contentWindow) frame.contentWindow.postMessage(relationMessage(relation), origin);
+}
+
+/** Shows the pane as not signed in: no chat, and the button that opens the dialog. */
+function needSignIn() {
+  gate = 'signed-out';
+  shown = undefined;
+  listening = false;
+  loaded = false;
+  frame.hidden = true;
+  signIn.hidden = false;
+  say('Sign in to use Canoa here');
+}
+
+/** Whether this host keeps a sign-in and the frame has one. A host that answers nothing the portal would is taken as open. */
+async function checkGate() {
+  try {
+    const answer = await fetch('/office/session', { credentials: 'same-origin', cache: 'no-store' });
+    gate = portalState(answer.status, answer.headers.get('content-type'));
+  } catch {
+    gate = 'open';
+  }
+  signIn.hidden = gate !== 'signed-out';
+  if (gate === 'signed-out') needSignIn();
+}
+
+// The app says `ready` when it listens (and so again after it reloads), and `signin` when its session has ended.
+window.addEventListener('message', (event) => {
+  if (event.origin !== origin || event.source !== frame.contentWindow) return;
+  const said = parsePaneMessage(event.data);
+  if (said === 'ready') {
+    listening = true;
+    if (shown !== undefined) tell(shown);
+  } else if (said === 'signin') {
+    needSignIn();
+  }
+});
 
 /** The open mail item's subject: a string when reading, a getter when composing. */
 function subjectOf(item) {
@@ -54,22 +126,49 @@ function documentRelation(app) {
 
 let refresh = async () => {};
 
-/** Opens the sign-in page in an Office dialog; the string it sends back ends it and starts the chat again. */
+/** Hands the dialog's string to the host, which opens this frame's session. Whether it did. */
+async function claim(string) {
+  try {
+    const answer = await fetch('/office/session', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ handoff: string }),
+    });
+    return answer.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Opens the sign-in in an Office dialog; the string it sends back is claimed and the chat starts. */
 function openSignIn() {
-  const page = new URL('/office/dialog.html', window.location.origin);
-  page.searchParams.set('start', '/');
+  const page = new URL('/office/dialog.html', origin);
+  page.searchParams.set('start', '/office/signin');
   Office.context.ui.displayDialogAsync(page.href, { height: 60, width: 30 }, (opened) => {
     if (opened.status !== Office.AsyncResultStatus.Succeeded) {
       say(`The sign-in window did not open (${opened.error.code})`);
       return;
     }
     const dialog = opened.value;
-    dialog.addEventHandler(Office.EventType.DialogMessageReceived, () => {
-      // A string and nothing else comes back, and what it holds is the sign-in page's to keep: it is neither run nor stored here.
+    dialog.addEventHandler(Office.EventType.DialogMessageReceived, async (arrived) => {
+      // A string and nothing else comes back. It is only passed on when it has the shape the host makes, and never run or stored.
       dialog.close();
-      loaded = '';
+      const string = handoffFrom(arrived.message);
+      if (string === null) {
+        say('The sign-in did not finish: try again');
+        return;
+      }
+      say('Signing in');
+      if (!(await claim(string))) {
+        say('The sign-in did not take: try again');
+        return;
+      }
+      gate = 'signed-in';
+      signIn.hidden = true;
       shown = undefined;
-      void refresh();
+      loaded = false;
+      await refresh();
     });
   });
 }
@@ -79,7 +178,6 @@ if (typeof Office === 'undefined') {
   say('Office.js did not load');
 } else {
   Office.onReady(async (info) => {
-    signIn.hidden = false;
     signIn.addEventListener('click', openSignIn);
     if (info.host === Office.HostType.Outlook) {
       refresh = async () => show(await mailRelation());
@@ -92,6 +190,7 @@ if (typeof Office === 'undefined') {
       say('This Office application is not known');
       return;
     }
-    await refresh();
+    await checkGate();
+    if (gate !== 'signed-out') await refresh();
   });
 }

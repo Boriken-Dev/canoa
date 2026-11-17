@@ -141,3 +141,65 @@ export function appAddress(origin, relation) {
   }
   return address.href;
 }
+
+/**
+ * The message that tells the framed app what is in front of the client now, as a string a frame of the same origin receives with
+ * `postMessage`: `{"canoa":"relation","relation":{kind,key,scope?,label?}|null}`. The app reads it without a reload.
+ * @param {{kind: string, key: string, scope?: string, label?: string}|null} relation
+ * @returns {string}
+ */
+export function relationMessage(relation) {
+  const body = relation === null || relation === undefined ? null : { kind: relation.kind, key: relation.key };
+  if (body && relation.scope) body.scope = relation.scope;
+  if (body && relation.label) body.label = relation.label;
+  return JSON.stringify({ canoa: 'relation', relation: body });
+}
+
+/**
+ * What the framed app says to the pane: `ready` once it listens for a relation, `signin` when its session ended. Anything else,
+ * and anything not a string, is nothing.
+ * @param {unknown} data
+ * @returns {'ready'|'signin'|null}
+ */
+export function parsePaneMessage(data) {
+  if (typeof data !== 'string' || data.length > 256) return null;
+  let value;
+  try {
+    value = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value.canoa === 'ready' || value.canoa === 'signin' ? value.canoa : null;
+}
+
+/**
+ * Whether the host the pane came from keeps a sign-in, from the answer to `GET /office/session`: the portal answers JSON, 200
+ * for a signed-in browser and 401 for one that is not. Any other answer (the site's own page, a 404) is a host with no sign-in,
+ * and the chat is shown as it is.
+ * @param {number} status
+ * @param {string|null|undefined} contentType
+ * @returns {'signed-in'|'signed-out'|'open'}
+ */
+export function portalState(status, contentType) {
+  const json = typeof contentType === 'string' && /^application\/json\b/i.test(contentType.trim());
+  if (!json) return 'open';
+  if (status === 200) return 'signed-in';
+  if (status === 401) return 'signed-out';
+  return 'open';
+}
+
+/** The longest string the dialog may send; the portal's are far shorter. */
+const HANDOFF_MAX = 128;
+
+/**
+ * The string a sign-in in the dialog sent, when it has the shape the portal makes (URL-safe base64): anything else is not sent
+ * on to the portal.
+ * @param {unknown} message
+ * @returns {string|null}
+ */
+export function handoffFrom(message) {
+  return typeof message === 'string' && message.length >= 20 && message.length <= HANDOFF_MAX && /^[A-Za-z0-9_-]+$/.test(message)
+    ? message
+    : null;
+}

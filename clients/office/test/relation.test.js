@@ -8,10 +8,14 @@ import {
   DOCUMENT,
   appAddress,
   documentName,
+  handoffFrom,
   hashKey,
   normalizeDocumentUrl,
+  parsePaneMessage,
+  portalState,
   relationForDocument,
   relationForMail,
+  relationMessage,
   sameRelation,
 } from '../taskpane/relation.js';
 
@@ -121,4 +125,44 @@ test('the app address asks for the chat alone and carries the relation as the ap
   assert.equal(address.searchParams.has('scope'), false);
   const none = new URL(appAddress('https://canoa.example', null));
   assert.equal(none.search, '?mode=chat', 'a new message or an unsaved document is unrelated');
+});
+
+test('a relation message carries the kind, the key and what is set of scope and label, and none is null', () => {
+  const message = JSON.parse(relationMessage({ kind: CONVERSATION, key: 'abc', label: 'Plan', extra: 'no' }));
+  assert.deepEqual(message, { canoa: 'relation', relation: { kind: CONVERSATION, key: 'abc', label: 'Plan' } });
+  assert.deepEqual(JSON.parse(relationMessage({ kind: DOCUMENT, key: 'k', scope: 's' })).relation, { kind: DOCUMENT, key: 'k', scope: 's' });
+  for (const none of [null, undefined]) {
+    assert.deepEqual(JSON.parse(relationMessage(none)), { canoa: 'relation', relation: null });
+  }
+  assert.equal(typeof relationMessage(null), 'string', 'a string, as a frame of the same origin takes it');
+});
+
+test('the pane hears only ready and signin from the app, as a short JSON string', () => {
+  assert.equal(parsePaneMessage('{"canoa":"ready"}'), 'ready');
+  assert.equal(parsePaneMessage('{"canoa":"signin"}'), 'signin');
+  for (const other of ['{"canoa":"relation"}', '{"canoa":"x"}', '[]', 'null', 'ready', '{', '', ' '.repeat(300), 3, null, undefined, { canoa: 'ready' }]) {
+    assert.equal(parsePaneMessage(other), null, String(other).slice(0, 20));
+  }
+});
+
+test('only a JSON answer from the portal says whether the pane is signed in; any other answer is a host with no sign-in', () => {
+  assert.equal(portalState(200, 'application/json'), 'signed-in');
+  assert.equal(portalState(401, 'application/json'), 'signed-out');
+  assert.equal(portalState(200, 'Application/JSON; charset=utf-8'), 'signed-in');
+  // The site's own page answers an unknown path with its index, and a missing one 404s.
+  assert.equal(portalState(200, 'text/html; charset=utf-8'), 'open');
+  assert.equal(portalState(404, 'text/plain'), 'open');
+  assert.equal(portalState(401, 'text/plain'), 'open');
+  assert.equal(portalState(503, 'application/json'), 'open');
+  assert.equal(portalState(200, null), 'open');
+  assert.equal(portalState(401, undefined), 'open');
+});
+
+test('the dialog\'s string goes on only when it is URL-safe base64 of the length the portal makes', () => {
+  const made = 'A'.repeat(43);
+  assert.equal(handoffFrom(made), made);
+  assert.equal(handoffFrom('a-b_c'.repeat(8)), 'a-b_c'.repeat(8));
+  for (const other of ['', 'short', 'x'.repeat(129), `${made}=`, `${made}"`, `${made}\n`, `${made} x`, `${made}<`, null, undefined, 7, { a: 1 }]) {
+    assert.equal(handoffFrom(other), null, String(other).slice(0, 20));
+  }
 });
