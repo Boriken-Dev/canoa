@@ -5,6 +5,7 @@ import { addedMethod, lookNearby, mcpConfigCommand, offersOf, readCandidates, sa
 import { createGateway, dialRecord, sameGrant, supersedes } from "./acp-gateway.js";
 import { createStanding, fromPermissionsPage } from "./acp-standing.js";
 import { createTools, OFFER } from "./acp-tools.js";
+import { createToolProvider } from "./tool-provider.js";
 import { dispatchBrowserTool } from "./browser-tools.js";
 import { markActing } from "./tab-marks.js";
 import { onGrantsChanged, readGrants, updateGrants } from "./browser-grants.js";
@@ -28,6 +29,9 @@ const CONTROL_MS = 30_000;
 const STANDING = "canoa_standing";
 const STANDING_STATUS = "canoa_standing_status";
 const STANDING_ALARM = "canoa-standing";
+const LOCAL_TOOLS_STATUS = "canoa_local_tools_status";
+// While this browser is paired with Canoa on this computer: finds it again when it was stopped or started later.
+const LOCAL_TOOLS_ALARM = "canoa-local-tools";
 // Notices a link that has gone silent, which a socket alone may not for a long time.
 const HEARTBEAT = { interval: 20_000, misses: 3 };
 // A browser ends an idle worker after 30 seconds, and with it the socket. A WebSocket's traffic counts as activity and a WebTransport's
@@ -72,7 +76,10 @@ const lastLocal = () => read("session", LOCAL_STATE, { state: "unknown" });
 /** Asks the native host what Canoa on this computer is doing, and remembers it for the lists that cannot wait for it. */
 async function refreshLocal() {
   const state = await localHost.hello();
-  return { state: await noteLocal(state), pinned: await pinnedHost() };
+  const noted = { state: await noteLocal(state), pinned: await pinnedHost() };
+  // A host that runs and holds this browser's key is offered the browser's tools, for every session it serves.
+  if (state.state === "running" && viewOf(state, noted.pinned).paired) offerLocalTools();
+  return noted;
 }
 
 /** Remembers a state the host was seen in, and what a paired host served, for a grant on one of its agents to outlast its being stopped. */
@@ -225,6 +232,7 @@ function installLocalHost() {
       answer = pairWithPin({ native: true, pin: String(message.pin ?? "") })
         .then(async (peer) => {
           await write("local", LOCAL_PIN, { peer, method: "noise" });
+          await syncLocalAlarm().catch(() => {});
           return view();
         });
     } else if (type === "canoa.host.unpair") {
@@ -240,6 +248,9 @@ function installLocalHost() {
           }
         }
         await write("local", LOCAL_PIN, null);
+        // Nothing of this browser stays offered to a Canoa it no longer trusts.
+        localTools.stop();
+        await syncLocalAlarm().catch(() => {});
         const after = await view();
         return notice === undefined ? after : { ...after, notice };
       })();
@@ -317,6 +328,7 @@ const requestAccess = createAccess({
 const toolHosts = new Set();
 onGrantsChanged(() => {
   for (const tools of toolHosts) tools.changed();
+  localTools.changed();
 });
 
 /** A page's own code runs in some tools, and a call to it that never ends would hold its place for ever. */
@@ -329,30 +341,39 @@ const within = (run, ms) => (details) => {
 };
 
 /**
+ * What answers one agent's MCP messages with the browser's tools: `peer` is the principal the grants are for (a key, or one session of
+ * Canoa on this computer), and every call is decided from the grants as they are then. `via` says who asks, for the window, `where`
+ * where it runs, and `still` whether what asked is still allowed to.
+ */
+function browserHandler({ peer, label, via, where, logs, still }) {
+  const capabilities = askableCapabilities(debuggerBuild());
+  return async (request) => handleMcpRequest({
+    request,
+    peerId: peer,
+    trustedPeers: new Set([peer]),
+    grants: await readGrants(),
+    dispatch: within(async (call) => {
+      const result = await dispatchBrowserTool(call);
+      // A tool that ran on a tab puts it in the agent's group; a failure to do that never fails the tool.
+      if (call.name !== "browser_list_tabs" && Number.isSafeInteger(call.args?.tabId)) await markActing({ tabId: call.args.tabId, peer, label }).catch(() => {});
+      return result;
+    }, TOOL_MS),
+    access: {
+      capabilities,
+      logs,
+      request: ({ capability, reason }) => requestAccess({ peer, label, capability, reason, via, where, still }),
+    },
+  });
+}
+
+/**
  * The browser's tools for one proven link. Each call is decided from the grants as they are then. `via` says a program with no session
  * is behind it, and `still` whether that is still turned on.
  */
 function offerTools({ mux, peer, label, via, still }) {
-  const capabilities = askableCapabilities(debuggerBuild());
   const tools = createTools({
     mux,
-    handle: async (request) => handleMcpRequest({
-      request,
-      peerId: peer,
-      trustedPeers: new Set([peer]),
-      grants: await readGrants(),
-      dispatch: within(async (call) => {
-        const result = await dispatchBrowserTool(call);
-        // A tool that ran on a tab puts it in the agent's group; a failure to do that never fails the tool.
-        if (call.name !== "browser_list_tabs" && Number.isSafeInteger(call.args?.tabId)) await markActing({ tabId: call.args.tabId, peer, label }).catch(() => {});
-        return result;
-      }, TOOL_MS),
-      access: {
-        capabilities,
-        logs: via !== undefined,
-        request: ({ capability, reason }) => requestAccess({ peer, label, capability, reason, via, still }),
-      },
-    }),
+    handle: browserHandler({ peer, label, via, logs: via !== undefined, still }),
   });
   toolHosts.add(tools);
   return {
@@ -441,6 +462,40 @@ async function forgetPeer(peer) {
   for (const tabId of debugged) await detachOnTabClosed(tabId).catch(() => {});
 }
 
+/**
+ * The browser as a tool provider of Canoa on this computer: one proven link to its `@tools` door, over which the host sends each of its
+ * sessions' MCP messages. Each session is a principal of its own, so a grant the person gives in the extension's window reaches that
+ * session only and ends with it. A web page never reaches this: it is the host that adds the server to a session, and it adds none to
+ * a session a page started.
+ */
+const localTools = createToolProvider({
+  dial: async () => {
+    const pinned = await pinnedHost();
+    if (pinned === null) throw new Error("this browser is not paired with Canoa on this computer");
+    return dialAgent({ native: { entry: "@tools" }, peer: pinned.peer, method: pinned.method, label: "Canoa" }, {});
+  },
+  serve: ({ principal, label, where, request, still }) => browserHandler({ peer: principal, label, via: "local", where, logs: false, still })(request),
+  // A session ended, or the link did: what the person gave it goes, and a window still asking for it closes.
+  forget: (principal) => forgetPeer(principal).catch(() => {}),
+  onStatus: (state) => {
+    write("session", LOCAL_TOOLS_STATUS, { state }).catch(() => {});
+  },
+});
+
+/** Connects the provider if this browser is paired and it is not connected; a failure is for the next look, an alarm away. */
+function offerLocalTools() {
+  localTools.ensure().catch(() => {});
+}
+
+/** The alarm that looks again exists only while this browser is paired with Canoa on this computer. */
+async function syncLocalAlarm() {
+  if ((await pinnedHost()) === null) {
+    await chrome.alarms.clear(LOCAL_TOOLS_ALARM);
+  } else if ((await chrome.alarms.get(LOCAL_TOOLS_ALARM)) === undefined) {
+    await chrome.alarms.create(LOCAL_TOOLS_ALARM, { periodInMinutes: ALARM_MINUTES });
+  }
+}
+
 /** Turns it on for one agent, or off with null. */
 async function setStanding(key) {
   const agents = await store.stored();
@@ -516,7 +571,10 @@ export function installProvider() {
 
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === STANDING_ALARM) standing.ensure().catch(() => {});
+    // Looks at the host, which connects the provider if it runs and holds this browser's key.
+    if (alarm.name === LOCAL_TOOLS_ALARM && !localTools.connected) refreshLocal().catch(() => {});
   });
+  syncLocalAlarm().catch(() => {});
   // A browser that starts wakes this worker for this listener, and any wake-up looks at the setting just below.
   chrome.runtime.onStartup.addListener(() => {});
   // A restart can clear an alarm, and setting one again would put off the next by its whole period.

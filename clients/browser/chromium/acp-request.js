@@ -404,7 +404,10 @@ function browserView(details) {
   });
   refuse.addEventListener("click", () => send({ acp: "answer", ask: askId, answer: null }));
   answerKeys(allow, refuse);
-  const who = details.via === "program"
+  const who = details.via === "local"
+    ? [element("p", {}, element("strong", { textContent: details.label }), ` asks to ${WHAT[details.capability] ?? details.capability}.`),
+      element("p", { textContent: `It runs in ${details.where ?? "the Canoa app on this computer"}, as you, with the settings and tools you gave it. This is for that conversation only, and ends with it.` })]
+    : details.via === "program"
     ? [element("p", {}, element("strong", { textContent: `A program on ${details.label}` }), ` asks to ${WHAT[details.capability] ?? details.capability}.`),
       element("p", { className: "warn", textContent: "Canoa cannot tell which program. Whatever can use that machine's key, which is whatever runs as its user there, can ask here and shares what you allow." }),
       element("p", {}, element("code", { textContent: details.peer }))]

@@ -29,8 +29,11 @@ function cleanReason(reason) {
 export function createAccess({ tabs, ask, updateGrants, debuggerBuild = false, now = Date.now }) {
   const held = new Map();
 
-  /** `via` says who is asking, for the window. `still` is asked as the grant is stored: whether what asked is still allowed to. */
-  return async function requestAccess({ peer, label, capability, reason, via, still }) {
+  /**
+   * `via` says who is asking, for the window, and `where` (for an agent of Canoa on this computer) where it runs, as the host said.
+   * `still` is asked as the grant is stored: whether what asked is still allowed to.
+   */
+  return async function requestAccess({ peer, label, capability, reason, via, where, still }) {
     if (!askableCapabilities(debuggerBuild).includes(capability)) return { allowed: false, why: "That cannot be asked for here." };
     const state = held.get(peer) ?? { asking: false, notBefore: 0 };
     held.set(peer, state);
@@ -45,6 +48,7 @@ export function createAccess({ tabs, ask, updateGrants, debuggerBuild = false, n
         label,
         peer,
         via,
+        where,
         capability,
         reason: cleanReason(reason),
         tabs: open.map(({ id, title, url, active }) => ({ id, title: cleanReason(title).slice(0, 120), origin: new URL(url).origin, active: active === true })),

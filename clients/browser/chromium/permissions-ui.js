@@ -35,8 +35,10 @@ async function refresh(){
     const grant=grants[i];
     const row=document.createElement('li');
     const text=document.createElement('code');
+    // A conversation of Canoa on this computer has no key of its own: the host says which agent, and the grant ends with it.
+    const holder=grant.peerId.startsWith('local:')?'an agent in Canoa on this computer':grant.peerId.slice(0,24)+'…';
     text.textContent=grant.capability+' • tab '+grant.tabId+' • '+grant.origin+
-      ' • '+grant.peerId.slice(0,24)+'… • '+expiryLabel(grant.expiresAt);
+      ' • '+holder+' • '+expiryLabel(grant.expiresAt);
     const button=document.createElement('button');
     button.textContent='Revoke';
     button.addEventListener('click',async()=>{
