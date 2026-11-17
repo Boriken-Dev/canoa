@@ -418,6 +418,10 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     try {
       if (await served.configStore.save(changed)) _offerRestart();
+    } on HostConfigChanged catch (error) {
+      if (mounted) setState(() => config = error.config);
+      _settingsKey.currentState?.controller.adopt(error.config);
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text(error.message)));
     } on ControlFailed catch (error) {
       _messenger.currentState?.showSnackBar(SnackBar(content: Text('The host did not save that: ${error.message}')));
     } on Object catch (error) {
@@ -549,6 +553,10 @@ class _CanoaAppState extends State<CanoaApp> {
       _settingsKey.currentState?.controller.adopt(changed);
       if (restart) _offerRestart();
       return null;
+    } on HostConfigChanged catch (error) {
+      if (mounted) setState(() => config = error.config);
+      _settingsKey.currentState?.controller.adopt(error.config);
+      return error.message;
     } on ControlFailed catch (error) {
       return error.message;
     } on Object catch (error) {

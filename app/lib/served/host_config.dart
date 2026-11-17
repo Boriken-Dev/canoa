@@ -30,6 +30,20 @@ const hostConfigSections = [
 /// knowledge settings.
 const hostTable = 'host';
 
+/// What [HostConfigStore.save] throws when the host's `[host]` table is no longer the one this page read, as another page or key
+/// wrote it meanwhile: nothing was written, and [config] is canoa.cfg read again.
+final class HostConfigChanged implements Exception {
+  const HostConfigChanged(this.config);
+
+  final CanoaConfig config;
+
+  String get message =>
+      "The host's own settings changed since this page read them, so nothing was saved. They were read again: make the change again.";
+
+  @override
+  String toString() => message;
+}
+
 /// The person's own canoa.cfg on a host reached over the control channel, as the app's [CanoaConfig] and written back by table:
 /// only the tables that changed are sent, each as the host's own words allow.
 final class HostConfigStore {
@@ -43,6 +57,9 @@ final class HostConfigStore {
   final _held = <String, String?>{};
   bool _loaded = false;
   bool _withHost = false;
+
+  /// What the host named `[host]` by when it was read; sent back with a write of it.
+  String? _hostDigest;
 
   /// Whether canoa.cfg was read whole: [save] refuses until it has been.
   bool get loaded => _loaded;
@@ -77,8 +94,9 @@ final class HostConfigStore {
     }
     _withHost = false;
     try {
-      final host = await _files.configGet(hostTable);
-      if (host != null) tables[hostTable] = host;
+      final host = await _files.configRead(hostTable);
+      if (host.value != null) tables[hostTable] = host.value!;
+      _hostDigest = host.digest;
       _withHost = true;
     } on ControlFailed catch (error) {
       // A key without the grant has no host table here, which is no failure; any other refusal is.
@@ -95,7 +113,8 @@ final class HostConfigStore {
 
   /// Writes the tables of [config] that differ from what was read, and says whether the host reads one of them only when it
   /// starts, so that [HostFiles.restart] is what applies the change. A table is removed on the host only when the host had one and
-  /// [config] has none now. Throws [StateError] when canoa.cfg was not read whole.
+  /// [config] has none now. A write of `[host]` names the table it was read as: [HostConfigChanged] is thrown when the host holds
+  /// another by now. Throws [StateError] when canoa.cfg was not read whole.
   Future<bool> save(CanoaConfig config) async {
     if (!_loaded) throw StateError('canoa.cfg on the host was not read, so nothing is written to it');
     final data = _tablesOf(config);
@@ -103,7 +122,19 @@ final class HostConfigStore {
     for (final section in _sections) {
       final text = _textOf(data[section]);
       if (text == _held[section]) continue;
-      restart |= await _files.configSet(section, text == null ? null : (jsonDecode(text) as Map<String, Object?>));
+      final value = text == null ? null : (jsonDecode(text) as Map<String, Object?>);
+      if (section == hostTable) {
+        try {
+          final written = await _files.configWrite(section, value, digest: _hostDigest);
+          restart |= written.restart;
+          _hostDigest = written.digest ?? _hostDigest;
+        } on ControlFailed catch (error) {
+          if (error.code != hostChanged) rethrow;
+          throw HostConfigChanged(await load());
+        }
+      } else {
+        restart |= await _files.configSet(section, value);
+      }
       _held[section] = text;
     }
     return restart;

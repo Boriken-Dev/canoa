@@ -41,6 +41,20 @@ final class _Hosting {
     },
   };
 
+  /// Which table is held, named as the host names it by a digest.
+  var version = 0;
+
+  /// Another writer changes the table after a page read it.
+  void changedElsewhere(String agent) {
+    table = {
+      'agents': {
+        ...?(table?['agents'] as Map?)?.cast<String, Object?>(),
+        agent: {'program': 'echo', 'listen': '127.0.0.1:0'},
+      },
+    };
+    version++;
+  }
+
   /// The host's words for a table it will not take, or null when it takes it.
   String? wrong;
 
@@ -90,13 +104,17 @@ final class _Link implements HostLink {
         _state.keys.removeWhere((key) => key['id'] == params['id']);
         return _reply(id, result: {'removed': _state.keys.length != before});
       case 'config/get':
-        return _reply(id, result: {'section': params['section'], 'value': params['section'] == 'host' ? _state.table : null, 'restart': params['section'] == 'host'});
+        return _reply(id, result: {'section': params['section'], 'value': params['section'] == 'host' ? _state.table : null, 'restart': params['section'] == 'host', if (params['section'] == 'host') 'digest': 'v${_state.version}'});
       case 'config/check':
         return _state.wrong == null ? _reply(id, result: {'section': 'host', 'valid': true}) : _reply(id, code: -32002, message: _state.wrong);
       case 'config/set':
         if (_state.wrong != null) return _reply(id, code: -32002, message: _state.wrong);
+        if (params['digest'] != null && params['digest'] != 'v${_state.version}') {
+          return _reply(id, code: -32004, message: "the host's own settings changed since this page read them");
+        }
         _state.table = (params['value'] as Map?)?.cast<String, Object?>();
-        return _reply(id, result: {'section': 'host', 'restart': true});
+        _state.version++;
+        return _reply(id, result: {'section': 'host', 'restart': true, 'digest': 'v${_state.version}'});
       case 'host/pair':
         final done = _state.pairing = Completer<String>();
         _out.add(jsonEncode({
@@ -210,6 +228,26 @@ void main() {
       expect(written.$2['section'], 'host');
       expect(((written.$2['value'] as Map)['agents'] as Map).keys, containsAll(['echo', 'review']));
       expect(state.methods('config/check'), hasLength(1));
+    });
+
+    test('a write made after another writer changed the table is refused, and the page reads the table again', () async {
+      final state = _Hosting();
+      final (store, config) = await load(state);
+      state.changedElsewhere('added-meanwhile');
+      final changed = config.withHostAgent(name: 'review', program: 'agy', args: const [], listen: '127.0.0.1:0', workingRoots: const []);
+      await expectLater(
+        store.save(changed),
+        throwsA(isA<HostConfigChanged>().having((error) => error.config.hostEntries.map((entry) => entry.name), 'names', contains('added-meanwhile'))),
+      );
+      expect(((state.table!['agents']) as Map).keys, isNot(contains('review')), reason: 'the host kept what the other writer wrote');
+
+      // Read again, the same change is taken, and a second one is not refused by the first's own write.
+      final fresh = await store.load();
+      final again = fresh.withHostAgent(name: 'review', program: 'agy', args: const [], listen: '127.0.0.1:0', workingRoots: const []);
+      expect(await store.save(again), isTrue);
+      expect(((state.table!['agents']) as Map).keys, containsAll(['echo', 'added-meanwhile', 'review']));
+      final more = again.withHostAgent(name: 'third', program: 'agy', args: const [], listen: '127.0.0.1:0', workingRoots: const []);
+      expect(await store.save(more), isTrue);
     });
 
     test('a table the host will not take comes back in its words and is not written', () async {

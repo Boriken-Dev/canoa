@@ -5,6 +5,9 @@ import 'dart:typed_data';
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
 
+/// The code of the host's refusal of a write made from a table the file no longer holds.
+const hostChanged = -32004;
+
 /// One place or entry `fs/list` names.
 final class HostFolderEntry {
   const HostFolderEntry({required this.name, required this.path, required this.isFolder});
@@ -166,15 +169,29 @@ final class HostFiles implements WorkspaceFiles, HostOpening {
       (await _call('upload/remove', {'id': path.split(RegExp(r'[\\/]')).last}))['removed'] == true;
 
   /// The table [section] of the person's canoa.cfg on the host, or null when it has none.
-  Future<Map<String, Object?>?> configGet(String section) async {
-    final value = (await _call('config/get', {'section': section}))['value'];
-    return value is Map ? {for (final MapEntry(:key, :value) in value.entries) '$key': value} : null;
+  Future<Map<String, Object?>?> configGet(String section) async => (await configRead(section)).value;
+
+  /// [configGet] with the `digest` the host names `[host]` by, which [configWrite] sends back so that the host can tell the file
+  /// is as this page read it.
+  Future<({Map<String, Object?>? value, String? digest})> configRead(String section) async {
+    final answer = await _call('config/get', {'section': section});
+    final value = answer['value'];
+    return (
+      value: value is Map ? {for (final MapEntry(:key, :value) in value.entries) '$key': value} : null,
+      digest: answer['digest'] as String?,
+    );
   }
 
   /// Replaces the table [section] with [value], or removes it for null. True when the host reads that table only when it starts, so
   /// [restart] is what applies it.
-  Future<bool> configSet(String section, Map<String, Object?>? value) async =>
-      (await _call('config/set', {'section': section, 'value': value}))['restart'] == true;
+  Future<bool> configSet(String section, Map<String, Object?>? value) async => (await configWrite(section, value)).restart;
+
+  /// [configSet] that names the [digest] of the table it was made from: the host refuses with [hostChanged] when its table is
+  /// another by now. Answers the table's new digest when the host names one.
+  Future<({bool restart, String? digest})> configWrite(String section, Map<String, Object?>? value, {String? digest}) async {
+    final answer = await _call('config/set', {'section': section, 'value': value, if (digest != null) 'digest': digest});
+    return (restart: answer['restart'] == true, digest: answer['digest'] as String?);
+  }
 
   /// What `workspace/openers` says this host can start for a folder; refused without the grant `workspace.open`.
   @override
