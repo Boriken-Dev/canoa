@@ -289,7 +289,7 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.home, this.hostFolders, this.listFolder, this.resolveInside, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection,
+    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection, this.speechCapture,
     this.mode, this.relations, this.openPage,
   });
 
@@ -331,6 +331,10 @@ class CanoaApp extends StatefulWidget {
   /// The host that served this page, when one did: where its sources, session list, folders, uploads, canoa.cfg and overlays are,
   /// over the control channel. Null on a desktop, whose host runs in its own process, and for a page nothing served.
   final ServedApp? served;
+
+  /// Where the audio of a dictation through the host's providers comes from: the microphone by default.
+  @visibleForTesting
+  final AudioCapture? speechCapture;
 
   /// How a conversation is shown in a window of its own: the platform's by default, and a test's own.
   final PopoutWindows? popoutWindows;
@@ -1100,17 +1104,44 @@ class _CanoaAppState extends State<CanoaApp> {
         });
 
   /// The speech providers of the host this app reaches, which run what a page or a platform without a speech service of its own records.
-  late final HostSpeechCatalog? _hostSpeech = _control == null ? null : HostSpeechCatalog(_control, capture: const RecordCapture());
+  late final HostSpeechCatalog? _hostSpeech = _control == null
+      ? null
+      : HostSpeechCatalog(
+          _control,
+          capture: widget.speechCapture ?? const RecordCapture(),
+          grants: _grants,
+          programs: ProgramStores(control: () => _control.ready(wait: false), open: _control.open, kind: 'runtimes'),
+        );
+
+  /// Reads what the host's speech providers are, once, before a dictation looks for its service: a page that has just opened has
+  /// not asked, and a host that was down is asked again.
+  Future<void> _speechReady() async {
+    final catalog = _hostSpeech, grants = _grants;
+    if (catalog == null || (catalog.loaded && catalog.problem == null)) return;
+    if (_speech.any((each) => each.id == config.voice.backend)) return;
+    if (grants != null && !grants.known) await grants.refresh();
+    if (grants == null || grants.may(HostGrants.voice)) await catalog.refresh();
+  }
+
+  /// Why no speech service is there to dictate with, in words, when the host is the reason.
+  String? _noSpeechWhy() {
+    final catalog = _hostSpeech, grants = _grants;
+    if (catalog == null) return null;
+    if (grants != null && grants.known && !grants.may(HostGrants.voice)) {
+      return 'This host has not given this key the voice grant, so it cannot run a speech provider for it. Its canoa.cfg names the keys that may.';
+    }
+    if (catalog.problem != null) return "This host's speech providers are not available: ${catalog.problem}";
+    if (catalog.loaded && catalog.providers.every((each) => each.problem != null)) {
+      return 'No speech service is set up yet. Install one in Settings, under Voice: it runs on your host.';
+    }
+    return null;
+  }
 
   /// Dictation into the composer, with the service and choices Settings holds at the moment it starts.
   late final Dictation _dictation = Dictation(
-    backend: () {
-      final id = config.voice.backend;
-      for (final each in [..._speech, ...?_hostSpeech?.backends]) {
-        if (each.id == id) return each;
-      }
-      return null;
-    },
+    ready: _speechReady,
+    whyNone: _noSpeechWhy,
+    backend: () => resolveSpeech(config.voice.backend, _speech, _hostSpeech?.backends ?? const []),
     voice: () => config.voice,
     // Where the audio goes is told once per service, and kept.
     acknowledge: (id) {
@@ -1434,6 +1465,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (!mounted) return;
     if (_grants?.may(HostGrants.accounts) ?? false) unawaited(_accountsHeld?.refresh());
     if (_grants?.may(HostGrants.usage) ?? false) unawaited(_usageHeld?.refresh());
+    if (_grants?.may(HostGrants.voice) ?? false) unawaited(_hostSpeech?.refresh());
   }
 
   /// A grant arrived or changed: what it opens is listed, and a source's readiness may now name its program.
@@ -1442,6 +1474,7 @@ class _CanoaAppState extends State<CanoaApp> {
     setState(() {});
     if (_grants?.may(HostGrants.accounts) ?? false) unawaited(_accountsHeld?.refresh());
     if (_grants?.may(HostGrants.usage) ?? false) unawaited(_usageHeld?.refresh());
+    if (_grants?.may(HostGrants.voice) ?? false) unawaited(_hostSpeech?.refresh());
     if (_programs != null && _checked) unawaited(_checkSources());
   }
 

@@ -181,27 +181,36 @@ class ProgramButtons extends StatelessWidget {
 
 /// Plans [action] (`install`, `update` or `uninstall`), shows the plan for the person to confirm, runs it with its progress
 /// shown, and shows how it ended. A refusal is shown as the host words it.
-Future<void> runProgramAction(BuildContext context, ProgramStores programs, ProgramStatus status, String action) async {
+///
+/// [channel] names the release channel the plan is made for, and the result says whether the person confirmed and the program was
+/// applied without failing, so a caller that goes on to use the program knows it is there.
+Future<bool> runProgramAction(BuildContext context, ProgramStores programs, ProgramStatus status, String action, {String? channel}) async {
   final title = status.info.title;
   final ProgramPlan plan;
   try {
-    plan = await programs.plan(status.info.provider, action);
+    plan = await programs.plan(status.info.provider, action, channel: channel);
   } on Object catch (error) {
     if (context.mounted) await _showError(context, _verb(action, title), hostWords(error));
-    return;
+    return false;
   }
-  if (!context.mounted) return;
+  if (!context.mounted) return false;
   final confirmed = await showSelectableDialog<bool>(
     context: context,
     builder: (_) => PlanDialog(plan: plan, title: title),
   );
-  if (confirmed != true || !context.mounted) return;
+  if (confirmed != true || !context.mounted) return false;
   final run = programs.apply(plan);
   await showSelectableDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (_) => ProgressDialog(run: run, title: _verb(action, title)),
   );
+  try {
+    await run.done;
+    return true;
+  } on Object {
+    return false;
+  }
 }
 
 /// Puts the host's copy of [status]'s program back to the version before, after the person confirms.

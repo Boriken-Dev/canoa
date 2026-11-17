@@ -14,6 +14,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_speech.dart';
+import 'fixtures/offers_host.dart';
+import 'package:canoa/desktop/host_control.dart';
+import 'package:canoa/voice/host_speech.dart';
 import 'package:canoa/voice/speech_backend.dart';
 import 'fixtures/settings_fixture.dart';
 import 'fixtures/store_fixtures.dart';
@@ -125,6 +128,16 @@ void main() {
       testWidgets('Voice with no speech service here', (tester) async {
         await open(tester, section: 'voice');
         await golden(tester, 'voice_none');
+      });
+
+      testWidgets('Voice on a page whose host offers a local engine and a named service', (tester) async {
+        final catalog = HostSpeechCatalog(HostControl.dialing(() async => OffersHost()));
+        await tester.runAsync(catalog.refresh);
+        await openSettings(tester, config: CanoaConfig.parse(_config), size: size, section: 'voice', hostSpeech: catalog);
+        for (var i = 0; i < 10; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        await golden(tester, 'voice_offers');
       });
     });
   }

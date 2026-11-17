@@ -22,10 +22,17 @@ enum DictationState {
 /// Turns speech into text in the message being written. It records only between [start] and [stop] or [cancel], keeps nothing, and
 /// never sends: the text it hears lands in the message at the cursor for the person to edit and send.
 final class Dictation extends ChangeNotifier {
-  Dictation({required this.backend, required this.voice, this.onFrontMatter, this.acknowledge});
+  Dictation({required this.backend, required this.voice, this.onFrontMatter, this.acknowledge, this.ready, this.whyNone});
 
   /// The speech service `[voice] backend` names, or null when this build has none of that name.
   final SpeechBackend? Function() backend;
+
+  /// Waited for before [backend] is asked, where the services are listed by something that may not have been read yet (the host's
+  /// providers on a page that has just opened).
+  final Future<void> Function()? ready;
+
+  /// Why [backend] has none, in words, when there is a reason better than "none is chosen"; null says no more than that.
+  final String? Function()? whyNone;
 
   /// The person's choices for it: model, language and device.
   final VoiceSettings Function() voice;
@@ -123,9 +130,14 @@ final class Dictation extends ChangeNotifier {
 
   Future<void> _begin(TextEditingController target, bool hold) async {
     await _over;
+    try {
+      await ready?.call();
+    } on Object {
+      // What it could not read is told below, as there being no service.
+    }
     final service = backend();
     if (service == null) {
-      _fail('No speech service is chosen. Choose one in Settings, under Voice.');
+      _fail(whyNone?.call() ?? 'No speech service is chosen. Choose one in Settings, under Voice.');
       return;
     }
     if (!voice().acknowledged.contains(service.id) && _told.add(service.id)) {

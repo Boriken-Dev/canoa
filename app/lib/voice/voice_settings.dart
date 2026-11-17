@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../config/canoa_config.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_row.dart';
+import 'host_offers.dart';
 import 'host_speech.dart';
 import 'host_speech_settings.dart';
 import 'speech_backend.dart';
@@ -50,12 +51,19 @@ class _VoiceSectionState extends State<VoiceSection> {
 
   List<SpeechBackend> get _all => [...widget.backends, ...?widget.host?.backends];
 
-  SpeechBackend? _backend(VoiceSettings voice) {
-    for (final backend in _all) {
-      if (backend.id == voice.backend) return backend;
-    }
-    return null;
-  }
+  SpeechBackend? _backend(VoiceSettings voice) =>
+      resolveSpeech(voice.backend, widget.backends, widget.host?.backends ?? const []);
+
+  /// The host's own providers and the offers Canoa makes, as one group; a provider the person sets up from an offer becomes the
+  /// speech service.
+  Widget _hostGroups(HostSpeechCatalog host, VoiceSettings voice) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    HostOffersGroup(
+      catalog: host,
+      chosen: _backend(voice)?.id ?? voice.backend,
+      onChosen: (id) => _set((v) => v.copyWith(backend: id, clearModel: true, clearLanguage: true, clearDevice: true)),
+    ),
+    HostProvidersGroup(catalog: host),
+  ]);
 
   Future<_Choices> _load(SpeechBackend backend) async =>
       _Choices(await backend.models(), await backend.languages(), await backend.devices());
@@ -78,8 +86,8 @@ class _VoiceSectionState extends State<VoiceSection> {
       final host = widget.host;
       if (_all.isEmpty) {
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const _NoSpeechService(),
-          if (host != null) HostProvidersGroup(catalog: host),
+          _NoSpeechService(host: host != null),
+          if (host != null) _hostGroups(host, voice),
         ]);
       }
       final backend = _backend(voice);
@@ -235,7 +243,7 @@ class _VoiceSectionState extends State<VoiceSection> {
               ),
             ),
           ]),
-        if (host != null) HostProvidersGroup(catalog: host),
+        if (host != null) _hostGroups(host, voice),
       ]);
     },
   );
@@ -246,30 +254,38 @@ const _voices = ['female', 'male'];
 
 /// What Voice says when this build has no speech service, with what would give it one.
 class _NoSpeechService extends StatelessWidget {
-  const _NoSpeechService();
+  const _NoSpeechService({this.host = false});
+
+  /// Whether the host of this page or app can run a speech provider, which is offered below.
+  final bool host;
 
   @override
   Widget build(BuildContext context) => SettingsGroup(title: 'Speech to text', children: [
     SettingsRow(
       key: const Key('voice-none'),
       title: 'No speech service here',
-      description: 'Dictation uses the speech service of the operating system, which Windows and macOS have. This browser or '
-          'system has none, and Canoa never sends audio to another service on its own',
-      control: TextButton(
-        key: const Key('voice-setup'),
-        onPressed: () => showDialog<void>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Set up dictation'),
-            content: const Text(
-              'Use the Canoa desktop app on Windows or macOS and allow the microphone and speech recognition in the '
-              'system\'s privacy settings. Another speech service can be added later in Settings > Voice.',
+      description: host
+          ? 'The operating system has no speech service to use here, and Canoa never sends audio to another service on its own. '
+              'Install a speech provider below: it runs on your host, so this page and the desktop app dictate alike'
+          : 'Dictation uses the speech service of the operating system, which Windows and macOS have. This browser or '
+              'system has none, and Canoa never sends audio to another service on its own',
+      control: host
+          ? null
+          : TextButton(
+              key: const Key('voice-setup'),
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Set up dictation'),
+                  content: const Text(
+                    'Use the Canoa desktop app on Windows or macOS and allow the microphone and speech recognition in the '
+                    'system\'s privacy settings. Another speech service can be added later in Settings > Voice.',
+                  ),
+                  actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
+                ),
+              ),
+              child: const Text('Set up'),
             ),
-            actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
-          ),
-        ),
-        child: const Text('Set up'),
-      ),
     ),
   ]);
 }

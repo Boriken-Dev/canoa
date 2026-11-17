@@ -573,12 +573,12 @@ class ProgramStores extends ChangeNotifier {
   }
 
   /// What [action] (`install`, `update` or `uninstall`) of [provider] would do, to [version] where the publisher serves more
-  /// than the newest: nothing is written. Throws [ControlFailed].
-  Future<ProgramPlan> plan(String provider, String action, {String? version}) async {
+  /// than the newest and to [channel] where the program has several (a speech model, say): nothing is written. Throws [ControlFailed].
+  Future<ProgramPlan> plan(String provider, String action, {String? version, String? channel}) async {
     final client = await _control();
     return ProgramPlan.parse(
       provider,
-      await client.call('store/plan', {'provider': provider, 'action': action, 'version': ?version}),
+      await client.call('store/plan', {'provider': provider, 'action': action, 'version': ?version, 'channel': ?channel}),
     );
   }
 

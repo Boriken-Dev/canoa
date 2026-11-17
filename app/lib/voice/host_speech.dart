@@ -3,8 +3,11 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../config/canoa_config.dart' show defaultVoiceBackend;
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
+import '../desktop/host_grants.dart';
+import '../store/programs.dart' show ProgramStores;
 import 'speech_backend.dart';
 
 /// Where the audio of a dictation comes from. The microphone opens in [open] and closes when the stream is cancelled, so nothing
@@ -48,12 +51,20 @@ final class HostSpeechProvider {
     required this.secretsSet,
     required this.partials,
     this.problem,
+    this.models = const [],
+    this.offer,
   });
 
   final String name, kind, title, description;
   final Map<String, Object?> settings;
   final Set<String> secretsSet;
   final bool partials;
+
+  /// The models its service has, when the host knows them; a recording may ask for one.
+  final List<SpeechChoice> models;
+
+  /// The offer it was made from (`whisper`), when it was one of Canoa's.
+  final String? offer;
 
   /// Why it cannot be used, in the host's words; null when it can.
   final String? problem;
@@ -70,6 +81,79 @@ final class HostSpeechProvider {
       secretsSet: {if (secrets is List) ...secrets.whereType<String>()},
       partials: json['partials'] == true,
       problem: json['problem'] is String ? json['problem']! as String : null,
+      models: _choices(json['models']),
+      offer: json['offer'] is String ? json['offer']! as String : null,
+    );
+  }
+}
+
+/// A list of `{id, label}` rows as choices; what is not one is left out.
+List<SpeechChoice> _choices(Object? rows) => [
+  if (rows is List)
+    for (final row in rows)
+      if (row is Map && row['id'] is String) SpeechChoice(row['id']! as String, row['label'] is String ? row['label']! as String : row['id']! as String),
+];
+
+/// One speech-to-text provider Canoa offers out of the box: a local engine the host installs through its Store, or a named service
+/// added with the person's own key.
+final class SpeechOffer {
+  const SpeechOffer({
+    required this.id,
+    required this.title,
+    required this.summary,
+    required this.where,
+    required this.local,
+    required this.models,
+    this.defaultModel,
+    this.license,
+    this.store,
+    this.kind,
+    this.settings = const {},
+    this.installed = false,
+    this.version,
+    this.provider,
+  });
+
+  final String id, title, summary, where;
+
+  /// Whether the audio is turned into text on the host itself, with nothing sent to another service.
+  final bool local;
+  final String? license;
+  final List<SpeechChoice> models;
+  final String? defaultModel;
+
+  /// The Store program a local engine is installed as; null for a service.
+  final String? store;
+
+  /// A service's provider kind and the settings it starts from.
+  final String? kind;
+  final Map<String, Object?> settings;
+
+  /// Whether the engine's program is installed on the host, and its version.
+  final bool installed;
+  final String? version;
+
+  /// The name of the provider canoa.cfg has made from it, if any.
+  final String? provider;
+
+  static SpeechOffer? parse(Object? json) {
+    if (json is! Map || json['id'] is! String) return null;
+    String? text(String key) => json[key] is String ? json[key]! as String : null;
+    return SpeechOffer(
+      id: json['id']! as String,
+      title: text('title') ?? json['id']! as String,
+      summary: text('summary') ?? '',
+      where: text('where') ?? '',
+      local: json['local'] == true,
+      models: _choices(json['models']),
+      defaultModel: text('default_model'),
+      license: text('license'),
+      store: text('store'),
+      kind: text('kind'),
+      settings: _map(json['settings']),
+      installed: json['installed'] == true,
+      version: text('version'),
+      provider: text('provider'),
     );
   }
 }
@@ -80,20 +164,36 @@ Map<String, Object?> _map(Object? value) => value is Map ? value.cast<String, Ob
 /// written back through the host's control channel (`speech/*`). The providers run on the host, so a page and a platform with no
 /// speech service of its own dictate through them.
 final class HostSpeechCatalog extends ChangeNotifier {
-  HostSpeechCatalog(this._control, {this.capture});
+  HostSpeechCatalog(this._control, {this.capture, this.grants, this.programs});
 
   final HostControl _control;
+
+  /// What the host lets this key do; the offers say what is missing. Null when the app knows no grants (everything is tried).
+  final HostGrants? grants;
+
+  /// The host's Runtimes stores, which a local engine is installed through.
+  final ProgramStores? programs;
 
   /// Where audio comes from; null while this build has no way to record, which a dictation says in words.
   final AudioCapture? capture;
 
   List<SpeechKind> _types = const [];
   List<HostSpeechProvider> _providers = const [];
+  List<SpeechOffer> _offers = const [];
   String? _problem;
   bool _loaded = false;
 
   List<SpeechKind> get types => _types;
   List<HostSpeechProvider> get providers => _providers;
+
+  /// What Canoa offers to add or install, read with the providers.
+  List<SpeechOffer> get offers => _offers;
+
+  /// The offer with the id [id].
+  SpeechOffer? offerOf(String? id) => _offers.where((offer) => offer.id == id).firstOrNull;
+
+  /// Whether the host's grants let this key [grant]; true while they are not known, so the host's own refusal says it.
+  bool may(String grant) => grants == null || !grants!.known || grants!.may(grant);
 
   /// Why the host's providers are not listed (no grant, no link); null when they are or nothing was asked yet.
   String? get problem => _problem;
@@ -125,9 +225,17 @@ final class HostSpeechCatalog extends ChangeNotifier {
       _types = [for (final kind in (answer['types'] as List? ?? const [])) ?SpeechKind.parse(kind)];
       _providers = [for (final provider in (answer['providers'] as List? ?? const [])) ?HostSpeechProvider.parse(provider)];
       _problem = null;
+      try {
+        final offered = await call('speech/offers', const {});
+        _offers = [for (final offer in (offered['offers'] as List? ?? const [])) ?SpeechOffer.parse(offer)];
+      } on SpeechFailure {
+        // A host that makes no offers (an older one) still has its providers.
+        _offers = const [];
+      }
     } on SpeechFailure catch (failure) {
       _types = const [];
       _providers = const [];
+      _offers = const [];
       _problem = failure.message;
     }
     // One backend per provider, kept until the next read, so a screen holding one is not handed another on each build.
@@ -147,6 +255,29 @@ final class HostSpeechCatalog extends ChangeNotifier {
     await call('speech/configure', {'name': name, 'remove': true});
     await refresh();
   }
+
+  /// Makes the provider of [offer] from the copy the host's Store has installed, and lists it. Throws a [SpeechFailure] with the
+  /// host's words when it cannot.
+  Future<String> enable(String offer, {String? name}) async {
+    final made = await call('speech/enable', {'offer': offer, 'name': ?name});
+    await refresh();
+    return made['name'] as String? ?? offer;
+  }
+}
+
+/// The service `[voice] backend` names among [platform]'s and the host's. A person who never chose one (the default, the operating
+/// system's service) and whose system has none gets the host's first local provider, so a page dictates as soon as its host has
+/// one; a provider that sends the audio to a named service is only ever the person's own choice.
+SpeechBackend? resolveSpeech(String id, List<SpeechBackend> platform, List<SpeechBackend> host) {
+  for (final each in [...platform, ...host]) {
+    if (each.id == id) return each;
+  }
+  if (id == defaultVoiceBackend) {
+    for (final each in host) {
+      if (each is HostSpeech && each.local) return each;
+    }
+  }
+  return null;
 }
 
 /// The parts of `speech/open` that carry what the person wrote of their own voice in Settings; nothing for what they left empty.
@@ -181,16 +312,23 @@ final class HostSpeech implements SpeechBackend {
   @override
   String get name => provider.title == provider.name ? provider.name : '${provider.name} (${provider.title})';
 
+  SpeechOffer? get _offer => _catalog.offerOf(provider.offer);
+
+  /// Whether the host turns the audio into text itself, with a program it installed and nothing sent to another service.
+  bool get local => _offer?.local ?? false;
+
   @override
   SpeechWhere get where => SpeechWhere(
     place: SpeechPlace.host,
     leaves: AudioLeaves.maybe,
-    words: 'The audio goes to your host, which hands it to the provider you set up there: a program it runs or an address you named.',
+    words: local
+        ? _offer!.where
+        : 'The audio goes to your host, which hands it to the provider you set up there: a program it runs or an address you named.',
     endpoint: provider.settings['url'] is String ? provider.settings['url']! as String : null,
   );
 
   @override
-  Future<List<SpeechChoice>> models() async => const [];
+  Future<List<SpeechChoice>> models() async => provider.models;
 
   @override
   Future<List<SpeechChoice>> languages() async => const [];
@@ -206,11 +344,11 @@ final class HostSpeech implements SpeechBackend {
     final out = StreamController<Transcript>();
     _out = out;
     _ending = false;
-    unawaited(_run(out, language, profile));
+    unawaited(_run(out, language, model, profile));
     return out.stream;
   }
 
-  Future<void> _run(StreamController<Transcript> out, String? language, VoiceProfile? profile) async {
+  Future<void> _run(StreamController<Transcript> out, String? language, String? model, VoiceProfile? profile) async {
     final capture = _catalog.capture;
     if (capture == null) {
       out.addError(const SpeechFailure('This build cannot record audio yet.'));
@@ -219,7 +357,9 @@ final class HostSpeech implements SpeechBackend {
     }
     try {
       const rate = 16000;
-      final opened = await _catalog.call('speech/open', {'provider': provider.name, 'rate': rate, 'language': ?language, ..._profileParams(profile)});
+      // The model is asked for only when the host lists it, so a choice made for another service is never sent to this one.
+      final asked = model != null && provider.models.any((each) => each.id == model) ? model : null;
+      final opened = await _catalog.call('speech/open', {'provider': provider.name, 'rate': rate, 'language': ?language, 'model': ?asked, ..._profileParams(profile)});
       final session = opened['session'] as String;
       _session = session;
       if (_ending) {

@@ -21,6 +21,7 @@ import 'package:canoa/main.dart';
 import 'package:canoa/popout/popout_hub.dart' show PopoutWindows;
 import 'package:canoa/served/served_app.dart' show ServedApp;
 import 'package:canoa/session_store.dart';
+import 'package:canoa/voice/host_speech.dart' show AudioCapture;
 import 'package:canoa/workspace/open_in.dart' show workspaceOpener;
 import 'package:canoa/sources/source_choices.dart';
 import 'package:canoa/worktree/worktree.dart';
@@ -122,6 +123,8 @@ Future<List<CanoaConfig>> pumpApp(
   ShellLayout? layout,
   ConnectionProbe? probe,
   Future<RemoteHost> Function(Connection connection)? openRemote,
+  // Where a dictation through the host's speech providers gets its audio; the microphone is never opened in a test.
+  AudioCapture? capture,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -171,6 +174,7 @@ Future<List<CanoaConfig>> pumpApp(
     layout: layout,
     probe: probe,
     openRemote: openRemote,
+    speechCapture: capture,
   ));
   await tester.pumpAndSettle();
   return written;

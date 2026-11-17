@@ -8,7 +8,7 @@ import 'speech_backend.dart';
 /// their `x-section`, `x-order` and `x-advanced`, and the guatiao-intake form that gives the sections their titles and the fields
 /// their widget, placeholder, unit and `visibleWhen`. Saving writes the host's canoa.cfg through `speech/configure`.
 class ProviderSettingsForm extends StatefulWidget {
-  const ProviderSettingsForm({super.key, required this.catalog, required this.kind, required this.name, this.provider});
+  const ProviderSettingsForm({super.key, required this.catalog, required this.kind, required this.name, this.provider, this.saveLabel, this.onSaved});
 
   final HostSpeechCatalog catalog;
   final SpeechKind kind;
@@ -18,6 +18,12 @@ class ProviderSettingsForm extends StatefulWidget {
 
   /// The provider as the host lists it, for the values to start from; null for a new one.
   final HostSpeechProvider? provider;
+
+  /// What the save button says, in place of Add for a new provider and Save for a listed one.
+  final String? saveLabel;
+
+  /// Called once the host has saved it.
+  final VoidCallback? onSaved;
 
   @override
   State<ProviderSettingsForm> createState() => _ProviderSettingsFormState();
@@ -193,6 +199,7 @@ class _ProviderSettingsFormState extends State<ProviderSettingsForm> {
     try {
       await widget.catalog.save(widget.name, widget.kind.id, settings, clear: _cleared.toList());
       if (mounted) setState(_cleared.clear);
+      widget.onSaved?.call();
     } on SpeechFailure catch (failure) {
       if (mounted) setState(() => _problem = failure.message);
     } finally {
@@ -223,7 +230,7 @@ class _ProviderSettingsFormState extends State<ProviderSettingsForm> {
           child: FilledButton(
             key: const Key('speech-save'),
             onPressed: _saving ? null : _save,
-            child: Text(widget.provider == null ? 'Add' : 'Save'),
+            child: Text(widget.saveLabel ?? (widget.provider == null ? 'Add' : 'Save')),
           ),
         ),
       ),
