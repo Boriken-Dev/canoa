@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **A folder on a Windows share works wherever a folder does.** The host names it `\\server\share\...` in the folder browser, `fs/info`, repository detection and Open in (it had answered `\\?\UNC\...`), runs git in it (git asks for `safe.directory` on a share and refused every command), makes a chat's folder from a `[sessions] workspace` template that starts with `\\server\share`, and opens a terminal there; `cmd.exe` cannot start in a share, so `terminal/open` says so in `notice`. The session list groups a share's sessions as one workspace however its path was written.
+
 ### Added
 - **The Store offers Boriken Dev's catalog from the first run, and a person can remove it.** `[catalogs]` now starts with `boriken` (`Boriken-Dev/agent-overlays`), listed first by the host for a desktop app and a served page alike; your own catalogs add beside it. Remove it in Settings, Catalogs (or write `boriken = false` in your own canoa.cfg): it stays gone across restarts and no lower layer is edited. A source under the label `boriken` replaces it, and the Store's empty state offers it again.
 - **A profile suggests how a session delegates.** A layer's `[delegate]` (an overlay's `[harness.ID.delegate]`, read through coqui-aos) names the agent a task goes to when none is named, the agents a task may name and how many of the session's tasks run at once. The host applies each only where its own settings allow: the default only when the connection may use that agent, the sources only to narrow, the limit only below the host's own. What the person sets in the Delegation setup replaces it key by key, `_canoa/delegate/targets` says which layer each value in effect came from (`from`) and a default that could not apply (`unusedDefault`), and the app's Delegation setup, Delegate task dialog and Effective setup show it.
