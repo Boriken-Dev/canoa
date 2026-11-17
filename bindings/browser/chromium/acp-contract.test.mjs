@@ -6,6 +6,13 @@ import { makeDriver } from "./acp-driver.mjs";
 
 const RPC = (id, method, params) => JSON.stringify({ jsonrpc: "2.0", id, method, params });
 const later = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
+// Waits for a condition instead of a fixed time, which a loaded machine can overrun.
+async function until(condition, message) {
+  for (let waited = 0; !condition(); waited += 5) {
+    if (waited > 3000) assert.fail(message);
+    await later(5);
+  }
+}
 
 async function granted(driver, origin, { label = "agent", lifetime = "always", tabId = 1, cwd = "/granted", permissions } = {}) {
   driver.discover(label);
@@ -206,11 +213,9 @@ test("a request window closes when its page goes, and what the person decides af
   page.activate();
   driver.person.answerNext({ hold: true });
   page.acp.request().catch(() => {});
-  await later();
-  assert.equal(driver.person.windows.length, 1);
+  await until(() => driver.person.windows.length === 1, "no request window opened");
   page.navigate();
-  await later();
-  assert.equal(driver.person.windows[0].closed, true, "the window stayed open after its page went");
+  await until(() => driver.person.windows[0].closed, "the window stayed open after its page went");
   driver.person.windows[0].answer({ allow: "agent", cwd: "/granted", lifetime: "always" });
   await later(40);
   assert.deepEqual(await driver.store.grants("https://a.example"), []);
