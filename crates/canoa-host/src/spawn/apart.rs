@@ -700,23 +700,12 @@ struct Book {
 pub(super) struct Link {
     writer: Mutex<UnixStream>,
     book: Mutex<Book>,
-    /// How long a spawn waits for the starter's answer.
-    wait: Duration,
 }
 
 impl Link {
     /// Runs on `socket`, whose other end the starter has, and listens for what it says on a thread of its own. `process` is
     /// the starter's, which that thread collects when the socket ends.
     fn over(socket: UnixStream, process: Option<std::process::Child>) -> io::Result<Arc<Self>> {
-        Self::over_waiting(socket, process, SPAWN_WAIT)
-    }
-
-    /// As [`Link::over`], with `wait` for how long a spawn waits for its answer.
-    fn over_waiting(
-        socket: UnixStream,
-        process: Option<std::process::Child>,
-        wait: Duration,
-    ) -> io::Result<Arc<Self>> {
         quiet_pipe(&socket);
         let listening = socket.try_clone()?;
         let link = Arc::new(Self {
@@ -727,7 +716,6 @@ impl Link {
                 children: HashMap::new(),
                 ended: false,
             }),
-            wait,
         });
         let mine = Arc::clone(&link);
         thread::Builder::new()
@@ -892,6 +880,11 @@ impl Link {
 
     /// Starts `command` in the starter.
     pub(super) fn spawn(self: &Arc<Self>, command: &Command) -> io::Result<Child> {
+        self.spawn_within(command, SPAWN_WAIT)
+    }
+
+    /// As [`Link::spawn`], giving up after `wait` for the starter's answer.
+    fn spawn_within(self: &Arc<Self>, command: &Command, wait: Duration) -> io::Result<Child> {
         let plumbing = Plumbing::of(command)?;
         let dir = command.dir.clone().or_else(|| std::env::current_dir().ok());
         let (reply, answer) = mpsc::sync_channel(1);
@@ -926,7 +919,7 @@ impl Link {
             lock(&self.book).pending.remove(&request);
             return Err(error);
         }
-        let (pid, fate) = match answer.recv_timeout(self.wait) {
+        let (pid, fate) = match answer.recv_timeout(wait) {
             Ok(answer) => answer?,
             Err(_) => return Err(self.give_up(request, &answer)),
         };

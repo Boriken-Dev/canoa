@@ -431,13 +431,15 @@ fn a_stream_closed_on_exec_is_a_closed_one_and_the_child_gets_nothing_behind_it(
 #[test]
 fn a_spawn_that_gets_no_answer_fails_alone_and_a_child_started_late_for_it_is_ended() {
     let (host, starter) = UnixStream::pair().expect("a socket pair");
-    let link = Link::over_waiting(host, None, Duration::from_millis(300)).expect("a link");
+    let link = Link::over(host, None).expect("a link");
     let file = std::env::temp_dir().join(format!("canoa-abandon-{}", std::process::id()));
     let _ = std::fs::remove_file(&file);
     let mut command = shell(&format!("echo $$ > '{}'; exec sleep 300", file.display()));
     command.own_group();
     // The starter is slow, not gone: nothing reads the socket yet.
-    let error = link.spawn(&command).expect_err("no answer in time");
+    let error = link
+        .spawn_within(&command, Duration::from_millis(300))
+        .expect_err("no answer in time");
     assert_eq!(error.kind(), io::ErrorKind::TimedOut, "{error}");
     assert!(
         !link.has_ended(),
