@@ -7,6 +7,9 @@ extern crate alloc;
 
 pub mod preset;
 
+#[cfg(feature = "network")]
+#[cfg_attr(docsrs, doc(cfg(feature = "network")))]
+pub mod network;
 #[cfg(feature = "speech")]
 #[cfg_attr(docsrs, doc(cfg(feature = "speech")))]
 pub mod speech;
