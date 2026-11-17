@@ -40,7 +40,7 @@ final class HostAgent {
 /// What a look at a host found: the state, and what the host says of itself. Everything but the state is the host's claim; the proof
 /// at connect is what decides whether it holds.
 final class HostStatus {
-  const HostStatus(this.state, {this.detail, this.peer, this.method, this.agents = const [], this.capabilities = const []});
+  const HostStatus(this.state, {this.detail, this.peer, this.method, this.agents = const [], this.capabilities = const [], this.served});
 
   const HostStatus.unchecked() : this(HostState.unchecked);
 
@@ -58,6 +58,9 @@ final class HostStatus {
 
   /// What it says it can do besides run agents, read from it: never assumed.
   final List<String> capabilities;
+
+  /// The list it served, whole, for a Canoa host that answered under the pinned id: its entries, system and control address.
+  final ServedHost? served;
 }
 
 /// Looks at one saved connection. A host that cannot be reached is a [HostStatus], not an error.
@@ -100,6 +103,7 @@ Future<HostStatus> _probeHost(Connection connection, http.Client? client, Durati
     method: host.method.id,
     agents: [for (final entry in host.entries) if (entry.kind == 'agent') HostAgent(entry.title ?? entry.name, entry.url)],
     capabilities: [if (host.control != null) 'Management (sessions, folders, files)'],
+    served: host,
   );
 }
 

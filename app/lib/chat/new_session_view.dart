@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../session_store.dart';
 import '../theme/canoa_mark.dart';
 import 'composer.dart';
+import 'host_picker.dart';
 
 /// A session before its first message: the mark, Chat or Workspace and, for a workspace, the folder it works in, and the composer
 /// in the middle, whose row holds the source, Local or Worktree and the agent's choices. Nothing has started; sending starts it.
@@ -22,9 +23,23 @@ class NewSessionView extends StatelessWidget {
   /// How many recent folders are offered as rows; the folder menu keeps the rest.
   static const recentShown = 5;
 
-  Future<void> _open(BuildContext context) async {
-    final folder = await kit.pickFolder?.call();
+  Future<void> _open(BuildContext context, {bool system = false}) async {
+    final folder = system ? await kit.nativeFolder?.call() : await (kit.browseFolder?.call(session) ?? kit.pickFolder?.call());
     if (folder != null) store.updateDraft(session, cwd: folder);
+  }
+
+  Future<void> _chooseHost(BuildContext context) async {
+    final picked = await pickHost(context, kit.hosts, chosen: session.host, canAdd: kit.addHost != null, canManage: kit.manageHosts != null);
+    switch (picked) {
+      case HostChosen(:final name):
+        if (name != session.host) kit.chooseHost?.call(session, name);
+      case HostAdd():
+        await kit.addHost?.call();
+      case HostManage():
+        kit.manageHosts?.call();
+      case null:
+        break;
+    }
   }
 
   @override
@@ -35,15 +50,42 @@ class NewSessionView extends StatelessWidget {
     // Where a chat works is Canoa's to make, so the view never shows it; a build that cannot make it has workspaces only.
     final canChat = kit.scratchFolder != null;
     final chat = canChat && session.kind == SessionKind.chat;
-    final folders = {?cwd, ...kit.recentFolders}.toList();
+    final recentFolders = kit.recentFor(session);
+    final folders = {?cwd, ...recentFolders}.toList();
     final draft = session.status == SessionStatus.draft;
-    final recent = draft && !chat ? kit.recentFolders.take(recentShown).toList() : const <String>[];
+    final recent = draft && !chat ? recentFolders.take(recentShown).toList() : const <String>[];
+    final unchecked = cwd != null && (kit.pathUnchecked?.call(session) ?? false);
+    final choice = kit.hosts.where((host) => host.name == session.host).firstOrNull;
+    final hostChip = kit.hosts.isEmpty || kit.chooseHost == null
+        ? null
+        : InkWell(
+            key: const Key('new-session-host'),
+            borderRadius: BorderRadius.circular(look.radius),
+            onTap: draft ? () => unawaited(_chooseHost(context)) : null,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                border: Border.all(color: look.muted.withValues(alpha: 0.35)),
+                borderRadius: BorderRadius.circular(look.radius),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.dns_outlined, size: 18, color: look.muted),
+                const SizedBox(width: 8),
+                Flexible(child: Text(choice?.label ?? session.host ?? kit.hosts.first.label, overflow: TextOverflow.ellipsis, maxLines: 1)),
+                Icon(Icons.expand_more, size: 18, color: look.muted),
+              ]),
+            ),
+          );
     final notices = session.messages.where((message) => message.role == MessageRole.notice).toList();
     final folder = PopupMenuButton<String>(
       key: const Key('new-session-folder'),
       tooltip: 'The workspace it works in',
       enabled: session.status == SessionStatus.draft,
-      onSelected: (chosen) => chosen.isEmpty ? unawaited(_open(context)) : store.updateDraft(session, cwd: chosen),
+      onSelected: (chosen) => chosen.isEmpty
+          ? unawaited(_open(context))
+          : chosen == '\u0000system'
+              ? unawaited(_open(context, system: true))
+              : store.updateDraft(session, cwd: chosen),
       itemBuilder: (context) => [
         for (final each in folders)
           CheckedPopupMenuItem(value: each, checked: each == cwd, child: Text(each, overflow: TextOverflow.ellipsis)),
@@ -51,9 +93,11 @@ class NewSessionView extends StatelessWidget {
         PopupMenuItem(
           key: const Key('new-session-browse'),
           value: '',
-          enabled: kit.pickFolder != null,
+          enabled: kit.browseFolder != null || kit.pickFolder != null,
           child: const Text('Open workspace…'),
         ),
+        if (kit.nativeFolder != null && session.host == null)
+          const PopupMenuItem(key: Key('new-session-native'), value: '\u0000system', child: Text('System folder dialog…')),
       ],
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -65,6 +109,10 @@ class NewSessionView extends StatelessWidget {
           Icon(Icons.folder_outlined, size: 18, color: look.muted),
           const SizedBox(width: 8),
           Flexible(child: Text(cwd ?? 'Choose a workspace', overflow: TextOverflow.ellipsis, maxLines: 1)),
+          if (unchecked) ...[
+            const SizedBox(width: 6),
+            Text('not checked', key: const Key('new-session-unchecked'), style: TextStyle(color: look.muted, fontSize: 12)),
+          ],
           Icon(Icons.expand_more, size: 18, color: look.muted),
         ]),
       ),
@@ -94,9 +142,9 @@ class NewSessionView extends StatelessWidget {
               Text('What should we work on?', textAlign: TextAlign.center, style: theme.textTheme.headlineSmall),
               const SizedBox(height: 14),
               ?kind,
-              if (!chat) ...[
+              if (hostChip != null || !chat) ...[
                 if (kind != null) const SizedBox(height: 10),
-                folder,
+                Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [?hostChip, if (!chat) folder]),
               ],
               const SizedBox(height: 20),
               composer,

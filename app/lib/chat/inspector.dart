@@ -41,7 +41,8 @@ import 'session_views.dart';
           : isPipeUrl(endpoint.toString())
               ? 'this computer, through its canoa'
               : (endpoint.host.isEmpty ? null : endpoint.host);
-      return (label: 'Host', value: name ?? session.place.label);
+      // The host a draft was aimed at keeps the name it was saved under; one reached any other way is named by its address.
+      return (label: 'Host', value: session.host ?? name ?? session.place.label);
     case SessionPlace.browser:
       return (label: 'Host', value: session.place.label);
   }

@@ -2,10 +2,12 @@ import 'attention/notifier.dart';
 import 'dart:async';
 import 'dart:convert' show utf8;
 import 'served/folder_dialog.dart';
+import 'served/served_control.dart' show servedControl;
+import 'workspace/remote_host.dart';
 import 'served/served_app.dart';
 import 'desktop/control_client.dart' show ControlFailed;
 import 'config/canoa_config.dart';
-import 'config/connection.dart' show ConnectionKind;
+import 'config/connection.dart' show Connection, ConnectionKind, ConnectionTransport;
 import 'config/canoa_config_file.dart';
 import 'desktop/desktop_shell.dart';
 import 'desktop/host_control.dart';
@@ -258,7 +260,7 @@ class CanoaApp extends StatefulWidget {
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
     this.isGitRepository, this.folderExists, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.documents, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
-    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint,
+    this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote,
   });
 
   /// Which section is shown and how each section's index is sized, kept across runs; the app keeps its own when none is given.
@@ -270,6 +272,11 @@ class CanoaApp extends StatefulWidget {
 
   /// How a chat reaches a host's endpoint; the browser's own proof unless a test stands in.
   final ConnectEndpoint? connectEndpoint;
+
+  /// How a saved Canoa host is opened for a new session aimed at it: its list read and its control channel dialled; the app's own
+  /// unless a test stands in.
+  @visibleForTesting
+  final Future<RemoteHost> Function(Connection connection)? openRemote;
 
   /// The views the work panel can show; the app's own (details and changes) when none are given.
   @visibleForTesting
@@ -525,6 +532,7 @@ class _CanoaAppState extends State<CanoaApp> {
     save: (changed) async {
       await _write(changed);
       if (mounted) setState(() => config = changed);
+      _forgetRemotes();
       _settingsKey.currentState?.controller.adopt(changed);
     },
     sessions: () => store.sessions,
@@ -1449,7 +1457,9 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// The source and folder chosen last, which a new session starts with.
   AgentSource? _lastSource;
-  String? _lastFolder;
+  /// The folder chosen last on each host: this app's own under null, a saved connection's under its name.
+  final Map<String?, String> _lastFolders = {};
+  String? get _lastFolder => _lastFolders[null];
 
   /// Whether the drafts the last run kept have been put back, so that the window does not make a new one first.
   bool _restored = false;
@@ -1475,19 +1485,39 @@ class _CanoaAppState extends State<CanoaApp> {
     if ((session == null || session.isDraft) && !_checked) unawaited(_checkSources());
     if (session == null || session.source == null) return;
     _lastSource = session.source;
-    if (session.isDraft && session.cwd != null) _lastFolder = session.cwd;
+    if (session.isDraft && session.cwd != null) _lastFolders[session.host] = session.cwd!;
     if (session.isDraft) _hint(session);
   }
 
-  /// Folders sessions worked in, the last chosen first: a worktree's stands for its repository. One that is gone is left out.
-  List<String> get _recentFolders => {
-    ?_lastFolder,
-    for (final session in store.sessions)
-      if (session.source != null && session.cwd != null && session.kind == SessionKind.workspace) session.worktree?.repo ?? session.cwd!,
-    for (final entry in store.ledger?.entries ?? const <LedgerEntry>[])
-      if (entry.kind == SessionKind.workspace && (entry.place == SessionPlace.local || entry.place == SessionPlace.host))
-        ?(entry.worktree?.repo ?? entry.cwd),
-  }.where(widget.folderExists ?? (_viaHost ? _hostFolders!.exists : folderExists)).take(8).toList();
+  /// Folders sessions worked in on [host], the last chosen first: this app's own host for null, else the saved connection of that
+  /// name. A worktree's stands for its repository. One that is gone, or written for another system, is left out.
+  List<String> _recentFoldersOn(String? host) {
+    final connection = _connection(host);
+    final remote = host == null ? null : _remoteReady[host];
+    bool onHost(SessionPlace place, String? peer) =>
+        connection == null ? place != SessionPlace.peer : place == SessionPlace.peer && peer?.toLowerCase() == connection.peer.toLowerCase();
+    final folders = {
+      ?_lastFolders[host],
+      for (final session in store.sessions)
+        if (session.source != null && session.cwd != null && session.kind == SessionKind.workspace &&
+            (connection == null ? session.host == null && session.place != SessionPlace.peer : onHost(session.place, session.peerId)))
+          session.worktree?.repo ?? session.cwd!,
+      for (final entry in store.ledger?.entries ?? const <LedgerEntry>[])
+        if (entry.kind == SessionKind.workspace &&
+            (connection == null ? (entry.place == SessionPlace.local || entry.place == SessionPlace.host) : onHost(entry.place, entry.peerId)))
+          ?(entry.worktree?.repo ?? entry.cwd),
+    };
+    if (connection != null) {
+      // A saved host is asked about its own folders, and a path of another system's is never offered for it.
+      return [
+        for (final folder in folders)
+          if (pathFitsSystem(remote?.os, folder) && (remote?.folders.exists(folder) ?? true)) folder,
+      ].take(8).toList();
+    }
+    return folders.where(widget.folderExists ?? (_viaHost ? _hostFolders!.exists : folderExists)).take(8).toList();
+  }
+
+  List<String> get _recentFolders => _recentFoldersOn(null);
 
   /// A new session with nothing started, from the source and folder chosen last; one already waiting untouched is shown
   /// instead of another.
@@ -1527,12 +1557,291 @@ class _CanoaAppState extends State<CanoaApp> {
     store.defaultChoices(draft);
   }
 
+  // ---- Where a new session starts: this app's own host, or a saved connection ----
+
+  /// The saved connections' hosts opened for a new session, by connection name; one is dialled the first time a draft is aimed at it.
+  final Map<String, Future<RemoteHost>> _remotes = {};
+  final Map<String, RemoteHost> _remoteReady = {};
+
+  Connection? _connection(String? name) => name == null ? null : config.connections.where((each) => each.name == name).firstOrNull;
+
+  /// The host saved as [name], its list read and its control channel dialled. A failure is the reason in words and is not kept, so the
+  /// next ask tries again.
+  Future<RemoteHost> _remoteOf(String name) {
+    final connection = _connection(name);
+    if (connection == null) return Future.error(StateError('$name is no longer a saved connection'));
+    if (connection.kind == ConnectionKind.acp) return Future.error(StateError('$name is a direct agent: it has no host to ask'));
+    return _remotes.putIfAbsent(name, () async {
+      try {
+        final opened = await (widget.openRemote ?? _openRemote)(connection);
+        if (!mounted) {
+          opened.dispose();
+          throw StateError('Canoa UI closed');
+        }
+        _remoteReady[name] = opened;
+        return opened;
+      } on Object {
+        unawaited(_remotes.remove(name)?.then<void>((_) {}, onError: (Object _) {}));
+        rethrow;
+      }
+    });
+  }
+
+  Future<RemoteHost> _openRemote(Connection connection) async {
+    final served = await fetchServedHost(connection);
+    return RemoteHost(connection, served, servedControl(served));
+  }
+
+  /// Puts away a host whose saved connection changed or went, so that the next draft aimed at it dials what is saved now.
+  void _forgetRemotes() {
+    for (final name in _remotes.keys.toList()) {
+      final now = _connection(name);
+      final held = _remoteReady[name];
+      if (now != null && held != null && held.connection.address == now.address && held.connection.peer == now.peer) continue;
+      _remotes.remove(name);
+      _remoteReady.remove(name)?.dispose();
+    }
+  }
+
+  /// The choices the host chip offers: this computer (or the host that served this page) first, then each saved connection.
+  List<HostChoice> get _hostChoices => widget.host == null
+      ? const []
+      : [
+          HostChoice(
+            name: null,
+            label: widget.served == null ? 'Local' : (Uri.base.authority.isEmpty ? 'Serving host' : Uri.base.authority),
+            detail: widget.served == null ? 'This computer' : 'Serves this page',
+          ),
+          for (final connection in config.connections)
+            HostChoice(name: connection.name, label: connection.name, kind: connection.kind, detail: connection.kind.label),
+        ];
+
+  /// The sources a draft aimed at [host] can start from: what that host serves, read when it was chosen.
+  List<AgentSource> _sourcesOn(String host) {
+    final connection = _connection(host);
+    if (connection == null) return const [];
+    if (connection.kind == ConnectionKind.acp) return [AgentSource.hosted(connection.name)];
+    final remote = _remoteReady[host];
+    if (remote == null) return const [];
+    return [
+      for (final entry in remote.agents)
+        AgentSource.hosted(entry.name, harness: entry.harness, title: entry.title),
+    ];
+  }
+
+  /// Aims [draft] at the saved connection [name], or at this app's own host for null: what it offers, its agents and recent
+  /// folders, is read again from there.
+  void _chooseHost(ChatSession draft, String? name) {
+    store.updateDraft(draft, host: name, localHost: name == null);
+    if (name == null) {
+      final sources = _sources;
+      final back = sources.contains(_lastSource)
+          ? _lastSource
+          : sources.where((source) => _checks[source]?.ready ?? false).firstOrNull ?? sources.firstOrNull;
+      if (back != null) store.updateDraft(draft, source: back);
+      return;
+    }
+    unawaited(_enterRemote(draft, name));
+  }
+
+  Future<void> _enterRemote(ChatSession draft, String name) async {
+    final connection = _connection(name);
+    if (connection == null) return;
+    try {
+      if (connection.kind != ConnectionKind.acp) await _remoteOf(name);
+    } on Object catch (error) {
+      if (mounted && draft.host == name) {
+        _messenger.currentState?.showSnackBar(SnackBar(content: Text('Could not read $name: ${reasonOf(error)}')));
+      }
+      return;
+    }
+    if (!mounted || draft.host != name || !draft.isDraft) return;
+    final offered = _sourcesOn(name);
+    final kept = offered.where((source) => source == draft.source).firstOrNull;
+    final chosen = kept ?? offered.firstOrNull;
+    if (chosen != null && chosen != draft.source) store.updateDraft(draft, source: chosen);
+    setState(() {});
+  }
+
+  Future<void> _addHost() async {
+    final above = _navigator.currentContext;
+    if (above == null || !above.mounted) return;
+    _hosts.adopt(config);
+    await showAddConnectionDialog(above, onAdd: _hosts.add, nearby: _hosts.nearby);
+  }
+
+  /// Asks which folder [session] works in, through the folder listing of the host it starts on.
+  Future<String?> _browseFolder(ChatSession session) async {
+    final above = _navigator.currentContext;
+    if (above == null || !above.mounted) return null;
+    final name = session.host;
+    if (name == null) {
+      if (widget.pickFolder != null) return widget.pickFolder!();
+      final files = widget.served?.files ?? (_viaHost ? _hostFiles : null);
+      final folders = _hostFolders;
+      if (files == null || folders == null) return canRunLocalAgents ? getDirectoryPath() : null;
+      return pickHostFolder(
+        above,
+        (path) => files.listFolders(path: path),
+        start: _lastFolders[null],
+        recent: _recentFoldersOn(null),
+        check: (path) => workspaceProblem(host: 'this computer', os: null, folders: folders, files: files, path: path),
+      );
+    }
+    final connection = _connection(name);
+    if (connection == null) return null;
+    if (connection.kind == ConnectionKind.acp) return _typePath(above, connection);
+    final RemoteHost remote;
+    try {
+      remote = await _remoteOf(name);
+    } on Object catch (error) {
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text('Could not read $name: ${reasonOf(error)}')));
+      return null;
+    }
+    if (!above.mounted) return null;
+    if (!remote.hasControl) {
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text('$name listens for no control channel, so its workspaces cannot be browsed.')));
+      return null;
+    }
+    return pickHostFolder(
+      above,
+      (path) async {
+        if (path != null && !pathFitsSystem(remote.os, path)) throw StateError('$path is not a path on $name, which runs ${remote.os}.');
+        return remote.files.listFolders(path: path);
+      },
+      start: _lastFolders[name],
+      recent: _recentFoldersOn(name),
+      check: remote.problemWith,
+      host: name,
+    );
+  }
+
+  /// A direct agent has no folder listing: the path is taken as typed.
+  Future<String?> _typePath(BuildContext above, Connection connection) {
+    final typed = TextEditingController(text: _lastFolders[connection.name] ?? '');
+    return showSelectableDialog<String>(
+      context: above,
+      builder: (context) => AlertDialog(
+        title: Text('Workspace on ${connection.name}'),
+        content: TextField(
+          key: const Key('typed-workspace'),
+          controller: typed,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'An absolute path on that machine'),
+          onSubmitted: (value) => Navigator.pop(context, value.trim().isEmpty ? null : value.trim()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(
+            key: const Key('typed-workspace-use'),
+            onPressed: () => Navigator.pop(context, typed.text.trim().isEmpty ? null : typed.text.trim()),
+            child: const Text('Use'),
+          ),
+        ],
+      ),
+    ).whenComplete(typed.dispose);
+  }
+
+  /// Starts a draft aimed at a saved connection, on its first message: the workspace is checked by that host (a direct agent's is
+  /// taken as typed), a chat's folder is made by that host, a worktree is made there, and the agent is reached at its own address.
+  Future<void> _startOnConnection(ChatSession draft, String name) async {
+    final source = draft.source;
+    final connection = _connection(name);
+    if (source == null) throw StateError('Choose its agent first');
+    if (connection == null) throw StateError('$name is no longer a saved connection');
+    final direct = connection.kind == ConnectionKind.acp;
+    final remote = direct ? null : await _remoteOf(name);
+    final String url;
+    if (remote == null) {
+      url = connection.address;
+    } else {
+      url = remote.agents.where((entry) => entry.name == source.label).firstOrNull?.url ??
+          (throw StateError('$name does not serve ${source.label} now'));
+    }
+    final noFolder = draft.cwd == null || draft.cwd!.isEmpty;
+    if (draft.kind != SessionKind.chat && noFolder && remote != null) {
+      draft
+        ..kind = SessionKind.chat
+        ..wantsWorktree = false;
+    }
+    final scratch = draft.kind == SessionKind.chat;
+    if (scratch && remote == null) throw StateError('$name takes a workspace you type: choose one first');
+    if (!scratch && noFolder) throw StateError('Choose its workspace first');
+    var folder = draft.cwd ?? '';
+    final request = scratch ? _scratchRequest(draft) : null;
+    var madeFolder = false;
+    if (scratch) {
+      if (request == null) throw StateError('A chat cannot be started here; choose a workspace instead');
+      try {
+        final made = await remote!.folders.makeScratch(request);
+        folder = made.path;
+        madeFolder = made.made;
+      } on Object catch (error) {
+        throw StateError("$name cannot make the chat's workspace: ${reasonOf(error)}");
+      }
+    } else if (remote != null) {
+      final problem = await remote.problemWith(folder);
+      if (problem != null) throw StateError(problem);
+    }
+    final worktree = !scratch && draft.wantsWorktree && remote != null && await remote.folders.isRepository(folder);
+    final method = PeerMethod.parse(connection.method);
+    final endpoint = Uri.parse(url);
+    final pinned = connection.peer.toLowerCase();
+    final place = widget.host?.peerId?.toLowerCase() == pinned ? SessionPlace.host : SessionPlace.peer;
+    final starting = _Starting();
+    _inFlight.add(starting);
+    Worktrees? worktrees;
+    SessionWorktree? made;
+    VerifiedAgent? client;
+    try {
+      worktrees = worktree ? _worktrees(place, endpoint: url, peerId: pinned, method: method.id) : null;
+      if (worktree && worktrees == null) throw StateError('Canoa cannot ask $name for a worktree');
+      made = worktrees == null ? null : await worktrees.create(folder, worktreeBranch(source.label));
+      starting
+        ..worktrees = worktrees
+        ..made = made;
+      if (_quitting) throw StateError('Canoa is quitting');
+      final where = made?.path ?? folder;
+      final overTransport = direct && connection.transport == ConnectionTransport.webtransport;
+      client = await (widget.connectEndpoint ?? connectBrowserAcp)(
+        chatEndpoints(
+          webSocket: overTransport ? '' : url,
+          webTransport: overTransport ? url : '',
+          preferWebTransport: config.preferWebTransport,
+        ),
+        pinnedPeerId: pinned,
+        method: method,
+        timeout: Duration(seconds: config.connectTimeout),
+        decider: store.askPermission,
+        elicitor: store.askQuestion,
+        secrets: store,
+        // The loadout and accounts of canoa.cfg are this computer's; only the cache lifetime means the same there.
+        initializeMeta: _cacheMeta(store.cacheLifetimeOf(draft)),
+      );
+      starting.client = client;
+      if (_quitting) throw StateError('Canoa is quitting');
+      final opened = await client.openSession(cwd: where);
+      if (!mounted || _quitting) throw StateError('Canoa UI closed');
+      store.bindDraft(draft, client, opened, cwd: where, worktree: made, place: place, endpoint: endpoint, method: method.id);
+      _ownedClients.add(client);
+    } catch (_) {
+      await client?.close();
+      if (made != null) await _unmake(worktrees!, made);
+      if (madeFolder && request != null) await remote!.folders.removeScratch(request);
+      rethrow;
+    } finally {
+      _inFlight.remove(starting);
+    }
+    await store.applyHostProfile(draft, expected: _hasProfiles);
+  }
+
   /// Starts [draft]'s agent on its first message: the worktree is made, the profile prepared and shown where it has something
   /// to approve, the agent started and its session opened, and the draft bound to it. Anything made is taken back when it
   /// fails, and the draft stays as it was.
   Future<void> _startDraft(ChatSession draft) async {
     final source = draft.source;
     if (source == null) throw StateError('Choose where its agent comes from first');
+    if (draft.host case final name?) return _startOnConnection(draft, name);
     await _stopForTrouble(source);
     final check = _checks[source] ?? await timed<SourceCheck>('lookup', () => _check(source));
     if (!check.ready) {
@@ -2102,6 +2411,7 @@ class _CanoaAppState extends State<CanoaApp> {
   void didUpdateWidget(CanoaApp oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.config != oldWidget.config) config = widget.config;
+    _forgetRemotes();
   }
 
   @override
@@ -2126,6 +2436,10 @@ class _CanoaAppState extends State<CanoaApp> {
     unawaited(_reconnects?.cancel());
     _hostFolders?.dispose();
     _dictation.dispose();
+    for (final remote in _remoteReady.values) {
+      remote.dispose();
+    }
+    _remoteReady.clear();
     unawaited(_control?.close());
     widget.settingsSignal?.removeListener(_requestSettings);
     widget.hostingSignal?.removeListener(_requestHosting);
@@ -2212,10 +2526,28 @@ class _CanoaAppState extends State<CanoaApp> {
     checks: _checks,
     recentFolders: _recentFolders,
     inGitRepository: widget.isGitRepository ?? (_viaHost ? _hostFolders!.inRepository : inGitRepository),
-    foldersChanged: _hostFolders,
-    foldersReadable: _viaHost ? (session) => _filesOf(session) != null : null,
+    foldersChanged: _remoteReady.isEmpty ? _hostFolders : Listenable.merge([?_hostFolders, for (final remote in _remoteReady.values) remote.folders]),
+    foldersReadable: (session) => session.host != null
+        ? false
+        : _viaHost
+            ? _filesOf(session) != null
+            : session.place == SessionPlace.local,
     pickFolder: widget.pickFolder ?? (widget.served != null ? _pickHostFolder : canRunLocalAgents ? () => getDirectoryPath() : null),
     // A served page has no file system: the host makes a chat's folder when the session opens.
+    hosts: _hostChoices,
+    chooseHost: _chooseHost,
+    addHost: _addHost,
+    manageHosts: () => _layout.select(HostsController.section),
+    browseFolder: _browseFolder,
+    nativeFolder: widget.pickFolder == null && widget.served == null && canRunLocalAgents && _viaHost ? () => getDirectoryPath() : null,
+    sourcesOf: (session) => session.host == null ? _sources : _sourcesOn(session.host!),
+    recentFoldersOf: (session) => _recentFoldersOn(session.host),
+    repositoryOf: (session) {
+      final name = session.host, cwd = session.cwd;
+      if (name == null || cwd == null) return null;
+      return _remoteReady[name]?.folders.inRepository(cwd) ?? false;
+    },
+    pathUnchecked: (session) => _connection(session.host)?.kind == ConnectionKind.acp,
     scratchFolder: widget.served != null ? (_) => siteStandInFolder : hasWorkspaceFolders && canRunLocalAgents ? _scratchOf : null,
     pickFiles: widget.pickFiles ?? () => openFiles(),
     statFile: widget.statFile ?? (canRunLocalAgents ? localFileSize : null),

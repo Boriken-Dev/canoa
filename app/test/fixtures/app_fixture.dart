@@ -24,6 +24,8 @@ import 'package:canoa/sources/source_choices.dart';
 import 'package:canoa/worktree/worktree.dart';
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
+import 'package:canoa/config/connection.dart' show Connection;
+import 'package:canoa/workspace/remote_host.dart' show RemoteHost;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_host.dart' show defaultLocalSources, linkedHost;
@@ -107,6 +109,7 @@ Future<List<CanoaConfig>> pumpApp(
   Future<CanoaConfig> Function()? readConfig,
   ShellLayout? layout,
   ConnectionProbe? probe,
+  Future<RemoteHost> Function(Connection connection)? openRemote,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -151,6 +154,7 @@ Future<List<CanoaConfig>> pumpApp(
     connectEndpoint: connectEndpoint,
     layout: layout,
     probe: probe,
+    openRemote: openRemote,
   ));
   await tester.pumpAndSettle();
   return written;

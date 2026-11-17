@@ -73,7 +73,7 @@ class PlaceToggle extends StatelessWidget {
 
   Widget _toggle() {
     final cwd = session.cwd;
-    final inRepository = cwd != null && (kit.inGitRepository?.call(cwd) ?? false);
+    final inRepository = cwd != null && (kit.repositoryOf?.call(session) ?? kit.inGitRepository?.call(cwd) ?? false);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: SegmentedButton<bool>(

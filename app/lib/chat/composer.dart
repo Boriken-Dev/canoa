@@ -14,6 +14,7 @@ import '../extension/composer_extension.dart';
 import '../session_store.dart';
 import '../sources/sources.dart';
 import '../store/programs.dart' show ProgramStores;
+import '../workspace/remote_host.dart' show HostChoice;
 import 'agent_events.dart' show AgentCommandInfo, MessageRole;
 import 'attachments.dart';
 import 'dictation.dart';
@@ -68,7 +69,51 @@ final class ComposerKit {
     this.programs,
     this.extension,
     this.dictation,
+    this.hosts = const [],
+    this.chooseHost,
+    this.addHost,
+    this.manageHosts,
+    this.browseFolder,
+    this.nativeFolder,
+    this.sourcesOf,
+    this.recentFoldersOf,
+    this.repositoryOf,
+    this.pathUnchecked,
   });
+
+  /// Where a new session can start: this app's own host first, then each saved connection. Empty where there is a choice of none,
+  /// which hides the host chip.
+  final List<HostChoice> hosts;
+
+  /// Aims [session], a draft, at the saved connection [name], or at this app's own host for null; the agents, accounts and recent
+  /// folders it offers then come from that host.
+  final void Function(ChatSession session, String? name)? chooseHost;
+
+  /// Opens Add connection, and Hosts; each returns to the same draft.
+  final Future<void> Function()? addHost;
+  final VoidCallback? manageHosts;
+
+  /// Asks which folder [session] works in through its host's own folder listing; null where [pickFolder] is all there is.
+  final Future<String?> Function(ChatSession session)? browseFolder;
+
+  /// This computer's own folder dialog, a shortcut for a draft on Local; null where there is none.
+  final Future<String?> Function()? nativeFolder;
+
+  /// The sources [session] can start from, which are its host's; [sources] when null.
+  final List<AgentSource> Function(ChatSession session)? sourcesOf;
+
+  /// The folders sessions worked in on [session]'s host, newest first; [recentFolders] when null.
+  final List<String> Function(ChatSession session)? recentFoldersOf;
+
+  /// Whether [session]'s folder is in a git repository on its host, when that is not the host [inGitRepository] asks.
+  final bool? Function(ChatSession session)? repositoryOf;
+
+  /// Whether a path [session] is given is taken as typed, with nothing on its host to check it against (a direct ACP endpoint).
+  final bool Function(ChatSession session)? pathUnchecked;
+
+  List<AgentSource> sourcesFor(ChatSession session) => sourcesOf?.call(session) ?? sources;
+
+  List<String> recentFor(ChatSession session) => recentFoldersOf?.call(session) ?? recentFolders;
 
   /// Dictation into the message; null where this build has no way to record, which leaves the microphone out.
   final Dictation? dictation;

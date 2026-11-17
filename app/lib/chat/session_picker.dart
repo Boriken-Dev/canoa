@@ -271,7 +271,7 @@ class _SessionPickerState extends State<SessionPicker> {
         selected: _stars,
         onTap: () => setState(() => _stars = !_stars),
       ),
-      for (final each in kit.sources) _sourceTile(context, each),
+      for (final each in kit.sourcesFor(session)) _sourceTile(context, each),
     ];
     final settings = kit.onSourceSettings;
     final link = settings == null

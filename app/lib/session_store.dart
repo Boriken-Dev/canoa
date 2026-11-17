@@ -256,6 +256,10 @@ class ChatSession {
   /// The `[loadouts]` name a draft starts with; null starts with `[defaults] loadout`. Choosing one starts [overlays] over.
   String? loadout;
 
+  /// The saved connection a draft starts on, by name; null for this app's own host (or the one that served the page). A started
+  /// session's host is the place and peer it was reached at, never this.
+  String? host;
+
   /// The id a draft is kept under between runs; null once it starts.
   String? draftId;
 
@@ -1031,6 +1035,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     String? account,
     SessionKind? kind,
     String? loadout,
+    String? host,
   }) {
     final session =
         _newSession(
@@ -1049,6 +1054,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           ..account = account
           ..overlays = overlays
           ..loadout = loadout
+          ..host = host
           ..draftId = id ?? newDraftId()
           ..workspaceId = workspaceId ?? newSessionUuid()
           ..draftText = text
@@ -1130,9 +1136,19 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     bool defaultLoadout = false,
     String? text,
     SessionKind? kind,
+    String? host,
+    bool localHost = false,
   }) {
     if (text != null) session.draftText = text;
     if (session.status == SessionStatus.draft) {
+      // A workspace is (host, path): another host holds none of this one's folders, nor a worktree of them.
+      if (localHost ? session.host != null : host != null && host != session.host) {
+        session
+          ..host = localHost ? null : host
+          ..wantsWorktree = false
+          ..cwd = null
+          ..account = null;
+      }
       if (source != null && source != session.source) {
         // Choices for another source's options mean nothing to this one's. They go first: the conversation tells its listeners as
         // each goes, and none should see a new source with the old one's choices.
@@ -1197,6 +1213,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         loadout: record['loadout'] is String
             ? record['loadout'] as String
             : null,
+        host: record['host'] is String ? record['host'] as String : null,
         text: record['text'] is String ? record['text'] as String : '',
         title: record['title'] is String ? record['title'] as String : null,
         bypass: record['bypass'] == true,
@@ -1255,6 +1272,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       'account': ?session.account,
       'overlays': ?session.overlays?.toList(),
       'loadout': ?session.loadout,
+      'host': ?session.host,
       'text': session.sending?.text ?? session.draftText,
       if (!session.agentNames) 'title': session.title,
       'pending': [for (final choice in session.pending.values) choice.toJson()],
