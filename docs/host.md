@@ -724,33 +724,31 @@ directories are held to `working_roots`, its `_meta` removed, and its stdio MCP 
 provider too, which holds a resumed Codex thread's own directory, which no request shows the host, to them. With a profile
 they go with one more directory, the one the connection's skills are written under (a `canoa-profile-` directory of the
 system's temporary one, removed with the connection), since the provider is told to work there too. An entry with no
-`working_roots` takes any directory, with or without a profile. What the command line asks before it acts is
-the entry's, never the configuration of the person on the host's machine, which a paired key would otherwise get:
-Claude Code runs with `permission_mode = "default"` and Codex with `approval_policy = "on-request"` and
-`sandbox = "workspace-write"` unless the entry names others, and another is logged as configuration. Claude Code's own
-allow rules in the settings it loads still apply. Permission prompts reach the
+`working_roots` takes any directory, with or without a profile. What the command line may do and asks before it acts is
+the profile's `access`, the same for every agent ([configuration](configuration.md#access)): with nothing set, no sandbox, the
+network on and everything asked, whatever the configuration of the command line says. Claude Code's own allow rules in the
+settings it loads still apply. Permission prompts reach the
 client as `session/request_permission` with the command line's own options (Claude Code: allow once, always allow with
 the rule it suggests, reject; Codex: its own decisions).
 
 ```toml
 [host.agents.claude]
 harness = "claude"
-permission_mode = "default"       # default, acceptEdits, plan, dontAsk, bypassPermissions, auto or manual
 setting_sources = ["project"]     # of user, project, local; unset is Claude Code's own
 executable = "C:/Tools/claude.exe"  # optional: a name on PATH, or a path from canoa.cfg's directory
 
 [host.agents.codex]
 harness = "codex"
-approval_policy = "on-request"    # untrusted, on-failure, on-request or never
-sandbox = "workspace-write"       # read-only, workspace-write or danger-full-access
-bypass = false                    # true offers a paired client the Bypass mode, which asks for nothing
+profiles = ["strict"]             # optional: the profile's `access` is this entry's access
+[host.profiles.strict]
+access = { sandbox = "workspace", network = false, approvals = "edits" }
 ```
 
-A paired client can choose only the mode the entry's own settings amount to and every stricter one (Plan, Manual, Accept edits,
-Auto, Bypass, loosest last), so it cannot loosen what canoa.cfg set: an entry with `permission_mode = "default"` or Codex's
-`on-request` with `workspace-write` offers it Plan and Manual (Plan, Manual and Accept edits for Codex). `modes = ["plan",
-"accept_edits"]` names the modes it may choose instead, which widens that, and is logged at `info` as configuration. Bypass
-follows `bypass` alone.
+An entry with no profile runs with the standard access. A paired client is offered every mode the agent has (Plan, Manual,
+Accept edits, Auto where there is one, Bypass) and may choose any of them: the host runs as its person, and a key paired to it
+is theirs. A paired key can therefore put a session in Bypass, which asks for nothing and, with the standard access, has no
+sandbox: pair only keys you would give your own account to. The keys `permission_mode`, `approval_policy`, `sandbox`,
+`bypass` and `modes` are gone: the access replaces the first three, and no key gates a mode.
 
 `cache_lifetime = "default" | "off" | "short" | "long"` sets how long the provider's prompt cache lives for the entry's sessions, where
 the harness has a control for it. Claude Code has: `short` is a 5-minute cache and `long` a 1-hour one (it sets
@@ -761,11 +759,6 @@ run is better with `short`, and a session someone is active in with `long`. Code
 chat asks `long` for a session when the entry says nothing, and the person can choose another for one session in the
 new-session view, which wins. A value other than the four is refused naming `cache_lifetime`. `canoa agent claude|codex`
 takes the same as `--cache-lifetime`.
-
-`bypass` is off by default and the only thing that lets a paired client put a session in Bypass: a key paired to someone else
-reaches the entry, and with Bypass it could take full control of this machine. Turning it on is logged at `info` as
-configuration. The app's own Claude and Codex sources turn it on for themselves (`--allow-bypass`), since the person using
-the app is the person who configured it.
 
 On Windows the providers start `claude.exe` and `codex.exe`, as the native installers put them; an npm-installed `.cmd`
 is untested. With `profiles`, the profile's environment is the command line's process
@@ -787,8 +780,8 @@ settings = { title = "Echo" }               # optional: the provider's configura
 dirs = ["harness"]
 ```
 
-`executable`, `permission_mode`, `approval_policy`, `sandbox` and `bypass` are the `claude` and `codex` providers' settings
-and belong to those two ids; another id takes `settings` alone. Loading runs the provider's code with the host's rights,
+`executable` and `setting_sources` are the `claude` and `codex` providers' settings and belong to the built-in ids; another id
+takes `settings` alone. Loading runs the provider's code with the host's rights,
 in the host's process, so a provider that crashes takes the host with it. Canoa passes no account, so the provider runs on
 the harness's own sign-in, and the prompt cache lifetime is the harness's default.
 
@@ -799,7 +792,7 @@ its own plumbing that failed. The host logs each at `info`, with the entry's nam
 and reason logged at `info` too. Each connection works on at most 64 requests at once, as before; the entry's `settings` can say
 `max_requests` for another number. Each entry loads its provider into a registry of its own, so an id is resolved from that
 entry's file and no other, and `claude` and `codex` cannot be replaced by a `library` or `source`. How an instance
-departs from its provider's defaults (`settings = { allow_bypass = true }`, `max_requests`, the mode keys) is logged at
+departs from its provider's defaults (`settings = { allow_bypass = false }`, `max_requests`) is logged at
 `info` as configuration when the host starts.
 
 **What the terms say.** Anthropic's [legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance)

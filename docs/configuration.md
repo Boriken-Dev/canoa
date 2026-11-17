@@ -124,7 +124,7 @@ Do not store identity private keys, tokens or passwords in canoa.cfg.
 A profile is what an agent is launched with: environment variables, an initial context, skills, MCP servers, and the
 model, effort and mode it starts with. It comes in layers, merged lowest first:
 
-1. **built-in**: Canoa's own, which sets nothing;
+1. **built-in**: Canoa's own: the [standard access](#access), and nothing else;
 2. **overlays**, each named in `[overlays]`: [AOS](https://github.com/Boriken-Dev/agent-overlay-spec) overlays, in their composition order (`priority`, then name);
 3. **yours**: `[profile]` in canoa.cfg;
 4. **the project's**: `.canoa/profile.toml` in the working directory, only once you trust that directory;
@@ -134,7 +134,7 @@ model, effort and mode it starts with. It comes in layers, merged lowest first:
    from it.
 
 `[profile]` is **yours**: every session gets it, whatever profile it is given. A named profile is the session's own values
-and sits above it. It holds `source`, `model`, `effort`, `mode`, `context` (shown as "Starting instructions", text added to
+and sits above it. It holds `source`, `model`, `effort`, `mode`, `access`, `context` (shown as "Starting instructions", text added to
 the initial context after every other layer's), `cache_lifetime` and `loadout`, all optional:
 
 ```toml
@@ -267,6 +267,45 @@ an overlay does not see them.
 resolved only when a session starts; the view shows the reference and the variable each MCP header or variable comes
 from, and nothing logs the value. A `from_file` reads a regular file of at most 1 MiB. Errors name a key, never a
 value.
+
+### Access
+
+`access` is the one setting that says how much an agent may do, the same for every agent: how much of the machine a command
+may reach, whether it may use the network, and what is asked first. It is set in any of your layers (`[profile]`, a named
+profile's `access = { ... }`, `[agents.NAME.profile]`, the session's), each part on its own, and a later layer wins per part:
+
+```toml
+[profile]
+access = { sandbox = "workspace", network = false, approvals = "edits" }   # any part may be left out
+```
+
+| Part | Values | Standard access (the built-in layer) |
+| --- | --- | --- |
+| `sandbox` | `none`: nothing holds a command back but your own account; `workspace`: it reads widely and writes only in the session's folders; `read-only`: it changes nothing | `none` |
+| `network` | `true`, `false` | `true` |
+| `approvals` | `ask`: everything that is not read-only is asked first; `edits`: edits run on their own, the rest is asked; `never`: nothing is asked | `ask` |
+
+The names follow what the three command lines share: a sandbox that is off, one that keeps writes to the folder, one that
+writes nothing; a network on or off; and the three steps from asking about everything to asking about nothing. Each
+harness's own words are in the table below, and a part a harness has no way to say is listed as not supported in the
+session's **Profile** line, with why. An agent that is not run by one of these providers (Grok, Antigravity, a command you
+add) is started as its entry says: Canoa passes it no access setting.
+
+| Access | Claude Code | Codex | Pi |
+| --- | --- | --- | --- |
+| `sandbox = "none"` | no sandbox of its own | `sandbox` `danger-full-access` | no sandbox |
+| `sandbox = "workspace"` | its sandbox on, no retry outside it (`--settings`: `sandbox.enabled`, `sandbox.allowUnsandboxedCommands = false`) | `workspace-write` | not supported: the permission gate asks about paths outside the session's folders in every mode but Bypass |
+| `sandbox = "read-only"` | the `plan` permission mode (its sandbox has no switch that forbids every write) | `read-only` | the gate's Plan mode, which refuses every change and command |
+| `network = false` | its sandbox's network with no allowed host and no asking (`sandbox.network.strictAllowlist`; with no sandbox, `sandbox.filesystem.disabled` leaves only that part); its WebFetch and MCP tools are not covered | `sandbox_workspace_write.network_access = false`; not supported with `sandbox = "none"`, and a read-only sandbox has none already | not supported |
+| `approvals = "ask"` | permission mode `default` | approval policy `untrusted` | the gate's Manual mode |
+| `approvals = "edits"` | `acceptEdits` | `on-request` | Accept edits |
+| `approvals = "never"` | `bypassPermissions` | `never` | Bypass |
+
+With nothing set, every agent starts with the standard access, whatever the configuration of its own command line says: no
+sandbox, the network on, everything asked. Every mode the agent has is offered in the mode control, Bypass included, and any
+paired key may choose any of them. An overlay or a project may not set `access`: a layer from elsewhere could loosen it, so
+such a file is refused (`reserved`). `canoa agent claude|codex` takes the same as `--sandbox none|workspace|read-only`,
+`--no-network` and `--approvals ask|edits|never`.
 
 ### Applying a profile
 
