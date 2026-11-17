@@ -28,6 +28,14 @@ void main() {
     expect(leftText(const UsageBucket(id: 'x'), _noon), isNull);
   });
 
+  test('the figures of a key say where they came from, and a plan window says nothing of it', () {
+    UsageBucket from(String source, {String unit = 'tokens'}) => UsageBucket(id: 'x', unit: UsageUnit(unit), used: 5, limit: 10, source: source);
+    expect(sourceText(from('response_headers')), "From the provider's rate-limit headers");
+    expect(sourceText(from('gateway', unit: 'micro_usd')), "From the gateway's key information");
+    expect(sourceText(from('recorded')), 'Counted by Canoa from the sessions on this key');
+    expect(sourceText(from('reported')), isNull);
+  });
+
   test('a countdown to the reset', () {
     expect(resetText(_weekly(usedPermille: 100, resetsInSeconds: 3 * 3600 + 20 * 60), _noon), 'Resets in 3 h 20 m');
     expect(resetText(_weekly(usedPermille: 100, resetsInSeconds: -5), _noon), 'Reset, not yet reported');

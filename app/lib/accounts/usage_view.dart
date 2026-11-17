@@ -10,6 +10,15 @@ String? leftText(UsageBucket bucket, int now) {
   return '${(1000 - used) ~/ 10}% left';
 }
 
+/// Where an API key's figure came from, in words: the provider's rate-limit headers, a gateway's key information, or the tokens this
+/// host recorded. Null for a figure the provider itself reports (a plan's window), which needs no source said.
+String? sourceText(UsageBucket bucket) => switch (bucket.source) {
+  'response_headers' => "From the provider's rate-limit headers",
+  'gateway' => "From the gateway's key information",
+  'recorded' => 'Counted by Canoa from the sessions on this key',
+  _ => null,
+};
+
 /// When [bucket] resets, as a countdown: `Resets in 3 h 20 m`. Null for a bucket that refills some other way.
 String? resetText(UsageBucket bucket, int now) {
   final left = bucket.resetsIn(now);
@@ -168,6 +177,7 @@ class _Bucket extends StatelessWidget {
           Text(bucket.isExhausted ? 'Limit reached' : level == UsageLevel.danger ? 'Almost used up' : 'Running low', style: small?.copyWith(color: colour)),
         ]),
       if (reset != null) Text(reset, key: Key('account-reset ${bucket.id}'), style: small),
+      if (sourceText(bucket) case final source?) Text(source, key: Key('account-source ${bucket.id}'), style: small),
       if (pace != null) Text(pace, key: Key('account-pace ${bucket.id}'), style: small?.copyWith(color: level == UsageLevel.calm ? null : colour)),
       if (large && readAt > 0) _read(small, scheme),
     ]);
