@@ -335,8 +335,10 @@ problem in `[about]`, store metadata, never does. Canoa applies:
 Canoa does not apply yet, and **Settings → Profiles** lists as "not applied by Canoa yet": env scripts (`env.<ext>`,
 `env_scripts`), `setup`, dependencies (`lib/python/requirements.txt`, `lib/node/package.json`, `runtime`), `runtime`
 probes, `scripts`, `mcp.skills`, an MCP server's `timeout` and its working directory (it runs in the session's), other
-harnesses' hints, and the
-`bin/` and `lib/` defaults, which would change `PATH`, `PYTHONPATH` and `NODE_PATH`. Nothing of an overlay ever runs.
+harnesses' hints. Each line names its overlay. An overlay's own `bin/` goes first on `PATH`, and its `lib/python/` and
+`lib/node/` on `PYTHONPATH` and `NODE_PATH`, ahead of the host's own entries, for the agent and the programs it starts.
+A `paths` entry that leaves the overlay's folder is refused, and a `paths` entry may set only those three of the variables
+Canoa keeps to itself. Canoa runs nothing of an overlay.
 
 From git, the desktop app installs an overlay into `overlays/NAME/` beside canoa.cfg, with `overlays/NAME.json`
 recording the source, the commit, each file's git blob id and **the tree digest** of what it wrote, and its history in
