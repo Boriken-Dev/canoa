@@ -346,6 +346,8 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
   /// chip to undo it: it is forgotten, and the tags chosen in it with it.
   void _forgetGoneCatalogs(String id) {
     final view = viewOf(id);
+    // A skill source the person removed is no longer the one Skills reads: it goes back to the catalogs.
+    if (view.source case final source? when !controller.skillSources.containsKey(source)) view.source = null;
     if (view.catalogs.isEmpty) return;
     final extension = _extension(id);
     final present = extension != null

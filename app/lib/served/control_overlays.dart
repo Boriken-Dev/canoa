@@ -179,12 +179,40 @@ final class ControlOverlayManager implements OverlayManager {
   }
 
   @override
-  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source) async {
+  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source, {bool own = false}) async {
     if (source.kind != 'git') throw const OverlayException('Canoa fetches skills from git only, and this source is not git');
     if (holdsPassword(source.location)) throw const OverlayException('A skill source holds a password, which none may');
-    final answer = await _call('skill/fetch', {'repo': source.location, 'ref': source.reference, 'path': source.path ?? ''});
+    final answer = await _call('skill/fetch', {
+      'repo': source.location,
+      'ref': source.reference,
+      'path': source.path ?? '',
+      if (own) 'own': true,
+    });
     final files = answer['files'] as Map<Object?, Object?>? ?? const {};
     return [for (final MapEntry(:key, :value) in files.entries) ('$key', base64Decode('$value'))];
+  }
+
+  @override
+  Future<SkillScan> scanSkills(String repo, {String? ref, String path = '', bool own = false}) async {
+    if (holdsPassword(repo)) throw const OverlayException('A skill source holds a password, which none may');
+    final answer = await _call('skill/scan', {'repo': repo, 'ref': ref, 'path': path, if (own) 'own': true});
+    final listed = answer['skills'];
+    final skills = <ScannedSkill>[
+      for (final each in listed is List<Object?> ? listed : const <Object?>[])
+        if (each is Map<Object?, Object?> && each['name'] is String && each['path'] is String)
+          ScannedSkill(
+            name: each['name']! as String,
+            description: each['description'] as String? ?? '',
+            path: each['path']! as String,
+            problem: each['problem'] as String?,
+          ),
+    ];
+    return SkillScan(
+      commit: answer['commit']! as String,
+      skills: skills,
+      skipped: (answer['skipped'] as num?)?.toInt() ?? 0,
+      truncated: answer['truncated'] == true,
+    );
   }
 
   @override

@@ -94,4 +94,34 @@ void main() {
     expect(host.asked.last, 'skill/remove');
     expect(host.params.last, {'name': 'review'});
   });
+
+  test('a source is scanned through the host, as the person\'s own only when it says so, and a fetch carries the same choice', () async {
+    final host = _Host((method, params) => switch (method) {
+      'skill/scan' => {
+        'commit': 'd' * 40,
+        'skills': [
+          {'name': 'pdf', 'description': 'Reads PDFs.', 'path': 'skills/pdf'},
+          {'name': 'odd', 'description': 'Odd.', 'path': 'skills/other', 'problem': 'the name has to be its folder\'s'},
+          {'path': 'skills/nameless'},
+        ],
+        'skipped': 2,
+        'truncated': false,
+      },
+      _ => {'commit': 'd' * 40, 'files': {'SKILL.md': base64Encode(utf8.encode(_skillText))}},
+    });
+    final manager = ControlOverlayManager(HostControl.dialing(() async => host));
+    final scan = await manager.scanSkills('https://github.com/anthropics/skills.git');
+    expect(host.asked.last, 'skill/scan');
+    expect(host.params.last, {'repo': 'https://github.com/anthropics/skills.git', 'ref': null, 'path': ''});
+    expect(scan.commit, 'd' * 40);
+    expect([for (final skill in scan.skills) (skill.name, skill.path, skill.problem != null)], [('pdf', 'skills/pdf', false), ('odd', 'skills/other', true)]);
+    expect(scan.skipped, 2);
+
+    await manager.scanSkills('https://git.example/o.git', ref: 'v1.0.0', path: 'skills', own: true);
+    expect(host.params.last, {'repo': 'https://git.example/o.git', 'ref': 'v1.0.0', 'path': 'skills', 'own': true});
+    await expectLater(manager.scanSkills('https://user:secret@git.example/t.git'), throwsA(isA<OverlayException>()));
+
+    await manager.fetchSkillFiles(aos.Source.parse('https://git.example/t.git@main#skills/review'), own: true);
+    expect(host.params.last, {'repo': 'https://git.example/t.git', 'ref': 'main', 'path': 'skills/review', 'own': true});
+  });
 }

@@ -277,10 +277,28 @@ final class MemoryOverlays implements OverlayManager {
   @override
   Future<Map<String, SkillCopy>> skillCopies() async => Map.of(skills);
 
+  /// Whether each fetch of a skill's files, in order, was made as the person's own (their git settings) or isolated.
+  final skillFetchOwn = <bool>[];
+
   @override
-  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source) async {
+  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source, {bool own = false}) async {
     skillFetches.add(source.shown());
-    return skillSources[source.shown()] ?? (throw const OverlayException('The source has no such skill'));
+    skillFetchOwn.add(own);
+    return skillSources[source.shown()] ??
+        (throw const OverlayException('The source has no such skill'));
+  }
+
+  /// What a scan of a source holds, by the repository it names, and every scan asked for as `repo@ref#path` with whether it was
+  /// made as the person's own.
+  final scans = <String, SkillScan>{};
+  final scanned = <String>[];
+  final scannedOwn = <bool>[];
+
+  @override
+  Future<SkillScan> scanSkills(String repo, {String? ref, String path = '', bool own = false}) async {
+    scanned.add('$repo@${ref ?? 'HEAD'}#$path');
+    scannedOwn.add(own);
+    return scans[repo] ?? (throw const OverlayException('The source has no branch or tag of that name'));
   }
 
   /// Skills (lower-case names) whose copy cannot be written.

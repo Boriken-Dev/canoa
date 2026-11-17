@@ -28,6 +28,10 @@ class StoreView extends ChangeNotifier {
   final tags = <String>{};
   final catalogs = <String>{};
 
+  /// The Skills page's Discover reads this skill source (a label of `[store.skill_sources]`) instead of the catalogs; null reads
+  /// the catalogs.
+  String? source;
+
   /// Installed's filter for the entries with a newer version.
   bool updatesOnly = false;
 

@@ -15,6 +15,7 @@ import '../profile/aos_support.dart' show holdsPassword;
 import '../permissions/protected_paths.dart' show protectedLinesOf;
 import '../profile/skill_copies.dart' show skillKey, skillsDirectory, validSkillName;
 import '../profile/profile.dart';
+import '../store/skill_sources.dart';
 import '../store/store_settings.dart';
 import '../theme/look.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatDensity, defaultWarnPermille;
@@ -798,6 +799,72 @@ final class CanoaConfig {
     return out._withEachLoadout((loadout) => loadout.withMcp(name, false));
   }
 
+  /// `[store.skill_sources]`: where the Skills page looks for skills, by the label the person gives each, as `npx skills add` takes a
+  /// source (`owner/repo`, a git URL, a folder). Anthropic's `anthropics/skills` is first unless the table names its label: `false`
+  /// removes it, a source replaces it.
+  Map<String, SkillSource> get skillSources => _skillSources((tables['store'] as Map?)?['skill_sources']);
+
+  /// The most skill sources the person adds beside the default.
+  static const maxSkillSources = 32;
+
+  static Map<String, SkillSource> _skillSources(Object? raw) {
+    if (raw != null && raw is! Map) throw const FormatException('canoa.cfg: store.skill_sources must be a table');
+    final given = <String, SkillSource>{};
+    final normalized = <String>{};
+    for (final MapEntry(:key, :value) in (raw as Map? ?? const {}).entries) {
+      final label = '$key';
+      if (!isCatalogLabel(label) || !normalized.add(normalizeName(label))) {
+        throw FormatException('canoa.cfg: store.skill_sources.$label: a label is a letter, then letters, digits, - or _, at most '
+            '64, unique when compared as AOS compares names');
+      }
+      switch (value) {
+        case false:
+          break;
+        case final String spec:
+          try {
+            given[label] = SkillSource.parse(spec);
+          } on FormatException catch (error) {
+            throw FormatException('canoa.cfg: store.skill_sources.$label: ${error.message}');
+          }
+        default:
+          throw FormatException('canoa.cfg: store.skill_sources.$label is a source, owner/repo or a git URL or a folder, or false');
+      }
+    }
+    if (given.length > maxSkillSources) {
+      throw const FormatException('canoa.cfg: store.skill_sources holds at most $maxSkillSources sources');
+    }
+    final own = given.keys.where((label) => normalizeName(label) == normalizeName(defaultSkillSourceLabel));
+    return {
+      if (!normalized.contains(normalizeName(defaultSkillSourceLabel)))
+        defaultSkillSourceLabel: SkillSource.parse(defaultSkillSourceSpec),
+      for (final label in own) label: given[label]!,
+      for (final MapEntry(:key, :value) in given.entries)
+        if (!own.contains(key)) key: value,
+    };
+  }
+
+  CanoaConfig _withSkillSourceTable(Map<String, dynamic> raw) {
+    _skillSources(raw);
+    final table = {...((tables['store'] as Map?) ?? const {}).cast<String, dynamic>()}..remove('skill_sources');
+    return _withTable('store', {...table, if (raw.isNotEmpty) 'skill_sources': raw});
+  }
+
+  /// This configuration with the skill source [spec] labelled [label]. Throws [FormatException].
+  CanoaConfig withSkillSource(String label, String spec) =>
+      _withSkillSourceTable(_deepCopy(((tables['store'] as Map?)?['skill_sources'] as Map?) ?? const {})..[label] = spec);
+
+  /// This configuration without the skill source [label]. The default one is recorded as `false` in this layer, so it stays gone
+  /// without touching a lower layer.
+  CanoaConfig withoutSkillSource(String label) {
+    final raw = _deepCopy(((tables['store'] as Map?)?['skill_sources'] as Map?) ?? const {});
+    if (normalizeName(label) == normalizeName(defaultSkillSourceLabel)) {
+      raw[raw.keys.cast<String>().where((key) => normalizeName(key) == normalizeName(label)).firstOrNull ?? defaultSkillSourceLabel] = false;
+    } else {
+      raw.remove(label);
+    }
+    return _withSkillSourceTable(raw);
+  }
+
   /// This configuration with [registries] as `[store] registries`, in the order given.
   CanoaConfig withStoreRegistries(List<String> registries) => _withStoreExtras(registries: registries);
 
@@ -864,7 +931,7 @@ final class CanoaConfig {
   Map<String, dynamic>? _storeExtrasTable() {
     final raw = tables['store'];
     if (raw is! Map) return null;
-    return {for (final key in const ['registries', 'mcp']) if (raw[key] != null) key: raw[key]};
+    return {for (final key in const ['registries', 'mcp', 'skill_sources']) if (raw[key] != null) key: raw[key]};
   }
 
   /// `[agents.NAME.mcp]`: for each agent, by label, the MCP servers the person turned on (`true`) or off (`false`), and
@@ -1327,6 +1394,7 @@ final class CanoaConfig {
     _defaultLoadout(data['defaults'], _loadouts(data['loadouts']));
     _presets(data['profiles']);
     _storeExtras(data['store']);
+    _skillSources((data['store'] as Map?)?['skill_sources']);
     _agentMcp(agentTables);
     _agentHooks(agentTables);
     final protectedPaths = permissions['protected'] == null ? null : protectedLinesOf(permissions['protected']);

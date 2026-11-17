@@ -84,7 +84,10 @@ final class FakeOverlays implements OverlayManager {
   Future<Map<String, SkillCopy>> skillCopies() async => const {};
 
   @override
-  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source) => throw UnimplementedError();
+  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source, {bool own = false}) => throw UnimplementedError();
+
+  @override
+  Future<SkillScan> scanSkills(String repo, {String? ref, String path = '', bool own = false}) => throw UnimplementedError();
 
   @override
   Future<void> saveSkill(SkillCopy copy) => throw UnimplementedError();

@@ -4,12 +4,14 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 
 import '../loadout/loadout_controller.dart';
+import '../profile/overlays.dart' show ScannedSkill, SkillScan;
 import '../profile/profile.dart';
 import '../profile/profiles_panel.dart' show visible;
 import '../profile/skill_copies.dart';
 import '../selectable.dart';
 import 'entry_details.dart';
 import 'overlay_page.dart' show SkillRows, oneLine;
+import 'skill_sources.dart';
 import 'skills.dart';
 import 'store.dart' show LoadedCatalog;
 import 'store_banner.dart';
@@ -35,6 +37,8 @@ class SkillsBody extends StatefulWidget {
 
 class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMixin {
   final spec = TextEditingController();
+  final sourceText = TextEditingController();
+  String? sourceProblem;
 
   LoadoutController get c => widget.controller;
   StoreView get view => widget.view;
@@ -45,6 +49,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
   @override
   void dispose() {
     spec.dispose();
+    sourceText.dispose();
     super.dispose();
   }
 
@@ -96,7 +101,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
         if (copy.chosen) 'Chosen by you' else if (copy.overlays.isNotEmpty) 'Comes with ${copy.overlays.join(', ')}' else 'Named by no overlay now',
       ],
       provenance: [
-        if (copy.catalog != null) 'from the catalog ${copy.catalog}' else 'pasted source',
+        if (copy.catalog != null) 'from the catalog ${copy.catalog}' else 'from a source you named',
         shown,
         copy.pin == null ? 'unpinned, fetched as ${copy.digest}' : 'pinned ${copy.pin}',
       ].join(' · '),
@@ -127,7 +132,183 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     }
   }
 
+  /// Which place Discover reads: the catalogs, or one of the sources that hold skills in git, and a field to add a source. Choosing
+  /// a source is what fetches it.
+  Widget _sourceRow(BuildContext context) {
+    final sources = c.skillSources;
+    final chosen = view.source;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        ChoiceChip(
+          key: const Key('skills-from-catalogs'),
+          label: const Text('Catalogs'),
+          selected: chosen == null,
+          onSelected: (_) {
+            view.source = null;
+            view.changed();
+          },
+        ),
+        for (final MapEntry(:key, :value) in sources.entries)
+          ChoiceChip(
+            key: Key('skills-source-$key'),
+            label: Text(value.spec),
+            tooltip: 'Read the skills in ${value.shown}',
+            selected: chosen == key,
+            onSelected: c.scanningSource != null ? null : (_) => unawaited(_choose(key)),
+          ),
+        if (chosen != null && sources.containsKey(chosen))
+          TextButton(
+            key: const Key('skills-source-remove'),
+            onPressed: c.busy != null ? null : () => unawaited(_removeSource(chosen)),
+            child: const Text('Remove this source'),
+          ),
+      ]),
+      const SizedBox(height: 8),
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+          child: TextField(
+            key: const Key('skills-source-address'),
+            controller: sourceText,
+            decoration: InputDecoration(
+              labelText: 'Add a source',
+              hintText: 'owner/repo  or  https://github.com/owner/repo  or  a folder',
+              errorText: sourceProblem,
+            ),
+            onSubmitted: (_) => unawaited(_addSource()),
+          ),
+        ),
+        const SizedBox(width: 8),
+        FilledButton.tonal(
+          key: const Key('skills-source-add'),
+          onPressed: c.busy != null ? null : () => unawaited(_addSource()),
+          child: const Text('Add'),
+        ),
+      ]),
+      const SizedBox(height: 12),
+    ]);
+  }
+
+  Future<void> _choose(String label) async {
+    view.source = label;
+    view.changed();
+    if (!c.skillScans.containsKey(label)) await c.scanSkillSource(label);
+  }
+
+  Future<void> _addSource() async {
+    final problem = await c.addSkillSource(sourceText.text);
+    if (!mounted) return;
+    setState(() {
+      sourceProblem = problem;
+      if (problem == null) sourceText.clear();
+    });
+  }
+
+  Future<void> _removeSource(String label) async {
+    await c.removeSkillSource(label);
+    if (view.source == label) view.source = null;
+    view.changed();
+  }
+
+  /// The skills one source holds, read from its `SKILL.md` files at the commit named, each installable on a yes.
+  Widget _fromSource(BuildContext context, List<Widget> head, String label) {
+    final source = c.skillSources[label]!;
+    final scan = c.skillScans[label];
+    final text = Theme.of(context).textTheme;
+    final own = c.skillSourceIsOwn(label);
+    final problem = c.skillScanProblems[label];
+    final held = [
+      if (scan != null)
+        for (final skill in scan.skills)
+          if (source.only == null || skillKey(skill.name) == skillKey(source.only!)) skill,
+    ];
+    final shown = [for (final skill in held) if (view.matches('${skill.name}\n${skill.description}')) skill];
+    return CardList(
+      header: [
+        ...head,
+        _sourceRow(context),
+        Text(source.shown, key: const Key('skills-source-shown'), style: text.titleSmall),
+        Text(
+          own
+              ? 'You typed this source, so it is fetched with your own git settings, credentials and keys. Reading it fetches its '
+                  'repository; nothing is installed until you say yes to a skill.'
+              : 'This source is fetched with none of your git settings, credentials or keys. Reading it fetches its repository; '
+                  'nothing is installed until you say yes to a skill.',
+          key: const Key('skills-source-note'),
+          style: text.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        if (c.scanningSource == label) const LinearProgressIndicator(),
+        if (problem != null)
+          Text(visible(problem), key: const Key('skills-source-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        if (scan != null) ...[
+          Row(children: [
+            Text(view.query.text.isEmpty ? 'Skills in this source' : 'Matching skills', style: text.titleMedium),
+            const SizedBox(width: 8),
+            Chip(key: const Key('store-count'), label: Text('${shown.length}'), visualDensity: VisualDensity.compact),
+            const Spacer(),
+            TextButton(
+              key: const Key('skills-source-reread'),
+              onPressed: c.scanningSource != null ? null : () => unawaited(c.scanSkillSource(label)),
+              child: const Text('Read again'),
+            ),
+          ]),
+          Text('Read at commit ${scan.commit}', key: const Key('skills-source-commit'), style: text.bodySmall),
+          if (scan.skipped > 0 || scan.truncated)
+            Text(
+              [
+                if (scan.skipped > 0)
+                  '${scan.skipped} SKILL.md left out: no front matter naming and describing it, marked internal, or a name already listed.',
+                if (scan.truncated) 'The source holds more skills than are listed.',
+              ].join(' '),
+              key: const Key('skills-source-left-out'),
+              style: text.bodySmall,
+            ),
+          const SizedBox(height: 8),
+          if (held.isEmpty)
+            const Text('This source holds no skill: Canoa looks for SKILL.md files the way npx skills does.', key: Key('skills-source-none'))
+          else if (shown.isEmpty)
+            const Text('Nothing listed matches.', key: Key('skills-source-nothing-matches')),
+        ] else if (problem == null && c.scanningSource != label)
+          const Text('Choose the source to read which skills it holds.', key: Key('skills-source-unread')),
+      ],
+      cards: [for (final skill in shown) _scannedTile(label, source, scan!, skill, own)],
+    );
+  }
+
+  Widget _scannedTile(String label, SkillSource source, SkillScan scan, ScannedSkill skill, bool own) {
+    final here = c.skills[skillKey(skill.name)];
+    return StoreTile(
+      key: Key('store-source-skill-$label-${skill.name}'),
+      leading: const SizedBox.square(dimension: 48, child: Center(child: LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined))),
+      title: skill.name,
+      summary: skill.problem == null ? skill.description : '${skill.description}\nCannot be installed: ${skill.problem}',
+      by: '${skill.path.isEmpty ? 'the whole source' : skill.path} · ${source.spec}',
+      installed: here != null,
+      installKey: Key('store-source-skill-install-$label-${skill.name}'),
+      onOpen: () => unawaited(_reviewScanned(source, scan, skill, own)),
+      onInstall: skill.problem != null || c.busy != null ? null : () => unawaited(_reviewScanned(source, scan, skill, own)),
+    );
+  }
+
+  /// A skill of a source is installed from the commit that was read, so that what is fetched is what was listed.
+  Future<void> _reviewScanned(SkillSource source, SkillScan scan, ScannedSkill skill, bool own) async {
+    if (skill.problem != null) return;
+    await _review(
+      null,
+      skill.name,
+      aos.CatalogEntry(
+        source: aos.Source('git', source.repo, scan.commit, skill.path.isEmpty ? null : skill.path),
+        pin: null,
+        description: skill.description,
+        about: null,
+      ),
+      own: own,
+    );
+  }
+
   Widget _discover(BuildContext context, List<Widget> head) {
+    final chosenSource = view.source;
+    if (chosenSource != null && c.skillSources.containsKey(chosenSource)) return _fromSource(context, head, chosenSource);
     final offered = c.skillsOffered();
     final inScope = [for (final item in offered) if (view.catalogs.isEmpty || view.catalogs.contains(item.$1)) item];
     final shown = [
@@ -142,6 +323,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     return CardList(
       header: [
         ...head,
+        _sourceRow(context),
         ...sourceNotes(c, only: view.catalogs),
         if (c.loadingCatalogs) const LinearProgressIndicator(),
         if (scope.isNotEmpty)
@@ -290,8 +472,8 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
   }
 
   /// Shows where the skill comes from and what it is pinned to, and fetches it only on a yes.
-  Future<void> _review(String? label, String name, aos.CatalogEntry offer, {bool fromDetails = false}) async {
-    final item = reviewChosenSkill(c.home!.overlays, c.skills, label, name, offer, pins: c.config.skillPins);
+  Future<void> _review(String? label, String name, aos.CatalogEntry offer, {bool fromDetails = false, bool own = false}) async {
+    final item = reviewChosenSkill(c.home!.overlays, c.skills, label, name, offer, pins: c.config.skillPins, own: own);
     final yes = await showSelectableDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(

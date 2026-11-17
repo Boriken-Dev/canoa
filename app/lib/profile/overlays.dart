@@ -132,15 +132,52 @@ abstract interface class OverlayManager {
   Future<Map<String, SkillCopy>> skillCopies();
 
   /// The files of the skill at [source], as its directory holds them in git: fetched with none of the person's
-  /// credentials, agent or prompts, no redirect to another host followed, nothing checked out and nothing run. Throws
-  /// [OverlayException] for a transport that fails, a link, a submodule or more than [skillLimits] allows.
-  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source);
+  /// credentials, agent or prompts, no redirect to another host followed, nothing checked out and nothing run. [own] says the
+  /// person typed the source themselves, which is then fetched as they would from a shell, with their git settings, credentials
+  /// and keys. Throws [OverlayException] for a transport that fails, a link, a submodule or more than [skillLimits] allows.
+  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source, {bool own = false});
+
+  /// Which skills the git repository [repo] holds at [ref] (its head when null), looked for in [path] of it (all of it when empty)
+  /// as `npx skills` looks: each `SKILL.md`'s folder, name and description, and none of a skill's other files. Fetches the
+  /// repository one commit deep, with the same settings as [fetchSkillFiles] under [own], and keeps nothing. Throws
+  /// [OverlayException] for a transport that fails.
+  Future<SkillScan> scanSkills(String repo, {String? ref, String path = '', bool own = false});
 
   /// Writes [copy] (its files, then its record) as the skill's copy, replacing any other of that name.
   Future<void> saveSkill(SkillCopy copy);
 
   /// Removes the skill [name]'s files and record.
   Future<void> removeSkill(String name);
+}
+
+/// One skill a source holds, as its `SKILL.md` says.
+final class ScannedSkill {
+  const ScannedSkill({required this.name, required this.description, required this.path, this.problem});
+
+  /// The name its front matter gives, which an installed skill is kept under.
+  final String name;
+  final String description;
+
+  /// The skill's folder from the source's root, empty for the root itself.
+  final String path;
+
+  /// Why it cannot be installed (a name that is not its folder's), or null.
+  final String? problem;
+}
+
+/// What a source holds at one commit.
+final class SkillScan {
+  const SkillScan({required this.commit, required this.skills, this.skipped = 0, this.truncated = false});
+
+  /// The commit read: what the person is shown is what installing fetches.
+  final String commit;
+  final List<ScannedSkill> skills;
+
+  /// How many `SKILL.md` files were left out: no front matter naming and describing the skill, marked internal, or a repeated name.
+  final int skipped;
+
+  /// Whether the source holds more skills than one scan lists.
+  final bool truncated;
 }
 
 /// One file of a fetched tree: its size, and its bytes unless it was larger than asked.
@@ -200,7 +237,10 @@ class NoOverlays implements OverlayManager {
   Future<Map<String, SkillCopy>> skillCopies() async => const {};
 
   @override
-  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source) async => throw _none;
+  Future<List<(String, Uint8List)>> fetchSkillFiles(aos.Source source, {bool own = false}) async => throw _none;
+
+  @override
+  Future<SkillScan> scanSkills(String repo, {String? ref, String path = '', bool own = false}) async => throw _none;
 
   @override
   Future<void> saveSkill(SkillCopy copy) async => throw _none;

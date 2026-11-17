@@ -12,7 +12,7 @@ import 'package:flutter/foundation.dart';
 import '../config/canoa_config.dart';
 import '../profile/overlay_layer.dart';
 import '../profile/profile.dart';
-import '../profile/overlays.dart' show FetchedTree, OverlayException;
+import '../profile/overlays.dart' show FetchedTree, OverlayException, SkillScan;
 import '../profile/profile_home.dart';
 import '../profile/profile_layers.dart';
 import '../profile/skill_copies.dart';
@@ -20,6 +20,7 @@ import '../store/contents_reader.dart';
 import '../store/contents_storage.dart';
 import '../store/contents_store.dart';
 import '../store/overlay_page.dart' show SaveConfig;
+import '../store/skill_sources.dart';
 import '../store/skills.dart';
 import '../store/store.dart';
 import '../store/store_index.dart';
@@ -287,6 +288,79 @@ class LoadoutController extends ChangeNotifier {
   ];
 
   Future<void> setSkillOn(String name, bool on) => apply(_withSkillOn(config, name, on));
+
+  /// Where the Skills page looks for skills besides the catalogs, by label: the default, then those the person added.
+  Map<String, SkillSource> get skillSources => config.skillSources;
+
+  /// What each skill source held when it was last read, by label. Reading one fetches its repository, so it is the person's
+  /// own action and never happens by itself.
+  final skillScans = <String, SkillScan>{};
+
+  /// Why the last read of a source failed, by label, and the label being read now.
+  final skillScanProblems = <String, String>{};
+  String? scanningSource;
+
+  /// Whether [label]'s source was typed by the person, which is then fetched with their own git settings, credentials and keys.
+  /// The default one is Canoa's offer, and any source it fetches gets none of them.
+  bool skillSourceIsOwn(String label) {
+    final source = skillSources[label];
+    return source != null && !(aos.normalizeName(label) == aos.normalizeName(defaultSkillSourceLabel) && source.spec == defaultSkillSourceSpec);
+  }
+
+  /// Reads which skills [label]'s source holds, at the commit its ref names now.
+  Future<void> scanSkillSource(String label) async {
+    final home = this.home;
+    final source = skillSources[label];
+    if (home == null || source == null || scanningSource != null) return;
+    scanningSource = label;
+    skillScanProblems.remove(label);
+    notifyListeners();
+    try {
+      skillScans[label] = await home.overlays.scanSkills(source.repo, ref: source.ref, path: source.path, own: skillSourceIsOwn(label));
+    } on OverlayException catch (error) {
+      skillScans.remove(label);
+      skillScanProblems[label] = error.message;
+    } on Object catch (error) {
+      skillScans.remove(label);
+      skillScanProblems[label] = 'It could not be read (${error.runtimeType})';
+    } finally {
+      scanningSource = null;
+      notifyListeners();
+    }
+  }
+
+  /// Keeps [text] as a skill source from now on. Gives why it cannot be one, or null. The source is not fetched.
+  Future<String?> addSkillSource(String text) async {
+    final SkillSource source;
+    try {
+      source = SkillSource.parse(text);
+    } on FormatException catch (error) {
+      return error.message;
+    }
+    if (skillSources.values.any((each) => each.spec == source.spec)) return 'That source is already here';
+    var label = source.label;
+    for (var n = 2; skillSources.keys.any((key) => aos.normalizeName(key) == aos.normalizeName(label)); n++) {
+      final base = source.label;
+      label = '${base.length > 60 ? base.substring(0, 60) : base}-$n';
+    }
+    final CanoaConfig changed;
+    try {
+      changed = config.withSkillSource(label, source.spec);
+    } on FormatException catch (error) {
+      return error.message;
+    }
+    await apply(changed);
+    return null;
+  }
+
+  /// Forgets the skill source [label], what was read from it and the reason it failed. The skills installed from it stay.
+  Future<void> removeSkillSource(String label) async {
+    if (!skillSources.containsKey(label)) return;
+    await apply(config.withoutSkillSource(label));
+    skillScans.remove(label);
+    skillScanProblems.remove(label);
+    notifyListeners();
+  }
 
   /// Fetches the skill [item] reviewed, as the person's own choice, and turns it on for new sessions.
   Future<SkillOutcome?> installSkill(SkillItem item) => run('Installing ${item.name}', () async {

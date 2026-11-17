@@ -41,7 +41,7 @@ enum SkillStatus {
 /// One skill of an overlay that comes from elsewhere, with where from and what installing does with it.
 final class SkillItem {
   const SkillItem({required this.name, required this.overlay, required this.status, this.source, this.pin,
-      this.configuredPin, this.catalog, this.catalogs, this.fetch, this.previous, this.why, this.warnings = const []});
+      this.configuredPin, this.catalog, this.catalogs, this.fetch, this.previous, this.why, this.warnings = const [], this.own = false});
 
   final String name;
 
@@ -72,6 +72,10 @@ final class SkillItem {
 
   /// `insecure-transport` and `private-source`, the settings of the source that are not the default.
   final List<String> warnings;
+
+  /// Whether the person typed the source themselves, so that fetching it uses their git settings, credentials and keys as a shell
+  /// would. A source someone else named is fetched with none of them.
+  final bool own;
 
   bool get unpinned =>
       pin == null && (status == SkillStatus.fetch || status == SkillStatus.update || status == SkillStatus.unchanged);
@@ -295,7 +299,7 @@ Future<SkillOutcome> _fetchAndSave(OverlayManager overlays, SkillItem item, Set<
   final fetch = item.fetch!;
   final List<(String, Uint8List)> files;
   try {
-    files = await overlays.fetchSkillFiles(fetch.from);
+    files = await overlays.fetchSkillFiles(fetch.from, own: item.own);
   } on OverlayException catch (error) {
     return SkillOutcome(item.name, SkillResult.failed, 'it could not be fetched: ${error.message}');
   } on Object catch (error) {
@@ -410,15 +414,15 @@ Future<List<String>> removeOrphans(OverlayManager overlays, Iterable<String> nam
 }
 
 /// What installing the skill [name] that the catalog [label] offers as [entry] would do, by the person's own choice.
-/// [pins] are canoa.cfg's `[skill_pins]`.
+/// [pins] are canoa.cfg's `[skill_pins]`; [own] says the person typed the source of [entry] themselves.
 SkillItem reviewChosenSkill(OverlayManager overlays, Map<String, SkillCopy> copies, String? label, String name,
-    aos.CatalogEntry entry, {Map<String, String> pins = const {}}) {
+    aos.CatalogEntry entry, {Map<String, String> pins = const {}, bool own = false}) {
   final from = entry.source;
   final copy = copies[skillKey(name)];
   final configured = pins[skillKey(name)];
   final both = effectivePin(entry.pin, configured);
   SkillItem refused(String why) => SkillItem(name: name, overlay: '', status: SkillStatus.refused, source: from.shown(),
-      pin: both.pin, configuredPin: configured, catalog: label, previous: copy, why: why);
+      pin: both.pin, configuredPin: configured, catalog: label, previous: copy, why: why, own: own);
   if (!validSkillName(name)) return refused('it is not a skill name');
   if (both.conflict) return refused('canoa.cfg [skill_pins] and the catalog give different pins, and no tree has both');
   final same = copy != null && copy.source == from.keyWith(null) && _samePin(copy.pin, both.pin);
@@ -428,7 +432,7 @@ SkillItem reviewChosenSkill(OverlayManager overlays, Map<String, SkillCopy> copi
   final fetch = aos.Fetch(name: name, overlay: '', from: from, pin: both.pin);
   final status = same && _sound(copy) ? SkillStatus.unchanged : copy == null ? SkillStatus.fetch : SkillStatus.update;
   return SkillItem(name: name, overlay: '', status: status, source: from.shown(), pin: both.pin,
-      configuredPin: configured, catalog: label, fetch: fetch, previous: copy,
+      configuredPin: configured, catalog: label, fetch: fetch, previous: copy, own: own,
       why: same && status == SkillStatus.update ? 'its copy here is not what was accepted: fetched again if you say yes' : null);
 }
 
