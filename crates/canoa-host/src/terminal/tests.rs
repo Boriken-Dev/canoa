@@ -598,11 +598,18 @@ fn a_terminal_opens_in_a_folder_on_a_share_and_a_shell_that_cannot_says_so() {
     let name = format!("canoa-terminal-share-{}", std::process::id());
     let folder = share_folder(&name);
     let verbatim = format!(r"\\?\UNC\{}", &folder.to_string_lossy()[2..]);
-    let powershell = Terminals::new(Some("powershell.exe".to_owned()), Some(std::env::temp_dir()));
+    let powershell = Terminals::new(
+        Some("powershell.exe".to_owned()),
+        Some(std::env::temp_dir()),
+    );
     let ((), _) = on_a_link(&control(powershell), &Caller::Owner, |page| {
         for written in [folder.to_string_lossy().into_owned(), verbatim.clone()] {
             let opened = page.ask("terminal/open", &json!({"cwd": written}));
-            assert_eq!(opened["result"]["cwd"], folder.to_string_lossy().as_ref(), "{opened}");
+            assert_eq!(
+                opened["result"]["cwd"],
+                folder.to_string_lossy().as_ref(),
+                "{opened}"
+            );
             assert!(opened["result"].get("notice").is_none(), "{opened}");
             let id = opened["result"]["id"].as_u64().expect("an id");
             page.type_in(
@@ -619,7 +626,12 @@ fn a_terminal_opens_in_a_folder_on_a_share_and_a_shell_that_cannot_says_so() {
     let ((), _) = on_a_link(&control(cmd), &Caller::Owner, |page| {
         let opened = page.ask("terminal/open", &json!({"cwd": folder.to_string_lossy()}));
         assert!(opened["result"]["notice"].is_string(), "{opened}");
-        assert!(opened["result"]["notice"].as_str().unwrap_or("").contains("cmd.exe"));
+        assert!(
+            opened["result"]["notice"]
+                .as_str()
+                .unwrap_or("")
+                .contains("cmd.exe")
+        );
     });
     let _ = std::fs::remove_dir_all(std::env::temp_dir().join(&name));
 }

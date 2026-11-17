@@ -1433,11 +1433,11 @@ mod speech_tests;
 mod state;
 #[cfg(test)]
 mod state_tests;
+#[cfg(all(test, windows))]
+mod unc_tests;
 mod usage_read;
 #[cfg(test)]
 mod workspace_tests;
-#[cfg(all(test, windows))]
-mod unc_tests;
 pub(crate) use index::ToolsBackend;
 mod account_move;
 #[cfg(test)]

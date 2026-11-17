@@ -15,7 +15,11 @@ fn shared(name: &str) -> PathBuf {
     let text = local.to_string_lossy().into_owned();
     let (drive, rest) = text.split_at(2);
     let share = PathBuf::from(format!(r"\\localhost\{}${rest}", &drive[..1]));
-    assert!(share.is_dir(), "{} needs the administrative share", share.display());
+    assert!(
+        share.is_dir(),
+        "{} needs the administrative share",
+        share.display()
+    );
     share
 }
 
@@ -81,7 +85,10 @@ fn a_share_folder_is_listed_and_named_as_written() {
         .iter()
         .filter_map(|entry| entry["name"].as_str())
         .collect();
-    assert!(names.contains(&"src") && names.contains(&"notes.txt"), "{said}");
+    assert!(
+        names.contains(&"src") && names.contains(&"notes.txt"),
+        "{said}"
+    );
     let verbatim = format!(r"\\?\UNC\{}", &text(&work)[2..]);
     let said = ask(&c, "fs/list", json!({"path": verbatim}));
     assert_eq!(said["result"]["path"], text(&work), "{said}");
@@ -105,10 +112,22 @@ fn a_share_folder_is_a_repository_and_mentions_its_files() {
     assert_eq!(found["exists"], true, "{said}");
     assert_eq!(found["repository"], true, "{said}");
     assert_eq!(found["root"], text(&work), "{said}");
-    let said = ask(&c, "fs/repo_root", json!({"paths": [text(&work.join("src"))]}));
+    let said = ask(
+        &c,
+        "fs/repo_root",
+        json!({"paths": [text(&work.join("src"))]}),
+    );
     assert_eq!(said["result"]["folders"][0]["root"], text(&work), "{said}");
-    let said = ask(&c, "fs/realpath", json!({"paths": [text(&work.join("src"))]}));
-    assert_eq!(said["result"]["paths"][0]["real"], text(&work.join("src")), "{said}");
+    let said = ask(
+        &c,
+        "fs/realpath",
+        json!({"paths": [text(&work.join("src"))]}),
+    );
+    assert_eq!(
+        said["result"]["paths"][0]["real"],
+        text(&work.join("src")),
+        "{said}"
+    );
     let said = ask(&c, "fs/mentions", json!({"path": text(&work)}));
     let all: Vec<&str> = said["result"]["entries"]
         .as_array()
@@ -116,9 +135,19 @@ fn a_share_folder_is_a_repository_and_mentions_its_files() {
         .iter()
         .filter_map(|entry| entry.as_str())
         .collect();
-    assert!(all.contains(&"notes.txt") && all.contains(&"src/lib.rs"), "{said}");
-    assert!(!all.contains(&"ignored.log"), "git names the files, so an ignored one is not: {said}");
-    let said = ask(&c, "fs/resolve", json!({"path": text(&work), "name": "src/lib.rs"}));
+    assert!(
+        all.contains(&"notes.txt") && all.contains(&"src/lib.rs"),
+        "{said}"
+    );
+    assert!(
+        !all.contains(&"ignored.log"),
+        "git names the files, so an ignored one is not: {said}"
+    );
+    let said = ask(
+        &c,
+        "fs/resolve",
+        json!({"path": text(&work), "name": "src/lib.rs"}),
+    );
     assert!(said.get("error").is_none(), "{said}");
     clean(&work);
 }
