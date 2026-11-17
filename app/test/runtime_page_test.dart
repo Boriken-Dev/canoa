@@ -384,7 +384,7 @@ void main() {
         homepage: 'https://gitforwindows.org',
         commands: ['bash', 'sh', 'git'],
         endpoints: ['https://api.github.com/repos/git-for-windows/git/releases', 'https://github.com/git-for-windows/git/releases/download/'],
-        copies: [copyOf('2.56.1', path: r'C:\Users\someone\AppData\Local\canoa\programs\git-bash\2.56.1\git\bin\bash.exe')],
+        copies: [copyOf('2.56.1', path: r'D:\canoa\programs\git-bash\2.56.1\git\bin\bash.exe')],
         latest: '2.56.1',
       ),
       FakeStore(

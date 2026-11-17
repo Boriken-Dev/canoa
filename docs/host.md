@@ -333,7 +333,12 @@ naming one is refused with what each side says.
 ```toml
 [host]
 account_store = "auto"          # the default: the operating system credential store when there is one, else sealed files; "os" or "file" to insist
-shell = "pwsh"                  # the program a terminal starts; absent, your own ($SHELL, else pwsh or powershell on Windows)
+shell = "git-bash"              # the shell a terminal starts and every agent is told to use: an id `shell/list` gives (git-bash, wsl, msys2, bash, zsh, pwsh, powershell, canoa-git-bash, canoa-pwsh) or a program; absent, your own ($SHELL, else pwsh or powershell on Windows)
+
+# One agent's own shell, in place of [host] shell. Each harness is told as its documentation allows; the host's log says when one cannot be.
+# [host.agents.Claude]
+# harness = "claude"
+# shell = "canoa-git-bash"
 
 # What a program store's install is held to, as gitignore-style lists (see the host's AGENTS.md); absent, the recommended lists apply.
 [host.store]

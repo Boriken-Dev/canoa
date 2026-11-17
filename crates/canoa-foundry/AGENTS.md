@@ -84,7 +84,7 @@ pub mod sdk {         // feature `sdk`
 // Foundry Local as a Store program.
 pub mod store {
     pub const RELEASES_API: &str; pub const DOWNLOADS: &str;     // the publisher's release listing and the folder its files are served from
-    pub struct FoundryRecipe;                                     // `canoa::store::recipe::Recipe`: program `foundry`; the `cli-preview-X.Y.Z` release, checked against GitHub's SHA-256
+    pub struct FoundryRecipe;                                     // `canoa::store::recipe::Recipe`: program `foundry`; the `cli-preview-X.Y.Z` release, the Windows MSIX (a zip), the Linux tar.gz or the Apple silicon zip (no Intel Mac build), checked against GitHub's SHA-256
 }
 
 // Foundry Local's models, as its command line lists and moves them.

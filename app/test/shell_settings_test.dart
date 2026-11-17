@@ -28,7 +28,7 @@ const _gitBash = {
 const _canoaBash = {
   'id': 'canoa-git-bash',
   'label': 'Git Bash (installed by Canoa)',
-  'path': r'C:\Users\someone\AppData\Local\canoa\programs\git-bash\2.56.1\git\bin\bash.exe',
+  'path': r'D:\canoa\programs\git-bash\2.56.1\git\bin\bash.exe',
   'family': 'bash',
   'origin': 'canoa',
 };

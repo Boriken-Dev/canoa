@@ -596,8 +596,8 @@ impl Plan {
             .default
             .as_deref()
             .map(|setting| resolve(setting, lookup, &found));
-        let agents: Vec<Value> = self
-            .agents
+        let entries = &self.agents;
+        let agents: Vec<Value> = entries
             .iter()
             .map(|agent| {
                 let setting = agent.own.as_deref().or(self.default.as_deref());

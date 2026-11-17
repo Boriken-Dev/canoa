@@ -136,7 +136,7 @@ Every method is required and synchronous. Every object a method is handed is the
 - `describe`: cheap, the same on every call. `StoreInfo.program` is the folder name (`[a-z0-9-]{1,64}`, `is_program_name`); `endpoints`
   are the `https` origins the host lets a download or a redirect reach; `serves` names the `acp_harness` provider ids and the
   settings (`when`) that select the program. `summary` is a sentence for the page that opens it; `icon` names one of the glyphs the
-  application draws, `STORE_GLYPHS` (`nodes`, `indent`, `crucible`, `brackets`, `chip`: plain pictures that suggest what a runtime is
+  application draws, `STORE_GLYPHS` (`nodes`, `indent`, `crucible`, `brackets`, `chip`, `branch`, `prompt`: plain pictures that suggest what a runtime is
   for, none a project's logo), and an unknown name or none draws the generic icon; `commands` are the names the host's copy puts on the
   `PATH` of what the host starts, which is how the application finds the agents and MCP servers that use it (none for a program that is
   on no `PATH`).
