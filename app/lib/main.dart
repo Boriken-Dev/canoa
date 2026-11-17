@@ -123,6 +123,7 @@ import 'shell/shell.dart';
 import 'rail/session_rail.dart';
 import 'session_store.dart';
 import 'sources/readiness.dart';
+import 'sources/source_checks.dart';
 import 'sources/sources.dart';
 import 'loadout/loadout_editor.dart' show LoadoutDraft;
 import 'loadout/loadouts_section.dart';
@@ -707,7 +708,7 @@ class _CanoaAppState extends State<CanoaApp> {
           if (source.local && !config.agents.any((agent) => agent.label == source.label)) source,
       ],
       hosted: [for (final source in _hostedSources) if (!source.local) source.hostEntry!],
-      checkSource: _check,
+      checkSource: _sourceChecks.check,
       programs: _programs,
       profileAgents: _profileAgents,
       home: _home,
@@ -1324,7 +1325,7 @@ class _CanoaAppState extends State<CanoaApp> {
   ];
 
   /// What each source needs and whether it is here, as last checked.
-  Map<AgentSource, SourceCheck> _checks = const {};
+  Map<AgentSource, SourceCheck> get _checks => _sourceChecks.results;
 
   Future<SourceCheck> _check(AgentSource source) async {
     final listening = widget.host?.listening.where((listening) => listening.name == source.hostEntry).firstOrNull;
@@ -1591,10 +1592,13 @@ class _CanoaAppState extends State<CanoaApp> {
     _checked = true;
     // A change of the Store's programs can come while a page is built, and a source-less host has nothing to wait for.
     await null;
-    final sources = _sources;
-    final checks = {for (final source in sources) source: await _check(source)};
-    if (mounted) setState(() => _checks = checks);
+    await _sourceChecks.refresh(_sources);
   }
+
+  /// Looks sources up side by side and shows each as its answer arrives.
+  late final SourceChecks _sourceChecks = SourceChecks(_check, onChange: () {
+    if (mounted) setState(() {});
+  });
 
   /// The source and folder chosen last, which a new session starts with.
   AgentSource? _lastSource;
@@ -2017,7 +2021,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (source == null) throw StateError('Choose where its agent comes from first');
     if (draft.host case final name?) return _startOnConnection(draft, name);
     await _stopForTrouble(source);
-    final check = _checks[source] ?? await timed<SourceCheck>('lookup', () => _check(source));
+    final check = _checks[source] ?? await timed<SourceCheck>('lookup', () => _sourceChecks.check(source));
     if (!check.ready) {
       throw StateError(check.describe(source.label)!);
     }
