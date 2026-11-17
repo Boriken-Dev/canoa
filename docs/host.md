@@ -565,6 +565,12 @@ origins that may frame the pages (Word, Excel and PowerPoint on the web, once yo
 portal serves the same pages with `office = true` in its own settings, and signs in through Office's dialog: see
 [The portal](portal.md).
 
+**The Office add-in on this computer** adds `office_local = true`, with `listen` on loopback and `cert` and `key` the browser engine
+inside Office trusts (HTTPS is what Microsoft recommends for every add-in, and Office on the web needs it). The task pane then needs no
+sign-in and no pairing: its page asks the host that served it to accept its key, which the host does for a request from this computer,
+at a loopback name, from the page's own origin, for a key that has connected once. What it can do is what the browser extension's key
+can do (`[host.native] control`). Do not set it behind a proxy.
+
 The API header lists every setting.
 
 ## The browser extension on this computer

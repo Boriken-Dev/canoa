@@ -1465,3 +1465,244 @@ fn an_origin_that_may_frame_the_add_in_is_one_origin_and_nothing_that_could_wide
         Err(WebError::OfficeFrame)
     ));
 }
+
+// The add-in on the person's own computer: the page this server serves asks, from its own origin, for its key to be accepted.
+
+use coqui_peer_webcrypto::{KeyMaterial, PeerId, TrustStore};
+use std::collections::BTreeSet;
+
+/// A server with the add-in on and an admission over a trust store of its own, which the test holds too.
+struct Admitting {
+    _outside: Outside,
+    address: SocketAddr,
+    store: Arc<TrustStore>,
+    admitted: Arc<Mutex<BTreeSet<PeerId>>>,
+}
+
+fn admitting(name: &str, local: bool, hosts: &[&str]) -> Admitting {
+    let outside = Outside::new(name);
+    std::fs::create_dir_all(outside.dir.join("trust")).expect("a folder for the store");
+    let store = Arc::new(TrustStore::open(&outside.dir.join("trust")).expect("a store"));
+    let admitted = Arc::new(Mutex::new(BTreeSet::new()));
+    let mut config = loopback(&outside.site());
+    config.office = true;
+    config.office_local = local;
+    config.hosts = hosts.iter().map(|host| (*host).to_owned()).collect();
+    let admission = local.then(|| Admission::new(Arc::clone(&store), Arc::clone(&admitted)));
+    let server =
+        WebServer::bind_admitting(&config, PEER, "noise", &[], admission).expect("it binds");
+    let address = server.local_addr();
+    std::thread::spawn(move || server.run());
+    Admitting {
+        _outside: outside,
+        address,
+        store,
+        admitted,
+    }
+}
+
+/// A key that connected from `source` and was turned away.
+fn waiting(store: &TrustStore, tag: u8, source: &str) -> PeerId {
+    let key = KeyMaterial::new("noise", "PUBLIC KEY", vec![tag; 32]).expect("a key");
+    store.record_waiting(&key, Some(source.parse().expect("an address")));
+    key.id()
+}
+
+fn post(address: SocketAddr, path: &str, headers: &[(&str, &str)]) -> Reply {
+    let mut request = format!("POST {path} HTTP/1.1\r\nConnection: close\r\nContent-Length: 0\r\n");
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    replies(address, request.as_bytes())
+        .into_iter()
+        .next()
+        .expect("an answer")
+}
+
+/// What the page's own `fetch` sends.
+const OWN: &[(&str, &str)] = &[
+    ("Host", "127.0.0.1"),
+    ("Origin", "http://127.0.0.1"),
+    ("Sec-Fetch-Site", "same-origin"),
+];
+
+#[test]
+fn a_key_that_connected_from_this_computer_is_accepted_when_its_own_page_asks() {
+    let host = admitting("admit-ok", true, &[]);
+    let id = waiting(&host.store, 1, "127.0.0.1:50001");
+    assert!(!host.store.is_accepted(&id));
+    let said = post(host.address, &format!("/office/admit?peer={id}"), OWN);
+    assert_eq!(said.status, 200, "{}", String::from_utf8_lossy(&said.body));
+    assert_eq!(said.headers["cache-control"], "no-store");
+    assert!(host.store.is_accepted(&id));
+    assert!(host.admitted.lock().unwrap().contains(&id));
+    // Asked again, as after a restart that kept the store, it is the same answer.
+    assert_eq!(
+        post(host.address, &format!("/office/admit?peer={id}"), OWN).status,
+        200
+    );
+}
+
+#[test]
+fn nothing_but_the_pages_own_request_for_a_key_that_connected_here_is_accepted() {
+    let host = admitting("admit-refused", true, &["canoa.example"]);
+    let near = waiting(&host.store, 2, "127.0.0.1:50002");
+    let far = waiting(&host.store, 3, "203.0.113.9:50003");
+    let unseen = KeyMaterial::new("noise", "PUBLIC KEY", vec![9; 32])
+        .expect("a key")
+        .id();
+    let ask = format!("/office/admit?peer={near}");
+    type Case<'a> = (&'a str, String, Vec<(&'a str, &'a str)>, u16);
+    let cases: Vec<Case<'_>> = vec![
+        // Another page, or none: the browser sends the page's own origin, and a page cannot send another's.
+        ("no origin", ask.clone(), vec![("Host", "127.0.0.1")], 403),
+        (
+            "another origin",
+            ask.clone(),
+            vec![("Host", "127.0.0.1"), ("Origin", "https://evil.example")],
+            403,
+        ),
+        (
+            "the browser says cross-site",
+            ask.clone(),
+            vec![
+                ("Host", "127.0.0.1"),
+                ("Origin", "http://127.0.0.1"),
+                ("Sec-Fetch-Site", "cross-site"),
+            ],
+            403,
+        ),
+        // A name that is not this computer's: a proxy, or a page whose name was pointed here.
+        (
+            "a name that is not loopback",
+            ask.clone(),
+            vec![
+                ("Host", "canoa.example"),
+                ("Origin", "http://canoa.example"),
+            ],
+            403,
+        ),
+        // A key that connected from elsewhere, one never seen, and what is no key.
+        (
+            "a key from another computer",
+            format!("/office/admit?peer={far}"),
+            OWN.to_vec(),
+            403,
+        ),
+        (
+            "a key never seen",
+            format!("/office/admit?peer={unseen}"),
+            OWN.to_vec(),
+            404,
+        ),
+        ("no key", "/office/admit".to_owned(), OWN.to_vec(), 400),
+        (
+            "not a key",
+            "/office/admit?peer=nope".to_owned(),
+            OWN.to_vec(),
+            400,
+        ),
+    ];
+    for (what, path, headers, status) in cases {
+        let said = post(host.address, &path, &headers);
+        assert_eq!(said.status, status, "{what}");
+    }
+    assert!(!host.store.is_accepted(&near), "nothing above accepted it");
+    assert!(!host.store.is_accepted(&far));
+    assert!(host.admitted.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_host_not_run_for_its_own_computer_has_no_such_route() {
+    let host = admitting("admit-off", false, &[]);
+    assert_eq!(post(host.address, "/office/admit?peer=x", OWN).status, 405);
+    let index = get(host.address, "/canoa.json");
+    assert!(!String::from_utf8_lossy(&index.body).contains("admit"));
+}
+
+#[test]
+fn only_a_page_reached_at_a_loopback_name_is_told_it_may_ask() {
+    let host = admitting("admit-index", true, &["canoa.example"]);
+    let asked = |name: &str| {
+        let request =
+            format!("GET /canoa.json HTTP/1.1\r\nHost: {name}\r\nConnection: close\r\n\r\n");
+        let reply = replies(host.address, request.as_bytes())
+            .into_iter()
+            .next()
+            .expect("an answer");
+        serde_json::from_slice::<serde_json::Value>(&reply.body).expect("json")
+    };
+    assert_eq!(asked("127.0.0.1")["admit"], "/office/admit");
+    assert!(asked("canoa.example").get("admit").is_none());
+}
+
+#[test]
+fn the_task_pane_is_served_over_tls_with_the_certificate_the_person_names() {
+    let outside = Outside::new("office-tls");
+    std::fs::create_dir_all(outside.site().join("icons")).expect("icons");
+    let made =
+        rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("a certificate");
+    let (cert, key) = (outside.dir.join("web.crt"), outside.dir.join("web.key"));
+    std::fs::write(&cert, made.cert.pem()).expect("a certificate file");
+    std::fs::write(&key, made.signing_key.serialize_pem()).expect("a key file");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).expect("private");
+    }
+    let mut config = loopback(&outside.site());
+    config.office = true;
+    config.tls = Some(WebTls::new(&cert, &key));
+    let address = running(&config, &[]);
+
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(made.cert.der().clone()).expect("a root");
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let client = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .expect("versions")
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let name = rustls::pki_types::ServerName::try_from("localhost").expect("a name");
+    let session = rustls::ClientConnection::new(Arc::new(client), name).expect("a session");
+    let tcp = TcpStream::connect(address).expect("it connects");
+    tcp.set_read_timeout(Some(Duration::from_secs(20)))
+        .expect("a timeout");
+    let mut tls = rustls::StreamOwned::new(session, tcp);
+    tls.write_all(
+        format!(
+            "GET /office/taskpane.html HTTP/1.1\r\nHost: localhost:{}\r\nConnection: close\r\n\r\n",
+            address.port()
+        )
+        .as_bytes(),
+    )
+    .expect("a request over TLS");
+    let mut received = Vec::new();
+    let _ = tls.read_to_end(&mut received);
+    let (reply, end) = parse_reply(&received, false).expect("an answer over TLS");
+    assert_eq!(reply.status, 200);
+    let head_end = received
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("a head")
+        + 4;
+    let body = &received[head_end..end.min(received.len())];
+    assert!(
+        String::from_utf8_lossy(body).contains("office.js"),
+        "the task pane's page"
+    );
+    assert!(reply.headers["content-security-policy"].contains("static.microsoft"));
+}
+
+#[test]
+fn the_app_page_the_task_pane_frames_finds_the_hosts_list_beside_itself() {
+    let host = admitting("admit-beside", true, &[]);
+    let beside = get(host.address, "/office/app/canoa.json");
+    assert_eq!(beside.status, 200);
+    assert_eq!(beside.body, get(host.address, "/canoa.json").body);
+    assert_eq!(beside.headers["cache-control"], "no-store");
+    // Only with the add-in on: otherwise that path is no more than the site's, which has no such file.
+    let (_site, off) = office_site("beside-off", false, &[]);
+    assert_eq!(get(off, "/office/app/canoa.json").status, 404);
+}

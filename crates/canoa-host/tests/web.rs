@@ -431,3 +431,71 @@ fn the_control_channel_is_listed_for_the_page_only_when_it_listens() {
             .all(|entry| entry["kind"] != "control")
     );
 }
+
+/// The status of `POST path` to `authority`, as the page's own `fetch` sends it.
+fn post_own(authority: &str, path: &str) -> u16 {
+    let mut tcp = TcpStream::connect(authority).expect("it connects");
+    tcp.set_read_timeout(Some(support::WAIT))
+        .expect("a timeout");
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {authority}\r\nOrigin: http://{authority}\r\nSec-Fetch-Site: same-origin\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    tcp.write_all(request.as_bytes())
+        .expect("the request is sent");
+    let mut received = Vec::new();
+    let _ = tcp.read_to_end(&mut received);
+    String::from_utf8_lossy(&received)
+        .split(' ')
+        .nth(1)
+        .and_then(|status| status.parse().ok())
+        .expect("a status")
+}
+
+#[test]
+fn the_add_ins_page_is_admitted_by_asking_and_nothing_else_the_host_holds_is_opened_to_it() {
+    let (guest, other) = (support::key(), support::key());
+    let config = format!(
+        "{}[host.control]\nlisten = \"127.0.0.1:0\"\n[host.web]\nlisten = \"127.0.0.1:0\"\noffice = true\noffice_local = true\n",
+        agents(1)
+    );
+    let host = Host::start_with(&config, 2, &["--web", &site().to_string_lossy()], &[]);
+    host.pair(&other);
+    let url = web_url(&host);
+    let authority = url.strip_prefix("http://").expect("an http URL");
+
+    // The page is told it may ask; a page of any other kind of host is not.
+    let listed: Value = serde_json::from_slice(&get(&url, "/canoa.json").1).expect("JSON");
+    assert_eq!(listed["admit"], "/office/admit");
+
+    let ledger = |who: &_| {
+        support::with_link(host.url("@control"), who, host.peer, |rpc| {
+            rpc.request("ledger/list", serde_json::json!({"limit": 1}))
+        })
+    };
+    let refused = |answer: Result<Result<Value, Value>, String>| !matches!(answer, Ok(Ok(_)));
+    // It connects once and is turned away: that is what waits in the trust store.
+    assert!(refused(ledger(&guest)), "a key not accepted has no ledger");
+    // Asking before it has connected, or for a key that never did, accepts nothing.
+    let unknown = format!("sha256:{}", "ab".repeat(32));
+    assert_eq!(
+        post_own(authority, &format!("/office/admit?peer={unknown}")),
+        404
+    );
+    assert_eq!(
+        post_own(
+            authority,
+            &format!("/office/admit?peer={}", guest.peer_id())
+        ),
+        200
+    );
+    let answer = ledger(&guest);
+    assert!(
+        matches!(answer, Ok(Ok(_))),
+        "the admitted page has its ledger: {answer:?}"
+    );
+    // A key paired by hand is not the page's: the control channel still turns it away, as it did.
+    assert!(
+        refused(ledger(&other)),
+        "a key listed in no grant has no control channel"
+    );
+}

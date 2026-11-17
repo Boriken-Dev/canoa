@@ -2194,3 +2194,42 @@ fn an_office_frame_needs_the_add_in_and_is_one_https_origin() {
         assert!(!said.contains("script-src"), "{said}");
     }
 }
+
+#[test]
+fn the_add_in_admits_its_own_page_only_when_asked_and_only_on_loopback() {
+    let web = |text: &str| parse(&format!("[host.web]\n{text}"));
+    assert!(!web("office = true\n").unwrap().web.unwrap().office_local);
+    assert!(
+        web("office = true\noffice_local = true\n")
+            .unwrap()
+            .web
+            .unwrap()
+            .office_local
+    );
+    for text in [
+        "office_local = true\n",
+        "office = true\noffice_local = true\nlisten = \"0.0.0.0:7800\"\ncert = \"a.crt\"\nkey = \"a.key\"\n",
+        "office = true\noffice_local = \"yes\"\n",
+    ] {
+        assert!(web(text).is_err(), "{text}");
+    }
+}
+
+#[test]
+fn a_control_channel_with_no_key_is_fine_when_the_add_in_page_is_admitted() {
+    let channel = "[host.control]\nlisten = \"127.0.0.1:0\"\n";
+    assert!(
+        parse(channel).is_err(),
+        "no key at all turns every key away"
+    );
+    assert!(
+        parse(&format!(
+            "{channel}[host.web]\noffice = true\noffice_local = true\n"
+        ))
+        .is_ok()
+    );
+    assert!(
+        parse(&format!("{channel}[host.web]\noffice = true\n")).is_err(),
+        "the add-in alone admits nobody"
+    );
+}

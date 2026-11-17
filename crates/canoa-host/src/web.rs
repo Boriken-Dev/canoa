@@ -18,13 +18,15 @@ use std::sync::{Mutex, PoisonError};
 use std::time::{Instant, SystemTime};
 
 use crate::config::{WebConfig, WebMode, WebTls};
-use crate::serve::{Gate, Listening, Serving};
+use crate::serve::{Admission, Gate, Listening, NotAdmitted, Serving};
 
 mod office;
 pub(crate) use office::{ICON_FILE, Office, Route, frame_source};
 
 /// Where the site is served when canoa.cfg does not say: loopback, port 7800.
 pub const DEFAULT_LISTEN: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 7800);
+/// Where a page served under `[host.web] office_local` asks for its own key to be accepted: `POST` with `?peer=<id>`.
+pub const ADMIT_PATH: &str = "/office/admit";
 /// The path of the list of this host's entries: `{"peer", "method", "os", "web", "entries": [{"name", "kind", "url", "harness"?, "title"?}]}`.
 pub const HOST_INDEX: &str = "/canoa.json";
 /// Whether this build holds a site of its own (feature `web`), served when no directory is given.
@@ -306,6 +308,8 @@ struct Shared {
     policy: String,
     /// The add-in's routes and their policies, when `[host.web] office` asks for them.
     office: Option<Office>,
+    /// What accepts the key of the page this server serves, when `[host.web] office_local` asks for it.
+    admission: Option<Admission>,
     /// The list at [`HOST_INDEX`] as a page reached over loopback reads it, and as any other page does.
     index: [Vec<u8>; 2],
     /// Set by [`WebStopper::stop`]: the listener ends, and each connection after the answer it is sending.
@@ -348,15 +352,28 @@ impl WebServer {
             .filter(|listening| !listening.local)
             .cloned()
             .collect();
-        Self::bind_listing(web, &peer, serving.method().name(), &listed)
+        let admission = (web.office && web.office_local).then(|| serving.admission());
+        Self::bind_admitting(web, &peer, serving.method().name(), &listed, admission)
     }
 
-    /// As [`WebServer::bind`], listing `entries` under the host id `peer`, which proves by `method`.
+    /// As [`WebServer::bind`], listing `entries` under the host id `peer`, which proves by `method`, and admitting no page.
+    #[cfg(test)]
     pub(crate) fn bind_listing(
         web: &WebConfig,
         peer: &str,
         method: &str,
         entries: &[Listening],
+    ) -> Result<Self, WebError> {
+        Self::bind_admitting(web, peer, method, entries, None)
+    }
+
+    /// [`WebServer::bind_listing`] with `admission`, which lets the page this server serves ask for its own key to be accepted.
+    pub(crate) fn bind_admitting(
+        web: &WebConfig,
+        peer: &str,
+        method: &str,
+        entries: &[Listening],
+        admission: Option<Admission>,
     ) -> Result<Self, WebError> {
         // A page cannot reach a pipe, so it is neither offered one nor allowed to connect to one.
         let entries: Vec<Listening> = entries
@@ -410,6 +427,11 @@ impl WebServer {
                 );
             }
         }
+        if admission.is_some() {
+            tracing::info!(
+                "non-default: host.web.office_local accepts the key of the page this server serves, when it asks from this computer at its own origin"
+            );
+        }
         let listener = TcpListener::bind(web.listen).map_err(|source| WebError::Listen {
             address: web.listen,
             source,
@@ -435,8 +457,17 @@ impl WebServer {
                 office: web
                     .office
                     .then(|| Office::new(&connect, &web.office_frames)),
-                index: [WebMode::Local, WebMode::Remote]
-                    .map(|reached| host_index(peer, method, entries, web.mode.unwrap_or(reached))),
+                index: [WebMode::Local, WebMode::Remote].map(|reached| {
+                    host_index(
+                        peer,
+                        method,
+                        entries,
+                        web.mode.unwrap_or(reached),
+                        // Only a page reached at a loopback name is told it may ask.
+                        admission.is_some() && reached == WebMode::Local,
+                    )
+                }),
+                admission,
                 stopped: Arc::new(AtomicBool::new(false)),
             }),
         })
@@ -680,13 +711,22 @@ fn readable_by_others(file: &Path) -> bool {
 }
 
 /// The list at [`HOST_INDEX`]: this host's id, method and operating system (`windows`, `linux`, `macos`, for reading an overlay as it would run there), whether the page's person sits at this computer (`web`: `local` or `remote`), and each entry as `serve` prints it (name, kind, address, and provider id and title when it has them).
-fn host_index(peer: &str, method: &str, entries: &[Listening], mode: WebMode) -> Vec<u8> {
+fn host_index(
+    peer: &str,
+    method: &str,
+    entries: &[Listening],
+    mode: WebMode,
+    admit: bool,
+) -> Vec<u8> {
     let entries: Vec<_> = entries
         .iter()
         .map(|entry| serde_json::Value::Object(entry.to_json()))
         .collect();
-    serde_json::to_vec(&serde_json::json!({"peer": peer, "method": method, "os": std::env::consts::OS, "web": mode.as_str(), "entries": entries}))
-        .unwrap_or_default()
+    let mut index = serde_json::json!({"peer": peer, "method": method, "os": std::env::consts::OS, "web": mode.as_str(), "entries": entries});
+    if admit && let Some(map) = index.as_object_mut() {
+        map.insert("admit".to_owned(), ADMIT_PATH.into());
+    }
+    serde_json::to_vec(&index).unwrap_or_default()
 }
 
 /// Whether a request's `Host` names this computer's loopback: `localhost`, `127.x.x.x` or `[::1]`, with or without a port.
@@ -969,6 +1009,7 @@ impl Wire for rustls::StreamOwned<rustls::ServerConnection, Timed> {
 
 fn connection(shared: &Shared, tcp: TcpStream) {
     let _ = tcp.set_nodelay(true);
+    let from = tcp.peer_addr().ok().map(|address| address.ip());
     let timed = Timed {
         tcp,
         until: after(shared.limits.request_time),
@@ -976,9 +1017,9 @@ fn connection(shared: &Shared, tcp: TcpStream) {
         end: after(shared.limits.connection_time),
     };
     match &shared.tls {
-        None => exchange(shared, timed),
+        None => exchange(shared, timed, from),
         Some(config) => match rustls::ServerConnection::new(Arc::clone(config)) {
-            Ok(session) => exchange(shared, rustls::StreamOwned::new(session, timed)),
+            Ok(session) => exchange(shared, rustls::StreamOwned::new(session, timed), from),
             Err(error) => tracing::debug!("web: TLS could not start: {error}"),
         },
     }
@@ -1051,7 +1092,7 @@ fn read_head<W: Wire>(
 }
 
 /// Serves requests on one connection until it closes, a limit is reached or an answer closes it.
-fn exchange<W: Wire>(shared: &Shared, mut wire: W) {
+fn exchange<W: Wire>(shared: &Shared, mut wire: W, from: Option<IpAddr>) {
     let mut buffer = Vec::with_capacity(CHUNK);
     let mut served = 0_usize;
     while !shared.stopped.load(Ordering::SeqCst) {
@@ -1072,7 +1113,7 @@ fn exchange<W: Wire>(shared: &Shared, mut wire: W) {
         ) {
             break;
         }
-        let (mut reply, head) = answer(shared, &request);
+        let (mut reply, head) = answer(shared, &request, from);
         // A name the host serves over HTTPS stays on HTTPS; localhost and addresses, which other servers share, do not.
         if shared.tls.is_some()
             && header(&request, "host").is_some_and(|host| {
@@ -1170,19 +1211,30 @@ const fn reason(status: u16) -> &'static str {
         200 => "OK",
         304 => "Not Modified",
         400 => "Bad Request",
+        403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
         408 => "Request Timeout",
         421 => "Misdirected Request",
         431 => "Request Header Fields Too Large",
+        500 => "Internal Server Error",
         _ => "Error",
     }
 }
 
 /// The answer to one request, and whether it was `HEAD`, which is answered without a body.
-fn answer(shared: &Shared, request: &httparse::Request<'_, '_>) -> (Answer, bool) {
+fn answer(
+    shared: &Shared,
+    request: &httparse::Request<'_, '_>,
+    from: Option<IpAddr>,
+) -> (Answer, bool) {
     let head = request.method == Some("HEAD");
-    if !head && request.method != Some("GET") {
+    let admitting = request.method == Some("POST")
+        && shared.admission.is_some()
+        && request
+            .path
+            .is_some_and(|target| target.split(['?', '#']).next() == Some(ADMIT_PATH));
+    if !head && !admitting && request.method != Some("GET") {
         let mut refused = Answer::refusal(405);
         refused.headers.push(("Allow", "GET, HEAD".to_owned()));
         return (refused, false);
@@ -1203,7 +1255,12 @@ fn answer(shared: &Shared, request: &httparse::Request<'_, '_>) -> (Answer, bool
     if !target.starts_with('/') {
         return (Answer::refusal(400), head);
     }
-    if target.split(['?', '#']).next() == Some(HOST_INDEX) {
+    if admitting {
+        return (admit(shared, request, target, from), false);
+    }
+    // The add-in's app page is at `/office/app/`, and the app asks for `canoa.json` beside the page it was loaded from.
+    let asked = target.split(['?', '#']).next();
+    if asked == Some(HOST_INDEX) || (shared.office.is_some() && asked == Some(office::APP_INDEX)) {
         let found = Answer {
             status: 200,
             headers: vec![
@@ -1297,6 +1354,74 @@ fn answer(shared: &Shared, request: &httparse::Request<'_, '_>) -> (Answer, bool
         },
         head,
     )
+}
+
+/// The answer to `POST /office/admit?peer=<id>`: the page this server serves asks for its own key to be accepted, once it has
+/// connected and been turned away.
+///
+/// It is refused unless the request is from this computer, names this computer by a loopback name, and comes from a page of this
+/// very origin (`Origin` is the scheme and `Host` of the request, and `Sec-Fetch-Site`, when the browser sends it, says
+/// `same-origin`). A page of another origin cannot send that `Origin`; a program on this computer can, and so can already do
+/// whatever the person's own account can.
+fn admit(
+    shared: &Shared,
+    request: &httparse::Request<'_, '_>,
+    target: &str,
+    from: Option<IpAddr>,
+) -> Answer {
+    let reply = |status: u16, said: &str| Answer {
+        status,
+        headers: vec![
+            ("Content-Type", "application/json".to_owned()),
+            ("Cache-Control", "no-store".to_owned()),
+        ],
+        body: Body::Owned(
+            serde_json::json!({ "admitted": status == 200, "said": said })
+                .to_string()
+                .into_bytes(),
+        ),
+        keep: false,
+    };
+    let (Some(admission), Some(host)) = (&shared.admission, header(request, "host")) else {
+        return reply(403, "not here");
+    };
+    let scheme = if shared.tls.is_some() {
+        "https"
+    } else {
+        "http"
+    };
+    let own = format!("{scheme}://{host}");
+    let same_origin = header(request, "origin")
+        .is_some_and(|origin| origin.eq_ignore_ascii_case(&own))
+        && header(request, "sec-fetch-site").is_none_or(|site| site == "same-origin");
+    if !loopback_host(host) || !from.is_some_and(|address| address.is_loopback()) || !same_origin {
+        return reply(
+            403,
+            "only the page this host serves, on this computer, may ask",
+        );
+    }
+    let peer = target
+        .split_once('?')
+        .map(|(_, query)| query.split('#').next().unwrap_or(query))
+        .and_then(|query| query.split('&').find_map(|pair| pair.strip_prefix("peer=")))
+        .and_then(|value| {
+            percent_encoding::percent_decode_str(value)
+                .decode_utf8()
+                .ok()
+        })
+        .and_then(|value| value.parse::<coqui_peer_webcrypto::PeerId>().ok());
+    let Some(peer) = peer else {
+        return reply(400, "no key id");
+    };
+    match admission.admit(&peer) {
+        Ok(()) => reply(200, "accepted"),
+        Err(NotAdmitted::NeverConnected) => reply(
+            404,
+            "this key never connected, so there is nothing to accept",
+        ),
+        Err(NotAdmitted::NotLocal) => reply(403, "this key did not connect from this computer"),
+        Err(NotAdmitted::Store) => reply(500, "the trust store could not be used"),
+    }
 }
 
 /// The headers a file's answer carries: its type, its caching, its tag and, when the file has one, when it changed.

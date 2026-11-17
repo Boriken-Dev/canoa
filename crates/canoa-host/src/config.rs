@@ -746,6 +746,10 @@ pub struct WebConfig {
     /// Origins besides the ones built in that may frame the add-in's pages (`https://*.officeapps.live.com`), each widening the
     /// policy of those pages and logged as configuration. Only with `office`.
     pub office_frames: Vec<String>,
+    /// The add-in runs in Office on this computer, so the key of the page it frames is accepted without a pairing step: the page,
+    /// reached at a loopback name and its own origin, asks `POST /office/admit` and gets what `[host.native] control` gives a
+    /// browser key. Only with `office`, and only with a loopback `listen`: behind a proxy every request looks local.
+    pub office_local: bool,
 }
 
 /// Whether the browser showing the web app is at the computer that serves it (the host starts an editor or file manager
@@ -784,6 +788,7 @@ impl WebConfig {
             mode: None,
             office: false,
             office_frames: Vec::new(),
+            office_local: false,
         }
     }
 }
@@ -1581,6 +1586,7 @@ struct RawWeb {
     office: Option<bool>,
     #[serde(default)]
     office_frames: Vec<String>,
+    office_local: Option<bool>,
     max_connections: Option<usize>,
     max_connections_per_address: Option<usize>,
     connection_seconds: Option<u64>,
@@ -2263,7 +2269,14 @@ impl Config {
                 "an entry and an agent on another machine share this name",
             ));
         }
-        let control = host.control.map(control_of).transpose()?;
+        let admits = host
+            .web
+            .as_ref()
+            .is_some_and(|web| web.office == Some(true) && web.office_local == Some(true));
+        let control = host
+            .control
+            .map(|raw| control_of(raw, admits))
+            .transpose()?;
         let native = host.native.map(native_of).transpose()?.unwrap_or_default();
         let history = host
             .history
@@ -2397,8 +2410,9 @@ fn native_of(raw: RawNative) -> Result<NativeConfig, ConfigError> {
     })
 }
 
-/// `[host.control]`. Errors name a key, never a value.
-fn control_of(raw: RawControl) -> Result<ControlConfig, ConfigError> {
+/// `[host.control]`; errors name a key, never a value. `admits` is whether the add-in's own page is admitted (`[host.web] office_local`), whose key is not known
+/// to canoa.cfg: a channel with no key under `grants` is then not one that turns every key away.
+fn control_of(raw: RawControl, admits: bool) -> Result<ControlConfig, ConfigError> {
     let refused = |what: &str| ConfigError::Invalid {
         entry: None,
         what: format!("host.control: {what}"),
@@ -2447,7 +2461,7 @@ fn control_of(raw: RawControl) -> Result<ControlConfig, ConfigError> {
             "max_upload_bytes, max_upload_total_bytes and max_uploads are at least 1",
         ));
     }
-    if listen.is_some() && grants.is_empty() {
+    if listen.is_some() && grants.is_empty() && !admits {
         return Err(refused(
             "listen without a key under grants would turn every key away",
         ));
@@ -3782,6 +3796,15 @@ fn web_of(raw: RawWeb, directory: &Path, entries: &[Entry]) -> Result<WebConfig,
             ));
         }
         web.office_frames.push(source);
+    }
+    web.office_local = raw.office_local.unwrap_or(false);
+    if web.office_local && !web.office {
+        return Err(refused("office_local needs office = true"));
+    }
+    if web.office_local && !web.listen.ip().is_loopback() {
+        return Err(refused(
+            "office_local needs a loopback listen address: behind another address or a proxy every request looks local",
+        ));
     }
     web.mode = match raw.mode.as_deref() {
         None => None,

@@ -9,6 +9,7 @@
 //! | `/office/taskpane.html` | Office.js may load; Office on the web may frame it (no `X-Frame-Options`); it may frame `/office/app/` |
 //! | `/office/dialog.html` | Office.js may load; no `Cross-Origin-Opener-Policy`, so the dialog keeps its link to the window that opened it |
 //! | `/office/app/` | the site's `index.html`, under today's policy, but its `frame-ancestors` names this page and Office on the web |
+//! | `/office/app/canoa.json` | the host's list of entries, as `/canoa.json` answers it, for the app page that asks for it beside itself |
 //! | `/office/icon-N.png` | `Cross-Origin-Resource-Policy: cross-origin`, since Office draws it from its own origin |
 //!
 //! `taskpane.js`, `relation.js` and `dialog.js` are scripts of this origin and are answered with the usual headers. Every other
@@ -40,6 +41,9 @@ pub(crate) const FRAMERS: &[&str] = &[
     "https://*.office.com",
     "https://*.cloud.microsoft",
 ];
+
+/// Where the list of the host's entries is for the app page the task pane frames, which asks for it beside itself.
+pub(crate) const APP_INDEX: &str = "/office/app/canoa.json";
 
 /// The pages of the add-in this host carries, by name under `/office/`.
 pub(crate) struct Page {

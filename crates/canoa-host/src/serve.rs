@@ -550,6 +550,10 @@ struct Shared {
     /// may read what they read.
     control_grants: IndexMap<PeerId, BTreeSet<control::Grant>>,
     control_everyone: Option<BTreeSet<control::Grant>>,
+    /// The keys of pages this host's own web server admitted (`[host.web] office_local`), for this run, and what each holds on the
+    /// control channel besides its own grants: what `[host.native] control` gives a browser key.
+    admitted: Arc<Mutex<BTreeSet<PeerId>>>,
+    page_grants: BTreeSet<control::Grant>,
     /// The sessions kept for more than one connection.
     hosted: Arc<sessions::Hosted>,
 }
@@ -565,8 +569,79 @@ impl Shared {
         } else if let Some(everyone) = &self.control_everyone {
             Some(everyone.clone())
         } else {
-            self.control_grants.get(peer).cloned()
+            let mut grants = self.control_grants.get(peer).cloned();
+            if self.is_admitted(peer) {
+                grants
+                    .get_or_insert_with(BTreeSet::new)
+                    .extend(self.page_grants.iter().copied());
+            }
+            grants
         }
+    }
+
+    /// Whether the host's own web server admitted `peer` as the key of the page it serves.
+    fn is_admitted(&self, peer: &PeerId) -> bool {
+        self.admitted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(peer)
+    }
+}
+
+/// Why a page's key was not admitted.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum NotAdmitted {
+    /// The key is neither accepted nor waiting here: it never connected, so there is nothing to accept.
+    NeverConnected,
+    /// It is waiting, and the trust store knows it connected from another computer.
+    NotLocal,
+    /// The trust store could not be read or written.
+    Store,
+}
+
+/// The host's own web server's way to accept the key of the page it serves: the page connects once, is turned away and waits
+/// in the trust store, and then asks for itself by id. What the key holds on the control channel afterwards is
+/// `[host.native] control`, as the browser extension's key holds through the door.
+pub(crate) struct Admission {
+    store: Arc<TrustStore>,
+    admitted: Arc<Mutex<BTreeSet<PeerId>>>,
+}
+
+impl Admission {
+    /// Admission to `store`, holding the keys it admits in `admitted`.
+    pub(crate) const fn new(
+        store: Arc<TrustStore>,
+        admitted: Arc<Mutex<BTreeSet<PeerId>>>,
+    ) -> Self {
+        Self { store, admitted }
+    }
+
+    /// Accepts the waiting key `id` when it connected from this computer, and holds it as a page's key for this run; a key
+    /// accepted already is held the same way.
+    pub(crate) fn admit(&self, id: &PeerId) -> Result<(), NotAdmitted> {
+        let store = &self.store;
+        if !store.is_accepted(id) {
+            let waiting = store.waiting().map_err(|_| NotAdmitted::Store)?;
+            let entry = waiting
+                .iter()
+                .find(|entry| entry.id == *id)
+                .ok_or(NotAdmitted::NeverConnected)?;
+            // A connection's source is not always known to the trust store; one that is known and is not this computer's is not
+            // the page's.
+            if entry
+                .source
+                .is_some_and(|source| !source.ip().is_loopback())
+            {
+                return Err(NotAdmitted::NotLocal);
+            }
+            store.accept(id).map_err(|_| NotAdmitted::Store)?;
+        }
+        self.admitted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(*id);
+        tracing::info!(%id, "the page this host serves was admitted: its key is accepted");
+        Ok(())
     }
 }
 
@@ -1692,6 +1767,8 @@ impl Serving {
                         .filter(|grant| *grant != control::Grant::Discover)
                         .collect()
                 }),
+                admitted: Arc::new(Mutex::new(BTreeSet::new())),
+                page_grants: config.native.control.clone(),
                 method,
                 store,
                 registry,
@@ -2094,6 +2171,15 @@ impl Serving {
         &self.listening
     }
 
+    /// What lets the host's own web server admit the key of the page it serves (`[host.web] office_local`).
+    #[must_use]
+    pub(crate) fn admission(&self) -> Admission {
+        Admission::new(
+            Arc::clone(&self.shared.store),
+            Arc::clone(&self.shared.admitted),
+        )
+    }
+
     /// A way into every entry from inside this process, which outlives [`Serving::run`] taking `self`.
     #[must_use]
     pub fn local(&self) -> Local {
@@ -2331,6 +2417,7 @@ impl Shared {
     /// Whether `peer`, whose key the store accepts, may use this entry.
     fn allows(&self, peer: &PeerId, served: &Served) -> bool {
         !served.restricted
+            || (matches!(served.run, Run::Control { .. }) && self.is_admitted(peer))
             || self
                 .registry
                 .resolve(
@@ -2502,11 +2589,15 @@ fn give_agent_flow<C: Channel>(
             let grants = if let Some(everyone) = everyone {
                 everyone.clone()
             } else {
-                grants
+                let mut own: BTreeSet<control::Grant> = grants
                     .iter()
                     .find(|(key, _)| *key == peer)
                     .map(|(_, grants)| grants.clone())
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                if shared.is_admitted(peer) {
+                    own.extend(shared.page_grants.iter().copied());
+                }
+                own
             };
             let caller = control::Caller::Peer {
                 id: peer.to_string(),
