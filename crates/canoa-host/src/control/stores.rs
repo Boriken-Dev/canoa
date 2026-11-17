@@ -24,7 +24,7 @@ use super::{BAD_PARAMS, NO_METHOD, POLL, REFUSED, error_line};
 use crate::secrets::ask::{Asked, Asker};
 use crate::store::programs::{Event, Programs, Sink, StoreError};
 use crate::store::registry::BUILT_IN;
-use crate::store::runtimes::RUNTIMES;
+use crate::store::runtimes::runtimes_here;
 use crate::store::shelf::Shelf;
 
 /// Nothing was found under that name.
@@ -193,7 +193,7 @@ impl Stores {
             Arc::new(Programs::new(shelf, registry)),
             BUILT_IN.iter().map(|id| (*id).to_owned()).collect(),
         )
-        .with_runtimes(RUNTIMES.iter().map(|id| (*id).to_owned()).collect()))
+        .with_runtimes(runtimes_here()))
     }
 }
 
@@ -703,6 +703,7 @@ impl Stores {
 #[cfg(test)]
 mod runtimes_tests {
     use super::*;
+    use crate::store::runtimes::RUNTIMES;
 
     fn stores() -> (Stores, std::path::PathBuf) {
         let root = std::env::temp_dir().join(format!("canoa-runtime-list-{}", std::process::id()));
@@ -714,7 +715,7 @@ mod runtimes_tests {
             Arc::new(programs),
             BUILT_IN.iter().map(|id| (*id).to_owned()).collect(),
         )
-        .with_runtimes(RUNTIMES.iter().map(|id| (*id).to_owned()).collect());
+        .with_runtimes(runtimes_here());
         (stores, root)
     }
 
@@ -749,21 +750,41 @@ mod runtimes_tests {
         let runtimes = stores
             .read("store/list", &json!({"kind": "runtimes"}), None)
             .expect("the runtimes");
+        let every = [
+            ("node_store", "node", "nodes"),
+            ("python_store", "python", "indent"),
+            ("foundry_store", "foundry", "crucible"),
+            ("whisper_store", "whisper", "chip"),
+            ("git_bash_store", "git-bash", "branch"),
+            ("powershell_store", "powershell", "prompt"),
+        ];
+        let here = runtimes_here();
+        let wanted: Vec<_> = every
+            .iter()
+            .filter(|(id, ..)| here.iter().any(|h| h == id))
+            .collect();
         assert_eq!(
             programs_of(&runtimes),
-            [
-                ("node_store".to_owned(), "node".to_owned()),
-                ("python_store".to_owned(), "python".to_owned()),
-                ("foundry_store".to_owned(), "foundry".to_owned()),
-                ("whisper_store".to_owned(), "whisper".to_owned())
-            ]
+            wanted
+                .iter()
+                .map(|(id, program, _)| ((*id).to_owned(), (*program).to_owned()))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            RUNTIMES
+                .iter()
+                .all(|id| every.iter().any(|(each, ..)| each == id)),
+            "this test names every runtime"
         );
         let listed = runtimes["stores"].as_array().expect("a list");
         let icons: Vec<&str> = listed
             .iter()
             .map(|store| store["icon"].as_str().expect("an icon"))
             .collect();
-        assert_eq!(icons, ["nodes", "indent", "crucible", "chip"]);
+        assert_eq!(
+            icons,
+            wanted.iter().map(|(_, _, icon)| *icon).collect::<Vec<_>>()
+        );
         assert!(
             listed
                 .iter()

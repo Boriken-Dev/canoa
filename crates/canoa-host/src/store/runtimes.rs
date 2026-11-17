@@ -38,16 +38,33 @@ const GITHUB_ASSET_HOSTS: [&str; 2] = [
 ];
 
 /// The provider ids of the runtimes' stores, in the order the app lists them.
-pub const RUNTIMES: [&str; 4] = [
+pub const RUNTIMES: [&str; 6] = [
     "node_store",
     "python_store",
     "foundry_store",
     "whisper_store",
+    "git_bash_store",
+    "powershell_store",
 ];
+
+/// The runtimes this computer's host lists: Git Bash is Git for Windows', and PowerShell is published for Windows and Linux, so
+/// a Mac lists neither.
+#[must_use]
+pub fn runtimes_here() -> Vec<String> {
+    RUNTIMES
+        .iter()
+        .filter(|id| match **id {
+            "git_bash_store" => cfg!(windows),
+            "powershell_store" => cfg!(any(windows, target_os = "linux")),
+            _ => true,
+        })
+        .map(|id| (*id).to_owned())
+        .collect()
+}
 
 /// The names of the programs the runtimes are kept under on the programs folder, and so the folders put on the `PATH` of what
 /// the host starts. Foundry Local is kept beside them but is not one: its folder holds libraries a program should not find.
-pub const RUNTIME_PROGRAMS: [&str; 2] = ["node", "python"];
+pub const RUNTIME_PROGRAMS: [&str; 4] = ["node", "python", "git-bash", "powershell"];
 
 store_provider!(
     /// The Node.js store.

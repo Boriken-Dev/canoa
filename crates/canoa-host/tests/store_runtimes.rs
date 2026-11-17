@@ -1,5 +1,6 @@
-//! The Runtimes type's stores (Node and Python) against stand-in archives served from a world of documents: the store contract
-//! suite, what each plan fetches and checks, and the folder a managed copy puts on a search path. No runtime is downloaded.
+//! The Runtimes type's stores (Node, Python, Foundry Local, Git Bash and PowerShell) against stand-in archives served from a world
+//! of documents: the store contract suite, what each plan fetches and checks, and the folder a managed copy puts on a search path.
+//! No runtime is downloaded.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -21,6 +22,10 @@ use canoa_host::store::contract::{Fixture, Variant, World, WorldTransport, run, 
 use canoa_host::store::engine::Engine;
 use canoa_host::store::runtimes::{
     NODE_ORIGIN, NodeRecipe, PYTHON_RELEASES, PythonRecipe, RUNTIME_PROGRAMS,
+};
+use canoa_host::store::shell_stores::{
+    GIT_DOWNLOADS, GIT_RELEASES_API, GitBashRecipe, POWERSHELL_DOWNLOADS, POWERSHELL_RELEASES_API,
+    PowerShellRecipe,
 };
 use canoa_host::store::tools::LocalTools;
 use canoa_host::store::whisper::{
@@ -347,6 +352,201 @@ impl Fixture for FoundryFixture {
     }
 }
 
+/// A copy of the stand-in that, given `-o<folder>`, writes `extract` under it: what a self-extracting archive does.
+fn self_extracting(
+    standin: &std::path::Path,
+    extract: &serde_json::Value,
+    extra: &[u8],
+) -> Vec<u8> {
+    let mut bytes = std::fs::read(standin).expect("the stand-in is built");
+    let trailer =
+        serde_json::json!({"line": "", "exit": 0, "auto_update_var": null, "extract": extract});
+    bytes.extend_from_slice(b"\nCOQUI-STANDIN:");
+    bytes.extend_from_slice(trailer.to_string().as_bytes());
+    bytes.push(b'\n');
+    bytes.extend_from_slice(extra);
+    bytes
+}
+
+fn github_arch() -> &'static str {
+    if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "x64"
+    }
+}
+
+/// Git for Windows' portable release: a self-extracting archive that holds `bin/bash.exe` and `bin/git.exe`.
+struct GitBashFixture;
+
+impl GitBashFixture {
+    fn tag(version: &str) -> String {
+        format!("v{version}.windows.1")
+    }
+
+    fn name(version: &str) -> String {
+        let arch = if cfg!(target_arch = "aarch64") {
+            "arm64"
+        } else {
+            "64-bit"
+        };
+        format!("PortableGit-{version}-{arch}.7z.exe")
+    }
+
+    fn archive(version: &str, exit: u32, extra: &[u8]) -> Vec<u8> {
+        let extract = serde_json::json!([
+            {"path": "bin/bash.exe", "line": "GNU bash, version 5.3.15(2)-release (x86_64-pc-cygwin)", "exit": 0},
+            {"path": "bin/git.exe", "line": format!("git version {version}.windows.1"), "exit": exit},
+        ]);
+        self_extracting(&standin(), &extract, extra)
+    }
+}
+
+impl Fixture for GitBashFixture {
+    fn older(&self) -> String {
+        "2.55.0".to_owned()
+    }
+
+    fn newer(&self) -> String {
+        "2.56.0".to_owned()
+    }
+
+    fn platform(&self) -> Platform {
+        here()
+    }
+
+    fn auto_update_var(&self) -> Option<String> {
+        None
+    }
+
+    fn world(&self, variant: Variant) -> World {
+        let mut world = World::new();
+        let mut releases = vec![
+            serde_json::json!({"tag_name": "v2.57.0-rc1.windows.1", "draft": false, "prerelease": true, "assets": []}),
+        ];
+        for (version, newer) in [("2.55.0", false), ("2.56.0", true)] {
+            let (exit, extra, claim_good) = bytes_for(variant, version, newer);
+            let bytes = Self::archive(version, exit, extra);
+            let claimed = if claim_good {
+                sha256(&Self::archive(version, 0, b""))
+            } else {
+                sha256(&bytes)
+            };
+            let name = Self::name(version);
+            releases.push(serde_json::json!({
+                "tag_name": Self::tag(version),
+                "draft": false,
+                "prerelease": false,
+                "assets": [
+                    {"name": name, "digest": format!("sha256:{claimed}")},
+                    {"name": format!("MinGit-{version}-64-bit.zip"), "digest": format!("sha256:{}", "0".repeat(64))},
+                ],
+            }));
+            world.put(
+                format!("{GIT_DOWNLOADS}{}/{name}", Self::tag(version)),
+                bytes,
+            );
+        }
+        world.put(
+            format!("{GIT_RELEASES_API}?per_page=30"),
+            serde_json::Value::Array(releases).to_string().into_bytes(),
+        );
+        if variant == Variant::DownloadFails {
+            world.fail_big(1024);
+        }
+        if variant == Variant::Slow {
+            world.slow();
+        }
+        world
+    }
+}
+
+/// PowerShell 7: a zip on Windows and a `tar.gz` on Linux, each with the program at its root.
+struct PowerShellFixture;
+
+impl PowerShellFixture {
+    fn tag(version: &str) -> String {
+        format!("v{version}")
+    }
+
+    fn name(version: &str) -> String {
+        if cfg!(windows) {
+            format!("PowerShell-{version}-win-{}.zip", github_arch())
+        } else {
+            format!("powershell-{version}-linux-{}.tar.gz", github_arch())
+        }
+    }
+
+    fn archive(version: &str, exit: u32, extra: &[u8]) -> Vec<u8> {
+        let mut program = standin_bytes(&standin(), &format!("PowerShell {version}"), exit, None);
+        program.extend_from_slice(extra);
+        if cfg!(windows) {
+            zipped(&[("pwsh.exe", &program), ("pwsh.dll", b"library")])
+        } else {
+            tar_gz(&[("./pwsh", &program), ("./pwsh.dll", b"library")])
+        }
+    }
+}
+
+impl Fixture for PowerShellFixture {
+    fn older(&self) -> String {
+        "7.6.1".to_owned()
+    }
+
+    fn newer(&self) -> String {
+        "7.7.0".to_owned()
+    }
+
+    fn platform(&self) -> Platform {
+        here()
+    }
+
+    fn auto_update_var(&self) -> Option<String> {
+        None
+    }
+
+    fn world(&self, variant: Variant) -> World {
+        let mut world = World::new();
+        let mut releases = vec![
+            serde_json::json!({"tag_name": "v7.8.0-rc.1", "draft": false, "prerelease": true, "assets": []}),
+        ];
+        for (version, newer) in [("7.6.1", false), ("7.7.0", true)] {
+            let (exit, extra, claim_good) = bytes_for(variant, version, newer);
+            let bytes = Self::archive(version, exit, extra);
+            let claimed = if claim_good {
+                sha256(&Self::archive(version, 0, b""))
+            } else {
+                sha256(&bytes)
+            };
+            let name = Self::name(version);
+            releases.push(serde_json::json!({
+                "tag_name": Self::tag(version),
+                "draft": false,
+                "prerelease": false,
+                "assets": [
+                    {"name": name, "digest": format!("sha256:{claimed}")},
+                    {"name": "hashes.sha256", "digest": format!("sha256:{}", "0".repeat(64))},
+                ],
+            }));
+            world.put(
+                format!("{POWERSHELL_DOWNLOADS}{}/{name}", Self::tag(version)),
+                bytes,
+            );
+        }
+        world.put(
+            format!("{POWERSHELL_RELEASES_API}?per_page=30"),
+            serde_json::Value::Array(releases).to_string().into_bytes(),
+        );
+        if variant == Variant::DownloadFails {
+            world.fail_big(1024);
+        }
+        if variant == Variant::Slow {
+            world.slow();
+        }
+        world
+    }
+}
+
 macro_rules! forwarding {
     ($name:ident, $recipe:ty) => {
         struct $name(Engine<$recipe>);
@@ -393,6 +593,8 @@ macro_rules! forwarding {
 forwarding!(Node, NodeRecipe);
 forwarding!(Python, PythonRecipe);
 forwarding!(Foundry, FoundryRecipe);
+forwarding!(GitBash, GitBashRecipe);
+forwarding!(PowerShell, PowerShellRecipe);
 
 #[test]
 fn the_node_store_passes_every_check() {
@@ -426,6 +628,34 @@ fn the_foundry_store_passes_every_check() {
         StoreSettings::default(),
     )));
     let failures = run(store, &FoundryFixture);
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Git for Windows' portable release is a self-extracting program, which the host runs once to unpack it: Windows only.
+#[cfg(windows)]
+#[test]
+fn the_git_bash_store_passes_every_check() {
+    let _alone = ONE_SUITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let store: Arc<dyn ProgramStore> = Arc::new(GitBash(Engine::new(
+        GitBashRecipe,
+        StoreSettings::default(),
+    )));
+    let failures = run(store, &GitBashFixture);
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn the_powershell_store_passes_every_check() {
+    let _alone = ONE_SUITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let store: Arc<dyn ProgramStore> = Arc::new(PowerShell(Engine::new(
+        PowerShellRecipe,
+        StoreSettings::default(),
+    )));
+    let failures = run(store, &PowerShellFixture);
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
@@ -529,6 +759,166 @@ fn the_foundry_plan_fetches_the_one_file_of_this_system_and_checks_the_digest_gi
 }
 
 #[test]
+fn the_git_bash_plan_fetches_the_portable_release_of_windows_and_checks_the_digest_github_lists() {
+    // A plan is made for a platform it is asked for: Windows, whatever system the test runs on.
+    let git = GitBash(Engine::new(GitBashRecipe, StoreSettings::default()));
+    let fixture = GitBashFixture;
+    let tools = tools_for(&git, fixture.world(Variant::Normal));
+    let windows = Platform::new(
+        "windows",
+        if cfg!(target_arch = "aarch64") {
+            "aarch64"
+        } else {
+            "x86_64"
+        },
+    );
+    let plan = git
+        .plan(PlanRequest::new(Action::Install, windows.clone()), tools)
+        .expect("a plan");
+    assert_eq!(
+        plan.version.as_deref(),
+        Some("2.56.0"),
+        "the newest, never the prerelease"
+    );
+    let [download] = plan.downloads.as_slice() else {
+        panic!("one download: {plan:#?}");
+    };
+    assert_eq!(
+        download.url,
+        format!(
+            "{GIT_DOWNLOADS}v2.56.0.windows.1/{}",
+            GitBashFixture::name("2.56.0")
+        )
+    );
+    assert_eq!(
+        download.check,
+        Check::Sha256 {
+            value: sha256(&GitBashFixture::archive("2.56.0", 0, b""))
+        }
+    );
+    assert!(plan.changes.is_empty(), "nothing outside the folder");
+    assert!(
+        plan.notices.iter().any(|n| n.contains("self-extracting")),
+        "the plan says the host runs the archive once: {:?}",
+        plan.notices
+    );
+    assert!(
+        plan.steps
+            .iter()
+            .any(|step| step.contains("self-extracting")),
+        "{:?}",
+        plan.steps
+    );
+    let tools = tools_for(&git, fixture.world(Variant::Normal));
+    let mut older = PlanRequest::new(Action::Install, windows.clone());
+    older.version = Some("2.55.0".to_owned());
+    assert_eq!(
+        git.plan(older, tools).expect("a plan").version.as_deref(),
+        Some("2.55.0")
+    );
+    for refused in [
+        Platform::new("linux", "x86_64"),
+        Platform::new("macos", "aarch64"),
+    ] {
+        let tools = tools_for(&git, fixture.world(Variant::Normal));
+        assert!(
+            git.plan(PlanRequest::new(Action::Install, refused), tools)
+                .is_err(),
+            "Git Bash is Git for Windows'"
+        );
+    }
+    let tools = tools_for(&git, fixture.world(Variant::Normal));
+    let mut unlisted = PlanRequest::new(Action::Install, windows);
+    unlisted.version = Some("9.9.9".to_owned());
+    assert!(git.plan(unlisted, tools).is_err(), "no such release");
+}
+
+#[test]
+fn the_powershell_plan_fetches_the_zip_or_the_archive_of_this_system_and_checks_the_digest_github_lists()
+ {
+    let pwsh = PowerShell(Engine::new(PowerShellRecipe, StoreSettings::default()));
+    let plan = plan_of(&pwsh, &PowerShellFixture, None);
+    assert_eq!(
+        plan.version.as_deref(),
+        Some("7.7.0"),
+        "the newest, never the prerelease"
+    );
+    let [download] = plan.downloads.as_slice() else {
+        panic!("one download: {plan:#?}");
+    };
+    assert_eq!(
+        download.url,
+        format!(
+            "{POWERSHELL_DOWNLOADS}v7.7.0/{}",
+            PowerShellFixture::name("7.7.0")
+        )
+    );
+    assert_eq!(
+        download.check,
+        Check::Sha256 {
+            value: sha256(&PowerShellFixture::archive("7.7.0", 0, b""))
+        }
+    );
+    assert!(plan.changes.is_empty());
+    assert_eq!(
+        plan_of(&pwsh, &PowerShellFixture, Some("7.6.1"))
+            .version
+            .as_deref(),
+        Some("7.6.1")
+    );
+    let tools = tools_for(&pwsh, PowerShellFixture.world(Variant::Normal));
+    let mut mac = PlanRequest::new(Action::Install, Platform::new("macos", "aarch64"));
+    mac.version = None;
+    assert!(
+        pwsh.plan(mac, tools).is_err(),
+        "published here for Windows and Linux"
+    );
+}
+
+#[test]
+fn foundry_local_is_offered_for_apple_silicon_as_the_zip_and_for_no_other_mac() {
+    let foundry = Foundry(Engine::new(FoundryRecipe, StoreSettings::default()));
+    let sha = "ab".repeat(32);
+    let listing = serde_json::json!([{
+        "tag_name": "cli-preview-0.14.0", "draft": false,
+        "assets": [
+            {"name": "foundry-0.14.0-osx-arm64.zip", "digest": format!("sha256:{sha}")},
+            {"name": "foundry-0.14.0-osx-arm64.pkg", "digest": format!("sha256:{}", "cd".repeat(32))},
+        ]
+    }]);
+    let mut world = World::new();
+    world.put(
+        format!("{RELEASES_API}?per_page=30"),
+        listing.to_string().into_bytes(),
+    );
+    let tools = tools_for(&foundry, world);
+    let plan = foundry
+        .plan(
+            PlanRequest::new(Action::Install, Platform::new("macos", "aarch64")),
+            tools,
+        )
+        .expect("a plan for Apple silicon");
+    let [download] = plan.downloads.as_slice() else {
+        panic!("one download: {plan:#?}");
+    };
+    assert_eq!(
+        download.url,
+        format!("{DOWNLOADS}cli-preview-0.14.0/foundry-0.14.0-osx-arm64.zip")
+    );
+    assert_eq!(download.check, Check::Sha256 { value: sha });
+    let tools = tools_for(&foundry, World::new());
+    assert!(
+        foundry
+            .plan(
+                PlanRequest::new(Action::Install, Platform::new("macos", "x86_64")),
+                tools
+            )
+            .is_err(),
+        "no Intel Mac build is published"
+    );
+}
+
+#[test]
 fn a_version_the_publisher_does_not_list_is_refused_and_a_digest_it_lacks_too() {
     let python = Python(Engine::new(PythonRecipe, StoreSettings::default()));
     let tools = tools_for(&python, PythonFixture.world(Variant::Normal));
@@ -545,7 +935,13 @@ fn a_version_the_publisher_does_not_list_is_refused_and_a_digest_it_lacks_too() 
 
 #[test]
 fn the_runtimes_stores_name_the_publishers_endpoints_and_nothing_wider() {
-    for info in [NodeRecipe.info(), PythonRecipe.info(), FoundryRecipe.info()] {
+    for info in [
+        NodeRecipe.info(),
+        PythonRecipe.info(),
+        FoundryRecipe.info(),
+        GitBashRecipe.info(),
+        PowerShellRecipe.info(),
+    ] {
         assert!(!info.endpoints.is_empty());
         assert!(
             info.endpoints.iter().all(|e| e.starts_with("https://")),
@@ -558,7 +954,13 @@ fn the_runtimes_stores_name_the_publishers_endpoints_and_nothing_wider() {
 
 #[test]
 fn each_runtime_says_what_it_is_names_a_glyph_and_the_commands_it_puts_on_a_path() {
-    for info in [NodeRecipe.info(), PythonRecipe.info(), FoundryRecipe.info()] {
+    for info in [
+        NodeRecipe.info(),
+        PythonRecipe.info(),
+        FoundryRecipe.info(),
+        GitBashRecipe.info(),
+        PowerShellRecipe.info(),
+    ] {
         let program = &info.program;
         let icon = info.icon.as_deref().unwrap_or_default();
         assert!(
@@ -571,9 +973,9 @@ fn each_runtime_says_what_it_is_names_a_glyph_and_the_commands_it_puts_on_a_path
                 .is_some_and(|s| !s.trim().is_empty()),
             "{program} has no summary"
         );
-        // Foundry Local's folder holds libraries a program should not find, so it is on no `PATH`.
+        // Foundry Local's folder holds libraries a program should not find, so it is on no `PATH`: it provides no command.
         assert_eq!(
-            info.commands.contains(program),
+            !info.commands.is_empty(),
             RUNTIME_PROGRAMS.contains(&program.as_str()),
             "{program} provides {:?}",
             info.commands
@@ -583,6 +985,10 @@ fn each_runtime_says_what_it_is_names_a_glyph_and_the_commands_it_puts_on_a_path
         NodeRecipe.info().commands,
         ["node", "npm", "npx", "corepack"]
     );
+    assert_eq!(GitBashRecipe.info().commands, ["bash", "sh", "git"]);
+    assert_eq!(PowerShellRecipe.info().commands, ["pwsh"]);
+    assert_eq!(GitBashRecipe.info().icon.as_deref(), Some("branch"));
+    assert_eq!(PowerShellRecipe.info().icon.as_deref(), Some("prompt"));
 }
 
 // whisper.cpp: the program from a release listing and one model from a folder of its own, both served from a world of documents.

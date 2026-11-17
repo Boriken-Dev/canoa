@@ -12,6 +12,7 @@ use coqui_acp_api::guatiao::library::Registry;
 
 use super::builtin::store_provider;
 use super::runtimes::{FoundryStore, NodeStore, PythonStore};
+use super::shell_stores::{GitBashStore, PowerShellStore};
 use super::whisper::WhisperStore;
 
 /// The provider ids of the built-in agent stores, in the order the app lists them; the runtimes are `runtimes::RUNTIMES`.
@@ -56,7 +57,9 @@ coqui_acp_api::guatiao::local_providers!(
         NodeStore,
         PythonStore,
         FoundryStore,
-        WhisperStore
+        WhisperStore,
+        GitBashStore,
+        PowerShellStore
     ]
 );
 

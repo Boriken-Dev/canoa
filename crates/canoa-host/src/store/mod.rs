@@ -17,6 +17,7 @@ pub mod protect;
 pub mod registry;
 pub mod runtimes;
 pub mod shelf;
+pub mod shell_stores;
 pub(crate) mod text;
 pub mod tools;
 pub mod whisper;
