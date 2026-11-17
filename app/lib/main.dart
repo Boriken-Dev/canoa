@@ -278,7 +278,7 @@ class CanoaApp extends StatefulWidget {
     super.key, this.store, this.config = const CanoaConfig(),
     this.shell, this.settingsSignal, this.host, this.hostingSignal,
     this.configPath, this.writeConfig, this.readConfig, this.ledger, this.rules, this.notifier, this.drafts,
-    this.isGitRepository, this.folderExists, this.hostFolders, this.listFolder, this.resolveInside, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
+    this.isGitRepository, this.folderExists, this.home, this.hostFolders, this.listFolder, this.resolveInside, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
     this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection,
   });
@@ -344,6 +344,9 @@ class CanoaApp extends StatefulWidget {
   final bool Function(String folder)? isGitRepository;
   @visibleForTesting
   final bool Function(String folder)? folderExists;
+  /// Where overlays and trust live, for a test that stands a host's in.
+  @visibleForTesting
+  final ProfileHome? home;
   /// The host's answers about folders, for a test that stands one in.
   @visibleForTesting
   final HostFolders? hostFolders;
@@ -801,7 +804,7 @@ class _CanoaAppState extends State<CanoaApp> {
   }.toList();
 
   /// Where overlays install and catalogs are fetched: the host that served this page, else beside canoa.cfg.
-  ProfileHome? get _home => widget.served?.home ?? _desktopHome();
+  ProfileHome? get _home => widget.home ?? widget.served?.home ?? _desktopHome();
 
   ProfileHome? _desktopHomeHeld;
   String? _desktopHomeFor;

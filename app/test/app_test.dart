@@ -12,6 +12,7 @@ import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/desktop/desktop_shell.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/main.dart';
+import 'package:canoa/profile/profile_home_io.dart';
 import 'package:canoa/session_store.dart';
 import 'dart:io';
 
@@ -190,7 +191,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final config = CanoaConfig.parse('[profile]\neffort = "high"\n[agents.Mine.profile]\nmodel = "m"\n');
     await tester.pumpWidget(CanoaApp(
-      store: SessionStore(), config: config, configPath: '${dir.path}/canoa.cfg',
+      store: SessionStore(), config: config, configPath: '${dir.path}/canoa.cfg', home: IoProfileHome(dir.path),
       host: linkedHost((name) => throw StateError(name)),
     ));
     await tester.pump();

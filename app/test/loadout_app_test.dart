@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
 import 'fixtures/options_agent.dart';
+import 'fixtures/store_fixtures.dart' show MemoryHome, MemoryOverlays;
 
 const overlaysText = '[overlays]\na = "https://example.invalid/a.git@main"\nb = "https://example.invalid/b.git@main"\n';
 
@@ -71,7 +72,7 @@ void main() {
   testWidgets('turning a default off in Loadout removes it from new sessions, and the session already started keeps it', (tester) async {
     final agent = OptionsAgent();
     final store = _store();
-    final written = await pumpApp(tester, store, linked: agent.openLink, config: CanoaConfig.parse(overlaysText));
+    final written = await pumpApp(tester, store, linked: agent.openLink, config: CanoaConfig.parse(overlaysText), profileHome: MemoryHome(MemoryOverlays()));
     await _startOnClaude(tester, agent, 1);
     expect(_overlaysAsked(agent, 0), ['a', 'b']);
     final first = store.selected!;
