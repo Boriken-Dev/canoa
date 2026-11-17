@@ -103,7 +103,8 @@ pub enum Grant {
     /// `host/restart`: ends this host so that its supervisor starts it again with the canoa.cfg then.
     HostRestart,
     /// `store/apply`, `store/rollback` and `store/remove`, and the probing `store/report`: install, update, roll back and remove an
-    /// agent program on the host's programs shelf, which downloads and runs code as this user.
+    /// agent program on the host's programs shelf, which downloads and runs code as this user. Also `foundry/models` and
+    /// `foundry/model`: list, download, load and unload Foundry Local's models, which runs its command line as this user.
     StorePrograms,
     /// `accounts/catalog`, `accounts/list`, `accounts/add`, `accounts/login`, `accounts/remove`, `accounts/entries` and
     /// `accounts/offer`: sign in to a provider on this host, which runs the provider's program as this user and keeps a credential in
@@ -836,6 +837,10 @@ impl Control {
                             )
                         })
                 }
+                Some("foundry/models") => allow(caller, Grant::StorePrograms)
+                    .and_then(|()| foundry::models(foundry::locate())),
+                Some("foundry/model") => allow(caller, Grant::StorePrograms)
+                    .and_then(|()| foundry::act(&params, foundry::locate())),
                 Some("store/index") => self.store_index(caller, &params),
                 Some(method @ ("store/rollback" | "store/remove")) => {
                     allow(caller, Grant::StorePrograms)
@@ -1384,6 +1389,7 @@ mod files;
 mod files_tests;
 #[cfg(test)]
 mod folders_tests;
+mod foundry;
 pub(crate) mod hosting;
 #[cfg(test)]
 mod hosting_tests;

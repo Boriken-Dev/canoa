@@ -837,9 +837,11 @@ The params and results are the JSON of `canoa::store`'s models:
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `store/list` | `kind`? (`agents`, the default, or `runtimes`) | `{"stores": [StoreInfo + "provider"]}`: the agents' programs, or the Runtimes type's (`node_store`, `python_store`); every other `store/*` method takes either kind's provider |
+| `store/list` | `kind`? (`agents`, the default, or `runtimes`) | `{"stores": [StoreInfo + "provider"]}`: the agents' programs, or the Runtimes type's (`node_store`, `python_store`, `foundry_store`); every other `store/*` method takes either kind's provider |
 | `store/list` | `kind`: `extension`, `type`: a type's id | the same shape for the stores of a type an extension adds; an unknown type is `-32003` |
 | `store/extensions` | none | `{"types": [{"id", "title", "icon"?, "stores": [provider ids], "extension", "extension_title", "publisher"}]}`: the types the `[host.extensions]` add, in canoa.cfg's order; needs `store.read` |
+| `foundry/models` | none | `{"installed": bool, "program"?, "models": [{"id", "alias"?, "task"?, "device"?, "size_mb"?, "description", "cached", "loaded"}]}`: Foundry Local's catalog (its variants) with what is downloaded and what is in memory marked, loaded first, read by running its command line (`model list --variants [--cached\|--loaded] -o json`; what is loaded is asked only while `~/.foundry/daemon.json` names a running service, so listing starts none); without Foundry Local `{"installed": false, "models": []}`. Needs `store.programs`: it runs a program as this user |
+| `foundry/model` | `model` (a variant id), `action` (`download`, `load` or `unload`) | `{"ok": true, "model", "action", "note"?}`: runs `foundry model <action> <model> -o json` and ends it after 4 hours (download), 15 minutes (load) or 2 minutes (unload); a refusal is the program's own words (`-32002`), a name that could be an option or an unknown action `-32602`. A load keeps the model in memory until `foundry server stop`, which `note` says. Needs `store.programs` |
 | `store/report` | `provider`, `probe`? (bool), `pick`? | `ProgramReport`: the copies the host finds; no network |
 | `store/latest` | `provider`, `channel`? | `LatestReport` |
 | `store/plan` | `provider`, `action` (`install`, `update`, `uninstall`), `channel`?, `version`? | `InstallPlan`, with its `token`: what an apply would do, nothing written |
@@ -900,6 +902,7 @@ the catalog's own repository; one elsewhere is the catalog's claim only. Nothing
 - `icons: true` adds the icon's bytes (`icon.data`, base64) for entries whose icon file passed AOS's checks and fit `index_cache_bytes`.
 - Programs come from `store/list`: no network, no cache.
 - Runtimes (`node_store`: nodejs.org builds checked against `SHASUMS256.txt`, channels `lts` and `current`; `python_store`: the standalone CPython builds checked against the `SHA256SUMS` of the newest release, channels `3.11` to `3.14`) are kept on the programs folder as `node` and `python`, installed and removed with `store/plan`, `store/apply` and `store/remove` like an agent's. A signature is not checked, and the plan says so. An archive's links are left out, so a Unix copy gets `npm`, `npx`, `python3` and `python` written beside the interpreter.
+- `foundry_store` (also Runtimes) keeps Foundry Local's command line, service and libraries as `foundry`: the `cli-preview-X.Y.Z` release of github.com/microsoft/foundry-local, the Windows MSIX unpacked as a zip (never installed) or the Linux `tar.gz`, checked against the SHA-256 GitHub lists for that file. Its folder is not on any program's `PATH`: `foundry/models` and `foundry/model` find the copy by its launch path, else the first `foundry` on the `PATH`.
 - Not indexed yet: `[store] registries` (MCP registries).
 
 ## Worktrees
