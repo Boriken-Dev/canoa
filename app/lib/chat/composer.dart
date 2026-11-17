@@ -16,6 +16,8 @@ import '../sources/sources.dart';
 import '../store/programs.dart' show ProgramStores;
 import 'agent_events.dart' show AgentCommandInfo, MessageRole;
 import 'attachments.dart';
+import 'dictation.dart';
+import 'palette.dart' show dictationKeys;
 import 'composer_controls.dart';
 import 'source_trouble.dart';
 import 'mentions.dart';
@@ -65,7 +67,11 @@ final class ComposerKit {
     this.portable,
     this.programs,
     this.extension,
+    this.dictation,
   });
+
+  /// Dictation into the message; null where this build has no way to record, which leaves the microphone out.
+  final Dictation? dictation;
 
   /// Whether Enter steers rather than queues while a turn runs (`[sessions] while_working`); Alt+Enter does the other.
   final bool enterSteers;
@@ -391,6 +397,7 @@ class SessionComposer extends StatelessWidget {
         if (draft && session.kind == SessionKind.workspace) PlaceToggle(store: store, session: session, kit: kit),
       ],
       trailing: [
+        if (kit.dictation case final dictation?) DictationButton(dictation: dictation, controller: controller, shortcut: dictationKeys),
         if (draft) SourceTroubleChip(store: store, session: session, kit: kit),
         ModelEffortChooser(store: store, session: session, options: options, kit: kit, seen: seen),
         if (options.any((option) => roleOf(option) == OptionRole.other)) MoreChooser(store: store, session: session, options: options),

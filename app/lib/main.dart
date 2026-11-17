@@ -57,6 +57,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'chat/child_thread.dart';
 import 'chat/clipboard.dart';
 import 'chat/composer.dart';
+import 'chat/dictation.dart';
 import 'chat/delegation_row.dart';
 import 'chat/delegation_view.dart';
 import 'chat/new_session_view.dart';
@@ -925,6 +926,18 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// The speech providers of the host this app reaches, which run what a page or a platform without a speech service of its own records.
   late final HostSpeechCatalog? _hostSpeech = _control == null ? null : HostSpeechCatalog(_control, capture: const RecordCapture());
+
+  /// Dictation into the composer, with the service and choices Settings holds at the moment it starts.
+  late final Dictation _dictation = Dictation(
+    backend: () {
+      final id = config.voice.backend;
+      for (final each in [..._speech, ...?_hostSpeech?.backends]) {
+        if (each.id == id) return each;
+      }
+      return null;
+    },
+    voice: () => config.voice,
+  );
 
   late final HostFiles? _hostFiles = widget.served?.files ?? (_control == null ? null : HostFiles(_control));
 
@@ -2112,6 +2125,7 @@ class _CanoaAppState extends State<CanoaApp> {
     widget.host?.removeListener(_hostChanged);
     unawaited(_reconnects?.cancel());
     _hostFolders?.dispose();
+    _dictation.dispose();
     unawaited(_control?.close());
     widget.settingsSignal?.removeListener(_requestSettings);
     widget.hostingSignal?.removeListener(_requestHosting);
@@ -2220,6 +2234,7 @@ class _CanoaAppState extends State<CanoaApp> {
     warnPermille: config.warnPermille,
     onSourceSettings: () => unawaited(_showSettings(section: 'sources')),
     onSettings: () => unawaited(_showSettings()),
+    dictation: _dictation,
     accounts: _accounts,
     onAccountSettings: () => unawaited(_showSettings(section: 'accounts')),
     switchAccount: (session, account) => store.switchAccount(
@@ -2475,6 +2490,7 @@ class _CanoaHome extends StatelessWidget {
     chord(LogicalKeyboardKey.tab): () => _step(1),
     chord(LogicalKeyboardKey.tab, shift: true): () => _step(-1),
     chord(LogicalKeyboardKey.keyL): () => conversation.focusComposer?.call(),
+    chord(LogicalKeyboardKey.space, shift: true): () => unawaited(kit.dictation?.toggle() ?? Future.value()),
     chord(LogicalKeyboardKey.period): _stop,
     chord(LogicalKeyboardKey.keyA, shift: true): () => _answer('allow_once'),
     chord(LogicalKeyboardKey.keyR, shift: true): () => _answer('reject_once'),

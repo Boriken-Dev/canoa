@@ -10,6 +10,9 @@ bool get _onMac => defaultTargetPlatform == TargetPlatform.macOS;
 SingleActivator chord(LogicalKeyboardKey key, {bool shift = false, bool alt = false}) =>
     SingleActivator(key, control: !_onMac, meta: _onMac, shift: shift, alt: alt);
 
+/// The keys that start and end a dictation, as the tooltip and the help sheet name them.
+String get dictationKeys => '${_onMac ? "⌘" : "Ctrl"}+Shift+Space';
+
 /// One line of the help sheet: the keys and what they do.
 typedef ShortcutLine = ({String keys, String what});
 
@@ -23,6 +26,7 @@ List<ShortcutLine> get shortcutHelp {
     (keys: '$mod+Alt+B', what: 'Hide or show the right panel'),
     (keys: '$mod+`', what: 'Hide or show the bottom panel'),
     (keys: '$mod+,', what: 'Open Settings'),
+    (keys: dictationKeys, what: 'Dictate into the message, and stop'),
     (keys: '$mod+V in a message', what: 'Paste: an image or files go with it, long text as a file'),
     (keys: '$mod+A', what: 'Select all of the conversation, or of the message being written'),
     (keys: '$mod+C', what: 'Copy what is selected'),
