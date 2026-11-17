@@ -241,4 +241,27 @@ void main() {
     await tester.pump();
     expect(tester.widget<TextField>(_composer).controller?.text, 'run the tests', reason: 'with text there, Up moves the cursor');
   });
+
+  testWidgets('Up and Down in a composer that holds text move its caret, and the selection area around it raises nothing', (tester) async {
+    final (_, _, store) = await _three(tester);
+    await tester.runAsync(() => store.sendText('run the tests'));
+    await _settle(tester);
+    await tester.tap(_composer);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    final controller = tester.widget<TextField>(_composer).controller!;
+    controller.text = 'first line\nsecond line';
+    controller.selection = const TextSelection.collapsed(offset: 17);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(controller.text, 'first line\nsecond line');
+    expect(controller.selection.isValid && controller.selection.isCollapsed, isTrue);
+    expect(controller.selection.baseOffset, lessThan(11), reason: 'Up moved the caret to the first line');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(controller.selection.baseOffset, greaterThan(10), reason: 'Down moved it back');
+    expect(tester.takeException(), isNull);
+  });
 }
