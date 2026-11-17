@@ -188,23 +188,6 @@ fn every_overlay_vector_gives_its_view_refusals_and_environment() {
     }
 }
 
-#[test]
-fn the_reserved_variables_are_the_vectors_list() {
-    use canoa_host::profile::{RESERVED_ENV, RESERVED_ENV_PREFIXES, RESERVED_ENV_SUFFIXES};
-    let vectors = vectors();
-    let list = |key: &str| -> Vec<String> {
-        vectors["reserved_env"][key]
-            .as_array()
-            .expect("a list")
-            .iter()
-            .map(|name| name.as_str().expect("text").to_owned())
-            .collect()
-    };
-    assert_eq!(list("names"), RESERVED_ENV);
-    assert_eq!(list("prefixes"), RESERVED_ENV_PREFIXES);
-    assert_eq!(list("suffixes"), RESERVED_ENV_SUFFIXES);
-}
-
 /// An overlay's layer from the text of its files.
 fn layer_of(files: &[(&str, &str)]) -> Result<Layer, canoa_host::profile::OverlayRefusal> {
     use canoa_host::profile::{OverlayInput, overlay_layer};
@@ -582,16 +565,58 @@ fn a_path_addition_that_leaves_the_overlays_own_folder_is_refused() {
 }
 
 #[test]
-fn only_the_three_list_variables_may_be_set_by_a_path_addition_among_the_reserved_ones() {
+fn every_variable_applies_and_the_sensitive_ones_are_listed_in_the_report() {
     for variable in ["LD_LIBRARY_PATH", "PERL5LIB", "HOME", "NODE_OPTIONS"] {
         let manifest = format!("[[paths]]\nvariable = \"{variable}\"\npath = \"lib\"\n");
-        let refusal = layer_of(&[("overlay.cfg", &manifest), ("lib/x", "x")]).expect_err(variable);
-        assert_eq!(
-            (refusal.code, refusal.subject.as_str()),
-            ("reserved", variable)
+        layer_of(&[("overlay.cfg", &manifest), ("lib/x", "x")]).expect(variable);
+    }
+    let layer = layer_of(&[(
+        "overlay.cfg",
+        "[env]\nNODE_OPTIONS = \"--require x\"\nLD_PRELOAD = \"x.so\"\nHTTPS_PROXY = \"http://proxy.example\"\n\
+         ANTHROPIC_BASE_URL = \"https://gateway.example\"\nCODEX_HOME = \"x\"\nPYTHONPATH = \"x\"\n",
+    )])
+    .expect("every one of them applies");
+    for name in [
+        "NODE_OPTIONS",
+        "LD_PRELOAD",
+        "HTTPS_PROXY",
+        "ANTHROPIC_BASE_URL",
+        "CODEX_HOME",
+        "PYTHONPATH",
+    ] {
+        assert!(layer.profile.env.contains_key(name), "{name}");
+    }
+    let view = merge(&[layer]).view();
+    let listed: Vec<&str> = view["overlays"][0]["non_defaults"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter(|setting| setting[0] == "env-sensitive")
+        .filter_map(|setting| setting[1].as_str())
+        .collect();
+    for name in [
+        "NODE_OPTIONS",
+        "LD_PRELOAD",
+        "HTTPS_PROXY",
+        "ANTHROPIC_BASE_URL",
+        "CODEX_HOME",
+    ] {
+        assert!(listed.contains(&name), "{name} in {listed:?}");
+    }
+}
+
+#[test]
+fn only_the_names_the_specification_reserves_for_the_host_are_refused() {
+    for name in ["AOS_MODE", "FOO_OVERLAY_ROOT", "foo_overlay_state"] {
+        let refusal = layer_of(&[("env", &format!("{name}=x\n"))]).expect_err(name);
+        assert_eq!((refusal.code, refusal.subject.as_str()), ("reserved", name));
+        let manifest = format!("[env]\n{name} = \"x\"\n");
+        let refusal = layer_of(&[("overlay.cfg", &manifest)]).expect_err(name);
+        assert!(
+            ["reserved", "invalid"].contains(&refusal.code),
+            "{name}: {} {}",
+            refusal.code,
+            refusal.subject
         );
     }
-    // A reserved name in env stays refused, even one a path addition may take.
-    let refusal = layer_of(&[("overlay.cfg", "[env]\nPYTHONPATH = \"x\"\n")]).expect_err("env");
-    assert_eq!(refusal.code, "reserved");
 }

@@ -200,7 +200,7 @@ fn env_of<'a>(connection: &'a Connection, name: &str) -> Option<&'a str> {
 }
 
 #[test]
-fn a_pre_env_hook_sets_variables_the_agent_is_given_and_not_those_an_overlay_may_not_set() {
+fn a_pre_env_hook_sets_variables_the_agent_is_given_and_a_sensitive_one_is_listed() {
     let temp = Temp::new();
     let digest = temp.install(
         "",
@@ -213,13 +213,17 @@ fn a_pre_env_hook_sets_variables_the_agent_is_given_and_not_those_an_overlay_may
     );
     let connection = connect(&temp, Some(&digest), &real).expect("prepared");
     assert_eq!(env_of(&connection, "PRE_VAR"), Some("from-hook"));
-    assert_eq!(env_of(&connection, "HTTPS_PROXY"), None);
-    let refused = connection
+    assert_eq!(
+        env_of(&connection, "HTTPS_PROXY"),
+        Some("http://proxy.example")
+    );
+    let listed = connection
         .notes
         .iter()
         .find(|item| item.key == "hooks.team.pre-env.HTTPS_PROXY")
         .expect("said");
-    assert_eq!(refused.state, State::Refused);
+    assert_eq!(listed.state, State::Applied);
+    assert!(listed.how.starts_with("env-sensitive"), "{}", listed.how);
     let told = script::logged(&temp.log());
     assert_eq!(told.len(), 1, "{told:?}");
     let keys: BTreeSet<&str> = told[0]

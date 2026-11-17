@@ -245,8 +245,25 @@ fn claude_takes_context_skills_as_a_plugin_and_mcp_servers_and_the_report_names_
     let temp = temp_with_skill();
     let offer = offer_of(&temp, &config_with(""));
     let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
-    assert_eq!(connection.env.len(), 1);
-    assert_eq!(connection.env[0].1.expose(), SECRET);
+    let token = connection
+        .env
+        .iter()
+        .find(|(name, _)| name == "TOKEN")
+        .expect("the profile's variable");
+    assert_eq!(token.1.expose(), SECRET);
+    // Beside it only what names the session, never a value of the person's.
+    assert!(
+        connection
+            .env
+            .iter()
+            .all(|(name, _)| name == "TOKEN" || name.starts_with("AGENTS_")),
+        "{:?}",
+        connection
+            .env
+            .iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>()
+    );
     let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
     assert_eq!(parts.system_prompt.as_deref(), Some("Host context."));
     let plugin =
@@ -940,9 +957,15 @@ fn a_client_narrows_the_overlays_a_connection_starts_with_and_never_adds_one() {
     install_overlay(&temp);
     let offer = offer_of(&temp, &config_with("overlays = [\"team\"]\n"));
     let report_of = |only: Option<Vec<String>>| {
-        let connection =
-            Connection::prepare_with(&offer, 0, "a", &lookup, only.as_deref(), None, None)
-                .expect("prepared");
+        let connection = Connection::prepare_with(
+            &offer,
+            0,
+            "a",
+            &lookup,
+            (only.as_deref(), None, None),
+            Starting::default(),
+        )
+        .expect("prepared");
         parts_for(&connection, Some("claude-code"), &claude(), &lookup).report
     };
 
@@ -1339,8 +1362,15 @@ fn loadout_offer(temp: &Temp, text: &str) -> Offer {
 
 /// A session of `offer` that names `loadout`, and the report it starts with.
 fn loadout_report(offer: &Offer, loadout: Option<&str>) -> (Connection, Value) {
-    let connection =
-        Connection::prepare_with(offer, 0, "a", &lookup, None, loadout, None).expect("prepared");
+    let connection = Connection::prepare_with(
+        offer,
+        0,
+        "a",
+        &lookup,
+        (None, loadout, None),
+        Starting::default(),
+    )
+    .expect("prepared");
     let report = parts_for(&connection, Some("claude-code"), &claude(), &lookup).report;
     (connection, report)
 }
@@ -1398,9 +1428,8 @@ fn an_overlay_the_client_names_wins_over_the_loadouts_and_skills_come_from_the_l
         0,
         "a",
         &lookup,
-        Some(&["team".to_owned()]),
-        Some("lean2"),
-        None,
+        (Some(&["team".to_owned()]), Some("lean2"), None),
+        Starting::default(),
     )
     .expect("prepared");
     let report = parts_for(&connection, Some("claude-code"), &claude(), &lookup).report;
@@ -1454,8 +1483,15 @@ const PRESETS: &str = "[profile]\nmodel = \"mine\"\neffort = \"low\"\n\
 
 /// A session of `offer` that names the preset `preset`, and the report it starts with.
 fn preset_report(offer: &Offer, preset: Option<&str>) -> (Connection, Value) {
-    let connection =
-        Connection::prepare_with(offer, 0, "a", &lookup, None, None, preset).expect("prepared");
+    let connection = Connection::prepare_with(
+        offer,
+        0,
+        "a",
+        &lookup,
+        (None, None, preset),
+        Starting::default(),
+    )
+    .expect("prepared");
     let report = parts_for(&connection, Some("claude-code"), &claude(), &lookup).report;
     (connection, report)
 }
@@ -1914,4 +1950,192 @@ fn each_line_not_applied_names_its_overlay_and_is_said_once() {
         .filter(|item| item["key"] == "setup: setup.sh" && item["layer"] == "overlay:alpha")
         .count();
     assert_eq!(setups, 1, "{}", parts.report);
+}
+
+/// The value of `name` in a connection's environment.
+fn env_value<'a>(connection: &'a Connection, name: &str) -> Option<&'a str> {
+    connection
+        .env()
+        .iter()
+        .find(|(each, _)| each == name)
+        .map(|(_, value)| value.expose())
+}
+
+/// A connection of the profile `main` over the overlay `team` made of `cfg`, started with `starting`.
+fn session_connection(cfg: &str, starting: Starting<'_>) -> Connection {
+    let temp = temp_with_skill();
+    install_files(&temp, "team", &[("overlay.cfg", cfg)]);
+    let offer = offer_of(&temp, &config_with("overlays = [\"team\"]\n"));
+    Connection::prepare_with(&offer, 0, "a", &lookup, (None, None, None), starting)
+        .expect("prepared")
+}
+
+#[test]
+fn an_overlays_variables_that_change_how_programs_run_apply_for_every_harness() {
+    let connection = session_connection(
+        "[env]\nNODE_OPTIONS = \"--require x\"\nLD_PRELOAD = \"x.so\"\nHTTPS_PROXY = \"http://proxy.example\"\n\
+         ANTHROPIC_BASE_URL = \"https://gateway.example\"\n",
+        Starting::default(),
+    );
+    for (name, value) in [
+        ("NODE_OPTIONS", "--require x"),
+        ("LD_PRELOAD", "x.so"),
+        ("HTTPS_PROXY", "http://proxy.example"),
+        ("ANTHROPIC_BASE_URL", "https://gateway.example"),
+    ] {
+        assert_eq!(env_value(&connection, name), Some(value), "{name}");
+    }
+    // The same environment goes to every harness's session: the report names each variable as applied.
+    for harness in ["claude-code", "codex", "pi", "antigravity", "grok"] {
+        let parts = parts_for(&connection, Some(harness), &claude(), &lookup);
+        for name in ["NODE_OPTIONS", "LD_PRELOAD", "HTTPS_PROXY"] {
+            assert_eq!(
+                item(&parts.report, &format!("env.{name}"))["state"],
+                "applied",
+                "{harness} {name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_overlay_reads_the_identity_variables_of_every_harness_and_the_agent_is_given_them() {
+    for (harness, vendor) in [
+        ("claude-code", "anthropic"),
+        ("codex", "openai"),
+        ("antigravity", "google"),
+        ("grok", "xai"),
+    ] {
+        let connection = session_connection(
+            "[env]\nWHO = \"${AGENTS_HARNESS}/${AGENTS_VENDOR}/${AGENT}\"\n",
+            Starting {
+                who: Who {
+                    harness: Some(harness),
+                    ..Who::default()
+                },
+                host: Vec::new(),
+            },
+        );
+        assert_eq!(
+            env_value(&connection, "WHO"),
+            Some(format!("{harness}/{vendor}/{harness}").as_str())
+        );
+        assert_eq!(env_value(&connection, "AGENTS_HARNESS"), Some(harness));
+        assert_eq!(env_value(&connection, "AGENTS_VENDOR"), Some(vendor));
+        assert_eq!(env_value(&connection, "AGENT"), Some(harness));
+        assert_eq!(env_value(&connection, "AGENTS_HOST"), Some("canoa"));
+        assert_eq!(env_value(&connection, "AGENTS_PROFILE"), Some("main"));
+    }
+    // Pi has no vendor of its own, so none is set.
+    let connection = session_connection(
+        "[env]\nWHO = \"${AGENTS_HARNESS}\"\n",
+        Starting {
+            who: Who {
+                harness: Some("pi"),
+                ..Who::default()
+            },
+            host: Vec::new(),
+        },
+    );
+    assert_eq!(env_value(&connection, "WHO"), Some("pi"));
+    assert_eq!(env_value(&connection, "AGENTS_VENDOR"), None);
+}
+
+#[test]
+fn the_account_model_and_run_variables_are_set_only_when_they_have_a_value() {
+    let connection = session_connection(
+        "[env]\nSAME = \"${AGENTS_ACCOUNT}:${AGENTS_ACCOUNT_KIND}:${AGENTS_ACCOUNT_PROVIDER}:${AGENTS_MODEL}\"\n",
+        Starting {
+            who: Who {
+                harness: Some("claude-code"),
+                model: Some("sonnet"),
+                effort: Some("high"),
+                version: Some("2.1.0"),
+                account: Some("work"),
+                account_kind: Some("subscription"),
+                account_provider: Some("anthropic"),
+                role: Some("delegate"),
+                ..Who::default()
+            },
+            host: Vec::new(),
+        },
+    );
+    assert_eq!(
+        env_value(&connection, "SAME"),
+        Some("work:subscription:anthropic:sonnet")
+    );
+    for (name, value) in [
+        ("AGENTS_EFFORT", "high"),
+        ("AGENTS_HARNESS_VERSION", "2.1.0"),
+        ("AGENTS_ROLE", "delegate"),
+        ("AGENTS_MODEL", "sonnet"),
+    ] {
+        assert_eq!(env_value(&connection, name), Some(value), "{name}");
+    }
+    // No account, no model, nothing else known: none of them is set, and none is ever empty.
+    let bare = session_connection(
+        "[env]\nWHO = \"${AGENTS_HARNESS}\"\n",
+        Starting {
+            who: Who {
+                harness: Some("codex"),
+                ..Who::default()
+            },
+            host: Vec::new(),
+        },
+    );
+    for name in [
+        "AGENTS_ACCOUNT",
+        "AGENTS_ACCOUNT_KIND",
+        "AGENTS_ACCOUNT_PROVIDER",
+        "AGENTS_MODEL",
+        "AGENTS_EFFORT",
+        "AGENTS_HARNESS_VERSION",
+        "AGENTS_ROLE",
+        "AGENTS_LOADOUT",
+        "AGENTS_SESSION_ID",
+        "AGENTS_PROJECT_ROOT",
+    ] {
+        assert_eq!(env_value(&bare, name), None, "{name}");
+    }
+    assert!(
+        bare.env()
+            .iter()
+            .all(|(_, value)| !value.expose().is_empty())
+    );
+}
+
+#[test]
+fn an_overlays_own_value_replaces_an_identity_variable_and_the_hosts_variables_are_readable() {
+    let connection = session_connection(
+        "[env]\nAGENTS_MODEL = \"mine\"\nSTATE = \"${CODEX_HOME}/thing\"\nCODEX_HOME = \"${CODEX_HOME}/own\"\n",
+        Starting {
+            who: Who {
+                harness: Some("codex"),
+                model: Some("gpt"),
+                ..Who::default()
+            },
+            host: vec![("CODEX_HOME".to_owned(), "/state".to_owned())],
+        },
+    );
+    assert_eq!(env_value(&connection, "AGENTS_MODEL"), Some("mine"));
+    // Mapping order carries no meaning: each value reads the variable as it was before the overlay.
+    assert_eq!(env_value(&connection, "STATE"), Some("/state/thing"));
+    assert_eq!(env_value(&connection, "CODEX_HOME"), Some("/state/own"));
+}
+
+#[test]
+fn an_overlay_naming_a_variable_the_specification_reserves_is_left_out() {
+    let temp = temp_with_skill();
+    install_files(&temp, "team", &[("env", "FOO_OVERLAY_ROOT=/x\n")]);
+    let offer = offer_of(&temp, &config_with("overlays = [\"team\"]\n"));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    assert!(
+        connection
+            .notes
+            .iter()
+            .any(|item| item.key == "overlay" && item.state == State::Refused),
+        "{:?}",
+        connection.notes
+    );
+    assert_eq!(env_value(&connection, "FOO_OVERLAY_ROOT"), None);
 }

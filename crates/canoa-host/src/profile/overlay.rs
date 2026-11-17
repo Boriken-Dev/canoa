@@ -15,7 +15,6 @@ use serde_json::{Map, Value, json};
 
 use super::{
     Change, Context, EnvValue, Layer, LayerId, LayerKind, McpServer, Profile, ProfileError, Skill,
-    is_reserved_env,
 };
 use coqui_aos::{self as aos, Environment, Facts, NonDefaultSetting, OverlayTree, Settings};
 
@@ -103,7 +102,7 @@ impl fmt::Display for OverlayRefusal {
             "invalid" => "its manifest is not valid",
             "env-file" => "an env file of it cannot be read",
             "path" => "a directory it adds to a variable is not inside its own folder",
-            _ => "it sets a variable a layer from elsewhere may not set",
+            _ => "it sets a variable the AOS specification reserves for the host",
         };
         write!(f, "{what} ({})", self.subject)
     }
@@ -222,8 +221,8 @@ const DEFAULT_SCRIPTS: [&str; 7] = [".py", ".js", ".mjs", ".cjs", ".ps1", ".bash
 ///
 /// [`OverlayRefusal`] for a name that is not a valid identity, a tree that cannot be digested, a manifest (`OVERLAY.md`
 /// or `overlay.cfg`, never both) that cannot be read or is not valid, an env file that is missing or cannot be read,
-/// a path addition that leaves the overlay's own folder, and a variable Canoa does not let a layer from elsewhere set
-/// ([`is_reserved_env`]), `PATH`, `PYTHONPATH` and `NODE_PATH` set by path additions aside.
+/// a path addition that leaves the overlay's own folder, and a variable the specification reserves for the consumer
+/// (`AOS_*`, `*_OVERLAY_ROOT`, `*_OVERLAY_STATE`). Every other variable is applied; the report lists the sensitive ones.
 #[allow(
     clippy::too_many_lines,
     reason = "one pass over the manifest, field by field"
@@ -332,18 +331,13 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
     for (variable, paths) in lists {
         set(&variable, EnvValue::Paths(paths), &mut env);
     }
-    // The three list variables an overlay's own `bin/` and `lib/` go on are what a path addition is for; every other
-    // reserved variable stays refused, as a path addition or as env.
-    let reserved = env
-        .iter()
+    // The names the specification reserves for the consumer are the only ones refused.
+    if let Some(name) = env
+        .keys()
         .skip(1)
-        .find(|(name, value)| {
-            is_reserved_env(name)
-                && !(matches!(value, EnvValue::Paths(_)) && is_list_variable(name))
-        })
-        .map(|(name, _)| name.clone());
-    if let Some(name) = reserved {
-        return Err(refused("reserved", name));
+        .find(|name| aos::is_reserved_variable(name))
+    {
+        return Err(refused("reserved", name.clone()));
     }
     profile.env = env
         .into_iter()
@@ -444,7 +438,10 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
                     },
                 );
             }
-            if let Some(variable) = variables.keys().find(|variable| is_reserved_env(variable)) {
+            if let Some(variable) = variables
+                .keys()
+                .find(|variable| aos::is_reserved_variable(variable))
+            {
                 return Err(refused("reserved", variable.clone()));
             }
             not_applied.push(format!(
@@ -645,13 +642,6 @@ fn context_entry(tree: &OverlayTree, path: &str, settings: &Settings) -> Option<
     let body = aos::context_file_text(tree.bytes(path)?, settings).ok()?;
     let text = core::str::from_utf8(body).ok()?;
     (!text.trim().is_empty()).then(|| Context::TemplateBody(text.to_owned()))
-}
-
-/// Whether `name` is one of the list variables an overlay's `bin/` and `lib/` go on.
-fn is_list_variable(name: &str) -> bool {
-    ["PATH", "PYTHONPATH", "NODE_PATH"]
-        .iter()
-        .any(|list| name.eq_ignore_ascii_case(list))
 }
 
 /// A text field of a mapping, empty when it is absent or not text.

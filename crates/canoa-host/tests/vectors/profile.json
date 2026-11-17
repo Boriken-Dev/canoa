@@ -1177,121 +1177,126 @@
       }
     },
     {
-      "name": "an overlay setting PATH",
+      "name": "an overlay sets variables that change how programs run, and all of them apply",
       "layers": [
         {
           "kind": "overlay",
           "name": "o",
-          "toml": "[env.PATH]\nvalue = \"/evil\"\n"
+          "toml": "[env.PATH]\nvalue = \"/extra\"\n[env.LD_PRELOAD]\nvalue = \"x.so\"\n[env.ANTHROPIC_BASE_URL]\nvalue = \"https://gateway.example\"\n[env.CLAUDE_CONFIG_DIR]\nvalue = \"x\"\n"
         }
       ],
-      "error": {
-        "layer": 0,
-        "code": "reserved",
-        "key": "env.PATH"
+      "effective": {
+        "env": [
+          {
+            "name": "PATH",
+            "value": {
+              "value": "/extra"
+            },
+            "layer": "overlay:o"
+          },
+          {
+            "name": "LD_PRELOAD",
+            "value": {
+              "value": "x.so"
+            },
+            "layer": "overlay:o"
+          },
+          {
+            "name": "ANTHROPIC_BASE_URL",
+            "value": {
+              "value": "https://gateway.example"
+            },
+            "layer": "overlay:o"
+          },
+          {
+            "name": "CLAUDE_CONFIG_DIR",
+            "value": {
+              "value": "x"
+            },
+            "layer": "overlay:o"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "removed": [],
+        "share_env": [],
+        "refused": []
       }
     },
     {
-      "name": "a project setting NODE_OPTIONS",
+      "name": "a project sets a loader option and a proxy in lower case, and both apply",
       "layers": [
         {
           "kind": "project",
-          "toml": "[env.NODE_OPTIONS]\nvalue = \"--require ./x.js\"\n"
+          "toml": "[env.NODE_OPTIONS]\nvalue = \"--require ./x.js\"\n[env.https_proxy]\nvalue = \"http://proxy.example\"\n"
         }
       ],
-      "error": {
-        "layer": 0,
-        "code": "reserved",
-        "key": "env.NODE_OPTIONS"
+      "effective": {
+        "env": [
+          {
+            "name": "NODE_OPTIONS",
+            "value": {
+              "value": "--require ./x.js"
+            },
+            "layer": "project"
+          },
+          {
+            "name": "https_proxy",
+            "value": {
+              "value": "http://proxy.example"
+            },
+            "layer": "project"
+          }
+        ],
+        "skills": [],
+        "mcp": [],
+        "removed": [],
+        "share_env": [],
+        "refused": []
       }
     },
     {
-      "name": "an overlay setting a loader variable",
+      "name": "an overlay setting a variable the specification reserves",
       "layers": [
         {
           "kind": "overlay",
           "name": "o",
-          "toml": "[env.LD_PRELOAD]\nvalue = \"x.so\"\n"
+          "toml": "[env.AOS_MODE]\nvalue = \"x\"\n"
         }
       ],
       "error": {
         "layer": 0,
         "code": "reserved",
-        "key": "env.LD_PRELOAD"
+        "key": "env.AOS_MODE"
       }
     },
     {
-      "name": "an overlay moving an agent's API",
-      "layers": [
-        {
-          "kind": "overlay",
-          "name": "o",
-          "toml": "[env.ANTHROPIC_BASE_URL]\nvalue = \"https://attacker.example\"\n"
-        }
-      ],
-      "error": {
-        "layer": 0,
-        "code": "reserved",
-        "key": "env.ANTHROPIC_BASE_URL"
-      }
-    },
-    {
-      "name": "a project setting a proxy in lower case",
+      "name": "a project setting another overlay's root variable in lower case",
       "layers": [
         {
           "kind": "project",
-          "toml": "[env.https_proxy]\nvalue = \"http://attacker.example\"\n"
+          "toml": "[env.team_overlay_root]\nvalue = \"/x\"\n"
         }
       ],
       "error": {
         "layer": 0,
         "code": "reserved",
-        "key": "env.https_proxy"
+        "key": "env.team_overlay_root"
       }
     },
     {
-      "name": "an overlay setting Path, as Windows spells it",
+      "name": "an overlay's MCP server with a state variable",
       "layers": [
         {
           "kind": "overlay",
           "name": "o",
-          "toml": "[env.Path]\nvalue = \"C:/evil\"\n"
+          "toml": "[mcp.m]\ntype = \"stdio\"\ncommand = \"m\"\n[mcp.m.env.TEAM_OVERLAY_STATE]\nvalue = \"x\"\n"
         }
       ],
       "error": {
         "layer": 0,
         "code": "reserved",
-        "key": "env.Path"
-      }
-    },
-    {
-      "name": "an overlay moving a harness's home",
-      "layers": [
-        {
-          "kind": "overlay",
-          "name": "o",
-          "toml": "[env.CLAUDE_CONFIG_DIR]\nvalue = \"x\"\n"
-        }
-      ],
-      "error": {
-        "layer": 0,
-        "code": "reserved",
-        "key": "env.CLAUDE_CONFIG_DIR"
-      }
-    },
-    {
-      "name": "an overlay's MCP server with PYTHONPATH",
-      "layers": [
-        {
-          "kind": "overlay",
-          "name": "o",
-          "toml": "[mcp.m]\ntype = \"stdio\"\ncommand = \"m\"\n[mcp.m.env.PYTHONPATH]\nvalue = \"x\"\n"
-        }
-      ],
-      "error": {
-        "layer": 0,
-        "code": "reserved",
-        "key": "mcp.m.env.PYTHONPATH"
+        "key": "mcp.m.env.TEAM_OVERLAY_STATE"
       }
     },
     {
@@ -1971,7 +1976,7 @@
       }
     },
     {
-      "name": "an overlay that sets a variable Canoa reserves is left out whole, and the others stay",
+      "name": "an overlay that sets a variable the specification reserves is left out whole, and the others stay",
       "os": "linux",
       "overlays": [
         {
@@ -1979,7 +1984,7 @@
           "root": "/ov/bad",
           "pinned": true,
           "files": {
-            "env": "NODE_OPTIONS=--require ./x.js\n"
+            "env": "AOS_MODE=x\n"
           }
         },
         {
@@ -1995,7 +2000,7 @@
         {
           "identity": "bad",
           "code": "reserved",
-          "subject": "NODE_OPTIONS"
+          "subject": "AOS_MODE"
         }
       ],
       "view": {
@@ -3006,65 +3011,6 @@
       }
     }
   ],
-  "reserved_env": {
-    "names": [
-      "PATH",
-      "PATHEXT",
-      "HOME",
-      "USERPROFILE",
-      "APPDATA",
-      "LOCALAPPDATA",
-      "XDG_CONFIG_HOME",
-      "XDG_DATA_HOME",
-      "TMP",
-      "TEMP",
-      "TMPDIR",
-      "COMSPEC",
-      "SHELL",
-      "BASH_ENV",
-      "ENV",
-      "PROMPT_COMMAND",
-      "NODE_OPTIONS",
-      "NODE_PATH",
-      "NODE_EXTRA_CA_CERTS",
-      "PERL5OPT",
-      "PERL5LIB",
-      "RUBYOPT",
-      "RUBYLIB",
-      "JAVA_TOOL_OPTIONS",
-      "_JAVA_OPTIONS",
-      "JDK_JAVA_OPTIONS",
-      "SSL_CERT_FILE",
-      "SSL_CERT_DIR",
-      "REQUESTS_CA_BUNDLE",
-      "CURL_CA_BUNDLE",
-      "CLAUDE_CONFIG_DIR",
-      "CLAUDE_CODE_EXECUTABLE",
-      "CODEX_HOME",
-      "CODEX_CONFIG",
-      "GEMINI_CLI_HOME",
-      "GEMINI_SYSTEM_MD",
-      "PI_CODING_AGENT_DIR",
-      "PI_ACP_PI_COMMAND",
-      "GROK_HOME",
-      "OPENCODE_CONFIG",
-      "OPENCODE_CONFIG_DIR",
-      "OPENCODE_CONFIG_CONTENT"
-    ],
-    "prefixes": [
-      "LD_",
-      "DYLD_",
-      "PYTHON",
-      "GIT_",
-      "NPM_CONFIG_",
-      "CANOA_",
-      "COQUI_"
-    ],
-    "suffixes": [
-      "_BASE_URL",
-      "_PROXY"
-    ]
-  },
   "loadouts": [
     {
       "name": "the default loadout holds its overlays in composition order, its skills and its servers",

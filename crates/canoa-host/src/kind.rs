@@ -393,19 +393,9 @@ impl Harness {
         offer.host.read_grant(config, info)
     }
 
-    /// The account the client's first message chooses for its connection, held for it: the one it names in `_meta`, else the
-    /// entry's first; `None` for an entry that offers none. `holder` says who is holding it. With `any`, the client may also
-    /// name an account of the provider the entry does not list, or `null` for the login the program has where it runs.
-    ///
-    /// # Errors
-    ///
-    /// Why the choice is refused, for the client.
-    pub(crate) fn choose(
-        &self,
-        first: &[u8],
-        holder: &str,
-        any: bool,
-    ) -> Result<Option<Held>, String> {
+    /// The account the first message chooses, not yet held: what [`Self::choose`] holds. `None` for an entry that offers
+    /// none, or when the client names `null` and may.
+    fn pick(&self, first: &[u8], any: bool) -> Result<Option<&Offered>, String> {
         let Some(offer) = &self.accounts else {
             return Ok(None);
         };
@@ -419,7 +409,7 @@ impl Harness {
                     .cloned()
             });
         let listed = |name: &str| offer.offered.iter().find(|(offered, ..)| offered == name);
-        let (name, config, info) = match named {
+        let picked = match named {
             None => match offer.offered.first() {
                 Some(first) => Some(first),
                 None => return Ok(None),
@@ -447,6 +437,42 @@ impl Harness {
                 why.unwrap_or_default()
             )
         })?;
+        Ok(Some(picked))
+    }
+
+    /// The label, kind id and provided standards of the account the first message chooses, which a session's environment
+    /// names as `AGENTS_ACCOUNT` and its kind and provider; nothing of its credentials. `None` when there is none, or the
+    /// choice is one `choose` refuses.
+    pub(crate) fn account_facts(
+        &self,
+        first: &[u8],
+        any: bool,
+    ) -> Option<(String, String, Vec<String>)> {
+        self.pick(first, any)
+            .ok()
+            .flatten()
+            .map(|(name, config, info)| (name.clone(), config.kind.clone(), info.provides.clone()))
+    }
+
+    /// The account the client's first message chooses for its connection, held for it: the one it names in `_meta`, else the
+    /// entry's first; `None` for an entry that offers none. `holder` says who is holding it. With `any`, the client may also
+    /// name an account of the provider the entry does not list, or `null` for the login the program has where it runs.
+    ///
+    /// # Errors
+    ///
+    /// Why the choice is refused, for the client.
+    pub(crate) fn choose(
+        &self,
+        first: &[u8],
+        holder: &str,
+        any: bool,
+    ) -> Result<Option<Held>, String> {
+        let Some(offer) = &self.accounts else {
+            return Ok(None);
+        };
+        let Some((name, config, info)) = self.pick(first, any)? else {
+            return Ok(None);
+        };
         let held = offer
             .host
             .begin(name, config, info, self.runs(), holder)

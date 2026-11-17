@@ -6,6 +6,7 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:toml/toml.dart';
 
 import 'overlay_layer.dart';
+import 'session.dart';
 
 /// The longest skill, MCP server, header or overlay name.
 const int maxProfileName = 64;
@@ -15,31 +16,6 @@ const int maxEnvName = 128;
 
 /// The largest file a `from_file` reference reads, in bytes.
 const int maxSecretFile = 1024 * 1024;
-
-/// Environment variables an overlay or a project may not set, compared without case: they decide what a process runs or
-/// loads, where an agent's own requests go, where a harness keeps its configuration, or which certificates are trusted.
-const reservedEnv = [
-  'PATH', 'PATHEXT', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'TMP',
-  'TEMP', 'TMPDIR', 'COMSPEC', 'SHELL', 'BASH_ENV', 'ENV', 'PROMPT_COMMAND', 'NODE_OPTIONS', 'NODE_PATH',
-  'NODE_EXTRA_CA_CERTS', 'PERL5OPT', 'PERL5LIB', 'RUBYOPT', 'RUBYLIB', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS',
-  'JDK_JAVA_OPTIONS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'CLAUDE_CONFIG_DIR',
-  'CLAUDE_CODE_EXECUTABLE', 'CODEX_HOME', 'CODEX_CONFIG', 'GEMINI_CLI_HOME', 'GEMINI_SYSTEM_MD', 'PI_CODING_AGENT_DIR',
-  'PI_ACP_PI_COMMAND', 'GROK_HOME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT',
-];
-
-/// Prefixes of [reservedEnv]'s kind, compared without case.
-const reservedEnvPrefixes = ['LD_', 'DYLD_', 'PYTHON', 'GIT_', 'NPM_CONFIG_', 'CANOA_', 'COQUI_'];
-
-/// Suffixes of [reservedEnv]'s kind, compared without case.
-const reservedEnvSuffixes = ['_BASE_URL', '_PROXY'];
-
-/// Whether an overlay or a project may not set [name]: [reservedEnv] and its prefixes and suffixes, and every variable the
-/// AOS specification names sensitive ([isSensitive]).
-bool isReservedEnv(String name) {
-  final upper = name.toUpperCase();
-  return aos.isSensitiveVariable(name) || reservedEnv.contains(upper) || reservedEnvPrefixes.any(upper.startsWith) ||
-      reservedEnvSuffixes.any(upper.endsWith);
-}
 
 /// Where a layer comes from, lowest first.
 enum LayerKind {
@@ -224,7 +200,7 @@ final class ProfileException implements Exception {
     'path' => 'Profile $key: a path is empty, or leaves the directory of a layer that comes from elsewhere',
     'form' => 'Profile $key: takes exactly one of its forms',
     'value' => 'Profile $key: a value is empty, holds a control character, or is not an HTTP URL',
-    'reserved' => 'Profile $key: a layer from elsewhere may not set this variable',
+    'reserved' => 'Profile $key: a layer from elsewhere may not set a variable the AOS specification reserves for the host',
     _ => 'Profile $key: ${reason ?? 'the reference cannot be resolved'}',
   };
 }
@@ -539,11 +515,11 @@ McpServer _mcpServer(String key, Map<dynamic, dynamic> raw, bool confined) {
   }
 }
 
-/// A confined layer's [value] for [name] unless [name] is reserved.
+/// A confined layer's [value] for [name] unless the specification reserves [name] for the host.
 EnvValue _reserved(String key, String name, EnvValue value, bool confined) =>
-    confined && isReservedEnv(name) ? _invalid('reserved', key) : value;
+    confined && aos.isReservedVariable(name) ? _invalid('reserved', key) : value;
 
-/// A server's `env` ([variables]) or `headers`; a confined layer's variables may not be reserved ones.
+/// A server's `env` ([variables]) or `headers`; a confined layer's variables may not be ones the specification reserves.
 Map<String, EnvValue> _entries(String key, Object? table, bool variables, bool confined) {
   final names = variables ? isEnvName : isEntryName;
   final out = <String, EnvValue>{};
@@ -664,14 +640,21 @@ final class EffectiveProfile {
   /// The environment variables, each reference resolved: what a session starts with, and nothing else may hold.
   /// [lookup] reads this process's environment; [readFile] a file's text, or null when it cannot, or when [within] is
   /// given and the file, its links resolved, is outside that directory.
-  /// Into [after] goes each AOS overlay's environment once it applied, as [buildOverlayEnvironment] gives it.
+  /// Into [after] goes each AOS overlay's environment once it applied, as [buildOverlayEnvironment] gives it. [session]'s
+  /// variables are read before any layer applies, and its identity variables come first in the result, so a layer's own
+  /// value for one replaces them.
   Future<Map<String, Secret>> environment({
     required String? Function(String name) lookup,
     required Future<String?> Function(String path, {String? within}) readFile,
     Map<String, BuiltEnvironment>? after,
+    SessionVariables session = const SessionVariables.none(),
   }) async {
+    final outer = lookup;
+    lookup = session.lookup(outer);
     final built = buildOverlayEnvironment(aos, shareEnv, lookup, after: after);
-    final out = <String, Secret>{};
+    final out = <String, Secret>{
+      for (final MapEntry(:key, :value) in session.identity.entries) key: Secret(value),
+    };
     for (final MapEntry(:key, :value) in env.entries) {
       if (value.layer.kind == LayerKind.overlay && aos.any((layer) => layer.identity == value.layer.name)) {
         // An optional reference that could not be resolved leaves its variable unset.
@@ -734,8 +717,11 @@ bool isAbsolutePath(String path) =>
 /// Merges [layers], lowest first. A later layer's value replaces a lower one's; a named entry is replaced whole and keeps
 /// its place; an entry removed and set again later comes last. An overlay's or a project's entry that reads a variable
 /// no other layer lists in `share_env` is left out, and the lower layer's entry stays.
-EffectiveProfile mergeProfiles(List<Layer> layers) {
+EffectiveProfile mergeProfiles(List<Layer> layers, {SessionVariables session = const SessionVariables.none()}) {
   final out = EffectiveProfile();
+  for (final name in session.names) {
+    out.shareEnv.putIfAbsent(name, () => const LayerId(LayerKind.builtIn, 'session'));
+  }
   for (final layer in layers.where((layer) => !layer.id.kind.confined)) {
     for (final name in layer.profile.shareEnv) {
       out.shareEnv.putIfAbsent(name, () => layer.id);

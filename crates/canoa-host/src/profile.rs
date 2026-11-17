@@ -21,81 +21,6 @@ pub const MAX_ENV_NAME: usize = 128;
 /// The largest file a `from_file` reference reads, in bytes.
 pub const MAX_SECRET_FILE: u64 = 1024 * 1024;
 
-/// Environment variables an overlay or a project may not set, compared without case: they decide what a process runs or
-/// loads, where an agent's own requests go, where a harness keeps its configuration, or which certificates are trusted.
-pub const RESERVED_ENV: &[&str] = &[
-    "PATH",
-    "PATHEXT",
-    "HOME",
-    "USERPROFILE",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "XDG_CONFIG_HOME",
-    "XDG_DATA_HOME",
-    "TMP",
-    "TEMP",
-    "TMPDIR",
-    "COMSPEC",
-    "SHELL",
-    "BASH_ENV",
-    "ENV",
-    "PROMPT_COMMAND",
-    "NODE_OPTIONS",
-    "NODE_PATH",
-    "NODE_EXTRA_CA_CERTS",
-    "PERL5OPT",
-    "PERL5LIB",
-    "RUBYOPT",
-    "RUBYLIB",
-    "JAVA_TOOL_OPTIONS",
-    "_JAVA_OPTIONS",
-    "JDK_JAVA_OPTIONS",
-    "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
-    "REQUESTS_CA_BUNDLE",
-    "CURL_CA_BUNDLE",
-    "CLAUDE_CONFIG_DIR",
-    "CLAUDE_CODE_EXECUTABLE",
-    "CODEX_HOME",
-    "CODEX_CONFIG",
-    "GEMINI_CLI_HOME",
-    "GEMINI_SYSTEM_MD",
-    "PI_CODING_AGENT_DIR",
-    "PI_ACP_PI_COMMAND",
-    "GROK_HOME",
-    "OPENCODE_CONFIG",
-    "OPENCODE_CONFIG_DIR",
-    "OPENCODE_CONFIG_CONTENT",
-];
-/// Prefixes of [`RESERVED_ENV`]'s kind, compared without case.
-pub const RESERVED_ENV_PREFIXES: &[&str] = &[
-    "LD_",
-    "DYLD_",
-    "PYTHON",
-    "GIT_",
-    "NPM_CONFIG_",
-    "CANOA_",
-    "COQUI_",
-];
-/// Suffixes of [`RESERVED_ENV`]'s kind, compared without case.
-pub const RESERVED_ENV_SUFFIXES: &[&str] = &["_BASE_URL", "_PROXY"];
-
-/// Whether an overlay or a project may not set `name`: [`RESERVED_ENV`] and its prefixes and suffixes, and every
-/// variable the AOS specification names sensitive ([`coqui_aos::is_sensitive_variable`]). An overlay's own `bin/` and
-/// `lib/` are the exception: its path additions may name `PATH`, `PYTHONPATH` and `NODE_PATH`.
-#[must_use]
-pub fn is_reserved_env(name: &str) -> bool {
-    let upper = name.to_ascii_uppercase();
-    coqui_aos::is_sensitive_variable(name)
-        || RESERVED_ENV.contains(&upper.as_str())
-        || RESERVED_ENV_PREFIXES
-            .iter()
-            .any(|prefix| upper.starts_with(prefix))
-        || RESERVED_ENV_SUFFIXES
-            .iter()
-            .any(|suffix| upper.ends_with(suffix))
-}
-
 /// Where a layer comes from, lowest first. The order of a merge is the caller's; this is the order Canoa uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
@@ -427,7 +352,8 @@ pub enum Rule {
     Form,
     /// A value that is empty or holds a control character, or an MCP URL that is not HTTP.
     Value,
-    /// An environment variable an overlay or a project may not set ([`is_reserved_env`]).
+    /// An environment variable the AOS specification reserves for the consumer (`AOS_*`, `*_OVERLAY_ROOT`,
+    /// `*_OVERLAY_STATE`) in a layer from elsewhere.
     Reserved,
 }
 
@@ -466,7 +392,9 @@ impl fmt::Display for ProfileError {
                     Rule::Value => {
                         "a value is empty, holds a control character, or is not an HTTP URL"
                     }
-                    Rule::Reserved => "a layer from elsewhere may not set this variable",
+                    Rule::Reserved => {
+                        "a layer from elsewhere may not set a variable the AOS specification reserves for the host (AOS_*, *_OVERLAY_ROOT, *_OVERLAY_STATE)"
+                    }
                 };
                 write!(f, "profile {key}: {what}")
             }
@@ -647,7 +575,7 @@ impl Profile {
                 )?
             } else {
                 let value = env_value(&key, raw, confined)?;
-                if confined && is_reserved_env(&name) {
+                if confined && coqui_aos::is_reserved_variable(&name) {
                     return Err(invalid(&key, Rule::Reserved));
                 }
                 Change::Set(value)
@@ -761,7 +689,7 @@ fn env_value(key: &str, raw: RawEnv, confined: bool) -> Result<EnvValue, Profile
     }
 }
 
-/// A server's `env` (`variables`) or `headers`; a confined layer's variables may not be reserved ones.
+/// A server's `env` (`variables`) or `headers`; a confined layer's variables may not be ones the specification reserves.
 fn values(
     key: &str,
     table: Option<IndexMap<String, RawEnv>>,
@@ -779,7 +707,7 @@ fn values(
             return Err(invalid(&entry, Rule::Form));
         }
         let value = env_value(&entry, raw, confined)?;
-        if variables && confined && is_reserved_env(&name) {
+        if variables && confined && coqui_aos::is_reserved_variable(&name) {
             return Err(invalid(&entry, Rule::Reserved));
         }
         out.insert(name, value);
@@ -956,7 +884,17 @@ pub struct Effective {
 /// no other layer lists in `share_env` is left out, and the lower layer's entry stays.
 #[must_use]
 pub fn merge(layers: &[Layer]) -> Effective {
+    merge_with(layers, &Session::none())
+}
+
+/// As [`merge`], with `session`'s variables readable by every layer, as if the first layer shared them.
+pub(crate) fn merge_with(layers: &[Layer], session: &Session) -> Effective {
     let mut out = Effective::default();
+    for name in session.names() {
+        out.share_env
+            .entry(name.to_owned())
+            .or_insert_with(|| LayerId::new(LayerKind::BuiltIn, "session"));
+    }
     for layer in layers.iter().filter(|layer| !layer.id.kind.is_confined()) {
         for name in &layer.profile.share_env {
             out.share_env
@@ -1554,6 +1492,7 @@ fn position(text: &str, offset: usize) -> (usize, usize) {
 pub(crate) mod hosted;
 mod launch;
 mod overlay;
+mod session;
 
 pub(crate) use hosted::forward_hook;
 pub use hosted::{APPROVE_META, APPROVE_METHOD, OVERLAYS_META, PRESET_META, PROFILE_META};
@@ -1562,6 +1501,7 @@ pub use launch::launch;
 pub(crate) use launch::{found_on_own_path, sets_path};
 pub(crate) use overlay::active_facts;
 pub use overlay::{AosLayer, OverlayInput, OverlayRefusal, OverlayReport, overlay_layer};
+pub(crate) use session::{Session, Who, account_words, starting};
 
 #[cfg(test)]
 mod tests;

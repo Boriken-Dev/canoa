@@ -46,7 +46,8 @@ use crate::kb_mcp::{self, KbLayer};
 use crate::kind;
 use crate::local::{self, Link};
 use crate::pipe;
-use crate::profile::hosted::{self, Connection, Hosted, Offer};
+use crate::profile::hosted::{self, Connection, Hosted, Offer, Starting};
+use crate::profile::{Who, account_words};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
 use crate::secrets::{self, Layer, Raw};
@@ -2518,6 +2519,25 @@ fn give_agent_flow<C: Channel>(
         .as_ref()
         .map_or_else(|| offer.clone(), |refresh| refresh.offer());
     let offer = fresh.as_ref();
+    // A key trusted with accounts may run a session on any account of the entry's provider, not only those the entry lists.
+    let any_account = shared
+        .store_grants(peer, context.is_some())
+        .is_some_and(|grants| grants.contains(&control::Grant::Accounts));
+    let account = match &agent {
+        Agent::Harness(harness) => harness.account_facts(first, any_account),
+        Agent::Program { .. } => None,
+    };
+    let provider = match &agent {
+        Agent::Harness(harness) => Some(harness.id()),
+        Agent::Program { .. } => None,
+    };
+    let harness_id = hosted::harness_identity(provider, &served.name);
+    let (account_kind, account_provider) = account
+        .as_ref()
+        .map_or((None, None), |(_, kind, provides)| {
+            account_words(kind, provides, harness_id)
+        });
+    let version = hosted::harness_version(provider);
     let connection = match offer {
         Some(offer) => match prepare(
             served,
@@ -2527,6 +2547,19 @@ fn give_agent_flow<C: Channel>(
             offer,
             // Only this process's own link is asked to approve: a key reaches the configuration's behaviour.
             *peer == shared.method.peer_id(),
+            Starting {
+                who: Who {
+                    harness: harness_id,
+                    version: version.as_deref(),
+                    account: account.as_ref().map(|(label, ..)| label.as_str()),
+                    account_kind,
+                    account_provider,
+                    // A task another agent started runs as its delegate.
+                    role: context.is_some().then_some("delegate"),
+                    ..Who::default()
+                },
+                host: hosted::host_variables(provider),
+            },
         ) {
             Some(connection) => Some(connection),
             None => return,
@@ -2570,15 +2603,7 @@ fn give_agent_flow<C: Channel>(
                 shared,
                 served,
                 channel,
-                (
-                    peer,
-                    first,
-                    // A key trusted with accounts may run a session on any account of the entry's provider, not only those the
-                    // entry lists.
-                    shared
-                        .store_grants(peer, context.is_some())
-                        .is_some_and(|grants| grants.contains(&control::Grant::Accounts)),
-                ),
+                (peer, first, any_account),
                 options,
                 scope,
                 (
@@ -2657,6 +2682,7 @@ fn prepare<C: Channel>(
     peer: &PeerId,
     offer: &Offer,
     in_process: bool,
+    starting: Starting<'_>,
 ) -> Option<Connection> {
     let refuse = |answer: Option<Vec<u8>>, log: &str| {
         if let Some(answer) = answer {
@@ -2698,9 +2724,8 @@ fn prepare<C: Channel>(
         index,
         &served.name,
         &lookup,
-        only.as_deref(),
-        loadout.as_deref(),
-        preset.as_deref(),
+        (only.as_deref(), loadout.as_deref(), preset.as_deref()),
+        starting,
     ) {
         Ok(connection) => Some(connection.asking(in_process)),
         Err(why) => {

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:canoa/profile/aos_support.dart';
 import 'package:canoa/profile/overlay_layer.dart';
 import 'package:canoa/profile/profile.dart';
+import 'package:canoa/profile/session.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -133,7 +134,7 @@ void main() {
       expect(layerOf(files).aos!.notApplied, isEmpty);
     });
 
-    test('a path that leaves the overlay is refused, and so is any other reserved variable a path addition names', () {
+    test('a path that leaves the overlay is refused, and any variable may take a path addition', () {
       for (final path in ['../up', 'bin/../../up', '/etc', 'C:/Windows']) {
         expect(
           () => layerOf({'overlay.cfg': '[[paths]]\nvariable = "MANPATH"\npath = "$path"\n'}),
@@ -142,15 +143,101 @@ void main() {
         );
       }
       for (final variable in ['LD_LIBRARY_PATH', 'PERL5LIB', 'HOME', 'NODE_OPTIONS']) {
+        layerOf({'overlay.cfg': '[[paths]]\nvariable = "$variable"\npath = "lib"\n', 'lib/x': 'x'});
+      }
+    });
+  });
+
+  group('variables', () {
+    Layer layerOf(Map<String, String> files) => overlayLayer(
+      identity: 'team',
+      root: '/ov/team',
+      os: 'linux',
+      tree: treeOfFiles({for (final MapEntry(:key, :value) in files.entries) key: utf8.encode(value)}).tree,
+    );
+
+    test('every variable applies, and the sensitive ones are listed in the report', () {
+      final layer = layerOf({
+        'overlay.cfg': '[env]\nNODE_OPTIONS = "--require x"\nLD_PRELOAD = "x.so"\nHTTPS_PROXY = "http://proxy.example"\n'
+            'ANTHROPIC_BASE_URL = "https://gateway.example"\nCODEX_HOME = "x"\n',
+      });
+      for (final name in ['NODE_OPTIONS', 'LD_PRELOAD', 'HTTPS_PROXY', 'ANTHROPIC_BASE_URL', 'CODEX_HOME']) {
+        expect(layer.profile.env, contains(name));
+      }
+      final view = mergeProfiles([layer]).view();
+      final listed = [
+        for (final setting in ((view['overlays']! as List).first as Map)['non_defaults'] as List)
+          if ((setting as List).first == 'env-sensitive') setting[1],
+      ];
+      expect(listed, containsAll(['NODE_OPTIONS', 'LD_PRELOAD', 'HTTPS_PROXY', 'ANTHROPIC_BASE_URL', 'CODEX_HOME']));
+    });
+
+    test('only the names the specification reserves for the host are refused', () {
+      for (final name in ['AOS_MODE', 'FOO_OVERLAY_ROOT', 'foo_overlay_state']) {
         expect(
-          () => layerOf({'overlay.cfg': '[[paths]]\nvariable = "$variable"\npath = "lib"\n', 'lib/x': 'x'}),
-          throwsA(isA<OverlayRefusal>().having((e) => e.code, 'code', 'reserved').having((e) => e.subject, 'subject', variable)),
+          () => layerOf({'env': '$name=x\n'}),
+          throwsA(isA<OverlayRefusal>().having((e) => e.code, 'code', 'reserved').having((e) => e.subject, 'subject', name)),
+          reason: name,
+        );
+        expect(
+          () => layerOf({'overlay.cfg': '[env]\n$name = "x"\n'}),
+          throwsA(isA<OverlayRefusal>().having((e) => e.code, 'code', anyOf('reserved', 'invalid'))),
+          reason: name,
         );
       }
-      expect(
-        () => layerOf({'overlay.cfg': '[env]\nPYTHONPATH = "x"\n'}),
-        throwsA(isA<OverlayRefusal>().having((e) => e.code, 'code', 'reserved')),
+    });
+
+    Future<Map<String, String>> environmentOf(Layer layer, SessionVariables session) async {
+      final effective = mergeProfiles([layer], session: session);
+      final env = await effective.environment(
+        lookup: (_) => null,
+        readFile: (path, {within}) async => null,
+        session: session,
       );
+      return {for (final MapEntry(:key, :value) in env.entries) key: value.expose()};
+    }
+
+    test('an overlay reads the identity variables and the host\'s own, and the agent is given the identity', () async {
+      for (final (harness, vendor) in [
+        ('claude-code', 'anthropic'),
+        ('codex', 'openai'),
+        ('antigravity', 'google'),
+        ('grok', 'xai'),
+      ]) {
+        final env = await environmentOf(
+          layerOf({'overlay.cfg': '[env]\nWHO = "\${AGENTS_HARNESS}/\${AGENTS_VENDOR}/\${AGENT}"\n'}),
+          SessionVariables(SessionWho(harness: harness, profile: 'main')),
+        );
+        expect(env['WHO'], '$harness/$vendor/$harness');
+        expect(env['AGENTS_HARNESS'], harness);
+        expect(env['AGENTS_VENDOR'], vendor);
+        expect(env['AGENTS_HOST'], 'canoa');
+        expect(env['AGENTS_PROFILE'], 'main');
+      }
+      final env = await environmentOf(
+        layerOf({
+          'overlay.cfg': '[env]\nAGENTS_MODEL = "mine"\nSTATE = "\${CODEX_HOME}/thing"\nCODEX_HOME = "\${CODEX_HOME}/own"\n',
+        }),
+        SessionVariables(const SessionWho(harness: 'codex', model: 'gpt'), host: const {'CODEX_HOME': '/state'}),
+      );
+      expect(env['AGENTS_MODEL'], 'mine');
+      expect(env['STATE'], '/state/thing');
+      expect(env['CODEX_HOME'], '/state/own');
+    });
+
+    test('a variable with no value is not set, and none is ever empty', () async {
+      final env = await environmentOf(
+        layerOf({'overlay.cfg': '[env]\nWHO = "\${AGENTS_HARNESS}"\n'}),
+        SessionVariables(const SessionWho(harness: 'pi', model: '', account: '')),
+      );
+      for (final name in ['AGENTS_VENDOR', 'AGENTS_MODEL', 'AGENTS_ACCOUNT', 'AGENTS_ROLE', 'AGENTS_SESSION_ID']) {
+        expect(env, isNot(contains(name)), reason: name);
+      }
+      expect(env.values, everyElement(isNotEmpty));
+      expect(accountWords('claude-login', const [], null), ('subscription', 'anthropic'));
+      expect(accountWords('codex-api-key', const [], null), ('api-key', 'openai'));
+      expect(accountWords('foundry-local', const [], null), ('local', 'microsoft-foundry'));
+      expect(accountWords('harness-login', const [], 'codex'), ('subscription', 'openai'));
     });
   });
 }

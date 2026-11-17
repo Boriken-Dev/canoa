@@ -22,7 +22,8 @@ use serde_json::{Map, Value, json};
 use super::overlay::{Built, build_each, granted, resolve_path};
 use super::{
     Change, Context, Effective, EnvValue, Layer, LayerId, LayerKind, McpServer, OverlayInput,
-    Secret, Skill, Sourced, merge, overlay_layer, resolve,
+    Scalar, Secret, Session, Skill, Sourced, Who, merge, merge_with, overlay_layer, resolve,
+    starting,
 };
 use crate::config::HostProfile;
 use crate::scope::{Scope, Verdict};
@@ -431,6 +432,17 @@ pub(crate) struct Connection {
     before: Vec<OsString>,
     /// Each layer's delegation suggestion, for the harness a session's agent turns out to be.
     delegation: Vec<(Layer, Option<aos::Document>)>,
+    /// What every layer reads before it applies: the identity variables and the host's own for the session.
+    session: Session,
+}
+
+/// What the host knows of the session its connection's environment is made for.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Starting<'a> {
+    /// Who the session is: harness, the entry's own model, account, folder.
+    pub(crate) who: Who<'a>,
+    /// Variables the host sets for the session itself, which layers read and may set their own from.
+    pub(crate) host: Vec<(String, String)>,
 }
 
 impl Connection {
@@ -477,7 +489,14 @@ impl Connection {
         entry: &str,
         lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Self, String> {
-        Self::prepare_with(offer, index, entry, lookup, None, None, None)
+        Self::prepare_with(
+            offer,
+            index,
+            entry,
+            lookup,
+            (None, None, None),
+            Starting::default(),
+        )
     }
 
     /// As [`Self::prepare`], with the overlays the client chose: only those of them the profile lists are read, and each
@@ -491,9 +510,8 @@ impl Connection {
         index: usize,
         entry: &str,
         lookup: &dyn Fn(&str) -> Option<String>,
-        only: Option<&[String]>,
-        loadout: Option<&str>,
-        preset: Option<&str>,
+        (only, loadout, preset): (Option<&[String]>, Option<&str>, Option<&str>),
+        starting_with: Starting<'_>,
     ) -> Result<Self, String> {
         let (name, listed) = &offer.profiles[index];
         let mut notes = Vec::new();
@@ -580,11 +598,28 @@ impl Connection {
         let overlays = read_overlays(host, &mut notes);
         let chosen = read_chosen(host, &mut notes);
         let layers = layers_of(host, &overlays, &chosen, None, &mut notes);
-        let effective = merge(&layers);
+        let model = starting(&layers, Scalar::Model);
+        let effort = starting(&layers, Scalar::Effort);
+        let session = Session::new(
+            Who {
+                model: model.as_deref().or(starting_with.who.model),
+                effort: effort.as_deref().or(starting_with.who.effort),
+                profile: Some(name.as_str()),
+                loadout: role.as_deref(),
+                ..starting_with.who
+            },
+            starting_with.host,
+            lookup,
+        );
+        let seen = session.lookup(lookup);
+        let lookup: &dyn Fn(&str) -> Option<String> = &seen;
+        let effective = merge_with(&layers, &session);
+        // What the person's own layers share, not the session's own variables.
         let shared_env = effective
             .share_env
-            .keys()
-            .filter_map(|name| lookup(name).map(|value| (name.clone(), value)))
+            .iter()
+            .filter(|(_, layer)| layer.kind != LayerKind::BuiltIn)
+            .filter_map(|(name, _)| lookup(name).map(|value| (name.clone(), value)))
             .collect();
         let mut hooks = Hooks::new(
             host,
@@ -601,8 +636,15 @@ impl Connection {
             .environment_with(lookup, &pre_env.runs, &pre_env.exported)
             .map_err(|error| error.to_string())?;
         notes.extend(resolved.hook_reports.iter().map(hooks::report_item));
-        notes.extend(pre_env.refused.iter().cloned());
-        let env = resolved.env;
+        notes.extend(pre_env.reported.iter().cloned());
+        let mut env = resolved.env;
+        // The identity variables come first, so a layer's own value for one replaces them.
+        for (name, value) in session.identity().iter().rev() {
+            if !env.iter().any(|(each, _)| each.eq_ignore_ascii_case(name)) {
+                env.insert(0, (name.clone(), Secret(value.clone())));
+            }
+        }
+        hooks.add_to_environment(session.identity().iter().cloned());
         // The person's own layers' variables are part of the session's environment, which hooks run in; an overlay's reach
         // them through the stack.
         hooks.add_to_environment(effective.env.iter().filter_map(|(name, value)| {
@@ -698,6 +740,7 @@ impl Connection {
                     )
                 })
                 .collect(),
+            session: session.clone(),
         })
     }
 
@@ -1180,6 +1223,40 @@ fn harness_of(reported: Option<&str>, entry: &str) -> Option<&'static str> {
             "Antigravity" => Some("antigravity"),
             _ => None,
         },
+    }
+}
+
+/// The AOS harness id of a session's agent for the identity variables: the id of the provider an entry runs in this process,
+/// else of an entry named as Canoa's presets are. Grok is named here though no AOS overlay has hints for it.
+pub(crate) fn harness_identity(provider: Option<&str>, entry: &str) -> Option<&'static str> {
+    match provider {
+        Some("claude") => Some("claude-code"),
+        Some("codex") => Some("codex"),
+        Some("pi") => Some("pi"),
+        _ => harness_of(None, entry).or(match entry {
+            "Grok" => Some("grok"),
+            _ => None,
+        }),
+    }
+}
+
+/// The version of the program the Store installed for the provider an entry runs in this process.
+pub(crate) fn harness_version(provider: Option<&str>) -> Option<String> {
+    match provider {
+        Some(program @ ("claude" | "codex")) => crate::sources::managed_version(program),
+        _ => None,
+    }
+}
+
+/// The variables the host sets for a session of the provider it runs in this process: what the Store's copy of the program
+/// is given, which a layer may read and set its own from. The provider's own settings for an account (its endpoint, its
+/// state directory) are applied inside the provider, after the request's environment, and are not these.
+pub(crate) fn host_variables(provider: Option<&str>) -> Vec<(String, String)> {
+    match provider {
+        Some(program @ ("claude" | "codex")) => crate::sources::managed_program(program)
+            .map(|(_, environment)| environment)
+            .unwrap_or_default(),
+        _ => Vec::new(),
     }
 }
 
@@ -1744,7 +1821,9 @@ fn parts_for(
         harness,
         &mut notes,
     );
-    let effective = merge(&layers);
+    let effective = merge_with(&layers, &connection.session);
+    let seen = connection.session.lookup(lookup);
+    let lookup: &dyn Fn(&str) -> Option<String> = &seen;
     let mut items = connection.notes.clone();
     items.extend(notes);
     items.extend(connection.env_items.iter().cloned());

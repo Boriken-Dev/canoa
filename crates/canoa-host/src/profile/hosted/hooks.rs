@@ -555,7 +555,21 @@ impl Hooks {
                 .into_owned();
             active.push((manifest, facts));
         }
-        let base = Environment::new(self.base.clone(), cfg!(windows));
+        let mut base = Environment::new(self.base.clone(), cfg!(windows));
+        // The folder and id of the session the hook runs for, where there is one: the `pre-env` run is made before any.
+        if event != HookEvent::PreEnv {
+            let session = turn.payload.get("session").and_then(Value::as_str);
+            for (name, value) in [
+                ("AGENTS_PROJECT_ROOT", turn.cwd.to_str()),
+                ("AGENTS_SESSION_ID", session),
+            ] {
+                if let Some(value) = value.filter(|value| !value.is_empty())
+                    && base.get(name).is_none()
+                {
+                    base.set(name, value.to_owned(), false);
+                }
+            }
+        }
         let made = aos::hook_environment(
             event,
             &active,
@@ -731,7 +745,7 @@ impl Hooks {
         known.insert("cwd".to_owned(), json!(cwd.to_string_lossy()));
         let payload = aos::hook_payload(HookEvent::PreEnv, &known);
         let mut out = BTreeMap::new();
-        let (mut exported, mut refused) = (Vec::new(), Vec::new());
+        let (mut exported, mut reported) = (Vec::new(), Vec::new());
         for overlay in self.overlays.iter().filter(|overlay| overlay.allowed) {
             let Some(hook) = overlay
                 .hooks
@@ -750,8 +764,9 @@ impl Hooks {
                 spent: 0,
             };
             let run = self.run_one(overlay, hook, &turn);
-            // What the environment script's output sets, which the agent is given besides the overlay's declared variables;
-            // a name the profile may not set from an overlay is left out and said so.
+            // What the environment script's output sets, which the agent is given besides the overlay's declared variables.
+            // Only the names the specification reserves for the consumer are left out (`fire_event` drops them); a variable
+            // that changes how programs find code, trust certificates or reach the network is applied and listed.
             let fired = aos::fire_event(
                 HookEvent::PreEnv,
                 core::slice::from_ref(&run),
@@ -763,23 +778,24 @@ impl Hooks {
                 if value.is_none() {
                     continue;
                 }
-                if crate::profile::is_reserved_env(&name) {
-                    refused.push(Item::new(
-                        format!("hooks.{}.pre-env.{name}", overlay.identity),
-                        LayerId::new(LayerKind::Overlay, overlay.identity.clone()),
-                        State::Refused,
-                        "hook-not-applied: an overlay may not set that variable for the agent",
-                    ));
-                } else if !exported.contains(&name) {
+                if !exported.contains(&name) {
                     exported.push(name);
                 }
+            }
+            for (id, name) in &fired.non_defaults {
+                reported.push(Item::new(
+                    format!("hooks.{}.pre-env.{name}", overlay.identity),
+                    LayerId::new(LayerKind::Overlay, overlay.identity.clone()),
+                    State::Applied,
+                    format!("{id}: the hook sets a variable that changes how programs find code, trust certificates or reach the network"),
+                ));
             }
             out.insert(overlay.identity.clone(), run);
         }
         PreEnv {
             runs: out,
             exported,
-            refused,
+            reported,
         }
     }
 }
@@ -821,8 +837,8 @@ pub(super) struct PreEnv {
     pub(super) runs: BTreeMap<String, HookRun>,
     /// The variables the runs set, which the agent is given.
     pub(super) exported: Vec<String>,
-    /// What was left out of them.
-    pub(super) refused: Vec<Item>,
+    /// What the runs set that is non-default, as the report lists it.
+    pub(super) reported: Vec<Item>,
 }
 
 impl core::fmt::Debug for PreEnv {

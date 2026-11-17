@@ -155,11 +155,4 @@ void main() {
       }
     });
   }
-
-  test('the reserved variables are the vectors\' list', () {
-    final reserved = vectors['reserved_env'] as Map;
-    expect(reservedEnv, reserved['names']);
-    expect(reservedEnvPrefixes, reserved['prefixes']);
-    expect(reservedEnvSuffixes, reserved['suffixes']);
-  });
 }

@@ -75,7 +75,7 @@ final class OverlayRefusal implements Exception {
     'invalid' => 'Its manifest is not valid',
     'env-file' => 'An env file of it cannot be read',
     'path' => 'A directory it adds to a variable is not inside its own folder',
-    _ => 'It sets a variable a layer from elsewhere may not set',
+    _ => 'It sets a variable the AOS specification reserves for the host',
   }} ($subject)';
 }
 
@@ -119,9 +119,6 @@ String _resolvePath(String root, String relative, bool windows) {
   final separator = windows ? r'\' : '/';
   return '${root.replaceFirst(RegExp(r'[/\\]+$'), '')}$separator${relative.replaceAll('/', separator)}';
 }
-
-/// Whether [name] is one of the list variables an overlay's `bin/` and `lib/` go on.
-bool _isListVariable(String name) => const {'PATH', 'PYTHONPATH', 'NODE_PATH'}.contains(name.toUpperCase());
 
 const _defaultScripts = ['.py', '.js', '.mjs', '.cjs', '.ps1', '.bash', '.sh'];
 
@@ -222,10 +219,9 @@ Layer overlayLayer({
   for (final MapEntry(:key, :value) in lists.entries) {
     set(key, EnvPaths(value));
   }
-  // The three list variables an overlay's own `bin/` and `lib/` go on are what a path addition is for; every other
-  // reserved variable stays refused, as a path addition or as env.
-  for (final MapEntry(:key, :value) in env.entries.skip(1)) {
-    if (isReservedEnv(key) && !(value is EnvPaths && _isListVariable(key))) throw OverlayRefusal('reserved', key);
+  // The names the specification reserves for the consumer are the only ones refused.
+  for (final key in env.keys.skip(1)) {
+    if (aos.isReservedVariable(key)) throw OverlayRefusal('reserved', key);
   }
 
   final skills = <String, Skill?>{};
@@ -262,7 +258,7 @@ Layer overlayLayer({
           '$variable': EnvReference('env:$variable', optional: true),
       };
       for (final variable in variables.keys) {
-        if (isReservedEnv(variable)) throw OverlayRefusal('reserved', variable);
+        if (aos.isReservedVariable(variable)) throw OverlayRefusal('reserved', variable);
       }
       notApplied.add("mcp.$name: it runs in the overlay's root, which Canoa does not set yet");
       mcp[name] = McpStdio(
@@ -631,7 +627,7 @@ BuiltEnvironment buildOverlayEnvironment(List<AosLayer> layers, Map<String, Laye
     final traced = aos.composedEnvironment(active.sublist(0, at + 1), marked.clone(), {}, []).env;
     last = BuiltEnvironment._(env, {
       for (final (name, value) in env.values())
-        if (!base.containsKey(name) || (traced == null ? base[name] != value : traced.get(name) != '$_mark$value')) windows ? name.toLowerCase() : name,
+        if (!base.containsKey(name) || base[name] != value || (traced != null && traced.get(name) != '$_mark$value')) windows ? name.toLowerCase() : name,
     });
     after?[layers[at].identity] = last;
   }

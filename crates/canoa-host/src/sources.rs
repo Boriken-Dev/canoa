@@ -151,6 +151,19 @@ pub(crate) fn runtime_dirs() -> Vec<PathBuf> {
     Shelf::default_root().map_or_else(Vec::new, |root| runtime_dirs_in(&Shelf::unchecked(root)))
 }
 
+/// The version of the copy [`managed_program`] runs, when there is one.
+pub(crate) fn managed_version(program: &str) -> Option<String> {
+    let shelf = Shelf::unchecked(Shelf::default_root()?);
+    managed_program_in(&shelf, program)?;
+    shelf
+        .program(program)
+        .ok()?
+        .current_checked()
+        .ok()??
+        .version
+        .into()
+}
+
 /// [`managed_program_in`] over this user's programs folder.
 pub(crate) fn managed_program(program: &str) -> Option<(PathBuf, Vec<(String, String)>)> {
     Shelf::default_root().and_then(|root| managed_program_in(&Shelf::unchecked(root), program))
