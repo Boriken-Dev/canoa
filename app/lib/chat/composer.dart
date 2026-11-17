@@ -9,7 +9,7 @@ import '../accounts/account_chooser.dart';
 import '../accounts/accounts_controller.dart';
 import '../acp/local_agent.dart' show InsideFile;
 import '../history/agent_switch.dart' show PortableAgents;
-import '../config/canoa_config.dart' show ResolvedLoadout;
+import '../config/canoa_config.dart' show Preset, ResolvedLoadout;
 import '../extension/composer_extension.dart';
 import '../session_store.dart';
 import '../sources/sources.dart';
@@ -55,6 +55,10 @@ final class ComposerKit {
     this.loadouts = const {},
     this.defaultLoadout,
     this.onLoadout,
+    this.presets = const {},
+    this.savePreset,
+    this.onSetup,
+    this.onProfiles,
     this.pasteAsFile = Composer.defaultPasteAsFile,
     this.enterSteers = false,
     this.warnPermille = defaultWarnPermille,
@@ -136,6 +140,19 @@ final class ComposerKit {
 
   /// Opens the Store, where an overlay is installed and turned on or off by default; null where there is none.
   final VoidCallback? onLoadout;
+
+  /// canoa.cfg's `[profiles]` by name: the values a new session may start with, chosen in its footer.
+  final Map<String, Preset> presets;
+
+  /// Writes the profile [name] into canoa.cfg as [preset], a new one or one that is changed; false when it could not be written.
+  /// Null where canoa.cfg is not the person's to write, which offers no saving.
+  final Future<bool> Function(String name, Preset preset)? savePreset;
+
+  /// Shows the setup [session] starts with, layer by layer; null where it cannot be worked out.
+  final void Function(ChatSession session)? onSetup;
+
+  /// Opens Settings at the profiles; null where there is none.
+  final VoidCallback? onProfiles;
 
   /// The sources Settings has, in its order.
   final List<AgentSource> sources;
@@ -452,6 +469,7 @@ class SessionComposer extends StatelessWidget {
       trailing: [
         if (kit.dictation case final dictation?) DictationButton(dictation: dictation, controller: controller, shortcut: dictationKeys),
         if (draft) SourceTroubleChip(store: store, session: session, kit: kit),
+        if (draft && (kit.presets.isNotEmpty || kit.savePreset != null)) PresetChooser(store: store, session: session, kit: kit),
         ModelEffortChooser(store: store, session: session, options: options, kit: kit, seen: seen),
         if (options.any((option) => roleOf(option) == OptionRole.other)) MoreChooser(store: store, session: session, options: options),
         if (draft) CacheChooser(store: store, session: session),

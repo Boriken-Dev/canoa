@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
@@ -12,6 +13,7 @@ import 'aos_support.dart';
 import 'overlay_layer.dart';
 import 'overlays.dart';
 import 'profile.dart';
+import 'profile_editor.dart';
 import 'profile_home.dart';
 import 'profile_layers.dart';
 import 'project_trust.dart';
@@ -23,7 +25,7 @@ import '../settings/settings_row.dart' show ScopeBar;
 /// only on a click that shows what changes; and the trusted project directories, each revocable.
 class ProfilesPanel extends StatefulWidget {
   const ProfilesPanel({super.key, required this.config, required this.agents, this.home, this.workingDirectory,
-      this.onPin, this.onLoadout});
+      this.onPin, this.onLoadout, this.onChange});
 
   final CanoaConfig config;
 
@@ -42,6 +44,9 @@ class ProfilesPanel extends StatefulWidget {
   /// Opens the Store, where overlays are found, installed and chosen; without it there is nowhere to.
   final VoidCallback? onLoadout;
 
+  /// Applies and writes an edit of canoa.cfg; without it the profiles are listed and not edited.
+  final Future<void> Function(CanoaConfig Function(CanoaConfig))? onChange;
+
   @override
   State<ProfilesPanel> createState() => ProfilesPanelState();
 }
@@ -53,10 +58,137 @@ class ProfilesPanelState extends State<ProfilesPanel> {
   ProfileLayers? layers;
   String? busy, problem;
 
+  /// The profile being edited: its name in canoa.cfg (null for a new one) and what the editor starts from.
+  ({String? original, Preset preset})? _editing;
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didUpdateWidget(ProfilesPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Settings holds the configuration the person is editing, which this panel shows once it is told.
+    if (!identical(oldWidget.config, widget.config)) config = widget.config;
+  }
+
+  /// Writes the profile [name] (in place of [original], which a rename takes out) as [preset]; the refusal when it cannot be.
+  Future<String?> _savePreset(String? original, String name, Preset preset) async {
+    final all = <String, Preset>{};
+    var placed = false;
+    for (final MapEntry(:key, :value) in config.presets.entries) {
+      if (key == original) {
+        all[name] = preset;
+        placed = true;
+      } else {
+        all[key] = value;
+      }
+    }
+    if (!placed) all[name] = preset;
+    return _change((held) => held.withPresets(all));
+  }
+
+  Future<String?> _change(CanoaConfig Function(CanoaConfig) edit) async {
+    final change = widget.onChange;
+    if (change == null) return 'canoa.cfg is not written from here';
+    try {
+      final next = edit(config);
+      await change((held) => edit(held));
+      if (mounted) setState(() => config = next);
+      return null;
+    } on FormatException catch (error) {
+      return error.message;
+    } on Object catch (error) {
+      return 'canoa.cfg could not be written: $error';
+    }
+  }
+
+  Future<void> _deletePreset(String name) async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete $name?'),
+        content: const Text('New sessions stop offering it. Sessions already running keep what they started with.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep it')),
+          FilledButton(key: const Key('profile-delete-confirm'), onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+    final refused = await _change((held) => held.withPresets({...held.presets}..remove(name)));
+    if (mounted) setState(() => problem = refused);
+  }
+
+  String _presetSummary(Preset preset) => [
+    ?preset.source,
+    if (preset.model != null || preset.effort != null) [?preset.model, ?preset.effort].join(' / '),
+    if (preset.mode case final mode?) 'mode $mode',
+    if (preset.context != null) 'starting instructions',
+    if (preset.loadout case final loadout?) 'loadout $loadout',
+  ].join(' · ');
+
+  Widget _presets(BuildContext context) {
+    final editing = _editing;
+    final presets = config.presets;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Expanded(child: Text('Profiles', style: Theme.of(context).textTheme.titleMedium)),
+        if (widget.onChange != null && editing == null)
+          TextButton(
+            key: const Key('profile-new'),
+            onPressed: () => setState(() => _editing = (original: null, preset: const Preset())),
+            child: const Text('New profile'),
+          ),
+      ]),
+      const Text('A profile holds the values a new session starts with, chosen by name at its footer: its source, model, effort, '
+          'mode and starting instructions. Your own profile (the user layer below) is what every session gets, whatever profile it is given; '
+          'a profile sits above it. The account and the permissions are never part of a profile.'),
+      if (presets.isEmpty && editing == null) const Text('None yet.', key: Key('profiles-none')),
+      for (final MapEntry(key: name, value: preset) in presets.entries)
+        ListTile(
+          key: Key('profile-row-$name'),
+          dense: true,
+          title: Text(name),
+          subtitle: Text(visible(_presetSummary(preset).isEmpty ? 'Sets nothing' : _presetSummary(preset))),
+          trailing: widget.onChange == null
+              ? null
+              : Row(mainAxisSize: MainAxisSize.min, children: [
+                  TextButton(
+                    key: Key('profile-edit-$name'),
+                    onPressed: editing != null ? null : () => setState(() => _editing = (original: name, preset: preset)),
+                    child: const Text('Edit'),
+                  ),
+                  TextButton(
+                    key: Key('profile-copy-$name'),
+                    onPressed: editing != null ? null : () => setState(() => _editing = (original: null, preset: preset)),
+                    child: const Text('Copy'),
+                  ),
+                  TextButton(
+                    key: Key('profile-delete-$name'),
+                    onPressed: editing != null ? null : () => unawaited(_deletePreset(name)),
+                    child: const Text('Delete'),
+                  ),
+                ]),
+        ),
+      if (editing != null)
+        ProfileEditor(
+          key: ValueKey('profile-editor-${editing.original}-${editing.preset.hashCode}'),
+          original: editing.original,
+          preset: editing.preset,
+          taken: presets.keys.toSet(),
+          sources: widget.agents,
+          loadouts: config.loadouts.keys.toList(),
+          onSave: (name, preset) async {
+            final refused = await _savePreset(editing.original, name, preset);
+            if (refused == null && mounted) setState(() => _editing = null);
+            return refused;
+          },
+          onCancel: () => setState(() => _editing = null),
+        ),
+    ]);
   }
 
   @override
@@ -179,6 +311,8 @@ class ProfilesPanelState extends State<ProfilesPanel> {
               onSubmitted: (_) => _load(),
             ),
           if (project != null) _projectRow(project),
+          const SizedBox(height: 12),
+          _presets(context),
           const SizedBox(height: 12),
           Text('Effective profile', style: Theme.of(context).textTheme.titleMedium),
           if (found == null) const LinearProgressIndicator() else EffectiveTable(effective: found.effective),

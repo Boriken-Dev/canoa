@@ -16,6 +16,10 @@ const overlaysMeta = 'dev.boriken.canoa/overlays';
 /// the session starts.
 const loadoutMeta = 'dev.boriken.canoa/loadout';
 
+/// Where `initialize` names the profile a session starts with: one of canoa.cfg's `[profiles]`, whose model, effort, mode and
+/// starting instructions the host makes the session's layer, and whose loadout is the one the session starts with unless it names one.
+const presetMeta = 'dev.boriken.canoa/preset';
+
 /// Each harness's name, by its AOS harness id.
 const harnessLabels = {
   'claude-code': 'Claude Code',

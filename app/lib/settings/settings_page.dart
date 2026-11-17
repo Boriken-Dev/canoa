@@ -242,6 +242,7 @@ class SettingsPageState extends State<SettingsPage> {
         home: widget.home,
         onPin: widget.onPin,
         onLoadout: widget.onLoadout,
+        onChange: controller.change,
       ),
       'mcp' => McpSection(controller: controller, agents: widget.profileAgents, onLoadout: widget.onLoadout),
       'permissions' => PermissionsSection(controller: controller, rules: widget.rules, sources: widget.profileAgents),

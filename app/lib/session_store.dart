@@ -4,6 +4,7 @@ import 'acp/client.dart';
 import 'acp/delegate.dart';
 import 'acp/local_agent.dart' show readLocalFile;
 import 'chat/timing_log.dart';
+import 'config/canoa_config.dart' show Preset;
 import 'acp/secret_wire.dart' show SecretIdentity;
 import 'package:coqui_acp/secret.dart';
 import 'package:coqui_acp_chat/coqui_acp_chat.dart' as model;
@@ -259,6 +260,17 @@ class ChatSession {
   /// The saved connection a draft starts on, by name; null for this app's own host (or the one that served the page). A started
   /// session's host is the place and peer it was reached at, never this.
   String? host;
+
+  /// The `[profiles]` name a draft was given its values from; null when it was given none. What it started as is read from
+  /// canoa.cfg each time it is compared, so a profile edited meanwhile shows.
+  String? preset;
+
+  /// The model, effort and mode (by key) that [preset] asks for and the draft's source has not yet listed, which are chosen
+  /// when it does.
+  final Map<String, String> presetWants = {};
+
+  /// The values of [preset] the draft cannot take, by key, with why: the agent offers no such model, or no source has the name.
+  final Map<String, String> presetUnsupported = {};
 
   /// The id a draft is kept under between runs; null once it starts.
   String? draftId;
@@ -672,6 +684,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         final got = await _loadChoices(source, as);
         if (got != null && !_disposed && _asks[key] == mine) {
           _choices[key] = got.at(DateTime.now());
+          _settlePresets();
         }
       } catch (error) {
         debugPrint(
@@ -1036,6 +1049,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     SessionKind? kind,
     String? loadout,
     String? host,
+    String? preset,
+    Map<String, String> presetWants = const {},
   }) {
     final session =
         _newSession(
@@ -1055,6 +1070,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           ..overlays = overlays
           ..loadout = loadout
           ..host = host
+          ..preset = preset
           ..draftId = id ?? newDraftId()
           ..workspaceId = workspaceId ?? newSessionUuid()
           ..draftText = text
@@ -1062,6 +1078,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           ..bypassBeforeAgent = bypass;
     _insert(session);
     session.chat.presetBypass(bypass);
+    session.presetWants.addAll(presetWants);
     for (final choice in pending.values) {
       session.chat.holdChoice(choice);
     }
@@ -1123,6 +1140,141 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
 
   /// What the sessions on each account last heard of its allowances, by the account's id as the host names it in a report.
   final Map<String, UsageReport> accountUsage = {};
+
+  /// Gives [session], a draft, the profile [name], whose values are [preset]: its source (when [source] is the one it names), its
+  /// model, effort and mode, its cache lifetime and its loadout (when [loadoutHeld]). What the profile sets replaces what the
+  /// person chose for the same thing; what it leaves unset stays as it was. A model, effort or mode the source has not yet
+  /// listed is chosen when it does, and one it does not offer is said in [ChatSession.presetUnsupported]. A null [name] only
+  /// takes the profile's name off, and every value stays.
+  void usePreset(
+    ChatSession session,
+    String? name,
+    Preset? preset, {
+    AgentSource? source,
+    bool loadoutHeld = true,
+  }) {
+    if (!session.isDraft) return;
+    session
+      ..presetWants.clear()
+      ..presetUnsupported.clear();
+    if (name == null || preset == null) {
+      session.preset = null;
+      _keepDraft(session);
+      notifyListeners();
+      return;
+    }
+    session.preset = name;
+    if (preset.source != null) {
+      if (source == null) {
+        session.presetUnsupported['source'] = 'no source is called ${preset.source}';
+      } else if (source != session.source) {
+        updateDraft(session, source: source);
+      }
+    }
+    for (final (key, role, value) in [
+      ('model', OptionRole.model, preset.model),
+      ('effort', OptionRole.effort, preset.effort),
+      ('mode', OptionRole.mode, preset.mode),
+    ]) {
+      if (value == null) continue;
+      session.chat.dropChoices(where: (choice) => choice.role == role);
+      session.presetWants[key] = value;
+    }
+    if (preset.mode != null) session.chat.presetBypass(false);
+    if (CacheLifetime.named(preset.cacheLifetime) case final lifetime?) session.cacheLifetime = lifetime;
+    if (preset.loadout != null && loadoutHeld) {
+      session
+        ..loadout = preset.loadout
+        ..overlays = null;
+    }
+    _settlePreset(session);
+    _keepDraft(session);
+    notifyListeners();
+  }
+
+  /// Chooses, for every draft, the values its profile asked for that its source has now listed.
+  void _settlePresets() {
+    for (final session in _sessions) {
+      if (session.isDraft && session.presetWants.isNotEmpty) _settlePreset(session);
+    }
+  }
+
+  /// Chooses the model, effort and mode [session]'s profile asks for where the source offers them. The model goes first, since
+  /// the efforts a source lists follow it. A value the source has listed and does not offer is unsupported; before it lists
+  /// anything the value waits.
+  void _settlePreset(ChatSession session) {
+    final source = session.source;
+    for (final (key, role) in [
+      ('model', OptionRole.model),
+      ('effort', OptionRole.effort),
+      ('mode', OptionRole.mode),
+    ]) {
+      final value = session.presetWants[key];
+      if (value == null) continue;
+      final options = optionsOf(session);
+      final listed =
+          source != null &&
+          !isAskingChoices(source) &&
+          (options.isNotEmpty || choicesOf(source) != null);
+      if (role == OptionRole.mode) {
+        final entry = modeEntries(modeOptionIn(options)).where((each) => each.value == value).firstOrNull;
+        if (entry != null) {
+          _chooseDraftMode(session, entry);
+        } else if (listed) {
+          session.presetUnsupported[key] = 'the agent offers no mode $value';
+        } else {
+          continue;
+        }
+      } else {
+        final option = optionIn(options, role);
+        if (option != null && option.choices.any((choice) => choice.value == value)) {
+          session.chat.holdChoice(PendingChoice(option.id, role, value, byPerson: true));
+          if (role == OptionRole.model) _dropUnofferedEffort(session);
+        } else if (listed) {
+          session.presetUnsupported[key] = option == null
+              ? 'the agent offers no $key to choose'
+              : 'the agent offers no $key $value';
+        } else {
+          continue;
+        }
+      }
+      session.presetWants.remove(key);
+    }
+  }
+
+  /// The values of [preset] that [session], a draft, no longer holds, by key (`source`, `model`, `effort`, `mode`,
+  /// `cache_lifetime`, `loadout`): empty while it is as the profile makes it. Only what the profile sets is compared, and a value
+  /// still waiting for its source's list, or one the agent cannot take, is not a change the person made.
+  List<String> presetChanges(ChatSession session, Preset preset) {
+    String? chosen(OptionRole role) => session.pending.values.where((choice) => choice.role == role).firstOrNull?.value;
+    bool differs(String key, String? asked, String? held) =>
+        asked != null &&
+        !session.presetWants.containsKey(key) &&
+        !session.presetUnsupported.containsKey(key) &&
+        asked != held;
+    return [
+      if (differs('source', preset.source, session.source?.label)) 'source',
+      if (differs('model', preset.model, chosen(OptionRole.model))) 'model',
+      if (differs('effort', preset.effort, chosen(OptionRole.effort))) 'effort',
+      if (differs('mode', preset.mode, chosen(OptionRole.mode))) 'mode',
+      if (differs('cache_lifetime', preset.cacheLifetime, session.cacheLifetime?.id)) 'cache_lifetime',
+      if (differs('loadout', preset.loadout, session.loadout)) 'loadout',
+    ];
+  }
+
+  /// What [session], a draft, holds now of what a profile sets: the values [Preset] names, as a profile of its own.
+  Preset presetOf(ChatSession session, {String? context}) {
+    String? chosen(OptionRole role) => session.pending.values.where((choice) => choice.role == role).firstOrNull?.value;
+    return Preset(
+      source: session.source?.label,
+      model: chosen(OptionRole.model),
+      effort: chosen(OptionRole.effort),
+      mode: chosen(OptionRole.mode),
+      context: context,
+      cacheLifetime: session.cacheLifetime?.id,
+      loadout: session.loadout,
+    );
+  }
 
   /// Changes what a draft will start with. Once it has started, its source, folder, worktree and overlays stay as they were.
   void updateDraft(
@@ -1214,6 +1366,13 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
             ? record['loadout'] as String
             : null,
         host: record['host'] is String ? record['host'] as String : null,
+        preset: record['preset'] is String ? record['preset'] as String : null,
+        presetWants: record['presetWants'] is Map
+            ? {
+                for (final MapEntry(:key, :value) in (record['presetWants'] as Map).entries)
+                  if (key is String && value is String) key: value,
+              }
+            : const {},
         text: record['text'] is String ? record['text'] as String : '',
         title: record['title'] is String ? record['title'] as String : null,
         bypass: record['bypass'] == true,
@@ -1273,6 +1432,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       'overlays': ?session.overlays?.toList(),
       'loadout': ?session.loadout,
       'host': ?session.host,
+      'preset': ?session.preset,
+      if (session.presetWants.isNotEmpty) 'presetWants': session.presetWants,
       'text': session.sending?.text ?? session.draftText,
       if (!session.agentNames) 'title': session.title,
       'pending': [for (final choice in session.pending.values) choice.toJson()],

@@ -122,6 +122,12 @@ overlays = ["team"]
 
 [defaults]
 loadout = "main"
+
+[profiles."Deep review"]
+source = "my-agent"
+model = "opus"
+context = "Read the tests first."
+loadout = "main"
 ''';
 
 Map<String, dynamic> tomlOf(CanoaConfig config) => TomlDocument.parse(config.encode()).toMap();
@@ -138,7 +144,7 @@ void main() {
   test('the canoa.cfg used here holds every table, and writes back whole', () {
     final names = tomlOf(every).keys.toSet();
     expect(names, containsAll(['desktop', 'network', 'assets', 'appearance', 'sessions', 'harnesses', 'notifications', 'attachments',
-      'usage', 'voice', 'permissions', 'sources', 'agents', 'host', 'overlays', 'profile', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults']));
+      'usage', 'voice', 'permissions', 'sources', 'agents', 'host', 'overlays', 'profile', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults', 'profiles']));
     expect(changedTables(every, CanoaConfig.parse(every.encode())), isEmpty);
   });
 

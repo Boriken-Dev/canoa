@@ -133,6 +133,29 @@ void main() {
     });
   }
 
+  for (final vector in (vectors['presets'] as List).cast<Map<dynamic, dynamic>>()) {
+    test('preset: ${vector['name']}', () {
+      final CanoaConfig config;
+      try {
+        config = CanoaConfig.parse(vector['config'] as String);
+      } on FormatException catch (error) {
+        if (!vector.containsKey('error')) fail('$error');
+        expect(vector['error'], {'code': 'invalid'}, reason: 'refused, and the vector takes it');
+        return;
+      }
+      expect(vector.containsKey('presets'), isTrue, reason: 'accepted, and the vector refuses it');
+      expect({for (final MapEntry(:key, :value) in config.presets.entries) key: value.toTable()}, vector['presets']);
+      expect(config.presets.keys.toList(), (vector['presets'] as Map).keys.toList(), reason: 'the file\'s order');
+      if (vector['use'] case final String used) {
+        final layers = [
+          Layer(const LayerId(LayerKind.user), config.profile),
+          Layer(const LayerId(LayerKind.session), config.presets[used]!.sessionLayer),
+        ];
+        expect(mergeProfiles(layers).view(), vector['view']);
+      }
+    });
+  }
+
   test('the reserved variables are the vectors\' list', () {
     final reserved = vectors['reserved_env'] as Map;
     expect(reservedEnv, reserved['names']);

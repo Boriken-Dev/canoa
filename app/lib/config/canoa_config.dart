@@ -673,6 +673,28 @@ final class CanoaConfig {
         ._withTable('defaults', {...defaults, 'loadout': ?named});
   }
 
+  /// `[profiles.NAME]`: the named presets of a session's own values (source, model, effort, mode, starting instructions, cache
+  /// lifetime and a loadout), in the order written. `[profile]` stays the person's own layer that every session gets.
+  Map<String, Preset> get presets => _presets(tables['profiles']);
+
+  static Map<String, Preset> _presets(Object? raw) {
+    if (raw == null) return const {};
+    if (raw is! Map) throw const FormatException('canoa.cfg: profiles must be a table');
+    final out = <String, Preset>{};
+    for (final MapEntry(:key, :value) in raw.entries) {
+      if (!isPresetName('$key')) {
+        throw FormatException('canoa.cfg: profiles.$key: $presetNameRule');
+      }
+      if (value is! Map) throw FormatException('canoa.cfg: profiles.$key must be a table');
+      out['$key'] = Preset.read('$key', value);
+    }
+    return out;
+  }
+
+  /// This configuration with [presets] as `[profiles]`.
+  CanoaConfig withPresets(Map<String, Preset> presets) =>
+      _withTable('profiles', {for (final MapEntry(:key, :value) in presets.entries) key: value.toTable()});
+
   /// This configuration with [change] applied to the loadout a session that names none starts with; the first change writes it
   /// as `Default`, holding what the session started with until now.
   CanoaConfig _withStarting(Loadout Function(Loadout loadout) change) {
@@ -1074,7 +1096,7 @@ final class CanoaConfig {
     final readFrom = ConfigSource(format: own.format, marked: own.marked, layers: below, own: own.data);
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults', 'sources', 'attachments', 'usage', 'voice', 'speech', 'connections'}
+            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults', 'profiles', 'sources', 'attachments', 'usage', 'voice', 'speech', 'connections'}
           .contains(name)) {
         throw FormatException('canoa.cfg: unknown table $name');
       }
@@ -1262,6 +1284,7 @@ final class CanoaConfig {
     _connections(data['connections']);
     _skillPins(data['skill_pins']);
     _defaultLoadout(data['defaults'], _loadouts(data['loadouts']));
+    _presets(data['profiles']);
     _storeExtras(data['store']);
     _agentMcp(agentTables);
     _agentHooks(agentTables);
@@ -1288,6 +1311,7 @@ final class CanoaConfig {
         'skill_pins': ?data['skill_pins'],
         'loadouts': ?data['loadouts'],
         'defaults': ?data['defaults'],
+        'profiles': ?data['profiles'],
         'store': ?rawStore,
       },
       agents: agents,
@@ -1510,6 +1534,127 @@ final class Loadout {
     if (skills.isNotEmpty) 'skills': skills,
     if (mcp.isNotEmpty) 'mcp': mcp,
   };
+}
+
+/// Whether [name] is one a profile may have: 1 to 64 of ASCII letters, digits, spaces, `-`, `_` and `.`, with no space at either end.
+/// A profile is chosen by its name in a footer, so it may read as words.
+bool isPresetName(String name) => RegExp(r'^[A-Za-z0-9_.-]([A-Za-z0-9 _.-]{0,62}[A-Za-z0-9_.-])?$').hasMatch(name);
+
+/// What a profile's name may be, in words.
+const presetNameRule = 'A profile is named with 1 to 64 letters, digits, spaces, - _ or ., and no space at either end';
+
+/// One `[profiles.NAME]`: the values a new session starts with, chosen by name in its footer. It is the session's layer: above the
+/// person's `[profile]` and the agent's entry. The account and the permission mode's rules are never part of one.
+final class Preset {
+  const Preset({this.source, this.model, this.effort, this.mode, this.context, this.cacheLifetime, this.loadout});
+
+  /// The label of the source it runs on; a session keeps its own when this is null.
+  final String? source;
+  final String? model, effort, mode;
+
+  /// The starting instructions: text added to the session's initial context after every other layer's.
+  final String? context;
+
+  /// The cache lifetime's name (`default`, `off`, `short` or `long`).
+  final String? cacheLifetime;
+
+  /// The loadout it starts with; the default loadout when null.
+  final String? loadout;
+
+  static const _keys = {'source', 'model', 'effort', 'mode', 'context', 'cache_lifetime', 'loadout'};
+  static const _lifetimes = {'default', 'off', 'short', 'long'};
+
+  /// The preset [name] as canoa.cfg has it. Throws [FormatException] for a key it does not have, a value that is not text or a name
+  /// that is not one; a loadout it names that the file no longer holds is not refused.
+  factory Preset.read(String name, Map<dynamic, dynamic> table) {
+    for (final MapEntry(:key, :value) in table.entries) {
+      if (!_keys.contains(key)) {
+        throw FormatException('canoa.cfg: profiles.$name.$key is not a profile setting: source, model, effort, mode, context, '
+            'cache_lifetime and loadout are');
+      }
+      if (value is! String) throw FormatException('canoa.cfg: profiles.$name.$key is not text');
+      if (value.isEmpty || value.contains('\u0000')) throw FormatException('canoa.cfg: profiles.$name.$key is empty or holds a NUL');
+    }
+    final lifetime = table['cache_lifetime'];
+    if (lifetime != null && !_lifetimes.contains(lifetime)) {
+      throw FormatException('canoa.cfg: profiles.$name.cache_lifetime is not default, off, short or long');
+    }
+    final loadout = table['loadout'];
+    if (loadout != null && !isEntryName(loadout as String)) {
+      throw FormatException('canoa.cfg: profiles.$name.loadout is not a loadout\'s name');
+    }
+    // The model, effort and mode are held to what a profile document holds them to.
+    final Profile own;
+    try {
+      own = Profile.fromMap({
+        for (final key in const ['model', 'effort', 'mode'])
+          if (table[key] != null) key: table[key],
+      }, LayerKind.session);
+    } on ProfileException catch (error) {
+      throw FormatException('canoa.cfg: profiles.$name: $error');
+    }
+    return Preset(
+      source: table['source'] as String?,
+      model: own.model,
+      effort: own.effort,
+      mode: own.mode,
+      context: table['context'] as String?,
+      cacheLifetime: lifetime as String?,
+      loadout: loadout,
+    );
+  }
+
+  /// This preset with the given values in place of its own; [clear] names the ones to take out.
+  Preset copyWith({
+    String? source,
+    String? model,
+    String? effort,
+    String? mode,
+    String? context,
+    String? cacheLifetime,
+    String? loadout,
+    Set<String> clear = const {},
+  }) => Preset(
+    source: clear.contains('source') ? null : source ?? this.source,
+    model: clear.contains('model') ? null : model ?? this.model,
+    effort: clear.contains('effort') ? null : effort ?? this.effort,
+    mode: clear.contains('mode') ? null : mode ?? this.mode,
+    context: clear.contains('context') ? null : context ?? this.context,
+    cacheLifetime: clear.contains('cache_lifetime') ? null : cacheLifetime ?? this.cacheLifetime,
+    loadout: clear.contains('loadout') ? null : loadout ?? this.loadout,
+  );
+
+  /// The session's layer this preset makes: its model, effort and mode, and its starting instructions added to the context.
+  Profile get sessionLayer => Profile(
+    model: model,
+    effort: effort,
+    mode: mode,
+    contexts: [if (context case final text?) ProfileContext.text(text)],
+  );
+
+  Map<String, dynamic> toTable() => {
+    'source': ?source,
+    'model': ?model,
+    'effort': ?effort,
+    'mode': ?mode,
+    'context': ?context,
+    'cache_lifetime': ?cacheLifetime,
+    'loadout': ?loadout,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is Preset &&
+      other.source == source &&
+      other.model == model &&
+      other.effort == effort &&
+      other.mode == mode &&
+      other.context == context &&
+      other.cacheLifetime == cacheLifetime &&
+      other.loadout == loadout;
+
+  @override
+  int get hashCode => Object.hash(source, model, effort, mode, context, cacheLifetime, loadout);
 }
 
 /// What a session starts with once its loadout is resolved, as the host resolves it when the session starts.

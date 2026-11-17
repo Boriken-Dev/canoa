@@ -20,6 +20,7 @@ const hostConfigSections = [
   'notifications',
   'overlays',
   'permissions',
+  'profiles',
   'sessions',
   'store',
   'usage',

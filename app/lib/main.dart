@@ -44,7 +44,10 @@ import 'accounts/account_models.dart' show AccountEntry, accountMeta, machineLog
 import 'accounts/accounts_controller.dart';
 import 'accounts/accounts_host.dart';
 import 'desktop/host_grants.dart';
+import 'chat/agent_events.dart' show Choice;
 import 'chat/cache_lifetime.dart';
+import 'chat/modes.dart' show modeEntries, modeOptionIn;
+import 'chat/session_options.dart' show OptionRole, optionIn;
 import 'chat/git_changes.dart' show GitReader;
 import 'chat/inspector.dart';
 import 'chat/timing_log.dart';
@@ -92,6 +95,7 @@ import 'store/control_data.dart';
 import 'profile/profile_home_platform.dart';
 import 'acp/usage_wire.dart' show ProfileApprover, noApproval;
 import 'profile/approval_dialog.dart';
+import 'profile/effective_setup.dart';
 import 'profile/report.dart';
 import 'settings/settings_page.dart';
 import 'rail/session_groups.dart';
@@ -1992,10 +1996,60 @@ class _CanoaAppState extends State<CanoaApp> {
   Map<String, Object?> _startMeta(ChatSession draft) {
     final cache = {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account)};
     final asked = draft.overlays;
-    final withLoadout = {...cache, ..._loadoutMeta(draft)};
+    final withLoadout = {...cache, ..._loadoutMeta(draft), ..._presetMeta(draft)};
     if (widget.served == null || asked == null || config.overlays.isEmpty) return withLoadout;
     final chosen = asked.where(config.overlays.containsKey).toSet();
     return {...withLoadout, overlaysMeta: _overlaysNamed(chosen)};
+  }
+
+  /// The profile [draft] was given, when canoa.cfg still holds it.
+  Map<String, Object?> _presetMeta(ChatSession draft) {
+    final name = draft.preset;
+    return name != null && config.presets.containsKey(name) ? {presetMeta: name} : const {};
+  }
+
+  /// Writes the profile [name] into canoa.cfg as [preset], in place when it is there; false when the file could not be written.
+  Future<bool> _savePreset(String name, Preset preset) async {
+    final changed = config.withPresets({...config.presets, name: preset});
+    try {
+      await _write(changed);
+    } on Object {
+      return false;
+    }
+    if (!mounted) return true;
+    setState(() => config = changed);
+    _settingsKey.currentState?.controller.adopt(changed);
+    return true;
+  }
+
+  /// Shows what a new session starts with, layer by layer: the profile and what was changed from it make the session's own layer.
+  void _showSetup(ChatSession session) {
+    final above = _navigator.currentContext;
+    if (above == null) return;
+    final chosen = config.presets[session.preset];
+    final options = store.optionsOf(session);
+    List<String> offered(OptionRole role) => [
+      for (final choice in optionIn(options, role)?.choices ?? const <Choice>[]) choice.value,
+    ];
+    unawaited(showSelectableDialog<void>(
+      context: above,
+      builder: (_) => EffectiveSetupDialog(
+        setup: EffectiveSetup(
+          config: config,
+          agent: session.source?.label ?? session.agent,
+          session: store.presetOf(session, context: chosen?.context).sessionLayer,
+          home: _home,
+          workingDirectory: session.cwd,
+          profile: chosen == null ? null : session.preset,
+          offered: {
+            'model': offered(OptionRole.model),
+            'effort': offered(OptionRole.effort),
+            'mode': [for (final entry in modeEntries(modeOptionIn(options))) entry.value],
+          },
+          unsupported: session.presetUnsupported,
+        ),
+      ),
+    ));
   }
 
   /// The loadout [draft] was given, when canoa.cfg still holds it; a session that names none starts with `[defaults] loadout`.
@@ -2157,6 +2211,7 @@ class _CanoaAppState extends State<CanoaApp> {
         ..._cacheMeta(store.cacheLifetimeOf(draft)),
         ..._accountMeta(draft.account),
         ..._loadoutMeta(draft),
+        ..._presetMeta(draft),
         if (config.overlays.isNotEmpty) overlaysMeta: _overlaysNamed(chosen),
       }));
       starting.client = client;
@@ -2615,6 +2670,10 @@ class _CanoaAppState extends State<CanoaApp> {
     loadouts: {for (final name in config.loadouts.keys) name: config.resolveLoadout(name)!},
     defaultLoadout: config.defaultLoadout,
     onLoadout: _showLoadouts,
+    presets: config.presets,
+    savePreset: _savePreset,
+    onSetup: _showSetup,
+    onProfiles: () => unawaited(_showSettings(section: 'profiles')),
     pasteAsFile: config.pasteAsFile,
     enterSteers: config.sessions.whileWorking == WhileWorking.steer,
     warnPermille: config.warnPermille,

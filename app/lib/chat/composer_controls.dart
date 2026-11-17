@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
+import '../config/canoa_config.dart' show Preset, isPresetName, presetNameRule;
 import '../session_store.dart';
 import '../sources/source_icons.dart';
 import 'agent_events.dart' show Choice, ConfigOption;
@@ -422,4 +423,182 @@ class OverlaysChooser extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The profile a draft starts with, as a pill ("Deep review", or "Deep review · Modified" once one of its values was changed). The
+/// menu lists the profiles of canoa.cfg, saves what the draft holds (over the profile, or as a new one), puts the profile's values
+/// back and shows the setup the session starts with, layer by layer. A profile sets the session's own values: the account and the
+/// permissions are chosen apart from it.
+class PresetChooser extends StatelessWidget {
+  const PresetChooser({super.key, required this.store, required this.session, required this.kit});
+
+  final SessionStore store;
+  final ChatSession session;
+  final ComposerKit kit;
+
+  Preset? get _held => kit.presets[session.preset];
+
+  /// Starts the draft over from the profile [name], with its source if the app has it.
+  void _use(String name) {
+    final preset = kit.presets[name];
+    if (preset == null) return;
+    final source = kit.sources.where((each) => each.label == preset.source).firstOrNull;
+    store.usePreset(session, name, preset, source: source, loadoutHeld: preset.loadout == null || kit.loadouts.containsKey(preset.loadout));
+  }
+
+  /// What the draft holds as a profile, keeping the starting instructions of [from] and, for a profile that names no source, none.
+  Preset _current(Preset? from) {
+    final made = store.presetOf(session, context: from?.context);
+    return from != null && from.source == null ? made.copyWith(clear: const {'source'}) : made;
+  }
+
+  Future<void> _saveChanges(BuildContext context, String name) async {
+    final saved = await kit.savePreset!(name, _current(_held));
+    if (!context.mounted || saved) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('canoa.cfg could not be written')));
+  }
+
+  Future<void> _saveAsNew(BuildContext context) async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => _ProfileNameDialog(taken: kit.presets.keys.toSet()),
+    );
+    if (name == null || !context.mounted) return;
+    final made = _current(_held);
+    final saved = await kit.savePreset!(name, made);
+    if (!context.mounted) return;
+    if (!saved) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('canoa.cfg could not be written')));
+      return;
+    }
+    store.usePreset(session, name, made, source: session.source);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = session.preset;
+    final held = _held;
+    final changes = held == null ? const <String>[] : store.presetChanges(session, held);
+    final modified = changes.isNotEmpty;
+    final missing = name != null && held == null;
+    final label = name == null ? 'Profile' : '$name${modified ? ' · Modified' : ''}';
+    final why = [
+      if (missing) '$name is no longer in canoa.cfg',
+      if (modified) 'Changed from the profile: ${changes.join(', ').replaceAll('_', ' ')}',
+      for (final line in session.presetUnsupported.entries) 'Not taken: ${line.key}, ${line.value}',
+    ];
+    return MenuAnchor(
+      menuChildren: [
+        MenuItemButton(
+          key: const Key('profile-choice-none'),
+          closeOnActivate: false,
+          leadingIcon: Icon(name == null ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18),
+          onPressed: () => store.usePreset(session, null, null),
+          child: const Text('No profile'),
+        ),
+        for (final entry in kit.presets.entries)
+          MenuItemButton(
+            key: Key('profile-choice ${entry.key}'),
+            closeOnActivate: false,
+            leadingIcon: Icon(entry.key == name ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18),
+            onPressed: () => _use(entry.key),
+            child: Text(entry.key),
+          ),
+        const Divider(height: 1),
+        if (kit.savePreset != null && name != null && held != null && modified)
+          MenuItemButton(
+            key: const Key('profile-save-changes'),
+            leadingIcon: const Icon(Icons.save_outlined, size: 18),
+            onPressed: () => unawaited(_saveChanges(context, name)),
+            child: const Text('Save changes'),
+          ),
+        if (kit.savePreset != null)
+          MenuItemButton(
+            key: const Key('profile-save-new'),
+            leadingIcon: const Icon(Icons.library_add_outlined, size: 18),
+            onPressed: () => unawaited(_saveAsNew(context)),
+            child: const Text('Save as new profile'),
+          ),
+        if (held != null && modified)
+          MenuItemButton(
+            key: const Key('profile-reset'),
+            leadingIcon: const Icon(Icons.restart_alt, size: 18),
+            onPressed: () => _use(name!),
+            child: const Text('Back to the profile'),
+          ),
+        if (kit.onSetup != null)
+          MenuItemButton(
+            key: const Key('profile-effective'),
+            leadingIcon: const Icon(Icons.fact_check_outlined, size: 18),
+            onPressed: () => kit.onSetup!(session),
+            child: const Text('Effective setup'),
+          ),
+        if (kit.onProfiles != null)
+          MenuItemButton(
+            key: const Key('profile-manage'),
+            leadingIcon: const Icon(Icons.tune, size: 18),
+            onPressed: kit.onProfiles,
+            child: const Text('Manage profiles'),
+          ),
+      ],
+      builder: (context, controller, _) => InkWell(
+        key: const Key('profile-pill'),
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => controller.isOpen ? controller.close() : controller.open(),
+        child: Tooltip(
+          message: why.isEmpty ? 'The profile it starts with: its source, model, effort, mode and starting instructions' : why.join('\n'),
+          child: ComposerPill(label: label, icon: modified || missing ? Icons.warning_amber_outlined : Icons.account_tree_outlined),
+        ),
+      ),
+    );
+  }
+}
+
+/// Asks for the name a new profile is saved under.
+class _ProfileNameDialog extends StatefulWidget {
+  const _ProfileNameDialog({required this.taken});
+
+  final Set<String> taken;
+
+  @override
+  State<_ProfileNameDialog> createState() => _ProfileNameDialogState();
+}
+
+class _ProfileNameDialogState extends State<_ProfileNameDialog> {
+  final _name = TextEditingController();
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  String? get _problem {
+    final text = _name.text;
+    if (text.isEmpty) return null;
+    if (!isPresetName(text)) return presetNameRule;
+    if (widget.taken.any((each) => each.toLowerCase() == text.toLowerCase())) return 'Another profile has that name';
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Save as new profile'),
+    content: TextField(
+      key: const Key('profile-name'),
+      controller: _name,
+      autofocus: true,
+      decoration: InputDecoration(labelText: 'Name', errorText: _problem),
+      onChanged: (_) => setState(() {}),
+      onSubmitted: (_) => _name.text.isNotEmpty && _problem == null ? Navigator.pop(context, _name.text) : null,
+    ),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      FilledButton(
+        key: const Key('profile-name-save'),
+        onPressed: _name.text.isEmpty || _problem != null ? null : () => Navigator.pop(context, _name.text),
+        child: const Text('Save'),
+      ),
+    ],
+  );
 }
