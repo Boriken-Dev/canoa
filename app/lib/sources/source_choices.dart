@@ -82,6 +82,8 @@ final class SourceChoices {
     this.unknownKind,
     this.signedOut = false,
     this.models = const [],
+    this.modes = const [],
+    this.defaultMode,
     this.programVersion,
     this.cacheLifetime,
     this.cacheLifetimeSetting,
@@ -99,6 +101,10 @@ final class SourceChoices {
   /// account the host applies.
   final bool signedOut;
   final List<ModelChoice> models;
+
+  /// The modes a program that lists them in its session listed, as (id, name), and the one it started in.
+  final List<(String, String)> modes;
+  final String? defaultMode;
 
   /// The first line of the program's `--version`, when it answered.
   final String? programVersion;
@@ -133,6 +139,8 @@ final class SourceChoices {
         unknownKind: unknownKind,
         signedOut: signedOut,
         models: models,
+        modes: modes,
+        defaultMode: defaultMode,
         programVersion: programVersion,
         cacheLifetime: cacheLifetime,
         cacheLifetimeSetting: cacheLifetimeSetting,
@@ -158,6 +166,12 @@ final class SourceChoices {
           unknownKind: UnknownKind.named(value['unknown_kind']),
           signedOut: value['signed_out'] == true,
           models: [if (value['models'] is List) for (final model in value['models'] as List) ?ModelChoice._parse(model)],
+          modes: [
+            if (value['modes'] case final List<dynamic> modes)
+              for (final mode in modes)
+                if (mode is Map && mode['id'] is String) (mode['id'] as String, mode['name'] is String ? mode['name'] as String : mode['id'] as String),
+          ],
+          defaultMode: value['default_mode'] is String ? value['default_mode'] as String : null,
           programVersion: value['program_version'] is String ? value['program_version'] as String : null,
           cacheLifetime: value['cache_lifetime'] is String ? value['cache_lifetime'] as String : null,
           cacheLifetimeSetting: CacheLifetime.named(value['cache_lifetime_setting']),
@@ -176,7 +190,7 @@ final class SourceChoices {
   /// The model option and the effort option for [model] (the one a person chose, else the default model's): each model's own
   /// efforts, so the list follows the model. Nothing when the provider listed no model.
   List<ConfigOption> options({String? model}) {
-    if (!known || models.isEmpty) return const [];
+    if (!known || (models.isEmpty && modes.isEmpty)) return const [];
     final chosen = models.where((each) => each.id == model).firstOrNull ?? defaultModel;
     final efforts = chosen?.efforts ?? const <String>[];
     // The provider's own Default entry is what a draft's Default stands for, so it is that and not a second choice.
@@ -188,7 +202,12 @@ final class SourceChoices {
     final defaultEffort = chosen?.defaultEffort;
     final effortName = defaultEffort == null ? null : choiceLabel(OptionRole.effort, Choice(defaultEffort, defaultEffort));
     return [
-      ConfigOption(
+      if (modes.isNotEmpty)
+        ConfigOption(
+          id: 'mode', label: 'Mode', current: '', category: 'mode',
+          choices: [for (final (id, name) in modes) Choice(id, name)],
+        ),
+      if (models.isNotEmpty) ConfigOption(
         id: 'model', label: 'Model', current: '', category: 'model', defaultLabel: standsFor?.name, defaultName: shortName,
         choices: [for (final each in models) if (each != standsFor) Choice(each.id, each.name)],
       ),

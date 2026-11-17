@@ -41,11 +41,22 @@ String? _findIn(String program, List<String> directories) {
 Future<String?> _find(String program, [List<String> searchDirs = const []]) async =>
     await _findOnPath(program) ?? _findIn(program, searchDirs);
 
+/// What a lookup found, by PATH value and program: asked once while PATH is unchanged and the file is still there. A program
+/// not found is asked again, since an installer may have put it in a directory PATH already names.
+final Map<String, String> _foundOnPath = {};
+
+/// How many times `where` or `which` ran, for tests.
+int pathLookupsRun = 0;
+
 Future<String?> _findOnPath(String program) async {
   // A program named by its full path is found when the file is there; `where` and `which` look only along PATH.
   if (File(program).isAbsolute && File(program).existsSync()) return program;
+  final key = '${environmentVariable('PATH') ?? ''}\u0000$program';
+  final held = _foundOnPath[key];
+  if (held != null && File(held).existsSync()) return held;
   final finder = Platform.isWindows ? 'where' : 'which';
   try {
+    pathLookupsRun++;
     final found = await Process.run(finder, [program], runInShell: _useShell);
     if (found.exitCode != 0) return null;
     final lines = LineSplitter.split(found.stdout as String).map((line) => line.trim()).where((line) => line.isNotEmpty);
@@ -53,7 +64,9 @@ Future<String?> _findOnPath(String program) async {
     final runnable = Platform.isWindows
         ? lines.where((line) => RegExp(r'\.(exe|cmd|bat|com)$', caseSensitive: false).hasMatch(line))
         : lines;
-    return runnable.firstOrNull ?? lines.firstOrNull;
+    final path = runnable.firstOrNull ?? lines.firstOrNull;
+    if (path != null) _foundOnPath[key] = path;
+    return path;
   } on ProcessException {
     return null;
   }

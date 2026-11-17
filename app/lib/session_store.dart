@@ -1664,6 +1664,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       if (_clients[session.id] == null) {
         throw StateError('The agent did not start');
       }
+      await timed('held_choices', () => applyHeldChoices(session));
       try {
         await _send(
           session,
@@ -2790,6 +2791,47 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     return refused;
   }
 
+  /// Sends the choices the person made before [session]'s agent ran, now that it has started and before its first message: the
+  /// mode and the model go together, and the other options, the effort among them, once the model has answered, since the
+  /// choices an option offers can depend on the model. Whatever is left waiting goes before the prompt as the chat sends it.
+  Future<void> applyHeldChoices(ChatSession session) async {
+    final chat = session.chat;
+    ConfigOption? offered(PendingChoice choice) {
+      final options = chat.options;
+      return options
+              .where((option) => option.id == choice.id && option.choices.any((each) => each.value == choice.value))
+              .firstOrNull ??
+          options
+              .where((option) => roleOf(option) == choice.role && option.choices.any((each) => each.value == choice.value))
+              .firstOrNull;
+    }
+
+    final held = [
+      for (final choice in session.pending.values)
+        // Canoa's own Bypass sits on the agent's mode, which the chat sets itself.
+        if (choice.byPerson && !(choice.role == OptionRole.mode && (choice.value == 'custom' || chat.bypass))) choice,
+    ];
+    final together = [
+      for (final choice in held)
+        if (choice.role == OptionRole.mode || choice.role == OptionRole.model) choice,
+    ];
+    Future<void> send(PendingChoice choice) async {
+      final option = offered(choice);
+      if (option == null) return;
+      if (choice.role == OptionRole.mode) {
+        await chat.chooseMode(ModeEntry(choice.value, choice.value));
+      } else if (option.current != choice.value) {
+        await chat.choose(option, choice.value);
+      }
+    }
+
+    await Future.wait([for (final choice in together) send(choice)]);
+    await Future.wait([
+      for (final choice in held)
+        if (!together.contains(choice)) send(choice),
+    ]);
+  }
+
   /// A new model's efforts replace the old one's: an effort chosen for the draft that the model does not take is taken back.
   void _dropUnofferedEffort(ChatSession session) {
     final effort = optionIn(optionsOf(session), OptionRole.effort);
@@ -2835,8 +2877,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         (keptMode == 'custom' ||
             modeOptionIn(chat.options)?.current == keptMode);
     final set = <String, String>{};
-    for (final (id, value, key) in chosen) {
-      if (keptTaken && key == 'mode') continue;
+    final wanted = [
+      for (final item in chosen)
+        if (!(keptTaken && item.$3 == 'mode')) item,
+    ];
+    Future<void> apply((String, String, String) item) async {
+      final (id, value, _) = item;
       final option = chat.options.firstWhere((option) => option.id == id);
       // Canoa's own Bypass stays where it is: the mode set is the agent's, which it sits on.
       if (option.isMode && !chat.bypass) {
@@ -2844,6 +2890,14 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       } else {
         await chat.choose(option, value);
       }
+    }
+
+    // The mode and the model go together; the effort and the rest follow the model, whose choices theirs can depend on.
+    bool first((String, String, String) item) => item.$3 == 'mode' || item.$3 == 'model';
+    await Future.wait([for (final item in wanted) if (first(item)) apply(item)]);
+    await Future.wait([for (final item in wanted) if (!first(item)) apply(item)]);
+    for (final (id, value, key) in wanted) {
+      final option = chat.options.firstWhere((option) => option.id == id);
       if (chat.options
               .where((option) => option.id == id)
               .firstOrNull

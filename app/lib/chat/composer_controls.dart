@@ -157,10 +157,14 @@ class ModelEffortChooser extends StatelessWidget {
     }
     // Nothing is known of this agent's list until it runs: say so, with the agent's reason when it gave one.
     if (!known) {
-      return Tooltip(
+      return InkWell(
         key: const Key('option-model'),
-        message: asked?.unknownBecause ?? 'Its model and effort choices are listed once the agent has started',
-        child: const ComposerPill(label: 'Model: after start', icon: Icons.memory, enabled: false),
+        borderRadius: BorderRadius.circular(8),
+        onTap: source == null ? null : () => unawaited(store.askChoicesAgain(source)),
+        child: Tooltip(
+          message: '${asked?.unknownBecause ?? 'Its model and effort choices are listed once the agent has started'}. Tap to ask again.',
+          child: const ComposerPill(label: 'Model: after start', icon: Icons.memory),
+        ),
       );
     }
     final parts = [
