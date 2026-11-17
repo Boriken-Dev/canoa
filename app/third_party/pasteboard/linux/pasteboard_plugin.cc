@@ -28,7 +28,7 @@ static void gtk_clipboard_request_uris_callback(
   g_autoptr(FlValue) result = fl_value_new_list();
   for (auto uri = uris; uri != nullptr && *uri != nullptr; uri++) {
     g_autoptr(GFile) file = g_file_new_for_uri(*uri);
-    auto *file_path = g_file_get_path(file);
+    g_autofree gchar *file_path = g_file_get_path(file);
     if (file_path) {
       fl_value_append(result, fl_value_new_string(file_path));
     }

@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 
+#include "drop_names.h"
 #include "strconv.h"
 
 #pragma comment(lib, "GdiPlus")
@@ -434,13 +435,10 @@ void PasteboardPlugin::HandleMethodCall(
     if (handle) {
       auto data = reinterpret_cast<HDROP>(GlobalLock(handle));
       if (data) {
-        auto files = DragQueryFile(data, 0xFFFFFFFF, nullptr, 0);
-        for (unsigned int i = 0; i < files; ++i) {
-          TCHAR filename[MAX_PATH];
-          DragQueryFile(data, i, filename, sizeof(TCHAR) * MAX_PATH);
-          std::wstring wide_filename(filename);
+        for (const auto &wide_filename : ReadDropNames(data)) {
           file_list.emplace_back(wide_to_utf8(wide_filename));
         }
+        GlobalUnlock(handle);
       }
     }
     CloseClipboard();

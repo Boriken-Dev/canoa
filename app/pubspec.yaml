@@ -46,7 +46,8 @@ dependencies:
   local_notifier: ^0.1.6
   markdown: ^7.3.1
   url_launcher: ^6.3.1
-  pasteboard: ^0.5.0
+  pasteboard:
+    path: third_party/pasteboard
   flutter_markdown_plus: ^1.0.12
   toml: ^0.18.0
   # canoa.cfg may be written in YAML (its first line says #!yaml).
