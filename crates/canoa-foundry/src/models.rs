@@ -129,7 +129,8 @@ fn number(row: &Value, keys: &[&str]) -> Option<u64> {
 pub fn rows(answer: &Value) -> Vec<Row> {
     let list = match answer {
         Value::Array(list) => Some(list),
-        Value::Object(map) => ["models", "items", "data", "results"]
+        // Foundry Local 0.14 answers `{"variants": [...]}`.
+        Value::Object(map) => ["variants", "models", "items", "data", "results"]
             .iter()
             .find_map(|key| map.get(*key).and_then(Value::as_array)),
         _ => None,
@@ -263,6 +264,20 @@ mod tests {
             "an alias that is the id says nothing more"
         );
         assert!(rows(&json!("text")).is_empty());
+    }
+
+    #[test]
+    fn rows_are_read_from_the_variants_foundry_local_0_14_answers() {
+        // `foundry model list --variants -o json`, version 0.14.0, one row of it.
+        let answer = json!({"variants": [{"alias": "clm-v0.1-8b", "source": "Public", "variantName": "clm-v0.1-8b-generic-gpu",
+            "variantId": "clm-v0.1-8b-generic-gpu:2", "type": "Unknown", "device": "Gpu",
+            "executionProvider": "WebGPUExecutionProvider", "fileSizeMb": 8544, "cached": false, "license": "apache-2.0"}]});
+        let found = rows(&answer);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "clm-v0.1-8b-generic-gpu:2");
+        assert_eq!(found[0].alias.as_deref(), Some("clm-v0.1-8b"));
+        assert_eq!(found[0].device.as_deref(), Some("Gpu"));
+        assert_eq!(found[0].size_mb, Some(8544));
     }
 
     #[test]

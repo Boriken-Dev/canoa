@@ -76,7 +76,7 @@ impl DaemonEngine {
             .or_else(|| running_endpoint(home))
             .ok_or_else(|| {
                 EngineError::Failed(
-                    "no Foundry Local service is running: start it (`foundry service start`) and load a model".to_owned(),
+                    "no Foundry Local service is running: start it (`foundry server start`) and load a model".to_owned(),
                 )
             })?
             .trim_end_matches('/')
