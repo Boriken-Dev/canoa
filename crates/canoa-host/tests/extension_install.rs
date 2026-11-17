@@ -63,7 +63,14 @@ fn catalog(scratch: &Scratch) -> (PathBuf, String) {
         .to_string_lossy()
         .into_owned();
     std::fs::copy(&library, folder.join(&name)).expect("the library");
-    // A native library, far over an overlay's file limit in a debug build, so the limits are the ones the installer reads with.
+    // A debug build on Linux carries about 500 MB of debug information, past what any extension may hold; what a catalog
+    // ships has none. Windows keeps it in a separate file.
+    #[cfg(unix)]
+    let _ = Command::new("strip")
+        .arg("-S")
+        .arg(folder.join(&name))
+        .status();
+    // A native library may be past an overlay's limits, so the pin is computed with the limits the installer reads with.
     let limits = coqui_aos::Settings::default()
         .tree_bytes(coqui_aos::Limit::at(256 * 1024 * 1024))
         .file_bytes(coqui_aos::Limit::at(256 * 1024 * 1024));
