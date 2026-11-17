@@ -179,6 +179,7 @@ impl Command {
     ///
     /// The operating system could not start it, or the host's own process starter could not.
     pub fn spawn(&mut self) -> io::Result<Child> {
+        self.put_runtimes_on_path(&crate::sources::runtime_dirs());
         #[cfg(unix)]
         if let Some(link) = apart::link()? {
             return link.spawn(self);
@@ -221,6 +222,40 @@ impl Command {
             stdout,
             stderr,
         })
+    }
+
+    /// Adds the folders of the runtimes the Store installed (`dirs`) to the end of the `PATH` the process starts with, so a
+    /// program of the person's own (their Node, their Python) is found first and a runtime is found only where they have none.
+    /// A process started with no `PATH` is left without one.
+    fn put_runtimes_on_path(&mut self, dirs: &[PathBuf]) {
+        if dirs.is_empty() {
+            return;
+        }
+        let named = |key: &OsStr| key.eq_ignore_ascii_case("PATH");
+        let set = self
+            .env
+            .iter()
+            .rev()
+            .find(|(key, _)| named(key))
+            .map(|(key, value)| (key.clone(), value.clone()));
+        let (key, current) = match set {
+            Some((key, Some(value))) => (key, value),
+            Some((_, None)) => return,
+            None if self.clear_env => return,
+            None => match std::env::var_os("PATH") {
+                Some(value) => (OsString::from("PATH"), value),
+                None => return,
+            },
+        };
+        let have: Vec<PathBuf> = std::env::split_paths(&current).collect();
+        let joined = std::env::join_paths(
+            have.iter()
+                .cloned()
+                .chain(dirs.iter().filter(|dir| !have.contains(dir)).cloned()),
+        );
+        if let Ok(joined) = joined {
+            self.env.push((key, Some(joined)));
+        }
     }
 
     /// The process as a child of this one, started by std.
