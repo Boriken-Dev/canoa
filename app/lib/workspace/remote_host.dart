@@ -36,7 +36,9 @@ final class HostChoice {
 bool pathFitsSystem(String? os, String path) {
   if (os == null || os.isEmpty) return true;
   final windows = RegExp(r'^([A-Za-z]:([\\/]|$)|\\\\)').hasMatch(path);
-  return os == 'windows' ? windows : path.startsWith('/') && !windows;
+  // A share written with forward slashes (`//server/share`) is a Windows path to a Windows host.
+  if (os == 'windows') return windows || RegExp(r'^//[^/]').hasMatch(path);
+  return path.startsWith('/') && !windows;
 }
 
 /// Why [path] cannot be a workspace on the host called [host], which runs [os], in that host's own words, or null when it can: it

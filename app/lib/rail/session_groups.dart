@@ -110,11 +110,31 @@ String _basename(String path) {
   return parts.isEmpty ? path : parts.last;
 }
 
+/// What names the same workspace however a host wrote it: a Windows path (a drive or a share, `\\?\UNC\server\share` and
+/// `//server/share` included) has one separator, no trailing one and no case; any other path is as it was.
+String workspaceIdentity(String path) {
+  var text = path;
+  final verbatim = RegExp(r'^[\\/]{2}\?[\\/]', caseSensitive: false);
+  if (verbatim.hasMatch(text)) {
+    text = text.replaceFirst(verbatim, '');
+    text = text.length > 4 && text.substring(0, 4).toLowerCase() == r'unc\' ? '\\\\${text.substring(4)}' : text;
+  }
+  final windows = RegExp(r'^([A-Za-z]:|[\\/]{2}[^\\/])').hasMatch(text);
+  if (!windows) return path;
+  text = text.replaceAll('/', r'\');
+  while (text.length > 3 && text.endsWith(r'\')) {
+    text = text.substring(0, text.length - 1);
+  }
+  return text.toLowerCase();
+}
+
 /// [sessions] by workspace, in the order each workspace's first session is kept (newest first). Inside one, the sessions that
 /// need the person come first. Chats, which have no workspace of the person's, are one group, "Chats", first; sessions with no
 /// workspace follow the others; archived ones that are not active are folded into a last group.
 List<WorkspaceGroup> groupByWorkspace(Iterable<ChatSession> sessions) {
   final byPath = <String, List<ChatSession>>{};
+  // How the first session of each workspace wrote its path, which names the group.
+  final written = <String, String>{};
   final archived = <ChatSession>[];
   final chats = <ChatSession>[];
   for (final session in sessions) {
@@ -123,7 +143,10 @@ List<WorkspaceGroup> groupByWorkspace(Iterable<ChatSession> sessions) {
     } else if (session.kind == SessionKind.chat) {
       chats.add(session);
     } else {
-      byPath.putIfAbsent(session.cwd ?? '', () => []).add(session);
+      final raw = session.cwd ?? '';
+      final identity = workspaceIdentity(raw);
+      written.putIfAbsent(identity, () => raw);
+      byPath.putIfAbsent(identity, () => []).add(session);
     }
   }
   List<ChatSession> ordered(List<ChatSession> list) => [
@@ -133,7 +156,7 @@ List<WorkspaceGroup> groupByWorkspace(Iterable<ChatSession> sessions) {
   return [
     if (chats.isNotEmpty) WorkspaceGroup('chats', 'Chats', ordered(chats)),
     for (final MapEntry(:key, :value) in byPath.entries)
-      if (key.isNotEmpty) WorkspaceGroup(key, _basename(key), ordered(value)),
+      if (key.isNotEmpty) WorkspaceGroup(written[key]!, _basename(written[key]!), ordered(value)),
     if (byPath['']?.isNotEmpty ?? false) WorkspaceGroup('none', 'No workspace', ordered(byPath['']!)),
     if (archived.isNotEmpty) WorkspaceGroup('archived', 'Archived', archived, folds: true),
   ];
