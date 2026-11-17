@@ -38,6 +38,7 @@ const manifest = JSON.parse(readFileSync(path.join(unpacked, "manifest.json"), "
 manifest.host_permissions = ["http://127.0.0.1/*"];
 delete manifest.side_panel;
 writeFileSync(path.join(unpacked, "manifest.json"), JSON.stringify(manifest));
+const PAGE_WAIT_MS = 30_000;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const CSP = "default-src 'none'; script-src 'self'; connect-src 'self'";
@@ -105,7 +106,14 @@ try {
   // The browser's own id, as its permissions page shows it to the person.
   const permissions = await openTab(`chrome-extension://${new URL(worker.url).hostname}/permissions.html`);
   // The key of the host's method, which is the one that connects to it: each method has a key of its own.
-  const browserId = await waitFor("the browser's id", () => permissions.run(`import("./acp-dial.js").then((dial) => dial.ownPeerId("${METHOD}"))`));
+  // The page may still be at about:blank, where a relative import cannot resolve: ask again until it has loaded.
+  const browserId = await waitFor("the browser's id", async () => {
+    try {
+      return await permissions.run(`import("./acp-dial.js").then((dial) => dial.ownPeerId("${METHOD}"))`);
+    } catch {
+      return null;
+    }
+  });
   assert.match(browserId, /^sha256:[0-9a-f]{64}$/);
   step(`the browser's key is ${browserId}`);
 
@@ -132,15 +140,18 @@ try {
   assert.equal(await page.run("window.asked"), 1);
   step("the person added the host's entry by hand, pinned to the host's id");
 
+  // Every wait on the page is bounded, so a link the extension never reports as refused or ended fails the run naming the wait.
   const turn = `(async () => {
-    const conn = await document.acp.connect(window.agent);
+    const within = (promise, what) => Promise.race([promise, new Promise((_, reject) =>
+      setTimeout(() => reject(Object.assign(new Error(what + ' did not settle in ${PAGE_WAIT_MS / 1000} s'), { name: 'Hung' })), ${PAGE_WAIT_MS}))]);
+    const conn = await within(document.acp.connect(window.agent), 'connect');
     const writer = conn.writable.getWriter();
     const reader = conn.readable.getReader();
     const said = [];
     const rpc = async (message) => {
-      await writer.write(JSON.stringify(message));
+      await within(writer.write(JSON.stringify(message)), 'a write');
       for (;;) {
-        const next = JSON.parse((await reader.read()).value);
+        const next = JSON.parse((await within(reader.read(), 'a read')).value);
         if (next.id === message.id && next.method === undefined) return next;
         said.push(next);
       }
@@ -155,8 +166,9 @@ try {
       conn.close?.();
     }
   })()`;
-  const refused = await page.run(`${turn}.then(() => 'served', (e) => e.name ?? String(e))`);
+  const refused = await page.run(`${turn}.then(() => 'served', (e) => e.name === 'Hung' ? e.message : (e.name ?? String(e)))`);
   assert.notEqual(refused, "served", "an unpaired key is served");
+  assert.doesNotMatch(refused, /did not settle/, `the extension never reported the unpaired key's link as refused: ${refused}`);
   step(`an unpaired key is turned away (${refused}), and waits on the host`);
 
   if (accept) {
