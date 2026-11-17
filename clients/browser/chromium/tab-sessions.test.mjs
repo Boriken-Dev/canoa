@@ -178,3 +178,18 @@ test("a window reads and takes the tab binding and asks for nothing that grants"
   assert.equal(mayAsk("panel", "canoa.tabs.share"), true);
   assert.equal(mayAsk(null, "canoa.tabs.list"), false);
 });
+
+test("the side panel asks for the chat alone, and the mode changes nobody's permissions", async () => {
+  const { readFile } = await import("node:fs/promises");
+  for (const name of ["manifest.json", "manifest.debug.json"]) {
+    const manifest = JSON.parse(await readFile(new URL(name, import.meta.url), "utf8"));
+    assert.equal(manifest.side_panel.default_path, "ui/index.html?view=panel&mode=chat", name);
+  }
+  // The same page, with the mode in its address, is the panel to the worker: the same client and the same binding rules.
+  const chatOnly = { id: "abc", url: "chrome-extension://abc/ui/index.html?view=panel&mode=chat&relation=origin:https://example.org" };
+  assert.equal(clientOf(chatOnly, runtime), "panel");
+  assert.equal(fromUiPage(chatOnly, runtime), true);
+  // A web page cannot be the panel by writing the mode into its own address.
+  assert.equal(clientOf({ id: "abc", url: "https://evil.example/ui/index.html?view=panel&mode=chat" }, runtime), null);
+  assert.equal(fromUiPage({ id: "abc", url: "https://evil.example/ui/index.html?view=panel&mode=chat" }, runtime), false);
+});

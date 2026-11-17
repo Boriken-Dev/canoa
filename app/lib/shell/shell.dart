@@ -50,7 +50,11 @@ class AppShell extends StatefulWidget {
     this.onSignOut,
     this.indexWidth = 260,
     this.banner,
+    this.selector = true,
   });
+
+  /// Whether the section selector shows. The chat-only app has one section, so it has none.
+  final bool selector;
 
   final ShellLayout layout;
   final List<AppSection> sections;
@@ -157,10 +161,10 @@ class _AppShellState extends State<AppShell> {
         return Scaffold(
           key: _scaffold,
           drawer: Drawer(
-            width: SectionRail.width + 304,
+            width: (widget.selector ? SectionRail.width : 0) + 304,
             child: SafeArea(
               child: Row(children: [
-                _selector(current),
+                if (widget.selector) _selector(current),
                 Expanded(child: current.index ?? ColoredBox(color: context.look.rail, child: const SizedBox.expand())),
               ]),
             ),
@@ -173,8 +177,7 @@ class _AppShellState extends State<AppShell> {
         key: _scaffold,
         body: SafeArea(
           child: _under(Row(children: [
-            _selector(current),
-            const VerticalDivider(width: 1),
+            if (widget.selector) ...[_selector(current), const VerticalDivider(width: 1)],
             Expanded(
               child: current.index == null || hidden
                   ? main

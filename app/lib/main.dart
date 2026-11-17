@@ -20,7 +20,12 @@ import 'extension/composer_extension.dart';
 import 'extension/local_host.dart';
 import 'extension/local_host_banner.dart';
 import 'extension/local_host_control.dart';
-import 'extension/site_sessions.dart';
+import 'client/client_mode.dart';
+import 'client/full_app.dart' as full_app;
+import 'client/related_rail.dart';
+import 'client/related_sessions.dart';
+import 'client/relation.dart';
+import 'client/relation_source.dart';
 import 'extension/tab_bridge.dart' show TabBridge;
 import 'extension/tab_shares.dart' show TabShares;
 import 'extension_context.dart';
@@ -150,6 +155,7 @@ import 'workspace/open_in_host.dart' show HostedOpening;
 import 'served/web_mode.dart' show WebMode;
 import 'workspace/open_in_ui.dart';
 import 'workspace/scratch.dart';
+import 'workspace/site.dart' show siteFqdn;
 import 'workspace/site_meta.dart';
 import 'worktree/close_dialog.dart';
 import 'worktree/host.dart';
@@ -284,7 +290,20 @@ class CanoaApp extends StatefulWidget {
     this.isGitRepository, this.folderExists, this.home, this.hostFolders, this.listFolder, this.resolveInside, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
     this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection,
+    this.mode, this.relations, this.openPage,
   });
+
+  /// Which app this page shows: the whole app, or the chat alone with the sessions of what is in front of the client first. The
+  /// address says by default (`mode=chat`); the extension's side panel and an Office task pane ask for the chat alone.
+  final ClientMode? mode;
+
+  /// What is in front of the client, which the sessions related to it are listed for. By default the one the address names
+  /// (`relation=`), else the page in the extension's front tab; a client that learns it later gives a [ManualRelation].
+  final RelationSource? relations;
+
+  /// Opens a page of its own, for "Open the full app"; the browser's by default.
+  @visibleForTesting
+  final bool Function(Uri address)? openPage;
 
   /// Which section is shown and how each section's index is sized, kept across runs; the app keeps its own when none is given.
   final ShellLayout? layout;
@@ -548,7 +567,7 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Hosting is part of Local's overview, in the Hosts section.
   Future<void> _showHosting() async {
     _hosts.select('local');
-    _layout.select(HostsController.section);
+    _showSection(HostsController.section);
   }
 
   /// Saves canoa.cfg once canoa finds nothing wrong with it, then serves it.
@@ -613,6 +632,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// Shows Settings, at [section] when one is named.
   Future<void> _showSettings({String? section}) async {
+    if (_mode.chatOnly) return _openFullApp();
     await _refreshOverlays();
     if (!mounted) return;
     if (section != null) {
@@ -655,7 +675,7 @@ class _CanoaAppState extends State<CanoaApp> {
     useBrowserAgents: _useBrowserAgents,
     hasShell: (item) => _terminalTargets().any((target) => target.id == item.id),
     openShell: (item) {
-      _layout.select('terminal');
+      _showSection('terminal');
       unawaited(_terminalSection.open(item.id, null));
     },
     onHostGone: (id) => unawaited(_terminalSection.closeHost(id)),
@@ -843,6 +863,7 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// Shows the Store: agents, overlays, skills and MCP servers, installed and to discover.
   Future<void> _showLoadout() async {
+    if (_mode.chatOnly) return _openFullApp();
     // What the host has installed changes without this page, and the store shows it from what was last read.
     await _refreshOverlays();
     if (!mounted) return;
@@ -851,7 +872,7 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   /// Shows Loadouts: what new sessions start with.
-  void _showLoadouts() => _layout.select('loadouts');
+  void _showLoadouts() => _showSection('loadouts');
 
   /// A new session that starts with the loadout [name], shown.
   void _useLoadout(String name) {
@@ -953,6 +974,32 @@ class _CanoaAppState extends State<CanoaApp> {
   TabsComposerExtension? _tabs;
   LocalHostBridge? _localHost;
 
+  late final ClientMode _mode = widget.mode ?? ClientMode.fromUri(Uri.base);
+
+  /// What is in front of the client: the one the app was given, else the one its address names, else the page in front in the
+  /// extension's window; null where nothing is.
+  RelationSource? _relations;
+
+  /// Whether [_relations] is the app's own, which it then ends.
+  bool _ownsRelations = false;
+
+  /// Opens the whole app in a page of its own, from the chat-only app's link, and says so when this client cannot.
+  void _openFullApp() {
+    final opened = (widget.openPage ?? full_app.openPage)(ClientMode.fullAppOf(Uri.base));
+    if (!opened) {
+      _messenger.currentState?.showSnackBar(const SnackBar(content: Text('This page cannot open the whole app in a page of its own.')));
+    }
+  }
+
+  /// Shows the section [id]; the chat-only app has no other than Conversations, so it opens the whole app there instead.
+  void _showSection(String id) {
+    if (_mode.chatOnly) {
+      _openFullApp();
+    } else {
+      _layout.select(id);
+    }
+  }
+
   Future<AcpPage?> get _provider => widget.browserProvider ?? findAcp(timeout: const Duration(milliseconds: 300));
 
   Future<void> _claimContext() async {
@@ -975,7 +1022,7 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   Future<void> _openProviderSession(
-    AcpPage acp, AcpPageAgent agent, {required String cwd, required String title, String? site}) async {
+    AcpPage acp, AcpPageAgent agent, {required String cwd, required String title, String? site, Relation? relation}) async {
     final client = await connectProviderAgent(acp, agent, decider: store.askPermission, elicitor: store.askQuestion);
     try {
       // A site's session works in a folder the agent's host makes and names in its answer; the page names none.
@@ -990,6 +1037,7 @@ class _CanoaAppState extends State<CanoaApp> {
         remoteSessionId: opened.id,
         cwd: made?.folder ?? cwd,
         site: site,
+        relation: relation,
         workspaceId: made?.id,
         agentNames: title.isEmpty,
       );
@@ -1003,20 +1051,23 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
-  /// A new session for [site], from the page in front: each agent the person grants works in a folder of its own that its host
-  /// makes under the site's folder in its Documents, and the ledger notes the site and the folder.
-  Future<void> _newSiteSession(String site) async {
+  /// A new session for [relation], what is in front of the client: each agent the person grants works in a folder of its own that
+  /// its host makes in its Documents (under the page's site for a webpage, under the app's own for anything else), and the ledger
+  /// notes the relation, the site and the folder. The relation stays here: the agent is told none of it.
+  Future<void> _newRelatedSession(Relation relation) async {
     final acp = await _provider;
     if (acp == null) throw StateError('This browser has no provider of agents');
-    final agents = await acp.request(purpose: 'Chat with it in Canoa about $site');
+    final site = relation.kind == Relation.originKind ? siteFqdn(relation.key) : servedSite;
+    if (site == null) throw StateError('${relation.display} is not a site a session can be kept for');
+    final agents = await acp.request(purpose: 'Chat with it in Canoa about ${relation.display}');
     for (final agent in agents) {
-      await _openProviderSession(acp, agent, cwd: siteStandInFolder, title: '', site: site);
+      await _openProviderSession(acp, agent, cwd: siteStandInFolder, title: '', site: site, relation: relation);
     }
   }
 
-  /// Opens a session of the site again, in its own folder, through the browser's provider: the agent it ran on must still be
-  /// granted to this browser, or the person is asked again.
-  Future<void> _resumeSiteSession(LedgerEntry entry) async {
+  /// Opens a session related to something again, in its own folder, through the browser's provider: the agent it ran on must
+  /// still be granted to this browser, or the person is asked again.
+  Future<void> _resumeRelated(LedgerEntry entry) async {
     if (entry.place != SessionPlace.browser) return _reopen(entry);
     final acp = await _provider;
     if (acp == null) throw StateError('This browser has no provider of agents');
@@ -2687,6 +2738,15 @@ class _CanoaAppState extends State<CanoaApp> {
     _localHost = widget.localHost ?? platformLocalHostBridge();
     final bridge = widget.tabBridge;
     _tabs = bridge == null ? TabsComposerExtension.platform(store) : TabsComposerExtension(TabShares(bridge), store: store);
+    final front = _tabs?.tabs;
+    _relations = widget.relations ??
+        (_mode.relation != null
+            ? ManualRelation(_mode.relation)
+            : front != null
+                ? FrontTabRelation(front)
+                // The chat-only app always has a source, which says nothing is in front until a client tells it.
+                : _mode.chatOnly ? ManualRelation() : null);
+    _ownsRelations = widget.relations == null && _relations != null;
     _contextTimer = Timer.periodic(
       const Duration(seconds: 2), (_) => unawaited(_claimContext()),
     );
@@ -2722,6 +2782,7 @@ class _CanoaAppState extends State<CanoaApp> {
     _grouping.dispose();
     _loadoutsSelection.dispose();
     _popout.dispose();
+    if (_ownsRelations) (_relations as ChangeNotifier).dispose();
     _tabs?.dispose();
     _contextTimer?.cancel();
     unawaited(_attention?.cancel());
@@ -2815,7 +2876,7 @@ class _CanoaAppState extends State<CanoaApp> {
     hosts: _hostChoices,
     chooseHost: _chooseHost,
     addHost: _addHost,
-    manageHosts: () => _layout.select(HostsController.section),
+    manageHosts: () => _showSection(HostsController.section),
     browseFolder: _browseFolder,
     nativeFolder: widget.pickFolder == null && widget.served == null && canRunLocalAgents && _viaHost ? () => getDirectoryPath() : null,
     sourcesOf: (session) => session.host == null ? _sources : _sourcesOn(session.host!),
@@ -2915,17 +2976,17 @@ class _CanoaAppState extends State<CanoaApp> {
     },
   );
 
-  /// In the extension's panel, the sessions of the page in front above the welcome page.
-  Widget _withSite(Widget welcome) {
-    final tabs = _tabs?.tabs, ledger = store.ledger;
-    if (tabs == null || ledger == null) return welcome;
+  /// Where the client has something in front of it, the sessions related to it above the welcome page.
+  Widget _withRelated(Widget welcome) {
+    final relations = _relations, ledger = store.ledger;
+    if (relations == null || ledger == null) return welcome;
     return Column(children: [
-      // At most half the panel: a site with many sessions scrolls inside it.
+      // At most half the panel: a place with many sessions scrolls inside it.
       Flexible(
         child: SingleChildScrollView(
-          child: SiteSessions(
-            tabs: tabs, ledger: ledger, store: store,
-            onNew: _newSiteSession, onResume: _resumeSiteSession,
+          child: RelatedSessions(
+            source: relations, ledger: ledger, store: store,
+            onNew: _newRelatedSession, onResume: _resumeRelated,
           ),
         ),
       ),
@@ -2989,7 +3050,7 @@ class _CanoaAppState extends State<CanoaApp> {
         animation: Listenable.merge([store, _popout]),
         builder: (context, _) => _CanoaHome(
           store: store, onNewSession: _newSession, onSettings: _showSettings,
-          onHosts: () => _layout.select(HostsController.section), onLoadout: _showLoadout, onLoadouts: _showLoadouts, onReopen: _reopen, running: _running, onAttach: _attachRunning,
+          onHosts: () => _showSection(HostsController.section), onLoadout: _showLoadout, onLoadouts: _showLoadouts, onReopen: _reopen, running: _running, onAttach: _attachRunning,
           account: widget.served?.portal?.user, onSignOut: widget.served?.portal?.signOut,
           layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(), loadouts: _loadoutsPage(),
           hostsIndex: _hostsIndex(), hostsPage: _hostsPage(), storeIndex: StoreIndex(selection: _storeSelection),
@@ -2998,11 +3059,16 @@ class _CanoaAppState extends State<CanoaApp> {
           terminalIndex: TerminalIndex(controller: _terminalSection), terminalMain: TerminalMain(controller: _terminalSection),
           conversation: _conversation,
           localHost: _localHost,
+          chatOnly: _mode.chatOnly,
+          relations: _relations,
+          onNewRelated: _newRelatedSession,
+          onResumeRelated: _resumeRelated,
+          onOpenFullApp: _openFullApp,
           grouping: _grouping,
           kit: _kit,
           renderers: widget.renderers,
           noAgent: _noAgent,
-          welcome: _withSite(WelcomeView(
+          welcome: _withRelated(WelcomeView(
             sources: _sources, checks: _checks, programs: _programs, historyImport: _historyImport(),
             onStore: () => unawaited(_showLoadout()),
             onSettings: () => unawaited(_showSettings(section: 'sources')),
@@ -3021,6 +3087,7 @@ class _CanoaHome extends StatelessWidget {
     required this.layout, required this.surfaces, required this.settings, required this.loadout, required this.loadouts,
     required this.hostsIndex, required this.hostsPage, required this.storeIndex, required this.loadoutsIndex, this.usageIndex, this.usagePage, this.sessionSpend,
     required this.terminalIndex, required this.terminalMain,
+    this.chatOnly = false, this.relations, required this.onNewRelated, required this.onResumeRelated, this.onOpenFullApp,
   });
 
   /// The extension's bridge to the Canoa on this computer; null where this is not the extension.
@@ -3041,6 +3108,16 @@ class _CanoaHome extends StatelessWidget {
 
   /// The Terminal section's index and main view.
   final Widget terminalIndex, terminalMain;
+
+  /// Whether this is the chat-only app: the conversation and the sessions related to what is in front of the client, with none of
+  /// the sections, panels or surfaces of the whole app, and a way to open that.
+  final bool chatOnly;
+
+  /// What is in front of the client, and what the chat-only index does with it.
+  final RelationSource? relations;
+  final Future<void> Function(Relation relation) onNewRelated;
+  final Future<void> Function(LedgerEntry entry) onResumeRelated;
+  final VoidCallback? onOpenFullApp;
   final Future<SpendRow?> Function(String sessionId)? sessionSpend;
 
   final SessionStore store;
@@ -3109,7 +3186,7 @@ class _CanoaHome extends StatelessWidget {
           PaletteItem('Go to ${other.title}', () => store.select(other.id), detail: other.agent, icon: Icons.chat_bubble_outline),
       ] : [
         PaletteItem('New session', onNewSession, icon: Icons.add_comment_outlined),
-        if (session != null && conversation.showChanges != null && (changeTotals(session) != null))
+        if (!chatOnly && session != null && conversation.showChanges != null && (changeTotals(session) != null))
           PaletteItem('Show the changes', conversation.showChanges!, icon: Icons.difference_outlined),
         if (session?.status == SessionStatus.working) PaletteItem('Stop the turn', _stop, icon: Icons.stop_circle_outlined),
         if (session != null && store.canDelegate(session))
@@ -3118,15 +3195,19 @@ class _CanoaHome extends StatelessWidget {
         if (session != null && store.canDelegate(session))
           PaletteItem('Delegation setup', () => unawaited(openDelegationSetup(context, store, session)),
               detail: 'Which agents this conversation may delegate to, and what it may attach', icon: Icons.tune),
-        if (session != null)
+        if (!chatOnly && session != null)
           if (workspaceOpener.workspaceOf(place: session.place, cwd: session.cwd, endpoint: session.endpoint, peerId: session.peerId).target case final target?)
             for (final action in workspaceOpener.actionsFor(WorkspaceContext.palette, target))
               PaletteItem(action.label, () => unawaited(runWorkspaceAction(context, action, target)),
                   detail: target.path, icon: action.icon),
-        PaletteItem('Settings', onSettings, icon: Icons.settings_outlined),
-        if (onLoadouts != null) PaletteItem('Loadouts', onLoadouts!, icon: Icons.inventory_2_outlined),
-        if (onLoadout != null) PaletteItem('Store', onLoadout!, icon: Icons.storefront_outlined),
-        if (onHosts != null) PaletteItem('Hosts', onHosts!, detail: 'Local, saved connections and Hosting', icon: Icons.lan_outlined),
+        if (chatOnly)
+          PaletteItem('Open the full app', onSettings, detail: 'Workspaces, terminal, Store and Settings', icon: Icons.open_in_new)
+        else ...[
+          PaletteItem('Settings', onSettings, icon: Icons.settings_outlined),
+          if (onLoadouts != null) PaletteItem('Loadouts', onLoadouts!, icon: Icons.inventory_2_outlined),
+          if (onLoadout != null) PaletteItem('Store', onLoadout!, icon: Icons.storefront_outlined),
+          if (onHosts != null) PaletteItem('Hosts', onHosts!, detail: 'Local, saved connections and Hosting', icon: Icons.lan_outlined),
+        ],
         PaletteItem('Keyboard shortcuts', () => unawaited(showShortcutHelp(context)), icon: Icons.keyboard_outlined),
         for (final other in store.listed)
           if (other.id != store.selectedId)
@@ -3144,11 +3225,14 @@ class _CanoaHome extends StatelessWidget {
   Map<ShortcutActivator, VoidCallback> _shortcuts(BuildContext context) => {
     chord(LogicalKeyboardKey.keyK): () => unawaited(_palette(context)),
     chord(LogicalKeyboardKey.keyN): onNewSession,
-    chord(LogicalKeyboardKey.backquote): () {
-      if (store.selected case final session?) toggleBottomPanel(surfaces: surfaces, layout: layout, session: session);
-    },
-    chord(LogicalKeyboardKey.keyB, alt: true): () {
-      if (store.selected case final session? when surfaces.offers(session, SurfaceSlot.right)) layout.toggleRight();
+    // The chat-only app has no panels.
+    if (!chatOnly) ...{
+      chord(LogicalKeyboardKey.backquote): () {
+        if (store.selected case final session?) toggleBottomPanel(surfaces: surfaces, layout: layout, session: session);
+      },
+      chord(LogicalKeyboardKey.keyB, alt: true): () {
+        if (store.selected case final session? when surfaces.offers(session, SurfaceSlot.right)) layout.toggleRight();
+      },
     },
     // The shell hears it too when focus is inside it; this is for focus above, where nothing in the shell is.
     chord(LogicalKeyboardKey.keyB): () {
@@ -3202,13 +3286,14 @@ class _CanoaHome extends StatelessWidget {
         onSignOut: onSignOut,
         indexWidth: context.look.railWidth,
         banner: localHost == null ? null : LocalHostBanner(bridge: localHost!),
+        selector: !chatOnly,
         sections: [
           AppSection(
             id: ShellLayout.conversations,
             ownsLayoutControls: true,
             label: 'Conversations',
             icon: Icons.chat_bubble_outline,
-            index: _rail(context),
+            index: chatOnly ? _relatedRail() : _rail(context),
             main: _Conversation(
               key: ValueKey(store.selectedId ?? 'empty'),
               store: store,
@@ -3221,18 +3306,35 @@ class _CanoaHome extends StatelessWidget {
               welcome: welcome,
               noAgent: noAgent,
               sessionSpend: sessionSpend,
+              chatOnly: chatOnly,
+              onOpenFullApp: onOpenFullApp,
             ),
           ),
+          if (!chatOnly) ...[
           AppSection(id: HostsController.section, label: 'Hosts', icon: Icons.lan_outlined, index: hostsIndex, main: hostsPage),
           AppSection(id: 'terminal', label: 'Terminal', icon: Icons.terminal, index: terminalIndex, main: terminalMain),
           if (usagePage != null) AppSection(id: 'usage', label: 'Usage', icon: Icons.speed, index: usageIndex, main: usagePage!),
           AppSection(id: 'loadouts', label: 'Loadouts', icon: Icons.inventory_2_outlined, index: loadoutsIndex, main: loadouts),
           AppSection(id: 'store', label: 'Store', icon: Icons.storefront_outlined, index: storeIndex, main: loadout, ownsLayoutControls: true),
           AppSection(id: 'settings', label: 'Settings', tooltip: 'Canoa settings', icon: Icons.settings_outlined, main: settings, atFoot: true),
+          ],
         ],
       ));
     });
   }
+
+  /// The chat-only app's index: the sessions of what is in front first.
+  Widget _relatedRail() => RelatedRail(
+    source: relations!,
+    store: store,
+    ledger: store.ledger,
+    onNew: onNewRelated,
+    onNewSession: onNewSession,
+    onResume: onResumeRelated,
+    onOpenFullApp: onOpenFullApp,
+    running: running,
+    onAttach: onAttach,
+  );
 }
 
 /// What a start under way has made so far, for quitting to take back.
@@ -3268,7 +3370,14 @@ class _Conversation extends StatefulWidget {
   const _Conversation({
     super.key, required this.store, required this.narrow, required this.handle, required this.layout, required this.surfaces,
     this.kit = const ComposerKit(), this.renderers = chat.ChatRenderers.none, required this.welcome, this.noAgent = false, this.sessionSpend,
+    this.chatOnly = false, this.onOpenFullApp,
   });
+
+  /// Whether this is the chat-only app, whose conversation has no work panels, inspector, terminal or workspace to open.
+  final bool chatOnly;
+
+  /// Opens the whole app, which the chat-only header offers.
+  final VoidCallback? onOpenFullApp;
 
   final Widget welcome;
   final bool noAgent;
@@ -3313,7 +3422,7 @@ class _ConversationState extends State<_Conversation> {
     widget.handle
       ..owner = this
       ..focusComposer = _composerFocus.requestFocus
-      ..showChanges = () {
+      ..showChanges = widget.chatOnly ? null : () {
         final session = widget.store.selected;
         if (session != null && !session.isDraft) _showInspector(session);
       }
@@ -3352,6 +3461,7 @@ class _ConversationState extends State<_Conversation> {
 
   /// The Terminal surface when the host [session] runs on gives a shell to open.
   TerminalSurface? _terminalSurface(ChatSession session) {
+    if (widget.chatOnly) return null;
     final surface = widget.surfaces.registry.whereType<TerminalSurface>().firstOrNull;
     return surface != null && surface.accessFor(session) is TerminalOnHost ? surface : null;
   }
@@ -3367,6 +3477,7 @@ class _ConversationState extends State<_Conversation> {
 
   /// The Files surface when the host [session] runs on gives its files to browse.
   FilesSurface? _filesSurface(ChatSession session) {
+    if (widget.chatOnly) return null;
     final surface = widget.surfaces.registry.whereType<FilesSurface>().firstOrNull;
     return surface != null && surface.available(session) ? surface : null;
   }
@@ -3506,15 +3617,16 @@ class _ConversationState extends State<_Conversation> {
     final actions = <(String, IconData, VoidCallback)>[
       if (session != null && (widget.store.canListEarlier(session) || (widget.handle.canListImported?.call(session) ?? false)))
         ('Earlier conversations', Icons.history, () => unawaited(_showEarlier(session))),
-      if (session != null && !session.isDraft) ('Session details', Icons.view_sidebar_outlined, () => _showInspector(session)),
-      if (session != null && (widget.handle.moveTargets?.call(session).isNotEmpty ?? false))
+      if (session != null && !session.isDraft && !widget.chatOnly) ('Session details', Icons.view_sidebar_outlined, () => _showInspector(session)),
+      if (session != null && !widget.chatOnly && (widget.handle.moveTargets?.call(session).isNotEmpty ?? false))
         ('Move to…', Icons.drive_file_move_outlined, () => unawaited(widget.handle.move!(context, session))),
       if (session != null && (!widget.narrow || Uri.base.queryParameters['view'] == 'panel') && !session.isDraft && (widget.handle.popout?.available ?? false))
         if (widget.handle.popout!.isPoppedOut(session))
           ('Bring back from its own window', Icons.close_fullscreen, () => unawaited(widget.handle.popout!.dockBack(session)))
         else
           ('Open in its own window', Icons.open_in_new, () => unawaited(_popOut(session))),
-      ?_workspaceEntry(session),
+      if (!widget.chatOnly) ?_workspaceEntry(session),
+      if (widget.chatOnly && widget.onOpenFullApp != null) ('Open the full app', Icons.open_in_new, widget.onOpenFullApp!),
       if (session?.profile case final report?)
         ('Profile', Icons.tune, () => unawaited(showSelectableDialog<void>(
           context: context,
@@ -3574,7 +3686,7 @@ class _ConversationState extends State<_Conversation> {
                   style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
               ],
             )),
-            if (session != null && !session.isDraft)
+            if (session != null && !session.isDraft && !widget.chatOnly)
               if (changeTotals(session) case (final added, final removed)) _ChangesChip(added: added, removed: removed, onPressed: () => _showInspector(session)),
             if (session != null && session.others.isNotEmpty) PresenceMark(others: session.others, narrow: widget.narrow),
             if (session != null && widget.store.inBypass(session)) _BypassMark(narrow: widget.narrow),
@@ -3600,7 +3712,7 @@ class _ConversationState extends State<_Conversation> {
                 label: Text(_state(session)),
                 visualDensity: VisualDensity.compact,
               ),
-            if (!widget.narrow)
+            if (!widget.narrow && !widget.chatOnly)
               LayoutControls(
                 layout: widget.layout,
                 section: ShellLayout.conversations,
@@ -3673,7 +3785,7 @@ class _ConversationState extends State<_Conversation> {
         ),
       ],
     ]);
-    if (session == null) return conversation;
+    if (session == null || widget.chatOnly) return conversation;
     return PanelFrame(
       layout: widget.layout,
       session: session,

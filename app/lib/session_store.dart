@@ -26,6 +26,7 @@ import 'chat/attachments.dart';
 import 'chat/cache_lifetime.dart';
 import 'chat/context_kinds.dart';
 import 'chat/image_fit.dart';
+import 'client/relation.dart';
 import 'chat/git_changes.dart';
 import 'chat/modes.dart';
 import 'chat/session_options.dart';
@@ -283,6 +284,10 @@ class ChatSession {
 
   /// The site a session started from a webpage belongs to (the page's host name, as `siteFqdn` writes it); null for any other.
   String? site;
+
+  /// What the session was started from, which a small client lists the sessions of first; kept in the ledger, never sent to the
+  /// agent. Null for a session started from nothing.
+  Relation? relation;
 
   /// The source a restored draft was kept with, by kind and label, while no source of that name is here.
   String? keptSource;
@@ -2080,6 +2085,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     String? cwd,
     SessionWorktree? worktree,
     String? site,
+    Relation? relation,
     String? workspaceId,
     bool agentNames = false,
   }) {
@@ -2101,6 +2107,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           agentNames: agentNames,
         )
         ..site = site
+        ..relation = relation
         ..kind = site == null ? SessionKind.workspace : SessionKind.chat
         ..workspaceId = workspaceId,
     );
@@ -2477,6 +2484,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       kind: session.kind,
       named: session.namedByPerson,
       site: session.site,
+      relation: session.relation,
       cacheLifetime: session.cacheLifetime?.id,
       account: session.account,
       overlays: session.overlays?.toList(),
@@ -3667,6 +3675,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           )
           ..host = host
           ..site = entry.site
+          ..relation = entry.relation
           ..kind = entry.kind
           ..namedByPerson = entry.named
           ..workspaceId = entry.canoaId

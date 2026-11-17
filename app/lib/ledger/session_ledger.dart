@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../chat/agent_events.dart' show ConfigOption, chatLimits;
 import '../chat/session_options.dart';
+import '../client/relation.dart';
 import '../workspace/workspace_template.dart' show defaultWorkspace;
 import '../worktree/worktree.dart';
 
@@ -104,6 +105,7 @@ final class LedgerEntry {
     this.overlays,
     this.canoaId,
     this.site,
+    this.relation,
     this.kind = SessionKind.workspace,
     this.named = false,
     this.pinned = false,
@@ -130,6 +132,10 @@ final class LedgerEntry {
 
   /// The site (a page's host name) a session started from a webpage belongs to; null for any other.
   final String? site;
+
+  /// What the session was started from (a webpage's origin, a mail conversation, a document), which a small client lists first;
+  /// kept here and never sent to the agent. Null for a session started from nothing.
+  final Relation? relation;
 
   /// Whether it is a chat or works in a chosen workspace.
   SessionKind kind;
@@ -224,6 +230,7 @@ final class LedgerEntry {
     'overlays': ?overlays,
     'canoaId': ?canoaId,
     'site': ?site,
+    'relation': ?relation?.toJson(),
     'kind': kind.name,
     if (named) 'named': true,
     if (pinned) 'pinned': true,
@@ -266,6 +273,7 @@ final class LedgerEntry {
       overlays: json['overlays'] is List ? [for (final name in json['overlays'] as List) if (name is String) name] : null,
       canoaId: text('canoaId'),
       site: text('site'),
+      relation: Relation.fromJson(json['relation']),
       kind: SessionKind.named(json['kind']),
       named: json['named'] == true,
       pinned: json['pinned'] == true,
@@ -427,9 +435,10 @@ class SessionLedger extends ChangeNotifier {
   /// The harnesses present, most recently used first.
   List<String> get harnesses => {for (final entry in _entries) entry.harness}.toList();
 
-  /// The sessions of one site, most recently used first: only those recorded with exactly that host name, so another site's
-  /// are never in it.
-  List<LedgerEntry> forSite(String site) => [for (final entry in _entries) if (entry.site == site) entry];
+  /// The sessions related to [relation], most recently used first: only those recorded with the same kind and key (and, with
+  /// [narrow], the same scope), so another origin's, another port's or another conversation's are never in it.
+  List<LedgerEntry> forRelation(Relation relation, {bool narrow = false}) =>
+      [for (final entry in _entries) if (relation.relates(entry.relation, narrow: narrow)) entry];
 
   LedgerEntry? find(String peerId, String sessionId) {
     final key = LedgerEntry.keyOf(peerId, sessionId);
@@ -515,6 +524,7 @@ class SessionLedger extends ChangeNotifier {
     SessionWorktree? worktree,
     String? canoaId,
     String? site,
+    Relation? relation,
     SessionKind? kind,
     bool named = false,
     String? cacheLifetime,
@@ -538,6 +548,7 @@ class SessionLedger extends ChangeNotifier {
         fallback: fallback,
         method: method,
         site: site,
+        relation: relation,
       );
       _entries.add(found);
     }

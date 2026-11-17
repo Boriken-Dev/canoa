@@ -11,7 +11,7 @@ import '../selectable.dart';
 /// The ledger's sessions that are not open now, listed under Earlier conversations, with a filter by agent. Each opens again where its agent
 /// offers that, says why where it does not, and can be removed from the list, which never deletes the agent's own session.
 class LedgerList extends StatefulWidget {
-  const LedgerList({super.key, required this.ledger, required this.store, this.onReopen, this.running, this.onAttach});
+  const LedgerList({super.key, required this.ledger, required this.store, this.onReopen, this.running, this.onAttach, this.where});
 
   final SessionLedger ledger;
   final SessionStore store;
@@ -24,6 +24,9 @@ class LedgerList extends StatefulWidget {
 
   /// Takes part in a running session: connects to its entry on the host and attaches to it, replayed what was said.
   final Future<void> Function(RunningSession)? onAttach;
+
+  /// Which entries are listed; all of them when null.
+  final bool Function(LedgerEntry)? where;
 
   @override
   State<LedgerList> createState() => _LedgerListState();
@@ -125,7 +128,7 @@ class _LedgerListState extends State<LedgerList> {
       final isRunning = {for (final session in running) '${session.entry}\n${session.sessionId}'};
       final shown = [
         for (final entry in widget.ledger.entries)
-          if (!open.contains(entry.key) && !isRunning.contains('${entry.entry}\n${entry.sessionId}')) entry,
+          if (!open.contains(entry.key) && !isRunning.contains('${entry.entry}\n${entry.sessionId}') && (widget.where?.call(entry) ?? true)) entry,
       ];
       final harnesses = {for (final entry in shown) entry.harness}.toList();
       final filter = harnesses.contains(_harness) ? _harness : null;

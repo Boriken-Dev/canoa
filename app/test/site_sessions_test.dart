@@ -3,6 +3,9 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:canoa/client/client_mode.dart';
+import 'package:canoa/client/relation.dart';
+import 'package:canoa/client/relation_source.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/extension/tab_bridge.dart';
 import 'package:canoa/ledger/session_ledger.dart';
@@ -10,7 +13,9 @@ import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/workspace/site_meta.dart';
 import 'package:coqui_acp/page.dart';
+import 'package:canoa/client/related_rail.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart' show settle, until;
@@ -45,6 +50,9 @@ final class _Provider implements AcpPage {
   /// The folders the host made.
   final newFolders = <String>[];
   final loads = <({String id, String cwd, String? site})>[];
+
+  /// Everything each `session/new` carried, as the agent's host read it.
+  final sent = <String>[];
 
   /// Whether the host leaves its folder out of its answer, as one that does not know the extension would.
   var forgets = false;
@@ -98,6 +106,7 @@ final class _Connection implements AcpPageConnection {
       case 'session/new':
         final site = ((params['_meta'] as Map<String, dynamic>?)?[siteMeta] as Map<String, dynamic>?)?['site'] as String?;
         owner.asked.add((cwd: params['cwd'] as String, site: site));
+        owner.sent.add(jsonEncode(params));
         final number = ++owner._next;
         final session = 'p$number';
         result = {'sessionId': session};
@@ -120,9 +129,12 @@ FakeTabBridge _bridge(String url, {String title = 'Example'}) => FakeTabBridge(f
 Future<SessionStore> _panel(
   WidgetTester tester, {
   required SessionLedger ledger,
-  required FakeTabBridge bridge,
+  FakeTabBridge? bridge,
   required _Provider provider,
   String? workspace,
+  ClientMode? mode,
+  RelationSource? relations,
+  bool Function(Uri)? openPage,
 }) async {
   final store = SessionStore(ledger: ledger);
   addTearDown(store.dispose);
@@ -133,6 +145,9 @@ Future<SessionStore> _panel(
     config: workspace == null ? const CanoaConfig() : CanoaConfig(sessions: LedgerSettings(workspace: workspace)),
     tabBridge: bridge,
     browserProvider: Future.value(provider),
+    mode: mode,
+    relations: relations,
+    openPage: openPage,
   ));
   await settle(tester);
   return store;
@@ -143,9 +158,11 @@ Future<void> _tap(WidgetTester tester, Key key) async {
   await settle(tester);
 }
 
-Finder _tiles() => find.byWidgetPredicate((widget) => widget.key is ValueKey<String> && (widget.key! as ValueKey<String>).value.startsWith('site-session '));
+Finder _tiles() => find.byWidgetPredicate((widget) => widget.key is ValueKey<String> && (widget.key! as ValueKey<String>).value.startsWith('related-session '));
 
 void main() {
+  chatOnlyTests();
+
   test('the app marks its sessions as its own person\'s, not a webpage\'s', () {
     expect(siteSetup('example.com').meta, {siteMeta: {'site': 'example.com', 'own': true}});
   });
@@ -154,10 +171,10 @@ void main() {
     final ledger = SessionLedger(MemoryLedgerBackend());
     final provider = _Provider();
     final store = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/a'), provider: provider);
-    expect(find.byKey(const Key('site-name')), findsOneWidget);
-    expect(tester.widget<Text>(find.byKey(const Key('site-name'))).data, 'example.com');
+    expect(find.byKey(const Key('related-name')), findsOneWidget);
+    expect(tester.widget<Text>(find.byKey(const Key('related-name'))).data, 'example.com');
 
-    await _tap(tester, const Key('site-new'));
+    await _tap(tester, const Key('related-new'));
     await until(tester, () => store.sessions.isNotEmpty && store.sessions.first.remoteSessionId != null, 'the session to open');
     final folder = provider.newFolders.single;
     expect(provider.asked.single, (cwd: siteStandInFolder, site: 'example.com'), reason: 'the page names the site, not a path');
@@ -170,13 +187,22 @@ void main() {
     expect(entry.cwd, folder);
     expect(entry.canoaId, folder.split('/').last, reason: 'the host\'s id for the session, which names its folder');
     expect(LedgerEntry.fromJson(entry.toJson())!.site, 'example.com');
+    // What the session relates to is the page's origin, with the page's title; it is the ledger's and the agent was told none of it.
+    expect(entry.relation, isNotNull);
+    expect(entry.relation!.kind, Relation.originKind);
+    expect(entry.relation!.key, 'https://example.com');
+    expect(entry.relation!.label, 'Example');
+    expect(LedgerEntry.fromJson(entry.toJson())!.relation, entry.relation);
+    expect(store.sessions.single.relation, entry.relation);
+    expect(provider.sent.single, isNot(contains('https://example.com')), reason: 'the origin stays with the app');
+    expect(provider.sent.single, isNot(contains('Example')), reason: 'so does the page title');
   });
 
   testWidgets('reopening the panel on example.com lists the session and resumes it in its own folder', (tester) async {
     final ledger = SessionLedger(MemoryLedgerBackend());
     final first = _Provider();
     final opened = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/a'), provider: first);
-    await _tap(tester, const Key('site-new'));
+    await _tap(tester, const Key('related-new'));
     await until(tester, () => opened.sessions.isNotEmpty && opened.sessions.first.remoteSessionId != null, 'the session to open');
     final folder = first.newFolders.single;
     final key = ledger.entries.single.key;
@@ -184,12 +210,12 @@ void main() {
 
     // The panel is closed and opened again on the same site: a new store over the same list.
     final provider = _Provider();
-    final store = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com:8443/other?q=1'), provider: provider);
+    final store = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/other?q=1#top'), provider: provider);
     expect(_tiles(), findsOneWidget);
     expect(find.text('Earlier on example.com'), findsOneWidget);
     expect(find.descendant(of: _tiles(), matching: find.textContaining(folder)), findsOneWidget);
 
-    await _tap(tester, ValueKey('site-resume $key'));
+    await _tap(tester, ValueKey('related-resume $key'));
     await until(tester, () => store.sessions.isNotEmpty && store.sessions.first.status == SessionStatus.connected, 'the session to open again');
     expect(provider.loads, [(id: 'p1', cwd: folder, site: 'example.com')], reason: 'reopened in the folder it was made in, naming the site');
     expect(provider.asked, isEmpty);
@@ -203,32 +229,36 @@ void main() {
     final ledger = SessionLedger(MemoryLedgerBackend());
     final provider = _Provider();
     final opened = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/a'), provider: provider);
-    await _tap(tester, const Key('site-new'));
+    await _tap(tester, const Key('related-new'));
     await until(tester, () => opened.sessions.isNotEmpty && opened.sessions.first.remoteSessionId != null, 'the session to open');
     expect(ledger.entries.single.site, 'example.com');
     await tester.pumpWidget(const SizedBox());
 
-    for (final url in ['https://example.org/', 'https://www.example.com/', 'https://com/', 'http://example.com.evil.test/']) {
+    for (final url in [
+      'https://example.org/', 'https://www.example.com/', 'https://com/', 'http://example.com.evil.test/',
+      // Another port or another scheme is another origin.
+      'https://example.com:8443/', 'http://example.com/',
+    ]) {
       await _panel(tester, ledger: ledger, bridge: _bridge(url), provider: _Provider());
-      expect(find.byKey(const Key('site-name')), findsOneWidget, reason: url);
+      expect(find.byKey(const Key('related-name')), findsOneWidget, reason: url);
       expect(_tiles(), findsNothing, reason: url);
       expect(find.textContaining('Earlier on'), findsNothing, reason: url);
       expect(find.textContaining('example.com/Canoa'), findsNothing, reason: url);
       expect(find.textContaining('/example.com/'), findsNothing, reason: 'nothing of example.com in $url\'s panel');
       await tester.pumpWidget(const SizedBox());
     }
-    expect(ledger.forSite('example.org'), isEmpty);
+    expect(ledger.forRelation(originRelation('https://example.org/')!), isEmpty);
   });
 
   testWidgets('a new session from the same site gets a folder of its own, and the site lists both newest first', (tester) async {
     final ledger = SessionLedger(MemoryLedgerBackend(), clock: _Clock().now);
     final provider = _Provider();
     final store = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/a'), provider: provider);
-    await _tap(tester, const Key('site-new'));
+    await _tap(tester, const Key('related-new'));
     await until(tester, () => store.sessions.length == 1 && store.sessions.first.remoteSessionId != null, 'the first session');
     await tester.runAsync(() => store.close(store.sessions.single));
     await settle(tester);
-    await _tap(tester, const Key('site-new'));
+    await _tap(tester, const Key('related-new'));
     await until(tester, () => store.sessions.length == 1 && store.sessions.first.remoteSessionId != null, 'the second session');
     expect(provider.newFolders, hasLength(2));
     expect(provider.newFolders.first, isNot(provider.newFolders.last));
@@ -236,7 +266,7 @@ void main() {
       expect(folder, matches(RegExp('^$_documents/Canoa/scratch/example\\.com/${_id.pattern}\$')));
     }
     expect({for (final folder in provider.newFolders) folder.substring(0, folder.lastIndexOf('/'))}, hasLength(1), reason: 'one folder for the site');
-    final listed = ledger.forSite('example.com');
+    final listed = ledger.forRelation(originRelation('https://example.com/')!);
     expect(listed.map((entry) => entry.cwd), [provider.newFolders.last, provider.newFolders.first], reason: 'newest first');
   });
 
@@ -246,7 +276,7 @@ void main() {
       'javascript:alert(1)', 'https://c:80:90/',
     ]) {
       await _panel(tester, ledger: SessionLedger(MemoryLedgerBackend()), bridge: _bridge(url), provider: _Provider());
-      expect(find.byKey(const Key('site-name')), findsNothing, reason: url);
+      expect(find.byKey(const Key('related-name')), findsNothing, reason: url);
       await tester.pumpWidget(const SizedBox());
     }
   });
@@ -259,8 +289,8 @@ void main() {
     );
     expect(find.byKey(const Key('site-documents')), findsNothing);
     expect(find.textContaining('Documents'), findsNothing);
-    expect(tester.widget<FilledButton>(find.byKey(const Key('site-new'))).onPressed, isNotNull);
-    await _tap(tester, const Key('site-new'));
+    expect(tester.widget<FilledButton>(find.byKey(const Key('related-new'))).onPressed, isNotNull);
+    await _tap(tester, const Key('related-new'));
     await until(tester, () => store.sessions.isNotEmpty && store.sessions.first.remoteSessionId != null, 'the session to open');
     expect(provider.asked.single, (cwd: siteStandInFolder, site: 'example.com'));
     expect(provider.newFolders.single, startsWith('$_documents/Canoa/scratch/example.com/'), reason: 'the host places it');
@@ -270,8 +300,8 @@ void main() {
     final ledger = SessionLedger(MemoryLedgerBackend());
     final provider = _Provider()..forgets = true;
     final store = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/'), provider: provider);
-    await _tap(tester, const Key('site-new'));
-    await until(tester, () => find.byKey(const Key('site-failed')).evaluate().isNotEmpty, 'the failure');
+    await _tap(tester, const Key('related-new'));
+    await until(tester, () => find.byKey(const Key('related-failed')).evaluate().isNotEmpty, 'the failure');
     expect(find.textContaining('did not say which workspace'), findsOneWidget);
     expect(store.sessions, isEmpty);
     expect(ledger.entries, isEmpty);
@@ -283,7 +313,7 @@ void main() {
     final provider = _Provider();
     final opened = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/docs'), provider: provider);
     for (var count = 1; count <= 2; count++) {
-      await _tap(tester, const Key('site-new'));
+      await _tap(tester, const Key('related-new'));
       await until(tester, () => opened.sessions.length == 1 && opened.sessions.first.remoteSessionId != null, 'session $count');
       ledger.touch(_peer, 'p$count', title: count == 1 ? 'Summarise the changelog' : 'Fix the broken link');
       await tester.runAsync(() => opened.close(opened.sessions.single));
@@ -292,6 +322,238 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/docs'), provider: _Provider());
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('ext_panel_site_sessions.png'));
+  });
+}
+
+const _chatOnly = ClientMode(chatOnly: true);
+
+Future<void> _openDrawer(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('Sessions'));
+  await settle(tester);
+}
+
+/// Starts a session on the front page and names it.
+Future<ChatSession> _start(WidgetTester tester, SessionStore store, String name) async {
+  final before = store.sessions.length;
+  // With a session open the welcome page, which lists the page's sessions, is not shown: its list is in the drawer.
+  if (find.byKey(const Key('related-new')).evaluate().isEmpty) await _openDrawer(tester);
+  await _tap(tester, const Key('related-new'));
+  await until(tester, () => store.sessions.length == before + 1 && store.sessions.first.remoteSessionId != null, 'session $name');
+  final session = store.sessions.first;
+  store.rename(session, name);
+  await settle(tester);
+  return session;
+}
+
+void chatOnlyTests() {
+  group('the chat-only app', () {
+    testWidgets('shows the conversation and the sessions of the page, with none of the whole app\'s sections', (tester) async {
+      final provider = _Provider();
+      final store = await _panel(
+        tester, ledger: SessionLedger(MemoryLedgerBackend()), bridge: _bridge('https://example.com/a'), provider: provider, mode: _chatOnly,
+      );
+      expect(find.byKey(const Key('related-name')), findsOneWidget);
+      await _openDrawer(tester);
+      expect(find.descendant(of: find.byType(Drawer), matching: find.byType(RelatedRail)), findsOneWidget);
+      for (final section in ['Conversations', 'Hosts', 'Terminal', 'Loadouts', 'Store', 'Canoa settings']) {
+        expect(find.byTooltip(section), findsNothing, reason: 'no $section section');
+      }
+      await tester.tapAt(const Offset(370, 400));
+      await settle(tester);
+      await _start(tester, store, 'About the page');
+      // The header's actions are under one menu on a narrow client: the whole app is one of them, and the workspace is none.
+      await tester.tap(find.byTooltip('More'));
+      await settle(tester);
+      expect(find.text('Open the full app'), findsOneWidget, reason: 'the header links to the whole app');
+      expect(find.text('Session details'), findsNothing);
+      expect(find.text('Open the workspace'), findsNothing);
+    });
+
+    testWidgets('the whole app is unchanged where nothing asks for the chat alone', (tester) async {
+      await _panel(tester, ledger: SessionLedger(MemoryLedgerBackend()), bridge: _bridge('https://example.com/a'), provider: _Provider());
+      await _openDrawer(tester);
+      expect(find.byTooltip('Canoa settings'), findsOneWidget);
+      expect(find.byTooltip('Store'), findsOneWidget);
+      expect(find.byType(RelatedRail), findsNothing);
+    });
+
+    testWidgets('a session started on a page is listed first on that page\'s origin, then the others', (tester) async {
+      final ledger = SessionLedger(MemoryLedgerBackend(), clock: _Clock().now);
+      final bridge = _bridge('https://example.com/a', title: 'Docs');
+      final store = await _panel(tester, ledger: ledger, bridge: bridge, provider: _Provider(), mode: _chatOnly);
+      final onExample = await _start(tester, store, 'About example');
+      bridge.open(const OpenTab(id: 2, title: 'Other', url: 'https://other.test/x'));
+      bridge.bring(2);
+      await settle(tester);
+      await _openDrawer(tester);
+      expect(tester.widget<Text>(find.byKey(const Key('related-name'))).data, 'other.test');
+      final onOther = await _start(tester, store, 'About other');
+
+      await _openDrawer(tester);
+      // On other.test: its own session is under the page, the one from example.com is among the others.
+      expect(find.byKey(ValueKey('related-open ${onOther.id}')), findsOneWidget);
+      expect(find.byKey(ValueKey('related-open ${onExample.id}')), findsNothing);
+      expect(find.byKey(ValueKey('rail-open ${onExample.id}')), findsOneWidget);
+      expect(find.text('Other conversations'), findsOneWidget);
+      final related = tester.getTopLeft(find.byKey(ValueKey('related-open ${onOther.id}'))).dy;
+      expect(related, lessThan(tester.getTopLeft(find.byKey(ValueKey('rail-open ${onExample.id}'))).dy), reason: 'related first');
+      await tester.tapAt(const Offset(370, 400));
+      await settle(tester);
+
+      bridge.bring(1);
+      await settle(tester);
+      await _openDrawer(tester);
+      expect(find.byKey(ValueKey('related-open ${onExample.id}')), findsOneWidget);
+      expect(find.byKey(ValueKey('rail-open ${onOther.id}')), findsOneWidget);
+    });
+
+    testWidgets('earlier sessions of the origin are listed first and the other earlier ones follow', (tester) async {
+      final ledger = SessionLedger(MemoryLedgerBackend(), clock: _Clock().now);
+      final bridge = _bridge('https://example.com/a');
+      final first = await _panel(tester, ledger: ledger, bridge: bridge, provider: _Provider(), mode: _chatOnly);
+      await _start(tester, first, 'Kept on example');
+      await tester.runAsync(() => first.close(first.sessions.single));
+      bridge.open(const OpenTab(id: 2, title: 'Other', url: 'https://other.test/'));
+      bridge.bring(2);
+      await settle(tester);
+      await _start(tester, first, 'Kept on other');
+      await tester.runAsync(() => first.close(first.sessions.single));
+      await tester.pumpWidget(const SizedBox());
+
+      final store = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/b'), provider: _Provider(), mode: _chatOnly);
+      await _openDrawer(tester);
+      Finder inDrawer(Finder finder) => find.descendant(of: find.byType(Drawer), matching: finder);
+      expect(inDrawer(find.text('Earlier on example.com')), findsOneWidget);
+      expect(inDrawer(_tiles()), findsOneWidget, reason: 'only the origin\'s own under the page');
+      expect(inDrawer(find.text('Kept on example')), findsOneWidget);
+      expect(inDrawer(find.text('Earlier conversations')), findsOneWidget);
+      expect(inDrawer(find.text('Kept on other')), findsOneWidget, reason: 'the rest follow, as any earlier conversation');
+      expect(
+        tester.getTopLeft(inDrawer(find.text('Earlier on example.com'))).dy,
+        lessThan(tester.getTopLeft(inDrawer(find.text('Earlier conversations'))).dy),
+      );
+      expect(store.sessions, isEmpty);
+    });
+
+    testWidgets('"This page only" narrows the list to the page, not its whole origin', (tester) async {
+      final ledger = SessionLedger(MemoryLedgerBackend(), clock: _Clock().now);
+      final bridge = _bridge('https://example.com/a');
+      final first = await _panel(tester, ledger: ledger, bridge: bridge, provider: _Provider(), mode: _chatOnly);
+      await _start(tester, first, 'On a');
+      await tester.runAsync(() => first.close(first.sessions.single));
+      await tester.pumpWidget(const SizedBox());
+
+      await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/b'), provider: _Provider(), mode: _chatOnly);
+      expect(_tiles(), findsOneWidget, reason: 'the origin');
+      await _tap(tester, const Key('related-narrow'));
+      expect(_tiles(), findsNothing, reason: 'another page of it');
+      await tester.pumpWidget(const SizedBox());
+
+      await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/a/'), provider: _Provider(), mode: _chatOnly);
+      await _tap(tester, const Key('related-narrow'));
+      expect(_tiles(), findsOneWidget, reason: 'the same page, its trailing slash aside');
+    });
+
+    testWidgets('a relation that is not a webpage works the same: the client gives it, and a session of it is listed first', (tester) async {
+      final ledger = SessionLedger(MemoryLedgerBackend(), clock: _Clock().now);
+      final provider = _Provider();
+      final relation = ManualRelation(const Relation(kind: Relation.conversationKind, key: 'c-1', label: 'Quarterly numbers'));
+      addTearDown(relation.dispose);
+      final store = await _panel(tester, ledger: ledger, provider: provider, mode: _chatOnly, relations: relation);
+      expect(tester.widget<Text>(find.byKey(const Key('related-name'))).data, 'Quarterly numbers');
+      expect(find.byKey(const Key('related-narrow')), findsNothing, reason: 'a conversation has nothing narrower');
+
+      await _start(tester, store, 'About the thread');
+      expect(provider.asked.single, (cwd: siteStandInFolder, site: servedSite), reason: 'not a webpage: the app\'s own folder');
+      expect(ledger.entries.single.relation!.kind, Relation.conversationKind);
+      expect(ledger.entries.single.relation!.key, 'c-1');
+      expect(provider.sent.single, isNot(contains('c-1')), reason: 'the agent is told none of it');
+      expect(provider.sent.single, isNot(contains('Quarterly')));
+      await tester.runAsync(() => store.close(store.sessions.single));
+      await settle(tester);
+      expect(_tiles(), findsOneWidget);
+
+      // The client moves to another item, and then back.
+      relation.current = const Relation(kind: Relation.conversationKind, key: 'c-2', label: 'Lunch');
+      await settle(tester);
+      expect(tester.widget<Text>(find.byKey(const Key('related-name'))).data, 'Lunch');
+      expect(_tiles(), findsNothing);
+      relation.current = const Relation(kind: Relation.conversationKind, key: 'c-1', label: 'Quarterly numbers');
+      await settle(tester);
+      expect(_tiles(), findsOneWidget);
+      // A document with the same key is not the conversation.
+      relation.current = const Relation(kind: Relation.documentKind, key: 'c-1');
+      await settle(tester);
+      expect(_tiles(), findsNothing);
+    });
+
+    testWidgets('the address names the mode and what is in front', (tester) async {
+      final ledger = SessionLedger(MemoryLedgerBackend());
+      final mode = ClientMode.fromUri(Uri.parse('https://canoa.example/app/?mode=chat&relation=document:abc&label=Plan'));
+      await _panel(tester, ledger: ledger, provider: _Provider(), mode: mode);
+      expect(tester.widget<Text>(find.byKey(const Key('related-name'))).data, 'Plan');
+      await _openDrawer(tester);
+      expect(find.byTooltip('Canoa settings'), findsNothing);
+    });
+
+    testWidgets('a link opens the whole app in a page of its own, with nothing of the chat-only mode in its address', (tester) async {
+      final opened = <Uri>[];
+      await _panel(
+        tester, ledger: SessionLedger(MemoryLedgerBackend()), bridge: _bridge('https://example.com/a'), provider: _Provider(),
+        mode: _chatOnly, openPage: (address) {
+          opened.add(address);
+          return true;
+        },
+      );
+      await _openDrawer(tester);
+      await tester.tap(find.byKey(const Key('open-full-app')));
+      await settle(tester);
+      expect(opened, hasLength(1));
+      expect(opened.single.queryParameters['view'], 'full');
+      for (final name in ['mode', 'relation', 'scope', 'label']) {
+        expect(opened.single.queryParameters.containsKey(name), isFalse, reason: name);
+      }
+    });
+
+    testWidgets('what the whole app does with a section opens the whole app instead', (tester) async {
+      final opened = <Uri>[];
+      await _panel(
+        tester, ledger: SessionLedger(MemoryLedgerBackend()), bridge: _bridge('https://example.com/a'), provider: _Provider(),
+        mode: _chatOnly, openPage: (address) {
+          opened.add(address);
+          return true;
+        },
+      );
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await settle(tester);
+      expect(opened, hasLength(1), reason: 'Ctrl+, is Settings there');
+    });
+
+    testWidgets('sample: the chat-only drawer lists the page\'s sessions first', (tester) async {
+      if (samplesDir == null) return;
+      final ledger = SessionLedger(MemoryLedgerBackend(), clock: _Clock().now);
+      final bridge = _bridge('https://example.com/docs', title: 'Docs');
+      final store = await _panel(tester, ledger: ledger, bridge: bridge, provider: _Provider(), mode: _chatOnly);
+      final onExample = await _start(tester, store, 'Summarise the changelog');
+      await tester.runAsync(() => store.close(onExample));
+      await settle(tester);
+      await _start(tester, store, 'Fix the broken link');
+      bridge.open(const OpenTab(id: 2, title: 'Other', url: 'https://other.test/x'));
+      bridge.bring(2);
+      await settle(tester);
+      await _start(tester, store, 'Compare the two quotes');
+      bridge.bring(1);
+      await settle(tester);
+      await _openDrawer(tester);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('ext_chat_only_drawer.png'));
+      await tester.tapAt(const Offset(370, 400));
+      await settle(tester);
+      store.select(store.sessions.firstWhere((session) => session.title == 'Fix the broken link').id);
+      await settle(tester);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('ext_chat_only_conversation.png'));
+    });
   });
 }
 
