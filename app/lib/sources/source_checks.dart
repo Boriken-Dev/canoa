@@ -29,7 +29,10 @@ final class SourceChecks {
     final run = ++_run;
     final wanted = sources.toList();
     _running.clear();
+    final before = _results.length;
     _results = {for (final entry in _results.entries) if (wanted.contains(entry.key)) entry.key: entry.value};
+    // A source that is gone is shown gone at once: with nothing left to look up, no answer would redraw it.
+    if (_results.length != before) onChange?.call();
     await Future.wait([
       for (final source in wanted)
         check(source).then((answer) {

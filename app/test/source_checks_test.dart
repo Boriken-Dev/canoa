@@ -9,6 +9,16 @@ const _ready = AgentSource.hosted('ready');
 const _slow = AgentSource.hosted('slow');
 
 void main() {
+  test('a refresh that leaves no source says so, though nothing is looked up', () async {
+    var changes = 0;
+    final checks = SourceChecks((source) => Future.value(const SourceCheck()), onChange: () => changes++);
+    await checks.refresh([_ready]);
+    final before = changes;
+    await checks.refresh(const []);
+    expect(checks.results, isEmpty);
+    expect(changes, greaterThan(before), reason: 'whoever draws the sources is told the last one is gone');
+  });
+
   test('a ready source is usable while an unrelated source is still being looked for', () async {
     final slow = Completer<SourceCheck>();
     final checks = SourceChecks((source) => source == _slow ? slow.future : Future.value(const SourceCheck()));
