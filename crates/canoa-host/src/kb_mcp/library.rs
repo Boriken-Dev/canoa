@@ -8,8 +8,8 @@ use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use coqui_aos::index::{
-    self, Corpus, Embedder, HttpEmbedder, Index, Options, index_dir, previous_version,
-    remove_other_versions, variant_dir,
+    self, Corpus, Embedder, Index, Options, index_dir, previous_version, remove_other_versions,
+    variant_dir,
 };
 use coqui_aos::{
     self as aos, CallerFacts, Document, KnowledgeOverlay, KnowledgeSettings, KnowledgeTree,
@@ -58,7 +58,7 @@ impl Source {
 pub(crate) struct Builder {
     pub(crate) state: PathBuf,
     pub(crate) settings: index::Settings,
-    pub(crate) embedder: Option<HttpEmbedder>,
+    pub(crate) embedder: Option<super::embedder::NetworkEmbedder>,
     pub(crate) knowledge: KnowledgeSettings,
     pub(crate) ranker: Option<Ranker>,
 }

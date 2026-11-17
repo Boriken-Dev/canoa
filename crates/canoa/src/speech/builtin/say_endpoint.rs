@@ -373,14 +373,18 @@ impl SpeechOutput for EndpointSay {
             body.insert("instructions".to_owned(), instructions.into());
         }
         let wait = Duration::from_secs(u64::from(settings.timeout_seconds.max(1)));
-        let agent: ureq::Agent = ureq::Agent::config_builder()
+        let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(None)
             .timeout_connect(Some(wait))
             .timeout_recv_response(Some(wait))
             .timeout_recv_body(Some(Duration::from_secs(BODY_SECONDS)))
-            .build()
-            .into();
+            .build();
+        let agent = crate::network::Network::current()
+            .agent(config)
+            .map_err(|error| {
+                internal(alloc::format!("the endpoint could not be reached: {error}"))
+            })?;
         let mut call = agent
             .post(&settings.url)
             .header("Content-Type", "application/json");

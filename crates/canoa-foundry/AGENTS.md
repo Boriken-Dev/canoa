@@ -2,7 +2,7 @@
 
 Header-file-style reference for `canoa-foundry`: the OpenAI and Anthropic APIs over a local model run by Foundry Local, so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `serde_json`; feature `daemon` (default) adds `ureq`, feature `sdk` adds `foundry-local-sdk` `2.4` and `tokio`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `serde_json`; feature `daemon` (default) adds `ureq` and `canoa`'s `network`, feature `sdk` adds `foundry-local-sdk` `2.4` and `tokio`.
 
 Nothing here opens a listening socket or starts a process: the translations are pure functions of JSON, and an [`Engine`] is what runs a model. The server that carries the requests is `canoa-host`'s (`gateway`).
 
@@ -10,7 +10,7 @@ Nothing here opens a listening socket or starts a process: the translations are 
 
 | Feature | Adds | Default |
 | --- | --- | --- |
-| `daemon` | `daemon::DaemonEngine`: chat completions to the Foundry Local service the person runs, by HTTP on loopback | on |
+| `daemon` | `daemon::DaemonEngine`: chat completions to the Foundry Local service the person runs, by HTTP on loopback, through `canoa::network` (loopback goes direct unless `[host.network]` says otherwise) | on |
 | `sdk` | `sdk::SdkEngine`: the Foundry Local Rust SDK, with the native library loaded into this process. It brings `reqwest` with the system's TLS library (OpenSSL on Linux), `hyper`, `tokio` and `async-openai` | off |
 
 ## Exports

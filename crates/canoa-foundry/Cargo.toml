@@ -16,7 +16,7 @@ publish = false
 [features]
 default = ["daemon"]
 # The engine over the Foundry Local service the person runs, by loopback HTTP.
-daemon = ["dep:ureq"]
+daemon = ["dep:ureq", "canoa/network"]
 # The engine over the Foundry Local Rust SDK, in this process. It brings the SDK's own dependencies (an async runtime and an HTTP
 # client with the system's TLS library: OpenSSL on Linux), which the translations do not need.
 sdk = ["dep:foundry-local-sdk", "dep:tokio"]

@@ -9,6 +9,7 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 
+use canoa::network::Network;
 use serde_json::{Value, json};
 
 /// The most characters of one passage the model is shown.
@@ -75,24 +76,21 @@ impl Ranker {
         self.by_chat(query, &shown)
     }
 
-    fn agent(&self) -> ureq::Agent {
-        ureq::Agent::config_builder()
-            .tls_config(
-                ureq::tls::TlsConfig::builder()
-                    .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-                    .build(),
-            )
+    fn agent(&self) -> Result<ureq::Agent, String> {
+        let config = ureq::Agent::config_builder()
             .max_redirects(0)
             .http_status_as_error(false)
             .timeout_global(Some(self.timeout))
-            .build()
-            .into()
+            .build();
+        Network::current()
+            .agent(config)
+            .map_err(|error| error.to_string())
     }
 
     fn post(&self, path: &str, body: &Value) -> Result<(u16, String), String> {
         let url = format!("{}/v1/{path}", self.root);
         let mut request = self
-            .agent()
+            .agent()?
             .post(&url)
             .header("content-type", "application/json");
         if let Some(token) = &self.bearer {

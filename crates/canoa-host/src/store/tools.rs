@@ -20,6 +20,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use canoa::network::Network;
 use canoa::store::{
     Check, FetchRequest, Fetched, FindRequest, Found, InstallTools, UnpackRequest, Unpacked,
 };
@@ -84,48 +85,33 @@ pub trait Transport: Send + Sync + fmt::Debug {
     fn get(&self, url: &str, limits: &ToolsLimits) -> Result<Reply, String>;
 }
 
-/// Whose certificates an HTTPS fetch trusts.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Roots {
-    /// The operating system's verifier and store, so a proxy that intercepts TLS and that the system trusts works.
-    #[default]
-    Platform,
-    /// The roots webpki ships, whatever the system trusts.
-    Webpki,
-}
-
-/// [`Transport`] over HTTPS with `ureq`.
-#[derive(Debug, Default, Clone, Copy)]
+/// [`Transport`] over HTTPS with `ureq`, through [`Network`]: the system's proxy and its login, the operating system's certificate
+/// verifier and the client certificate of its keystores, unless `[host.network]` says otherwise.
+#[derive(Debug, Default, Clone)]
 pub struct HttpTransport {
-    roots: Roots,
+    network: Option<Arc<Network>>,
 }
 
 impl HttpTransport {
-    /// Trusts `roots`.
+    /// Sends through `network` instead of the process's.
     #[must_use]
-    pub const fn with_roots(roots: Roots) -> Self {
-        Self { roots }
+    pub const fn on(network: Arc<Network>) -> Self {
+        Self {
+            network: Some(network),
+        }
     }
 }
 
 impl Transport for HttpTransport {
     fn get(&self, url: &str, limits: &ToolsLimits) -> Result<Reply, String> {
-        let root_certs = match self.roots {
-            Roots::Platform => ureq::tls::RootCerts::PlatformVerifier,
-            _ => ureq::tls::RootCerts::WebPki,
-        };
-        let tls = ureq::tls::TlsConfig::builder()
-            .root_certs(root_certs)
-            .build();
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .tls_config(tls)
+        let config = ureq::Agent::config_builder()
             .max_redirects(0)
             .http_status_as_error(false)
             .timeout_recv_response(Some(limits.response_timeout))
             .timeout_recv_body(Some(limits.body_timeout))
-            .build()
-            .into();
+            .build();
+        let network = self.network.clone().unwrap_or_else(Network::current);
+        let agent = network.agent(config).map_err(|error| error.to_string())?;
         let response = agent.get(url).call().map_err(|error| error.to_string())?;
         let status = response.status().as_u16();
         let location = response

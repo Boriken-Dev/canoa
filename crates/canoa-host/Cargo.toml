@@ -43,7 +43,7 @@ qrcode = { workspace = true, optional = true }
 # The WebSocket handshake of the portal's relay, which checks the session before it upgrades; already in the graph through
 # coqui-transport-web.
 tungstenite = { workspace = true, optional = true, features = ["handshake"] }
-canoa = { workspace = true, features = ["store", "speech-builtin"] }
+canoa = { workspace = true, features = ["store", "speech-builtin", "network"] }
 canoa-antigravity.workspace = true
 canoa-claude.workspace = true
 canoa-codex.workspace = true
@@ -138,6 +138,8 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 [dev-dependencies]
 # A certificate for the web app's HTTPS tests, at the version the bridge library (coqui-acp-bridge) already builds.
 rcgen.workspace = true
+# The keystore stand-in of the network tests names its identity source.
+coqui-syshttp.workspace = true
 # The peers the web_peer example plays the page of; already in the graph through coqui-acp-bridge.
 coqui-peer-noise.workspace = true
 

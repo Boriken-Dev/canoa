@@ -216,13 +216,17 @@ impl Recording {
         let tail = alloc::format!("\r\n--{boundary}--\r\n").into_bytes();
         let length = head.len() + WAV_HEADER_LEN + audio.len() + tail.len();
 
-        let agent: ureq::Agent = ureq::Agent::config_builder()
+        let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(u64::from(
                 self.settings.timeout_seconds,
             ))))
-            .build()
-            .into();
+            .build();
+        let agent = crate::network::Network::current()
+            .agent(config)
+            .map_err(|error| {
+                internal(alloc::format!("the endpoint could not be reached: {error}"))
+            })?;
         let mut call = agent
             .post(&self.settings.url)
             .header(

@@ -13,6 +13,7 @@
     reason = "locks, threads and the clock are std's"
 )]
 
+mod embedder;
 mod http;
 mod library;
 mod rank;
@@ -25,7 +26,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use coqui_aos::index::{HttpEmbedder, Settings};
+use coqui_aos::index::Settings;
 use coqui_aos::{CallerFacts, KnowledgeOverlay, KnowledgeSettings};
 use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
@@ -200,7 +201,7 @@ impl Hub {
             .as_deref()
             .zip(config.model.as_deref())
             .map(|(address, model)| {
-                let mut embedder = HttpEmbedder::new(address, model);
+                let mut embedder = embedder::NetworkEmbedder::new(address, model);
                 if let Some(key) =
                     key_from("api_key_env", config.api_key_env.as_deref(), "embeddings")
                 {

@@ -14,6 +14,7 @@ use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
+use canoa::network::Network;
 use serde_json::Value;
 
 use crate::{Engine, EngineError, ModelInfo, running_endpoint};
@@ -81,12 +82,14 @@ impl DaemonEngine {
             })?
             .trim_end_matches('/')
             .to_owned();
-        let agent: ureq::Agent = ureq::Agent::config_builder()
+        let settings = ureq::Agent::config_builder()
             .max_redirects(0)
             .http_status_as_error(false)
             .timeout_global(Some(ANSWER_LIMIT))
-            .build()
-            .into();
+            .build();
+        let agent = Network::current()
+            .agent(settings)
+            .map_err(|error| EngineError::Failed(error.to_string()))?;
         let listed = agent
             .get(format!("{base}/v1/models"))
             .config()

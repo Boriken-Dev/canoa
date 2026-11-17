@@ -2,11 +2,38 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-Three Cargo features: `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
+Four Cargo features: `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
 The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`) and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
 
 No `unsafe` code (`#![forbid(unsafe_code)]`).
+
+## `canoa::network` (feature `network`)
+
+How Canoa reaches the network: the system's proxy (PAC and WPAD included), proxy login, the operating system's certificate verifier and the client certificates of its keystores, built on `coqui-syshttp` and `ureq`. The `speech-builtin` feature and `canoa-foundry`'s `daemon` feature turn it on.
+
+```rust
+pub struct NetworkSettings { pub proxy: ProxyChoice, pub proxy_user: Option<String>, pub proxy_password: Option<Secret>,
+    pub no_proxy: Option<Vec<String>>, pub negotiate: Option<bool>, pub client_certificate: ClientCertificate,
+    pub ca_file: Option<PathBuf>, pub git_tls: GitTls, pub endpoints: Vec<String> }   // Default follows the system; non_exhaustive, Clone, Debug, Eq
+pub enum ProxyChoice { System, None, Proxy(String), Pac(String) }                      // default System
+pub enum ClientCertificate { System, None, File(PathBuf) }                              // default System; File is a PEM chain and its unencrypted key
+pub enum GitTls { System, Git }                                                         // default System
+pub use coqui_syshttp::{ChildEnvironment, Secret};
+impl Network {
+    pub fn new(&NetworkSettings) -> Result<Network, NetworkError>;   // a proxy that cannot be read, an unreadable or empty ca_file or client certificate
+    pub fn with(Resolver, TlsBuilder) -> Network;                    // the caller's own resolver and TLS, for a test
+    pub fn system() -> Network;
+    pub fn current() -> Arc<Network>;                                // the one installed, else the system's
+    pub fn install(Network) -> Arc<Network>;                         // the process's
+    pub fn agent(&self, ureq::config::Config) -> Result<ureq::Agent, NetworkError>;
+    pub fn child_variables(&self, endpoints: &[String]) -> Vec<(String, String)>;   // cached for a minute; the person's `endpoints` are added
+    pub fn variables_for(&self, urls: &[String]) -> Vec<(String, String)>;
+    pub fn resolver(&self) -> &Resolver;  pub fn git_tls(&self) -> GitTls;
+}
+```
+
+`agent` takes the timeouts, redirects and limits of the `Config` and none of its proxy or TLS settings: every request asks the resolver for its proxy, connects through it with its login (Negotiate or NTLM through SSPI on Windows when `negotiate` is not `Some(false)`; Basic from `proxy_user`), verifies with the system's verifier (or exactly `ca_file`) and answers a certificate request from the keystores (or `client_certificate`). Loopback is never sent through a proxy unless `no_proxy` holds `<-loopback>`. `child_variables` and `variables_for` are `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (lower case too off Windows) for a program: a proxy chosen per URL is resolved for the endpoints named, and nothing is given when everything goes direct. The credentials are in the proxy URL, so the variables belong to the child only. The `speech_endpoint` and `speech_say_endpoint` providers build their client from `Network::current()`.
 
 ## `Registry`
 
@@ -308,7 +335,7 @@ Helpers: `unsupported_format(format, takes)`, `bad_value(why)` and `internal(why
 
 ### `canoa::speech::builtin` (feature `speech-builtin`)
 
-Needs `guatiao-intake`, `serde_json` and `ureq` (the endpoint's call is its own; the command's program is the spawner's). Two providers, ids `speech_command` and `speech_endpoint`, both reading `pcm_s16le` and
+Needs `guatiao-intake`, `serde_json` and `network` (the endpoint's call is made through `Network::current()`; the command's program is the spawner's). Two providers, ids `speech_command` and `speech_endpoint`, both reading `pcm_s16le` and
 neither limiting which program or address the person names (they run as the person). Nothing is downloaded by Canoa.
 
 ```rust
