@@ -300,6 +300,7 @@ Layer overlayLayer({
   if (routing.isNotEmpty) contexts.add(ProfileContext.text(routing.join('\n')));
   contexts.addAll([for (final path in aos.contextOf(manifest, tree)) ?_context(tree, path)]);
   String? model, effort;
+  var delegate = const ProfileDelegate();
   for (final MapEntry(key: id, value: hints) in sortedEntries(manifest['harness'])) {
     if (harness != id) {
       notApplied.add('harness.$id: hints for another harness');
@@ -315,6 +316,20 @@ Layer overlayLayer({
           effort = text;
         case ('context', final List<dynamic> paths):
           contexts.addAll([for (final path in paths) if (path is String) ?_context(tree, path)]);
+        case ('delegate', final Map<dynamic, dynamic> hint):
+          // Suggestions only: the host applies each where its own settings allow.
+          delegate = ProfileDelegate(
+            defaultSource: hint['default'] is String ? hint['default']! as String : null,
+            sources: hint['sources'] is List
+                ? List.unmodifiable([for (final name in hint['sources']! as List) if (name is String) name])
+                : null,
+            maxRunning: switch (hint['max_running']) {
+              final int limit => limit,
+              // The manifest reader may give an integer as a BigInt.
+              final BigInt limit when limit.isValidInt => limit.toInt(),
+              _ => null,
+            },
+          );
         case ('skills', true):
           break;
         case ('skills', _):
@@ -371,6 +386,7 @@ Layer overlayLayer({
     Profile(
       model: model,
       effort: effort,
+      delegate: delegate,
       env: Map.unmodifiable(env),
       skills: Map.unmodifiable(skills),
       mcp: Map.unmodifiable(mcp),

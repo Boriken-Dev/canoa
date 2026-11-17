@@ -97,7 +97,15 @@ final class DelegateTarget {
 
 /// The session's targets with what the person set for them.
 final class DelegateTargets {
-  const DelegateTargets(this.targets, {this.defaultSource, this.maxRunning, this.sources, this.offered = const [], this.context = const [], this.contextBytes});
+  const DelegateTargets(this.targets,
+      {this.defaultSource,
+      this.maxRunning,
+      this.sources,
+      this.offered = const [],
+      this.context = const [],
+      this.contextBytes,
+      this.origins = const {},
+      this.unusedDefault});
 
   /// Reads the host's answer; null when it is not one.
   static DelegateTargets? parse(Object? raw) {
@@ -114,7 +122,28 @@ final class DelegateTargets {
       ],
       context: [if (raw['context'] is List) for (final kind in raw['context'] as List) if (kind is String) kind],
       contextBytes: raw['contextBytes'] is int ? raw['contextBytes'] as int : null,
+      origins: {
+        if (raw['from'] is Map)
+          for (final MapEntry(:key, :value) in (raw['from'] as Map).entries)
+            if (key is String && value is String) key: value,
+      },
+      unusedDefault: raw['unusedDefault'] is Map && (raw['unusedDefault'] as Map)['value'] is String
+          ? ((raw['unusedDefault'] as Map)['value'] as String, ((raw['unusedDefault'] as Map)['layer'] ?? '').toString())
+          : null,
     );
+  }
+
+  /// Where each value in effect (`default`, `sources`, `maxRunning`) comes from: `session` for what the person set, else the
+  /// profile layer that suggested it. A value with no entry is the person's.
+  final Map<String, String> origins;
+
+  /// The default a profile suggested that does not apply because the connection may not use that source: its name and layer.
+  final (String, String)? unusedDefault;
+
+  /// The profile layer that suggested [key]'s value in effect, or null when the person set it or nothing did.
+  String? suggestedBy(String key) {
+    final origin = origins[key];
+    return origin == null || origin == 'session' ? null : origin;
   }
 
   final List<DelegateTarget> targets;

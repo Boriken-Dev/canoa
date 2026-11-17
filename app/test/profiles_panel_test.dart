@@ -243,6 +243,21 @@ model = "claude-x"
     expect(stdio, allOf(contains('KEY from \$GITHUB_TOKEN'), contains('AOS from env:DOCS_TOKEN')));
   });
 
+  testWidgets('the effective setup shows the delegation suggestions with the layer of each', (tester) async {
+    final effective = mergeProfiles([
+      Layer(const LayerId(LayerKind.overlay, 'team'),
+          Profile.parse('[delegate]\ndefault = "Claude"\nsources = ["Claude", "Pi"]\nmax_running = 4\n', LayerKind.overlay)),
+      Layer(const LayerId(LayerKind.user), Profile.parse('[delegate]\nmax_running = 2\n', LayerKind.user)),
+    ]);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: EffectiveTable(effective: effective))));
+    expect(find.text('delegate.default'), findsOneWidget);
+    expect(find.text('Claude'), findsOneWidget);
+    expect(find.text('Claude, Pi'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+    expect(find.text('4'), findsNothing, reason: 'the later layer replaced the limit');
+    expect(find.text('overlay:team'), findsNWidgets(2));
+  });
+
   testWidgets('what is trusted is shown with its invisible characters named', (tester) async {
     final (home, _) = await open(tester);
     home.files['/work/.canoa/profile.toml'] = 'mode = "plan"\n# \u202Eevil\n';

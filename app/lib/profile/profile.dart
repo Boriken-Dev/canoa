@@ -229,6 +229,23 @@ final class ProfileException implements Exception {
   };
 }
 
+/// What a layer suggests about delegation: the source a task starts on, the sources it may name and how many run at once. A
+/// suggestion only: the host applies each part where its own settings and the connection allow it.
+final class ProfileDelegate {
+  const ProfileDelegate({this.defaultSource, this.sources, this.maxRunning});
+
+  /// The source a task starts on when none is named.
+  final String? defaultSource;
+
+  /// The sources a task may name; an empty list suggests none.
+  final List<String>? sources;
+
+  /// The most tasks of a session running at once.
+  final int? maxRunning;
+
+  bool get isEmpty => defaultSource == null && sources == null && maxRunning == null;
+}
+
 /// One profile document: what one layer sets and removes. In [env], [skills] and [mcp], null removes a lower layer's.
 final class Profile {
   const Profile({
@@ -236,6 +253,7 @@ final class Profile {
     this.effort,
     this.mode,
     this.context,
+    this.delegate = const ProfileDelegate(),
     this.unset = const [],
     this.shareEnv = const [],
     this.env = const {},
@@ -245,6 +263,9 @@ final class Profile {
   });
 
   final String? model, effort, mode;
+
+  /// What it suggests about delegation, key by key.
+  final ProfileDelegate delegate;
 
   /// What an AOS overlay adds to the initial context, in order: its rules, routing lines, context files and the
   /// harness's own. Every layer's adds up, and `unset = ["context"]` takes them back with `context`.
@@ -264,10 +285,10 @@ final class Profile {
 
   /// This profile with [skills] in place of its own.
   Profile withSkills(Map<String, Skill?> skills) => Profile(model: model, effort: effort, mode: mode, context: context,
-      unset: unset, shareEnv: shareEnv, env: env, skills: skills, mcp: mcp, contexts: contexts);
+      delegate: delegate, unset: unset, shareEnv: shareEnv, env: env, skills: skills, mcp: mcp, contexts: contexts);
 
   bool get isEmpty =>
-      model == null && effort == null && mode == null && context == null && unset.isEmpty && shareEnv.isEmpty && env.isEmpty &&
+      model == null && effort == null && mode == null && context == null && delegate.isEmpty && unset.isEmpty && shareEnv.isEmpty && env.isEmpty &&
       skills.isEmpty && mcp.isEmpty && contexts.isEmpty;
 
   /// Parses a profile document for a layer of [kind]. Touches no file.
@@ -288,7 +309,7 @@ final class Profile {
   }
 }
 
-const _top = {'model', 'effort', 'mode', 'context', 'unset', 'share_env', 'env', 'skills', 'mcp'};
+const _top = {'model', 'effort', 'mode', 'context', 'delegate', 'unset', 'share_env', 'env', 'skills', 'mcp'};
 const _envKeys = {'value', 'from_env', 'from_file', 'remove'};
 const _mcpKeys = {'type', 'command', 'args', 'env', 'url', 'headers', 'remove'};
 
@@ -315,6 +336,16 @@ void _shape(Map<dynamic, dynamic> map) {
     _keys(context, {'text', 'file'});
     _optional<String>(context, 'text');
     _optional<String>(context, 'file');
+  }
+  if (map.containsKey('delegate')) {
+    final delegate = _tableOf(map['delegate']);
+    _keys(delegate, {'default', 'sources', 'max_running'});
+    _optional<String>(delegate, 'default');
+    _optional<int>(delegate, 'max_running');
+    if (delegate.containsKey('sources')) {
+      final list = delegate['sources'];
+      if (list is! List || list.any((item) => item is! String)) _parseError();
+    }
   }
   for (final key in ['unset', 'share_env']) {
     if (!map.containsKey(key)) continue;
@@ -407,6 +438,20 @@ Profile _checked(Map<dynamic, dynamic> map, bool confined) {
       _ => _invalid('form', 'context'),
     };
   }
+  var delegate = const ProfileDelegate();
+  if (map['delegate'] case final Map<dynamic, dynamic> raw) {
+    final source = raw['default'] as String?;
+    if (source != null && !_plain(source)) _invalid('value', 'delegate.default');
+    final sources = (raw['sources'] as List<dynamic>?)?.cast<String>();
+    if (sources != null) {
+      for (final (at, name) in sources.indexed) {
+        if (!_plain(name) || sources.sublist(0, at).contains(name)) _invalid('value', 'delegate.sources');
+      }
+    }
+    final limit = raw['max_running'] as int?;
+    if (limit != null && (limit < 0 || limit > 2147483647)) _invalid('value', 'delegate.max_running');
+    delegate = ProfileDelegate(defaultSource: source, sources: sources == null ? null : List.unmodifiable(sources), maxRunning: limit);
+  }
   final unset = <String>[];
   for (final name in (map['unset'] as List<dynamic>?) ?? const []) {
     if (!Profile.scalars.contains(name)) _invalid('form', 'unset');
@@ -450,6 +495,7 @@ Profile _checked(Map<dynamic, dynamic> map, bool confined) {
     effort: scalar['effort'],
     mode: scalar['mode'],
     context: context,
+    delegate: delegate,
     unset: List.unmodifiable(unset),
     shareEnv: List.unmodifiable(shareEnv),
     env: Map.unmodifiable(env),
@@ -557,6 +603,11 @@ final class Refused {
 final class EffectiveProfile {
   Sourced<String>? model, effort, mode;
   Sourced<ProfileContext>? context;
+
+  /// What the layers suggest about delegation, each part with the layer that set it: a later layer wins per key.
+  Sourced<String>? delegateDefault;
+  Sourced<List<String>>? delegateSources;
+  Sourced<int>? delegateMaxRunning;
   final env = <String, Sourced<EnvValue>>{};
   final skills = <String, Sourced<Skill>>{};
   final mcp = <String, Sourced<McpServer>>{};
@@ -588,6 +639,12 @@ final class EffectiveProfile {
       if (effort case final effort?) 'effort': one(effort.value, effort.layer),
       if (mode case final mode?) 'mode': one(mode.value, mode.layer),
       if (context case final context?) 'context': one(context.value.toJson(), context.layer),
+      if (delegateDefault != null || delegateSources != null || delegateMaxRunning != null)
+        'delegate': {
+          if (delegateDefault case final value?) 'default': one(value.value, value.layer),
+          if (delegateSources case final value?) 'sources': one(value.value, value.layer),
+          if (delegateMaxRunning case final value?) 'max_running': one(value.value, value.layer),
+        },
       'env': entries(env, (value) => value.toJson()),
       'skills': entries(skills, (skill) => skill.toJson()),
       'mcp': entries(mcp, (server) => server.toJson()),
@@ -720,6 +777,9 @@ EffectiveProfile mergeProfiles(List<Layer> layers) {
     if (profile.effort case final effort?) out.effort = sourced(effort);
     if (profile.mode case final mode?) out.mode = sourced(mode);
     if (profile.context case final context?) out.context = sourced(context);
+    if (profile.delegate.defaultSource case final source?) out.delegateDefault = sourced(source);
+    if (profile.delegate.sources case final sources?) out.delegateSources = sourced(sources);
+    if (profile.delegate.maxRunning case final limit?) out.delegateMaxRunning = sourced(limit);
     void entries<T extends Object>(Map<String, Sourced<T>> into, Map<String, T?> changes, String table) {
       for (final MapEntry(:key, :value) in changes.entries) {
         if (value != null) {

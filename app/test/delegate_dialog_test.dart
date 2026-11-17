@@ -141,6 +141,40 @@ void main() {
     expect(host.started, hasLength(1));
   });
 
+  testWidgets('what a profile suggested is shown with its layer, and what the person leaves as it was is not written as theirs', (tester) async {
+    await open(tester, targets: {
+      'targets': [_target('claude', models: _models)],
+      'sources': ['claude'],
+      'default': 'claude',
+      'maxRunning': 2,
+      'from': {'default': 'overlay:team', 'sources': 'overlay:team', 'maxRunning': 'user'},
+      'unusedDefault': {'value': 'codex', 'layer': 'agent:x', 'why': 'the connection may not use that source'},
+      'offered': [
+        {'source': 'claude', 'title': 'CLAUDE'},
+        {'source': 'codex', 'title': 'CODEX'},
+      ],
+    });
+    expect(find.byKey(const Key('delegate default from')), findsOneWidget);
+    expect(find.textContaining('overlay:team'), findsWidgets);
+    await tester.tap(find.byKey(const Key('delegate setup open')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('delegation setup sources from')), findsOneWidget);
+    expect(find.textContaining('Suggested by the profile (overlay:team)'), findsWidgets);
+    expect(find.textContaining('Suggested by the profile (user)'), findsOneWidget, reason: 'the limit says where it came from');
+    expect(find.byKey(const Key('delegation setup unused default')), findsOneWidget);
+    expect(find.textContaining('codex'), findsWidgets);
+    // Only the context is changed: the three values the profile suggested stay the profile's, so none is sent as the person's.
+    await tester.tap(find.byKey(const Key('delegation setup files')));
+    await tester.tap(find.byKey(const Key('delegation setup save')));
+    await tester.runAsync(_settle);
+    await tester.pumpAndSettle();
+    final sent = host.sentOf('_canoa/delegate/setup').single['params'] as Map<String, dynamic>;
+    expect(sent['sources'], isNull);
+    expect(sent['default'], isNull);
+    expect(sent['maxRunning'], isNull);
+    expect(sent['context'], ['files']);
+  });
+
   testWidgets('a profile and its loadout are chosen among what the agent offers and sent by name', (tester) async {
     await open(tester, targets: {
       'targets': [

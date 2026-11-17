@@ -529,6 +529,10 @@ class EffectiveTable extends StatelessWidget {
       if (effective.effort case final value?) ('effort', value.value, '${value.layer}'),
       if (effective.mode case final value?) ('mode', value.value, '${value.layer}'),
       if (effective.context case final value?) ('context', describe(value.value), '${value.layer}'),
+      if (effective.delegateDefault case final value?) ('delegate.default', value.value, '${value.layer}'),
+      if (effective.delegateSources case final value?)
+        ('delegate.sources', value.value.isEmpty ? 'none' : value.value.join(', '), '${value.layer}'),
+      if (effective.delegateMaxRunning case final value?) ('delegate.max_running', '${value.value}', '${value.layer}'),
       for (final value in effective.contexts) ('context', describe(value.value), '${value.layer}'),
       for (final MapEntry(:key, :value) in effective.env.entries) ('env.$key', describe(value.value), '${value.layer}'),
       for (final MapEntry(:key, :value) in effective.skills.entries)

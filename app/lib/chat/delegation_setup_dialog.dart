@@ -42,6 +42,12 @@ class _DelegationSetupDialogState extends State<DelegationSetupDialog> {
     return offered.isNotEmpty ? offered : [for (final target in widget.current.targets) (target.source, target.title)];
   }
 
+  /// What says where a value in effect comes from, when a profile suggested it and the person has not set their own.
+  String? _suggestion(String key) {
+    final layer = widget.current.suggestedBy(key);
+    return layer == null ? null : _suggestedText(layer);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -73,11 +79,14 @@ class _DelegationSetupDialogState extends State<DelegationSetupDialog> {
     });
     final names = [for (final (source, _) in _offered) if (_allowed.contains(source)) source];
     final defaultSource = _default != null && names.contains(_default) ? _default : null;
+    final current = widget.current;
+    // A value the profile suggested and the person left as it was stays the profile's: it is not written as theirs.
+    final sameSources = current.sources != null && !_everyAgent && {...names}.length == current.sources!.length && current.sources!.every(names.contains);
     final took = await widget.store.delegateSetup(
       widget.session,
-      sources: _everyAgent ? null : names,
-      defaultSource: defaultSource,
-      maxRunning: limit,
+      sources: _everyAgent || (current.suggestedBy('sources') != null && sameSources) ? null : names,
+      defaultSource: current.suggestedBy('default') != null && defaultSource == current.defaultSource ? null : defaultSource,
+      maxRunning: current.suggestedBy('maxRunning') != null && limit == current.maxRunning ? null : limit,
       context: [if (_messages) 'messages', if (_files) 'files'],
     );
     if (!mounted) return;
@@ -102,6 +111,7 @@ class _DelegationSetupDialogState extends State<DelegationSetupDialog> {
         child: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('Let this agent delegate to these Canoa agents:'),
+            if (widget.current.suggestedBy('sources') case final layer?) _Suggested(layer, key: const Key('delegation setup sources from')),
             SwitchListTile(
               key: const Key('delegation setup every'),
               contentPadding: EdgeInsets.zero,
@@ -133,7 +143,10 @@ class _DelegationSetupDialogState extends State<DelegationSetupDialog> {
               key: const Key('delegation setup default'),
               isExpanded: true,
               initialValue: _default,
-              decoration: const InputDecoration(labelText: 'Agent a task goes to when none is named'),
+              decoration: InputDecoration(
+                labelText: 'Agent a task goes to when none is named',
+                helperText: _suggestion('default'),
+              ),
               items: [
                 const DropdownMenuItem<String?>(value: null, child: Text('None: the agent must name one')),
                 for (final (source, title) in offered)
@@ -145,9 +158,21 @@ class _DelegationSetupDialogState extends State<DelegationSetupDialog> {
               key: const Key('delegation setup limit'),
               controller: _limit,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Tasks running at once, at most', helperText: 'Empty leaves the host\'s own limit.'),
+              decoration: InputDecoration(
+                labelText: 'Tasks running at once, at most',
+                helperText: _suggestion('maxRunning') ?? 'Empty leaves the host\'s own limit.',
+              ),
             ),
             const SizedBox(height: 8),
+            if (widget.current.unusedDefault case (final source, final layer)?)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'The profile ($layer) suggests $source as the default, but this connection may not use it, so no default applies.',
+                  key: const Key('delegation setup unused default'),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
             const Text('Let this agent attach, by its own call:'),
             CheckboxListTile(
               key: const Key('delegation setup messages'),
@@ -177,4 +202,16 @@ class _DelegationSetupDialogState extends State<DelegationSetupDialog> {
       ],
     );
   }
+}
+
+String _suggestedText(String layer) => 'Suggested by the profile ($layer); setting your own replaces it.';
+
+class _Suggested extends StatelessWidget {
+  const _Suggested(this.layer, {super.key});
+
+  final String layer;
+
+  @override
+  Widget build(BuildContext context) =>
+      Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(_suggestedText(layer), style: const TextStyle(fontSize: 12)));
 }

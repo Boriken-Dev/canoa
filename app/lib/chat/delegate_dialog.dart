@@ -228,6 +228,12 @@ class _DelegateDialogState extends State<DelegateDialog> {
                       if (next != null) _pick(next);
                     }),
                   ),
+                  if (target != null && target.source == targets.defaultSource)
+                    if (targets.suggestedBy('default') case final layer?)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text('Chosen first because the profile ($layer) suggests it.', key: const Key('delegate default from'), style: const TextStyle(fontSize: 12)),
+                    ),
                   if (target != null && !target.ready)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
