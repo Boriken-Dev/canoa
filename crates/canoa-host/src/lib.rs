@@ -21,6 +21,7 @@ mod local;
 mod loopback;
 pub mod native;
 pub mod options;
+mod pair_run;
 pub mod peers;
 pub mod pipe;
 #[cfg(all(unix, feature = "portal"))]

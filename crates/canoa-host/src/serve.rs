@@ -1170,6 +1170,7 @@ impl Serving {
         let store = Arc::new(store);
         // What proves this host to an agent on another machine it hands a task to.
         let dialer = identity.clone();
+        let pairing_identity = Arc::new(identity.clone());
         let secrets = secrets::Hub::new(
             &identity,
             &store,
@@ -1706,6 +1707,13 @@ impl Serving {
                             },
                         ));
                     let kept = kept.with_trust(Arc::clone(&trust));
+                    let kept = match &options.state_dir {
+                        Some(home) => kept.with_pairing(control::hosting::Pairing {
+                            identity: Arc::clone(&pairing_identity),
+                            home: home.clone(),
+                        }),
+                        None => kept,
+                    };
                     let kept = match &usage_log {
                         Some(log) => kept.with_usage(Arc::clone(log)),
                         None => kept,

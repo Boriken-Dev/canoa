@@ -11,15 +11,12 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use coqui_agentic_peer::auth;
 use coqui_agentic_peer::auth::Method;
-use coqui_agentic_peer::{auth, pairing};
-use coqui_transport::{Channel as _, Failure};
-use coqui_transport_web::Limits;
 
 mod bridge;
 
@@ -684,16 +681,6 @@ struct ForceArg {
     /// Change the method of a home a host is running on anyway; the host's next restart refuses every client already paired.
     #[arg(long)]
     force: bool,
-}
-
-/// Takes back the PIN when `pair` returns, however it returns: a connection still pairing runs on a thread of its own, which
-/// in an application's process goes on after the command has ended.
-struct ClearPin<'a>(&'a coqui_peer_webcrypto::pair::PairingDesk);
-
-impl Drop for ClearPin<'_> {
-    fn drop(&mut self) {
-        self.0.clear_pin();
-    }
 }
 
 #[derive(Debug, Args)]
@@ -1378,16 +1365,9 @@ fn native_host(origin: &str, front: &dyn Front) -> Result<(), Failed> {
     .map_err(Failed::run)
 }
 
-/// Connections pairing at once; past it a new one is dropped.
-const MAX_PAIRING_RUNS: usize = 16;
-/// How long one connection may take to pair.
-const PAIRING_RUN: Duration = Duration::from_secs(60);
-
-/// No browser sends this as its `Origin`, so the pairing listener takes only clients that send none: native programs.
-const NO_BROWSER: &str = "-";
-
-/// `pair --native`: the same PIN pairing, on a pipe in the home that only the extension's native host reaches, for this user.
-fn pair_native(
+/// Runs `door` to its end for `canoa pair`: prints what is shown, then `{"paired"}`.
+fn pair_at(
+    door: crate::pair_run::Door,
     timeout: Duration,
     until_stdin_closes: bool,
     method: MethodArg,
@@ -1397,8 +1377,6 @@ fn pair_native(
     let home = home_of(front)?;
     let identity = Arc::new(method.identity_unless_running(&home, force)?);
     let store = Arc::new(store(&home)?);
-    let name = crate::native::pair_door_name(home.dir()).map_err(Failed::run)?;
-    let listener = crate::pipe::Listener::bind(&name).map_err(Failed::run)?;
     let cancelled = Arc::new(AtomicBool::new(false));
     if until_stdin_closes {
         let cancel = Arc::clone(&cancelled);
@@ -1406,82 +1384,41 @@ fn pair_native(
             .when_input_closes(1, Box::new(move || cancel.store(true, Ordering::SeqCst)))
             .map_err(Failed::run)?;
     }
-    let desk = pairing::desk().map_err(Failed::run)?;
-    let shown = desk.show_pin().map_err(Failed::run)?;
-    let _clear = ClearPin(&desk);
-    print(
+    let run = crate::pair_run::Run {
+        identity,
+        store,
+        home: home.dir().to_owned(),
+        timeout,
+        cancelled,
+    };
+    let peer = crate::pair_run::run(door, &run, &mut |shown| {
+        front
+            .print(&shown.to_string())
+            .map_err(|error| error.to_string())
+    })
+    .map_err(|fail| match fail {
+        crate::pair_run::Fail::Usage(why) => Failed::usage(why),
+        crate::pair_run::Fail::Run(why) => Failed::run(why),
+    })?;
+    print(front, &serde_json::json!({ "paired": peer }).to_string())
+}
+
+/// `pair --native`: the same PIN pairing, on a pipe in the home that only the extension's native host reaches, for this user.
+fn pair_native(
+    timeout: Duration,
+    until_stdin_closes: bool,
+    method: MethodArg,
+    force: ForceArg,
+    front: &dyn Front,
+) -> Result<(), Failed> {
+    pair_at(
+        crate::pair_run::Door::Native,
+        timeout,
+        until_stdin_closes,
+        method,
+        force,
         front,
-        &serde_json::json!({
-            "pin": shown.pin.as_str(),
-            "peer": identity.peer_id().to_string(),
-            "method": identity.method().name(),
-            "native": true,
-        })
-        .to_string(),
-    )?;
-    let until = Instant::now() + timeout;
-    let (report, reports) = mpsc::channel();
-    let running = Arc::new(AtomicUsize::new(0));
-    loop {
-        if cancelled.load(Ordering::SeqCst) {
-            return Err(Failed::run("pairing was cancelled"));
-        }
-        while let Ok(result) = reports.try_recv() {
-            match result {
-                Ok(peer) => {
-                    return print(front, &serde_json::json!({ "paired": peer }).to_string());
-                }
-                Err(why) => {
-                    tracing::info!("a pairing attempt failed: {why}");
-                    if desk.shown_pin().is_none() {
-                        return Err(Failed::run("the PIN is used up or expired: start again"));
-                    }
-                }
-            }
-        }
-        if Instant::now() >= until {
-            return Err(Failed::run("nobody paired in time"));
-        }
-        let stream = match listener.accept_timeout(Some(Duration::from_millis(100))) {
-            Ok(stream) => stream,
-            Err(crate::pipe::Error::TimedOut) => continue,
-            Err(error) => return Err(Failed::run(error)),
-        };
-        if running.fetch_add(1, Ordering::SeqCst) >= MAX_PAIRING_RUNS {
-            running.fetch_sub(1, Ordering::SeqCst);
-            continue;
-        }
-        let (identity, store, desk, report, running, dir) = (
-            Arc::clone(&identity),
-            Arc::clone(&store),
-            desk.clone(),
-            report.clone(),
-            Arc::clone(&running),
-            home.dir().to_owned(),
-        );
-        std::thread::spawn(move || {
-            let channel = crate::pipe::PipeChannel::new(stream, crate::native::MAX_PREAMBLE);
-            let result = crate::native::accept_pairing(&channel)
-                .ok_or_else(|| "a connection did not ask to pair".to_owned())
-                .and_then(|origin| {
-                    pairing::respond(&channel, &identity, &store, &desk, None, PAIRING_RUN)
-                        .map_err(|error| error.to_string())
-                        .map(|paired| (paired.peer.id(), origin))
-                })
-                .and_then(|(peer, origin)| {
-                    crate::native::record_origin(&dir, &peer.to_string(), &origin)
-                        .map(|()| peer.to_string())
-                        .map_err(|error| {
-                            // A key no extension is bound to is served to any: take it back out rather than leave it.
-                            let _ = store.remove(&peer);
-                            format!("the extension could not be recorded, so its key was not kept: {error}")
-                        })
-                });
-            channel.close();
-            running.fetch_sub(1, Ordering::SeqCst);
-            let _ = report.send(result);
-        });
-    }
+    )
 }
 
 fn pair(
@@ -1493,16 +1430,6 @@ fn pair(
     force: ForceArg,
     front: &dyn Front,
 ) -> Result<(), Failed> {
-    let home = home_of(front)?;
-    let identity = Arc::new(method.identity_unless_running(&home, force)?);
-    let store = Arc::new(store(&home)?);
-    // The PIN exchange runs inside the method's own session and takes one guess, so where the socket sits is the person's to
-    // choose.
-    // A page could run its own PIN exchange and spend the one try, so a browser is refused before the handshake unless its origin
-    // is named.
-    let mut limits = Limits::default();
-    limits.max_message = auth::MAX_PROOF_MESSAGE;
-    limits.pending = 8;
     if origins.len() > 1
         || origins
             .iter()
@@ -1512,113 +1439,17 @@ fn pair(
             "--origin is one origin, scheme://host or scheme://host:port with no path, and never null",
         ));
     }
-    let recorded_origin = origins.first().cloned();
-    let origins = if origins.is_empty() {
-        vec![NO_BROWSER.to_owned()]
-    } else {
-        origins
-    };
-    let listener = crate::serve::plain_listener(listen, limits, origins).map_err(Failed::run)?;
-    let bound = listener.local_addr().map_err(Failed::run)?;
-    if listener.plain_beyond_loopback() {
-        tracing::info!(
-            "non-default: pair --listen is {bound}, default loopback: any machine that reaches it may try the PIN"
-        );
-    }
-    let cancelled = Arc::new(AtomicBool::new(false));
-    if until_stdin_closes {
-        let cancel = Arc::clone(&cancelled);
-        front
-            .when_input_closes(1, Box::new(move || cancel.store(true, Ordering::SeqCst)))
-            .map_err(Failed::run)?;
-    }
-    let desk = pairing::desk().map_err(Failed::run)?;
-    let shown = desk.show_pin().map_err(Failed::run)?;
-    let _clear = ClearPin(&desk);
-    print(
+    pair_at(
+        crate::pair_run::Door::Network {
+            listen,
+            origin: origins.into_iter().next(),
+        },
+        timeout,
+        until_stdin_closes,
+        method,
+        force,
         front,
-        &serde_json::json!({
-            "pin": shown.pin.as_str(),
-            "peer": identity.peer_id().to_string(),
-            "method": identity.method().name(),
-            "url": format!("ws://{bound}"),
-        })
-        .to_string(),
-    )?;
-    let until = Instant::now() + timeout;
-    let (report, reports) = mpsc::channel();
-    let running = Arc::new(AtomicUsize::new(0));
-    loop {
-        if cancelled.load(Ordering::SeqCst) {
-            return Err(Failed::run("pairing was cancelled"));
-        }
-        while let Ok(result) = reports.try_recv() {
-            match result {
-                Ok(peer) => {
-                    return print(front, &serde_json::json!({ "paired": peer }).to_string());
-                }
-                Err(why) => {
-                    tracing::info!("a pairing attempt failed: {why}");
-                    if desk.shown_pin().is_none() {
-                        return Err(Failed::run("the PIN is used up or expired: start again"));
-                    }
-                }
-            }
-        }
-        if Instant::now() >= until {
-            return Err(Failed::run("nobody paired in time"));
-        }
-        let pending = match listener.next(Some(Duration::from_millis(100))) {
-            Ok(pending) => pending,
-            Err(Failure::Timeout) => continue,
-            Err(failure) => return Err(Failed::run(failure)),
-        };
-        // Each connection runs apart, so one that connects and says nothing costs neither the PIN nor the wait.
-        if running.fetch_add(1, Ordering::SeqCst) >= MAX_PAIRING_RUNS {
-            running.fetch_sub(1, Ordering::SeqCst);
-            continue;
-        }
-        let (identity, store, desk, report, running) = (
-            Arc::clone(&identity),
-            Arc::clone(&store),
-            desk.clone(),
-            report.clone(),
-            Arc::clone(&running),
-        );
-        let (dir, origin) = (home.dir().to_owned(), recorded_origin.clone());
-        std::thread::spawn(move || {
-            let result = pending
-                .handshake()
-                .map_err(|failure| failure.to_string())
-                .and_then(|channel| {
-                    let paired =
-                        pairing::respond(&channel, &identity, &store, &desk, None, PAIRING_RUN);
-                    channel.close();
-                    paired.map_err(|error| error.to_string())
-                })
-                .and_then(|paired| {
-                    let peer = paired.peer.id();
-                    // The one origin that may pair is the one the key is bound to, as a key paired through the door is.
-                    match &origin {
-                        Some(origin) => crate::native::record_origin(
-                            &dir,
-                            &peer.to_string(),
-                            origin,
-                        )
-                        .map(|()| peer.to_string())
-                        .map_err(|error| {
-                            let _ = store.remove(&peer);
-                            format!(
-                                "the origin could not be recorded, so the key was not kept: {error}"
-                            )
-                        }),
-                        None => Ok(peer.to_string()),
-                    }
-                });
-            running.fetch_sub(1, Ordering::SeqCst);
-            let _ = report.send(result);
-        });
-    }
+    )
 }
 
 /// canoa.cfg for a command that may make it: a file that does not exist names nothing.

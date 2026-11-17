@@ -137,12 +137,17 @@ pub enum Grant {
     /// key that holds it, where an app keeps what a browser would lose: drafts, the window layout and the permission rules with
     /// their log. A remembered rule decides what an agent may do unasked, so this is as much as access to the agent.
     State,
+    /// `host/keys`, `host/accept`, `host/revoke` and `host/pair`, and `[host]` through `config/get`, `config/set` and `config/check`:
+    /// pair and remove the keys that may connect, show a PIN and edit what the host serves. A paired key reaches whatever its own
+    /// grants let it, and `[host]` names the programs this host runs and the grants its keys hold, so this is as much as access to
+    /// the agent.
+    Hosting,
 }
 
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 21] {
+    pub fn all() -> [Self; 22] {
         [
             Self::LedgerRead,
             Self::LedgerWrite,
@@ -166,6 +171,7 @@ impl Grant {
             Self::Voice,
             Self::VoiceSetup,
             Self::State,
+            Self::Hosting,
         ]
     }
 
@@ -195,6 +201,7 @@ impl Grant {
             Self::Voice => "voice",
             Self::VoiceSetup => "voice.setup",
             Self::State => "state",
+            Self::Hosting => "hosting",
         }
     }
 
@@ -330,6 +337,9 @@ pub(crate) struct Control {
     ledger: Mutex<BTreeMap<String, Stored>>,
     /// The documents `state/*` keeps in the home.
     state: state::State,
+    /// What `host/pair` pairs by, once the host has its identity and a home.
+    pairing: Option<hosting::Pairing>,
+    pairings: hosting::Running,
 }
 
 /// Why a control channel could not be opened.
@@ -430,6 +440,8 @@ impl Control {
             max_record_bytes,
             ledger: Mutex::new(ledger),
             state: state::State::new(dir.map(|dir| dir.join("state"))),
+            pairing: None,
+            pairings: hosting::Running::default(),
         })
     }
 
@@ -511,6 +523,21 @@ impl Control {
     pub(crate) fn with_sealer(mut self, sealer: Sealer) -> Self {
         self.sealer = Some(sealer);
         self
+    }
+
+    /// Lets `host/pair` show a PIN under this identity, with the extension's door and the origins keys are bound to in `home`.
+    #[must_use]
+    pub(crate) fn with_pairing(mut self, pairing: hosting::Pairing) -> Self {
+        self.pairing = Some(pairing);
+        self
+    }
+
+    /// The trust store `host/keys`, `host/accept` and `host/revoke` answer from.
+    fn keys_store(&self) -> Result<&Arc<TrustStore>, (i32, String)> {
+        self.trust.as_ref().ok_or((
+            REFUSED,
+            "this host keeps no trust store a key can manage".to_owned(),
+        ))
     }
 
     /// Lets a paired key remove itself (`peer/forget`).
@@ -679,13 +706,35 @@ impl Control {
                     .and_then(|()| self.files.trust_set(caller, &params)),
                 Some("trust/revoke") => allow(caller, Grant::ConfigWrite)
                     .and_then(|()| self.files.trust_revoke(caller, &params)),
+                Some("config/get") if names_host(&params) => {
+                    allow(caller, Grant::Hosting).and_then(|()| self.files.host_get())
+                }
                 Some("config/get") => {
                     allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(&params))
+                }
+                Some("config/set") if names_host(&params) => {
+                    allow(caller, Grant::Hosting).and_then(|()| self.files.host_set(&params, true))
                 }
                 Some("config/set") => allow(caller, Grant::ConfigWrite).and_then(|()| {
                     self.files
                         .config_set(&params, caller.may(Grant::ConfigWriteSessions))
                 }),
+                Some("config/check") if names_host(&params) => {
+                    allow(caller, Grant::Hosting).and_then(|()| self.files.host_set(&params, false))
+                }
+                Some("config/check") => allow(caller, Grant::ConfigWrite).and_then(|()| {
+                    self.files
+                        .config_check(&params, caller.may(Grant::ConfigWriteSessions))
+                }),
+                Some("host/keys") => allow(caller, Grant::Hosting)
+                    .and_then(|()| self.keys_store())
+                    .and_then(|store| hosting::keys(store)),
+                Some("host/accept") => allow(caller, Grant::Hosting)
+                    .and_then(|()| self.keys_store())
+                    .and_then(|store| hosting::accept(store, &params)),
+                Some("host/revoke") => allow(caller, Grant::Hosting)
+                    .and_then(|()| self.keys_store())
+                    .and_then(|store| hosting::revoke(store, &params)),
                 Some("upload/put") => allow(caller, Grant::Upload)
                     .and_then(|()| self.files.upload_put(caller, &params)),
                 Some("upload/remove") => allow(caller, Grant::Upload)
@@ -815,7 +864,7 @@ impl Control {
                             "this needs a link that can carry its output".to_owned(),
                         ))
                     }),
-                Some("store/apply" | "accounts/add" | "accounts/login") => Err((
+                Some("store/apply" | "accounts/add" | "accounts/login" | "host/pair") => Err((
                     REFUSED,
                     "this needs a link that can carry its progress".to_owned(),
                 )),
@@ -1071,6 +1120,11 @@ fn text_param<'a>(params: &'a Value, key: &str) -> Result<Option<&'a str>, (i32,
     }
 }
 
+/// Whether a request names `[host]`, which only a key that holds `hosting` reads or writes.
+fn names_host(params: &Value) -> bool {
+    params.get("section").and_then(Value::as_str) == Some(files::HOST)
+}
+
 fn error_line(id: &Value, code: i32, message: &str) -> Vec<u8> {
     serde_json::to_vec(
         &json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}),
@@ -1106,7 +1160,9 @@ fn is_apply(line: &[u8]) -> bool {
                 .get("method")
                 .and_then(Value::as_str)
                 .is_some_and(|method| {
-                    method == "store/apply" || accounts::Long::of(method).is_some()
+                    method == "store/apply"
+                        || method == "host/pair"
+                        || accounts::Long::of(method).is_some()
                 })
     })
 }
@@ -1143,6 +1199,17 @@ impl Control {
     fn apply<C: Channel>(&self, caller: &Caller, line: &[u8], channel: &C) -> Vec<u8> {
         let request: Value = serde_json::from_slice(line).unwrap_or(Value::Null);
         let id = request.get("id").cloned().unwrap_or(Value::Null);
+        if request.get("method").and_then(Value::as_str) == Some("host/pair") {
+            return hosting::pair(
+                caller,
+                self.pairing.as_ref(),
+                self.trust.as_ref(),
+                &self.pairings,
+                line,
+                channel,
+                &|other| self.handle(caller, other),
+            );
+        }
         if let Some(long) = request
             .get("method")
             .and_then(Value::as_str)
@@ -1296,6 +1363,9 @@ mod files;
 mod files_tests;
 #[cfg(test)]
 mod folders_tests;
+pub(crate) mod hosting;
+#[cfg(test)]
+mod hosting_tests;
 mod import;
 #[cfg(test)]
 mod import_tests;

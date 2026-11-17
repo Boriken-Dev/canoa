@@ -65,6 +65,9 @@ pub const SECTIONS: &[&str] = &[
 /// the agent.
 pub const GUARDED_SECTIONS: &[&str] = &["defaults", "loadouts", "overlays", "permissions"];
 
+/// The table of the host's own settings, which `config/get`, `config/set` and `config/check` serve only a key that holds `hosting`.
+pub(crate) const HOST: &str = "host";
+
 /// The sections the host itself reads, which it takes up when it next starts.
 const READ_AT_START: &[&str] = &["permissions", "usage"];
 
@@ -502,6 +505,41 @@ impl Files {
     }
 
     fn write_section(&self, section: &str, value: &Value) -> Outcome {
+        self.change_section(section, value, true)
+    }
+
+    /// `[host]`, which no page edits through `config/set` (it names the programs the host runs and the keys' grants): read for a
+    /// key that holds `hosting`.
+    pub(crate) fn host_get(&self) -> Outcome {
+        Ok(json!({
+            "section": HOST,
+            "value": self.hidden_section(HOST)?,
+            "restart": true,
+        }))
+    }
+
+    /// Replaces `[host]` with an object, or removes it with null, after the host has read what canoa.cfg would then hold; the host
+    /// reads it only when it starts. With `write` false nothing is written: the answer is the host's own verdict.
+    pub(crate) fn host_set(&self, params: &Value, write: bool) -> Outcome {
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        self.change_section(HOST, params.get("value").unwrap_or(&Value::Null), write)
+    }
+
+    /// `config/check`: whether `section` set to the value would leave canoa.cfg one the host accepts, and in the host's words why
+    /// not. Nothing is written.
+    pub(crate) fn config_check(&self, params: &Value, guarded: bool) -> Outcome {
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        let section = section_of(params)?;
+        if GUARDED_SECTIONS.contains(&section) && !guarded {
+            return Err((
+                super::DENIED,
+                format!("{section} takes the grant config.write.sessions"),
+            ));
+        }
+        self.change_section(section, params.get("value").unwrap_or(&Value::Null), false)
+    }
+
+    fn change_section(&self, section: &str, value: &Value, write: bool) -> Outcome {
         let path = self.config_path()?;
         if !(value.is_null() || value.is_object()) {
             return Err(bad("value is an object, or null to remove the section"));
@@ -566,11 +604,16 @@ impl Files {
                 "that would change a table other than the one named",
             ));
         }
+        if !write {
+            return Ok(json!({"section": section, "valid": true}));
+        }
         // A canoa.cfg that is a link is written through to its target.
         let target = fs::canonicalize(path).map_or_else(|_| path.to_path_buf(), plain);
         write_beside(&target, written.as_bytes())
             .map_err(|error| refused(&format!("canoa.cfg could not be written: {error}")))?;
-        Ok(json!({"section": section, "restart": READ_AT_START.contains(&section)}))
+        Ok(
+            json!({"section": section, "restart": section == HOST || READ_AT_START.contains(&section)}),
+        )
     }
 
     /// `upload/put`: keeps a file a page sends, in a folder of this caller's, and answers where. A file travels in chunks of at most
