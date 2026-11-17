@@ -1046,13 +1046,9 @@ fn text_of(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// `path` without the `\\?\` prefix Windows' resolution adds to a drive's path.
+/// `path` without the `\\?\` prefix Windows' resolution adds: a drive's path as `C:\work`, a share's as `\\server\share`.
 fn plain(path: PathBuf) -> PathBuf {
-    let text = path.to_string_lossy();
-    match text.strip_prefix(r"\\?\") {
-        Some(rest) if !rest.starts_with("UNC\\") => PathBuf::from(rest),
-        _ => path,
-    }
+    crate::share::plain(&path).into_owned()
 }
 
 /// canoa.cfg's text, and whether the file is there; empty when it is not.

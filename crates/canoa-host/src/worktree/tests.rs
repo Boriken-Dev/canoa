@@ -161,9 +161,8 @@ fn a_device_or_a_share_outside_the_roots_is_never_looked_at() {
     }
 }
 
-/// A repository on a share under a root passes this host's checks like any other. Git itself still asks for
-/// `safe.directory` on a share it does not take as local, and says so; where that is set, a worktree is made there and
-/// every path answered is written plain.
+/// A repository on a share under a root passes this host's checks like any other: a worktree is made there and every path
+/// answered is written plain.
 #[cfg(windows)]
 #[test]
 fn a_repository_on_a_share_under_a_root_passes_the_hosts_checks() {
@@ -177,14 +176,9 @@ fn a_repository_on_a_share_under_a_root_passes_the_hosts_checks() {
     };
     let repo = on_share(&fixture.repo);
     let worktrees = Worktrees::new(vec![on_share(&fixture.scratch.join("src"))], true);
-    let made = match worktrees.make(&repo.to_string_lossy(), "canoa/share-a1b2c3") {
-        Ok(made) => made,
-        Err(refusal) => {
-            assert_eq!(refusal.code, INTERNAL_ERROR, "{refusal:?}");
-            assert!(refusal.message.starts_with("git failed: "), "{refusal:?}");
-            return;
-        }
-    };
+    let made = worktrees
+        .make(&repo.to_string_lossy(), "canoa/share-a1b2c3")
+        .expect("git works in a repository on a share");
     let path = PathBuf::from(made["path"].as_str().expect("a path"));
     assert!(
         path.to_string_lossy().starts_with(r"\\localhost\"),
@@ -192,8 +186,14 @@ fn a_repository_on_a_share_under_a_root_passes_the_hosts_checks() {
         path.display()
     );
     assert!(path.join("README").exists());
+    std::fs::write(path.join("README"), "changed\n").expect("an edit");
+    let said = ask(&worktrees, STATUS, &json!({"path": path}));
+    assert!(said.get("error").is_none(), "{said}");
+    let said = ask(&worktrees, DIFF, &json!({"path": path}));
+    assert!(said.get("error").is_none(), "{said}");
+    assert!(said.to_string().contains("changed"), "{said}");
     let removed = worktrees
-        .remove(&path.to_string_lossy(), false)
+        .remove(&path.to_string_lossy(), true)
         .expect("removed");
     assert_eq!(removed["branchKept"], false, "{removed}");
     assert!(!path.exists());

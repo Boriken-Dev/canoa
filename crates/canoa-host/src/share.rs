@@ -59,6 +59,16 @@ pub(crate) fn is_share(path: &Path) -> bool {
     )
 }
 
+/// The `git` options a repository in `dir` needs: on a share git asks for `safe.directory` (it cannot tell whose files they
+/// are) and refuses every command without it, so a folder on a share is trusted for the one command. Elsewhere none.
+pub(crate) fn git_trust(dir: &Path) -> &'static [&'static str] {
+    if is_share(dir) {
+        &["-c", "safe.directory=*"]
+    } else {
+        &[]
+    }
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;

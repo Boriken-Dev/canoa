@@ -416,6 +416,7 @@ fn git_listing(folder: &Path, max_entries: usize) -> Option<Vec<String>> {
     let mut child = command
         .arg("-C")
         .arg(folder)
+        .args(crate::share::git_trust(folder))
         .args([
             "-c",
             "core.fsmonitor=false",

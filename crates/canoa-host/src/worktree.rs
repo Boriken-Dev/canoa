@@ -697,6 +697,7 @@ fn run_git(dir: &Path, args: &[&OsStr], ceilings: &OsString) -> Result<(bool, St
     let mut child = command
         .arg("-C")
         .arg(dir)
+        .args(share::git_trust(dir))
         .args(["-c", no_hooks, "-c", "core.fsmonitor=false"])
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
