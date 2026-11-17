@@ -10,7 +10,7 @@ use coqui_aos::{
 };
 use serde_json::{Value, json};
 
-use super::{Caller, Outcome, Overlays, PoisonError, bad, refused, text_param};
+use super::{Caller, Outcome, Overlays, PoisonError, Trust, bad, refused, text_param};
 
 /// The most entries one call reads, so one answer and one request stay a size a link carries.
 const MAX_ENTRIES: usize = 32;
@@ -71,7 +71,7 @@ impl Overlays {
                 asked[key] = value.clone();
             }
         }
-        let planned = self.check(caller, &asked, local)?;
+        let planned = self.check_as(Trust::Isolated, caller, &asked, local)?;
         let token = planned
             .get("token")
             .and_then(Value::as_str)

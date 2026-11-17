@@ -30,6 +30,55 @@ mod skills;
 
 type Outcome = Result<Value, (i32, String)>;
 
+/// Whose git settings a run may use. A source the person named themselves (an overlay or catalog in canoa.cfg, one they typed) is
+/// fetched as they would from a shell, with their credentials and ssh keys. A source someone else named (a skill an overlay
+/// lists, a catalog entry read ahead) gets none of that: it could be offered the person's keys and ask for their agent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Trust {
+    Own,
+    Isolated,
+}
+
+/// The git settings every isolated run is given: no credential helper, no redirect followed, every object received checked.
+const ISOLATED_SETTINGS: [&str; 3] = [
+    "credential.helper=",
+    "http.followRedirects=false",
+    "transfer.fsckObjects=true",
+];
+
+/// The transports an isolated run may use.
+const ISOLATED_PROTOCOLS: [&str; 5] = ["https", "http", "git", "ssh", "file"];
+
+/// The ssh command of an isolated run: none of the person's configuration, keys or agent. OpenSSH takes its home from the
+/// password database, not from `HOME`, so its configuration and identity files are replaced by `empty`, a file with nothing in
+/// it, and only that identity may be tried.
+fn isolated_ssh(program: &str, empty: &Path) -> String {
+    let empty = empty.display().to_string().replace('\\', "/");
+    format!(
+        "{program} -F \"{empty}\" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o IdentityFile=\"{empty}\" \
+         -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no"
+    )
+}
+
+/// What an isolated run's environment keeps of the person's: where git finds its programs, and the proxy the network goes through.
+const KEPT_VARIABLES: [&str; 15] = [
+    "PATH",
+    "SystemRoot",
+    "windir",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "LANG",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+];
+
 /// The most files one overlay may hold.
 pub const DEFAULT_MAX_FILES: usize = 4096;
 /// The most bytes its files may hold in all.
@@ -102,6 +151,9 @@ pub(crate) struct Overlays {
     git: OnceLock<Result<PathBuf, String>>,
     /// The git processes this host has started, so a caller can tell an answer from a cache apart from one that went to git.
     git_runs: std::sync::atomic::AtomicUsize,
+    /// The environment a test makes this host's git runs inherit: a person's home, ssh agent and programs.
+    #[cfg(test)]
+    person: Vec<(OsString, OsString)>,
 }
 
 fn refused(what: impl Into<String>) -> (i32, String) {
@@ -115,6 +167,34 @@ impl Overlays {
             limits,
             ..Self::default()
         }
+    }
+
+    /// This host, whose git runs inherit `vars` as well as this process's environment.
+    #[cfg(test)]
+    pub(crate) fn with_person_env(mut self, vars: &[(&str, OsString)]) -> Self {
+        self.person = vars
+            .iter()
+            .map(|(name, value)| (OsString::from(name), value.clone()))
+            .collect();
+        self
+    }
+
+    /// The program an isolated run starts for ssh.
+    fn ssh_program(&self) -> String {
+        #[cfg(test)]
+        if let Some((_, value)) = self.person.iter().find(|(key, _)| key == "CANOA_TEST_SSH") {
+            return value.to_string_lossy().into_owned();
+        }
+        "ssh".to_owned()
+    }
+
+    /// A variable of the environment git runs inherit.
+    fn inherited(&self, name: &str) -> Option<OsString> {
+        #[cfg(test)]
+        if let Some((_, value)) = self.person.iter().find(|(key, _)| key == name) {
+            return Some(value.clone());
+        }
+        std::env::var_os(name)
     }
 
     /// How many git processes this host has started.
@@ -237,6 +317,17 @@ impl Overlays {
         params: &Value,
         local: &dyn Fn(&str) -> bool,
     ) -> Outcome {
+        self.check_as(Trust::Own, caller, params, local)
+    }
+
+    /// [`Self::check`], fetching the source under `trust`.
+    fn check_as(
+        &self,
+        trust: Trust,
+        caller: &Caller,
+        params: &Value,
+        local: &dyn Fn(&str) -> bool,
+    ) -> Outcome {
         let name = checked_name(text_param(params, "name")?.ok_or_else(|| bad("name is needed"))?)?;
         let pin = pin_of(params)?;
         let (repo, reference, path, source) = git_source(params)?;
@@ -249,7 +340,7 @@ impl Overlays {
         let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
         let cache = self.cache(name)?;
         self.init_cache(&cache)?;
-        let commit = self.fetch(&cache, &repo, &reference)?;
+        let commit = self.fetch(trust, &cache, &repo, &reference)?;
         let (files, skipped, digest, bytes) = self.list(&cache, &commit, &path)?;
         if let Some(pin) = &pin
             && !same_digest(pin, &digest)
@@ -580,7 +671,7 @@ impl Overlays {
         let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
         let cache = self.catalog_cache(label)?;
         self.init_cache(&cache)?;
-        let commit = self.fetch(&cache, &repo, &reference)?;
+        let commit = self.fetch(Trust::Own, &cache, &repo, &reference)?;
         Ok(json!({"commit": commit}))
     }
 
@@ -787,8 +878,14 @@ impl Overlays {
 
     /// Fetches only what `reference` names, one commit deep, and returns its commit. A whole commit id is that object and
     /// nothing else: a branch or tag carrying the same name never stands in for it.
-    fn fetch(&self, cache: &Path, repo: &str, reference: &str) -> Result<String, (i32, String)> {
-        let commit = self.fetch_into(cache, repo, reference)?;
+    fn fetch(
+        &self,
+        trust: Trust,
+        cache: &Path,
+        repo: &str,
+        reference: &str,
+    ) -> Result<String, (i32, String)> {
+        let commit = self.fetch_into(trust, cache, repo, reference)?;
         // What the fetch wrote counts against the folder's cap at once: past it the history goes and nothing more is fetched.
         if folder_size(self.root()?) > MAX_FOLDER_BYTES {
             let _ = fs::remove_dir_all(cache);
@@ -801,6 +898,7 @@ impl Overlays {
 
     fn fetch_into(
         &self,
+        trust: Trust,
         cache: &Path,
         repo: &str,
         reference: &str,
@@ -823,7 +921,7 @@ impl Overlays {
                 repo.into(),
             ];
             args.extend(wants.iter().map(OsString::from));
-            self.run(&args, None, Some(cache), 1024 * 1024)
+            self.run_as(trust, &args, None, Some(cache), 1024 * 1024)
         };
         if full_commit_id(reference) {
             if fetch(&[reference]).is_err() {
@@ -855,7 +953,8 @@ impl Overlays {
         }
         let heads = format!("refs/heads/{reference}");
         let tags = format!("refs/tags/{reference}");
-        let listed = self.run(
+        let listed = self.run_as(
+            trust,
             &[
                 format!("--git-dir={}", cache.display()).into(),
                 "ls-remote".into(),
@@ -1138,6 +1237,30 @@ impl Overlays {
         guard: Option<&Path>,
         ceiling: usize,
     ) -> Result<Vec<u8>, (i32, String)> {
+        self.run_as(Trust::Own, args, stdin, guard, ceiling)
+    }
+
+    /// The folder an isolated run names as its home, and an empty file in it that stands for every configuration file.
+    fn isolated_home(&self) -> Result<(PathBuf, PathBuf), (i32, String)> {
+        let home = self.root()?.join(".isolated");
+        fs::create_dir_all(&home)
+            .map_err(|error| refused(format!("the fetch could not be made: {error}")))?;
+        // A file, since Git for Windows cannot open the null device as a configuration file.
+        let empty = home.join("empty.config");
+        fs::write(&empty, b"")
+            .map_err(|error| refused(format!("the fetch could not be made: {error}")))?;
+        Ok((home, empty))
+    }
+
+    /// [`Self::run`] under `trust`.
+    fn run_as(
+        &self,
+        trust: Trust,
+        args: &[OsString],
+        stdin: Option<Vec<u8>>,
+        guard: Option<&Path>,
+        ceiling: usize,
+    ) -> Result<Vec<u8>, (i32, String)> {
         let git = self.git()?;
         // Run from the overlays folder with the ceiling at its parent, so git looks no higher for a repository whose configuration
         // it would read; what names a cache takes `--git-dir`.
@@ -1151,7 +1274,22 @@ impl Overlays {
         };
         self.git_runs
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let isolated = if trust == Trust::Isolated {
+            Some(self.isolated_home()?)
+        } else {
+            None
+        };
         let mut command = Command::new(git);
+        #[cfg(test)]
+        command.envs(self.person.iter().map(|(name, value)| (name, value)));
+        if isolated.is_some() {
+            command.env_clear();
+            for name in KEPT_VARIABLES {
+                if let Some(value) = self.inherited(name) {
+                    command.env(name, value);
+                }
+            }
+        }
         for (name, _) in std::env::vars_os() {
             if name
                 .to_string_lossy()
@@ -1164,6 +1302,19 @@ impl Overlays {
         command.args(["-c", "protocol.allow=never"]);
         for scheme in ["https", "http", "ssh", "git", "file"] {
             command.args(["-c", &format!("protocol.{scheme}.allow=always")]);
+        }
+        if let Some((home, empty)) = &isolated {
+            for setting in ISOLATED_SETTINGS {
+                command.args(["-c", setting]);
+            }
+            command
+                .env("HOME", home)
+                .env("USERPROFILE", home)
+                .env("XDG_CONFIG_HOME", home)
+                .env("GIT_CONFIG_GLOBAL", empty)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_ALLOW_PROTOCOL", ISOLATED_PROTOCOLS.join(":"))
+                .env("GIT_SSH_COMMAND", isolated_ssh(&self.ssh_program(), empty));
         }
         let mut child = command
             .args([

@@ -14,7 +14,7 @@ use coqui_aos::{
 use serde_json::{Map, Value, json};
 
 use super::{
-    Outcome, Overlays, PoisonError, bad, git_source, is_local, refused, text_param,
+    Outcome, Overlays, PoisonError, Trust, bad, git_source, is_local, refused, text_param,
     valid_skill_name, write_beside,
 };
 use crate::profile::full_commit_id;
@@ -224,7 +224,7 @@ impl Overlays {
         let commit = if headless {
             self.fetch_head(cache, repo)?
         } else {
-            self.fetch(cache, repo, reference)?
+            self.fetch(Trust::Isolated, cache, repo, reference)?
         };
         let (files, _skipped, _digest, bytes) = self.list(cache, &commit, path)?;
         if files.len() > MAX_SKILL_FILES || bytes > MAX_SKILL_BYTES {
@@ -250,7 +250,8 @@ impl Overlays {
     /// The commit the repository's head names, fetched one commit deep.
     fn fetch_head(&self, cache: &Path, repo: &str) -> Result<String, (i32, String)> {
         let dir = format!("--git-dir={}", cache.display());
-        self.run(
+        self.run_as(
+            Trust::Isolated,
             &[
                 dir.clone().into(),
                 "fetch".into(),

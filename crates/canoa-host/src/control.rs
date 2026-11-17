@@ -1443,6 +1443,8 @@ mod index_tests;
 mod moves;
 mod overlays;
 #[cfg(test)]
+mod overlays_isolation_tests;
+#[cfg(test)]
 mod overlays_tests;
 #[cfg(test)]
 mod profiles_tests;
