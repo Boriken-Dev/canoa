@@ -316,6 +316,9 @@ impl Control {
         if let Some(pin) = text(entry, "pin") {
             params["pin"] = json!(pin);
         }
+        if let Some(label) = text(entry, "catalog") {
+            params["catalog"] = json!(label);
+        }
         let checked = self
             .overlays
             .check(caller, &params, &|repo| self.may_read_source(caller, repo))

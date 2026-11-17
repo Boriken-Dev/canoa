@@ -309,15 +309,24 @@ impl Overlays {
         Ok(json!({"overlays": found}))
     }
 
-    /// `overlay/check` `{"name", "source", "pin"?}`: fetches `source` into the cache for `name` and says what installing it would
-    /// change; nothing installed is touched. `local` says whether a source on this computer may be read.
+    /// `overlay/check` `{"name", "source", "pin"?, "catalog"?}`: fetches `source` into the cache for `name` and says what installing it
+    /// would change; nothing installed is touched. `local` says whether a source on this computer may be read. A `catalog` label says
+    /// the overlay was chosen from that catalog, someone else's listing: it is fetched [`Trust::Isolated`], and one without the
+    /// label (a source the person typed) as the person would from a shell.
     pub(crate) fn check(
         &self,
         caller: &Caller,
         params: &Value,
         local: &dyn Fn(&str) -> bool,
     ) -> Outcome {
-        self.check_as(Trust::Own, caller, params, local)
+        let trust = match text_param(params, "catalog")? {
+            Some(label) => {
+                checked_name(label)?;
+                Trust::Isolated
+            }
+            None => Trust::Own,
+        };
+        self.check_as(trust, caller, params, local)
     }
 
     /// [`Self::check`], fetching the source under `trust`.

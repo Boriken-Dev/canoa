@@ -100,8 +100,10 @@ abstract interface class OverlayManager {
   String directoryOf(String name);
 
   /// Fetches [source] and says what installing it as [name] would change, touching nothing installed. Refuses a tree
-  /// whose digest is not the source's pin.
-  Future<OverlayUpdate> check(String name, GitOverlay source);
+  /// whose digest is not the source's pin. [catalog] names the catalog the overlay was chosen from: its source is someone
+  /// else's listing, so the host fetches it without the person's git settings, credentials or keys; one the person typed
+  /// passes none.
+  Future<OverlayUpdate> check(String name, GitOverlay source, {String? catalog});
 
   /// Installs exactly what [update] showed. [catalog] records that the store installed it from the catalog so labelled; a
   /// record already made for the same source keeps its own when none is given, so a sync from Settings leaves it.
@@ -174,7 +176,7 @@ class NoOverlays implements OverlayManager {
   String directoryOf(String name) => '';
 
   @override
-  Future<OverlayUpdate> check(String name, GitOverlay source) async => throw _none;
+  Future<OverlayUpdate> check(String name, GitOverlay source, {String? catalog}) async => throw _none;
 
   @override
   Future<InstalledOverlay> apply(OverlayUpdate update, {String? catalog}) async => throw _none;

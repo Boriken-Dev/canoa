@@ -270,3 +270,61 @@ fn a_catalog_entry_read_ahead_is_fetched_without_the_persons_settings() {
     }
     let _ = fs::remove_dir_all(p.tmp);
 }
+
+fn overlay_from_catalog(p: &Person, repo: &str, label: &str) -> Value {
+    ask(
+        &p.control,
+        &key("k", &BOTH),
+        "overlay/check",
+        json!({"name": "o", "repo": repo, "ref": "main", "path": "", "catalog": label}),
+    )
+}
+
+#[test]
+fn an_overlay_chosen_from_a_catalog_ignores_the_persons_url_rewrites_and_a_typed_one_keeps_them() {
+    let tmp = dir("isolated-chosen");
+    let up = upstream(&tmp);
+    let p = person(&up, tmp);
+    let chosen = overlay_from_catalog(&p, REDIRECTED, "boriken");
+    assert!(
+        chosen["error"].is_object(),
+        "a rewrite in the person's .gitconfig reached a catalog entry's install: {chosen}"
+    );
+    let typed = overlay(&p, REDIRECTED);
+    assert!(typed["result"]["token"].is_string(), "{typed}");
+    let _ = fs::remove_dir_all(p.tmp);
+}
+
+#[test]
+fn an_overlay_chosen_from_a_catalog_never_calls_the_persons_credential_helper_or_agent() {
+    let tmp = dir("isolated-chosen-helper");
+    let up = upstream(&tmp);
+    let p = person(&up, tmp);
+    let server = demanding_server();
+    let id = git(&up, &["rev-parse", "HEAD"]);
+    let chosen = ask(
+        &p.control,
+        &key("k", &BOTH),
+        "overlay/check",
+        json!({"name": "o", "repo": server, "ref": id, "path": "", "catalog": "mine"}),
+    );
+    assert!(chosen["error"].is_object(), "{chosen}");
+    assert!(
+        !p.helper_log.exists(),
+        "the credential helper ran for a catalog entry's install"
+    );
+    let over_ssh = overlay_from_catalog(&p, "ssh://git@skills.example.invalid/tools.git", "mine");
+    assert!(over_ssh["error"].is_object(), "{over_ssh}");
+    assert_eq!(
+        fs::read_to_string(&p.ssh_agent).expect("environment"),
+        "agent=unset\n"
+    );
+    let bad = ask(
+        &p.control,
+        &key("k", &BOTH),
+        "overlay/check",
+        json!({"name": "o", "repo": REDIRECTED, "ref": "main", "catalog": "../x"}),
+    );
+    assert!(bad["error"].is_object(), "{bad}");
+    let _ = fs::remove_dir_all(p.tmp);
+}

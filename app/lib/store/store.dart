@@ -376,19 +376,20 @@ final class OverlayPreview {
 
 /// Fetches [source] as [name] and computes what installing it would do, touching nothing installed: the manifest and
 /// files are read from the fetched tree, the layer is the one Settings, Profiles would make of it, and the report is
-/// its non-default settings and what Canoa does not apply. A catalog's [catalogPin] must match the tree fetched, or installing is
+/// its non-default settings and what Canoa does not apply. A [catalog] label says the source was chosen from that catalog, so the host fetches it isolated. A catalog's [catalogPin] must match the tree fetched, or installing is
 /// refused; canoa.cfg's own pin is held by [installPreview].
 Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitOverlay source, {
   required String os,
   required Map<String, LayerId> shared,
   String? catalogPin,
+  String? catalog,
   String? harness,
   aos.Settings? iconLimits,
   List<(String, aos.Catalog)> catalogs = const [],
   Map<String, InstalledManifest> others = const {},
   Map<String, String> skillPins = const {},
 }) async {
-  final update = await overlays.check(name, source.pinnedTo(null));
+  final update = await overlays.check(name, source.pinnedTo(null), catalog: catalog);
   final files = await overlays.read(update);
   final ReadTree read;
   try {

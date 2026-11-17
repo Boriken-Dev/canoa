@@ -53,7 +53,7 @@ final class FakeOverlays implements OverlayManager {
   String directoryOf(String name) => '/overlays/$name';
 
   @override
-  Future<OverlayUpdate> check(String name, GitOverlay source) async {
+  Future<OverlayUpdate> check(String name, GitOverlay source, {String? catalog}) async {
     checked.add(name);
     return OverlayUpdate(name: name, source: source, from: records[name]?.commit, commit: 'c' * 40,
         digest: teamDigest, files: const {'overlay.cfg': 'b1'}, skipped: const ['.git/config'],

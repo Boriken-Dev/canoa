@@ -108,7 +108,7 @@ class OverlayPageState extends State<OverlayPage> {
     final (name, source) = _target!;
     final found = await previewOverlay(home.overlays, namedAs(config, name) ?? name, source,
         os: home.os, shared: mergeProfiles([Layer(const LayerId(LayerKind.user), config.profile)]).shareEnv,
-        catalogPin: entry.pin, iconLimits: config.store.iconLimits, catalogs: widget.catalogs,
+        catalogPin: entry.pin, catalog: widget.listed.label, iconLimits: config.store.iconLimits, catalogs: widget.catalogs,
         others: await installedManifests(home, config, except: namedAs(config, name) ?? name), skillPins: config.skillPins);
     if (mounted) setState(() => preview = found);
   });

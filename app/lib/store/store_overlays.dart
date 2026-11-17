@@ -197,7 +197,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
 
   Future<void> _update(String name, GitOverlay source) async {
     final home = c.home!;
-    final update = await c.run('Checking $name', () => home.overlays.check(name, source));
+    final update = await c.run('Checking $name', () => home.overlays.check(name, source, catalog: home.overlays.installed(name)?.catalog));
     if (update == null || !mounted) return;
     final apply = await showSelectableDialog<bool>(context: context, builder: (_) => OverlayUpdateDialog(update: update));
     if (apply != true) return;
@@ -350,7 +350,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
         final named = namedAs(c.config, name) ?? name;
         final preview = await previewOverlay(home.overlays, named, source,
             os: home.os, shared: mergeProfiles([Layer(const LayerId(LayerKind.user), c.config.profile)]).shareEnv,
-            catalogPin: entry.pin, iconLimits: c.config.store.iconLimits, catalogs: skillCatalogs(c.loaded),
+            catalogPin: entry.pin, catalog: listed.label, iconLimits: c.config.store.iconLimits, catalogs: skillCatalogs(c.loaded),
             others: await installedManifests(home, c.config, except: named), skillPins: c.config.skillPins);
         if (!preview.installable || pinMoved(c.config, preview) != null || (preview.skills?.isEmpty == false)) {
           needsLook = true;

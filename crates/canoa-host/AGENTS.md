@@ -713,10 +713,13 @@ overlays are kept where the host already reads them: `overlays/<name>/` (the fil
 `commit`, `digest`, `files` by blob id, `skipped`, `installed`, `catalog`?) beside the person's own canoa.cfg, and the fetched history
 in `overlays/.cache/<name>.git` (a catalog's in `overlays/.catalogs/<label>.git`). A name is a valid AOS overlay name of 1 to 64 letters, digits, `-` or `_`.
 
-- `overlay/check` `{"name", "repo", "ref", "path"?, "spec"?, "pin"?: "sha256:…"}` (`repo` as canoa.cfg writes it, with or without `git+`; `spec` is the text a record keeps as its source, `repo@ref#path` when none) fetches the source (one commit deep; a whole
+- `overlay/check` `{"name", "repo", "ref", "path"?, "spec"?, "pin"?: "sha256:…", "catalog"?: LABEL}` (`repo` as canoa.cfg writes it, with or without `git+`; `spec` is the text a record keeps as its source, `repo@ref#path` when none) fetches the source (one commit deep; a whole
   commit id is that object and nothing else; a branch or tag by `ls-remote`) and lists the tree at that commit as git does, never checking
   anything out: a link, a submodule, a name that is not a relative path or two names equal without ASCII case refuse the overlay; entries
   under an excluded name (`.git`, `node_modules`, `__pycache__`, `*.pyc`, …) are left out and reported as `skipped`; more than
+  `catalog` says the overlay was chosen from that catalog's listing, not typed by the person: it is then fetched with none of the person's git
+  settings, credentials, ssh keys or agent, as `skill/fetch` is (a label is a name as below; `catalog/fetch`, which reads the catalog
+  itself, and its `remote_revision` refresh stay the person's own, since canoa.cfg or the default row names that source).
   4096 files, 64 MiB, or 16384 entries is refused. The tree digest is AOS's and must equal `pin` when one is given (`-32002`, nothing
   installed). It answers `{"token", "name", "from", "fromSource", "fromDigest", "commit", "digest", "files": {path: blob id},
   "skipped", "added", "changed", "removed", "manifest"}` and changes nothing installed; the host keeps the plan under `token` for

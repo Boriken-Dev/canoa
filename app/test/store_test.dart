@@ -456,6 +456,8 @@ path = "s\u202Eh.sh"
       await tester.pumpAndSettle();
       final digest = tester.widget<SelectableText>(find.byKey(const Key('store-digest'))).textSpan!.toPlainText()
           .split(': ').last;
+      expect(overlays.fetchedFrom['$teamRepo@main#overlays/docs-tools'], 'team',
+          reason: 'an entry of a catalog is fetched as one chosen from it, so the host isolates it');
       await tester.tap(find.byKey(const Key('store-install')));
       await tester.pumpAndSettle();
       expect(overlays.records['docs-tools']!.digest, digest);

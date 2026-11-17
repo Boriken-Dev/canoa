@@ -406,7 +406,7 @@ own_profile = true
         await loadCatalog(overlays, label, source, const StoreSettings()),
     ]);
     final entry = listing.choose('team/docs-tools').entry;
-    final preview = await previewOverlay(overlays, installName(entry), installSource(entry), os: 'linux', shared: const {});
+    final preview = await previewOverlay(overlays, installName(entry), installSource(entry), os: 'linux', shared: const {}, catalog: 'team');
     expect(preview.update.added, ['overlay.cfg']);
     expect(overlays.installed('docs-tools'), isNull, reason: 'a preview installs nothing');
     current = await installPreview(overlays, current, preview, catalog: 'team');

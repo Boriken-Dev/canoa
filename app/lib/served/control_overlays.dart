@@ -68,11 +68,12 @@ final class ControlOverlayManager implements OverlayManager {
   String directoryOf(String name) => '$root/$name';
 
   @override
-  Future<OverlayUpdate> check(String name, GitOverlay given) async {
+  Future<OverlayUpdate> check(String name, GitOverlay given, {String? catalog}) async {
     final answer = await _call('overlay/check', {
       'name': name,
       ..._sourceOf(given),
       'pin': ?given.pin,
+      'catalog': ?catalog,
     });
     final files = {for (final MapEntry(:key, :value) in (answer['files'] as Map<Object?, Object?>).entries) '$key': '$value'};
     List<String> names(String key) => [for (final each in (answer[key] as List<Object?>? ?? const [])) '$each'];

@@ -181,6 +181,8 @@ final class MemoryOverlays implements OverlayManager {
   final records = <String, InstalledOverlay>{};
   final installedFiles = <String, Map<String, List<int>>>{};
   final fetched = <String>[];
+  /// The catalog each check named, by the source it fetched (null: a source the person typed).
+  final fetchedFrom = <String, String?>{};
   final _blobs = <String, List<int>>{};
 
   void put(String repo, Map<String, Object> files) => repos[repo] = {
@@ -194,8 +196,9 @@ final class MemoryOverlays implements OverlayManager {
   String directoryOf(String name) => '/home/overlays/$name';
 
   @override
-  Future<OverlayUpdate> check(String name, GitOverlay source) async {
+  Future<OverlayUpdate> check(String name, GitOverlay source, {String? catalog}) async {
     fetched.add(source.spec);
+    fetchedFrom[source.spec] = catalog;
     final all = repos[source.repo] ?? (throw const OverlayException('The source has no branch or tag of that name'));
     final prefix = source.path.isEmpty ? '' : '${source.path}/';
     final files = {
