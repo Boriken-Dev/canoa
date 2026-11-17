@@ -722,6 +722,15 @@ impl Control {
                     .and_then(|()| self.files.trust_set(caller, &params)),
                 Some("trust/revoke") => allow(caller, Grant::ConfigWrite)
                     .and_then(|()| self.files.trust_revoke(caller, &params)),
+                Some("config/get") if owner_section(caller, &params).is_some() => {
+                    self.files.owner_get(owner_section(caller, &params).unwrap_or_default())
+                }
+                Some("config/set") if owner_section(caller, &params).is_some() => self
+                    .files
+                    .owner_set(&params, owner_section(caller, &params).unwrap_or_default(), true),
+                Some("config/check") if owner_section(caller, &params).is_some() => self
+                    .files
+                    .owner_set(&params, owner_section(caller, &params).unwrap_or_default(), false),
                 Some("config/get") if names_host(&params) => {
                     allow(caller, Grant::Hosting).and_then(|()| self.files.host_get())
                 }
@@ -1149,6 +1158,12 @@ fn text_param<'a>(params: &'a Value, key: &str) -> Result<Option<&'a str>, (i32,
 /// Whether a request names `[host]`, which only a key that holds `hosting` reads or writes.
 fn names_host(params: &Value) -> bool {
     params.get("section").and_then(Value::as_str) == Some(files::HOST)
+}
+
+/// The table a request names when it is one only the app this host runs in edits and the caller is that app.
+fn owner_section<'a>(caller: &Caller, params: &'a Value) -> Option<&'a str> {
+    let section = params.get("section").and_then(Value::as_str)?;
+    (matches!(caller, Caller::Owner) && files::OWNER_SECTIONS.contains(&section)).then_some(section)
 }
 
 fn error_line(id: &Value, code: i32, message: &str) -> Vec<u8> {

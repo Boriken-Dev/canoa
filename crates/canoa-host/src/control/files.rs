@@ -75,6 +75,10 @@ pub const GUARDED_SECTIONS: &[&str] = &[
 /// The table of the host's own settings, which `config/get`, `config/set` and `config/check` serve only a key that holds `hosting`.
 pub(crate) const HOST: &str = "host";
 
+/// The tables only the app this host runs in reads and writes, since they name the programs it runs and what may run: another
+/// key never edits them through `config/set`.
+pub(crate) const OWNER_SECTIONS: &[&str] = &["agents", "desktop", "profile", "skill_pins"];
+
 /// The code of a refusal because the table a write was made from is no longer the file's.
 pub(crate) const CHANGED: i32 = -32004;
 
@@ -558,6 +562,21 @@ impl Files {
             done["digest"] = Value::String(host_digest(self.hidden_section(HOST)?.as_ref()));
         }
         Ok(done)
+    }
+
+    /// `config/get` of a table in [`OWNER_SECTIONS`], for the app this host runs in.
+    pub(crate) fn owner_get(&self, section: &str) -> Outcome {
+        Ok(json!({
+            "section": section,
+            "value": self.hidden_section(section)?,
+            "restart": false,
+        }))
+    }
+
+    /// `config/set` (`write`) or `config/check` of a table in [`OWNER_SECTIONS`], for the app this host runs in.
+    pub(crate) fn owner_set(&self, params: &Value, section: &str, write: bool) -> Outcome {
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        self.change_section(section, params.get("value").unwrap_or(&Value::Null), write)
     }
 
     /// `config/check`: whether `section` set to the value would leave canoa.cfg one the host accepts, and in the host's words why
