@@ -32,6 +32,25 @@ An agent that Canoa's own chat started can use the browser's tools, when its bri
 
 **What stays true.** What an agent reads on a page can try to talk it into things, and a grant lets it act on that, so share a tab as you would show it to the agent yourself. A grant is by peer, so several agents behind one bridge share it. Any program running as you on the agent's machine can read the shim's token file and use what that agent holds; another user on that machine cannot. Anyone able to pair with `acp/1` can already run commands on that machine: the bridge's own documentation says so.
 
+## Agents of Canoa on this computer
+
+A session that Canoa on this computer starts for the Canoa app can use the browser's tools, with nothing set up per agent. A conversation that reaches the host with a paired key (the page the host serves, an Office pane, the extension's own chat with the host's agents, another program) has them once `[host.control]` gives that key `tools.use`: a grant is by key and starts denied. The extension is a **provider** of the host: once this browser is paired with Canoa on this computer, the extension's worker opens one more proven link to the host's door, as `@tools`, and registers as `browser`. The host then gives each session it starts an MCP server, `canoa-browser`, that carries that session's MCP messages to the extension over the link. The extension owns everything it decides; the host only carries messages and says whose session each one is.
+
+1. The worker looks for the host when it starts, when a window or the panel asks how Canoa is, and every 30 seconds while the host is not reached (the alarm exists only while this browser is paired). The link stays open as long as the host runs, which also keeps the worker awake. Unpairing ends it.
+2. For each session the host opens a stream and says which agent it is (the entry's name) and how it reached the host: the Canoa app in the host's own process, or a program paired with it. A session is its own principal: what the person allows is for that session, shown in the window as the agent's name and where it runs, and it ends with the session, its link, or a revocation, navigation or the time running out, as under "Remote browser tools".
+3. An agent has `browser_request_access` first, and what its session holds a grant for. The agent is told the list changed over its server's own stream of messages where it takes HTTP servers (an agent that takes only stdio is not told, and lists again when it chooses).
+
+| It takes | To |
+| --- | --- |
+| The session ending, its connection closing or `session/close` | End its grants, close a window still asking, and tell the extension |
+| Closing the browser, stopping Canoa or unpairing | End the link and every session's grants. A Canoa that starts again, or a browser that returns, connects a new link, and no session has what it had |
+| A session starting before the extension has ever connected to this Canoa | It has no `canoa-browser`; one that starts later has it. A session that outlives the extension keeps the server, which says the browser is not connected until it returns |
+| Refusing, or no answer in two minutes | No grant, and 30 seconds before that session can ask again |
+
+**Who has none of this.** A session a web page started (a site the person allowed to use their agents through `document.acp`): the host never gives one `canoa-browser`, whatever key it came through, so a page cannot steer an agent into driving the browser, and the page's own connection never opens `@tools`. A session of a paired key, whatever computer it comes from, has it only when `[host.control]` gives that key `tools.use`; the Canoa app in the host's process holds it. A task another agent handed out has none. What opens `@tools` is a key holding `tools.provide`, which the door gives the browser's paired key by default and no other key by default: a program offering tools to a host answers for what its agents read there, so it is as much as access to the agent's context. A provider name held by one key is refused to another.
+
+**What stays true.** The browser-local checks decide every call, against the tab, its origin, the capability and the time left, as above. A grant is the session's: another session of the same agent, key or window holds nothing. The agent's own words are shown as its own, and the window says where it runs in the host's words (a claim: the host is the Canoa the person paired). What an agent reads on a page can still try to talk it into things.
+
 ## A program on a paired machine
 
 An MCP client that Canoa did not start, such as an IDE or a CLI agent, can ask for a tab the same way, with no ACP session and nothing listening in the browser. It is off unless a person turns it on, for one machine.
