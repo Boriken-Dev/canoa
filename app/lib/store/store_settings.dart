@@ -69,7 +69,7 @@ final class StoreSettings {
   /// and `CanoaConfig.skillSources`.
   static StoreSettings parse(Map<dynamic, dynamic> table) {
     for (final key in table.keys) {
-      if (!keys.contains(key) && key != 'registries' && key != 'mcp' && key != 'skill_sources') throw FormatException('canoa.cfg: store: invalid key $key');
+      if (!keys.contains(key) && key != 'registries' && key != 'mcp' && key != 'skill_sources' && key != 'extension_catalogs') throw FormatException('canoa.cfg: store: invalid key $key');
     }
     int read(String key, int fallback) {
       final value = table[key] ?? fallback;

@@ -226,6 +226,10 @@ final class HostFiles implements WorkspaceFiles, HostOpening {
     }
   }
 
+  /// Takes the extension [name] out of canoa.cfg and, when the Store installed it, its files out of the folder the host kept them in.
+  /// Throws [ControlFailed] in the host's words. The host loads extensions only when it starts.
+  Future<bool> extensionRemove(String name) async => (await _call('extension/remove', {'name': name}))['files_removed'] == true;
+
   /// Ends the host so that its supervisor starts it again with canoa.cfg as it is now; this link ends with it.
   Future<void> restart() async {
     await _call('host/restart');

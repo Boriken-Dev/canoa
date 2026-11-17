@@ -594,6 +594,29 @@ final class CanoaConfig {
   /// catalog file.
   Map<String, GitOverlay> get catalogs => _catalogs(tables['catalogs']);
 
+  /// `[store.extension_catalogs]`: each extensions catalog the Store lists, by the label the person gives it, a git source
+  /// (`<repository>@<ref>#<file>`) whose file lists extensions in Canoa's own format. The host reads them; none is listed
+  /// until the table names one, so this is empty by default.
+  Map<String, String> get extensionCatalogs => _extensionCatalogs((tables['store'] as Map?)?['extension_catalogs']);
+
+  static Map<String, String> _extensionCatalogs(Object? raw) {
+    if (raw == null) return const {};
+    if (raw is! Map) throw const FormatException('canoa.cfg: store.extension_catalogs must be a table');
+    final out = <String, String>{};
+    final normalized = <String>{};
+    for (final MapEntry(:key, :value) in raw.entries) {
+      final label = '$key';
+      if (!isCatalogLabel(label) || !normalized.add(normalizeName(label))) {
+        throw FormatException('canoa.cfg: store.extension_catalogs.$label: a label is a letter, then letters, digits, - or _, at most 64, unique when compared as names are');
+      }
+      if (value is! String || value.isEmpty) {
+        throw FormatException('canoa.cfg: store.extension_catalogs.$label is a git source, <repository>@<ref>#<extensions file>');
+      }
+      out[label] = value;
+    }
+    return out;
+  }
+
   /// `[skill_pins]`: the tree digest the person requires of a skill from elsewhere, by its name in lower case. A skill is
   /// fetched only when its digest equals this and the pin its entry or catalog gives.
   Map<String, String> get skillPins => _skillPins(tables['skill_pins']);
@@ -931,7 +954,7 @@ final class CanoaConfig {
   Map<String, dynamic>? _storeExtrasTable() {
     final raw = tables['store'];
     if (raw is! Map) return null;
-    return {for (final key in const ['registries', 'mcp', 'skill_sources']) if (raw[key] != null) key: raw[key]};
+    return {for (final key in const ['registries', 'mcp', 'skill_sources', 'extension_catalogs']) if (raw[key] != null) key: raw[key]};
   }
 
   /// `[agents.NAME.mcp]`: for each agent, by label, the MCP servers the person turned on (`true`) or off (`false`), and
@@ -1395,6 +1418,7 @@ final class CanoaConfig {
     _presets(data['profiles']);
     _storeExtras(data['store']);
     _skillSources((data['store'] as Map?)?['skill_sources']);
+    _extensionCatalogs((data['store'] as Map?)?['extension_catalogs']);
     _agentMcp(agentTables);
     _agentHooks(agentTables);
     final protectedPaths = permissions['protected'] == null ? null : protectedLinesOf(permissions['protected']);

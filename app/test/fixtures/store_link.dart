@@ -116,6 +116,15 @@ final class FakeStoreHost {
   /// What `config/check` refuses with, in the host's words; null accepts.
   String? checkRefusal;
 
+  /// What `extension/catalogs` answers: the extensions catalogs and their entries, as the host's index words them.
+  Object? catalogIndex;
+
+  /// What `extension/plan` refuses with, in the host's words; null makes a plan of the entry.
+  String? extensionPlanRefusal;
+
+  /// What `extension/apply` refuses with; null installs, which writes `[host.extensions.NAME]` as the host does.
+  String? extensionApplyRefusal;
+
   /// Foundry Local's models as `foundry/models` lists them (`id`, `cached`, `loaded` and the rest), and whether the host found
   /// Foundry Local; `foundry/model` changes them the way the real command line does.
   List<Map<String, Object?>> foundryModels = [];
@@ -187,6 +196,42 @@ final class FakeStoreHost {
     params.putIfAbsent(method, () => []).add(given);
     if (failures[method] ?? failures[key] case final failure?) throw failure;
     if (method == 'store/extensions') return {'types': extensionTypes};
+    if (method == 'extension/catalogs') return catalogIndex ?? {'schema': 1, 'sources': <Object?>[], 'entries': <Object?>[]};
+    if (method == 'extension/plan') {
+      if (extensionPlanRefusal != null) throw ControlFailed(-32002, extensionPlanRefusal!);
+      return {
+        'action': 'install',
+        'version': null,
+        'downloads': [
+          {'url': 'https://example.org/${given['name']}.lib', 'bytes': null, 'check': {'kind': 'sha256', 'value': 'ab' * 32}},
+        ],
+        'steps': <Object?>[],
+        'changes': [
+          {'kind': 'canoa_cfg', 'target': '[host.extensions.${given['name']}]', 'detail': 'Names the library.', 'undone_by_uninstall': true},
+        ],
+        'notices': ['An extension is code the host loads into its own process: it runs with your access.'],
+        'token': 'token-${given['name']}',
+        'extension': {'catalog': given['catalog'], 'name': given['name'], 'provider': 'p'},
+      };
+    }
+    if (method == 'extension/apply') {
+      if (extensionApplyRefusal != null) throw ControlFailed(-32002, extensionApplyRefusal!);
+      final name = ((given['plan'] as Map)['extension'] as Map)['name'] as String;
+      hostTable = {
+        ...?hostTable,
+        'extensions': {
+          ...?(hostTable?['extensions'] as Map?)?.cast<String, Object?>(),
+          name: {'library': '/home/extensions/$name/$name.lib', 'provider': 'p', 'sha256': 'ab' * 32},
+        },
+      };
+      return {'installed': true, 'name': name, 'path': '/home/extensions/$name/$name.lib', 'restart': true};
+    }
+    if (method == 'extension/remove') {
+      final extensions = {...?(hostTable?['extensions'] as Map?)?.cast<String, Object?>()};
+      if (extensions.remove(given['name']) == null) throw ControlFailed(-32002, 'there is no extension ${given['name']} in canoa.cfg');
+      hostTable = extensions.isEmpty ? null : {...?hostTable, 'extensions': extensions};
+      return {'removed': true, 'files_removed': true, 'restart': true};
+    }
     if (method == 'config/get') return {'section': given['section'], 'value': hostTable, 'restart': true};
     if (method == 'config/check') {
       if (checkRefusal != null) throw ControlFailed(-32002, checkRefusal!);

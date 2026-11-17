@@ -2,6 +2,7 @@
 // each type an extension adds is asked of the host and listed from the stores the host says it is made of.
 import 'package:canoa/desktop/control_client.dart' show ControlFailed;
 import 'package:canoa/store/store_extension.dart' show ExtensionBody, ExtensionStoreType;
+import 'package:canoa/store/store_extension_catalog.dart';
 import 'package:canoa/store/store_extensions.dart';
 import 'package:canoa/store/store_foundry.dart';
 import 'package:canoa/store/store_runtimes.dart';
@@ -22,13 +23,13 @@ void main() {
       ];
     final shared = host.client();
     final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId]);
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, extensionsTypeId]);
     var heard = 0;
     extensions.addListener(() => heard++);
 
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, 'echoes'], reason: 'a type may not take a built-in one\'s id');
-    expect(extensions.types.map((type) => type.label), [runtimesTypeLabel, foundryTypeLabel, 'Echoes']);
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, extensionsTypeId, 'echoes'], reason: 'a type may not take a built-in one\'s id');
+    expect(extensions.types.map((type) => type.label), [runtimesTypeLabel, foundryTypeLabel, extensionsTypeLabel, 'Echoes']);
     expect(heard, 1);
 
     final echoes = extensions.types.last;
@@ -52,13 +53,13 @@ void main() {
     final shared = host.client();
     final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId]);
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, extensionsTypeId]);
     host.failures.clear();
     host.extensionTypes = [
       {'id': 'echoes', 'title': 'Echoes', 'stores': <String>[]},
     ];
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, 'echoes']);
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, extensionsTypeId, 'echoes']);
     extensions.dispose();
   });
 

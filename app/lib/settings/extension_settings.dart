@@ -21,6 +21,9 @@ final class ExtensionEntry {
 
   /// Where the extension is loaded from.
   String get where => library ?? source ?? '';
+
+  /// Whether the Store installed it, so the host keeps the digest it checked and checks it again each time the extension is loaded.
+  bool get fromStore => table['pin'] is String || table['sha256'] is String;
 }
 
 /// The extensions of the host canoa.cfg names, listed, added, changed and removed through the host's own `[host]` table: the host
@@ -122,9 +125,11 @@ class ExtensionSettings extends ChangeNotifier {
         if (old is Map)
           for (final MapEntry(:key, :value) in old.entries) '$key': value,
       };
+      // A library or source that is not the one the Store checked is not covered by the digest it kept.
+      final moved = (old is Map ? old['library'] ?? old['source'] : null) != (from[0].isNotEmpty ? from[0] : from[1]);
       final table = <String, Object?>{
         for (final MapEntry(:key, :value) in kept.entries)
-          if (key != 'library' && key != 'source') key: value,
+          if (key != 'library' && key != 'source' && !(moved && (key == 'pin' || key == 'sha256' || key == 'root'))) key: value,
         if (from[0].isNotEmpty) 'library': from[0] else 'source': from[1],
         'provider': provider,
       };
@@ -146,14 +151,31 @@ class ExtensionSettings extends ChangeNotifier {
     });
   }
 
-  /// Takes the extension [name] out of canoa.cfg. Returns what is wrong in the host's words, or null.
-  Future<String?> remove(String name) => _change((extensions) {
-    if (!extensions.containsKey(name)) return 'There is no extension called $name.';
-    return {
-      for (final MapEntry(:key, :value) in extensions.entries)
-        if (key != name) key: value,
-    };
-  });
+  /// Takes the extension [name] out of canoa.cfg, and its files with it when the Store installed it. Returns what is wrong in the
+  /// host's words, or null.
+  Future<String?> remove(String name) async {
+    if (_entries.where((each) => each.name == name).firstOrNull?.fromStore ?? false) {
+      try {
+        await _files.extensionRemove(name);
+        _restartPending = true;
+        _problem = null;
+        if (saved != null) await saved!();
+        await load();
+        return null;
+      } on ControlFailed catch (error) {
+        return error.code == -32001 ? "This key may not change the host's own settings." : error.message;
+      } on Object catch (error) {
+        return 'The host could not be reached to remove that: $error';
+      }
+    }
+    return _change((extensions) {
+      if (!extensions.containsKey(name)) return 'There is no extension called $name.';
+      return {
+        for (final MapEntry(:key, :value) in extensions.entries)
+          if (key != name) key: value,
+      };
+    });
+  }
 
   /// Reads `[host]` again from the host, lets [edit] make the extensions it should name (or say, as text, why not), has the host
   /// check the result and writes it. Reading it again keeps another page's change to the table.
@@ -227,7 +249,8 @@ class _ExtensionsSectionState extends State<ExtensionsSection> {
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(
           'An extension adds types to the Store, each made of programs the host installs with the plan you confirm. The host loads '
-          'extensions when it starts.',
+          'extensions when it starts. The Store\'s Extensions type installs the ones the catalogs list, checking what it fetches against '
+          'their digest; the ones named here by hand are loaded as they are.',
           style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 12),
@@ -293,6 +316,7 @@ class _ExtensionsSectionState extends State<ExtensionsSection> {
     final adds = settings.addedBy(entry.name);
     return [
       '${entry.provider} from ${entry.where}',
+      if (entry.fromStore) 'Installed from a catalog: its digest is checked each time the host loads it',
       if (adds.isNotEmpty) 'Adds ${adds.join(', ')}' else if (settings.restartPending) 'Loads when the host restarts' else 'Adds nothing: it did not load, or names none',
     ].join('\n');
   }

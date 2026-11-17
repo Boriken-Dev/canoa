@@ -1608,7 +1608,13 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Runtimes and the types extensions add, which the host lists and installs from; asked only once the Store is shown.
   late final StoreExtensions? _extensionsHeld = _control == null
       ? null
-      : (StoreExtensions(control: () => _control.ready(wait: false), open: _control.open)..addListener(_extensionsChanged));
+      : (StoreExtensions(
+          control: () => _control.ready(wait: false),
+          open: _control.open,
+          mayInstall: () => _grants?.may(HostGrants.hosting) ?? false,
+          restart: _restartForExtensions,
+          saved: _extensionsSaved,
+        )..addListener(_extensionsChanged));
 
   void _extensionsChanged() {
     if (mounted) setState(() {});
