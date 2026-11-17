@@ -298,3 +298,30 @@ mod tests {
         assert!(touched);
     }
 }
+
+#[cfg(all(test, windows))]
+mod share_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn a_protected_entry_on_a_share_is_touched_by_a_call_naming_the_share() {
+        let local = std::env::temp_dir().join(format!("canoa-hook-share-{}", std::process::id()));
+        std::fs::create_dir_all(local.join("secrets")).expect("a folder");
+        std::fs::create_dir_all(local.join("src")).expect("a folder");
+        std::fs::write(local.join("secrets").join("key.pem"), "x").expect("a file");
+        std::fs::write(local.join("src").join("a.js"), "x").expect("a file");
+        let text = local.to_string_lossy().into_owned();
+        let (drive, rest) = text.split_at(2);
+        let share = PathBuf::from(format!(r"\\localhost\{}${rest}", &drive[..1]));
+        let entry = share.join("secrets").to_string_lossy().into_owned();
+        let list = Refusals::new(Some(&[entry]));
+        let edit = |path: PathBuf| json!({"kind": "edit", "rawInput": {"file_path": path}});
+        assert!(list.touches(&edit(share.join("secrets").join("key.pem")), &share));
+        assert!(list.touches(&edit(PathBuf::from("secrets").join("key.pem")), &share));
+        assert!(!list.touches(&edit(share.join("src").join("a.js")), &share));
+        assert!(!list.touches(&edit(PathBuf::from("src").join("a.js")), &share));
+        let _ = std::fs::remove_dir_all(&local);
+    }
+}
