@@ -54,6 +54,7 @@ pub const SECTIONS: &[&str] = &[
     "notifications",
     "overlays",
     "permissions",
+    "profiles",
     "sessions",
     "store",
     "usage",
@@ -63,7 +64,13 @@ pub const SECTIONS: &[&str] = &[
 /// The tables that change what an agent may do or is given (the permission mode and protected paths, the overlays and skills
 /// every `own_profile` session starts with): writing them takes the grant `config.write.sessions`, which is as much as access to
 /// the agent.
-pub const GUARDED_SECTIONS: &[&str] = &["defaults", "loadouts", "overlays", "permissions"];
+pub const GUARDED_SECTIONS: &[&str] = &[
+    "defaults",
+    "loadouts",
+    "overlays",
+    "permissions",
+    "profiles",
+];
 
 /// The table of the host's own settings, which `config/get`, `config/set` and `config/check` serve only a key that holds `hosting`.
 pub(crate) const HOST: &str = "host";

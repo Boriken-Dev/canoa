@@ -770,7 +770,13 @@ fn a_chunk_is_at_most_what_a_page_can_carry() {
 fn the_safety_sections_need_their_own_grant_and_a_part_file_name_is_just_a_name() {
     let (path, control, _) = editing("canoa.cfg", "[desktop]\nstart_hidden = true\n");
     let plain = key("sha256:aa", &[Grant::ConfigRead, Grant::ConfigWrite]);
-    for section in ["permissions", "overlays", "loadouts", "defaults"] {
+    for section in [
+        "permissions",
+        "overlays",
+        "loadouts",
+        "defaults",
+        "profiles",
+    ] {
         let answer = ask(
             &control,
             &plain,

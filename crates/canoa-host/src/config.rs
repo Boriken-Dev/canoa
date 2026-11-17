@@ -140,9 +140,63 @@ pub struct LocalProfiles {
     pub loadouts: IndexMap<String, Loadout>,
     /// `[defaults] loadout`: the loadout a session starts with when it names none.
     pub default_loadout: Option<String>,
+    /// `[profiles.NAME]`: the named presets of a session's own values, in the file's order.
+    pub presets: IndexMap<String, Preset>,
     /// `[permissions] protected`: the places a hook's allow never answers for.
     pub protected: Option<Vec<String>>,
 }
+
+/// One `[profiles.NAME]`: the values a new session starts with, chosen by name. It is the session's layer, which sits above the
+/// person's own `[profile]` and the agent's entry; the account and the permissions are never part of one.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Preset {
+    /// The label of the source it runs on; the session keeps its own source when none is named.
+    pub source: Option<String>,
+    /// The model it starts with.
+    pub model: Option<String>,
+    /// The effort it starts with.
+    pub effort: Option<String>,
+    /// The mode it starts in.
+    pub mode: Option<String>,
+    /// The starting instructions: text added to the session's initial context after every other layer's.
+    pub context: Option<String>,
+    /// How long the prompt cache lives, one of the names `cache_lifetime` takes elsewhere.
+    pub cache_lifetime: Option<String>,
+    /// The loadout it starts with, by name; the default loadout when none is named.
+    pub loadout: Option<String>,
+}
+
+impl Preset {
+    /// This preset as the session's layer: its model, effort, mode and starting instructions.
+    #[must_use]
+    pub fn session_layer(&self) -> Profile {
+        let mut profile = Profile {
+            model: self.model.clone(),
+            effort: self.effort.clone(),
+            mode: self.mode.clone(),
+            ..Profile::default()
+        };
+        if let Some(text) = &self.context {
+            profile
+                .contexts
+                .push(crate::profile::Context::Text(text.clone()));
+        }
+        profile
+    }
+}
+
+/// A session asked for a preset `[profiles]` does not hold.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnknownPreset(pub String);
+
+impl fmt::Display for UnknownPreset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "there is no profile named {}", self.0)
+    }
+}
+
+impl core::error::Error for UnknownPreset {}
 
 /// One `[loadouts.NAME]`: a named collection a session is started with. Overlays apply whole, in the order `[overlays]` composes
 /// them; the loadout cannot reorder them.
@@ -255,6 +309,7 @@ impl LocalProfiles {
         if self.profile.is_none()
             && self.overlays.is_empty()
             && self.loadouts.is_empty()
+            && self.presets.is_empty()
             && own.is_none()
             && layer.is_none_or(|layer| layer.mcp.is_empty() && layer.hooks.is_empty())
         {
@@ -287,6 +342,8 @@ impl LocalProfiles {
             chosen_skills: Vec::new(),
             loadouts: self.loadouts.clone(),
             default_loadout: self.default_loadout.clone(),
+            presets: self.presets.clone(),
+            session: None,
             protected: self.protected.clone(),
         })
     }
@@ -756,12 +813,27 @@ pub struct HostProfile {
     pub loadouts: IndexMap<String, Loadout>,
     /// `[defaults] loadout`.
     pub default_loadout: Option<String>,
+    /// `[profiles.NAME]`, which a connection resolves once when it starts.
+    pub presets: IndexMap<String, Preset>,
+    /// The session's layer, above the agent's: the preset the connection named, once resolved.
+    pub session: Option<Profile>,
     /// `[permissions] protected`: the places a hook's allow never answers for, in gitignore syntax; none leaves it to the
     /// host's recommended places.
     pub protected: Option<Vec<String>>,
 }
 
 impl HostProfile {
+    /// The preset `name` as this profile holds it.
+    ///
+    /// # Errors
+    ///
+    /// [`UnknownPreset`] when `name` is not in `[profiles]`.
+    pub fn resolve_preset(&self, name: &str) -> Result<&Preset, UnknownPreset> {
+        self.presets
+            .get(name)
+            .ok_or_else(|| UnknownPreset(name.to_owned()))
+    }
+
     /// The loadout `name` (`[defaults] loadout` when `None`) as this profile holds it; `None` when none applies.
     ///
     /// # Errors
@@ -1249,6 +1321,9 @@ struct RawFile {
     /// `[defaults]`: the app's table, of which the host reads `loadout`.
     #[serde(default)]
     defaults: Option<toml::Table>,
+    /// `[profiles.NAME]`: the named presets of a session's own values.
+    #[serde(default)]
+    profiles: IndexMap<String, toml::Value>,
 }
 
 /// `[permissions]`: the app reads the modes and the rules, so only the key the host passes on is named.
@@ -1640,6 +1715,7 @@ impl Config {
         let kb_choice = overlay_kb_of(&raw.overlays)?;
         local_profiles.kb_choice.clone_from(&kb_choice);
         local_profiles.loadouts = loadouts_of(&raw.loadouts)?;
+        local_profiles.presets = presets_of(&raw.profiles)?;
         local_profiles.default_loadout =
             default_loadout_of(raw.defaults.as_ref(), &local_profiles.loadouts)?;
         local_profiles.protected.clone_from(&protected_paths);
@@ -2580,6 +2656,8 @@ fn profile_of(
         chosen_skills: Vec::new(),
         loadouts: IndexMap::new(),
         default_loadout: None,
+        presets: IndexMap::new(),
+        session: None,
         protected: None,
     })
 }
@@ -2667,6 +2745,7 @@ fn local_profiles_of(
         kb_choice: BTreeMap::new(),
         loadouts: IndexMap::new(),
         default_loadout: None,
+        presets: IndexMap::new(),
         protected: None,
     })
 }
@@ -2750,6 +2829,80 @@ fn loadouts_of(
             }
         }
         out.insert(name.clone(), loadout);
+    }
+    Ok(out)
+}
+
+/// Whether `name` is one a profile may have: 1 to 64 of ASCII letters, digits, spaces, `-`, `_` and `.`, with no space at either
+/// end. A profile is chosen by its name in a footer, so it may read as words.
+fn preset_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with(' ')
+        && !name.ends_with(' ')
+        && name
+            .chars()
+            .all(|each| each.is_ascii_alphanumeric() || matches!(each, ' ' | '-' | '_' | '.'))
+}
+
+/// `[profiles.NAME]`: each a source, model, effort, mode, starting instructions, cache lifetime and loadout, all optional. Errors
+/// name the table and the key, never a value. A loadout the file no longer holds is not refused here: a session that names the
+/// preset starts with the default loadout and says so.
+fn presets_of(
+    raw: &IndexMap<String, toml::Value>,
+) -> Result<IndexMap<String, Preset>, ConfigError> {
+    let invalid = |what: String| ConfigError::Invalid { entry: None, what };
+    let mut out = IndexMap::new();
+    for (name, table) in raw {
+        if !preset_name(name) {
+            return Err(invalid(
+                "profiles holds a name of more than letters, digits, spaces, - _ and ., or one that begins or ends with a space, or of over 64 characters".to_owned(),
+            ));
+        }
+        let toml::Value::Table(table) = table else {
+            return Err(invalid(format!("profiles.{name} is not a table")));
+        };
+        let mut preset = Preset::default();
+        let mut scalars = toml::Table::new();
+        for (key, value) in table {
+            let refused = |what: &str| invalid(format!("profiles.{name}.{key} {what}"));
+            let toml::Value::String(text) = value else {
+                return Err(refused("is not text"));
+            };
+            if text.is_empty() || text.contains('\0') {
+                return Err(refused("is empty or holds a NUL"));
+            }
+            match key.as_str() {
+                "source" => preset.source = Some(text.clone()),
+                "model" | "effort" | "mode" => {
+                    scalars.insert(key.clone(), value.clone());
+                }
+                "context" => preset.context = Some(text.clone()),
+                "cache_lifetime" => {
+                    if cache_lifetime_named(text).is_none() {
+                        return Err(refused("is not default, off, short or long"));
+                    }
+                    preset.cache_lifetime = Some(text.clone());
+                }
+                "loadout" => {
+                    if !crate::profile::entry_name(text) {
+                        return Err(refused("is not a loadout's name"));
+                    }
+                    preset.loadout = Some(text.clone());
+                }
+                _ => {
+                    return Err(refused(
+                        "is not a profile setting: source, model, effort, mode, context, cache_lifetime and loadout are",
+                    ));
+                }
+            }
+        }
+        let own = Profile::from_table(scalars, LayerKind::Session)
+            .map_err(|error| invalid(format!("profiles.{name}: {error}")))?;
+        preset.model = own.model;
+        preset.effort = own.effort;
+        preset.mode = own.mode;
+        out.insert(name.clone(), preset);
     }
     Ok(out)
 }

@@ -439,3 +439,65 @@ fn every_loadout_vector_resolves_to_its_collection_or_is_refused() {
         }
     }
 }
+
+/// The presets of `config` as the vectors write them: each by name, with only the settings it holds.
+fn presets_of(config: &canoa_host::Config) -> Value {
+    let mut all = serde_json::Map::new();
+    for (name, preset) in &config.local_profiles.presets {
+        let mut one = serde_json::Map::new();
+        for (key, value) in [
+            ("source", &preset.source),
+            ("model", &preset.model),
+            ("effort", &preset.effort),
+            ("mode", &preset.mode),
+            ("context", &preset.context),
+            ("cache_lifetime", &preset.cache_lifetime),
+            ("loadout", &preset.loadout),
+        ] {
+            if let Some(value) = value {
+                one.insert(key.to_owned(), Value::String(value.clone()));
+            }
+        }
+        all.insert(name.clone(), Value::Object(one));
+    }
+    Value::Object(all)
+}
+
+#[test]
+fn every_preset_vector_reads_to_its_presets_and_its_session_layer_or_is_refused() {
+    use canoa_host::Config;
+    let vectors = vectors();
+    let cases = vectors["presets"].as_array().expect("presets");
+    assert!(cases.len() >= 8, "the vectors are all there");
+    for case in cases {
+        let name = case["name"].as_str().expect("name");
+        let parsed = Config::from_str_in(
+            case["config"].as_str().expect("config"),
+            std::path::Path::new("."),
+        );
+        match (parsed, case.get("presets"), case.get("error")) {
+            (Ok(config), Some(expected), None) => {
+                assert_eq!(&presets_of(&config), expected, "{name}");
+                if let Some(used) = case["use"].as_str() {
+                    let preset = config.local_profiles.presets.get(used).expect("used");
+                    let own = config.local_profiles.profile.clone().unwrap_or_default();
+                    let layers = [
+                        Layer::new(LayerId::new(LayerKind::User, ""), None, own),
+                        Layer::new(
+                            LayerId::new(LayerKind::Session, ""),
+                            None,
+                            preset.session_layer(),
+                        ),
+                    ];
+                    assert_eq!(&merge(&layers).view(), &case["view"], "{name}");
+                }
+            }
+            (Err(_), None, Some(expected)) => assert_eq!(expected["code"], "invalid", "{name}"),
+            (Ok(_), _, Some(_)) => panic!("{name}: accepted, and the vector refuses it"),
+            (Err(error), Some(_), _) => {
+                panic!("{name}: refused ({error}), and the vector takes it")
+            }
+            _ => panic!("{name}: a vector has either presets or error"),
+        }
+    }
+}

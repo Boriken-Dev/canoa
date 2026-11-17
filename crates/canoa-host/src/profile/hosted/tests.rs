@@ -940,8 +940,9 @@ fn a_client_narrows_the_overlays_a_connection_starts_with_and_never_adds_one() {
     install_overlay(&temp);
     let offer = offer_of(&temp, &config_with("overlays = [\"team\"]\n"));
     let report_of = |only: Option<Vec<String>>| {
-        let connection = Connection::prepare_with(&offer, 0, "a", &lookup, only.as_deref(), None)
-            .expect("prepared");
+        let connection =
+            Connection::prepare_with(&offer, 0, "a", &lookup, only.as_deref(), None, None)
+                .expect("prepared");
         parts_for(&connection, Some("claude-code"), &claude(), &lookup).report
     };
 
@@ -1339,7 +1340,7 @@ fn loadout_offer(temp: &Temp, text: &str) -> Offer {
 /// A session of `offer` that names `loadout`, and the report it starts with.
 fn loadout_report(offer: &Offer, loadout: Option<&str>) -> (Connection, Value) {
     let connection =
-        Connection::prepare_with(offer, 0, "a", &lookup, None, loadout).expect("prepared");
+        Connection::prepare_with(offer, 0, "a", &lookup, None, loadout, None).expect("prepared");
     let report = parts_for(&connection, Some("claude-code"), &claude(), &lookup).report;
     (connection, report)
 }
@@ -1399,6 +1400,7 @@ fn an_overlay_the_client_names_wins_over_the_loadouts_and_skills_come_from_the_l
         &lookup,
         Some(&["team".to_owned()]),
         Some("lean2"),
+        None,
     )
     .expect("prepared");
     let report = parts_for(&connection, Some("claude-code"), &claude(), &lookup).report;
@@ -1444,6 +1446,87 @@ fn a_loadout_a_session_names_that_the_profile_does_not_hold_is_refused_with_its_
     }
 }
 
+const PRESETS: &str = "[profile]\nmodel = \"mine\"\neffort = \"low\"\n\
+    [agents.a.profile]\nmode = \"plan\"\n\
+    [loadouts.lean]\nmcp = []\n\
+    [profiles.deep]\nmodel = \"big\"\neffort = \"high\"\ncontext = \"Read the tests first.\"\nloadout = \"lean\"\n\
+    [profiles.orphan]\nloadout = \"gone\"\n";
+
+/// A session of `offer` that names the preset `preset`, and the report it starts with.
+fn preset_report(offer: &Offer, preset: Option<&str>) -> (Connection, Value) {
+    let connection =
+        Connection::prepare_with(offer, 0, "a", &lookup, None, None, preset).expect("prepared");
+    let report = parts_for(&connection, Some("claude-code"), &claude(), &lookup).report;
+    (connection, report)
+}
+
+#[test]
+fn a_preset_is_the_sessions_layer_above_the_person_and_the_agent_and_gives_its_loadout() {
+    let temp = temp_with_skill();
+    let offer = loadout_offer(&temp, PRESETS);
+    let (connection, report) = preset_report(&offer, Some("deep"));
+    assert_eq!(item(&report, "model")["layer"], "session", "{report}");
+    assert_eq!(item(&report, "model")["value"], "big", "{report}");
+    assert_eq!(item(&report, "effort")["layer"], "session", "{report}");
+    // What the preset leaves alone stays the lower layer's.
+    assert_eq!(item(&report, "mode")["layer"], "agent:a", "{report}");
+    // The starting instructions are added to the initial context, as the session's own part of it.
+    let context = items_of(&report, "context", "session");
+    assert_eq!(context.len(), 1, "{report}");
+    assert_eq!(context[0]["state"], "applied", "{report}");
+    assert_eq!(connection.role.as_deref(), Some("lean"));
+    // With no preset the person's own values stand and nothing is the session's.
+    let (_, bare) = preset_report(&offer, None);
+    assert_eq!(item(&bare, "model")["value"], "mine", "{bare}");
+    assert!(items_of(&bare, "context", "session").is_empty(), "{bare}");
+}
+
+#[test]
+fn a_preset_whose_loadout_is_gone_says_so_and_the_default_applies() {
+    let temp = temp_with_skill();
+    let offer = loadout_offer(&temp, &format!("{PRESETS}[defaults]\nloadout = \"lean\"\n"));
+    let (connection, report) = preset_report(&offer, Some("orphan"));
+    assert_eq!(connection.role.as_deref(), Some("lean"));
+    assert_eq!(
+        item(&report, "loadout")["state"],
+        "not supported",
+        "{report}"
+    );
+}
+
+#[test]
+fn a_preset_a_client_names_that_the_profile_does_not_hold_is_refused_with_its_name() {
+    let temp = temp_with_skill();
+    let offer = loadout_offer(&temp, PRESETS);
+    let first = |value: Value| {
+        serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"_meta": {PRESET_META: value}}}))
+        .expect("json")
+    };
+    assert_eq!(
+        choose_preset(&offer, 0, &first(json!("deep"))).expect("held"),
+        Some("deep".to_owned())
+    );
+    assert_eq!(
+        choose_preset(&offer, 0, b"{\"method\":\"initialize\"}").expect("none"),
+        None
+    );
+    for bad in [json!("ghost"), json!(3), json!(["deep"])] {
+        let refusal = choose_preset(&offer, 0, &first(bad.clone())).expect_err("refused");
+        let answer: Value =
+            serde_json::from_slice(&refusal.answer.expect("an answer")).expect("json");
+        assert_eq!(answer["error"]["code"], INVALID_PARAMS, "{answer}");
+        if bad == json!("ghost") {
+            assert!(
+                answer["error"]["message"]
+                    .as_str()
+                    .expect("text")
+                    .contains("ghost"),
+                "{answer}"
+            );
+        }
+    }
+}
 #[test]
 fn a_change_to_canoa_cfg_after_a_session_started_leaves_that_sessions_report_as_it_was() {
     let temp = temp_with_skill();

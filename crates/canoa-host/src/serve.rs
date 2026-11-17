@@ -2552,6 +2552,13 @@ fn prepare<C: Channel>(
             return None;
         }
     };
+    let preset = match hosted::choose_preset(offer, index, first) {
+        Ok(preset) => preset,
+        Err(refusal) => {
+            refuse(refusal.answer, refusal.log);
+            return None;
+        }
+    };
     let lookup = |name: &str| std::env::var(name).ok();
     match Connection::prepare_with(
         offer,
@@ -2560,6 +2567,7 @@ fn prepare<C: Channel>(
         &lookup,
         only.as_deref(),
         loadout.as_deref(),
+        preset.as_deref(),
     ) {
         Ok(connection) => Some(connection.asking(in_process)),
         Err(why) => {

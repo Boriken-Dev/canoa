@@ -44,6 +44,11 @@ pub const OVERLAYS_META: &str = "dev.boriken.canoa/overlays";
 /// profile does not hold is refused.
 pub const LOADOUT_META: &str = "dev.boriken.canoa/loadout";
 
+/// The `_meta` key a client names, in `initialize`, the profile preset (`[profiles.NAME]`) this connection starts with: its
+/// model, effort, mode and starting instructions become the session's layer, above the person's and the agent's, and its
+/// loadout is the one the connection starts with unless the client names another. A name `[profiles]` does not hold is refused.
+pub const PRESET_META: &str = "dev.boriken.canoa/preset";
+
 /// The longest initial context a session is given, in UTF-8 bytes, every layer's together.
 const MAX_CONTEXT: usize = 1024 * 1024;
 pub(crate) mod fetched;
@@ -257,6 +262,40 @@ pub(crate) fn choose_loadout(
     }
 }
 
+/// The preset `first` names for the connection in `initialize`'s `_meta`; `None` when it names none. A name the profile `index`
+/// of `offer` does not hold, and anything but a name, is refused with the name.
+pub(crate) fn choose_preset(
+    offer: &Offer,
+    index: usize,
+    first: &[u8],
+) -> Result<Option<String>, Refusal> {
+    let message: Value = serde_json::from_slice(first).unwrap_or(Value::Null);
+    let Some(chosen) = message
+        .get("params")
+        .and_then(|params| params.get("_meta"))
+        .and_then(|meta| meta.get(PRESET_META))
+    else {
+        return Ok(None);
+    };
+    let refuse = |text: String, log: &'static str| Refusal {
+        answer: message.get("id").map(|id| error(id, INVALID_PARAMS, &text)),
+        log,
+    };
+    let Some(name) = chosen.as_str() else {
+        return Err(refuse(
+            "a profile is chosen by its name".to_owned(),
+            "a client sent something other than a preset's name as its choice, which was refused",
+        ));
+    };
+    match offer.profiles[index].1.resolve_preset(name) {
+        Ok(_) => Ok(Some(name.to_owned())),
+        Err(unknown) => Err(refuse(
+            unknown.to_string(),
+            "a client asked for a preset the profile does not hold, which was refused",
+        )),
+    }
+}
+
 /// The overlays `first` chooses for the connection in `initialize`'s `_meta`; `None` when it chooses none, which is every
 /// overlay the profile lists. Anything but an array of names is refused.
 pub(crate) fn choose_overlays(first: &[u8]) -> Result<Option<Vec<String>>, Refusal> {
@@ -405,7 +444,7 @@ impl Connection {
         entry: &str,
         lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Self, String> {
-        Self::prepare_with(offer, index, entry, lookup, None, None)
+        Self::prepare_with(offer, index, entry, lookup, None, None, None)
     }
 
     /// As [`Self::prepare`], with the overlays the client chose: only those of them the profile lists are read, and each
@@ -421,10 +460,35 @@ impl Connection {
         lookup: &dyn Fn(&str) -> Option<String>,
         only: Option<&[String]>,
         loadout: Option<&str>,
+        preset: Option<&str>,
     ) -> Result<Self, String> {
         let (name, listed) = &offer.profiles[index];
         let mut notes = Vec::new();
         let mut narrowed = listed.clone();
+        let preset = preset
+            .map(|asked| listed.resolve_preset(asked).map(|held| (asked, held)))
+            .transpose()
+            .map_err(|error| error.to_string())?;
+        // The preset's loadout is the connection's unless the client named one; one the file no longer holds is said, and the
+        // default applies.
+        let mut loadout = loadout;
+        if let Some((asked, held)) = preset {
+            narrowed.session = Some(held.session_layer());
+            if loadout.is_none()
+                && let Some(named) = held.loadout.as_deref()
+            {
+                if listed.loadouts.contains_key(named) {
+                    loadout = Some(named);
+                } else {
+                    notes.push(Item::new(
+                        "loadout",
+                        LayerId::new(LayerKind::Session, ""),
+                        State::Unsupported,
+                        format!("the profile {asked} names the loadout {named}, which canoa.cfg no longer holds: the default applies"),
+                    ));
+                }
+            }
+        }
         let resolved = listed
             .resolve_loadout(loadout)
             .map_err(|error| error.to_string())?;
@@ -967,6 +1031,13 @@ fn layers_of(
     if let Some((label, profile)) = &host.agent {
         layers.push(Layer::new(
             LayerId::new(LayerKind::Agent, label.clone()),
+            Some(host.directory.clone()),
+            profile.clone(),
+        ));
+    }
+    if let Some(profile) = &host.session {
+        layers.push(Layer::new(
+            LayerId::new(LayerKind::Session, ""),
             Some(host.directory.clone()),
             profile.clone(),
         ));

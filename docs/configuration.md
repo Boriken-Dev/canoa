@@ -126,7 +126,25 @@ model, effort and mode it starts with. It comes in layers, merged lowest first:
 4. **the project's**: `.canoa/profile.toml` in the working directory, only once you trust that directory;
 5. **the agent's entry**: `[agents.NAME.profile]`, where `NAME` is an agent's label (an entry with only a `profile` names
    a preset, such as `Claude`);
-6. **the session** being started.
+6. **the session** being started: the profile chosen for it in its footer (`[profiles.NAME]`, below), and what was changed
+   from it.
+
+`[profile]` is **yours**: every session gets it, whatever profile it is given. A named profile is the session's own values
+and sits above it. It holds `source`, `model`, `effort`, `mode`, `context` (shown as "Starting instructions", text added to
+the initial context after every other layer's), `cache_lifetime` and `loadout`, all optional:
+
+```toml
+[profiles."Deep review"]
+source = "Claude"
+model = "opus"
+effort = "high"
+context = "Read the tests before the code."
+loadout = "review"
+```
+
+It is chosen in a new session's footer. A value changed after choosing it reads "Deep review · Modified", with *Save changes*
+and *Save as new profile*; *Effective setup* lists every value beside its layer and what the agent does not offer. The
+account and the permissions are chosen apart from it. Settings → Profiles creates, edits, copies and deletes them.
 
 A later layer wins per key. Environment variables, skills and MCP servers merge by name: a later layer's entry replaces a
 lower one's whole and keeps its place, and `remove = true` takes it out. `unset = ["model"]` takes back a lower layer's

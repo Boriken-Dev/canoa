@@ -1,5 +1,5 @@
 {
-  "about": "Profile documents, their merge and the effective view, read by canoa (tests/profile.rs) and the app (app/test/profile_vectors_test.dart). Each layer is a TOML document; `effective` is the view both produce, or `error` the first refusal: its layer's index, a code, and for every code but parse the key it names. `sources` are AOS source strings held to what Canoa fetches. `overlays` are AOS overlays, each given as its files: the overlays refused whole, the view of their layers in composition order under an optional user layer, and the environment built from them over `host`, or the refusal. `loadouts` are canoa.cfg texts and the loadout a session names (null: none named): the loadout resolved against `[overlays]` (overlays in composition order, those `[overlays]` lacks apart, skills, servers), or null when none applies, or `error`: `unknown-loadout` with the name, or `invalid` when the file is refused.",
+  "about": "Profile documents, their merge and the effective view, read by canoa (tests/profile.rs) and the app (app/test/profile_vectors_test.dart). Each layer is a TOML document; `effective` is the view both produce, or `error` the first refusal: its layer's index, a code, and for every code but parse the key it names. `sources` are AOS source strings held to what Canoa fetches. `overlays` are AOS overlays, each given as its files: the overlays refused whole, the view of their layers in composition order under an optional user layer, and the environment built from them over `host`, or the refusal. `loadouts` are canoa.cfg texts and the loadout a session names (null: none named): the loadout resolved against `[overlays]` (overlays in composition order, those `[overlays]` lacks apart, skills, servers), or null when none applies, or `error`: `unknown-loadout` with the name, or `invalid` when the file is refused. `presets` are canoa.cfg texts: the `[profiles.NAME]` presets they hold (only the settings each names), or `error`: `invalid` when the file is refused; with `use`, the view of the person's own `[profile]` under that preset as the session layer.",
   "merges": [
     {
       "name": "all six layers: a later layer wins per key, lists merge by name, a layer removes an entry",
@@ -2841,6 +2841,166 @@
       "name": "a skill name that climbs out refuses the file",
       "config": "[overlays]\nteam = \"https://example.invalid/team.git@main\"\nother = \"https://example.invalid/other.git@main\"\n[loadouts.review]\nskills = [\"../x\"]\n",
       "loadout": "review",
+      "error": {
+        "code": "invalid"
+      }
+    }
+  ],
+  "presets": [
+    {
+      "name": "a preset holds its source, model, effort, mode, starting instructions, cache lifetime and loadout",
+      "config": "[profile]\nmodel = \"mine\"\neffort = \"low\"\n[loadouts.lean]\n[profiles.deep]\nsource = \"Claude\"\nmodel = \"big\"\neffort = \"high\"\nmode = \"plan\"\ncontext = \"Read the tests first.\"\ncache_lifetime = \"short\"\nloadout = \"lean\"\n",
+      "presets": {
+        "deep": {
+          "source": "Claude",
+          "model": "big",
+          "effort": "high",
+          "mode": "plan",
+          "context": "Read the tests first.",
+          "cache_lifetime": "short",
+          "loadout": "lean"
+        }
+      },
+      "use": "deep",
+      "view": {
+        "model": {
+          "value": "big",
+          "layer": "session"
+        },
+        "effort": {
+          "value": "high",
+          "layer": "session"
+        },
+        "mode": {
+          "value": "plan",
+          "layer": "session"
+        },
+        "env": [],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": [],
+        "contexts": [
+          {
+            "value": {
+              "text": "Read the tests first."
+            },
+            "layer": "session"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a preset is the session layer: it wins over the person's own values and leaves the rest as they are",
+      "config": "[profile]\nmodel = \"mine\"\neffort = \"low\"\nmode = \"default\"\n[profiles.quick]\neffort = \"high\"\n",
+      "presets": {
+        "quick": {
+          "effort": "high"
+        }
+      },
+      "use": "quick",
+      "view": {
+        "model": {
+          "value": "mine",
+          "layer": "user"
+        },
+        "effort": {
+          "value": "high",
+          "layer": "session"
+        },
+        "mode": {
+          "value": "default",
+          "layer": "user"
+        },
+        "env": [],
+        "skills": [],
+        "mcp": [],
+        "share_env": [],
+        "refused": [],
+        "removed": []
+      }
+    },
+    {
+      "name": "presets keep the file's order and a preset may hold nothing",
+      "config": "[profiles.b]\nmodel = \"x\"\n[profiles.a]\n",
+      "presets": {
+        "b": {
+          "model": "x"
+        },
+        "a": {}
+      }
+    },
+    {
+      "name": "a name may read as words",
+      "config": "[profiles.\"Deep review\"]\nmodel = \"x\"\n",
+      "presets": {
+        "Deep review": {
+          "model": "x"
+        }
+      }
+    },
+    {
+      "name": "a loadout the file no longer holds is not refused",
+      "config": "[profiles.orphan]\nloadout = \"gone\"\n",
+      "presets": {
+        "orphan": {
+          "loadout": "gone"
+        }
+      }
+    },
+    {
+      "name": "a key a preset does not have refuses the file",
+      "config": "[profiles.deep]\nenv = \"x\"\n",
+      "error": {
+        "code": "invalid"
+      }
+    },
+    {
+      "name": "an account is not a preset's to name",
+      "config": "[profiles.deep]\naccount = \"work\"\n",
+      "error": {
+        "code": "invalid"
+      }
+    },
+    {
+      "name": "a value that is not text refuses the file",
+      "config": "[profiles.deep]\nmodel = 3\n",
+      "error": {
+        "code": "invalid"
+      }
+    },
+    {
+      "name": "an empty value refuses the file",
+      "config": "[profiles.deep]\ncontext = \"\"\n",
+      "error": {
+        "code": "invalid"
+      }
+    },
+    {
+      "name": "a cache lifetime that is not one of the four refuses the file",
+      "config": "[profiles.deep]\ncache_lifetime = \"forever\"\n",
+      "error": {
+        "code": "invalid"
+      }
+    },
+    {
+      "name": "a name of more than letters, digits, spaces, - _ and ., or one that begins or ends with a space, refuses the file",
+      "config": "[profiles.\"deep/review\"]\nmodel = \"x\"\n",
+      "error": {
+        "code": "invalid"
+      }
+    },
+    {
+      "name": "a preset that is not a table refuses the file",
+      "config": "profiles = \"deep\"\n",
+      "error": {
+        "code": "invalid"
+      }
+    },
+    {
+      "name": "a name with a space at its end refuses the file",
+      "config": "[profiles.\"deep \"]\nmodel = \"x\"\n",
       "error": {
         "code": "invalid"
       }
