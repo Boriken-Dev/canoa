@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:canoa/client/client_mode.dart';
+import 'package:canoa/client/pane_link.dart';
 import 'package:canoa/client/relation.dart';
 import 'package:canoa/client/relation_source.dart';
 import 'package:canoa/config/canoa_config.dart';
@@ -26,6 +27,28 @@ final _peer = 'sha256:${'ab' * 32}';
 // What the agent's host puts the folders under; the panel does not know it.
 const _documents = '/home/ana/Documents';
 final _id = RegExp(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}');
+
+/// The page that frames the app, as a task pane's: it says what is in front when it learns it, and notes that the app said it listens.
+final class _Pane implements PaneLink {
+  final _said = StreamController<Relation?>.broadcast();
+  var readied = 0;
+  var signedOut = 0;
+  var disposed = false;
+
+  void say(Relation? relation) => _said.add(relation);
+
+  @override
+  Stream<Relation?> get relations => _said.stream;
+  @override
+  void ready() => readied++;
+  @override
+  void signIn() => signedOut++;
+  @override
+  void dispose() {
+    disposed = true;
+    unawaited(_said.close());
+  }
+}
 
 final class _Agent implements AcpPageAgent {
   @override
@@ -135,6 +158,7 @@ Future<SessionStore> _panel(
   ClientMode? mode,
   RelationSource? relations,
   bool Function(Uri)? openPage,
+  PaneLink? paneLink,
 }) async {
   final store = SessionStore(ledger: ledger);
   addTearDown(store.dispose);
@@ -148,6 +172,7 @@ Future<SessionStore> _panel(
     mode: mode,
     relations: relations,
     openPage: openPage,
+    paneLink: paneLink,
   ));
   await settle(tester);
   return store;
@@ -485,6 +510,59 @@ void chatOnlyTests() {
       relation.current = const Relation(kind: Relation.documentKind, key: 'c-1');
       await settle(tester);
       expect(_tiles(), findsNothing);
+    });
+
+    testWidgets('a task pane that learns what is open later switches the related list with no reload', (tester) async {
+      final ledger = SessionLedger(MemoryLedgerBackend(), clock: _Clock().now);
+      final provider = _Provider();
+      final pane = _Pane();
+      final mode = ClientMode.fromUri(Uri.parse('https://canoa.example/office/app/?mode=chat&relation=conversation:c-1&label=Quarterly%20numbers'));
+      final store = await _panel(tester, ledger: ledger, provider: provider, mode: mode, paneLink: pane);
+      expect(pane.readied, 1, reason: 'the app says it listens once, after it can hear');
+      expect(tester.widget<Text>(find.byKey(const Key('related-name'))).data, 'Quarterly numbers');
+
+      await _start(tester, store, 'About the thread');
+      expect(ledger.entries.single.relation!.key, 'c-1');
+      await tester.runAsync(() => store.close(store.sessions.single));
+      await settle(tester);
+      expect(_tiles(), findsOneWidget);
+
+      // The pinned Outlook pane moves to another message: the list follows, the page and the store are the ones they were.
+      pane.say(const Relation(kind: Relation.conversationKind, key: 'c-2', label: 'Lunch'));
+      await settle(tester);
+      expect(tester.widget<Text>(find.byKey(const Key('related-name'))).data, 'Lunch');
+      expect(_tiles(), findsNothing);
+      expect(pane.readied, 1, reason: 'no reload: the app did not start over');
+      pane.say(const Relation(kind: Relation.conversationKind, key: 'c-1', label: 'Quarterly numbers'));
+      await settle(tester);
+      expect(_tiles(), findsOneWidget, reason: 'back on the first conversation, its session is listed again');
+      // A document with the same key is not the conversation, and nothing open lists none.
+      pane.say(const Relation(kind: Relation.documentKind, key: 'c-1'));
+      await settle(tester);
+      expect(_tiles(), findsNothing);
+      pane.say(null);
+      await settle(tester);
+      expect(_tiles(), findsNothing);
+      expect(find.byKey(const Key('related-name')), findsNothing, reason: 'nothing is in front');
+
+      await tester.pumpWidget(const SizedBox());
+      expect(pane.disposed, isTrue, reason: 'the link is let go with the app');
+    });
+
+    testWidgets('a pane link is not used where the app is given its own relations, and the whole app listens to none', (tester) async {
+      final pane = _Pane();
+      final own = ManualRelation(const Relation(kind: Relation.conversationKind, key: 'c-1', label: 'Mine'));
+      addTearDown(own.dispose);
+      await _panel(tester, ledger: SessionLedger(MemoryLedgerBackend()), provider: _Provider(), mode: _chatOnly, relations: own, paneLink: pane);
+      expect(pane.readied, 0);
+      pane.say(const Relation(kind: Relation.conversationKind, key: 'c-2', label: 'Other'));
+      await settle(tester);
+      expect(tester.widget<Text>(find.byKey(const Key('related-name'))).data, 'Mine');
+
+      final full = _Pane();
+      await tester.pumpWidget(const SizedBox());
+      await _panel(tester, ledger: SessionLedger(MemoryLedgerBackend()), provider: _Provider(), paneLink: full);
+      expect(full.readied, 0, reason: 'the whole app is no pane');
     });
 
     testWidgets('the address names the mode and what is in front', (tester) async {

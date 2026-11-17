@@ -22,6 +22,8 @@ import 'extension/local_host_banner.dart';
 import 'extension/local_host_control.dart';
 import 'client/client_mode.dart';
 import 'client/full_app.dart' as full_app;
+import 'client/pane_link.dart';
+import 'client/pane_pairing.dart';
 import 'client/related_rail.dart';
 import 'client/related_sessions.dart';
 import 'client/relation.dart';
@@ -290,7 +292,7 @@ class CanoaApp extends StatefulWidget {
     this.isGitRepository, this.folderExists, this.home, this.hostFolders, this.listFolder, this.resolveInside, this.pickFolder, this.pickFiles, this.statFile, this.clipboard,
     this.worktrees, this.askChoices, this.renderers = chat.ChatRenderers.none, this.popoutWindows,
     this.tabBridge, this.localHost, this.browserProvider, this.gitReader, this.accountsHost, this.agentMoves, this.served, this.layout, this.surfaces, this.probe, this.connectEndpoint, this.openRemote, this.terminalOnConnection, this.speechCapture,
-    this.mode, this.relations, this.openPage,
+    this.mode, this.relations, this.openPage, this.paneLink,
   });
 
   /// Which app this page shows: the whole app, or the chat alone with the sessions of what is in front of the client first. The
@@ -304,6 +306,11 @@ class CanoaApp extends StatefulWidget {
   /// Opens a page of its own, for "Open the full app"; the browser's by default.
   @visibleForTesting
   final bool Function(Uri address)? openPage;
+
+  /// The page that frames the chat-only app (an Office task pane), which tells it what is in front of the client as that changes;
+  /// by default the framing page of this one, when it has one.
+  @visibleForTesting
+  final PaneLink? paneLink;
 
   /// Which section is shown and how each section's index is sized, kept across runs; the app keeps its own when none is given.
   final ShellLayout? layout;
@@ -986,6 +993,17 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// Whether [_relations] is the app's own, which it then ends.
   bool _ownsRelations = false;
+
+  /// The page that frames the chat-only app and what it says of what is in front; null where none frames it.
+  PaneLink? _pane;
+  StreamSubscription<Relation?>? _paneRelations;
+
+  /// Whether the chat-only app, served by a host that has a control channel, was turned away by it: its key is not accepted there,
+  /// so the person pairs it by PIN here, where there is no Hosts section.
+  bool get _needsPairing {
+    final served = widget.served;
+    return _mode.chatOnly && served != null && served.portal == null && served.host.control != null && !served.reachable;
+  }
 
   /// Opens the whole app in a page of its own, from the chat-only app's link, and says so when this client cannot.
   void _openFullApp() {
@@ -2786,6 +2804,14 @@ class _CanoaAppState extends State<CanoaApp> {
                 // The chat-only app always has a source, which says nothing is in front until a client tells it.
                 : _mode.chatOnly ? ManualRelation() : null);
     _ownsRelations = widget.relations == null && _relations != null;
+    final manual = _relations;
+    if (_mode.chatOnly && _ownsRelations && manual is ManualRelation) {
+      // A pane that learns what is open later (a pinned Outlook pane moving between messages) says so, and the list follows with no
+      // reload; it is told the app is listening only once the first message can be heard.
+      _pane = widget.paneLink ?? PaneLink.ofPage();
+      _paneRelations = _pane?.relations.listen((relation) => manual.current = relation);
+      _pane?.ready();
+    }
     _contextTimer = Timer.periodic(
       const Duration(seconds: 2), (_) => unawaited(_claimContext()),
     );
@@ -2821,6 +2847,8 @@ class _CanoaAppState extends State<CanoaApp> {
     _grouping.dispose();
     _loadoutsSelection.dispose();
     _popout.dispose();
+    unawaited(_paneRelations?.cancel());
+    _pane?.dispose();
     if (_ownsRelations) (_relations as ChangeNotifier).dispose();
     _tabs?.dispose();
     _contextTimer?.cancel();
@@ -3017,6 +3045,20 @@ class _CanoaAppState extends State<CanoaApp> {
 
   /// Where the client has something in front of it, the sessions related to it above the welcome page.
   Widget _withRelated(Widget welcome) {
+    final listed = _relatedAbove(welcome);
+    final served = widget.served;
+    if (!_needsPairing || served == null) return listed;
+    return Column(children: [
+      Flexible(
+        child: SingleChildScrollView(
+          child: PanePairing(hostPeer: served.host.peer, origin: '${served.page.scheme}://${served.page.authority}'),
+        ),
+      ),
+      Expanded(child: listed),
+    ]);
+  }
+
+  Widget _relatedAbove(Widget welcome) {
     final relations = _relations, ledger = store.ledger;
     if (relations == null || ledger == null) return welcome;
     return Column(children: [

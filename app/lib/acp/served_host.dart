@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../auth/peer_proof.dart';
+import '../served/app_base.dart';
 import '../served/navigate.dart';
 import '../served/web_mode.dart';
 
@@ -109,7 +110,7 @@ Future<ServedHost?> loadServedHost({http.Client? client, Uri? base, void Functio
   if (!_inPage && base == null) return null;
   final ask = client ?? http.Client();
   try {
-    final page = base ?? Uri.base;
+    final page = base ?? appBase();
     final response = await ask.get(page.resolve('canoa.json'));
     if (response.statusCode == 401) {
       final login = page.resolve('/portal/login');

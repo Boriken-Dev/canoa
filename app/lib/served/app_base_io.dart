@@ -1,0 +1,1 @@
+Uri appBase() => Uri.base;
