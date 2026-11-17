@@ -176,3 +176,65 @@ fn config_check_answers_for_a_section_a_key_may_write_and_writes_nothing() {
     );
     assert_eq!(denied["error"]["code"], DENIED, "{denied}");
 }
+
+#[test]
+fn an_extension_is_added_changed_and_removed_through_the_host_table() {
+    let (path, control) =
+        editing("[desktop]\nstart_hidden = true\n\n[host.agents.echo]\nprogram = \"echo\"\n");
+    let who = key(&[Grant::Hosting]);
+    let table = |extensions: Value| json!({"agents": {"echo": {"program": "echo"}}, "extensions": extensions});
+    let set = |value: Value| {
+        ask(
+            &control,
+            &who,
+            "config/set",
+            json!({"section": "host", "value": value}),
+        )
+    };
+
+    let added = set(table(
+        json!({"sample": {"library": "sample.dll", "provider": "sample_extension"}}),
+    ));
+    assert_eq!(added["result"]["restart"], true, "{added}");
+    let read = ask(&control, &who, "config/get", json!({"section": "host"}));
+    assert_eq!(
+        read["result"]["value"]["extensions"]["sample"]["provider"],
+        "sample_extension"
+    );
+
+    // An extension that names neither a library nor a source, or both, is the host's own refusal and writes nothing.
+    let before = fs::read_to_string(&path).expect("canoa.cfg");
+    let neither = set(table(json!({"sample": {"provider": "sample_extension"}})));
+    assert_eq!(neither["error"]["code"], REFUSED, "{neither}");
+    assert_eq!(fs::read_to_string(&path).expect("canoa.cfg"), before);
+
+    // Another name and library replace the first, and the rest of canoa.cfg stays.
+    let changed = set(table(
+        json!({"renamed": {"library": "other.dll", "provider": "sample_extension"}}),
+    ));
+    assert_eq!(changed["result"]["restart"], true, "{changed}");
+    let text = fs::read_to_string(&path).expect("canoa.cfg");
+    assert!(
+        text.contains("renamed") && !text.contains("sample.dll"),
+        "{text}"
+    );
+    assert!(text.contains("start_hidden = true"), "{text}");
+
+    let removed = set(json!({"agents": {"echo": {"program": "echo"}}}));
+    assert_eq!(removed["result"]["restart"], true, "{removed}");
+    assert!(
+        !fs::read_to_string(&path)
+            .expect("canoa.cfg")
+            .contains("renamed")
+    );
+
+    // Without the grant that guards `[host]`, the table is not reachable at all.
+    let reader = key(&[Grant::ConfigRead, Grant::ConfigWrite]);
+    let denied = ask(
+        &control,
+        &reader,
+        "config/set",
+        json!({"section": "host", "value": {}}),
+    );
+    assert_eq!(denied["error"]["code"], DENIED, "{denied}");
+}

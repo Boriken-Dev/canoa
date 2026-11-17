@@ -15,6 +15,18 @@ use coqui_acp_api::guatiao::{FromValue, Schema, ToValue};
 /// The type ids the Store has of its own, which an extension cannot add.
 pub const RESERVED_TYPES: [&str; 5] = ["overlays", "skills", "agents", "mcps", "runtimes"];
 
+/// The most characters an image icon's address may have: a small image, not a picture.
+pub const MAX_ICON_TEXT: usize = 64 * 1024;
+
+/// The prefixes an image icon's address starts with, one for each format the application draws.
+pub const ICON_IMAGE_PREFIXES: [&str; 2] = ["data:image/png;base64,", "data:image/webp;base64,"];
+
+/// Whether `icon` is an image address rather than the name of one of the application's icons.
+#[must_use]
+pub fn is_icon_image(icon: &str) -> bool {
+    icon.starts_with("data:")
+}
+
 /// One store type an extension adds.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
@@ -24,7 +36,9 @@ pub struct ExtensionType {
     pub id: String,
     /// The type's name in the plural, for the Store's index.
     pub title: String,
-    /// The name of one of the application's icons, or none for its default.
+    /// The name of one of the application's icons, or a small image the extension ships as a `data:image/png;base64,...` or
+    /// `data:image/webp;base64,...` address (at most [`MAX_ICON_TEXT`] characters), or none for the default icon. A name the
+    /// application does not know draws the default.
     pub icon: Option<String>,
     /// The `program_store` providers the type lists, in order.
     pub stores: Vec<String>,
@@ -79,6 +93,23 @@ impl ExtensionType {
         }
         if self.title.trim().is_empty() {
             return Some(format!("the type {:?} has no title", self.id));
+        }
+        if let Some(icon) = self.icon.as_deref().filter(|icon| is_icon_image(icon)) {
+            let body = ICON_IMAGE_PREFIXES
+                .iter()
+                .find_map(|prefix| icon.strip_prefix(prefix));
+            let ok = body.is_some_and(|body| {
+                !body.is_empty()
+                    && body.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'=')
+                    })
+            });
+            if !ok || icon.len() > MAX_ICON_TEXT {
+                return Some(format!(
+                    "the icon of the type {:?} is not a PNG or WebP base64 address of at most {MAX_ICON_TEXT} characters",
+                    self.id
+                ));
+            }
         }
         None
     }

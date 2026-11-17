@@ -98,8 +98,16 @@ fn an_extension_adds_a_type_the_host_lists_and_installs_from() {
     let types = types["types"].as_array().expect("a list");
     assert_eq!(
         types.len(),
-        1,
+        2,
         "the broken extension adds nothing: {types:?}"
+    );
+    assert_eq!(types[0]["icon"], "extension");
+    assert_eq!(types[1]["id"], "pictured");
+    assert!(
+        types[1]["icon"]
+            .as_str()
+            .is_some_and(|icon| icon.starts_with("data:image/png;base64,")),
+        "an image icon is given as the extension wrote it: {types:?}"
     );
     assert_eq!(types[0]["id"], "echoes");
     assert_eq!(types[0]["title"], "Echoes");

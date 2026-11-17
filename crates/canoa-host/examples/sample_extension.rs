@@ -10,7 +10,10 @@ use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtension};
 use canoa_host::store::builtin::EchoArchiveStore;
 use coqui_acp_api::guatiao::{self, Provider, library::ProviderError};
 
-/// Adds the Echoes type.
+/// A one-pixel PNG.
+const PICTURE: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==";
+
+/// Adds the Echoes type, and one that has a picture for its icon.
 #[derive(Default, Provider)]
 #[provider(StoreExtension, id = "sample_extension", crate = ::coqui_acp_api::guatiao)]
 struct SampleExtension;
@@ -19,10 +22,13 @@ impl StoreExtension for SampleExtension {
     fn describe(&self) -> Result<ExtensionInfo, ProviderError> {
         let mut echoes = ExtensionType::new("echoes", "Echoes", ["echo_archive_store"]);
         echoes.icon = Some("extension".to_owned());
+        // A type with a picture of its own for an icon, and no store of its own to list.
+        let mut pictured = ExtensionType::new("pictured", "Pictured", Vec::<String>::new());
+        pictured.icon = Some(PICTURE.to_owned());
         Ok(ExtensionInfo::new(
             "Sample",
             "A test publisher",
-            vec![echoes],
+            vec![echoes, pictured],
         ))
     }
 }
