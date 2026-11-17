@@ -1207,3 +1207,261 @@ fn caching_follows_whether_the_path_carries_a_version() {
         assert!(reply.headers.contains_key("etag"), "{path}");
     }
 }
+
+/// The directives of a policy, by name.
+fn directives(policy: &str) -> BTreeMap<&str, &str> {
+    policy
+        .split(';')
+        .filter_map(|directive| directive.trim().split_once(' '))
+        .collect()
+}
+
+/// The add-in's own file `name` under `clients/office/taskpane`, as the repository holds it.
+fn taskpane_file(name: &str) -> Vec<u8> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("clients")
+        .join("office")
+        .join("taskpane")
+        .join(name);
+    std::fs::read(path).expect("a file of the add-in")
+}
+
+/// A site with an index and the icon the add-in's icons are, and a server on it with the add-in's routes `on`.
+fn office_site(name: &str, on: bool, frames: &[&str]) -> (Outside, SocketAddr) {
+    let outside = Outside::new(name);
+    std::fs::create_dir_all(outside.site().join("icons")).expect("a folder of icons");
+    std::fs::write(outside.site().join("icons").join("Icon-192.png"), "PNG").expect("an icon");
+    std::fs::write(outside.site().join("app.js"), "APP").expect("a script");
+    let mut config = loopback(&outside.site());
+    config.office = on;
+    config.office_frames = frames.iter().map(|source| (*source).to_owned()).collect();
+    let address = running(&config, &[]);
+    (outside, address)
+}
+
+#[test]
+fn the_add_ins_routes_are_the_sites_own_unless_the_setting_asks_for_them() {
+    let (_site, address) = office_site("office-off", false, &[]);
+    for path in [
+        "/office/taskpane.html",
+        "/office/dialog.js",
+        "/office/icon-32.png",
+    ] {
+        assert_eq!(get(address, path).status, 404, "{path}");
+    }
+    let app = get(address, "/office/app/?mode=chat");
+    assert_eq!(app.status, 200, "an app route, as any");
+    assert_eq!(app.body, b"INDEX");
+    let policy = &app.headers["content-security-policy"];
+    assert_eq!(directives(policy)["frame-ancestors"], "'none'");
+    assert_eq!(app.headers["x-frame-options"], "DENY");
+    assert!(!policy.contains("static.microsoft"), "{policy}");
+}
+
+#[test]
+fn the_task_pane_may_load_office_js_and_be_framed_by_office_and_nothing_else_may() {
+    let (_site, address) = office_site("office-pane", true, &["https://*.officeapps.live.com"]);
+    let pane = get(address, "/office/taskpane.html");
+    assert_eq!(pane.status, 200);
+    assert_eq!(pane.body, taskpane_file("taskpane.html"));
+    assert_eq!(pane.headers["content-type"], "text/html; charset=utf-8");
+    let policy = directives(&pane.headers["content-security-policy"]);
+    assert_eq!(
+        policy["script-src"],
+        "'self' https://officeapis.public.onecdn.static.microsoft"
+    );
+    assert_eq!(policy["default-src"], "'none'");
+    assert_eq!(policy["frame-src"], "'self'");
+    assert_eq!(policy["object-src"], "'none'");
+    let ancestors: Vec<&str> = policy["frame-ancestors"].split(' ').collect();
+    for framer in [
+        "https://outlook.office.com",
+        "https://outlook.office365.com",
+        "https://outlook.live.com",
+        "https://*.office.com",
+        "https://*.cloud.microsoft",
+        "https://*.officeapps.live.com",
+    ] {
+        assert!(ancestors.contains(&framer), "{framer} in {ancestors:?}");
+    }
+    assert!(!ancestors.contains(&"'self'"), "{ancestors:?}");
+    assert!(
+        !pane.headers.contains_key("x-frame-options"),
+        "{:?}",
+        pane.headers
+    );
+    assert_eq!(pane.headers["x-content-type-options"], "nosniff");
+    assert_eq!(pane.headers["cross-origin-opener-policy"], "same-origin");
+    // The page names Office.js at the address the policy allows, and no other address.
+    let html = String::from_utf8(pane.body).expect("UTF-8");
+    assert!(html.contains("src=\"https://officeapis.public.onecdn.static.microsoft/1/office.js\""));
+    assert_eq!(html.matches("https://").count(), 1, "{html}");
+}
+
+#[test]
+fn the_dialog_loads_office_js_and_keeps_its_link_to_its_opener_but_is_never_framed() {
+    let (_site, address) = office_site("office-dialog", true, &[]);
+    let dialog = get(address, "/office/dialog.html");
+    assert_eq!(dialog.status, 200);
+    assert_eq!(dialog.body, taskpane_file("dialog.html"));
+    let policy = directives(&dialog.headers["content-security-policy"]);
+    assert_eq!(
+        policy["script-src"],
+        "'self' https://officeapis.public.onecdn.static.microsoft"
+    );
+    assert_eq!(policy["frame-ancestors"], "'none'");
+    assert!(!policy.contains_key("frame-src"));
+    assert_eq!(dialog.headers["x-frame-options"], "DENY");
+    assert!(
+        !dialog.headers.contains_key("cross-origin-opener-policy"),
+        "{:?}",
+        dialog.headers
+    );
+}
+
+#[test]
+fn the_add_ins_scripts_are_this_origins_and_carry_the_usual_headers() {
+    let (_site, address) = office_site("office-scripts", true, &[]);
+    for name in ["taskpane.js", "relation.js", "dialog.js"] {
+        let script = get(address, &format!("/office/{name}"));
+        assert_eq!(script.status, 200, "{name}");
+        assert_eq!(script.body, taskpane_file(name), "{name}");
+        assert_eq!(
+            script.headers["content-type"], "text/javascript; charset=utf-8",
+            "{name}"
+        );
+        let policy = directives(&script.headers["content-security-policy"]);
+        assert_eq!(policy["script-src"], "'self' 'wasm-unsafe-eval'", "{name}");
+        assert_eq!(policy["frame-ancestors"], "'none'", "{name}");
+        assert_eq!(script.headers["x-frame-options"], "DENY", "{name}");
+    }
+}
+
+#[test]
+fn the_chat_only_app_may_be_framed_by_the_pane_and_office_but_runs_no_more_than_the_site_does() {
+    let (_site, address) = office_site("office-app", true, &[]);
+    let usual = get(address, "/");
+    let normal = directives(&usual.headers["content-security-policy"]);
+    for path in [
+        "/office/app/",
+        "/office/app",
+        "/office/app/?mode=chat&relation=conversation:ab&label=Plan",
+    ] {
+        let app = get(address, path);
+        assert_eq!(app.status, 200, "{path}");
+        assert_eq!(app.body, b"INDEX", "{path}");
+        let policy = directives(&app.headers["content-security-policy"]);
+        for (name, value) in &normal {
+            if *name != "frame-ancestors" {
+                assert_eq!(policy[name], *value, "{path}: {name} is the site's own");
+            }
+        }
+        assert!(
+            policy["frame-ancestors"].starts_with("'self' https://outlook.office.com "),
+            "{path}: {policy:?}"
+        );
+        assert!(!policy["script-src"].contains("microsoft"), "{path}");
+        assert!(!app.headers.contains_key("x-frame-options"), "{path}");
+        assert_eq!(app.headers["cache-control"], "no-cache", "{path}");
+    }
+}
+
+#[test]
+fn the_icons_may_be_drawn_by_office_from_its_own_origin() {
+    let (_site, address) = office_site("office-icon", true, &[]);
+    for size in ["16", "32", "64", "80"] {
+        let icon = get(address, &format!("/office/icon-{size}.png"));
+        assert_eq!(icon.status, 200, "{size}");
+        assert_eq!(icon.body, b"PNG", "{size}");
+        assert_eq!(icon.headers["content-type"], "image/png", "{size}");
+        assert_eq!(
+            icon.headers["cross-origin-resource-policy"], "cross-origin",
+            "{size}"
+        );
+        assert!(
+            !icon.headers["cache-control"].contains("no-store"),
+            "{size}"
+        );
+    }
+    // Another size is no icon of the add-in's, and the site's own icon keeps its headers.
+    assert_eq!(get(address, "/office/icon-48.png").status, 404);
+    let own = get(address, "/icons/Icon-192.png");
+    assert_eq!(own.headers["cross-origin-resource-policy"], "same-origin");
+}
+
+#[test]
+fn every_other_route_keeps_todays_headers_with_the_add_in_on() {
+    let (_site, address) = office_site("office-others", true, &[]);
+    let baseline = {
+        let (_off, address) = office_site("office-baseline", false, &[]);
+        get(address, "/").headers["content-security-policy"].clone()
+    };
+    for path in [
+        "/",
+        "/app.js",
+        "/canoa.json",
+        "/sessions/abc",
+        "/office",
+        "/office/",
+        "/office/app/deeper",
+        "/office/other",
+        "/office/taskpane.html/x",
+        "/icons/Icon-192.png",
+    ] {
+        let reply = get(address, path);
+        let policy = &reply.headers["content-security-policy"];
+        assert_eq!(policy, &baseline, "{path}");
+        assert_eq!(reply.headers["x-frame-options"], "DENY", "{path}");
+        assert_eq!(
+            reply.headers["cross-origin-opener-policy"], "same-origin",
+            "{path}"
+        );
+        assert_eq!(
+            reply.headers["cross-origin-resource-policy"], "same-origin",
+            "{path}"
+        );
+    }
+    assert_eq!(directives(&baseline)["frame-ancestors"], "'none'");
+    assert_eq!(get(address, "/office/other.js").status, 404);
+}
+
+#[test]
+fn an_origin_that_may_frame_the_add_in_is_one_origin_and_nothing_that_could_widen_it() {
+    for good in [
+        "https://a.example",
+        "https://a.example:8443",
+        "https://*.office.com",
+        "https://*.officeapps.live.com:443",
+        "https://box-1.example",
+    ] {
+        assert!(frame_source(good), "{good}");
+    }
+    for bad in [
+        "http://a.example",
+        "https://*.com",
+        "https://*",
+        "https://*.",
+        "https://a.example/path",
+        "https://a.example; script-src *",
+        "https://a.example b.example",
+        "https://a..example",
+        "https://.a.example",
+        "https://a.example:",
+        "https://a.example:99999",
+        "https://a*.example",
+        "https://",
+        "*.office.com",
+        "'self'",
+    ] {
+        assert!(!frame_source(bad), "{bad}");
+    }
+    let mut config = loopback(&site());
+    config.office = true;
+    config.office_frames = vec!["https://*.com".to_owned()];
+    assert!(matches!(
+        WebServer::bind_listing(&config, PEER, "noise", &[]),
+        Err(WebError::OfficeFrame)
+    ));
+}

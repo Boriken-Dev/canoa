@@ -2128,3 +2128,36 @@ shared_permission_window_seconds = 5
         .is_err()
     );
 }
+
+#[test]
+fn the_office_add_in_is_off_unless_the_web_table_asks_for_it() {
+    let web = |text: &str| {
+        parse(&format!("[host.web]\n{text}"))
+            .expect("parses")
+            .web
+            .expect("a web table")
+    };
+    let off = web("");
+    assert!(!off.office);
+    assert!(off.office_frames.is_empty());
+    let on = web("office = true\noffice_frames = [\"https://*.officeapps.live.com\"]\n");
+    assert!(on.office);
+    assert_eq!(on.office_frames, ["https://*.officeapps.live.com"]);
+}
+
+#[test]
+fn an_office_frame_needs_the_add_in_and_is_one_https_origin() {
+    for text in [
+        "office_frames = [\"https://a.example\"]\n",
+        "office = false\noffice_frames = [\"https://a.example\"]\n",
+        "office = true\noffice_frames = [\"http://a.example\"]\n",
+        "office = true\noffice_frames = [\"https://*.com\"]\n",
+        "office = true\noffice_frames = [\"https://a.example; script-src *\"]\n",
+        "office = true\noffice_frames = [\"*\"]\n",
+        "office = \"yes\"\n",
+    ] {
+        let text = format!("[host.web]\n{text}");
+        let said = parse(&text).expect_err(&text).to_string();
+        assert!(!said.contains("script-src"), "{said}");
+    }
+}

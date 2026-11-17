@@ -20,6 +20,10 @@ use std::time::{Instant, SystemTime};
 use crate::config::{WebConfig, WebMode, WebTls};
 use crate::serve::{Gate, Listening, Serving};
 
+mod office;
+pub(crate) use office::frame_source;
+use office::{Office, Route};
+
 /// Where the site is served when canoa.cfg does not say: loopback, port 7800.
 pub const DEFAULT_LISTEN: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 7800);
 /// The path of the list of this host's entries: `{"peer", "method", "os", "web", "entries": [{"name", "kind", "url", "harness"?, "title"?}]}`.
@@ -231,6 +235,8 @@ pub enum WebError {
     Limit(&'static str),
     /// A `connect` source is not one origin: `http`, `https`, `ws` or `wss` and a host, with an optional port and path.
     Connect,
+    /// An `office_frames` source is not `https://` and a host (which may start with `*.`), with an optional port.
+    OfficeFrame,
     /// The certificate or key could not be used.
     Tls {
         /// The file, or the certificate's when the two do not go together.
@@ -261,6 +267,9 @@ impl fmt::Display for WebError {
             Self::Limit(setting) => write!(f, "[host.web] {setting} must be above zero"),
             Self::Connect => f.write_str(
                 "a [host.web] connect source is not http, https, ws or wss and a host, with an optional port and path",
+            ),
+            Self::OfficeFrame => f.write_str(
+                "a [host.web] office_frames source is not https and a host (a leading *. is allowed), with an optional port",
             ),
             Self::Tls { file, why } => write!(f, "TLS from {}: {why}", file.display()),
             Self::Listen { address, source } => {
@@ -296,6 +305,8 @@ struct Shared {
     limits: Limits,
     hosts: Vec<String>,
     policy: String,
+    /// The add-in's routes and their policies, when `[host.web] office` asks for them.
+    office: Option<Office>,
     /// The list at [`HOST_INDEX`] as a page reached over loopback reads it, and as any other page does.
     index: [Vec<u8>; 2],
     /// Set by [`WebStopper::stop`]: the listener ends, and each connection after the answer it is sending.
@@ -386,6 +397,20 @@ impl WebServer {
                 "non-default: host.web.connect lets the page connect to {source}, beyond this host's entries"
             );
         }
+        if !web.office_frames.iter().all(|source| frame_source(source)) {
+            return Err(WebError::OfficeFrame);
+        }
+        if web.office {
+            tracing::info!(
+                "non-default: host.web.office serves the Office add-in under /office/: Office on the web may frame its pages and Office.js ({}) runs in them",
+                office::JS_ORIGIN
+            );
+            for source in &web.office_frames {
+                tracing::info!(
+                    "non-default: host.web.office_frames lets {source} frame the Office add-in's pages"
+                );
+            }
+        }
         let listener = TcpListener::bind(web.listen).map_err(|source| WebError::Listen {
             address: web.listen,
             source,
@@ -408,6 +433,9 @@ impl WebServer {
                 limits: web.limits,
                 hosts: web.hosts.clone(),
                 policy: policy(&connect),
+                office: web
+                    .office
+                    .then(|| Office::new(&connect, &web.office_frames)),
                 index: [WebMode::Local, WebMode::Remote]
                     .map(|reached| host_index(peer, method, entries, web.mode.unwrap_or(reached))),
                 stopped: Arc::new(AtomicBool::new(false)),
@@ -679,6 +707,12 @@ fn loopback_host(value: &str) -> bool {
 /// The Content-Security-Policy every answer carries: scripts, styles, images, fonts and workers from this origin only,
 /// WebAssembly compiled from them, and connections to this origin and to `connect`, the host's entries, alone.
 pub(crate) fn policy(connect: &[&str]) -> String {
+    policy_framed(connect, "'none'")
+}
+
+/// [`policy`] with `frame-ancestors` naming `ancestors`: the pages that may frame the answer, `'none'` for every route but
+/// the add-in's.
+pub(crate) fn policy_framed(connect: &[&str], ancestors: &str) -> String {
     let mut sources = String::from("'self'");
     for url in connect {
         sources.push(' ');
@@ -688,7 +722,7 @@ pub(crate) fn policy(connect: &[&str]) -> String {
         "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; \
          img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src {sources}; \
          worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; \
-         frame-ancestors 'none'"
+         frame-ancestors {ancestors}"
     )
 }
 
@@ -1189,6 +1223,41 @@ fn answer(shared: &Shared, request: &httparse::Request<'_, '_>) -> (Answer, bool
         tracing::debug!("web: a path that is not plain was refused");
         return (Answer::refusal(404), head);
     };
+    // The add-in's routes, when asked for, are the only ones answered with a policy of their own.
+    let office = shared
+        .office
+        .as_ref()
+        .and_then(|office| Office::route(&segments).map(|route| (office, route)));
+    if let Some((office, route @ Route::Page(page))) = &office {
+        let mut headers = vec![
+            ("Content-Type", content_type(page.name()).to_owned()),
+            ("Cache-Control", "no-cache".to_owned()),
+        ];
+        headers.extend(office.headers(route));
+        let body = Body::Owned(page.body());
+        return (
+            Answer {
+                status: 200,
+                headers,
+                body,
+                keep: true,
+            },
+            head,
+        );
+    }
+    // The app's page and the icon are the site's own files, under another path.
+    let segments = match &office {
+        Some((_, Route::App)) => vec!["index.html".to_owned()],
+        Some((_, Route::Icon)) => office::ICON_FILE
+            .iter()
+            .map(|part| (*part).to_owned())
+            .collect(),
+        _ => segments,
+    };
+    let own = office
+        .as_ref()
+        .map(|(office, route)| office.headers(route))
+        .unwrap_or_default();
     let found = match lookup(&shared.site, &segments) {
         Lookup::Found(file) => Some((file, segments.last().map(String::as_str))),
         Lookup::Refused => None,
@@ -1206,6 +1275,7 @@ fn answer(shared: &Shared, request: &httparse::Request<'_, '_>) -> (Answer, bool
     let name = name.unwrap_or("index.html");
     let cache = cache_control(&segments, name, shared.limits.immutable_age, false);
     let mut headers = validators(&file, cache, name);
+    headers.extend(own);
     if not_modified(
         header(request, "if-none-match"),
         header(request, "if-modified-since"),
@@ -1481,12 +1551,25 @@ fn send<W: Wire>(
         ("Cross-Origin-Resource-Policy", "same-origin"),
         ("Connection", if keep { "keep-alive" } else { "close" }),
     ];
-    for (name, value) in common.iter().copied().chain(
+    // A route may replace a header every answer carries, or drop it with an empty value.
+    let replaced = |name: &str| {
         answer
             .headers
             .iter()
-            .map(|(name, value)| (*name, value.as_str())),
-    ) {
+            .any(|(each, _)| each.eq_ignore_ascii_case(name))
+    };
+    for (name, value) in common
+        .iter()
+        .copied()
+        .filter(|(name, _)| !replaced(name))
+        .chain(
+            answer
+                .headers
+                .iter()
+                .map(|(name, value)| (*name, value.as_str())),
+        )
+        .filter(|(_, value)| !value.is_empty())
+    {
         let _ = write!(text, "{name}: {value}\r\n");
     }
     if answer.status != 304 {

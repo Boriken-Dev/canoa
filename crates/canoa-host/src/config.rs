@@ -718,6 +718,12 @@ pub struct WebConfig {
     /// Where the person sits in front of the page, told to it in `/canoa.json`; `None` says local to a page reached over
     /// loopback and remote to one reached by any other name.
     pub mode: Option<WebMode>,
+    /// Serves the Office add-in's pages under `/office/` with a policy of their own, which lets Office on the web frame them and
+    /// lets them load Office.js. Off by default: every route then has the one policy.
+    pub office: bool,
+    /// Origins besides the ones built in that may frame the add-in's pages (`https://*.officeapps.live.com`), each widening the
+    /// policy of those pages and logged as configuration. Only with `office`.
+    pub office_frames: Vec<String>,
 }
 
 /// Whether the browser showing the web app is at the computer that serves it (the host starts an editor or file manager
@@ -754,6 +760,8 @@ impl WebConfig {
             limits: crate::web::Limits::default(),
             keep_out: Vec::new(),
             mode: None,
+            office: false,
+            office_frames: Vec::new(),
         }
     }
 }
@@ -1544,6 +1552,9 @@ struct RawWeb {
     #[serde(default)]
     connect: Vec<String>,
     mode: Option<String>,
+    office: Option<bool>,
+    #[serde(default)]
+    office_frames: Vec<String>,
     max_connections: Option<usize>,
     max_connections_per_address: Option<usize>,
     connection_seconds: Option<u64>,
@@ -3665,6 +3676,18 @@ fn web_of(raw: RawWeb, directory: &Path, entries: &[Entry]) -> Result<WebConfig,
             ));
         }
         web.connect.push(source);
+    }
+    web.office = raw.office.unwrap_or(false);
+    if !raw.office_frames.is_empty() && !web.office {
+        return Err(refused("office_frames needs office = true"));
+    }
+    for source in raw.office_frames {
+        if !crate::web::frame_source(&source) {
+            return Err(refused(
+                "an office_frames source is not https, a host (a leading *. is allowed) and an optional port",
+            ));
+        }
+        web.office_frames.push(source);
     }
     web.mode = match raw.mode.as_deref() {
         None => None,

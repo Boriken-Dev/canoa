@@ -552,6 +552,13 @@ default. While the host is not running, anyone on the machine can listen on that
 that origin, which can then use the key you paired. Serve over HTTPS there, with a certificate the browser trusts and a key only
 you can read, or reach the host from the browser extension.
 
+**The Office add-in** is off unless `[host.web] office = true`. It makes the host serve the add-in's task pane under `/office/`
+(the page that loads Office.js and frames the chat-only app) and relaxes the policy of those routes only: Office.js's own
+address may load in the pane and the dialog, and Outlook on the web may frame the pane and the app's page. Every other path keeps the
+policy above. Office on the web needs HTTPS, so it is used behind a certificate the browser trusts. The add-in's folder in the
+repository, `clients/office/`, says how to render the manifests for your address and sideload them; `office_frames` names further
+origins that may frame the pages (Word, Excel and PowerPoint on the web, once you have seen which ones your account uses).
+
 The API header lists every setting.
 
 ## The browser extension on this computer
