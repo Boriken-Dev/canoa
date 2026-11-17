@@ -145,6 +145,7 @@ final class CanoaConfig {
     this.connectTimeout = 10,
     this.cdn = 'none',
     this.look = LookId.canoa,
+    this.followProvider = false,
     this.brightness = 'dark',
     this.density = ChatDensity.normal,
     this.agents = const [],
@@ -192,6 +193,9 @@ final class CanoaConfig {
   final int connectTimeout;
   final String cdn;
   final LookId look;
+
+  /// Whether the shown conversation's agent picks the family (Claude and Codex have one); [look] is the one for any other.
+  final bool followProvider;
 
   /// Agents this person added, offered beside the presets when what they need is installed.
   final List<AgentCommand> agents;
@@ -248,7 +252,7 @@ final class CanoaConfig {
 
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
       bool? minimizeToTray, bool? preferWebTransport, int? connectTimeout,
-      LookId? look, String? brightness, ChatDensity? density, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
+      LookId? look, bool? followProvider, String? brightness, ChatDensity? density, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
       List<String>? protectedPaths, bool clearProtectedPaths = false,
       NotificationSettings? notifications, VoiceSettings? voice, List<AgentCommand>? agents, Set<String>? hiddenSources, int? warnPermille}) =>
       CanoaConfig(
@@ -260,6 +264,7 @@ final class CanoaConfig {
         connectTimeout: connectTimeout ?? this.connectTimeout,
         cdn: cdn,
         look: look ?? this.look,
+        followProvider: followProvider ?? this.followProvider,
         brightness: brightness ?? this.brightness,
         density: density ?? this.density,
         agents: agents ?? this.agents,
@@ -292,6 +297,7 @@ final class CanoaConfig {
     connectTimeout: connectTimeout,
     cdn: cdn,
     look: look,
+    followProvider: followProvider,
     brightness: brightness,
     density: density,
     agents: agents,
@@ -1021,6 +1027,7 @@ final class CanoaConfig {
     connectTimeout: connectTimeout,
     cdn: cdn,
     look: look,
+    followProvider: followProvider,
     brightness: brightness,
     density: density,
     agents: agents,
@@ -1085,7 +1092,7 @@ final class CanoaConfig {
     final desktop = table('desktop', {'start_hidden','close_to_tray','minimize_to_tray','local_host'});
     final network = table('network', {'prefer_webtransport','connect_timeout'});
     final assets = table('assets', {'cdn'});
-    final appearance = table('appearance', {'look', 'brightness', 'density'});
+    final appearance = table('appearance', {'look', 'follow_provider', 'brightness', 'density'});
     final sessions = table('sessions', {'keep', 'keep_text', 'text_messages', 'workspace', 'while_working', 'queue_delivery'});
     final permissions = table('permissions', {'default_mode', 'full_access', 'allow_once_only', 'protected'});
     final notifications = table('notifications', {'permission', 'question', 'finished'});
@@ -1285,7 +1292,7 @@ final class CanoaConfig {
       },
       agents: agents,
       host: host == null ? null : Map<String, dynamic>.from(host as Map),
-      look: look, brightness: brightness, density: density,
+      look: look, followProvider: flag(appearance, 'follow_provider', false), brightness: brightness, density: density,
       startHidden: flag(desktop, 'start_hidden', false),
       closeToTray: flag(desktop, 'close_to_tray', true),
       minimizeToTray: flag(desktop, 'minimize_to_tray', false),
@@ -1353,6 +1360,7 @@ cdn = "$cdn"
 
 [appearance]
 look = "${look.name}"
+follow_provider = $followProvider
 brightness = "$brightness"
 density = "${density.name}"
 

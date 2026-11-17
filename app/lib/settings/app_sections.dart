@@ -238,13 +238,20 @@ class AppearanceSection extends StatelessWidget {
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         SettingsGroup(title: 'Theme', children: [
           ChoiceRow<LookId>(
-            title: 'Look',
+            title: 'Family',
             configKey: const ['appearance', 'look'],
-            description: 'Bubbles on a warm page, or a terminal\'s lines',
+            description: 'Canoa\'s own, a terminal\'s lines, or a look in the spirit of Claude or ChatGPT; brightness is set apart',
             fieldKey: const Key('settings-look'),
             value: config.look,
             choices: [for (final look in LookId.values) (look, look.label)],
             onChanged: (v) => controller.change((c) => c.copyWith(look: v)),
+          ),
+          SwitchRow(
+            title: 'Follow the selected agent',
+            configKey: const ['appearance', 'follow_provider'],
+            description: 'A Claude conversation draws in the Claude family and a Codex one in ChatGPT\'s; any other agent, and every page but the conversations, use the family above',
+            value: config.followProvider,
+            onChanged: (v) => controller.change((c) => c.copyWith(followProvider: v)),
           ),
           ChoiceRow<String>(
             title: 'Brightness',
@@ -292,6 +299,7 @@ class AppearancePreview extends StatelessWidget {
     };
     final theme = themeFor(look, bright, density: density);
     final chat = theme.extension<ChatLook>()!;
+    final shell = theme.extension<CanoaLook>()!;
     final mono = TextStyle(fontFamily: chat.codeFont, fontSize: 13, color: chat.text);
     Widget line(String sign, String text, Color? background) => Container(
       color: background,
@@ -329,6 +337,43 @@ class AppearancePreview extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text('2 tests passed', style: TextStyle(color: chat.muted, fontSize: 13)),
+          const SizedBox(height: 12),
+          // The shell's navigation, a Store card with its button, and the composer, in the same tokens.
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 96,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: shell.rail, borderRadius: BorderRadius.circular(shell.controlRadius)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  decoration: BoxDecoration(color: shell.selected, borderRadius: BorderRadius.circular(shell.controlRadius)),
+                  child: Text('Fix the sum', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: shell.text, fontSize: 12)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(6, 4, 6, 0),
+                  child: Text('Notes', maxLines: 1, style: TextStyle(color: shell.muted, fontSize: 12)),
+                ),
+              ]),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: shell.surface, borderRadius: BorderRadius.circular(shell.radius), border: Border.all(color: shell.border)),
+                child: Row(children: [
+                  Expanded(child: Text('A Store card', style: TextStyle(color: shell.text, fontSize: 13))),
+                  FilledButton(onPressed: () {}, child: const Text('Add')),
+                ]),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(color: chat.composer, borderRadius: BorderRadius.circular(shell.controlRadius), border: Border.all(color: chat.border)),
+            child: Text('Message the agent', style: TextStyle(color: chat.muted, fontSize: chat.bodySize - 2)),
+          ),
         ]),
       ),
     );

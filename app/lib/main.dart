@@ -15,6 +15,7 @@ import 'desktop/host_supervisor.dart';
 import 'desktop/host_tool.dart';
 import 'sources/control_choices.dart';
 import 'sources/source_choices.dart';
+import 'sources/source_icons.dart' show sourceProvider;
 import 'extension/composer_extension.dart';
 import 'extension/local_host.dart';
 import 'extension/local_host_banner.dart';
@@ -127,6 +128,7 @@ import 'store/store_index.dart';
 import 'welcome/welcome_view.dart';
 import 'drafts/draft_backend.dart';
 import 'drafts/draft_store.dart';
+import 'theme/follow_provider.dart';
 import 'theme/look.dart';
 import 'auth/browser_peer.dart' show verifyBrowserPeer;
 import 'workspace/documents.dart' show hasWorkspaceFolders, homeFolder, makeFolder, removeEmptyFolder;
@@ -2694,18 +2696,39 @@ class _CanoaAppState extends State<CanoaApp> {
     ]);
   }
 
+  /// The family the shown conversation's agent picks when Appearance follows the provider, else the chosen one.
+  LookId _familyShown() {
+    final session = store.selected;
+    return familyFor(
+      chosen: config.look,
+      follow: config.followProvider,
+      inConversations: _layout.section == ShellLayout.conversations,
+      provider: session == null ? null : sourceProvider(session.source) ?? session.agent,
+    );
+  }
+
+  final Map<(LookId, Brightness, String), ThemeData> _themes = {};
+
+  ThemeData _theme(LookId family, Brightness brightness) =>
+      _themes.putIfAbsent((family, brightness, config.density.name), () => themeFor(family, brightness, density: config.density));
+
   @override
   Widget build(BuildContext context) {
     _popout
       ..look = config.look.name
       ..density = config.density.name;
+    if (!config.followProvider) return _app(config.look);
+    return ListenableBuilder(listenable: Listenable.merge([store, _layout]), builder: (_, _) => _app(_familyShown()));
+  }
+
+  Widget _app(LookId family) {
     return MaterialApp(
       navigatorKey: _navigator,
       scaffoldMessengerKey: _messenger,
       title: 'Canoa',
       debugShowCheckedModeBanner: false,
-      theme: themeFor(config.look, Brightness.light, density: config.density),
-      darkTheme: themeFor(config.look, Brightness.dark, density: config.density),
+      theme: _theme(family, Brightness.light),
+      darkTheme: _theme(family, Brightness.dark),
       themeMode: config.themeMode,
       home: AnimatedBuilder(
         animation: Listenable.merge([store, _popout]),

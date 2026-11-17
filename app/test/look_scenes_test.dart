@@ -68,6 +68,10 @@ const _looks = [
   (LookId.canoa, Brightness.light),
   (LookId.terminal, Brightness.dark),
   (LookId.terminal, Brightness.light),
+  (LookId.claude, Brightness.dark),
+  (LookId.claude, Brightness.light),
+  (LookId.chatgpt, Brightness.dark),
+  (LookId.chatgpt, Brightness.light),
 ];
 
 void main() {
@@ -76,8 +80,8 @@ void main() {
   for (final (id, brightness) in _looks) {
     final name = '${id.name}_${brightness.name}';
     for (final (label, size) in [('desktop', const Size(1280, 800)), ('phone', const Size(390, 844))]) {
-      // The phone is drawn in the look's dark canoa and light terminal; the desktop in all four.
-      if (label == 'phone' && (id == LookId.canoa) != (brightness == Brightness.dark)) continue;
+      // The phone is drawn in dark canoa and light terminal; the desktop in every family and brightness.
+      if (label == 'phone' && !((id == LookId.canoa && brightness == Brightness.dark) || (id == LookId.terminal && brightness == Brightness.light))) continue;
       group('$name at $label width', () {
         final theme = themeFor(id, brightness);
 

@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 /// The looks a person can choose, named for how they look.
 enum LookId {
   canoa('Canoa'),
-  terminal('Terminal');
+  terminal('Terminal'),
+  claude('Claude'),
+  chatgpt('ChatGPT');
 
   const LookId(this.label);
   final String label;
@@ -137,11 +139,46 @@ final _terminalLight = CanoaLook(
   radius: 2, controlRadius: 2, railWidth: 220,
 );
 
+final _claudeDark = CanoaLook(
+  id: LookId.claude, page: const Color(0xFF1F1E1D), rail: const Color(0xFF181817), bar: const Color(0xFF1C1B1A),
+  selected: const Color(0xFF33312F), surface: const Color(0xFF262524), raised: const Color(0xFF2D2C2A),
+  border: _hairline(const Color(0xFFB5B1AA), const Color(0xFF1F1E1D)), text: const Color(0xFFF0EEE9), muted: const Color(0xFFB5B1AA),
+  accent: const Color(0xFFE08A66), onAccent: const Color(0xFF241006),
+  success: const Color(0xFF7FC48A), warning: const Color(0xFFE2B455), danger: const Color(0xFFEA8F85),
+  radius: 14, controlRadius: 10, railWidth: 270,
+);
+final _claudeLight = CanoaLook(
+  id: LookId.claude, page: const Color(0xFFFAF9F5), rail: const Color(0xFFF0EEE6), bar: const Color(0xFFF5F4EE),
+  selected: const Color(0xFFE6E3D8), surface: const Color(0xFFF3F1EA), raised: const Color(0xFFFFFFFF),
+  border: _hairline(const Color(0xFF66625A), const Color(0xFFFAF9F5)), text: const Color(0xFF29261F), muted: const Color(0xFF66625A),
+  accent: const Color(0xFFB04E2B), onAccent: const Color(0xFFFFFFFF),
+  success: const Color(0xFF276B37), warning: const Color(0xFF8A5A00), danger: const Color(0xFFB3261E),
+  radius: 14, controlRadius: 10, railWidth: 270,
+);
+final _chatgptDark = CanoaLook(
+  id: LookId.chatgpt, page: const Color(0xFF181818), rail: const Color(0xFF121212), bar: const Color(0xFF151515),
+  selected: const Color(0xFF2F2F2F), surface: const Color(0xFF212121), raised: const Color(0xFF2B2B2B),
+  border: _hairline(const Color(0xFFAEAEAE), const Color(0xFF181818)), text: const Color(0xFFECECEC), muted: const Color(0xFFAEAEAE),
+  accent: const Color(0xFF5A9BFF), onAccent: const Color(0xFF04122B),
+  success: const Color(0xFF7FC48A), warning: const Color(0xFFE2B455), danger: const Color(0xFFEA8F85),
+  radius: 18, controlRadius: 20, railWidth: 260,
+);
+final _chatgptLight = CanoaLook(
+  id: LookId.chatgpt, page: const Color(0xFFFFFFFF), rail: const Color(0xFFF4F4F4), bar: const Color(0xFFFAFAFA),
+  selected: const Color(0xFFE6E6E6), surface: const Color(0xFFF7F7F7), raised: const Color(0xFFFFFFFF),
+  border: _hairline(const Color(0xFF5E5E5E), const Color(0xFFFFFFFF)), text: const Color(0xFF1A1A1A), muted: const Color(0xFF5E5E5E),
+  accent: const Color(0xFF1F5FD0), onAccent: const Color(0xFFFFFFFF),
+  success: const Color(0xFF276B37), warning: const Color(0xFF8A5A00), danger: const Color(0xFFB3261E),
+  radius: 18, controlRadius: 20, railWidth: 260,
+);
+
 CanoaLook lookFor(LookId id, Brightness brightness) {
   final dark = brightness == Brightness.dark;
   return switch (id) {
     LookId.canoa => dark ? _canoaDark : _canoaLight,
     LookId.terminal => dark ? _terminalDark : _terminalLight,
+    LookId.claude => dark ? _claudeDark : _claudeLight,
+    LookId.chatgpt => dark ? _chatgptDark : _chatgptLight,
   };
 }
 
@@ -154,6 +191,10 @@ ChatLook chatLookFor(LookId id, Brightness brightness, ColorScheme scheme, {Chat
     (LookId.canoa, false) => (const Color(0xFFEDE7DA), const Color(0xFFEDE8DE), const Color(0xFFD5EDD7), const Color(0xFFF6D6D3), const Color(0xFFF1ECE2)),
     (LookId.terminal, true) => (const Color(0xFF0A0B0A), const Color(0xFF161A16), const Color(0xFF173A1C), const Color(0xFF45201F), const Color(0xFF111311)),
     (LookId.terminal, false) => (const Color(0xFFF8F9F6), const Color(0xFFE6E9E2), const Color(0xFFD4EED4), const Color(0xFFF4D5D3), const Color(0xFFEDEFEA)),
+    (LookId.claude, true) => (const Color(0xFF302F2D), const Color(0xFF282725), const Color(0xFF2F4A34), const Color(0xFF5C3030), const Color(0xFF191817)),
+    (LookId.claude, false) => (const Color(0xFFEDEAE0), const Color(0xFFF0EDE4), const Color(0xFFD5EDD7), const Color(0xFFF6D6D3), const Color(0xFFF0EEE6)),
+    (LookId.chatgpt, true) => (const Color(0xFF303030), const Color(0xFF212121), const Color(0xFF1F4A2A), const Color(0xFF5A2A2A), const Color(0xFF0F0F0F)),
+    (LookId.chatgpt, false) => (const Color(0xFFEFEFEF), const Color(0xFFF4F4F4), const Color(0xFFD5EDD7), const Color(0xFFF6D6D3), const Color(0xFFF4F4F4)),
   };
   final terminal = id == LookId.terminal;
   return ChatLook(
