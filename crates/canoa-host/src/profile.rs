@@ -81,7 +81,8 @@ pub const RESERVED_ENV_PREFIXES: &[&str] = &[
 pub const RESERVED_ENV_SUFFIXES: &[&str] = &["_BASE_URL", "_PROXY"];
 
 /// Whether an overlay or a project may not set `name`: [`RESERVED_ENV`] and its prefixes and suffixes, and every
-/// variable the AOS specification names sensitive ([`coqui_aos::is_sensitive_variable`]).
+/// variable the AOS specification names sensitive ([`coqui_aos::is_sensitive_variable`]). An overlay's own `bin/` and
+/// `lib/` are the exception: its path additions may name `PATH`, `PYTHONPATH` and `NODE_PATH`.
 #[must_use]
 pub fn is_reserved_env(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();

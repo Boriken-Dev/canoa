@@ -501,3 +501,97 @@ fn every_preset_vector_reads_to_its_presets_and_its_session_layer_or_is_refused(
         }
     }
 }
+
+/// The environment an overlay's layer gives a session on `os`, over a host whose own `PATH`, `PYTHONPATH` and `NODE_PATH`
+/// hold one entry each, `host-bin`, `host-py` and `host-node`.
+fn environment_of(
+    os: &str,
+    root: &str,
+    files: &[(&str, &str)],
+) -> std::collections::BTreeMap<String, String> {
+    use canoa_host::profile::{OverlayInput, overlay_layer};
+    let tree = coqui_aos::OverlayTree::from_texts(
+        files.iter().map(|(path, text)| ((*path).to_owned(), *text)),
+    );
+    let layer = overlay_layer(&OverlayInput::new("team", root, os, &tree)).expect("applies");
+    let host = |name: &str| {
+        let host = match name {
+            "PATH" => "host-bin",
+            "PYTHONPATH" => "host-py",
+            "NODE_PATH" => "host-node",
+            _ => return None,
+        };
+        Some(host.to_owned())
+    };
+    merge(&[layer])
+        .environment(host)
+        .expect("builds")
+        .into_iter()
+        .map(|(name, value)| (name, value.expose().to_owned()))
+        .collect()
+}
+
+#[test]
+fn an_overlays_bin_and_lib_go_first_on_the_host_s_path_variables() {
+    let files = [
+        ("bin/tool", "x"),
+        ("lib/python/t.py", "x"),
+        ("lib/node/t.js", "x"),
+    ];
+    let linux = environment_of("linux", "/ov/team", &files);
+    assert_eq!(linux["PATH"], "/ov/team/bin:host-bin");
+    assert_eq!(linux["PYTHONPATH"], "/ov/team/lib/python:host-py");
+    assert_eq!(linux["NODE_PATH"], "/ov/team/lib/node:host-node");
+    assert_eq!(linux["TEAM_OVERLAY_ROOT"], "/ov/team");
+    let windows = environment_of("windows", "C:\\ov\\team", &files);
+    assert_eq!(windows["PATH"], "C:\\ov\\team\\bin;host-bin");
+    assert_eq!(windows["PYTHONPATH"], "C:\\ov\\team\\lib\\python;host-py");
+    assert_eq!(windows["NODE_PATH"], "C:\\ov\\team\\lib\\node;host-node");
+}
+
+#[test]
+fn a_declared_path_replaces_its_default_and_an_overlay_with_no_bin_adds_nothing() {
+    let none = environment_of("linux", "/ov/team", &[("CONTEXT.md", "x")]);
+    assert!(!none.contains_key("PATH") && !none.contains_key("PYTHONPATH"));
+    let appended = environment_of(
+        "linux",
+        "/ov/team",
+        &[
+            (
+                "overlay.cfg",
+                "[[paths]]\nvariable = \"PATH\"\npath = \"bin\"\nposition = \"append\"\n",
+            ),
+            ("bin/tool", "x"),
+        ],
+    );
+    assert_eq!(appended["PATH"], "host-bin:/ov/team/bin");
+}
+
+#[test]
+fn a_path_addition_that_leaves_the_overlays_own_folder_is_refused() {
+    for path in ["../up", "bin/../../up", "/etc", "C:/Windows", "a//b"] {
+        let manifest = format!("[[paths]]\nvariable = \"MANPATH\"\npath = \"{path}\"\n");
+        let refusal = layer_of(&[("overlay.cfg", &manifest)]).expect_err(path);
+        assert!(
+            ["invalid", "path"].contains(&refusal.code),
+            "{path}: {} {}",
+            refusal.code,
+            refusal.subject
+        );
+    }
+}
+
+#[test]
+fn only_the_three_list_variables_may_be_set_by_a_path_addition_among_the_reserved_ones() {
+    for variable in ["LD_LIBRARY_PATH", "PERL5LIB", "HOME", "NODE_OPTIONS"] {
+        let manifest = format!("[[paths]]\nvariable = \"{variable}\"\npath = \"lib\"\n");
+        let refusal = layer_of(&[("overlay.cfg", &manifest), ("lib/x", "x")]).expect_err(variable);
+        assert_eq!(
+            (refusal.code, refusal.subject.as_str()),
+            ("reserved", variable)
+        );
+    }
+    // A reserved name in env stays refused, even one a path addition may take.
+    let refusal = layer_of(&[("overlay.cfg", "[env]\nPYTHONPATH = \"x\"\n")]).expect_err("env");
+    assert_eq!(refusal.code, "reserved");
+}

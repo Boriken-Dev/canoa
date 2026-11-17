@@ -100,4 +100,57 @@ void main() {
       refused({'OVERLAY.md': utf8.encode('---\nenv:\n  A: one\n')}, 'unterminated-front-matter');
     });
   });
+
+  group('path additions', () {
+    Layer layerOf(Map<String, String> files, {String os = 'linux', String root = '/ov/team'}) => overlayLayer(
+      identity: 'team',
+      root: root,
+      os: os,
+      tree: treeOfFiles({for (final MapEntry(:key, :value) in files.entries) key: utf8.encode(value)}).tree,
+    );
+    Map<String, String> environmentOf(Layer layer, Map<String, String> host) {
+      final built = buildOverlayEnvironment([layer.aos!], const {}, (name) => host[name]);
+      return {
+        for (final name in const ['PATH', 'PYTHONPATH', 'NODE_PATH'])
+          name: ?built.owned(name),
+      };
+    }
+
+    const host = {'PATH': 'host-bin', 'PYTHONPATH': 'host-py', 'NODE_PATH': 'host-node'};
+    const files = {'bin/tool': 'x', 'lib/python/t.py': 'x', 'lib/node/t.js': 'x'};
+
+    test("an overlay's bin and lib go first on the host's own path variables", () {
+      expect(environmentOf(layerOf(files), host), {
+        'PATH': '/ov/team/bin:host-bin',
+        'PYTHONPATH': '/ov/team/lib/python:host-py',
+        'NODE_PATH': '/ov/team/lib/node:host-node',
+      });
+      expect(environmentOf(layerOf(files, os: 'windows', root: r'C:\ov\team'), host), {
+        'PATH': r'C:\ov\team\bin;host-bin',
+        'PYTHONPATH': r'C:\ov\team\lib\python;host-py',
+        'NODE_PATH': r'C:\ov\team\lib\node;host-node',
+      });
+      expect(layerOf(files).aos!.notApplied, isEmpty);
+    });
+
+    test('a path that leaves the overlay is refused, and so is any other reserved variable a path addition names', () {
+      for (final path in ['../up', 'bin/../../up', '/etc', 'C:/Windows']) {
+        expect(
+          () => layerOf({'overlay.cfg': '[[paths]]\nvariable = "MANPATH"\npath = "$path"\n'}),
+          throwsA(isA<OverlayRefusal>().having((e) => e.code, 'code', anyOf('invalid', 'path'))),
+          reason: path,
+        );
+      }
+      for (final variable in ['LD_LIBRARY_PATH', 'PERL5LIB', 'HOME', 'NODE_OPTIONS']) {
+        expect(
+          () => layerOf({'overlay.cfg': '[[paths]]\nvariable = "$variable"\npath = "lib"\n', 'lib/x': 'x'}),
+          throwsA(isA<OverlayRefusal>().having((e) => e.code, 'code', 'reserved').having((e) => e.subject, 'subject', variable)),
+        );
+      }
+      expect(
+        () => layerOf({'overlay.cfg': '[env]\nPYTHONPATH = "x"\n'}),
+        throwsA(isA<OverlayRefusal>().having((e) => e.code, 'code', 'reserved')),
+      );
+    });
+  });
 }

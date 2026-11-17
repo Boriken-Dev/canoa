@@ -1714,7 +1714,7 @@
   ],
   "overlays": [
     {
-      "name": "no manifest: the root variable, a skill and CONTEXT.md; bin/ is reported, not applied",
+      "name": "no manifest: the root variable, a skill and CONTEXT.md; bin/ goes first on PATH",
       "os": "linux",
       "overlays": [
         {
@@ -1728,6 +1728,9 @@
           }
         }
       ],
+      "host": {
+        "PATH": "/usr/bin"
+      },
       "refused": [],
       "view": {
         "env": [
@@ -1735,6 +1738,18 @@
             "name": "TEAM_OVERLAY_ROOT",
             "value": {
               "value": "/ov/team"
+            },
+            "layer": "overlay:team"
+          },
+          {
+            "name": "PATH",
+            "value": {
+              "paths": [
+                {
+                  "path": "bin",
+                  "position": "prepend"
+                }
+              ]
             },
             "layer": "overlay:team"
           }
@@ -1764,9 +1779,7 @@
           {
             "layer": "overlay:team",
             "digest": "sha256:9b8afdc89cebcb810242341bc2e48c7a21fd7625d0dd5e6a15ce15bc7b9a417b",
-            "not_applied": [
-              "paths: bin/ on PATH, which a layer from elsewhere may not change"
-            ],
+            "not_applied": [],
             "ungranted": [],
             "unresolved": [],
             "non_defaults": []
@@ -1774,7 +1787,8 @@
         ]
       },
       "environment": {
-        "TEAM_OVERLAY_ROOT": "/ov/team"
+        "TEAM_OVERLAY_ROOT": "/ov/team",
+        "PATH": "/ov/team/bin:/usr/bin"
       }
     },
     {
@@ -2075,6 +2089,10 @@
           }
         }
       ],
+      "host": {
+        "PATH": "/usr/bin",
+        "PYTHONPATH": "/site"
+      },
       "refused": [],
       "view": {
         "env": [
@@ -2082,6 +2100,30 @@
             "name": "TOOLS_OVERLAY_ROOT",
             "value": {
               "value": "/ov/tools"
+            },
+            "layer": "overlay:tools"
+          },
+          {
+            "name": "PATH",
+            "value": {
+              "paths": [
+                {
+                  "path": "bin",
+                  "position": "prepend"
+                }
+              ]
+            },
+            "layer": "overlay:tools"
+          },
+          {
+            "name": "PYTHONPATH",
+            "value": {
+              "paths": [
+                {
+                  "path": "lib/python",
+                  "position": "prepend"
+                }
+              ]
             },
             "layer": "overlay:tools"
           }
@@ -2124,8 +2166,6 @@
             "layer": "overlay:tools",
             "digest": "sha256:37d0e0443d2ed2f90bd26af618a66eabace7d1e7a1bddc28b39ba606167c7fb2",
             "not_applied": [
-              "paths: bin/ on PATH, which a layer from elsewhere may not change",
-              "paths: lib/python/ on PYTHONPATH, which a layer from elsewhere may not change",
               "harness.claude-code.permissions: the harness's own setting",
               "harness.claude-code.skills: delivery by routing line",
               "harness.codex: hints for another harness",
@@ -2143,7 +2183,9 @@
         ]
       },
       "environment": {
-        "TOOLS_OVERLAY_ROOT": "/ov/tools"
+        "TOOLS_OVERLAY_ROOT": "/ov/tools",
+        "PATH": "/ov/tools/bin:/usr/bin",
+        "PYTHONPATH": "/ov/tools/lib/python:/site"
       }
     },
     {

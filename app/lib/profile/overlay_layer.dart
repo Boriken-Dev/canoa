@@ -30,8 +30,7 @@ final class AosLayer {
   final String digest;
   final bool pinned;
 
-  /// Its manifest as Canoa applies it: the `bin` and `lib` defaults off, and no header sent over plain `http` to another
-  /// host.
+  /// Its manifest as Canoa applies it: no header sent over plain `http` to another host.
   final aos.Document manifest;
   final Set<String> files;
 
@@ -64,7 +63,7 @@ final class AosLayer {
 final class OverlayRefusal implements Exception {
   const OverlayRefusal(this.code, this.subject);
 
-  /// `name`, `digest`, `manifest`, `invalid`, `env-file` or `reserved`.
+  /// `name`, `digest`, `manifest`, `invalid`, `env-file`, `path` or `reserved`.
   final String code;
   final String subject;
 
@@ -75,6 +74,7 @@ final class OverlayRefusal implements Exception {
     'manifest' => 'Its manifest cannot be read',
     'invalid' => 'Its manifest is not valid',
     'env-file' => 'An env file of it cannot be read',
+    'path' => 'A directory it adds to a variable is not inside its own folder',
     _ => 'It sets a variable a layer from elsewhere may not set',
   }} ($subject)';
 }
@@ -120,11 +120,14 @@ String _resolvePath(String root, String relative, bool windows) {
   return '${root.replaceFirst(RegExp(r'[/\\]+$'), '')}$separator${relative.replaceAll('/', separator)}';
 }
 
+/// Whether [name] is one of the list variables an overlay's `bin/` and `lib/` go on.
+bool _isListVariable(String name) => const {'PATH', 'PYTHONPATH', 'NODE_PATH'}.contains(name.toUpperCase());
+
 const _defaultScripts = ['.py', '.js', '.mjs', '.cjs', '.ps1', '.bash', '.sh'];
 
 /// Makes the layer of an AOS overlay from its [tree]: its root variable, environment, skills, MCP servers, context, and
-/// the hints for [harness]. The `bin` and `lib` defaults, which change `PATH`, `PYTHONPATH` and `NODE_PATH`, are not
-/// applied and are reported; so is everything Canoa does not run. Its `[about]` icon is kept only within [iconLimits].
+/// the hints for [harness]. The overlay's own `bin/` and `lib/` go first on `PATH`, `PYTHONPATH` and `NODE_PATH`, as the
+/// specification's defaults and `paths` say; what Canoa does not run is reported. Its `[about]` icon is kept only within [iconLimits].
 /// A skill from elsewhere is delivered from its entry in [fetched] (by lower-case name) once [skillCopyRefusal] finds
 /// nothing against it, and otherwise reported with the reason it is not. Throws [OverlayRefusal].
 Layer overlayLayer({
@@ -207,27 +210,22 @@ Layer overlayLayer({
     set(key, _envValue(value));
   }
   final applied = _copy(manifest);
-  final defaults = aos.defaultPaths(manifest, paths);
-  for (final addition in defaults) {
-    notApplied.add('paths: ${_text(addition, 'path')}/ on ${_text(addition, 'variable')}, which a layer from elsewhere may not change');
-  }
-  if (defaults.isNotEmpty) {
-    final table = (applied['defaults'] as Map<String, Object>?) ?? <String, Object>{};
-    table['bin'] = false;
-    table['lib'] = false;
-    applied['defaults'] = table;
-  }
   final lists = <String, List<(String, bool)>>{};
   for (final addition in aos.pathsOf(applied, paths)) {
     if (aos.entryOn(addition, os)) {
-      (lists[_text(addition, 'variable')] ??= []).add((_text(addition, 'path'), _text(addition, 'position') == 'append'));
+      final path = _text(addition, 'path');
+      // A directory is the overlay's own: a path that leaves its installed tree is refused, whoever wrote it.
+      if (!aos.validRelativePath(path)) throw OverlayRefusal('path', 'paths: $path');
+      (lists[_text(addition, 'variable')] ??= []).add((path, _text(addition, 'position') == 'append'));
     }
   }
   for (final MapEntry(:key, :value) in lists.entries) {
     set(key, EnvPaths(value));
   }
-  for (final name in env.keys.skip(1)) {
-    if (isReservedEnv(name)) throw OverlayRefusal('reserved', name);
+  // The three list variables an overlay's own `bin/` and `lib/` go on are what a path addition is for; every other
+  // reserved variable stays refused, as a path addition or as env.
+  for (final MapEntry(:key, :value) in env.entries.skip(1)) {
+    if (isReservedEnv(key) && !(value is EnvPaths && _isListVariable(key))) throw OverlayRefusal('reserved', key);
   }
 
   final skills = <String, Skill?>{};
@@ -586,6 +584,11 @@ BuiltEnvironment buildOverlayEnvironment(List<AosLayer> layers, Map<String, Laye
     _words(layer.manifest, named);
     for (final text in layer.texts.values) {
       _words(utf8.decode(text, allowMalformed: true), named);
+    }
+    // The default `bin/` and `lib/` additions are in no text, yet they extend this process's `PATH`, `PYTHONPATH` and
+    // `NODE_PATH`: without them read, each would start empty and replace the process's own.
+    for (final addition in aos.pathsOf(layer.manifest, _treeOf(layer.files, const {}))) {
+      named.add(_text(addition, 'variable'));
     }
   }
   final base = <String, String>{};

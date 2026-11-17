@@ -33,8 +33,7 @@ pub struct AosLayer {
     pub digest: String,
     /// Whether canoa.cfg pins it by digest.
     pub pinned: bool,
-    /// Its manifest as Canoa applies it: the `bin` and `lib` defaults off, and no header sent over plain `http` to
-    /// another host.
+    /// Its manifest as Canoa applies it: no header sent over plain `http` to another host.
     pub manifest: Map<String, Value>,
     /// Its files, relative to its root.
     pub files: BTreeSet<String>,
@@ -88,9 +87,10 @@ impl<'a> OverlayInput<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct OverlayRefusal {
-    /// `name`, `digest`, `manifest`, `invalid`, `env-file` or `reserved`.
+    /// `name`, `digest`, `manifest`, `invalid`, `env-file`, `path` or `reserved`.
     pub code: &'static str,
-    /// The name, the digest's or the reader's class and path, the pointer, or the variable.
+    /// The name, the digest's or the reader's class and path, the pointer, the path that leaves the overlay, or the
+    /// variable.
     pub subject: String,
 }
 
@@ -102,6 +102,7 @@ impl fmt::Display for OverlayRefusal {
             "manifest" => "its manifest cannot be read",
             "invalid" => "its manifest is not valid",
             "env-file" => "an env file of it cannot be read",
+            "path" => "a directory it adds to a variable is not inside its own folder",
             _ => "it sets a variable a layer from elsewhere may not set",
         };
         write!(f, "{what} ({})", self.subject)
@@ -213,15 +214,16 @@ fn entries(value: Option<&Value>) -> Vec<(&String, &Value)> {
 const DEFAULT_SCRIPTS: [&str; 7] = [".py", ".js", ".mjs", ".cjs", ".ps1", ".bash", ".sh"];
 
 /// Makes the layer of an AOS overlay: its root variable, environment, skills, MCP servers, context, and the hints for
-/// `input.harness`. The `bin` and `lib` defaults, which change `PATH`, `PYTHONPATH` and `NODE_PATH`, are not applied
-/// and are reported; so is everything Canoa does not run: env scripts, setup, dependencies, runtime probes and
-/// commands. Reads nothing but `input.tree`.
+/// `input.harness`. The overlay's own `bin/` and `lib/` go first on `PATH`, `PYTHONPATH` and `NODE_PATH`, as the
+/// specification's defaults and `paths` say; what Canoa does not run is reported: env scripts, setup, dependencies,
+/// runtime probes and commands. Reads nothing but `input.tree`.
 ///
 /// # Errors
 ///
 /// [`OverlayRefusal`] for a name that is not a valid identity, a tree that cannot be digested, a manifest (`OVERLAY.md`
 /// or `overlay.cfg`, never both) that cannot be read or is not valid, an env file that is missing or cannot be read,
-/// and a variable Canoa does not let a layer from elsewhere set ([`is_reserved_env`]).
+/// a path addition that leaves the overlay's own folder, and a variable Canoa does not let a layer from elsewhere set
+/// ([`is_reserved_env`]), `PATH`, `PYTHONPATH` and `NODE_PATH` set by path additions aside.
 #[allow(
     clippy::too_many_lines,
     reason = "one pass over the manifest, field by field"
@@ -313,40 +315,35 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         set(name, env_value(value), &mut env);
     }
     let mut applied = manifest.clone();
-    let defaults = aos::default_paths(&manifest, &paths);
-    for addition in &defaults {
-        not_applied.push(format!(
-            "paths: {}/ on {}, which a layer from elsewhere may not change",
-            text_of(addition, "path"),
-            text_of(addition, "variable")
-        ));
-    }
-    if !defaults.is_empty() {
-        let table = applied
-            .entry("defaults")
-            .or_insert_with(|| Value::Object(Map::new()));
-        if let Value::Object(table) = table {
-            table.insert("bin".to_owned(), Value::Bool(false));
-            table.insert("lib".to_owned(), Value::Bool(false));
-        }
-    }
     let mut lists: IndexMap<String, Vec<(String, bool)>> = IndexMap::new();
     for addition in aos::paths_of(&applied, &paths) {
         if on_os(&addition, input.os) {
+            let path = text_of(&addition, "path");
+            // A directory is the overlay's own: a path that leaves its installed tree is refused, whoever wrote it.
+            if !aos::valid_relative_path(path) {
+                return Err(refused("path", format!("paths: {path}")));
+            }
             lists
                 .entry(text_of(&addition, "variable").to_owned())
                 .or_default()
-                .push((
-                    text_of(&addition, "path").to_owned(),
-                    text_of(&addition, "position") == "append",
-                ));
+                .push((path.to_owned(), text_of(&addition, "position") == "append"));
         }
     }
     for (variable, paths) in lists {
         set(&variable, EnvValue::Paths(paths), &mut env);
     }
-    if let Some(name) = env.keys().skip(1).find(|name| is_reserved_env(name)) {
-        return Err(refused("reserved", name.clone()));
+    // The three list variables an overlay's own `bin/` and `lib/` go on are what a path addition is for; every other
+    // reserved variable stays refused, as a path addition or as env.
+    let reserved = env
+        .iter()
+        .skip(1)
+        .find(|(name, value)| {
+            is_reserved_env(name)
+                && !(matches!(value, EnvValue::Paths(_)) && is_list_variable(name))
+        })
+        .map(|(name, _)| name.clone());
+    if let Some(name) = reserved {
+        return Err(refused("reserved", name));
     }
     profile.env = env
         .into_iter()
@@ -650,6 +647,13 @@ fn context_entry(tree: &OverlayTree, path: &str, settings: &Settings) -> Option<
     (!text.trim().is_empty()).then(|| Context::TemplateBody(text.to_owned()))
 }
 
+/// Whether `name` is one of the list variables an overlay's `bin/` and `lib/` go on.
+fn is_list_variable(name: &str) -> bool {
+    ["PATH", "PYTHONPATH", "NODE_PATH"]
+        .iter()
+        .any(|list| name.eq_ignore_ascii_case(list))
+}
+
 /// A text field of a mapping, empty when it is absent or not text.
 fn text_of<'a>(entry: &'a Value, key: &str) -> &'a str {
     entry.get(key).and_then(Value::as_str).unwrap_or("")
@@ -950,6 +954,14 @@ pub(crate) fn build_each(
             let text = String::from_utf8_lossy(text).into_owned();
             words(&Value::String(text), &mut named);
         }
+        // The default `bin/` and `lib/` additions are in no text, yet they extend this process's `PATH`, `PYTHONPATH` and
+        // `NODE_PATH`: without them read, each would start empty and replace the process's own.
+        let paths = OverlayTree::from_paths(layer.files.iter().cloned());
+        named.extend(
+            aos::paths_of(&layer.manifest, &paths)
+                .iter()
+                .map(|addition| text_of(addition, "variable").to_owned()),
+        );
     }
     let mut base = BTreeMap::new();
     let mut process = Environment::new(Vec::new(), windows);
