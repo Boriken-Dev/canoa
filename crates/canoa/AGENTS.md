@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-Three Cargo features: `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the two providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
+Three Cargo features: `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
 The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`) and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
 
@@ -336,3 +336,77 @@ pub const WAV_HEADER_LEN: usize = 44;
   is, with a `Content-Length`. The answer's `text` is the transcript and each other member that is a string, number or boolean (`language`,
   `duration`) is front matter; arrays and objects are not. A plain-text answer is the text. A status outside 2xx is an error with the first
   300 bytes of its body. It answers no partial text and uses no voice profile.
+
+## `speech_output` (`canoa::speech::output`, feature `speech`)
+
+The other direction of `speech_provider`: a Guatiao kind, not ACP, that turns text into audio. A client sends text, the provider answers audio in order
+a chunk at a time so playing can start before it has finished, and the provider says what the person may choose (voices, models, styles, speeds) and where
+the text goes. Needs `guatiao` and `coqui-acp-api`'s `ProcessSpawner`. The files an outside library is built against: `include/canoa.speech_output.kinds.json`
+and `include/canoa.speech_output.schemas.json`, checked current by `tests/speech_output.rs` (regenerate with `CANOA_SPEECH_WRITE_KINDS=1`).
+
+```rust
+#[guatiao::kind(name = "speech_output")]
+pub trait SpeechOutput: Send + Sync {
+    fn describe(&self) -> Result<OutputInfo, ProviderError>;
+    fn voices(&self, query: VoiceQuery, spawner: Object<dyn ProcessSpawner>) -> Result<VoiceList, ProviderError>;
+    fn say(&self, request: SayRequest, spawner: Object<dyn ProcessSpawner>) -> Result<Object<dyn SpeechUtterance>, ProviderError>;
+}
+
+#[guatiao::kind(object, name = "speech_utterance")]
+pub trait SpeechUtterance: Send + Sync {
+    fn format(&self) -> Result<AudioFormat, ProviderError>;                              // the same on every call
+    fn read(&self, dst: &mut [u8], timeout_ms: u64) -> Result<i64, ProviderError>;        // bytes; 0 at the end; READ_TIMED_OUT (-1) after timeout_ms
+    fn stop(&self) -> Result<(), ProviderError>;
+}
+```
+
+Every method is required and synchronous; the provider destroys the spawner it is handed, even when it refuses. `describe` is cheap and the same on every call.
+`voices` may run a program or ask a server, so it may take time and fail with the reason. `say` starts nothing for a request it refuses: `UNSUPPORTED`
+(naming what it has) for a voice, model or style it does not list, `BAD_VALUE` for no text, too much text or a setting it cannot use. `read` answers the audio
+before an error that ended the utterance, so a client plays what there is and then hears why it stopped; after `stop`, or the end, it answers `0`. Dropping an
+utterance is a `stop`. Audio is `pcm_s16le` at the rate and channels `format` says.
+
+Models, all `#[non_exhaustive]` with a constructor (set fields after). `SayRequest` and `VoiceQuery` refuse a key they do not declare; answers are read leniently:
+
+```rust
+pub struct Choice { pub id: String, pub label: String, pub description: Option<String> }                    // Choice::new(id, label)
+pub struct Voice { pub id: String, pub name: String, pub language: Option<String> /* BCP 47 */, pub gender: Option<String>,
+                   pub description: Option<String>, pub models: Vec<String> /* empty: every model */ }      // Voice::new(id, name)
+pub enum Leaves { No /* default */, Maybe, Yes }                                                            // does the text leave the computer
+pub struct SpeedRange { pub min: f64, pub max: f64 }                                                        // multiples of normal; ::new, .clamp(speed)
+pub struct OutputInfo { pub title: String, pub description: Option<String>, pub encodings: Vec<String>, pub models: Vec<Choice>,
+                        pub default_model: Option<String>, pub styles: Vec<Choice>, pub speed: Option<SpeedRange>, pub uses: Vec<String>,
+                        pub leaves: Leaves, pub endpoint: Option<String>, pub words: Option<String>, pub max_chars: Option<u32> }  // OutputInfo::new(title, encodings)
+pub struct VoiceQuery { pub language: Option<String> }                                                      // ::in_language(tag)
+pub struct VoiceList { pub voices: Vec<Voice> }                                                             // ::new(voices), .speaking(language)
+pub struct SayRequest { pub text: String, pub voice: Option<String>, pub model: Option<String>, pub style: Option<String>,
+                        pub speed: Option<f64>, pub language: Option<String> }                              // SayRequest::new(text)
+```
+
+`uses` names the `SayRequest` fields the provider acts on (`voice`, `model`, `style`, `speed`, `language`), so a form offers only what has an effect. `words` is a
+sentence on where the text goes; `endpoint` is the address when it goes to one. `VoiceList::speaking(language)` keeps the voices that speak the tag's primary
+subtag, and keeps a voice that names no language. Helpers: `sentences(text)` (the lines a program that speaks one line at a time is handed: a sentence each,
+a sentence over 400 characters cut at a comma or a space, nothing for text with nothing to say), `checked_text(request, max)`, `unknown_choice(what, wanted, has)`,
+`unsupported(why)`.
+
+### `canoa::speech::builtin` speech-output providers (feature `speech-builtin`)
+
+Four providers, each `pcm_s16le`, none limiting which program or address the person names. Those that run a program share `builtin::spoken::Spoken`: the text goes
+to its standard input a line a sentence from a thread of its own, its standard output is buffered up to `spoken::BUFFER` (96 KiB) so a client that plays slowly stops the
+program from running ahead, and its standard error is kept (the last 2 KiB) for the message of a failure. A program that makes no sound for `timeout_seconds` is
+ended and the read says so; a non-zero exit is an error carrying the end of its standard error, after the audio it made.
+
+- `speech_say_command` (`CommandSaySettings`, `CommandSay`): a program the person names. `args` may name `{voice}`, `{model}`, `{style}`, `{speed}`, `{language}` and `{text}`; the same
+  choices are `CANOA_SAY_VOICE`, `_MODEL`, `_STYLE`, `_SPEED` and `_LANGUAGE`. `input` is `stdin` (default, a line a sentence) or `argument` (`{text}`, the whole text); `output` is raw
+  samples at `rate` (default 22050) or a WAV stream read from its `data` chunk on. `voices`, `models` and `styles` are lists the settings give (the program is not asked), and a
+  request outside a non-empty list is refused; `speed` says the program takes one (0.5 to 2). The text goes where the program sends it: `leaves` is `Maybe`.
+- `speech_say_piper` (`PiperSettings`, `PiperSpeech`): Piper, a local neural engine, over a folder of voices (`NAME.onnx` and `NAME.onnx.json`). A voice's id is `NAME`; its language,
+  sample rate and speakers come from the json, and a speaker of a model that has several is `NAME#N` (the first 32 named in the model are listed). The program gets `--model`,
+  `--output-raw`, `--quiet`, `--length_scale` (1 / speed, 0.5 to 2) and `--speaker`. A voice left out is `default_voice`, else the first in the request's language, else the first. The text stays on the computer.
+- `speech_say_system` (`SystemSettings`, `SystemSpeech`): the operating system's own synthesizer, through the program the spawner's system gives: Windows PowerShell with `System.Speech` (its
+  desktop voices, a sentence at a time), `say` on macOS, `espeak-ng` elsewhere. `voices` runs the listing program (`say -v ?`, `espeak-ng --voices`). Speed 0.5 to 2. The text stays on the computer.
+- `speech_say_endpoint` (`EndpointSaySettings`, `EndpointSay`): `POST` of JSON in the shape of OpenAI's `audio/speech` (`model`, `input`, `voice`, `response_format: "pcm"`, `speed` held to 0.25 to 4, and the chosen
+  style's text as `instructions`), the key as `Authorization: Bearer`, the answer read as it arrives as raw samples at `rate` (default 24000). A status outside 2xx is an error with the first 300 bytes of its body.
+  For `api.openai.com` the lists are the documented ones until the settings give others (models `gpt-4o-mini-tts`, `tts-1`, `tts-1-hd`; thirteen voices, of which `ballad`, `verse`, `marin` and `cedar` work with
+  `gpt-4o-mini-tts` only, which a request is refused for; four styles); for any other address they are `models`, `voices` and `styles` (`name=instruction`) as written. `leaves` is `Yes` and `words` names the host and
+  whether a key goes with it. The text is at most `max_chars` (default 4096).

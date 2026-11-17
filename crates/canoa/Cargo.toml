@@ -51,3 +51,11 @@ required-features = ["speech-builtin"]
 [[example]]
 name = "speech_standin"
 required-features = ["speech-builtin"]
+
+[[test]]
+name = "speech_output"
+required-features = ["speech-builtin"]
+
+[[example]]
+name = "say_standin"
+required-features = ["speech-builtin"]

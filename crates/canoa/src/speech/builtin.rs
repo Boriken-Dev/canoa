@@ -6,6 +6,9 @@
 //! - [`endpoint`]: an HTTP speech-to-text endpoint and model the person names, in the shape of the `audio/transcriptions`
 //!   call that OpenAI-compatible servers answer.
 //!
+//! The speech-output providers, which turn text into audio, are [`say_command`], [`say_endpoint`], [`say_piper`] and
+//! [`say_system`]; [`spoken`] is what the ones that run a program share.
+//!
 //! Neither limits which program or address the person may name: both run as the person, and what they name is theirs.
 #![allow(
     clippy::std_instead_of_core,
@@ -15,9 +18,18 @@
 
 pub mod command;
 pub mod endpoint;
+pub mod say_command;
+pub mod say_endpoint;
+pub mod say_piper;
+pub mod say_system;
+pub mod spoken;
 
 pub use command::{CommandSettings, CommandSpeech};
 pub use endpoint::{EndpointSettings, EndpointSpeech};
+pub use say_command::{CommandSay, CommandSaySettings, SayInput, SayOutput};
+pub use say_endpoint::{EndpointSay, EndpointSaySettings};
+pub use say_piper::{PiperSettings, PiperSpeech};
+pub use say_system::{SystemSettings, SystemSpeech};
 
 use alloc::string::String;
 use alloc::vec::Vec;

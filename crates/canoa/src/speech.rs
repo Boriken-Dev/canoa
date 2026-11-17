@@ -26,6 +26,8 @@ use guatiao::{FromValue, Schema, ToValue, Value};
 #[cfg_attr(docsrs, doc(cfg(feature = "speech-builtin")))]
 pub mod builtin;
 
+pub mod output;
+
 /// An [`AudioFormat::encoding`]: raw 16-bit signed little-endian samples, interleaved by channel.
 pub const PCM_S16LE: &str = "pcm_s16le";
 /// An [`AudioFormat::encoding`]: Opus packets, each one a chunk's whole content.

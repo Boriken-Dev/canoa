@@ -1,0 +1,682 @@
+{
+  "Choice": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "What a request names."
+      },
+      "label": {
+        "type": "string",
+        "description": "What a person is shown."
+      },
+      "description": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "One line on what it does."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "label"
+    ]
+  },
+  "Voice": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "What a request names."
+      },
+      "name": {
+        "type": "string",
+        "description": "What a person is shown."
+      },
+      "language": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The language it speaks, as a BCP 47 tag (`en-US`); absent when it speaks several or the provider does not say."
+      },
+      "gender": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "`female`, `male` or `neutral`, when the provider says."
+      },
+      "description": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "One line on it."
+      },
+      "models": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The models it works with; empty says every model the provider lists.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "name"
+    ]
+  },
+  "Leaves": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "no",
+      "maybe",
+      "yes"
+    ],
+    "x-enum-labels": {
+      "no": "It stays on the computer.",
+      "maybe": "It may: the provider hands it to something that decides for itself.",
+      "yes": "It does: it goes to the address in [`OutputInfo::endpoint`]."
+    },
+    "properties": {}
+  },
+  "SpeedRange": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "min": {
+        "type": "number",
+        "description": "The slowest."
+      },
+      "max": {
+        "type": "number",
+        "description": "The fastest."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "min",
+      "max"
+    ]
+  },
+  "OutputInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "description": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "One line on what it does."
+      },
+      "encodings": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The audio encodings it answers (`pcm_s16le`)."
+      },
+      "models": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "What a request names."
+            },
+            "label": {
+              "type": "string",
+              "description": "What a person is shown."
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "One line on what it does."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "label"
+          ]
+        },
+        "description": "The models it offers, when it has several; empty when it has one or none.",
+        "default": []
+      },
+      "default_model": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The model it uses when a request names none."
+      },
+      "styles": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "What a request names."
+            },
+            "label": {
+              "type": "string",
+              "description": "What a person is shown."
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "One line on what it does."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "label"
+          ]
+        },
+        "description": "The styles it offers (a way of speaking: cheerful, calm); empty when it has none.",
+        "default": []
+      },
+      "speed": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "min": {
+            "type": "number",
+            "description": "The slowest."
+          },
+          "max": {
+            "type": "number",
+            "description": "The fastest."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "min",
+          "max"
+        ],
+        "description": "The speeds it takes; absent says it has one speed."
+      },
+      "uses": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The [`SayRequest`] fields it uses (`voice`, `model`, `style`, `speed`, `language`), so a form offers only what has an effect.",
+        "default": []
+      },
+      "leaves": {
+        "type": "string",
+        "enum": [
+          "no",
+          "maybe",
+          "yes"
+        ],
+        "x-enum-labels": {
+          "no": "It stays on the computer.",
+          "maybe": "It may: the provider hands it to something that decides for itself.",
+          "yes": "It does: it goes to the address in [`OutputInfo::endpoint`]."
+        },
+        "description": "Whether the text leaves the computer.",
+        "default": "no"
+      },
+      "endpoint": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The address the text goes to, when it goes to one."
+      },
+      "words": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A sentence on where the text goes and what is done with it, for people."
+      },
+      "max_chars": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "The most characters one request takes; absent says no limit of its own."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "title",
+      "encodings"
+    ]
+  },
+  "VoiceQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "language": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Only the voices that speak this language (a BCP 47 tag or its primary subtag); absent asks for all of them."
+      }
+    },
+    "additionalProperties": false
+  },
+  "VoiceList": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "voices": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "What a request names."
+            },
+            "name": {
+              "type": "string",
+              "description": "What a person is shown."
+            },
+            "language": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The language it speaks, as a BCP 47 tag (`en-US`); absent when it speaks several or the provider does not say."
+            },
+            "gender": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "`female`, `male` or `neutral`, when the provider says."
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "One line on it."
+            },
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The models it works with; empty says every model the provider lists.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name"
+          ]
+        },
+        "description": "Every voice, in the order a person should see them.",
+        "default": []
+      }
+    },
+    "additionalProperties": false
+  },
+  "SayRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "The text to speak, as plain text."
+      },
+      "voice": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A voice the provider listed; absent is the provider's own."
+      },
+      "model": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A model the provider listed; absent is its default."
+      },
+      "style": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A style the provider listed."
+      },
+      "speed": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "description": "A multiple of normal speech, 1 being normal; a provider holds it to the range it takes."
+      },
+      "language": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The language of the text, as a BCP 47 tag, for a provider that picks a voice by it."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ]
+  },
+  "CommandSaySettings": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "program": {
+        "type": "string",
+        "title": "Program",
+        "description": "The program to run: a name found on the search path, or a path.",
+        "x-section": "command"
+      },
+      "args": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "title": "Arguments",
+        "description": "Its arguments, one per entry.",
+        "x-section": "command",
+        "default": []
+      },
+      "input": {
+        "type": "string",
+        "enum": [
+          "stdin",
+          "argument"
+        ],
+        "x-enum-labels": {
+          "stdin": "The program's standard input, a sentence a line.",
+          "argument": "The argument that names `{text}`, the whole text in one."
+        },
+        "title": "Text",
+        "description": "Where it wants the text.",
+        "x-section": "command",
+        "default": "stdin"
+      },
+      "output": {
+        "type": "string",
+        "enum": [
+          "pcm",
+          "wav"
+        ],
+        "x-enum-labels": {
+          "pcm": "Raw 16-bit little-endian mono samples at the setting's `rate`.",
+          "wav": "A WAV stream of 16-bit mono samples, read from its `data` chunk on; its header's rate is not read, so `rate` says it."
+        },
+        "title": "Audio on standard output",
+        "description": "What it writes.",
+        "x-section": "command",
+        "default": "pcm"
+      },
+      "rate": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "title": "Sample rate",
+        "description": "The samples a second of the audio it writes.",
+        "x-section": "command",
+        "default": 22050
+      },
+      "voices": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "title": "Voices",
+        "description": "The voices it has, as the names it takes.",
+        "x-section": "command",
+        "default": []
+      },
+      "models": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "title": "Models",
+        "description": "The models it has.",
+        "x-section": "command",
+        "default": []
+      },
+      "styles": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "title": "Styles",
+        "description": "The styles it has.",
+        "x-section": "command",
+        "default": []
+      },
+      "speed": {
+        "type": "boolean",
+        "title": "Takes a speed",
+        "description": "Whether it takes a speed, as `{speed}` or `CANOA_SAY_SPEED`.",
+        "x-section": "command",
+        "default": false
+      },
+      "timeout_seconds": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "title": "Time to start",
+        "description": "How long it may go without a sound before it is stopped, in seconds.",
+        "x-section": "command",
+        "x-advanced": true,
+        "default": 60
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "program"
+    ]
+  },
+  "EndpointSaySettings": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "title": "Address",
+        "description": "The address the text is posted to, such as `https://api.openai.com/v1/audio/speech`.",
+        "x-section": "endpoint"
+      },
+      "api_key": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "writeOnly": true,
+        "x-sensitive": true,
+        "title": "Key",
+        "description": "A key sent as `Authorization: Bearer`, when the endpoint asks for one.",
+        "x-section": "endpoint"
+      },
+      "model": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "title": "Model",
+        "description": "The model used when a request names none.",
+        "x-section": "endpoint"
+      },
+      "voice": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "title": "Voice",
+        "description": "The voice used when a request names none.",
+        "x-section": "endpoint"
+      },
+      "models": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "title": "Models offered",
+        "description": "The models to offer, when not OpenAI's own.",
+        "x-section": "endpoint",
+        "default": []
+      },
+      "voices": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "title": "Voices offered",
+        "description": "The voices to offer, when not OpenAI's own.",
+        "x-section": "endpoint",
+        "default": []
+      },
+      "styles": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "title": "Styles offered",
+        "description": "The styles to offer, each `name=what to ask the voice to sound like`, sent as the call's `instructions`.",
+        "x-section": "endpoint",
+        "default": []
+      },
+      "rate": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "title": "Sample rate",
+        "description": "The samples a second of the audio it answers.",
+        "x-section": "endpoint",
+        "x-advanced": true,
+        "default": 24000
+      },
+      "max_chars": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "title": "Longest text",
+        "description": "The most characters sent in one call.",
+        "x-section": "endpoint",
+        "x-advanced": true,
+        "default": 4096
+      },
+      "timeout_seconds": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "title": "Time to answer",
+        "description": "How long the server may take to start answering, and then to go without a sound, in seconds.",
+        "x-section": "endpoint",
+        "x-advanced": true,
+        "default": 60
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "url"
+    ]
+  },
+  "PiperSettings": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "program": {
+        "type": "string",
+        "title": "Program",
+        "description": "The Piper program: a path, or a name found on the search path.",
+        "x-section": "piper"
+      },
+      "voices_dir": {
+        "type": "string",
+        "title": "Voices folder",
+        "description": "The folder of voices: each `NAME.onnx` with its `NAME.onnx.json`.",
+        "x-section": "piper"
+      },
+      "default_voice": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "title": "Default voice",
+        "description": "The voice used when a request names none; absent is the first voice, in the request's language when it has one.",
+        "x-section": "piper"
+      },
+      "timeout_seconds": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "title": "Time to start",
+        "description": "How long the program may go without a sound before it is stopped, in seconds.",
+        "x-section": "piper",
+        "x-advanced": true,
+        "default": 60
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "program",
+      "voices_dir"
+    ]
+  },
+  "SystemSettings": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "program": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "title": "Program",
+        "description": "The program that speaks, when not the one the system gives: Windows PowerShell, `say` or `espeak-ng`.",
+        "x-section": "system",
+        "x-advanced": true
+      },
+      "timeout_seconds": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "title": "Time to start",
+        "description": "How long the program may go without a sound before it is stopped, in seconds.",
+        "x-section": "system",
+        "x-advanced": true,
+        "default": 30
+      }
+    },
+    "additionalProperties": false
+  }
+}
