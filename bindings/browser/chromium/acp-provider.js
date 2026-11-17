@@ -2,7 +2,7 @@
 import { METHODS, dialAgent, ownPeerId, pairWithPin, unreachable } from "./acp-dial.js";
 import { createLocalHost, fromExtensionPage, fromOwnPage, localAgents, localGrants, rememberedEntries, stoppedAgents, viewOf } from "./acp-local.js";
 import { addedMethod, lookNearby, mcpConfigCommand, offersOf, readCandidates, sameKey } from "./acp-discovery.js";
-import { createGateway, dialRecord } from "./acp-gateway.js";
+import { createGateway, dialRecord, sameGrant, supersedes } from "./acp-gateway.js";
 import { createStanding, fromPermissionsPage } from "./acp-standing.js";
 import { createTools, OFFER } from "./acp-tools.js";
 import { dispatchBrowserTool } from "./browser-tools.js";
@@ -39,7 +39,6 @@ const FOUND = ["dns-sd", "local"];
 
 const read = async (area, key, fallback) => (await chrome.storage[area].get(key))[key] ?? fallback;
 const write = (area, key, value) => chrome.storage[area].set({ [key]: value });
-const sameGrant = (a, b) => a.origin === b.origin && a.agent === b.agent;
 const areaOf = (grant) => (grant.lifetime === "always" ? ["local", GRANTS] : ["session", ONCE]);
 
 // Each change reads a whole list and writes it back, so two at once could bring back what the other removed.
@@ -55,9 +54,10 @@ async function replaceAgent(key, change) {
   await write("local", AGENTS, agents.map((agent) => (agent.key === key ? change(agent) : agent)));
 }
 
-async function dropGrant(grant) {
+/** What saving a grant replaces (`replaces`), or what a revoke ends (`sameGrant`: the one grant, in its own tab if it is a `once`). */
+async function dropGrants(drops) {
   for (const [area, name] of [["local", GRANTS], ["session", ONCE]]) {
-    await write(area, name, (await read(area, name, [])).filter((held) => !sameGrant(held, grant)));
+    await write(area, name, (await read(area, name, [])).filter((held) => !drops(held)));
   }
 }
 
@@ -133,11 +133,11 @@ const store = {
     return [...kept, ...local.filter((grant) => !held.some((item) => item.agent === grant.agent))];
   },
   saveGrant: (grant) => oneAtATime(async () => {
-    await dropGrant(grant);
+    await dropGrants((held) => supersedes(grant, held));
     const [area, name] = areaOf(grant);
     await write(area, name, [...(await read(area, name, [])), grant]);
   }),
-  deleteGrant: (grant) => oneAtATime(() => dropGrant(grant)),
+  deleteGrant: (grant) => oneAtATime(() => dropGrants((held) => sameGrant(held, grant))),
   async secret() {
     let secret = await read("local", SECRET);
     if (secret === undefined) {
@@ -279,7 +279,8 @@ async function nearby() {
 const asking = new Map();
 
 /** Opens the provider's own window, where a page cannot draw over it. Closing it, or no answer in time, is a refusal. */
-async function ask(details, width, height) {
+async function ask(details, width, height, signal) {
+  if (signal?.aborted) return null;
   const id = crypto.randomUUID();
   return new Promise((resolve) => {
     const done = (answer) => {
@@ -291,10 +292,14 @@ async function ask(details, width, height) {
       resolve(answer);
     };
     asking.set(id, { details, done, timer: setTimeout(() => done(null), ASK_MS) });
+    // The page went, or answered the question another way: the window closes with no answer.
+    signal?.addEventListener("abort", () => done(null), { once: true });
     chrome.windows.create({ url: `acp-request.html?ask=${id}`, type: "popup", width, height }).then(
       (window) => {
         const entry = asking.get(id);
         if (entry !== undefined) entry.windowId = window.id;
+        // Answered or cancelled while it was opening.
+        else chrome.windows.remove(window.id).catch(() => {});
       },
       () => done(null),
     );
@@ -362,8 +367,8 @@ function offerTools({ mux, peer, label, via, still }) {
 const gateway = createGateway({
   store,
   dial: (agent, options) => dialAgent(agent, options),
-  askPerson: (details) => ask({ kind: "grant", ...details }, 520, 680),
-  askPermission: (details) => ask({ kind: "permission", ...details }, 480, 420),
+  askPerson: ({ signal, ...details }) => ask({ kind: "grant", ...details }, 520, 680, signal),
+  askPermission: ({ signal, ...details }) => ask({ kind: "permission", ...details }, 480, 420, signal),
   askMode: async (details) => {
     const answer = await ask({ ...details, kind: "mode" }, 480, 460);
     return answer === true ? true : answer === "never" ? "never" : false;

@@ -279,6 +279,8 @@ async function dialUnproven(agent, WebSocketClass) {
   const socket = new WebSocketClass(agent.url);
   let onMessage = () => {};
   let onClose = () => {};
+  // "closed" when the socket closed in order, "cut" when it did not.
+  let ending;
   await new Promise((resolve, reject) => {
     socket.addEventListener("open", resolve, { once: true });
     socket.addEventListener("error", () => reject(new Error("the connection failed")), { once: true });
@@ -286,9 +288,15 @@ async function dialUnproven(agent, WebSocketClass) {
   socket.addEventListener("message", (event) => {
     if (typeof event.data === "string") onMessage(event.data);
   });
-  socket.addEventListener("close", () => onClose());
+  socket.addEventListener("close", (event) => {
+    ending = event.wasClean === true ? "closed" : "cut";
+    onClose();
+  });
   return {
     proven: false,
+    get ending() {
+      return ending;
+    },
     send: async (message) => socket.send(message),
     onMessage(handler) {
       onMessage = handler;

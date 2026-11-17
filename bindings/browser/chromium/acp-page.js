@@ -102,11 +102,25 @@
     }
   }
 
-  async function call(op, args) {
+  const aborted = () => new DOMException("the wait was aborted", "AbortError");
+
+  /** `signal` ends only the wait: the worker is told, so what it was opening is closed, and the answer that comes is dropped. */
+  async function call(op, args, signal) {
     await attached;
+    if (signal?.aborted) throw aborted();
     const id = next++;
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
+      const stop = () => {
+        if (!pending.delete(id)) return;
+        port.postMessage({ cancel: id });
+        reject(aborted());
+      };
+      const settle = (how) => (value) => {
+        signal?.removeEventListener("abort", stop);
+        how(value);
+      };
+      pending.set(id, { resolve: settle(resolve), reject: settle(reject) });
+      signal?.addEventListener("abort", stop, { once: true });
       port.postMessage({ id, op, args });
     });
   }
@@ -124,45 +138,64 @@
     revoke: async (agent) => {
       await call("revoke", { id: agent?.id });
     },
-    async connect(agent) {
-      const opened = await call("connect", { id: agent?.id });
+    async connect(agent, options) {
+      const signal = options?.signal;
+      if (signal?.aborted) throw aborted();
+      const opened = await call("connect", { id: agent?.id }, signal);
       const conn = opened.conn;
       let output;
+      let input;
+      let ended = false;
       let finished;
       const closed = new Promise((resolve) => {
         finished = resolve;
       });
       const finish = (reason) => {
         if (!connections.delete(conn)) return;
+        ended = true;
         try {
           output.close();
         } catch {
           // The page cancelled its reader.
         }
+        // A write after the end rejects with this, and the stream refuses a later one.
+        input?.error(new DOMException("the connection is closed", "InvalidStateError"));
         finished(Object.freeze({ reason }));
       };
-      finish.message = (text) => output.enqueue(text);
+      // close(), writable.close(), writable.abort() and readable.cancel() are one act, and doing it again does nothing.
+      const end = () => {
+        if (ended) return;
+        port.postMessage({ conn, op: "close" });
+        finish("page");
+      };
+      finish.message = (text) => {
+        if (!ended) output.enqueue(text);
+      };
       connections.set(conn, finish);
       const readable = new ReadableStream({
         start(controller) {
           output = controller;
         },
+        cancel: end,
       });
       const writable = new WritableStream({
+        start(controller) {
+          input = controller;
+        },
         write(text) {
+          if (ended) throw new DOMException("the connection is closed", "InvalidStateError");
           if (typeof text !== "string") throw new TypeError("a message is a string");
           port.postMessage({ conn, msg: text });
         },
+        close: end,
+        abort: end,
       });
       return Object.freeze({
         agent: tagged(opened.agent),
         readable,
         writable,
         closed,
-        close() {
-          port.postMessage({ conn, op: "close" });
-          finish("page");
-        },
+        close: end,
       });
     },
   };

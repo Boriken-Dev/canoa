@@ -25,6 +25,22 @@ const MAX_WAITING_PERMISSIONS = 8;
 const refuse = (name, message) => Object.assign(new Error(message), { refusal: { name, message } });
 const NOT_ALLOWED = () => refuse("NotAllowedError", "this page may not do that");
 
+/** The same grant: one origin, one agent, and for a grant of lifetime `once` the one tab it belongs to. */
+export function sameGrant(a, b) {
+  return a.origin === b.origin && a.agent === b.agent && a.lifetime === b.lifetime && (a.lifetime !== "once" || a.tabId === b.tabId);
+}
+
+/**
+ * Whether saving `grant` replaces `held`: the same origin and agent, unless both are `once` grants of different tabs, which each
+ * tab holds for itself. An `always` grant serves every tab, so it replaces what a tab held, and the other way round.
+ */
+export function supersedes(grant, held) {
+  return grant.origin === held.origin && grant.agent === held.agent && (grant.lifetime === "always" || held.lifetime === "always" || grant.tabId === held.tabId);
+}
+
+/** Whether a tab sees a grant: one of lifetime `once` belongs to the tab it was made in. */
+export const seenBy = (grant, tabId) => grant.lifetime !== "once" || grant.tabId === tabId;
+
 // Format characters can reorder what is shown around them, or hide part of it.
 function text(value) {
   return typeof value === "string" ? value.replace(/\p{Cf}|\p{Cc}/gu, " ").trim().slice(0, MAX_TEXT) : undefined;
@@ -84,6 +100,16 @@ export function hereAddress(hostname, names = []) {
   if (parts.length !== 4 || parts.some((part) => !/^[0-9]{1,3}$/.test(part))) return false;
   const [a] = parts.map(Number);
   return a === 127 || host === "0.0.0.0";
+}
+
+/** The session a forwarded `session/cancel` is for, and undefined for any other message. */
+function cancelledSession(text) {
+  try {
+    const message = JSON.parse(text);
+    return message?.method === "session/cancel" && typeof message.params?.sessionId === "string" ? message.params.sessionId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** An agent reached on this computer's own address. */
@@ -183,10 +209,12 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
     };
   }
 
-  async function held(origin) {
+  /** What a tab holds of an origin's grants: those of lifetime `once` are the tab's own. */
+  async function held(origin, tabId) {
     const agents = await store.agents({ stale: true });
     const pairs = [];
     for (const grant of await store.grants(origin)) {
+      if (!seenBy(grant, tabId)) continue;
       const agent = agents.find((candidate) => candidate.key === grant.agent);
       if (agent === undefined) continue;
       // A grant on the host's entry is for the host whose key was paired when it was made: another Canoa under that name has none.
@@ -196,8 +224,8 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
     return pairs;
   }
 
-  async function find(origin, id) {
-    for (const pair of await held(origin)) {
+  async function find(origin, tabId, id) {
+    for (const pair of await held(origin, tabId)) {
       if ((await publicId(origin, pair.agent.key)) === id) return pair;
     }
     throw NOT_ALLOWED();
@@ -210,22 +238,24 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
   }
 
   const operations = {
-    async agents({ origin }) {
-      const pairs = await held(origin);
+    async agents({ origin, tabId }) {
+      const pairs = await held(origin, tabId);
       return Promise.all(pairs.map(({ grant, agent }) => describe(origin, grant, agent)));
     },
 
-    async request({ origin, tabId, activated }, options = {}) {
-      if (activated !== true || asking.has(origin)) throw NOT_ALLOWED();
+    async request({ origin, tabId, activated, leaving }, options = {}) {
+      if (activated !== true || asking.has(origin) || leaving.signal.aborted) throw NOT_ALLOWED();
       asking.add(origin);
       let decision;
       try {
         const own = origin === ownOrigin;
         const known = await store.agents();
+        // The window closes when the page goes: `signal` ends then.
         decision = await askPerson({
           origin,
           own,
           tabId,
+          signal: leaving.signal,
           purpose: text(options.purpose),
           mcpOrigins: origins(options.mcpOrigins),
           peers: list(options.peers),
@@ -235,7 +265,8 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       } finally {
         asking.delete(origin);
       }
-      if (!decision) throw NOT_ALLOWED();
+      // A document that has gone is granted nothing, whatever was decided for it.
+      if (!decision || leaving.signal.aborted) throw NOT_ALLOWED();
       const own = origin === ownOrigin;
       const added = [];
       for (const agent of decision.add ?? []) added.push(await store.addAgent(agent));
@@ -246,7 +277,8 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       for (const key of keys) {
         const agent = agents.find((candidate) => candidate.key === key);
         if (agent === undefined) continue;
-        const earlier = (await store.grants(origin)).find((grant) => grant.agent === key);
+        if (leaving.signal.aborted) throw NOT_ALLOWED();
+        const earlier = (await store.grants(origin)).find((grant) => grant.agent === key && seenBy(grant, tabId));
         // The Canoa on this computer makes a page's folder itself, from the site; the person names none and the page cannot.
         const folder = agent.local === true && !own;
         // Agents on this computer, the host's entries and those found on a loopback address alike, run as the person.
@@ -266,6 +298,11 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
           sessions: (folder && earlier?.peer !== agent.peer ? undefined : earlier?.sessions) ?? [],
           ...(folder ? { folders: (earlier?.peer === agent.peer ? earlier.folders : undefined) ?? {} } : {}),
         };
+        // The terms the person has just chosen replace the old ones for connections already open too: they end here, so none
+        // holds the old grant or can write it back.
+        for (const link of [...live]) {
+          if (supersedes(grant, link.grant)) finish(link, "revoked");
+        }
         await store.saveGrant(grant);
         granted.push(await describe(origin, grant, agent));
       }
@@ -274,9 +311,9 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       return granted;
     },
 
-    async connect(entry, { id } = {}) {
-      const { origin, port } = entry;
-      const { grant, agent } = await find(origin, id);
+    async connect(entry, { id } = {}, call) {
+      const { origin, port, tabId } = entry;
+      const { grant, agent } = await find(origin, tabId, id);
       // A page's session with a local entry is placed by the host, in a folder for the site the browser reported. That is settled,
       // and the origin's share of connections is checked, before anything is dialled.
       const placedByHost = grant.folder === "provider" || (agent.local === true && origin !== ownOrigin);
@@ -309,6 +346,8 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       // Only where both hold: a page's connection has no streams at all, and an agent that names no link would read one as ACP.
       const options = { link: origin === ownOrigin && offerTools !== undefined && agent.offers?.includes(OFFER) === true };
       channel = await dialRecord(store, dial, agent, options);
+      // The page stopped waiting: what was opened is closed, and nobody is told.
+      if (call?.cancelled) throw NOT_ALLOWED();
       if (channel.proven) await store.markProven(agent.key);
       const sessions = new Set(grant.sessions ?? []);
       const folders = new Map(placedByHost ? Object.entries(grant.folders ?? {}) : []);
@@ -319,7 +358,7 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
       const conn = entry.nextConn++;
       const link = {
         conn, entry, channel, scope, grant, sessions, site, placedByHost, folders, label: agent.label, categories: new Map(), names: new Map(), approval: undefined, initId: undefined, denied: false,
-        known: sessions.size, knownFolders: folders.size, waiting: 0, asking: Promise.resolve(), outgoing: Promise.resolve(),
+        known: sessions.size, knownFolders: folders.size, waiting: 0, waits: new Set(), asking: Promise.resolve(), outgoing: Promise.resolve(),
       };
       if (channel.proven && channel.mux !== undefined) link.tools = offerTools({ mux: channel.mux, peer: agent.peer, label: agent.label });
       entry.links.set(conn, link);
@@ -339,17 +378,22 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
             channel.send(scope.answerPermission(step.ask, null));
           } else {
             link.waiting += 1;
+            // The page's `session/cancel` for this session ends the wait: the window closes and the agent is answered cancelled.
+            const wait = { session: step.ask.params.sessionId, stop: new AbortController() };
+            link.waits.add(wait);
             link.asking = link.asking
-              .then(() => (live.has(link) ? askPermission({ origin, label: agent.label, request: step.ask }) : null))
+              .then(() => (live.has(link) && !wait.stop.signal.aborted ? askPermission({ origin, label: agent.label, request: step.ask, signal: wait.stop.signal }) : null))
               .catch(() => null)
               .then((option) => {
                 link.waiting -= 1;
-                if (live.has(link)) channel.send(scope.answerPermission(step.ask, option));
+                link.waits.delete(wait);
+                if (live.has(link)) channel.send(scope.answerPermission(step.ask, wait.stop.signal.aborted ? null : option));
               });
           }
         }
       });
-      channel.onClose(() => finish(link, "agent"));
+      // "agent" when the agent ended it in order, "failed" when the link was cut with no close from it.
+      channel.onClose(() => finish(link, channel.ending === "cut" ? "failed" : "agent"));
       let told;
       try {
         told = await describe(origin, grant, { ...agent, proven: channel.proven });
@@ -357,14 +401,18 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
         finish(link, "failed", false);
         throw error;
       }
+      if (call?.cancelled) {
+        finish(link, "page", false);
+        throw NOT_ALLOWED();
+      }
       return { conn, agent: told };
       }
     },
 
-    async revoke({ origin }, { id } = {}) {
+    async revoke({ origin, tabId }, { id } = {}) {
       let pair;
       try {
-        pair = await find(origin, id);
+        pair = await find(origin, tabId, id);
       } catch {
         return null;
       }
@@ -558,17 +606,31 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
           return;
         }
         const step = link.scope.fromPage(message.msg);
+        const cancelled = step.forward === undefined ? undefined : cancelledSession(step.forward);
+        if (cancelled !== undefined) {
+          for (const wait of link.waits) {
+            if (wait.session === cancelled) wait.stop.abort();
+          }
+        }
         if (step.forward !== undefined) forward(link, link.site === undefined ? step.forward : inSite(link, step.forward));
         if (step.reply !== undefined) entry.port.postMessage({ conn: link.conn, msg: step.reply });
       }
       return;
     }
+    // The page stopped waiting for a call: one still running is told, so it can close what it opened.
+    if (typeof message.cancel === "number") {
+      const call = entry.calls.get(message.cancel);
+      if (call !== undefined) call.cancelled = true;
+      return;
+    }
     if (message.op === "ping" || typeof message.id !== "number") return;
     const operation = Object.hasOwn(operations, message.op) ? operations[message.op] : undefined;
+    const call = { cancelled: false };
+    entry.calls.set(message.id, call);
     const running = operation === undefined
       ? Promise.reject(NOT_ALLOWED())
-      : operation({ ...entry, activated: message.activated === true }, message.args);
-    running.then(
+      : operation({ ...entry, activated: message.activated === true }, message.args, call);
+    running.finally(() => entry.calls.delete(message.id)).then(
       (result) => entry.port.postMessage({ id: message.id, result }),
       (error) => entry.port.postMessage({ id: message.id, error: error.refusal ?? { name: "NetworkError", message: "that failed" } }),
     );
@@ -583,7 +645,7 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
     link.outgoing = link.outgoing
       .then(() => link.tools.declared(text))
       .then((declared) => (live.has(link) ? link.channel.send(declared) : undefined))
-      .catch(() => finish(link, "agent"));
+      .catch(() => finish(link, "failed"));
   }
 
   function closeLinks(matches) {
@@ -614,10 +676,12 @@ export function createGateway({ store, dial, askPerson, askPermission, askMode =
 
     /** One document's port. `origin` and `tabId` are what the browser reported about its sender. */
     attach(port, { origin, tabId }) {
-      const entry = { port, origin, tabId, links: new Map(), nextConn: 1 };
+      // `leaving` ends with the document, which closes its request window.
+      const entry = { port, origin, tabId, links: new Map(), nextConn: 1, calls: new Map(), leaving: new AbortController() };
       ports.add(entry);
       port.onMessage.addListener((message) => fromPage(entry, message));
       port.onDisconnect.addListener(() => {
+        entry.leaving.abort();
         ports.delete(entry);
         for (const link of [...entry.links.values()]) finish(link, "navigation", false);
       });
