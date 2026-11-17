@@ -32,6 +32,8 @@ import 'package:canoa/served/control_overlays.dart';
 import 'package:canoa/served/host_config.dart';
 import 'package:canoa/served/host_files.dart';
 import 'package:canoa/served/served_control.dart';
+import 'package:canoa/store/contents_reader.dart';
+import 'package:canoa/store/control_data.dart' show ControlContentsReader;
 import 'package:canoa/store/store.dart';
 import 'package:canoa/store/store_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -337,6 +339,20 @@ own_profile = true
     expect((await loadCatalog(overlays, 'dirs', at('icons'), const StoreSettings())).problem,
         'It has no file icons at that commit');
     await overlays.removeCatalog('dirs');
+  }, skip: skip);
+
+  test('the host reads what a batch of entries provides, and one it cannot read is noted against it', () async {
+    final reader = ControlContentsReader(control(), os: 'linux');
+    final source = team.location;
+    final answers = await reader.read([
+      ContentsRequest(id: 'a', kind: 'overlay', name: 'docs-tools', repo: source, ref: 'main', path: 'overlays/docs-tools'),
+      ContentsRequest(id: 'b', kind: 'overlay', name: 'gone', repo: source, ref: 'nowhere'),
+    ]);
+    final read = answers['a']!.contents!;
+    expect(read.generated, isFalse);
+    expect(read.digest, startsWith('sha256:'));
+    expect(answers['b']!.problem, isNotNull);
+    expect(answers['b']!.contents, isNull);
   }, skip: skip);
 
   test('a page saves, renames and removes a connection in canoa.cfg on the host, and the host refuses one that holds a credential', () async {

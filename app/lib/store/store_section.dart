@@ -17,6 +17,7 @@ import 'store_catalogs.dart';
 import 'store_extension.dart';
 import 'store_index.dart';
 import 'store_mcps.dart';
+import 'contents_reader.dart';
 import 'contents_storage.dart';
 import 'store.dart' show LoadedCatalog;
 import 'store_overlays.dart';
@@ -43,6 +44,7 @@ class StoreSection extends StatefulWidget {
     this.now,
     this.selection,
     this.contentsStorage,
+    this.contentsReader,
     this.readAhead = true,
     this.extensionTypes = const [],
   });
@@ -79,6 +81,9 @@ class StoreSection extends StatefulWidget {
   /// Where what was read of every entry is kept between runs; none keeps it only while the app runs.
   final ContentsStorage? contentsStorage;
 
+  /// Reads what the entries provide, which the host does; none leaves entries unread.
+  final ContentsReader? contentsReader;
+
   /// Whether the catalogs' entries are read for what they provide when the catalogs are read.
   final bool readAhead;
 
@@ -100,6 +105,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     findProgram: widget.findProgram,
     index: widget.index,
     contentsStorage: widget.contentsStorage,
+    contentsReader: widget.contentsReader,
     now: widget.now,
     readAhead: widget.readAhead,
   )..addListener(_changed);

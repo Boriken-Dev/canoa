@@ -16,6 +16,7 @@ import '../profile/overlays.dart' show FetchedTree, OverlayException;
 import '../profile/profile_home.dart';
 import '../profile/profile_layers.dart';
 import '../profile/skill_copies.dart';
+import '../store/contents_reader.dart';
 import '../store/contents_storage.dart';
 import '../store/contents_store.dart';
 import '../store/overlay_page.dart' show SaveConfig;
@@ -74,12 +75,13 @@ class LoadoutController extends ChangeNotifier {
     this.findProgram,
     this.index,
     ContentsStorage? contentsStorage,
+    ContentsReader? contentsReader,
     DateTime Function()? now,
     bool readAhead = true,
   }) : _config = config {
     final home = this.home;
-    if (home != null && index != null && readAhead) {
-      contents = ContentsStore(overlays: home.overlays, os: home.os, storage: contentsStorage, now: now)..addListener(notifyListeners);
+    if (home != null && index != null && readAhead && contentsReader != null) {
+      contents = ContentsStore(reader: contentsReader, storage: contentsStorage, now: now)..addListener(notifyListeners);
     }
   }
 

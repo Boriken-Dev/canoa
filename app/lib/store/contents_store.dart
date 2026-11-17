@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/foundation.dart';
 
-import '../profile/overlays.dart';
+import '../profile/aos_support.dart' show holdsPassword;
+import 'contents_reader.dart';
 import 'contents_storage.dart';
 import 'overlay_contents.dart';
 import 'store.dart';
@@ -44,24 +44,26 @@ String contentsId(String label, String kind, String name) => '$label/$kind:$name
 /// asking for anything. A reading is kept under the cache directory by catalog, and is current while the entry's pin (or, when
 /// it has none, its catalog's commit) is the one it was made for and, for an entry with no pin, for [readAhead]'s `ttl`.
 ///
-/// Reading fetches an entry's files as an install's review does, into a place nothing is installed from, and runs nothing.
-/// One entry that cannot be read is noted against it and the rest go on.
+/// The host reads: it fetches an entry's files as an install's review does, into a place nothing is installed from, and runs
+/// nothing. This store asks for the entries that are not current in batches and keeps the answers. One entry that cannot be read
+/// is noted against it and the rest go on.
 class ContentsStore extends ChangeNotifier {
-  ContentsStore({required this.overlays, required this.os, this.storage, DateTime Function()? now}) : _now = now ?? DateTime.now;
+  ContentsStore({required this.reader, this.storage, DateTime Function()? now}) : _now = now ?? DateTime.now;
 
-  final OverlayManager overlays;
-  final String os;
+  final ContentsReader reader;
   final ContentsStorage? storage;
   final DateTime Function() _now;
 
   final _entries = <String, EntryContents>{};
   final _reading = <String>{};
   final _loaded = <String>{};
-  final _byName = <String, Future<void>>{};
   var _disposed = false;
 
-  /// How many entries have been fetched to be read, since this store was made.
+  /// How many entries have been asked of the host to be read, since this store was made.
   int fetches = 0;
+
+  /// How many entries one request to the host holds.
+  static const batchSize = 8;
 
   /// What was read of the entry [id], or null when nothing has been.
   EntryContents? of(String id) => _entries[id];
@@ -83,41 +85,55 @@ class ContentsStore extends ChangeNotifier {
     if (!_disposed) super.notifyListeners();
   }
 
-  /// Reads every entry of [catalogs] whose last reading is not current, at most [concurrency] at a time. [force] reads them all
+  /// Reads every entry of [catalogs] whose last reading is not current, [concurrency] requests at a time. [force] reads them all
   /// again. [ttl] is how long an entry with no pin stays current; zero reads again every time.
   Future<void> readAhead(List<LoadedCatalog> catalogs, {required Duration ttl, bool force = false, int concurrency = 3}) async {
     _running++;
     try {
-      final work = <(String, String, Future<void> Function(String))>[];
+      final work = <(String label, String id, String key, ContentsRequest request)>[];
       for (final loaded in catalogs) {
         final catalog = loaded.catalog;
         if (catalog == null) continue;
         await _load(loaded.label);
         final fallback = loaded.commit ?? '';
-        void want(String kind, String name, String? pin, Future<OverlayContents> Function() read) {
+        void want(String kind, String name, String? pin, ContentsRequest Function(String id) request) {
           final id = contentsId(loaded.label, kind, name);
           final key = pin ?? fallback;
           final held = _entries[id];
           final current = held != null &&
               held.key == key &&
               (pin != null || ttl > Duration.zero && _now().difference(held.readAt) < ttl);
-          if (force || !current) work.add((loaded.label, id, (id) => _read(id, key, read)));
+          if (!force && current) return;
+          try {
+            work.add((loaded.label, id, key, request(id)));
+          } on StoreRefusal catch (error) {
+            _entries[id] = EntryContents(key: key, readAt: _now(), problem: error.message);
+          }
         }
 
         for (final entry in catalog.entries.values) {
-          want('overlay', entry.name, entry.pin, () => _readOverlay(entry));
+          want('overlay', entry.name, entry.pin, (id) {
+            final source = installSource(entry);
+            return ContentsRequest(id: id, kind: 'overlay', name: installName(entry), repo: source.repo, ref: source.reference, path: source.path);
+          });
         }
         for (final MapEntry(key: name, value: entry) in catalog.skills.entries) {
-          want('skill', name, entry.pin, () => _readSkill(name, entry));
+          want('skill', name, entry.pin, (id) {
+            final source = entry.source;
+            if (source.kind != 'git') throw const StoreRefusal('Canoa fetches skills from git only, and this source is not git');
+            if (holdsPassword(source.location)) throw const StoreRefusal('A skill source holds a password, which none may');
+            return ContentsRequest(id: id, kind: 'skill', name: name, repo: source.location, ref: source.reference, path: source.path);
+          });
         }
       }
+      final batches = [for (var at = 0; at < work.length; at += batchSize) work.sublist(at, (at + batchSize).clamp(0, work.length))];
       var next = 0;
       final touched = <String>{};
       Future<void> worker() async {
-        while (next < work.length) {
-          final (label, id, run) = work[next++];
-          touched.add(label);
-          await run(id);
+        while (next < batches.length) {
+          final batch = batches[next++];
+          touched.addAll(batch.map((item) => item.$1));
+          await _readBatch(batch);
         }
       }
 
@@ -131,51 +147,31 @@ class ContentsStore extends ChangeNotifier {
     }
   }
 
-  Future<void> _read(String id, String key, Future<OverlayContents> Function() read) async {
-    _reading.add(id);
-    notifyListeners();
-    EntryContents result;
-    try {
-      result = EntryContents(key: key, readAt: _now(), contents: await read());
-    } on OverlayException catch (error) {
-      result = EntryContents(key: key, readAt: _now(), problem: error.message);
-    } on StoreRefusal catch (error) {
-      result = EntryContents(key: key, readAt: _now(), problem: error.message);
-    } on aos.AosError catch (error) {
-      result = EntryContents(key: key, readAt: _now(), problem: 'Its files cannot be read as an overlay (${error.errorClass})');
-    } on Object catch (error) {
-      result = EntryContents(key: key, readAt: _now(), problem: '$error');
+  Future<void> _readBatch(List<(String label, String id, String key, ContentsRequest request)> batch) async {
+    for (final item in batch) {
+      _reading.add(item.$2);
     }
-    _entries[id] = result;
-    _reading.remove(id);
+    fetches += batch.length;
     notifyListeners();
-  }
-
-  /// Reads one overlay: its files fetched as a review fetches them, then discarded when nothing is installed under the name.
-  /// An entry that installs under the same name as another is read after it, since they share a place.
-  Future<OverlayContents> _readOverlay(CatalogEntry entry) {
-    final name = installName(entry);
-    final before = _byName[name] ?? Future<void>.value();
-    final done = Completer<OverlayContents>();
-    _byName[name] = before.then((_) async {
-      try {
-        final update = await overlays.check(name, installSource(entry).pinnedTo(null));
-        fetches++;
-        try {
-          done.complete(readContents(await overlays.read(update), name: entry.name, os: os));
-        } finally {
-          await overlays.discard(name);
-        }
-      } on Object catch (error, stack) {
-        done.completeError(error, stack);
-      }
-    });
-    return done.future;
-  }
-
-  Future<OverlayContents> _readSkill(String name, aos.CatalogEntry entry) async {
-    fetches++;
-    return readSkillContents(await overlays.fetchSkillFiles(entry.source), name: name);
+    Map<String, ContentsAnswer> answers;
+    String? failure;
+    try {
+      answers = await reader.read([for (final item in batch) item.$4]);
+    } on Object catch (error) {
+      answers = const {};
+      failure = '$error';
+    }
+    for (final (_, id, key, _) in batch) {
+      final answer = answers[id];
+      _entries[id] = EntryContents(
+        key: key,
+        readAt: _now(),
+        contents: answer?.contents,
+        problem: answer == null ? (failure ?? 'The host gave no answer for it') : answer.problem,
+      );
+      _reading.remove(id);
+    }
+    notifyListeners();
   }
 
   Future<void> _load(String label) async {

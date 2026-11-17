@@ -7,7 +7,9 @@ import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
 import '../loadout/loadout_controller.dart' show FindProgram;
 import '../loadout/mcp_registry.dart';
+import 'contents_reader.dart';
 import 'contents_storage.dart';
+import 'overlay_contents.dart' show OverlayContents;
 
 Future<Map<Object?, Object?>> _ask(HostControl control, String method, Map<String, Object?> params, Duration wait) async {
   final client = await control.ready();
@@ -63,5 +65,32 @@ final class ControlContentsStorage implements ContentsStorage {
   @override
   Future<void> write(String label, String json) async {
     await _ask(_control, 'store/contents_put', {'label': label, 'document': json}, const Duration(seconds: 30));
+  }
+}
+
+/// Reads catalog entries through the host's `store/read_ahead`: one call for a batch, which fetches and reads each entry there.
+final class ControlContentsReader implements ContentsReader {
+  ControlContentsReader(this._control, {required this.os});
+
+  final HostControl _control;
+
+  /// The system the host runs on, which decides what an overlay's hooks and requirements are.
+  final String os;
+
+  @override
+  Future<Map<String, ContentsAnswer>> read(List<ContentsRequest> requests) async {
+    final answer = await _ask(_control, 'store/read_ahead', {'os': os, 'entries': [for (final request in requests) request.toJson()]}, const Duration(minutes: 8));
+    final entries = answer['entries'];
+    final read = <String, ContentsAnswer>{};
+    if (entries is Map<Object?, Object?>) {
+      for (final MapEntry(:key, :value) in entries.entries) {
+        if (value is! Map<Object?, Object?>) continue;
+        final contents = value['contents'];
+        read['$key'] = contents is Map<Object?, Object?>
+            ? ContentsAnswer.read(OverlayContents.fromJson(contents))
+            : ContentsAnswer.failed(value['problem'] is String ? value['problem']! as String : 'The host could not read it');
+      }
+    }
+    return read;
   }
 }
