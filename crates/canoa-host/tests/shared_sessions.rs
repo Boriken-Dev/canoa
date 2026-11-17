@@ -343,6 +343,18 @@ fn the_running_sessions_a_key_may_attach_to_are_listed_with_who_is_attached() {
         // A second key that attaches shows beside the first, and the head moves with what is said.
         with_link(&url, &other, host.peer, |b| {
             attach(b, &session, &dir, None);
+            // The presence message is the hub's list for everyone; each client is told which entry is its own.
+            let (presence, _) = read_until(b, |message| {
+                message["method"] == "_dev.boriken.coqui.acp/hub_presence"
+            });
+            let own: Vec<&Value> = presence["params"]["clients"]
+                .as_array()
+                .expect("a list")
+                .iter()
+                .filter(|client| client["self"] == true)
+                .collect();
+            assert_eq!(own.len(), 1, "{presence}");
+            assert_eq!(own[0]["id"], other.peer_id().to_string(), "{presence}");
             let both = running_sessions(&control, &reader, &host).expect("answers");
             assert_eq!(
                 both["sessions"][0]["clients"].as_array().map(Vec::len),

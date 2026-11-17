@@ -553,7 +553,7 @@ impl Session {
                     let Some(slot) = state.clients.get(&client) else {
                         continue;
                     };
-                    let bytes = message.to_string().into_bytes();
+                    let bytes = marked_for(&client, message).to_string().into_bytes();
                     if bytes.len() > MAX_LINE {
                         tracing::warn!(entry = self.entry, "a message over the limit was not sent");
                         continue;
@@ -691,6 +691,24 @@ impl Session {
         }
         self.finish();
     }
+}
+
+/// A presence message as one client reads it: its own entry says so (`"self": true`), since the hub's list is the same for all.
+fn marked_for(client: &ClientId, mut message: Value) -> Value {
+    if message.get("method").and_then(Value::as_str) != Some(coqui_acp_hub::PRESENCE) {
+        return message;
+    }
+    if let Some(clients) = message
+        .pointer_mut("/params/clients")
+        .and_then(Value::as_array_mut)
+    {
+        for each in clients {
+            if each.get("id").and_then(Value::as_str) == Some(client.as_str()) {
+                each["self"] = json!(true);
+            }
+        }
+    }
+    message
 }
 
 /// The name an agent's `session_info_update` gives its session, cleaned for a person to read: control characters out, cut to 200.
