@@ -37,6 +37,9 @@ const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 /// The most a sealed file or a stored record may hold; a record is a few kilobytes.
 const MAX_RECORD: usize = 1 << 20;
+/// How many times a removal deletes an account again while the store still shows its index.
+const REMOVE_ROUNDS: u32 = 5;
+
 /// How many generations a removal looks for when the index is damaged and cannot say.
 const DAMAGED_SWEEP: u64 = 16;
 /// How many half-seconds a put waits for the index of an account the store showed before it takes the account as gone.
@@ -414,20 +417,38 @@ impl SecretStore for KeyringStore {
     fn remove(&self, id: &str) -> Result<(), StoreError> {
         let _turn = one_at_a_time();
         self.shown().remove(id);
-        let newest = match self.index(id) {
-            Ok(Some(index)) => index.generation,
-            Ok(None) => 0,
-            Err(IndexError::Damaged) => DAMAGED_SWEEP,
-            Err(error @ IndexError::Unreadable(_)) => return Err(error.into_error()),
-        };
-        // Every generation there may be: a put that failed left chunks under one the index never named.
-        for generation in 1..=newest + 1 {
-            self.forget_generation(id, generation);
-        }
-        let index_entry = self.entry(&Self::index_user(id))?;
-        match patiently(|| index_entry.delete_credential()) {
-            Ok(()) | Err(KeyError::NoEntry) => Ok(()),
-            Err(error) => Err(failed("the credential store could not forget it", error)),
+        // Windows' Credential Manager under load answers "no such credential" to a delete of an entry that is there, so a
+        // delete that said so is believed only once a read of the index agrees. Each round starts from what the index says
+        // now, since an index that was missing a moment ago may name a generation the sweep has to reach.
+        let mut round = 0;
+        loop {
+            let newest = match self.index(id) {
+                Ok(Some(index)) => index.generation,
+                Ok(None) => 0,
+                Err(IndexError::Damaged) => DAMAGED_SWEEP,
+                Err(error @ IndexError::Unreadable(_)) => return Err(error.into_error()),
+            };
+            // Every generation there may be: a put that failed left chunks under one the index never named.
+            for generation in 1..=newest + 1 {
+                self.forget_generation(id, generation);
+            }
+            let index_entry = self.entry(&Self::index_user(id))?;
+            match patiently(|| index_entry.delete_credential()) {
+                Ok(()) | Err(KeyError::NoEntry) => {}
+                Err(error) => {
+                    return Err(failed("the credential store could not forget it", error));
+                }
+            }
+            if matches!(self.index(id), Ok(None)) {
+                return Ok(());
+            }
+            round += 1;
+            if round >= REMOVE_ROUNDS {
+                return Err(StoreError(
+                    "the credential store still shows the account after it was deleted".into(),
+                ));
+            }
+            std::thread::sleep(core::time::Duration::from_millis(300));
         }
     }
 }

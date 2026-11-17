@@ -387,17 +387,27 @@ fn a_chunk_a_failed_write_left_and_every_old_generation_are_removed_with_the_acc
             .expect("planted");
     }
     store.put("x", b"third").expect("puts");
-    let stale = store
-        .entry(&KeyringStore::chunk_user("x", 3, 2))
-        .expect("an entry")
-        .get_secret();
+    // Windows' Credential Manager under load shows a deleted entry for a moment longer: each check waits, bounded, for the
+    // store to agree.
+    let gone = |user: String| {
+        let entry = store.entry(&user).expect("an entry");
+        (0..20).any(|_| {
+            let gone = entry.get_secret().is_err();
+            if !gone {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            gone
+        })
+    };
+    assert!(
+        gone(KeyringStore::chunk_user("x", 3, 2)),
+        "a chunk of the failed write was kept"
+    );
     store.remove("x").expect("removes");
-    let first_gone = store
-        .entry(&KeyringStore::chunk_user("x", 1, 0))
-        .expect("an entry")
-        .get_secret();
-    assert!(stale.is_err(), "a chunk of the failed write was kept");
-    assert!(first_gone.is_err(), "an old generation's chunk was kept");
+    assert!(
+        gone(KeyringStore::chunk_user("x", 1, 0)),
+        "an old generation's chunk was kept"
+    );
     assert!(store.get("x").expect("reads").is_none());
 }
 
