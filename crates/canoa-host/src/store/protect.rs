@@ -9,7 +9,7 @@
 //!
 //! The host holds no list of its own in code beyond the two recommendations here, which a list the person writes replaces.
 
-use std::path::{Component, Path};
+use std::path::{Component, Path, Prefix};
 
 /// What the host recommends keeping a store's declared changes out of, for a person who has not written a list of their own:
 /// what a login or a tool reads and can be made to run, and the folders programs share (a program may declare a place inside
@@ -77,23 +77,32 @@ fn fold(text: &str) -> String {
     text.to_lowercase()
 }
 
-/// The names of a path, drive first on Windows, lower case.
+/// The names of a path, drive first on Windows, lower case. A share's server and share are two names, so `\server\share\x`,
+/// `\?\UNC\server\share\x` and a rule written `//server/share/x` meet.
 fn names_of(path: &Path) -> Vec<String> {
-    path.components()
-        .filter_map(|part| match part {
-            Component::Prefix(prefix) => {
-                // `\\?\C:` (what links followed make of a drive) is the drive `C:`.
-                let text = prefix.as_os_str().to_string_lossy().into_owned();
-                let drive = text
-                    .rfind(':')
-                    .filter(|at| *at >= 1)
-                    .map_or(text.as_str(), |at| &text[at - 1..=at]);
-                Some(fold(drive))
-            }
-            Component::Normal(name) => Some(fold(&name.to_string_lossy())),
-            _ => None,
-        })
-        .collect()
+    let mut names = Vec::new();
+    for part in path.components() {
+        match part {
+            Component::Prefix(prefix) => match prefix.kind() {
+                Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => {
+                    names.push(fold(&server.to_string_lossy()));
+                    names.push(fold(&share.to_string_lossy()));
+                }
+                _ => {
+                    // `\?\C:` (what links followed make of a drive) is the drive `C:`.
+                    let text = prefix.as_os_str().to_string_lossy().into_owned();
+                    let drive = text
+                        .rfind(':')
+                        .filter(|at| *at >= 1)
+                        .map_or(text.as_str(), |at| &text[at - 1..=at]);
+                    names.push(fold(drive));
+                }
+            },
+            Component::Normal(name) => names.push(fold(&name.to_string_lossy())),
+            _ => {}
+        }
+    }
+    names
 }
 
 fn glob(pattern: &[char], name: &[char]) -> bool {
@@ -334,5 +343,37 @@ mod tests {
         let cut = list(&["*TOKEN", "!GITHUB_TOKEN"]);
         assert!(cut.protects_name("NPM_TOKEN"));
         assert!(!cut.protects_name("GITHUB_TOKEN"));
+    }
+}
+
+
+#[cfg(all(test, windows))]
+mod share_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn a_protected_entry_on_a_share_matches_the_share_however_it_is_written() {
+        for line in [
+            r"\\localhost\C$\work\secrets",
+            "//localhost/C$/work/secrets",
+            r"\\LOCALHOST\c$\Work\Secrets\",
+        ] {
+            let rules = Protected::new([line]);
+            for path in [
+                r"\\localhost\C$\work\secrets",
+                r"\\localhost\C$\work\secrets\key.pem",
+                r"\\?\UNC\localhost\C$\work\secrets\key.pem",
+            ] {
+                assert!(rules.protects(&PathBuf::from(path), None), "{line} {path}");
+            }
+            for path in [
+                r"\\localhost\C$\work\other",
+                r"\\otherhost\C$\work\secrets",
+                r"C:\work\secrets",
+            ] {
+                assert!(!rules.protects(&PathBuf::from(path), None), "{line} {path}");
+            }
+        }
     }
 }
