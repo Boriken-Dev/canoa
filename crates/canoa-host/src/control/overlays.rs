@@ -9,6 +9,7 @@
 )]
 
 use crate::spawn::{Command, Stdio};
+use canoa::network::{GitTls, Network};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
@@ -153,6 +154,8 @@ pub(crate) struct Overlays {
     git: OnceLock<Result<PathBuf, String>>,
     /// The git processes this host has started, so a caller can tell an answer from a cache apart from one that went to git.
     git_runs: std::sync::atomic::AtomicUsize,
+    /// The network git reaches its remotes through; the process's when `None`.
+    network: Option<std::sync::Arc<Network>>,
     /// The environment a test makes this host's git runs inherit: a person's home, ssh agent and programs.
     #[cfg(test)]
     person: Vec<(OsString, OsString)>,
@@ -178,6 +181,13 @@ impl Overlays {
             .iter()
             .map(|(name, value)| (OsString::from(name), value.clone()))
             .collect();
+        self
+    }
+
+    /// This host, whose git runs reach their remotes through `network`.
+    #[cfg(test)]
+    pub(crate) fn with_network(mut self, network: std::sync::Arc<Network>) -> Self {
+        self.network = Some(network);
         self
     }
 
@@ -1341,6 +1351,23 @@ impl Overlays {
             {
                 command.env_remove(name);
             }
+        }
+        // Git reaches the network as everything else here does: the system's proxy for the remote it is asked about (as variables,
+        // which a person's own `http.proxy` still overrides) and, on Windows, the operating system's TLS library, so the system's
+        // certificate store and client certificates are used.
+        let network = self.network.clone().unwrap_or_else(Network::current);
+        if cfg!(windows) && network.git_tls() == GitTls::System {
+            command.args(["-c", "http.sslBackend=schannel"]);
+        }
+        command.network(std::sync::Arc::clone(&network));
+        let remotes: Vec<String> = args
+            .iter()
+            .filter_map(|arg| arg.to_str())
+            .filter(|arg| arg.starts_with("https://") || arg.starts_with("http://"))
+            .map(str::to_owned)
+            .collect();
+        if !remotes.is_empty() {
+            command.reaches(remotes);
         }
         command.args(["-c", "protocol.allow=never"]);
         for scheme in ["https", "http", "ssh", "git", "file"] {

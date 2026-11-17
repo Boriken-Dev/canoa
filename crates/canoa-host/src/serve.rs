@@ -296,6 +296,11 @@ pub enum ServeError {
     },
     /// The host's ledger could not be opened.
     Control(control::ControlError),
+    /// `[host.network]` cannot be used.
+    Network {
+        /// Why; names a key, never a value.
+        what: String,
+    },
 }
 
 impl fmt::Display for ServeError {
@@ -324,6 +329,7 @@ impl fmt::Display for ServeError {
                 )
             }
             Self::Accounts { what } => write!(f, "[host.accounts]: {what}"),
+            Self::Network { what } => write!(f, "[host.network]: {what}"),
             Self::Control(error) => write!(f, "the control channel's ledger {error}"),
         }
     }
@@ -1271,6 +1277,9 @@ impl Serving {
         store: TrustStore,
         options: &ServeOptions,
     ) -> Result<Self, ServeError> {
+        crate::network::install(&config.network).map_err(|error| ServeError::Network {
+            what: error.to_string(),
+        })?;
         let adapted;
 
         let config = match &options.portal {

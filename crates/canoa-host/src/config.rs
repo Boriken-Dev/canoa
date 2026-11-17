@@ -9,6 +9,7 @@ use core::time::Duration;
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
+use canoa::network::{ClientCertificate, GitTls, NetworkSettings, ProxyChoice, Secret};
 use coqui_acp_api::CacheLifetime;
 use coqui_peer_webcrypto::PeerId;
 use coqui_transport_pipe::PipeName;
@@ -59,6 +60,9 @@ pub struct Config {
     pub shell: Option<String>,
     /// `[host.store]`: what the program stores' installs are held to.
     pub store: StoreConfig,
+    /// `[host.network]`: how the host reaches the network; the system's proxy, login, certificate verifier and client
+    /// certificates unless it says otherwise.
+    pub network: NetworkConfig,
     /// `[host.kb]`: the knowledge index tools and where their embeddings come from.
     pub kb: KbConfig,
     /// `[host.delegate]`: what an agent may hand to another one.
@@ -517,6 +521,69 @@ pub struct StoreConfig {
     /// `tools`: whether the host offers the `canoa-store` tools (search and inspect) to a session whose client asks for them and
     /// whose key reads the index (default true).
     pub tools: Option<bool>,
+}
+
+/// `[host.network]`: how every fetch the host makes, and every program it starts, reaches the network. With no key the host follows
+/// the system: the proxy variables of its environment, else the operating system's proxy settings (PAC and WPAD included) and its
+/// proxy login, the operating system's certificate verifier and the client certificates of its keystores. Each key is an
+/// override.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NetworkConfig {
+    /// `proxy`: `system` (the default), `none`, `pac:LOCATION` (a URL, a `file:` URL or a path), or a proxy for every URL as
+    /// `[scheme://][user[:password]@]host[:port]`.
+    pub proxy: ProxyChoice,
+    /// `proxy_user`: a login for every HTTP proxy that names none of its own.
+    pub proxy_user: Option<String>,
+    /// `proxy_password_env`: the name of a variable holding that login's password; the password itself is never in canoa.cfg.
+    pub proxy_password_env: Option<String>,
+    /// `no_proxy`: the hosts that go direct, replacing the system's list: names (a name covers its subdomains), `*.suffix`,
+    /// networks (`10.0.0.0/8`), `host:port`, `<-loopback>` to send loopback through the proxy too. A string or a list; an empty
+    /// one sends everything but loopback through the proxy.
+    pub no_proxy: Option<Vec<String>>,
+    /// `negotiate`: whether a proxy that asks for Negotiate or NTLM is answered with the logon session (default true on Windows,
+    /// the only place this build can).
+    pub negotiate: Option<bool>,
+    /// `client_certificate`: `system` (the default: what a browser here would send, from the operating system's keystores),
+    /// `none`, or the path of a PEM file holding a certificate chain and its unencrypted private key.
+    pub client_certificate: ClientCertificate,
+    /// `ca_file`: trust exactly the certificates of this PEM file, replacing the system's trust.
+    pub ca_file: Option<PathBuf>,
+    /// `git_tls`: `system` (the default: Schannel on Windows, so git uses the system's certificate store) or `git` (git's own, and
+    /// the person's git configuration).
+    pub git_tls: GitTls,
+    /// `endpoints`: URLs the programs the host starts will use, added to the built-in list a PAC script is asked about to give them
+    /// their proxy variables.
+    pub endpoints: Vec<String>,
+}
+
+impl NetworkConfig {
+    /// The settings the network is built from, with the password read from its variable.
+    ///
+    /// # Errors
+    ///
+    /// `proxy_password_env` names a variable that is not set.
+    pub fn settings(&self) -> Result<NetworkSettings, ConfigError> {
+        let mut settings = NetworkSettings::default();
+        settings.proxy.clone_from(&self.proxy);
+        settings.proxy_user.clone_from(&self.proxy_user);
+        if let Some(name) = &self.proxy_password_env {
+            let password = std::env::var(name).map_err(|_| ConfigError::Invalid {
+                entry: None,
+                what: "network: proxy_password_env names a variable that is not set".to_owned(),
+            })?;
+            settings.proxy_password = Some(Secret::new(password));
+        }
+        settings.no_proxy.clone_from(&self.no_proxy);
+        settings.negotiate = self.negotiate;
+        settings
+            .client_certificate
+            .clone_from(&self.client_certificate);
+        settings.ca_file.clone_from(&self.ca_file);
+        settings.git_tls = self.git_tls;
+        settings.endpoints.clone_from(&self.endpoints);
+        Ok(settings)
+    }
 }
 
 /// `[host.kb]`: the `canoa-kb` tools, which search the knowledge an overlay ships. With no `embeddings` an index holds words only
@@ -1413,8 +1480,87 @@ struct RawHost {
     history: Option<RawHistory>,
     usage: Option<RawHostUsage>,
     store: Option<RawStore>,
+    network: Option<RawNetwork>,
     delegate: Option<RawDelegate>,
     kb: Option<RawKb>,
+}
+
+/// `[host.network]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawNetwork {
+    proxy: Option<String>,
+    proxy_user: Option<String>,
+    proxy_password_env: Option<String>,
+    no_proxy: Option<RawLines>,
+    negotiate: Option<bool>,
+    client_certificate: Option<String>,
+    ca_file: Option<String>,
+    git_tls: Option<String>,
+    #[serde(default)]
+    endpoints: Vec<String>,
+}
+
+/// `[host.network]`, its paths made absolute from canoa.cfg's directory. Errors name a key, never a value.
+fn network_of(raw: RawNetwork, directory: &Path) -> Result<NetworkConfig, ConfigError> {
+    let refused = |what: &str| ConfigError::Invalid {
+        entry: None,
+        what: format!("network: {what}"),
+    };
+    let path = |text: String, key: &str| {
+        if text.is_empty() {
+            return Err(refused(&format!("{key} is empty")));
+        }
+        let path = directory.join(text);
+        Ok(std::path::absolute(&path).unwrap_or(path))
+    };
+    let proxy = match raw.proxy.as_deref().map(str::trim) {
+        None => ProxyChoice::System,
+        Some("") => return Err(refused("proxy is empty")),
+        Some(text) if text.eq_ignore_ascii_case("system") => ProxyChoice::System,
+        Some(text) if text.eq_ignore_ascii_case("none") => ProxyChoice::None,
+        Some(text) => match text.strip_prefix("pac:") {
+            Some("") => return Err(refused("proxy pac: names no location")),
+            Some(location) => ProxyChoice::Pac(location.to_owned()),
+            None => ProxyChoice::Proxy(text.to_owned()),
+        },
+    };
+    let client_certificate = match raw.client_certificate {
+        None => ClientCertificate::System,
+        Some(text) if text.eq_ignore_ascii_case("system") => ClientCertificate::System,
+        Some(text) if text.eq_ignore_ascii_case("none") => ClientCertificate::None,
+        Some(text) => ClientCertificate::File(path(text, "client_certificate")?),
+    };
+    let git_tls = match raw.git_tls.as_deref() {
+        None | Some("system") => GitTls::System,
+        Some("git") => GitTls::Git,
+        Some(_) => return Err(refused("git_tls is system or git")),
+    };
+    if raw.proxy_user.as_deref().is_some_and(str::is_empty) {
+        return Err(refused("proxy_user is empty"));
+    }
+    if raw.proxy_password_env.is_some() && raw.proxy_user.is_none() {
+        return Err(refused("proxy_password_env goes with proxy_user"));
+    }
+    Ok(NetworkConfig {
+        proxy,
+        proxy_user: raw.proxy_user,
+        proxy_password_env: raw.proxy_password_env,
+        no_proxy: raw.no_proxy.map(|lines| {
+            lines
+                .lines()
+                .iter()
+                .flat_map(|line| line.split(|c: char| c == ',' || c.is_whitespace()))
+                .filter(|entry| !entry.is_empty())
+                .map(str::to_owned)
+                .collect()
+        }),
+        negotiate: raw.negotiate,
+        client_certificate,
+        ca_file: raw.ca_file.map(|file| path(file, "ca_file")).transpose()?,
+        git_tls,
+        endpoints: raw.endpoints,
+    })
 }
 
 /// `[host.kb]`.
@@ -1827,6 +1973,11 @@ impl Config {
                 index_cache_bytes: raw.index_cache_bytes,
                 tools: raw.tools,
             });
+        let network = host
+            .network
+            .map(|raw| network_of(raw, &directory))
+            .transpose()?
+            .unwrap_or_default();
         let kb = host
             .kb
             .map(RawKb::into_config)
@@ -2288,6 +2439,7 @@ impl Config {
             history,
             usage,
             store,
+            network,
             kb,
             delegate,
             skill_pins,

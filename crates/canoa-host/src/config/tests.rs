@@ -2206,3 +2206,85 @@ fn a_control_channel_with_no_key_is_fine_when_the_add_in_page_is_admitted() {
         "the add-in alone admits nobody"
     );
 }
+
+#[test]
+fn with_no_network_table_the_host_follows_the_system_in_everything() {
+    let none = parse("[host]\n").expect("parses");
+    assert_eq!(none.network, NetworkConfig::default());
+    assert_eq!(none.network.proxy, canoa::network::ProxyChoice::System);
+    assert_eq!(
+        none.network.client_certificate,
+        canoa::network::ClientCertificate::System
+    );
+    assert_eq!(none.network.git_tls, canoa::network::GitTls::System);
+    assert!(none.network.no_proxy.is_none());
+    let settings = none.network.settings().expect("settings");
+    assert_eq!(settings.proxy, canoa::network::ProxyChoice::System);
+}
+
+#[test]
+fn the_network_table_overrides_each_part_and_every_part_is_explicit() {
+    let config = parse(
+        "[host.network]\nproxy = \"http://gateway.corp:3128\"\nproxy_user = \"alice\"\nproxy_password_env = \"CANOA_TEST_NO_SUCH_VARIABLE\"\n\
+         no_proxy = \"a.example, *.corp\\n10.0.0.0/8\"\nnegotiate = false\nclient_certificate = \"me.pem\"\nca_file = \"roots.pem\"\n\
+         git_tls = \"git\"\nendpoints = [\"https://tools.example/\"]\n",
+    )
+    .expect("parses");
+    let network = &config.network;
+    assert_eq!(
+        network.proxy,
+        canoa::network::ProxyChoice::Proxy("http://gateway.corp:3128".to_owned())
+    );
+    assert_eq!(network.proxy_user.as_deref(), Some("alice"));
+    assert_eq!(
+        network.no_proxy,
+        Some(vec![
+            "a.example".to_owned(),
+            "*.corp".to_owned(),
+            "10.0.0.0/8".to_owned()
+        ])
+    );
+    assert_eq!(network.negotiate, Some(false));
+    assert!(matches!(
+        &network.client_certificate,
+        canoa::network::ClientCertificate::File(path) if path.ends_with("me.pem") && path.is_absolute()
+    ));
+    assert!(
+        network
+            .ca_file
+            .as_ref()
+            .is_some_and(|path| path.ends_with("roots.pem"))
+    );
+    assert_eq!(network.git_tls, canoa::network::GitTls::Git);
+    assert_eq!(network.endpoints, ["https://tools.example/"]);
+    // The password is read when the network is made, from the variable the file names, never from the file.
+    assert!(network.settings().is_err());
+}
+
+#[test]
+fn the_network_proxy_is_system_none_a_pac_location_or_a_proxy() {
+    let proxy = |text: &str| {
+        parse(&format!("[host.network]\nproxy = \"{text}\"\n"))
+            .expect("parses")
+            .network
+            .proxy
+    };
+    assert_eq!(proxy("system"), canoa::network::ProxyChoice::System);
+    assert_eq!(proxy("none"), canoa::network::ProxyChoice::None);
+    assert_eq!(
+        proxy("pac:http://wpad.corp/proxy.pac"),
+        canoa::network::ProxyChoice::Pac("http://wpad.corp/proxy.pac".to_owned())
+    );
+    assert_eq!(
+        parse("[host.network]\nclient_certificate = \"none\"\n")
+            .expect("parses")
+            .network
+            .client_certificate,
+        canoa::network::ClientCertificate::None
+    );
+    assert!(parse("[host.network]\nproxy = \"\"\n").is_err());
+    assert!(parse("[host.network]\nproxy = \"pac:\"\n").is_err());
+    assert!(parse("[host.network]\ngit_tls = \"openssl\"\n").is_err());
+    assert!(parse("[host.network]\nproxy_password_env = \"X\"\n").is_err());
+    assert!(parse("[host.network]\nother = 1\n").is_err());
+}

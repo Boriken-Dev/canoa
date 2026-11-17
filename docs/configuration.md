@@ -603,6 +603,34 @@ version = "1.2.0"
 digest = "sha256:..."         # of the server.json that was shown
 ```
 
+### The network
+
+With no `[host.network]` table every fetch the host makes (the Store's downloads and release lists, `registry/fetch`, the endpoints of `[host.kb]` and of the speech providers, the Foundry Local service) and every program it starts follows the computer's own settings, as a browser on it would:
+
+- the proxy: the `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` variables of the host's environment, else the operating system's (Windows Internet Options through WinHTTP, `scutil --proxy` on a Mac, GNOME, KDE and NetworkManager settings elsewhere), PAC scripts and WPAD included, with its bypass list; loopback is never sent through a proxy;
+- the proxy's login: Negotiate or NTLM with the logon session on Windows, when the proxy asks for it (`negotiate = false` turns it off); Basic with the login below, when one is given;
+- who is trusted: the operating system's certificate verifier, so a TLS-intercepting proxy the computer trusts works;
+- the client certificate: when a server asks for one, the one a browser would offer from the operating system's keystores (the Windows certificate store, the macOS Keychain, a PKCS #11 module through p11-kit) that the server's named authorities issued, with the policy Edge and Chrome read;
+- git (overlay and skill sources): started with the proxy for the remote it is fetching and, on Windows, with `http.sslBackend=schannel`, so it uses the same certificate store; a git configuration of the person's own (`http.proxy`) still wins where the source is one they named.
+
+A program the host starts (an agent, Node or Python, `git`) is given `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` for that proxy when its environment names none; variables the person or the entry set are never replaced. A proxy chosen per URL (PAC, WPAD) cannot be written as variables, so it is asked about the addresses the programs reach (the package registries, GitHub, the agents' own services; `endpoints` adds to them) and the proxy it names for those is the one given. Each key below is an override and none is needed:
+
+```toml
+[host.network]
+proxy = "system"                 # system (the default), none, pac:LOCATION (a URL, a file: URL or a path), or a proxy for every URL:
+                                 # [scheme://][user[:password]@]host[:port]
+proxy_user = "alice"             # a login for every HTTP proxy that names none of its own
+proxy_password_env = "PROXY_PW"  # the variable holding its password; the password is never in canoa.cfg
+no_proxy = ["corp.example", "*.lan", "10.0.0.0/8"]   # replaces the system's bypass list; "<-loopback>" sends loopback through the proxy too
+negotiate = true                 # answer a proxy's Negotiate or NTLM with the logon session (Windows only)
+client_certificate = "system"    # system (the default), none, or a PEM file holding a certificate chain and its unencrypted key
+ca_file = "roots.pem"            # trust exactly these certificates, replacing the system's
+git_tls = "system"               # system (Schannel on Windows) or git (git's own and the person's git configuration)
+endpoints = ["https://tools.corp.example/"]   # addresses the programs reach, for a PAC script to choose their proxy by
+```
+
+Paths are read from the folder of canoa.cfg. The host starts only with a setting it can use: a proxy it cannot read, a `proxy_password_env` variable that is not set, or a certificate file that is missing is refused at start, with the key named. Git's client certificate is not chosen from the keystore as a browser's is: Git for Windows presents one only when its `http.sslCert` names it, which a source the person typed gets from their own git configuration.
+
 ### Skill sources
 
 Skills are looked for the way `npx skills add` looks, in their own list beside `[catalogs]`: `[store.skill_sources]`, a label of yours

@@ -63,6 +63,10 @@ pub struct Command {
     stdout: Stdio,
     stderr: Stdio,
     own_group: bool,
+    /// The URLs the program will use, when the caller knows them: a PAC script is asked about these for its proxy variables.
+    reaches: Option<Vec<String>>,
+    /// The network whose proxy it is given; the process's when `None`.
+    network: Option<alloc::sync::Arc<canoa::network::Network>>,
     #[cfg(windows)]
     flags: u32,
 }
@@ -80,6 +84,8 @@ impl Command {
             stdout: Stdio::Inherit,
             stderr: Stdio::Inherit,
             own_group: false,
+            reaches: None,
+            network: None,
             #[cfg(windows)]
             flags: 0,
         }
@@ -166,6 +172,19 @@ impl Command {
         self
     }
 
+    /// Names the URLs the program will use. A program started with no proxy variable of its own is given the system's proxy for these
+    /// (a PAC script is asked about each) instead of for the host's own list of what programs reach.
+    pub fn reaches(&mut self, urls: impl IntoIterator<Item = impl Into<String>>) -> &mut Self {
+        self.reaches = Some(urls.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// Gives it the proxy of `network` instead of the process's, when it has none of its own.
+    pub fn network(&mut self, network: alloc::sync::Arc<canoa::network::Network>) -> &mut Self {
+        self.network = Some(network);
+        self
+    }
+
     /// The process creation flags of a Windows process.
     #[cfg(windows)]
     pub fn creation_flags(&mut self, flags: u32) -> &mut Self {
@@ -180,6 +199,7 @@ impl Command {
     /// The operating system could not start it, or the host's own process starter could not.
     pub fn spawn(&mut self) -> io::Result<Child> {
         self.put_runtimes_on_path(&crate::sources::runtime_dirs());
+        self.put_proxy_variables();
         #[cfg(unix)]
         if let Some(link) = apart::link()? {
             return link.spawn(self);
@@ -255,6 +275,46 @@ impl Command {
         );
         if let Ok(joined) = joined {
             self.env.push((key, Some(joined)));
+        }
+    }
+
+    /// Gives the process the system's proxy as `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` when the environment it starts with names no
+    /// proxy: the person's own variables, or a caller's, are never replaced, and a name already set is left as it is.
+    fn put_proxy_variables(&mut self) {
+        let named = |key: &OsStr, name: &str| key.eq_ignore_ascii_case(name);
+        let has = |this: &Self, name: &str| -> bool {
+            match this.env.iter().rev().find(|(key, _)| named(key, name)) {
+                Some((_, Some(value))) => !value.is_empty(),
+                Some((_, None)) => false,
+                None => {
+                    !this.clear_env
+                        && [name.to_ascii_lowercase(), name.to_ascii_uppercase()]
+                            .iter()
+                            .any(|spelling| {
+                                std::env::var_os(spelling).is_some_and(|value| !value.is_empty())
+                            })
+                }
+            }
+        };
+        if ["http_proxy", "https_proxy", "all_proxy"]
+            .iter()
+            .any(|name| has(self, name))
+        {
+            return;
+        }
+        let network = self
+            .network
+            .clone()
+            .unwrap_or_else(canoa::network::Network::current);
+        let variables = match &self.reaches {
+            Some(urls) => crate::network::variables_for(&network, urls),
+            None => crate::network::program_variables(&network),
+        };
+        for (name, value) in variables {
+            if !has(self, &name) {
+                self.env
+                    .push((OsString::from(name), Some(OsString::from(value))));
+            }
         }
     }
 

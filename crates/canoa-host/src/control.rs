@@ -1566,6 +1566,8 @@ mod account_move;
 #[cfg(test)]
 mod index_tests;
 mod moves;
+#[cfg(test)]
+mod network_tests;
 mod overlays;
 #[cfg(test)]
 mod overlays_isolation_tests;
