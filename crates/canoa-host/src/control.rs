@@ -130,12 +130,16 @@ pub enum Grant {
     /// `speech/configure`: defines or removes a speech provider in canoa.cfg, which names a program this host runs as this user or
     /// an address it sends audio to: as much as access to the agent.
     VoiceSetup,
+    /// `state/get`, `state/put`, `state/append`, `state/list` and `state/remove`: named documents in the host's home, shared by every
+    /// key that holds it, where an app keeps what a browser would lose: drafts, the window layout and the permission rules with
+    /// their log. A remembered rule decides what an agent may do unasked, so this is as much as access to the agent.
+    State,
 }
 
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 20] {
+    pub fn all() -> [Self; 21] {
         [
             Self::LedgerRead,
             Self::LedgerWrite,
@@ -157,6 +161,7 @@ impl Grant {
             Self::Terminal,
             Self::Voice,
             Self::VoiceSetup,
+            Self::State,
         ]
     }
 
@@ -184,6 +189,7 @@ impl Grant {
             Self::Terminal => "terminal",
             Self::Voice => "voice",
             Self::VoiceSetup => "voice.setup",
+            Self::State => "state",
         }
     }
 
@@ -317,6 +323,8 @@ pub(crate) struct Control {
     max_records: usize,
     max_record_bytes: usize,
     ledger: Mutex<BTreeMap<String, Stored>>,
+    /// The documents `state/*` keeps in the home.
+    state: state::State,
 }
 
 /// Why a control channel could not be opened.
@@ -416,6 +424,7 @@ impl Control {
             max_records,
             max_record_bytes,
             ledger: Mutex::new(ledger),
+            state: state::State::new(dir.map(|dir| dir.join("state"))),
         })
     }
 
@@ -608,6 +617,16 @@ impl Control {
                 Some("ledger/clear") => self.clear(caller),
                 Some("peer/forget") => self.forget(caller),
                 Some("fs/read") => self.fs_read(caller, &params),
+                Some(
+                    method @ ("state/get" | "state/put" | "state/append" | "state/list"
+                    | "state/remove"),
+                ) => allow(caller, Grant::State).and_then(|()| match method {
+                    "state/get" => self.state.get(&params),
+                    "state/put" => self.state.put(&params),
+                    "state/append" => self.state.append(&params),
+                    "state/list" => self.state.list(&params),
+                    _ => self.state.remove(&params),
+                }),
                 Some("fs/list") => {
                     allow(caller, Grant::Folders).and_then(|()| self.files.list(caller, &params))
                 }
@@ -1262,6 +1281,9 @@ mod index;
 mod speech;
 #[cfg(test)]
 mod speech_tests;
+mod state;
+#[cfg(test)]
+mod state_tests;
 mod usage_read;
 pub(crate) use index::ToolsBackend;
 mod account_move;
