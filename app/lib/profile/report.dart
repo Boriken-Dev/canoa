@@ -65,9 +65,15 @@ final class ProfileReport {
 
   /// One line for the conversation: how many applied, and which did not, by key.
   String get summary {
-    final missed = notApplied.toList();
+    // Each line names the overlay it comes from, so two overlays that miss the same thing are two lines.
+    final missed = {
+      for (final item in notApplied)
+        item.layer.startsWith('overlay:')
+            ? '${item.layer.substring('overlay:'.length)}: ${item.key} (${item.state.label})'
+            : '${item.key} (${item.state.label})',
+    };
     return 'Profile for ${harnessLabels[harness] ?? harness}: ${applied.length} applied'
-        '${missed.isEmpty ? '' : '; not applied: ${missed.map((item) => '${item.key} (${item.state.label})').join(', ')}'}';
+        '${missed.isEmpty ? '' : '; not applied: ${missed.join(', ')}'}';
   }
 }
 

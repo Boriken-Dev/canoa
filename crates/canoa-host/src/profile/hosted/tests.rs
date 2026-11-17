@@ -1796,3 +1796,122 @@ fn the_knowledge_tools_are_told_the_profile_the_loadout_and_the_variables_it_sha
     );
     assert!(caller.env.iter().all(|(name, _)| name == "HOST_SECRET"));
 }
+
+#[test]
+fn an_overlays_bin_and_lib_reach_the_environment_every_harness_is_started_with() {
+    use crate::profile::overlay::resolve_path;
+    let temp = temp_with_skill();
+    install_files(
+        &temp,
+        "team",
+        &[
+            ("CONTEXT.md", "Team.\n"),
+            ("bin/tool", "x"),
+            ("lib/python/t.py", "x"),
+            ("lib/node/t.js", "x"),
+        ],
+    );
+    let offer = offer_of(&temp, &config_with("overlays = [\"team\"]\n"));
+    let root = temp.0.join("overlays").join("team");
+    let root = root.to_string_lossy();
+    let separator = if cfg!(windows) { ';' } else { ':' };
+    // The host's own entries on the three list variables, which the overlay's go in front of.
+    let host = |name: &str| match name {
+        "PYTHONPATH" => Some("host-py".to_owned()),
+        "NODE_PATH" => Some("host-node".to_owned()),
+        _ => lookup(name),
+    };
+    let expected = [
+        ("PATH", resolve_path(&root, "bin", cfg!(windows))),
+        (
+            "PYTHONPATH",
+            resolve_path(&root, "lib/python", cfg!(windows)),
+        ),
+        ("NODE_PATH", resolve_path(&root, "lib/node", cfg!(windows))),
+    ]
+    .map(|(name, directory)| {
+        (
+            name,
+            format!("{directory}{separator}{}", host(name).expect("held")),
+        )
+    });
+    // Claude, Codex and Pi run in the host's process and are given the environment as a request's; Grok, Antigravity and any
+    // other program get it on `canoa launch`'s first line.
+    for entry in ["Claude", "Codex", "Pi", "Grok", "Antigravity"] {
+        let connection = Connection::prepare(&offer, 0, entry, &host).expect("prepared");
+        let given: BTreeMap<&str, &str> = connection
+            .env()
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.expose()))
+            .collect();
+        let line: Value = serde_json::from_slice(&connection.launch_line()).expect("a line");
+        let launched: BTreeMap<&str, &str> = line["env"]
+            .as_array()
+            .expect("env")
+            .iter()
+            .map(|pair| {
+                (
+                    pair[0].as_str().expect("name"),
+                    pair[1].as_str().expect("value"),
+                )
+            })
+            .collect();
+        for (name, value) in &expected {
+            assert_eq!(given.get(name), Some(&value.as_str()), "{entry}: {name}");
+            assert_eq!(launched.get(name), Some(&value.as_str()), "{entry}: {name}");
+        }
+        let parts = parts_for(
+            &connection,
+            harness_of(None, entry),
+            &Takes::default(),
+            &host,
+        );
+        for (name, _) in &expected {
+            let each = item(&parts.report, &format!("env.{name}"));
+            assert_eq!(each["state"], "applied", "{entry}: {}", parts.report);
+            assert_eq!(each["layer"], "overlay:team");
+        }
+        let summary = parts.report["summary"].as_str().expect("summary");
+        assert!(!summary.contains("PATH"), "{entry}: {summary}");
+    }
+}
+
+#[test]
+fn each_line_not_applied_names_its_overlay_and_is_said_once() {
+    let temp = temp_with_skill();
+    for name in ["alpha", "beta"] {
+        install_files(
+            &temp,
+            name,
+            &[("setup.sh", "true\n"), ("CONTEXT.md", "x\n")],
+        );
+    }
+    let config = config_with("overlays = [\"alpha\", \"beta\"]\n");
+    let offer = offer_of(&temp, &config);
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let parts = parts_for(&connection, None, &Takes::default(), &lookup);
+    let summary = parts.report["summary"].as_str().expect("summary");
+    for name in ["alpha", "beta"] {
+        let line = format!("{name}: setup: setup.sh (not supported)");
+        assert_eq!(summary.matches(&line).count(), 1, "{summary}");
+    }
+    // An overlay the person's list names twice says each thing once.
+    let twice = config_with("overlays = [\"alpha\", \"alpha\"]\n");
+    let offer = offer_of(&temp, &twice);
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let parts = parts_for(&connection, None, &Takes::default(), &lookup);
+    let summary = parts.report["summary"].as_str().expect("summary");
+    assert_eq!(
+        summary
+            .matches("alpha: setup: setup.sh (not supported)")
+            .count(),
+        1,
+        "{summary}"
+    );
+    let items = parts.report["items"].as_array().expect("items");
+    let setups = items
+        .iter()
+        .filter(|item| item["key"] == "setup: setup.sh" && item["layer"] == "overlay:alpha")
+        .count();
+    assert_eq!(setups, 1, "{}", parts.report);
+}

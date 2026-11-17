@@ -2023,17 +2023,33 @@ fn parts_for(
     }
 
     items.extend(connection.hooks.items(&BTreeSet::new(), harness));
+    // An overlay listed twice reports each item once.
+    let mut seen = BTreeSet::new();
+    items.retain(|item| {
+        seen.insert((
+            item.key.clone(),
+            item.layer.clone(),
+            item.how.clone(),
+            item.state.as_str(),
+        ))
+    });
 
     let label = harness.unwrap_or(&connection.entry);
     let applied = items
         .iter()
         .filter(|item| item.state == State::Applied)
         .count();
-    let missed: Vec<String> = items
-        .iter()
-        .filter(|item| item.state != State::Applied)
-        .map(|item| format!("{} ({})", item.key, item.state.as_str()))
-        .collect();
+    // Each line names the overlay it comes from, so two overlays that miss the same thing are two lines.
+    let mut missed: Vec<String> = Vec::new();
+    for item in items.iter().filter(|item| item.state != State::Applied) {
+        let line = match item.layer.strip_prefix("overlay:") {
+            Some(overlay) => format!("{overlay}: {} ({})", item.key, item.state.as_str()),
+            None => format!("{} ({})", item.key, item.state.as_str()),
+        };
+        if !missed.contains(&line) {
+            missed.push(line);
+        }
+    }
     let summary = format!(
         "Profile {} for {label}: {applied} applied{}",
         connection.name,
