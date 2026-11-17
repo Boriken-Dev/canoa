@@ -153,6 +153,20 @@ beside the layer it came from, and what each layer removed. canoa reads the same
 (`canoa_host::profile`); `crates/canoa-host/tests/vectors/profile.json` holds the app and the host to the same merge.
 What each harness takes of it, and how, is [below](#applying-a-profile).
 
+A layer may also suggest how a session delegates, with `[delegate]` (an overlay does it with `[harness.ID.delegate]` for the
+harness it is read for): `default` is the agent a task goes to when none is named, `sources` the agents a task may name, and
+`max_running` how many tasks of the session run at once. It is only a suggestion. The default is used only when the connection
+may use that agent, `sources` can only narrow what `[host.delegate] sources` and the connection already allow, and
+`max_running` can only be below the host's own limits. What the person sets in the session's Delegation setup replaces the
+suggestion key by key, and the setup and the Delegate task dialog say which layer a value in effect came from.
+
+```toml
+[profile.delegate]
+default = "Claude"
+sources = ["Claude", "Pi"]
+max_running = 3
+```
+
 ```toml
 [overlays]
 team = "https://github.com/example/canoa-profiles.git@main#team"   # an AOS source string, <repository>@<ref>#<path>
