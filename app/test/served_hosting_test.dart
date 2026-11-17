@@ -250,6 +250,27 @@ void main() {
       expect(await store.save(more), isTrue);
     });
 
+    test('the app that runs the host writes the tables it changed, its own among them, in the file\'s format', () async {
+      final state = _Hosting();
+      final config = CanoaConfig.parse('[desktop]\nstart_hidden = false\n');
+      final store = HostConfigStore.ofDesktop(HostFiles(_over(state)), config);
+      expect(store.loaded, isTrue);
+      expect(await store.save(config), isFalse, reason: 'nothing changed, so nothing is sent');
+      expect(state.methods('config/set'), isEmpty);
+
+      final changed = config.copyWith(startHidden: true, closeToTray: true);
+      await store.save(changed);
+      final written = [for (final (method, params) in state.asked) if (method == 'config/set') params];
+      expect([for (final each in written) each['section']], ['desktop'], reason: 'only the table that changed');
+      expect((written.single['value'] as Map)['start_hidden'], true);
+      expect(await store.save(changed), isFalse, reason: 'and it is not sent again');
+
+      // A file written by the app itself meanwhile is what the next change is measured from.
+      store.adopt(config);
+      await store.save(changed);
+      expect(state.methods('config/set'), hasLength(2));
+    });
+
     test('a table the host will not take comes back in its words and is not written', () async {
       final state = _Hosting();
       final (store, config) = await load(state);
