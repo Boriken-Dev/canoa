@@ -52,6 +52,20 @@ def rrect(x: float, y: float, w: float, h: float, r: float, hole: bool = False) 
     )
 
 
+def band(cx: float, cy: float, r: float, width: float, start: float, end: float) -> str:
+    """A band of [width] round a circle of radius [r], from angle [start] to [end] in degrees (0 is to the right, clockwise)."""
+    outer, inner = r + width / 2, r - width / 2
+
+    def at(radius: float, degrees: float) -> str:
+        angle = math.radians(degrees)
+        return f"{num(cx + radius * math.cos(angle))} {num(cy + radius * math.sin(angle))}"
+
+    return (
+        f"M{at(outer, start)}A{num(outer)} {num(outer)} 0 0 1 {at(outer, end)}"
+        f"L{at(inner, end)}A{num(inner)} {num(inner)} 0 0 0 {at(inner, start)}Z"
+    )
+
+
 def bar(x1: float, y1: float, x2: float, y2: float, width: float) -> str:
     """A straight bar of [width] between two points, with flat ends."""
     length = math.hypot(x2 - x1, y2 - y1)
@@ -116,6 +130,13 @@ def glyphs() -> dict[str, list[str]]:
         rrect(2.5, 3.5, 19, 17, 3) + rrect(4.4, 5.4, 15.2, 13.2, 1.6, hole=True),
         pts([(6.6, 8.2), (8.4, 7.0), (12.6, 11.3), (8.4, 15.6), (6.6, 14.4), (9.6, 11.3)]),
         rrect(12.4, 14.2, 5.4, 1.9, 0.9),
+    ]
+
+    # Piper: a loudspeaker and the sound that leaves it.
+    out["speaker"] = [
+        pts([(2.5, 9.2), (6.2, 9.2), (11, 5), (11, 19), (6.2, 14.8), (2.5, 14.8)]),
+        band(12.5, 12, 4.6, 1.9, -42, 42),
+        band(12.5, 12, 8.2, 1.9, -42, 42),
     ]
     return out
 

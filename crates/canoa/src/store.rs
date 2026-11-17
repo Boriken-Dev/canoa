@@ -114,8 +114,8 @@ fn empty_object() -> Value {
 }
 
 /// The glyphs the application draws for [`StoreInfo::icon`]: simple original pictures, none a project's logo.
-pub const STORE_GLYPHS: [&str; 7] = [
-    "nodes", "indent", "crucible", "brackets", "chip", "branch", "prompt",
+pub const STORE_GLYPHS: [&str; 8] = [
+    "nodes", "indent", "crucible", "brackets", "chip", "branch", "prompt", "speaker",
 ];
 
 /// Who a store's program is, from [`ProgramStore::describe`]. Cheap, and the same on every call.

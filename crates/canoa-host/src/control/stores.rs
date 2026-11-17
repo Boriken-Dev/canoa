@@ -755,6 +755,7 @@ mod runtimes_tests {
             ("python_store", "python", "indent"),
             ("foundry_store", "foundry", "crucible"),
             ("whisper_store", "whisper", "chip"),
+            ("piper_store", "piper", "speaker"),
             ("git_bash_store", "git-bash", "branch"),
             ("powershell_store", "powershell", "prompt"),
         ];

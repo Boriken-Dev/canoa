@@ -201,7 +201,7 @@ impl Recipe for PiperRecipe {
             "A local neural voice that reads replies aloud on this computer, with an English and a Spanish voice; the text is sent nowhere."
                 .to_owned(),
         );
-        info.icon = Some("chip".to_owned());
+        info.icon = Some("speaker".to_owned());
         info.platforms = measured_platforms();
         info.channels = ["standard", "english", "spanish"]
             .map(str::to_owned)
