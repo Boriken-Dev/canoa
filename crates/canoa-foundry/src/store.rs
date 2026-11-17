@@ -1,10 +1,10 @@
 //! Foundry Local as a Store program: the command line, the service and the runtime libraries the publisher ships as one
 //! archive, unpacked into the version's folder.
 //!
-//! Microsoft publishes them on GitHub as `cli-preview-X.Y.Z` releases: an MSIX (a zip) for Windows and a `tar.gz` for Linux.
-//! The release listing carries each asset's SHA-256, which the download is checked against. An MSIX is unpacked, never
-//! installed: nothing outside the version's folder changes, and the copy does not replace one the person installed with their
-//! package manager.
+//! Microsoft publishes them on GitHub as `cli-preview-X.Y.Z` releases: an MSIX (a zip) for Windows, a `tar.gz` for Linux and a
+//! zip for Apple silicon Macs. The release listing carries each asset's SHA-256, which the download is checked against. An
+//! MSIX is unpacked, never installed: nothing outside the version's folder changes, and the copy does not replace one the
+//! person installed with their package manager.
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -103,6 +103,7 @@ impl Recipe for FoundryRecipe {
         );
         info.icon = Some("crucible".to_owned());
         info.platforms = measured_platforms();
+        info.platforms.push(Platform::new("macos", "aarch64"));
         info.endpoints = [RELEASES_API.to_owned(), DOWNLOADS.to_owned()]
             .into_iter()
             .chain(ASSET_HOSTS.iter().map(|host| (*host).to_owned()))
@@ -166,13 +167,22 @@ impl Recipe for FoundryRecipe {
         platform: &Platform,
         tools: &Object<dyn InstallTools>,
     ) -> Result<Release, ProviderError> {
-        let os = spell(&platform.os, &[("windows", "win"), ("linux", "linux")])
-            .ok_or_else(|| unsupported_error("Foundry Local is not published for this system"))?;
+        let os = spell(
+            &platform.os,
+            &[("windows", "win"), ("linux", "linux"), ("macos", "osx")],
+        )
+        .ok_or_else(|| unsupported_error("Foundry Local is not published for this system"))?;
         let arch =
             spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")]).ok_or_else(|| {
                 unsupported_error("Foundry Local is not published for this processor")
             })?;
         let windows = platform.os == "windows";
+        let mac = platform.os == "macos";
+        if mac && arch != "arm64" {
+            return Err(unsupported_error(
+                "Foundry Local is published for Apple silicon Macs only",
+            ));
+        }
         let doc = listing(tools)?;
         let all = clis(&doc);
         let cli = match version {
@@ -183,7 +193,11 @@ impl Recipe for FoundryRecipe {
             None => newest(all),
         }
         .ok_or_else(|| unsupported_error("the repository lists no such command line release"))?;
-        let extension = if windows { "msix" } else { "tar.gz" };
+        let extension = match (windows, mac) {
+            (true, _) => "msix",
+            (_, true) => "zip",
+            _ => "tar.gz",
+        };
         let name = format!("foundry-{}-{os}-{arch}.{extension}", cli.version);
         let digest = cli
             .assets
@@ -198,14 +212,19 @@ impl Recipe for FoundryRecipe {
             None,
             Check::Sha256 { value: digest },
         );
-        // The Windows package is a zip with every file at its root; the Linux archive holds one folder, whose `lib` is the program.
+        // The Windows package is a zip with every file at its root; the Linux archive and the Mac's zip hold one folder, whose
+        // `lib` (Linux) or `bin` (Mac) is the program. The Mac's zip carries one link, which `finish` writes as a copy.
         let step = if windows {
             UnpackStep::new("zip", "foundry", 0, true)
+        } else if mac {
+            UnpackStep::new("zip", "foundry", 1, true)
         } else {
             UnpackStep::new("tar.gz", "foundry", 1, true)
         };
         let launch = if windows {
             "foundry/foundry.exe"
+        } else if mac {
+            "foundry/bin/foundry"
         } else {
             "foundry/lib/foundry"
         };
@@ -232,21 +251,32 @@ impl Recipe for FoundryRecipe {
     }
 
     fn finish(&self, finish: &Finish<'_>) -> Result<(), ProviderError> {
+        // The Mac's zip holds `libonnxruntime.1.dylib` as a link to `libonnxruntime.dylib`, which the unpack leaves out and
+        // `libfoundry_local.dylib` loads by the first name: written here as a copy.
+        let bin = std::path::Path::new(finish.staging).join("foundry/bin");
+        let (linked, target) = (
+            bin.join("libonnxruntime.1.dylib"),
+            bin.join("libonnxruntime.dylib"),
+        );
+        if target.is_file() && !linked.exists() {
+            std::fs::copy(&target, &linked)
+                .map_err(|error| internal_error(format!("libonnxruntime.1.dylib: {error}")))?;
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
             // The archive's own modes are kept when it carries them; these three are the programs, so make sure.
-            let lib = std::path::Path::new(finish.staging).join("foundry/lib");
-            for name in ["foundry", "foundrylocald", "foundry-local-host"] {
-                let path = lib.join(name);
-                if path.is_file() {
-                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                        .map_err(|error| internal_error(format!("{name}: {error}")))?;
+            for dir in ["foundry/lib", "foundry/bin"] {
+                let dir = std::path::Path::new(finish.staging).join(dir);
+                for name in ["foundry", "foundrylocald", "foundry-local-host"] {
+                    let path = dir.join(name);
+                    if path.is_file() {
+                        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                            .map_err(|error| internal_error(format!("{name}: {error}")))?;
+                    }
                 }
             }
         }
-        #[cfg(not(unix))]
-        let _ = finish;
         Ok(())
     }
 }
