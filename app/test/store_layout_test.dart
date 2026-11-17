@@ -240,6 +240,20 @@ void main() {
       expect(find.byKey(const Key('store-entry-other-lint')), findsOneWidget);
     });
 
+    testWidgets('removing the catalog the filter chose shows every catalog again, not an empty Store', (tester) async {
+      await open(tester);
+      await tester.tap(find.byKey(const Key('catalog-filter-other')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('store-entry-team-review')), findsNothing);
+
+      final state = tester.state<StoreSectionState>(find.byType(StoreSection));
+      await tester.runAsync(() => state.controller.removeCatalog('other'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('store-entry-team-review')), findsOneWidget, reason: 'the gone catalog no longer filters');
+      expect(find.byKey(const Key('store-entry-other-lint')), findsNothing);
+      expect(state.view.catalogs, isEmpty);
+    });
+
     testWidgets('choosing a type shows only that type, and a search stays within it', (tester) async {
       await open(tester);
       await tester.tap(find.byKey(const Key('store-index-skills')));

@@ -342,9 +342,24 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
 
   void _openSettings() => Navigator.of(context).push<void>(selectablePage(builder: (_) => StoreSettingsPage(controller: controller)));
 
+  /// A catalog the person removed can still be the chosen filter of [id]'s page, where it would hide every entry and leave no
+  /// chip to undo it: it is forgotten, and the tags chosen in it with it.
+  void _forgetGoneCatalogs(String id) {
+    final view = viewOf(id);
+    if (view.catalogs.isEmpty) return;
+    final extension = _extension(id);
+    final present = extension != null
+        ? {for (final item in extension.items()) item.catalog}
+        : {...controller.config.catalogs.keys, for (final loaded in controller.loaded) loaded.label};
+    if (view.catalogs.every(present.contains)) return;
+    view.catalogs.removeWhere((label) => !present.contains(label));
+    view.tags.clear();
+  }
+
   @override
   Widget build(BuildContext context) {
     final current = type;
+    _forgetGoneCatalogs(current);
     final indexed = selection != null;
     return PopScope(
       canPop: widget.embedded,
