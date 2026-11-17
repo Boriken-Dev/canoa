@@ -215,7 +215,6 @@ profiles = ["review", "plain"]        # a client chooses among these; the first 
 
 [host.profiles.review]
 context = { text = "Review before you change anything." }
-share_env = ["GITHUB_TOKEN"]          # what the overlays below may read
 overlays = ["team"]                   # installed by the app in overlays/ beside canoa.cfg
 allow_mcp = { team = "sha256:…" }     # an overlay's MCP server, at the digest of its definition
 allow_hooks = { team = "sha256:…" }   # an overlay's hooks, at the digest of its files

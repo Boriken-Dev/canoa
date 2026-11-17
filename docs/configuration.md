@@ -183,7 +183,6 @@ effort = "high"
 mode = "plan"
 context = { text = "Answer in Spanish." }      # or { file = "CONTEXT.md" }
 unset = ["mode"]                               # not beside a value it takes back
-share_env = ["GITHUB_TOKEN"]                   # variables overlays and projects may read; only in your own layers
 
 [profile.env.RUST_LOG]
 value = "debug"                                # written here: never a secret
@@ -222,9 +221,9 @@ directory: canoa.cfg's for yours and an agent's, the overlay's, or the working d
 
 - Its paths must be relative and stay inside its directory: no root, drive, `~`, `:` or `..`, and a file it names for
   a secret is read only if, its links followed, it is still inside.
-- It reads only the variables of this computer that one of your own layers lists in `share_env`, such as
-  `share_env = ["GITHUB_TOKEN"]` in `[profile]`. An environment variable or an MCP server of its that reads any other
-  is left out, the lower layer's entry stays, and Settings → Profiles lists it as left out and what it reads.
+- It reads any variable of this computer, by `${NAME}` in its text or by a `from_env` or `env` provider reference, as
+  your own layers do. An overlay's report lists each such read as `env-passthrough`, and an MCP server it reaches over
+  plain `http` as `insecure-transport`; its headers are still sent.
 - It may set any variable, including `PATH`, `NODE_OPTIONS`, `LD_PRELOAD`, `HTTPS_PROXY`, a harness's home or an
   endpoint: you chose the overlay, and what it sets is applied. The one exception is the format's own: a name the AOS
   specification reserves for the host, `AOS_*`, `*_OVERLAY_ROOT` and `*_OVERLAY_STATE`, leaves the overlay out whole.
