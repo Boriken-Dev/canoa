@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/store/store_section.dart';
 import 'package:canoa/loadout/mcp_registry.dart' show RegistryRefusal;
+import 'package:canoa/loadout/loadout_controller.dart' show knownCatalogs;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -183,7 +184,7 @@ void main() {
     await open(tester, text: '[catalogs]\nboriken = false\n');
     await tapKey(tester, 'overlays-discover');
     expect(find.byKey(const Key('catalogs-empty')), findsOneWidget);
-    expect(find.byKey(const Key('known-catalog-aos-examples')), findsOneWidget);
+    expect(find.byKey(Key('known-catalog-$defaultCatalogLabel')), findsOneWidget);
     expect(find.textContaining('https://github.com/ana/overlays.git@main#catalog.toml'), findsWidgets, reason: 'an example to paste');
     expect(find.textContaining('<repository>'), findsNothing);
     expect(find.textContaining('add one to [overlays]'), findsNothing);
@@ -193,12 +194,12 @@ void main() {
     expect(saved.last.catalogs.keys, ['team-things'], reason: 'the label is the repository\'s name when none is given');
   });
 
-  testWidgets('a known catalog is added in one tap, under its own label', (tester) async {
+  testWidgets('Boriken Dev\'s catalog is the only one offered to start from', (tester) async {
     await open(tester, text: '[catalogs]\nboriken = false\n');
     await tapKey(tester, 'overlays-discover');
-    await tapKey(tester, 'known-catalog-add-aos-examples');
-    expect(saved.last.catalogs.keys, ['aos-examples']);
-    expect(saved.last.catalogs['aos-examples']!.path, 'examples/registry/catalog.toml');
+    expect(find.byKey(Key('known-catalog-$defaultCatalogLabel')), findsOneWidget);
+    expect(find.byKey(const Key('known-catalog-aos-examples')), findsNothing);
+    expect(knownCatalogs.map((each) => each.label), [defaultCatalogLabel]);
   });
 
   testWidgets('the default catalog removed comes back from the empty state under its own label', (tester) async {

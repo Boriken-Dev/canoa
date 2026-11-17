@@ -32,17 +32,12 @@ typedef FindProgram = Future<String?> Function(String program);
 /// offer, so adding to it is a line here and no logic.
 typedef KnownCatalog = ({String label, String about, String spec});
 
-/// Where the sample catalogs of the Agent Overlay Specification live.
+/// The catalogs the Store offers to start from: Boriken Dev's overlays alone.
 const knownCatalogs = <KnownCatalog>[
   (
     label: defaultCatalogLabel,
     about: 'Boriken Dev\'s overlays: the engineering, language, network and release rules and tools.',
     spec: defaultCatalogSpec,
-  ),
-  (
-    label: 'aos-examples',
-    about: 'The specification\'s own example catalog: small overlays that show what a catalog lists.',
-    spec: 'https://github.com/Boriken-Dev/agent-overlay-spec.git@main#examples/registry/catalog.toml',
   ),
 ];
 
