@@ -82,6 +82,20 @@ pub struct Config {
     pub local_profiles: LocalProfiles,
     /// `[skill_pins]`, by lower-case skill name: the tree digest each skill from elsewhere must have.
     pub skill_pins: BTreeMap<String, String>,
+    /// `[host.extensions.NAME]`: the `store_extension` providers that add types to the Store, in the file's order.
+    pub extensions: Vec<Extension>,
+}
+
+/// One `[host.extensions.NAME]`: a `store_extension` provider the host loads, whose store types the Store lists.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Extension {
+    /// The entry's name.
+    pub name: String,
+    /// Where its code is.
+    pub origin: Origin,
+    /// The `store_extension` provider id.
+    pub provider: String,
 }
 
 /// One `[agents.NAME] a2a = { url, peer, source, title }`: an agent on another machine that a task may be handed to.
@@ -1263,6 +1277,8 @@ struct RawHost {
     #[serde(default)]
     tools: IndexMap<String, toml::Table>,
     #[serde(default)]
+    extensions: IndexMap<String, RawExtension>,
+    #[serde(default)]
     profiles: IndexMap<String, toml::Table>,
     #[serde(default)]
     accounts: IndexMap<String, RawAccount>,
@@ -1496,6 +1512,17 @@ struct RawAsks {
     bypass: Option<bool>,
     setting_sources: Option<Vec<String>>,
     modes: Option<Vec<String>>,
+}
+
+/// `[host.extensions.NAME]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawExtension {
+    library: Option<String>,
+    source: Option<String>,
+    source_settings: Option<toml::Table>,
+    import_search: Option<String>,
+    provider: String,
 }
 
 #[derive(Deserialize)]
@@ -1996,6 +2023,32 @@ impl Config {
             };
             entries.push(entry(name, kind, common)?);
         }
+        let mut extensions = Vec::new();
+        for (name, extension) in host.extensions {
+            check_name(&name)?;
+            if extension.provider.is_empty() {
+                return Err(invalid(&name, "provider must not be empty"));
+            }
+            let Some(origin) = origin_of(
+                &name,
+                base,
+                &directory,
+                OriginKeys {
+                    library: extension.library.as_deref(),
+                    source: extension.source.as_deref(),
+                    source_settings: extension.source_settings,
+                    import_search: extension.import_search.as_deref(),
+                },
+            )?
+            else {
+                return Err(invalid(&name, "an extension needs library or source"));
+            };
+            extensions.push(Extension {
+                name,
+                origin,
+                provider: extension.provider,
+            });
+        }
         for (name, table) in host.tools {
             check_name(&name)?;
             let (common, spec) = tool_of(&name, base, &directory, table)?;
@@ -2065,6 +2118,7 @@ impl Config {
             kb,
             delegate,
             skill_pins,
+            extensions,
         })
     }
 

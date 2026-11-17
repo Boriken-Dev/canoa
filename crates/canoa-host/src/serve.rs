@@ -1738,10 +1738,16 @@ impl Serving {
                         _ => kept,
                     };
                     match &options.programs {
-                        Some((programs, providers)) => kept.with_stores(control::Stores::new(
-                            Arc::clone(programs),
-                            providers.clone(),
-                        )),
+                        Some((programs, providers)) => kept.with_stores(
+                            control::Stores::new(Arc::clone(programs), providers.clone())
+                                .extended(&config.extensions),
+                        ),
+                        None if !config.extensions.is_empty() => {
+                            match control::Stores::built_in() {
+                                Ok(stores) => kept.with_stores(stores.extended(&config.extensions)),
+                                Err(_) => kept,
+                            }
+                        }
                         None => kept,
                     }
                 }),

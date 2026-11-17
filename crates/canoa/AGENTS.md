@@ -108,6 +108,10 @@ Returns the text.
 - `verified()` is only for a trusted host integration after it has proven identity.
 - The registry is in memory.
 
+## `store_extension` (`canoa::store::extension`, feature `store`)
+
+A Guatiao kind that adds types to the Store: `describe() -> ExtensionInfo { title, publisher, types: Vec<ExtensionType { id, title, icon?, stores }> }`. `stores` names `program_store` providers the same library offers; the host lists and installs them as any store. `ExtensionType::problem` says why an id or title is refused (`RESERVED_TYPES` are the Store's own).
+
 ## `program_store` (`canoa::store`, feature `store`)
 
 A Guatiao kind, not ACP: a provider that knows one program (where its copies are, what is newest, how it installs). Needs

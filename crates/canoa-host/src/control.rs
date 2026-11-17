@@ -793,7 +793,10 @@ impl Control {
                 ) => {
                     return Some(self.worktree(caller, method, &request, &id));
                 }
-                Some(method @ ("store/list" | "store/report" | "store/latest" | "store/plan")) => {
+                Some(
+                    method @ ("store/list" | "store/extensions" | "store/report" | "store/latest"
+                    | "store/plan"),
+                ) => {
                     // Running a program of the user's, and choosing which copy, is the person's; a key reads what is found.
                     let runs = method == "store/report"
                         && (params

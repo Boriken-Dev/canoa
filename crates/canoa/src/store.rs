@@ -18,6 +18,7 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Schema, Secret, ToValue, Value};
 use coqui_acp_api::{Environment, LoginAnswer, LoginForm, ProcessSpawner};
 
+pub mod extension;
 pub mod recipe;
 
 /// How long an `apply` may run before the host cancels it, in milliseconds, by default.

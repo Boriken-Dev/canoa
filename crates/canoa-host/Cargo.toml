@@ -154,6 +154,10 @@ name = "echo_source"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "sample_extension"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "stdio_agent"
 
 [[example]]

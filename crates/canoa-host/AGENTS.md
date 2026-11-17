@@ -90,6 +90,9 @@ import_dirs = ["python/runtime"]      # optional, Windows: where python3.dll is 
 [host.providers.NAME.settings]        # the provider's configuration, for one that is built from one
 prefix = "hi"                         # checked against the provider's schema when a connection loads it
 
+[host.extensions.NAME]                # a Guatiao store_extension: adds types to the Store; see "Store extensions" below
+library = "..."                       # or source = "..." (with source_settings, import_search, as a provider)
+provider = "..."                      # the store_extension provider id
 [host.tools.NAME]                     # a command-line tool with no ACP, served as an ACP agent; see "A tool entry" below
 program = "pi"                        # required; found as the OS finds a command
 args = ["--mode", "rpc"]
@@ -834,6 +837,8 @@ The params and results are the JSON of `canoa::store`'s models:
 | Method | Params | Result |
 | --- | --- | --- |
 | `store/list` | `kind`? (`agents`, the default, or `runtimes`) | `{"stores": [StoreInfo + "provider"]}`: the agents' programs, or the Runtimes type's (`node_store`, `python_store`); every other `store/*` method takes either kind's provider |
+| `store/list` | `kind`: `extension`, `type`: a type's id | the same shape for the stores of a type an extension adds; an unknown type is `-32003` |
+| `store/extensions` | none | `{"types": [{"id", "title", "icon"?, "stores": [provider ids], "extension", "extension_title", "publisher"}]}`: the types the `[host.extensions]` add, in canoa.cfg's order; needs `store.read` |
 | `store/report` | `provider`, `probe`? (bool), `pick`? | `ProgramReport`: the copies the host finds; no network |
 | `store/latest` | `provider`, `channel`? | `LatestReport` |
 | `store/plan` | `provider`, `action` (`install`, `update`, `uninstall`), `channel`?, `version`? | `InstallPlan`, with its `token`: what an apply would do, nothing written |
@@ -858,6 +863,17 @@ The params and results are the JSON of `canoa::store`'s models:
   `store/remove` need `store.programs` (the owner holds every grant): there is no `store.write` grant and `[host.control]` refuses the name, since an install
   runs code as the user. A store that is not one of the host's is `-32003`; a plan or install the host refuses `-32002`.
 - The overlay store's git half is `overlay/*` and `catalog/*` (see "Overlays for a page" above).
+
+**Store extensions** (`[host.extensions.NAME]`, `canoa::store::extension`): a `store_extension` provider, loaded from a library or a
+source like any other, whose `describe` names the types it adds (`id`: 1 to 32 lower-case letters and digits, not `overlays`,
+`skills`, `agents`, `mcps` or `runtimes`; `title`; `icon`?; `stores`: the `program_store` provider ids the same library offers). The
+host loads each into a registry of its own, lists its types in `store/extensions`, and plans, applies, reports and removes through the
+same `store/*` methods and the same plan the person confirms, so an extension writes no installer. One that does not load, names a
+type already taken, or a store it does not offer (or one of the built-in ones) is skipped and logged; the others stay. The app lists
+Runtimes and each type after the built-in ones. `examples/sample_extension.rs` is a stand-in library; `tests/extension_stores.rs` runs it.
+
+**Installed runtimes** (Node, Python; Store type Runtimes) are put on the `PATH` of every program the host starts through `spawn::Command`
+(agents, their MCP servers, tools), after the person's own `PATH` entries so their own copy wins; a program started with no `PATH` gets none.
 
 **The catalog index** (`store/index`, `store::index`) lists every `[catalogs]` source of the host's canoa.cfg and every program store as
 one normalized list, so a client reads cards from one call and not one fetch an entry. `store/index` `{"refresh"?: bool, "icons"?: bool}`

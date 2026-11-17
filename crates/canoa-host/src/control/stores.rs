@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use canoa::store::{Action, InstallPlan, StoreSettings};
+use canoa::store::extension::{ExtensionType, StoreExtension};
+use canoa::store::{Action, InstallPlan, ProgramStore, StoreSettings};
 use coqui_acp_api::guatiao::{Alloc, FromValue, ToValue};
 use coqui_acp_api::{LoginAnswer, LoginForm};
 use coqui_transport::{Channel, Failure};
@@ -36,6 +37,17 @@ pub(crate) struct Stores {
     providers: Vec<String>,
     /// The stores of the Runtimes type, listed by `store/list` only when asked for.
     runtimes: Vec<String>,
+    /// The store types the extensions of canoa.cfg add.
+    types: Vec<AddedType>,
+}
+
+/// A store type an extension adds, with the extension it comes from.
+#[derive(Clone, Debug)]
+struct AddedType {
+    info: ExtensionType,
+    extension: String,
+    extension_title: String,
+    publisher: String,
 }
 
 impl core::fmt::Debug for Stores {
@@ -54,7 +66,72 @@ impl Stores {
             programs,
             providers,
             runtimes: Vec::new(),
+            types: Vec::new(),
         }
+    }
+
+    /// The same, also offering the store types the `extensions` of canoa.cfg add. Each extension's library is loaded into a
+    /// registry of its own, so an id it offers is resolved from its file and a built-in store is never replaced. One that does
+    /// not load, or that adds a type already taken or a store it does not offer, is skipped and logged: the others stay.
+    pub(crate) fn extended(mut self, extensions: &[crate::config::Extension]) -> Self {
+        for extension in extensions {
+            if let Err(why) = self.load_extension(extension) {
+                tracing::warn!(extension = extension.name.as_str(), "not loaded: {why}");
+            }
+        }
+        self
+    }
+
+    fn load_extension(&mut self, extension: &crate::config::Extension) -> Result<(), String> {
+        let mut registry =
+            coqui_acp_api::guatiao::library::Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        crate::provider::open(&mut registry, &extension.origin).map_err(|e| e.to_string())?;
+        let offer = registry
+            .offer::<dyn StoreExtension>(&extension.provider)
+            .ok_or_else(|| format!("no provider {}", extension.provider))?
+            .map_err(|_| format!("{} is not a store_extension", extension.provider))?;
+        let info = offer
+            .default_instance()
+            .ok_or_else(|| "it needs settings".to_owned())?
+            .describe()
+            .map_err(|e| e.to_string())?;
+        let mut added = Vec::new();
+        for kind in info.types {
+            if let Some(problem) = kind.problem() {
+                return Err(problem);
+            }
+            if self
+                .types
+                .iter()
+                .chain(&added)
+                .any(|t: &AddedType| t.info.id == kind.id)
+            {
+                return Err(format!("the type {:?} is already added", kind.id));
+            }
+            for store in &kind.stores {
+                let taken = self
+                    .providers
+                    .iter()
+                    .chain(&self.runtimes)
+                    .chain(self.types.iter().flat_map(|t| &t.info.stores))
+                    .any(|id| id == store);
+                if taken || registry.offer::<dyn ProgramStore>(store).is_none() {
+                    return Err(format!(
+                        "the store {store:?} is taken or not one this extension offers"
+                    ));
+                }
+            }
+            added.push(AddedType {
+                info: kind,
+                extension: extension.name.clone(),
+                extension_title: info.title.clone(),
+                publisher: info.publisher.clone(),
+            });
+        }
+        drop(offer);
+        self.programs.add_registry(Arc::new(registry));
+        self.types.extend(added);
+        Ok(())
     }
 
     /// The same, also keeping the runtimes the stores named `runtimes` install.
@@ -117,6 +194,7 @@ impl Stores {
             .providers
             .iter()
             .chain(&self.runtimes)
+            .chain(self.types.iter().flat_map(|t| &t.info.stores))
             .any(|known| known == provider)
         {
             return Err((NOT_FOUND, format!("this host has no store {provider}")));
@@ -135,13 +213,46 @@ impl Stores {
         params: &Value,
         owner: Option<&str>,
     ) -> Result<Value, Failed> {
+        if method == "store/extensions" {
+            let types: Vec<Value> = self
+                .types
+                .iter()
+                .map(|t| {
+                    json!({
+                        "id": t.info.id, "title": t.info.title, "icon": t.info.icon,
+                        "stores": t.info.stores, "extension": t.extension,
+                        "extension_title": t.extension_title, "publisher": t.publisher,
+                    })
+                })
+                .collect();
+            return Ok(json!({"types": types}));
+        }
         if method == "store/list" {
-            // The Agents type's stores, or with `{"kind": "runtimes"}` the Runtimes type's.
+            // The Agents type's stores, with `{"kind": "runtimes"}` the Runtimes type's, or with
+            // `{"kind": "extension", "type": ID}` those of a type an extension adds.
             let kind = params.get("kind").and_then(Value::as_str);
+            let added;
             let of = match kind {
                 None | Some("agents") => &self.providers,
                 Some("runtimes") => &self.runtimes,
-                Some(_) => return Err((BAD_PARAMS, "kind is agents or runtimes".to_owned())),
+                Some("extension") => {
+                    let id = text(params, "type")?;
+                    added = self
+                        .types
+                        .iter()
+                        .find(|t| t.info.id == id)
+                        .ok_or_else(|| (NOT_FOUND, format!("no extension adds the type {id}")))?
+                        .info
+                        .stores
+                        .clone();
+                    &added
+                }
+                Some(_) => {
+                    return Err((
+                        BAD_PARAMS,
+                        "kind is agents, runtimes or extension".to_owned(),
+                    ));
+                }
             };
             let ids: Vec<&str> = of.iter().map(String::as_str).collect();
             let listed = self.programs.list(&ids).map_err(|error| refusal(&error))?;

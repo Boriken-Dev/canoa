@@ -13,8 +13,8 @@ use core::fmt;
 use core::time::Duration;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
 use canoa::store::{
@@ -395,6 +395,8 @@ pub struct Applied {
 pub struct Programs {
     shelf: Shelf,
     registry: Arc<Registry>,
+    /// The registries of extensions' libraries, asked for a store the first one does not offer.
+    extras: Mutex<Vec<Arc<Registry>>>,
     transport: Arc<dyn Transport>,
     options: Options,
     /// The plans this host made, by token: it applies its own copy of a plan, never one a client sends.
@@ -424,10 +426,20 @@ impl Programs {
         Self {
             shelf,
             registry,
+            extras: Mutex::new(Vec::new()),
             transport: Arc::new(HttpTransport::default()),
             options: Options::default(),
             plans: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Also offers the stores of `registry`, which an extension's library was loaded into; a store the first registry offers
+    /// is never replaced by one of these.
+    pub fn add_registry(&self, registry: Arc<Registry>) {
+        self.extras
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(registry);
     }
 
     /// Fetches through `transport`.
@@ -459,9 +471,14 @@ impl Programs {
         settings: &StoreSettings,
     ) -> Result<Arc<dyn ProgramStore>, StoreError> {
         use coqui_acp_api::guatiao::ToValue;
-        let offer = self
-            .registry
-            .offer::<dyn ProgramStore>(id)
+        let extras = self
+            .extras
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let offer = core::iter::once(&self.registry)
+            .chain(&extras)
+            .find_map(|registry| registry.offer::<dyn ProgramStore>(id))
             .ok_or_else(|| StoreError::Unknown(id.to_owned()))?
             .map_err(|_| StoreError::Unknown(id.to_owned()))?;
         let config: Value = settings
