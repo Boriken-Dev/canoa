@@ -107,6 +107,11 @@ final class FakeStoreHost {
   /// What `config/check` refuses with, in the host's words; null accepts.
   String? checkRefusal;
 
+  /// Foundry Local's models as `foundry/models` lists them (`id`, `cached`, `loaded` and the rest), and whether the host found
+  /// Foundry Local; `foundry/model` changes them the way the real command line does.
+  List<Map<String, Object?>> foundryModels = [];
+  bool foundryInstalled = false;
+
   /// Every line the app sent on any link, whole, to look for what must never be in one.
   final wire = <String>[];
 
@@ -150,6 +155,23 @@ final class FakeStoreHost {
   Object? _answer(String method, Map<String, Object?> given) {
     // What the host grants this key is not a store request, so it is not in [calls].
     if (method == 'host/grants') return {'grants': grants};
+    if (method == 'foundry/models' || method == 'foundry/model') {
+      calls.add(method);
+      params.putIfAbsent(method, () => []).add(given);
+      if (failures[method] case final failure?) throw failure;
+      if (method == 'foundry/models') return {'installed': foundryInstalled, 'models': foundryModels};
+      final model = foundryModels.firstWhere((each) => each['id'] == given['model']);
+      switch (given['action']) {
+        case 'download':
+          model['cached'] = true;
+        case 'load':
+          if (model['cached'] != true) throw ControlFailed(-32002, '${model['id']} is not downloaded');
+          model['loaded'] = true;
+        case 'unload':
+          model['loaded'] = false;
+      }
+      return {'ok': true, 'model': given['model'], 'action': given['action']};
+    }
     final provider = given['provider'] as String?;
     final key = '$method ${provider ?? ''}'.trim();
     calls.add(key);

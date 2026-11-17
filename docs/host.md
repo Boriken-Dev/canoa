@@ -404,9 +404,9 @@ the service's address (`endpoint`; the running service's own is read from `~/.fo
 canoa accounts add local --harness claude --method foundry-local --input model=qwen3-14b-generic-gpu:2
 ```
 
-- **Loading a model is the person's.** Load it first (`foundry model load qwen3-14b-generic-gpu:2`) and unload it when done,
-  since it holds gigabytes other work needs. The host never loads or unloads one; a session on a model that is not loaded is
-  refused with that said.
+- **Loading a model is the person's.** Load it first, from the Store's Foundry models page (Foundry Local itself is in its
+  Runtimes) or with `foundry model load qwen3-14b-generic-gpu:2`, and unload it when done, since it holds gigabytes other work
+  needs. The gateway never loads or unloads one; a session on a model that is not loaded is refused with that said.
 - **A gateway per session.** When a session starts on the account the host listens on loopback (a port of the system's choosing)
   and hands the harness an address and a bearer minted for that session, through the harness's own account kind: a gateway
   token for Claude Code (`anthropic-auth-token`), an API key and `openai_base_url` for Codex (`codex-api-key`, with a

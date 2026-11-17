@@ -3,6 +3,7 @@
 import 'package:canoa/desktop/control_client.dart' show ControlFailed;
 import 'package:canoa/store/store_extension.dart' show ExtensionBody, ExtensionStoreType;
 import 'package:canoa/store/store_extensions.dart';
+import 'package:canoa/store/store_foundry.dart';
 import 'package:canoa/store/store_runtimes.dart';
 import 'package:canoa/store/store_view.dart';
 import 'package:flutter/material.dart';
@@ -21,13 +22,13 @@ void main() {
       ];
     final shared = host.client();
     final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId]);
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId]);
     var heard = 0;
     extensions.addListener(() => heard++);
 
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, 'echoes'], reason: 'a type may not take a built-in one\'s id');
-    expect(extensions.types.map((type) => type.label), [runtimesTypeLabel, 'Echoes']);
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, 'echoes'], reason: 'a type may not take a built-in one\'s id');
+    expect(extensions.types.map((type) => type.label), [runtimesTypeLabel, foundryTypeLabel, 'Echoes']);
     expect(heard, 1);
 
     final echoes = extensions.types.last;
@@ -51,13 +52,13 @@ void main() {
     final shared = host.client();
     final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId]);
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId]);
     host.failures.clear();
     host.extensionTypes = [
       {'id': 'echoes', 'title': 'Echoes', 'stores': <String>[]},
     ];
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, 'echoes']);
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, 'echoes']);
     extensions.dispose();
   });
 
