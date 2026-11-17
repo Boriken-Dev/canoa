@@ -225,12 +225,43 @@ directory: canoa.cfg's for yours and an agent's, the overlay's, or the working d
 - It reads only the variables of this computer that one of your own layers lists in `share_env`, such as
   `share_env = ["GITHUB_TOKEN"]` in `[profile]`. An environment variable or an MCP server of its that reads any other
   is left out, the lower layer's entry stays, and Settings → Profiles lists it as left out and what it reads.
-- It may not set the variables that decide what a process runs or loads, where an agent's own requests go, where a
-  harness keeps its configuration, or which certificates are trusted: `PATH`, `NODE_OPTIONS`, `HOME`, `TMP`,
-  `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and the like, anything starting `LD_`, `DYLD_`, `PYTHON`, `GIT_`, `NPM_CONFIG_`,
-  `CANOA_` or `COQUI_`, and anything ending `_BASE_URL` or `_PROXY`, in any case. Your own layers may set them. The
-  whole list is `RESERVED_ENV` in `canoa_host::profile`, with every variable the AOS specification names sensitive.
-  An overlay that sets one anywhere (`env`, an env file, `paths`, an MCP server) is left out whole.
+- It may set any variable, including `PATH`, `NODE_OPTIONS`, `LD_PRELOAD`, `HTTPS_PROXY`, a harness's home or an
+  endpoint: you chose the overlay, and what it sets is applied. The one exception is the format's own: a name the AOS
+  specification reserves for the host, `AOS_*`, `*_OVERLAY_ROOT` and `*_OVERLAY_STATE`, leaves the overlay out whole.
+  A variable that changes how programs find code, trust certificates or reach the network (`PATH`, `LD_*`,
+  `NODE_OPTIONS`, `SSL_*`, `*_PROXY`, `*_BASE_URL` and the like) is applied and listed in the overlay's report as
+  `env-sensitive`; so is one a `pre-env` hook exports.
+
+### Variables every session carries
+
+Before any layer applies, each session starts from a base environment that every layer's `${...}` reads, and an
+overlay may set its own variables from them. A layer's own value for one replaces it. Each is set only when it has a
+value, and never empty; a value already set in the host's own environment is kept.
+
+| Variable | Value |
+| --- | --- |
+| `AGENTS_HOST` | `canoa` |
+| `AGENTS_HARNESS`, `AGENT` | the harness id: `claude-code`, `codex`, `pi`, `antigravity`, `gemini-cli`, `grok`, `opencode` |
+| `AGENTS_VENDOR` | `anthropic`, `openai`, `google` or `xai`; none for Pi |
+| `AGENTS_MODEL`, `AGENTS_EFFORT` | the model and effort the session starts on |
+| `AGENTS_HARNESS_VERSION` | the version of the program the Store installed for the harness |
+| `AGENTS_ACCOUNT` | the account's label, never anything of its credentials |
+| `AGENTS_ACCOUNT_KIND` | `subscription`, `api-key`, `gateway` or `local` |
+| `AGENTS_ACCOUNT_PROVIDER` | `anthropic`, `openai`, `xai`, `google` or `microsoft-foundry` |
+| `AGENTS_PROFILE`, `AGENTS_LOADOUT` | the profile the connection runs and the loadout it started with |
+| `AGENTS_ROLE` | `delegate` when another agent started the session as a task |
+| `AGENTS_PROJECT_ROOT`, `AGENTS_SESSION_ID` | the session's folder and id, for the hooks that run for it |
+
+The names and the harness ids and vendors are dotagents'. One overlay then adapts to every harness:
+
+```toml
+[env]
+TEAM_NOTES = "${AOS_OVERLAY_ROOT}/notes/${AGENTS_HARNESS}"
+```
+
+reads `notes/claude-code` for Claude Code and `notes/codex` for Codex. A variable the host itself sets for a session is
+read the same way; the endpoint and state folder an account gives a program are applied by its provider after these, so
+an overlay does not see them.
 
 **Secrets** come from a reference, `from_env` or `from_file`, and are never written into a profile. A reference is
 resolved only when a session starts; the view shows the reference and the variable each MCP header or variable comes
