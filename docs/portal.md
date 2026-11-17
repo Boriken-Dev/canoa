@@ -394,6 +394,9 @@ an administrator does**. Two purposes, because they are not the same trust:
   recovery codes once, and a field for the first code from the app. Nothing is a factor until that code confirms it, and it is
   spent. In a sign-in, the confirming code is also the step the sign-in was waiting for. Starting again replaces the setup
   waiting; the code in use keeps working until a new one is confirmed.
+- A person who already has a code replaces it only after showing it: the `enrol` rule must ask for `totp` (or `recovery_code`) among its
+  factors, and the person shows one. A rule that asks for a password alone leaves no way to replace a code from the page; an
+  administrator `reset`s the account and sets the next one up.
 - Whoever holds the first factor can set up a code for an account that has none, where an `enrol_first` rule allows it. That is
   what such a rule says.
 
@@ -401,7 +404,7 @@ an administrator does**. Two purposes, because they are not the same trust:
 
 ```sh
 canoa portal --config /etc/canoa/portal.toml factor list                    # one JSON line per account: id, user, enrolled, disabled, waiting, reset
-canoa portal --config /etc/canoa/portal.toml factor enrol alice              # prints the link and the recovery codes, once
+canoa portal --config /etc/canoa/portal.toml factor enrol alice              # prints the link and the recovery codes, once; refused for an account that has a code: reset it first
 canoa portal --config /etc/canoa/portal.toml factor enrol alice --code 123456  # the first code from the app confirms it
 canoa portal --config /etc/canoa/portal.toml factor reset alice              # removes the code, its recovery codes and any setup waiting
 canoa portal --config /etc/canoa/portal.toml factor reset --id 1000:alice    # the same by the id `list` shows, for an account that is gone
