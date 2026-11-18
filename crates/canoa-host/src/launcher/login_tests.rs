@@ -222,11 +222,17 @@ fn the_run_value_starts_the_launcher_detached_and_an_entry_without_that_is_not_c
     assert!(!Place::LaunchAgents(PathBuf::from("a")).needs_detach());
 
     let program = Path::new(r"C:\Program Files\Canoa\canoa.exe");
-    let config = Some(r"C:\Users\me\canoa.cfg");
+    // An absolute path of the platform running the test: another's would be made absolute again.
+    let named = if cfg!(windows) {
+        r"C:\Users\me\canoa.cfg"
+    } else {
+        "/home/me/canoa.cfg"
+    };
+    let config = Some(named);
     let wanted = command_of(program, &[], config, true);
     assert_eq!(
         place.text_of(&wanted),
-        r#""C:\Program Files\Canoa\canoa.exe" office-launcher --config C:\Users\me\canoa.cfg --detach"#
+        format!(r#""C:\Program Files\Canoa\canoa.exe" office-launcher --config {named} --detach"#)
     );
 
     // What `reg query` lists is what `status` compares with what `--install` would write now.
