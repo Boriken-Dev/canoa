@@ -75,7 +75,7 @@ Configuration tables:
 - `title` on a `[host.agents.NAME]` entry (text, 1 to 64 characters, not blank, no control characters; optional): what the app shows for the entry in its source picker instead of the entry's name. A provider or tool entry takes none. It is listed beside `harness` (the provider id) in the host's lines and in `/canoa.json`, which is how the app learns both.
 - `usage` on a `[host.agents.NAME]` entry with `program`: `"antigravity"` (the only value) makes `canoa` read that agent's quota as `reported` usage buckets, the way [usage](acp-client.md#usage) describes. The app's Add an agent sets it when the command is `agy acp`.
 - [overlays], [profile] and `[agents.NAME.profile]`: profiles, described [below](#profiles).
-- [catalogs] and [store]: the overlay store's catalogs and limits, described [below](#the-overlay-store); `[store.extension_catalogs]` lists [extensions catalogs](#extensions-catalogs).
+- [catalogs] and [store]: the overlay store's catalogs and limits, described [below](#the-overlay-store); `[store.extension_catalogs]` lists [extensions catalogs](#extensions-catalogs); `[store] skills_search` turns on [searching skills.sh](#searching-skillssh).
 
 The session list is `sessions.json` beside canoa.cfg on a desktop, and this origin's IndexedDB in a web build, a PWA or the extension. Removing a session from it never deletes the agent's own session. It also keeps, per source, what its agent offered (model, effort, mode and its other choices) and took with a prompt when it last ran, and the last model, effort and mode the agent took from you.
 
@@ -663,6 +663,25 @@ default, use Remove this source or set `anthropics = false`; giving the label a 
 anthropics = false                                  # leave out the source Canoa offers by default
 web = "addyosmani/web-quality-skills"               # a label of yours = a source as above
 ```
+
+### Searching skills.sh
+
+[skills.sh](https://skills.sh) ranks skills by how often `npx skills add` installed them, and has a search. Canoa can search it for you, but
+it is off until you turn it on, because skills.sh is a third party and its search address is not documented. Turn it on in Store settings
+(Skills, Search skills.sh) or in canoa.cfg:
+
+```toml
+[store]
+skills_search = true                       # skills.sh; remove the line (or write false) to turn it off
+# skills_search = "https://skills.example"  # another directory that answers /api/search?q=...&limit=... the same way
+```
+
+With it on, Store, Skills, Discover has a Search skills.sh chip. Only the words you type are sent (at least two characters), through the
+same proxy and certificate settings as every fetch the host makes, with no redirect followed. A result names a repository
+(`owner/repo`) and a skill in it, with how many installs skills.sh counted; nothing it sends is a file. Installing one reads that
+repository the way any source is read (fetched with none of your git settings, credentials or keys, its `SKILL.md` files listing what it
+holds), shows the commit that was read, asks, and fetches exactly that commit. A result that does not name a GitHub `owner/repo`
+is dropped, and one whose repository has no `SKILL.md` for it says so. Turning the search off removes the chip and the results.
 
 ### Extensions catalogs
 
