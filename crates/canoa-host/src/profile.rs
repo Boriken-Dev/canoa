@@ -1526,6 +1526,7 @@ fn position(text: &str, offset: usize) -> (usize, usize) {
 
 pub(crate) mod hosted;
 mod launch;
+mod needs;
 mod overlay;
 mod session;
 
@@ -1534,6 +1535,7 @@ pub use hosted::{APPROVE_META, APPROVE_METHOD, OVERLAYS_META, PRESET_META, PROFI
 pub use launch::launch;
 #[cfg(unix)]
 pub(crate) use launch::{found_on_own_path, sets_path};
+pub(crate) use needs::{Finder, Line as NeedLine, of_installed};
 pub(crate) use overlay::active_facts;
 pub use overlay::{AosLayer, OverlayInput, OverlayRefusal, OverlayReport, overlay_layer};
 pub(crate) use session::{Session, Who, account_words, starting};

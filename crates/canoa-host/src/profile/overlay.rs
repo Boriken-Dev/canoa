@@ -206,8 +206,8 @@ const DEFAULT_SCRIPTS: [&str; 7] = [".py", ".js", ".mjs", ".cjs", ".ps1", ".bash
 
 /// Makes the layer of an AOS overlay: its root variable, environment, skills, MCP servers, context, and the hints for
 /// `input.harness`. The overlay's own `bin/` and `lib/` go first on `PATH`, `PYTHONPATH` and `NODE_PATH`, as the
-/// specification's defaults and `paths` say; what Canoa does not run is reported: env scripts, setup, dependencies,
-/// runtime probes and commands. Reads nothing but `input.tree`.
+/// specification's defaults and `paths` say; what Canoa does not run is reported: env scripts, setup, dependencies and
+/// commands. What it needs of the computer (`runtime`) is checked when a session starts. Reads nothing but `input.tree`.
 ///
 /// # Errors
 ///
@@ -528,9 +528,6 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
             }
         }
     }
-    for (key, _) in entries(manifest.get("runtime")) {
-        not_applied.push(format!("runtime.{key}"));
-    }
     for (name, target) in entries(manifest.get("scripts")) {
         if *target != Value::Bool(false) {
             not_applied.push(format!("scripts.{name}"));
@@ -678,6 +675,53 @@ fn probe(overlay: &Probed<'_>) -> Result<aos::Effective, aos::Error> {
         |tree, (path, bytes)| tree.with_bytes(path, bytes.clone()),
     );
     aos::effective(manifest, &facts)
+}
+
+/// What an overlay needs of the computer it runs on: its `runtime`, and the interpreters and commands the rest of its manifest
+/// names. None when its environment cannot be built, since no session would start with it.
+pub(crate) fn required(aos: &AosLayer) -> Option<super::needs::Required> {
+    let found = probe(&Probed {
+        manifest: &aos.manifest,
+        files: &aos.files,
+        texts: &aos.texts,
+        identity: &aos.identity,
+        root: &aos.root,
+        os: &aos.os,
+        pinned: aos.pinned,
+        gate: Some((&aos.digest, aos.allowed.as_deref())),
+    })
+    .ok()?;
+    let version = |variant: &Option<Map<String, Value>>| {
+        variant
+            .as_ref()
+            .and_then(|variant| variant.get("version"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    let asks = |name: &str| found.needs.interpreters.iter().any(|each| each == name);
+    let other_os = (!found.supported).then(|| {
+        aos.manifest
+            .get("runtime")
+            .and_then(|runtime| runtime.get("os"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|each| each.as_str().map(str::to_owned))
+            .collect()
+    });
+    Some(super::needs::Required {
+        other_os,
+        python: (found.python.is_some() || asks("python")).then(|| version(&found.python)),
+        node: (found.node.is_some() || asks("node")).then(|| version(&found.node)),
+        interpreters: found
+            .needs
+            .interpreters
+            .iter()
+            .filter(|each| !matches!(each.as_str(), "python" | "node"))
+            .cloned()
+            .collect(),
+        commands: found.needs.commands.clone(),
+    })
 }
 
 /// An overlay's report.

@@ -1127,3 +1127,72 @@ fn a_commit_id_pins_that_commit_whatever_branch_carries_its_name_and_a_short_id_
     assert!(short["error"].is_object(), "{short}");
     let _ = fs::remove_dir_all(s.tmp);
 }
+
+#[test]
+fn what_an_installed_overlay_needs_is_checked_on_the_host_by_a_key_that_may_start_programs() {
+    let s = setup(None, OverlayLimits::default());
+    let folder = s.overlays.join("needy");
+    fs::create_dir_all(&folder).expect("folder");
+    fs::write(
+        folder.join("overlay.cfg"),
+        "[runtime]\ncommands = [\"canoa-test-absent-tool\", \"npm\"]\n",
+    )
+    .expect("manifest");
+    let digest =
+        coqui_aos::tree_digest(&coqui_aos::StdFs, &folder, &coqui_aos::Settings::default())
+            .expect("digest")
+            .digest
+            .to_string();
+    fs::write(
+        s.overlays.join("needy.json"),
+        json!({"source": "x", "commit": "y", "digest": digest, "files": {}}).to_string(),
+    )
+    .expect("record");
+
+    let asked = ask(
+        &s.control,
+        &Caller::Owner,
+        "overlay/needs",
+        json!({"name": "needy"}),
+    );
+    let items = asked["result"]["items"].as_array().expect("items");
+    let keys: Vec<&str> = items
+        .iter()
+        .filter_map(|item| item["key"].as_str())
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "runtime.commands: canoa-test-absent-tool",
+            "runtime.commands: npm"
+        ],
+        "{asked}"
+    );
+    assert_eq!(items[0]["state"], "off");
+    assert!(items[0].get("offer").is_none(), "{}", items[0]);
+    // Whether `npm` is here depends on this computer; when it is not, the Store's Node.js is what is offered.
+    if items[1]["state"] == "off" {
+        assert_eq!(items[1]["offer"], "node_store", "{}", items[1]);
+    }
+
+    // Asking starts programs, so reading overlays is not enough; one that is not installed is refused.
+    let reader = key("sha256:cc", &[Grant::OverlayRead]);
+    let denied = ask(
+        &s.control,
+        &reader,
+        "overlay/needs",
+        json!({"name": "needy"}),
+    );
+    assert_eq!(denied["error"]["code"], DENIED, "{denied}");
+    let both = key("sha256:dd", &[Grant::OverlayRead, Grant::StorePrograms]);
+    let allowed = ask(&s.control, &both, "overlay/needs", json!({"name": "needy"}));
+    assert_eq!(allowed["result"]["items"], asked["result"]["items"]);
+    let missing = ask(
+        &s.control,
+        &both,
+        "overlay/needs",
+        json!({"name": "nowhere"}),
+    );
+    assert_eq!(missing["error"]["code"], REFUSED, "{missing}");
+    let _ = fs::remove_dir_all(s.tmp);
+}

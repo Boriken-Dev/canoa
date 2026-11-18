@@ -2124,6 +2124,93 @@ fn each_line_not_applied_names_its_overlay_and_is_said_once() {
     assert_eq!(setups, 1, "{}", parts.report);
 }
 
+#[test]
+fn what_an_overlay_needs_is_applied_when_this_computer_has_it_and_offered_from_the_store_when_it_does_not()
+ {
+    let temp = temp_with_skill();
+    install_files(
+        &temp,
+        "needy",
+        &[(
+            "overlay.cfg",
+            "[runtime]\ncommands = [\"probe\", \"canoa-test-absent-tool\"]\n\
+             [[runtime.python]]\nversion = \"999.0\"\n\
+             [[runtime.node]]\n",
+        )],
+    );
+    let offer = offer_of(&temp, &config_with("overlays = [\"needy\"]\n"));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let parts = parts_for(&connection, None, &Takes::default(), &lookup);
+    let report = &parts.report;
+    let found = item(report, "runtime.commands: probe");
+    assert_eq!(found["state"], "applied", "{report}");
+    assert_eq!(found["layer"], "overlay:needy");
+    assert!(found.get("offer").is_none(), "{found}");
+    // The stand-in node has no version to ask for, so a Node of no minimum is met by finding it.
+    assert_eq!(item(report, "runtime.node")["state"], "applied", "{report}");
+
+    let absent = item(report, "runtime.commands: canoa-test-absent-tool");
+    assert_eq!(absent["state"], "off");
+    assert!(
+        absent.get("offer").is_none(),
+        "no runtime provides it: {absent}"
+    );
+    assert!(
+        absent["how"]
+            .as_str()
+            .expect("how")
+            .contains("not on the PATH")
+    );
+
+    let python = item(report, "runtime.python");
+    assert_eq!(python["state"], "off", "{report}");
+    assert_eq!(python["offer"], "python_store");
+    assert!(
+        python["how"]
+            .as_str()
+            .expect("how")
+            .contains("999.0 or later"),
+        "{python}"
+    );
+
+    let summary = report["summary"].as_str().expect("summary");
+    assert!(summary.contains("needy: runtime.python (off)"), "{summary}");
+    assert!(
+        summary.contains("needy: runtime.commands: canoa-test-absent-tool (off)"),
+        "{summary}"
+    );
+    assert!(!summary.contains("runtime.node"), "{summary}");
+    assert!(!summary.contains("runtime.commands: probe"), "{summary}");
+    // The two found ones count as applied, and none is reported as a thing Canoa does not apply.
+    assert!(
+        report["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .all(|item| item["state"] != "not supported"
+                || !item["key"].as_str().unwrap_or("").starts_with("runtime")),
+        "{report}"
+    );
+}
+
+#[test]
+fn an_overlay_that_needs_nothing_reports_no_runtime_line() {
+    let temp = temp_with_skill();
+    install_files(&temp, "plain", &[("overlay.cfg", "name = \"plain\"\n")]);
+    let offer = offer_of(&temp, &config_with("overlays = [\"plain\"]\n"));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let parts = parts_for(&connection, None, &Takes::default(), &lookup);
+    assert!(
+        parts.report["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .all(|item| !item["key"].as_str().unwrap_or("").starts_with("runtime")),
+        "{}",
+        parts.report
+    );
+}
+
 /// The value of `name` in a connection's environment.
 fn env_value<'a>(connection: &'a Connection, name: &str) -> Option<&'a str> {
     connection

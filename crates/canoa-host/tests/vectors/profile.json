@@ -2174,7 +2174,6 @@
               "setup: setup.sh",
               "setup: setup/install.sh",
               "dependencies: lib/python/requirements.txt",
-              "runtime.os",
               "scripts.check"
             ],
             "non_defaults": []

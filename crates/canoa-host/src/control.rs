@@ -886,6 +886,9 @@ impl Control {
                     .and_then(|()| self.files.upload_remove(caller, &params)),
                 Some("overlay/installed") => allow(caller, Grant::OverlayRead)
                     .and_then(|()| self.overlays.installed(&params)),
+                Some("overlay/needs") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| allow(caller, Grant::StorePrograms))
+                    .and_then(|()| self.overlays.needs(&params)),
                 Some("overlay/read") => allow(caller, Grant::OverlayRead)
                     .and_then(|()| self.overlays.read(caller, &params)),
                 Some("catalog/read") => allow(caller, Grant::OverlayRead)

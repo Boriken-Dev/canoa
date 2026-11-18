@@ -20,7 +20,8 @@ use coqui_transport::{Channel, Failure};
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 
-use super::overlay::{Built, build_each, resolve_path};
+use super::needs;
+use super::overlay::{self, Built, build_each, resolve_path};
 use super::{
     Change, Context, Effective, EnvValue, Layer, LayerId, LayerKind, McpServer, OverlayInput,
     Scalar, Secret, Session, Skill, Sourced, Who, merge, overlay_layer, resolve, starting,
@@ -142,6 +143,8 @@ struct Item {
     digest: Option<String>,
     /// What `model`, `effort` or `mode` is set to: the session's options take it, as the host cannot. Never a secret.
     value: Option<String>,
+    /// The Store runtime (a provider id) that installs the program this part needs and the computer lacks.
+    offer: Option<String>,
 }
 
 impl Item {
@@ -158,6 +161,7 @@ impl Item {
             how: how.into(),
             digest: None,
             value: None,
+            offer: None,
         }
     }
 
@@ -165,6 +169,9 @@ impl Item {
         let mut out = json!({"key": self.key, "layer": self.layer, "state": self.state.as_str(), "how": self.how});
         if let Some(digest) = &self.digest {
             out["digest"] = json!(digest);
+        }
+        if let Some(offer) = &self.offer {
+            out["offer"] = json!(offer);
         }
         if let Some(value) = &self.value {
             out["value"] = json!(value);
@@ -799,6 +806,27 @@ impl Connection {
                     State::Unsupported,
                     "Canoa does not apply it",
                 ));
+            }
+        }
+        // What each overlay needs of this computer is checked once per overlay, against the `PATH` the session starts from and
+        // the Store's runtimes.
+        let finder = needs::Finder::new(lookup, &crate::sources::runtime_dirs());
+        let mut checked = BTreeSet::new();
+        for aos in &effective.aos {
+            let Some(required) = overlay::required(aos).filter(|_| checked.insert(&aos.identity))
+            else {
+                continue;
+            };
+            for line in needs::check(&required, &finder, &aos.os) {
+                let state = if line.met { State::Applied } else { State::Off };
+                let mut item = Item::new(
+                    line.key,
+                    LayerId::new(LayerKind::Overlay, aos.identity.clone()),
+                    state,
+                    line.how,
+                );
+                item.offer = line.offer.map(str::to_owned);
+                notes.push(item);
             }
         }
         let skills = private::Private::new("canoa-profile");

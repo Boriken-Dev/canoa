@@ -337,9 +337,6 @@ Layer overlayLayer({
       if (files.contains(path)) notApplied.add('dependencies: $path');
     }
   }
-  for (final MapEntry(:key) in sortedEntries(manifest['runtime'])) {
-    notApplied.add('runtime.$key');
-  }
   for (final MapEntry(:key, :value) in sortedEntries(manifest['scripts'])) {
     if (value != false) notApplied.add('scripts.$key');
   }

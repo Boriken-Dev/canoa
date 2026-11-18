@@ -67,6 +67,19 @@ pub fn runtimes_here() -> Vec<String> {
 /// the host starts. Foundry Local is kept beside them but is not one: its folder holds libraries a program should not find.
 pub const RUNTIME_PROGRAMS: [&str; 4] = ["node", "python", "git-bash", "powershell"];
 
+/// The provider id of the Store runtime that installs the command `command` on this computer, when one does: what a program that
+/// is missing is offered. Each runtime's recipe lists the same commands in its [`StoreInfo`].
+#[must_use]
+pub(crate) fn runtime_for(command: &str) -> Option<&'static str> {
+    match command {
+        "node" | "npm" | "npx" | "corepack" => Some("node_store"),
+        "python" | "python3" | "pip" | "pip3" => Some("python_store"),
+        "bash" | "sh" | "git" if cfg!(windows) => Some("git_bash_store"),
+        "pwsh" if cfg!(any(windows, target_os = "linux")) => Some("powershell_store"),
+        _ => None,
+    }
+}
+
 store_provider!(
     /// The Node.js store.
     NodeStore, NodeRecipe, "node_store"

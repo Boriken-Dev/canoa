@@ -329,6 +329,22 @@ impl Overlays {
         Ok(json!({"overlays": found}))
     }
 
+    /// `overlay/needs` `{"name"}` -> `{"items": [{"key", "state", "how", "offer"?}]}`: what the installed overlay needs of this
+    /// computer (`runtime`, and the interpreters its scripts name), as a session would find it: on the host's `PATH`, then in the
+    /// Store's runtimes. A program that is missing carries the Store runtime that installs it. Starts the programs it asks the
+    /// version of, which is why a key needs `store.programs` as well.
+    pub(crate) fn needs(&self, params: &Value) -> Outcome {
+        let name = checked_name(text_param(params, "name")?.ok_or_else(|| bad("name is needed"))?)?;
+        let root = self.root()?;
+        let finder = crate::profile::Finder::new(
+            &|variable| std::env::var(variable).ok(),
+            &crate::sources::runtime_dirs(),
+        );
+        let lines = crate::profile::of_installed(root, name, coqui_aos::current_os(), &finder)
+            .map_err(|why| refused(format!("{name}: {why}")))?;
+        Ok(json!({"items": lines.iter().map(crate::profile::NeedLine::json).collect::<Vec<_>>()}))
+    }
+
     /// `overlay/check` `{"name", "source", "pin"?, "catalog"?}`: fetches `source` into the cache for `name` and says what installing it
     /// would change; nothing installed is touched. `local` says whether a source on this computer may be read. A `catalog` label says
     /// the overlay was chosen from that catalog, someone else's listing: it is fetched [`Trust::Isolated`], and one without the
