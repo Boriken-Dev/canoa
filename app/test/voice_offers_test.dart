@@ -180,6 +180,52 @@ void main() {
     expect(add.onPressed, isNull);
   });
 
+  testWidgets('Foundry Local says what is missing until its service lists a Whisper model', (tester) async {
+    final down = OffersHost(more: [_foundry(unavailable: 'Foundry Local\'s service is not running: start it (`foundry server start`), then load a Whisper model.')]);
+    await _page(tester, host: down);
+    expect(find.byKey(const Key('offer-foundry')), findsOneWidget);
+    expect(find.textContaining('nothing is sent to another service'), findsWidgets);
+    expect(tester.widget<FilledButton>(find.byKey(const Key('offer-unavailable-foundry'))).onPressed, isNull);
+    expect(tester.widget<Text>(find.byKey(const Key('offer-why-foundry'))).data, contains('not running'));
+    expect(find.byKey(const Key('offer-model-foundry')), findsNothing, reason: 'there is no model to choose yet');
+    expect(down.calls, isNot(contains('speech/enable')));
+  });
+
+  testWidgets('a running Foundry Local is set up with a Whisper model the person picks, and becomes the speech service', (tester) async {
+    final speech = OffersHost(more: [_foundry(models: ['openai-whisper-tiny-generic-cpu', 'openai-whisper-base-generic-cpu'])]);
+    final (_, _, harness) = await _page(tester, host: speech);
+    expect(find.byKey(const Key('offer-why-foundry')), findsNothing);
+    await tester.tap(find.byKey(const Key('offer-model-foundry')));
+    await _settle(tester);
+    await tester.tap(find.text('openai-whisper-base-generic-cpu').last);
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('offer-enable-foundry')));
+    await _settle(tester);
+    expect(speech.params['speech/enable']!.single, {'offer': 'foundry', 'model': 'openai-whisper-base-generic-cpu'});
+    expect(harness.last.voice.backend, 'host:foundry');
+    expect(find.byKey(const Key('offer-in-use')), findsOneWidget);
+  });
+
+  testWidgets('each OpenAI API key account is an offer named for the account, one that is no API key says why, and Add uses the account\'s key without asking for one', (tester) async {
+    final speech = OffersHost(more: [
+      _account('work'),
+      _account('login', unavailable: 'a ChatGPT sign-in is not an OpenAI API key, and Canoa has no measured way to send audio to OpenAI with it, so it is not offered'),
+    ]);
+    final (_, _, harness) = await _page(tester, host: speech);
+    expect(find.textContaining('account work'), findsWidgets, reason: 'the offer names the account whose key pays');
+    expect(find.textContaining('API key of your account work'), findsWidgets);
+    expect(tester.widget<FilledButton>(find.byKey(const Key('offer-unavailable-openai_account:login'))).onPressed, isNull);
+    expect(tester.widget<Text>(find.byKey(const Key('offer-why-openai_account:login'))).data, contains('not an OpenAI API key'));
+    expect(find.byKey(const Key('offer-form-openai_account:work')), findsNothing, reason: 'the key is the account\'s: no form asks for one');
+    await tester.tap(find.byKey(const Key('offer-enable-openai_account:work')));
+    await _settle(tester);
+    expect(speech.params['speech/enable']!.single, {'offer': 'openai_account:work', 'model': 'gpt-transcribe'});
+    expect(speech.configured, isEmpty, reason: 'no key was typed or sent');
+    expect(harness.last.voice.backend, 'host:openai-work');
+    // The provider is listed as the account's, so the person can tell which key pays when they choose it.
+    expect(find.textContaining('openai-work (OpenAI, account work)'), findsWidgets);
+  });
+
   test('the model a person chose reaches the provider when the host lists it, and a model of another service does not', () async {
     final link = _ModelHost();
     final catalog = HostSpeechCatalog(HostControl.dialing(() async => link), capture: _Silent());
@@ -243,3 +289,32 @@ final class _Silent implements AudioCapture {
   @override
   Stream<Uint8List> open({required int rate}) => const Stream.empty();
 }
+
+Map<String, Object?> _foundry({String? unavailable, List<String> models = const []}) => {
+  'id': 'foundry',
+  'title': 'Foundry Local',
+  'summary': 'Speech to text by a Whisper model that Foundry Local runs on this computer.',
+  'local': true,
+  'where': 'The audio is written to a temporary file on this computer, handed to Foundry Local\'s service on a loopback address and removed afterwards: nothing is sent to another service.',
+  'service': 'foundry_local',
+  'models': [for (final id in models) {'id': id, 'label': id}],
+  'default_model': models.firstOrNull,
+  'installed': unavailable == null,
+  'unavailable': unavailable,
+  'provider': null,
+};
+
+Map<String, Object?> _account(String name, {String? unavailable}) => {
+  'id': 'openai_account:$name',
+  'title': 'OpenAI, account $name',
+  'summary': 'Speech to text by OpenAI\'s service, under the API key of your account $name.',
+  'local': false,
+  'where': 'The audio goes over the internet to api.openai.com, under the API key of your account $name in Canoa, and OpenAI\'s terms say what it does with it.',
+  'account': name,
+  'models': [
+    {'id': 'gpt-transcribe', 'label': 'GPT Transcribe (recommended)'},
+  ],
+  'default_model': 'gpt-transcribe',
+  'unavailable': unavailable,
+  'provider': null,
+};

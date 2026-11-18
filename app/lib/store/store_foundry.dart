@@ -47,6 +47,9 @@ final class FoundryModel {
   /// Whether it is downloaded, and whether it is in memory.
   final bool cached, loaded;
 
+  /// Whether Canoa can use it to turn speech into text: Foundry Local transcribes with Whisper models, which take a file.
+  bool get speech => '$id ${alias ?? ''}'.toLowerCase().contains('whisper');
+
   /// What the row says of the model: where it stands, then what it is.
   String get summary => [loaded ? 'Loaded' : cached ? 'Downloaded' : 'Not downloaded', if (description.isNotEmpty) description].join(' · ');
 }
@@ -94,6 +97,14 @@ class FoundryModels extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Makes [model] a speech-to-text provider on the host, which calls Foundry Local's service with it. The model is not loaded
+  /// here: loading one is the person's choice. Returns the provider's name; throws what the host refuses with.
+  Future<String> useForSpeech(String model) async {
+    final client = await _control();
+    final answer = await client.call('speech/enable', {'offer': 'foundry', 'model': model}, null, const Duration(seconds: 30));
+    return answer is Map && answer['name'] is String ? answer['name'] as String : 'foundry';
+  }
+
   /// Asks the host to `download`, `load` or `unload` [model], on a link of its own since a download takes long; throws what it
   /// refuses with. The list is read again after, whatever came of it.
   Future<void> run(String model, String action) async {
@@ -135,6 +146,7 @@ ExtensionStoreType foundryModelsType(FoundryModels models) => ExtensionStoreType
           tags: [?model.task, ?model.device],
           installed: model.loaded,
           install: (context) => _choose(context, models, model),
+          details: model.speech ? (context, config) => FoundrySpeechPage(models: models, model: model) : null,
         ),
     ];
   },
@@ -192,5 +204,79 @@ Future<void> _choose(BuildContext context, FoundryModels models, FoundryModel mo
     await models.run(model.id, 'load');
   } on Object catch (error) {
     if (context.mounted) await _failed(context, 'Load ${model.id}', error);
+  }
+}
+
+/// The page of a Whisper model: what Foundry Local says of it and "Use as speech provider", which makes the host's provider that
+/// sends dictation to the model through Foundry Local's service. The audio stays on the host's computer.
+class FoundrySpeechPage extends StatefulWidget {
+  const FoundrySpeechPage({super.key, required this.models, required this.model});
+
+  final FoundryModels models;
+  final FoundryModel model;
+
+  @override
+  State<FoundrySpeechPage> createState() => _FoundrySpeechPageState();
+}
+
+class _FoundrySpeechPageState extends State<FoundrySpeechPage> {
+  String? _made;
+  String? _problem;
+  bool _busy = false;
+
+  Future<void> _use() async {
+    setState(() {
+      _busy = true;
+      _problem = null;
+    });
+    try {
+      final name = await widget.models.useForSpeech(widget.model.id);
+      if (mounted) setState(() => _made = name);
+    } on Object catch (error) {
+      if (mounted) setState(() => _problem = hostWords(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final model = widget.model;
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(title: Text(model.id)),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Text(model.summary, key: const Key('foundry-speech-summary')),
+          const SizedBox(height: 12),
+          const Text(
+            'Dictation can send its audio to this model through the Foundry Local service on the host: the audio is written to a temporary file there, '
+            'handed to the service and removed afterwards, and nothing is sent to another service. Canoa never loads a model for you, so load it '
+            'with + on the list first.',
+          ),
+          if (!model.loaded)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('It is not loaded now.', key: const Key('foundry-speech-not-loaded'), style: TextStyle(color: scheme.onSurfaceVariant)),
+            ),
+          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton(key: const Key('foundry-use-speech'), onPressed: _busy ? null : () => unawaited(_use()), child: const Text('Use as speech provider')),
+          ),
+          if (_made case final made?)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text('Added as the provider "$made". Choose it in Settings, Voice.', key: const Key('foundry-speech-done')),
+            ),
+          if (_problem case final problem?)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(problem, key: const Key('foundry-speech-failed'), style: TextStyle(color: scheme.error)),
+            ),
+        ],
+      ),
+    );
   }
 }

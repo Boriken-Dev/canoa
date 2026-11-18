@@ -1015,9 +1015,14 @@ impl Control {
                 Some("discover/nearby") => {
                     allow(caller, Grant::Discover).and_then(|()| discover::nearby(&params))
                 }
-                Some(method @ ("speech/offers" | "speech/enable")) => {
-                    speech_offers::call(caller, &self.files, self.stores(), method, &params)
-                }
+                Some(method @ ("speech/offers" | "speech/enable")) => speech_offers::call(
+                    caller,
+                    &self.files,
+                    self.stores(),
+                    &speech_offers::Lend::new(self.accounts.as_ref()),
+                    method,
+                    &params,
+                ),
                 Some(
                     method @ ("speech/voices"
                     | "speech/say"
@@ -1025,9 +1030,13 @@ impl Control {
                     | "speech/stop"
                     | "speech/say_configure"),
                 ) => self.say.call(caller, &self.files, method, &params),
-                Some(method) if method.starts_with("speech/") => {
-                    self.speech.call(caller, &self.files, method, &params)
-                }
+                Some(method) if method.starts_with("speech/") => self.speech.call(
+                    caller,
+                    &self.files,
+                    &speech_offers::Lend::new(self.accounts.as_ref()),
+                    method,
+                    &params,
+                ),
                 Some("host/grants") => Ok(caller.grants_json()),
                 // The shells a terminal could start, and which one each agent is told to use: for a key that may open a terminal
                 // or read what programs are installed here (their paths are in `store/report` too).
@@ -1579,6 +1588,8 @@ mod say;
 #[cfg(test)]
 mod say_tests;
 mod speech;
+#[cfg(test)]
+mod speech_lend_tests;
 mod speech_offers;
 #[cfg(test)]
 mod speech_tests;

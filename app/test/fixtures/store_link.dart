@@ -193,6 +193,12 @@ final class FakeStoreHost {
       }
       return {'ok': true, 'model': given['model'], 'action': given['action']};
     }
+    if (method == 'speech/enable') {
+      calls.add(method);
+      params.putIfAbsent(method, () => []).add(given);
+      if (failures[method] case final failure?) throw failure;
+      return {'name': 'foundry', 'provider': 'speech_endpoint', 'model': given['model'], 'saved': true};
+    }
     final provider = given['provider'] as String?;
     final key = '$method ${provider ?? ''}'.trim();
     calls.add(key);

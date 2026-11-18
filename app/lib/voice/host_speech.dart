@@ -53,6 +53,7 @@ final class HostSpeechProvider {
     this.problem,
     this.models = const [],
     this.offer,
+    this.account,
   });
 
   final String name, kind, title, description;
@@ -65,6 +66,9 @@ final class HostSpeechProvider {
 
   /// The offer it was made from (`whisper`), when it was one of Canoa's.
   final String? offer;
+
+  /// The account whose API key it uses, when it was made of one: the key is the account's and never leaves the host.
+  final String? account;
 
   /// Why it cannot be used, in the host's words; null when it can.
   final String? problem;
@@ -83,6 +87,7 @@ final class HostSpeechProvider {
       problem: json['problem'] is String ? json['problem']! as String : null,
       models: _choices(json['models']),
       offer: json['offer'] is String ? json['offer']! as String : null,
+      account: json['account'] is String ? json['account']! as String : null,
     );
   }
 }
@@ -112,6 +117,9 @@ final class SpeechOffer {
     this.installed = false,
     this.version,
     this.provider,
+    this.account,
+    this.service,
+    this.unavailable,
   });
 
   final String id, title, summary, where;
@@ -136,6 +144,18 @@ final class SpeechOffer {
   /// The name of the provider canoa.cfg has made from it, if any.
   final String? provider;
 
+  /// The account whose API key an offer made of an account uses; the account's name is what tells the person which key pays.
+  final String? account;
+
+  /// The service on the host an offer calls (Foundry Local), set up with a model the person has loaded there.
+  final String? service;
+
+  /// Why it cannot be set up now, in the host's words; null when it can.
+  final String? unavailable;
+
+  /// Whether the host makes the provider itself from a model the person picks, with no program to install and no form to fill.
+  bool get direct => account != null || service != null;
+
   static SpeechOffer? parse(Object? json) {
     if (json is! Map || json['id'] is! String) return null;
     String? text(String key) => json[key] is String ? json[key]! as String : null;
@@ -154,6 +174,9 @@ final class SpeechOffer {
       installed: json['installed'] == true,
       version: text('version'),
       provider: text('provider'),
+      account: text('account'),
+      service: text('service'),
+      unavailable: text('unavailable'),
     );
   }
 }
@@ -256,10 +279,10 @@ final class HostSpeechCatalog extends ChangeNotifier {
     await refresh();
   }
 
-  /// Makes the provider of [offer] from the copy the host's Store has installed, and lists it. Throws a [SpeechFailure] with the
-  /// host's words when it cannot.
-  Future<String> enable(String offer, {String? name}) async {
-    final made = await call('speech/enable', {'offer': offer, 'name': ?name});
+  /// Makes the provider of [offer] from the copy the host's Store has installed, or from the account or the service it names with
+  /// [model], and lists it. Throws a [SpeechFailure] with the host's words when it cannot.
+  Future<String> enable(String offer, {String? name, String? model}) async {
+    final made = await call('speech/enable', {'offer': offer, 'name': ?name, 'model': ?model});
     await refresh();
     return made['name'] as String? ?? offer;
   }
@@ -310,7 +333,11 @@ final class HostSpeech implements SpeechBackend {
   String get id => hostSpeechId(provider.name);
 
   @override
-  String get name => provider.title == provider.name ? provider.name : '${provider.name} (${provider.title})';
+  String get name {
+    final account = provider.account;
+    if (account != null) return '${provider.name} (OpenAI, account $account)';
+    return provider.title == provider.name ? provider.name : '${provider.name} (${provider.title})';
+  }
 
   SpeechOffer? get _offer => _catalog.offerOf(provider.offer);
 
@@ -321,9 +348,7 @@ final class HostSpeech implements SpeechBackend {
   SpeechWhere get where => SpeechWhere(
     place: SpeechPlace.host,
     leaves: AudioLeaves.maybe,
-    words: local
-        ? _offer!.where
-        : 'The audio goes to your host, which hands it to the provider you set up there: a program it runs or an address you named.',
+    words: _offer?.where ?? 'The audio goes to your host, which hands it to the provider you set up there: a program it runs or an address you named.',
     endpoint: provider.settings['url'] is String ? provider.settings['url']! as String : null,
   );
 

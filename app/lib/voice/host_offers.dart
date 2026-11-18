@@ -10,9 +10,10 @@ import 'provider_form.dart';
 import 'speech_backend.dart';
 
 /// Settings > Voice, the speech providers Canoa offers out of the box, which the host of this page or app sets up: a local engine
-/// it installs through its Store (the audio is turned into text on the host and goes nowhere else) and the named services it can
-/// call with the person's own key. Nothing is installed or added until a button is pressed, and each offer says where the audio goes
-/// before it is.
+/// it installs through its Store (the audio is turned into text on the host and goes nowhere else), the Foundry Local service on the
+/// host, the OpenAI API key of an account the person already has in Canoa (named, so they know which key pays) and the named
+/// services it can call with a key typed here. Nothing is installed or added until a button is pressed, and each offer says where
+/// the audio goes before it is.
 class HostOffersGroup extends StatefulWidget {
   const HostOffersGroup({super.key, required this.catalog, required this.chosen, required this.onChosen});
 
@@ -77,7 +78,7 @@ class _HostOffersGroupState extends State<HostOffersGroup> {
   }
 
   Future<void> _enable(SpeechOffer offer) => _run(offer.id, () async {
-    final name = await _catalog.enable(offer.id);
+    final name = await _catalog.enable(offer.id, model: offer.direct ? _modelOf(offer) : null);
     widget.onChosen(hostSpeechId(name));
   });
 
@@ -115,9 +116,16 @@ class _HostOffersGroupState extends State<HostOffersGroup> {
           onPressed: busy || !setup ? null : () => unawaited(_remove(made)),
         ),
       ]);
-    } else if (offer.local && offer.installed) {
+    } else if (offer.unavailable != null) {
+      why = offer.unavailable;
+      action = FilledButton(key: Key('offer-unavailable-${offer.id}'), onPressed: null, child: Text(offer.account != null ? 'Add' : 'Set up'));
+    } else if (offer.direct || (offer.local && offer.installed)) {
       why = setup ? null : 'This host has not given this key the voice.setup grant.';
-      action = FilledButton(key: Key('offer-enable-${offer.id}'), onPressed: busy || !setup ? null : () => unawaited(_enable(offer)), child: const Text('Set up'));
+      action = FilledButton(
+        key: Key('offer-enable-${offer.id}'),
+        onPressed: busy || !setup ? null : () => unawaited(_enable(offer)),
+        child: Text(offer.account != null ? 'Add' : 'Set up'),
+      );
     } else if (offer.local) {
       why = !installs
           ? 'This host has not given this key the store.programs grant, which installing a program needs.'
@@ -146,9 +154,9 @@ class _HostOffersGroupState extends State<HostOffersGroup> {
             '${offer.installed && offer.version != null ? ' Installed: ${offer.version}.' : ''}',
         control: busy ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)) : action,
         below: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (offer.models.isNotEmpty && made == null && offer.local && !offer.installed)
+          if (offer.models.isNotEmpty && made == null && offer.unavailable == null && (offer.direct || (offer.local && !offer.installed)))
             Row(children: [const Text('Model  '), Flexible(child: _modelChoice(offer))]),
-          if (offer.local && made != null && offer.models.isNotEmpty && setup && installs)
+          if (offer.local && offer.store != null && made != null && offer.models.isNotEmpty && setup && installs)
             Row(children: [
               const Text('Another model  '),
               Flexible(child: _modelChoice(offer)),

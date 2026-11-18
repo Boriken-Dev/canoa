@@ -365,6 +365,11 @@ impl Accounts {
         &self.home
     }
 
+    /// The canoa.cfg files the accounts are listed in.
+    pub(super) const fn layers(&self) -> &Layers {
+        &self.layers
+    }
+
     /// Whether this is the host of a portal.
     pub(super) fn portal(&self) -> bool {
         self.portal

@@ -27,7 +27,7 @@ use guatiao_intake::Screen;
 use serde_json::{Map, Value, json};
 
 use super::files::Files;
-use super::speech_offers;
+use super::speech_offers::{self, HOST_KEYS, Lend};
 use super::{BAD_PARAMS, Caller, Grant, NOT_FOUND, REFUSED, allow, bad, text_param};
 
 type Outcome = Result<Value, (i32, String)>;
@@ -161,18 +161,19 @@ fn tables(files: &Files) -> Result<Map<String, Value>, (i32, String)> {
     })
 }
 
-/// What one table says, built: its kind and the provider, or why it cannot be.
-fn built(table: &Value) -> Result<(&'static Kind, Arc<dyn SpeechProvider>), String> {
+/// What one table says, built: its kind and the provider, or why it cannot be. With `with_key`, the key of the account the table
+/// names is read and given to the provider; without it the account is only checked, which is all a listing needs.
+fn built(
+    table: &Value,
+    lend: &Lend<'_>,
+    with_key: bool,
+) -> Result<(&'static Kind, Arc<dyn SpeechProvider>), String> {
     let id = table
         .get("provider")
         .and_then(Value::as_str)
         .ok_or("it names no provider")?;
     let kind = kind(id).ok_or_else(|| format!("this host has no provider {id}"))?;
-    let mut settings = table.clone();
-    if let Some(map) = settings.as_object_mut() {
-        map.remove("provider");
-        map.remove(speech_offers::OFFER_KEY);
-    }
+    let settings = lend.settings(table, with_key)?;
     (kind.build)(&settings).map(|provider| (kind, provider))
 }
 
@@ -181,16 +182,17 @@ impl Speech {
         &self,
         caller: &Caller,
         files: &Files,
+        lend: &Lend<'_>,
         method: &str,
         params: &Value,
     ) -> Outcome {
         match method {
-            "speech/providers" => allow(caller, Grant::Voice).and_then(|()| providers(files)),
+            "speech/providers" => allow(caller, Grant::Voice).and_then(|()| providers(files, lend)),
             "speech/configure" => {
-                allow(caller, Grant::VoiceSetup).and_then(|()| configure(files, params))
+                allow(caller, Grant::VoiceSetup).and_then(|()| configure(files, lend, params))
             }
             "speech/open" => {
-                allow(caller, Grant::Voice).and_then(|()| self.open(caller, files, params))
+                allow(caller, Grant::Voice).and_then(|()| self.open(caller, files, lend, params))
             }
             "speech/push" => allow(caller, Grant::Voice).and_then(|()| self.push(caller, params)),
             "speech/finish" => {
@@ -225,7 +227,7 @@ impl Speech {
         stale.iter().filter_map(|id| held.remove(id)).collect()
     }
 
-    fn open(&self, caller: &Caller, files: &Files, params: &Value) -> Outcome {
+    fn open(&self, caller: &Caller, files: &Files, lend: &Lend<'_>, params: &Value) -> Outcome {
         let name = text_param(params, "provider")?.ok_or_else(|| bad("provider is needed"))?;
         let tables = tables(files)?;
         let table = tables.get(name).ok_or_else(|| {
@@ -235,7 +237,8 @@ impl Speech {
             )
         })?;
         let table = &speech_offers::with_model(table, params)?;
-        let (_, provider) = built(table).map_err(|why| (REFUSED, format!("{name}: {why}")))?;
+        let (_, provider) =
+            built(table, lend, true).map_err(|why| (REFUSED, format!("{name}: {why}")))?;
         let request = request_of(params)?;
         let owner = caller.owner().to_owned();
         let stale = {
@@ -395,7 +398,7 @@ fn request_of(params: &Value) -> Result<OpenRequest, (i32, String)> {
 
 /// `speech/providers`: the kinds this host has, each with the schema and the form its settings are drawn with, and the providers
 /// canoa.cfg defines, each with what it says of itself. A setting that is a secret is never answered, only that it is set.
-fn providers(files: &Files) -> Outcome {
+fn providers(files: &Files, lend: &Lend<'_>) -> Outcome {
     let mut types = Vec::new();
     for kind in &KINDS {
         types.push(json!({
@@ -419,7 +422,7 @@ fn providers(files: &Files) -> Outcome {
         if let Some(map) = table.as_object() {
             for (key, value) in map
                 .iter()
-                .filter(|(key, _)| *key != "provider" && *key != speech_offers::OFFER_KEY)
+                .filter(|(key, _)| *key != "provider" && !HOST_KEYS.contains(&key.as_str()))
             {
                 if secrets.contains(key) {
                     set.push(key.clone());
@@ -433,9 +436,13 @@ fn providers(files: &Files) -> Outcome {
             .get(speech_offers::OFFER_KEY)
             .cloned()
             .unwrap_or(Value::Null);
+        entry["account"] = table
+            .get(speech_offers::ACCOUNT_KEY)
+            .cloned()
+            .unwrap_or(Value::Null);
         entry["settings"] = Value::Object(settings);
         entry["secrets_set"] = json!(set);
-        match built(&table) {
+        match built(&table, lend, false) {
             Ok((_, provider)) => match provider.describe() {
                 Ok(info) => {
                     entry["title"] = json!(info.title);
@@ -444,6 +451,9 @@ fn providers(files: &Files) -> Outcome {
                     entry["partials"] = json!(info.partials);
                     entry["max_seconds"] = json!(info.max_seconds);
                     entry["hints"] = json!(info.hints);
+                    if let Some(why) = lend.missing(&table) {
+                        entry["problem"] = json!(why);
+                    }
                 }
                 Err(error) => entry["problem"] = json!(error.to_string()),
             },
@@ -457,7 +467,7 @@ fn providers(files: &Files) -> Outcome {
 /// `speech/configure`: writes (or, with `remove`, takes out) the `[speech.NAME]` table. Settings the kind's schema does not name
 /// are refused, and a secret the request leaves out or leaves empty keeps what the table had, so a form that never showed it
 /// does not clear it; `clear` names the ones to take out.
-fn configure(files: &Files, params: &Value) -> Outcome {
+fn configure(files: &Files, lend: &Lend<'_>, params: &Value) -> Outcome {
     let name = text_param(params, "name")?.ok_or_else(|| bad("name is needed"))?;
     if !valid_name(name) {
         return Err(bad(
@@ -502,9 +512,11 @@ fn configure(files: &Files, params: &Value) -> Outcome {
             }
         }
         if before.get("provider").and_then(Value::as_str) == Some(id) {
-            // A provider made from an offer stays that offer's when its settings are edited.
-            if let Some(offer) = before.get(speech_offers::OFFER_KEY) {
-                table.insert(speech_offers::OFFER_KEY.to_owned(), offer.clone());
+            // A provider made from an offer stays that offer's when its settings are edited, with the account or service it calls.
+            for key in HOST_KEYS {
+                if let Some(kept) = before.get(key) {
+                    table.insert(key.to_owned(), kept.clone());
+                }
             }
             for key in &secrets {
                 if !table.contains_key(key)
@@ -516,7 +528,8 @@ fn configure(files: &Files, params: &Value) -> Outcome {
             }
         }
         let table = Value::Object(table);
-        built(&table).map_err(|why| format!("those settings cannot be used: {why}"))?;
+        built(&table, lend, false)
+            .map_err(|why| format!("those settings cannot be used: {why}"))?;
         map.insert(name.to_owned(), table);
         Ok(Value::Object(map))
     })?;

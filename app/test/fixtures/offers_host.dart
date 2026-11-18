@@ -36,10 +36,15 @@ const whisperModels = [
 /// The speech methods of a host with the two offers; `speech/enable` makes the whisper provider, as the real one does once the Store
 /// has installed the copy.
 final class OffersHost implements HostLink {
-  OffersHost({this.installed = false});
+  OffersHost({this.installed = false, this.more = const []});
 
   bool installed;
   bool enabled = false;
+
+  /// Offers the host makes besides the two (Foundry Local, an account's OpenAI key); `speech/enable` of one of them makes a provider
+  /// of the offer's id and the model asked for.
+  final List<Map<String, Object?>> more;
+  final made = <String, Map<String, Object?>>{};
   final calls = <String>[];
   final params = <String, List<Map<String, Object?>>>{};
   final configured = <Map<String, Object?>>[];
@@ -91,6 +96,18 @@ final class OffersHost implements HostLink {
         result = {
           'types': [speechEndpointKind],
           'providers': [
+            for (final entry in made.entries)
+              {
+                'name': entry.key,
+                'provider': 'speech_endpoint',
+                'title': 'Endpoint',
+                'description': '',
+                'settings': <String, Object?>{},
+                'secrets_set': <Object?>[],
+                'partials': false,
+                'offer': entry.value['offer'],
+                'account': entry.value['account'],
+              },
             if (enabled)
               {
                 'name': 'whisper',
@@ -106,11 +123,22 @@ final class OffersHost implements HostLink {
         };
       case 'speech/offers':
         result = {
-          'offers': [_whisper, _openai],
+          'offers': [
+            _whisper,
+            for (final offer in more) {...offer, 'provider': made.entries.where((e) => e.value['offer'] == offer['id']).firstOrNull?.key},
+            _openai,
+          ],
         };
       case 'speech/enable':
-        enabled = true;
-        result = {'name': 'whisper', 'provider': 'speech_command', 'model': 'base', 'saved': true};
+        final offer = more.where((each) => each['id'] == given['offer']).firstOrNull;
+        if (offer == null) {
+          enabled = true;
+          result = {'name': 'whisper', 'provider': 'speech_command', 'model': 'base', 'saved': true};
+        } else {
+          final name = (given['name'] as String?) ?? (offer['account'] != null ? 'openai-${offer['account']}' : '${offer['id']}');
+          made[name] = {'offer': offer['id'], 'account': offer['account'], 'model': given['model']};
+          result = {'name': name, 'provider': 'speech_endpoint', 'model': given['model'], 'saved': true};
+        }
       case 'speech/configure':
         configured.add(given);
         result = {'saved': true};

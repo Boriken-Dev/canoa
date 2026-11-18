@@ -128,6 +128,45 @@ void main() {
     models.dispose();
   });
 
+  testWidgets('a Whisper model has a page with Use as speech provider, which makes the provider and loads nothing', (tester) async {
+    final host = FakeStoreHost([])
+      ..foundryInstalled = true
+      ..foundryModels = [_model('openai-whisper-tiny-generic-cpu', cached: true), _model('qwen3-14b-generic-gpu:2')];
+    final models = _models(host);
+    final type = foundryModelsType(models);
+    await tester.runAsync(type.load!);
+    final items = type.items();
+    expect(items[1].details, isNull, reason: 'a chat model is not a speech model');
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => items[0].details!(context, null))));
+    expect(find.byKey(const Key('foundry-speech-not-loaded')), findsOneWidget);
+    expect(find.textContaining('never loads a model'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('foundry-use-speech')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pumpAndSettle();
+    expect(host.params['speech/enable']!.single, {'offer': 'foundry', 'model': 'openai-whisper-tiny-generic-cpu'});
+    expect(host.params['foundry/model'], isNull, reason: 'the model was not loaded');
+    expect(find.byKey(const Key('foundry-speech-done')), findsOneWidget);
+    expect(find.textContaining('"foundry"'), findsOneWidget);
+    models.dispose();
+  });
+
+  testWidgets('a refusal to make the provider is shown in the host\'s words', (tester) async {
+    final host = FakeStoreHost([])
+      ..foundryInstalled = true
+      ..foundryModels = [_model('openai-whisper-tiny-generic-cpu')]
+      ..failures['speech/enable'] = ControlFailed(-32001, 'this key may not set up a speech provider');
+    final models = _models(host);
+    final type = foundryModelsType(models);
+    await tester.runAsync(type.load!);
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => type.items().single.details!(context, null))));
+    await tester.tap(find.byKey(const Key('foundry-use-speech')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pumpAndSettle();
+    expect(find.text('this key may not set up a speech provider'), findsOneWidget);
+    expect(find.byKey(const Key('foundry-speech-done')), findsNothing);
+    models.dispose();
+  });
+
   testWidgets('+ on a loaded model offers to unload it', (tester) async {
     final host = FakeStoreHost([])
       ..foundryInstalled = true
