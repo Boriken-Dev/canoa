@@ -1,6 +1,6 @@
 //! The Outlook backend: the requests it makes against a recording runner, and the real helper script run by Windows PowerShell
 //! against a stand-in for Outlook's object model (classic Outlook is not needed). The PowerShell tests are skipped where there is
-//! no Windows PowerShell.
+//! no Windows PowerShell, and those that keep the mailbox between calls in a file also where it does not share this host's files.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -86,6 +86,19 @@ macro_rules! need_powershell {
             eprintln!("skipped: no Windows PowerShell here");
             return;
         }
+    };
+}
+
+/// Skips the test where Windows PowerShell does not see this process's files. The stand-in keeps what a call changed in a file
+/// that the next call reads, so it has to name the same file for both: through WSL's interop `powershell.exe` reads a Unix path
+/// as one of its own drive's.
+macro_rules! need_shared_files {
+    () => {
+        if !cfg!(windows) {
+            eprintln!("skipped: Windows PowerShell does not share this host's files");
+            return;
+        }
+        need_powershell!();
     };
 }
 
@@ -393,7 +406,7 @@ fn the_helper_reads_a_message_lists_folders_and_relates_mail_by_conversation() {
 
 #[test]
 fn the_helper_saves_drafts_and_never_sends() {
-    need_powershell!();
+    need_shared_files!();
     let dir = Dir::new("draft");
     let outlook = outlook_over_standin(&dir.state());
     let saved = outlook
@@ -431,7 +444,7 @@ fn the_helper_saves_drafts_and_never_sends() {
 
 #[test]
 fn the_helper_moves_marks_flags_and_categorizes() {
-    need_powershell!();
+    need_shared_files!();
     let dir = Dir::new("change");
     let outlook = outlook_over_standin(&dir.state());
     let both = vec!["M1".to_owned(), "M3".to_owned()];
