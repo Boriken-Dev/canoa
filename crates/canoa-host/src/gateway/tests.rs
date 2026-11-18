@@ -464,8 +464,13 @@ fn a_stream_says_it_is_still_there_while_a_slow_model_works() {
         "/v1/responses",
         &json!({"stream": true, "input": "hi"}),
     );
+    // The head says in progress once; each wait says it again, as an event and not a comment.
     assert!(
-        responses.body.contains(": keep-alive"),
+        responses
+            .body
+            .matches("event: response.in_progress")
+            .count()
+            >= 3,
         "{}",
         responses.body
     );

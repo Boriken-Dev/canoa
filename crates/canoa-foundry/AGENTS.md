@@ -30,8 +30,9 @@ pub mod responses {   // POST /v1/responses
     pub fn to_chat(request: &Value, model: &ModelInfo) -> Result<Translated, ApiError>;
     pub fn response(done: &Completion) -> Value;
     pub fn stream_head(id: &str, model: &str) -> String;                 // response.created, response.in_progress
+    pub fn ping(id: &str, model: &str) -> String;                        // response.in_progress again, sent while the model works: an event, since a comment is not one to Codex
     pub fn stream_body(done: &Completion) -> String;                     // items, deltas, response.completed or response.incomplete
-    pub fn stream_error(error: &ApiError) -> String;
+    pub fn stream_error(error: &ApiError) -> String;                     // response.failed with the reason
 }
 pub mod openai {      // POST /v1/chat/completions, GET /v1/models
     pub fn to_chat(request: &Value, model: &ModelInfo) -> Result<Translated, ApiError>;

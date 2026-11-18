@@ -324,9 +324,8 @@ pub fn response(done: &Completion) -> Value {
     envelope(done, &ids, final_status(done), output(done, &ids, true))
 }
 
-/// The events that open a stream, sent before the model has answered.
-#[must_use]
-pub fn stream_head(id: &str, model: &str) -> String {
+/// The response as it stands before the model has answered.
+fn started(id: &str, model: &str) -> Value {
     let empty = Completion {
         id: id.to_string(),
         model: model.to_string(),
@@ -337,7 +336,13 @@ pub fn stream_head(id: &str, model: &str) -> String {
         usage: crate::Usage::default(),
     };
     let ids = Ids::of(&empty);
-    let started = envelope(&empty, &ids, "in_progress", Vec::new());
+    envelope(&empty, &ids, "in_progress", Vec::new())
+}
+
+/// The events that open a stream, sent before the model has answered.
+#[must_use]
+pub fn stream_head(id: &str, model: &str) -> String {
+    let started = started(id, model);
     let mut out = crate::sse(
         Some("response.created"),
         &json!({"type": "response.created", "sequence_number": 0, "response": started}),
@@ -347,6 +352,16 @@ pub fn stream_head(id: &str, model: &str) -> String {
         &json!({"type": "response.in_progress", "sequence_number": 1, "response": started}),
     ));
     out
+}
+
+/// What is sent while the model works: the response is still in progress, said again. A client that gives up when no event
+/// arrives for a while (Codex waits five minutes) counts an event and not a comment line, so this is an event.
+#[must_use]
+pub fn ping(id: &str, model: &str) -> String {
+    crate::sse(
+        Some("response.in_progress"),
+        &json!({"type": "response.in_progress", "sequence_number": 1, "response": started(id, model)}),
+    )
 }
 
 /// The events that carry an answer after [`stream_head`].
@@ -423,12 +438,23 @@ pub fn stream_body(done: &Completion) -> String {
     out
 }
 
-/// A failure in the middle of a stream, which has already said 200.
+/// A failure in the middle of a stream, which has already said 200: the response ends as failed and says why, which is the
+/// event a client reads (a bare `error` event is ignored by some, and they then report only that the stream closed).
 #[must_use]
 pub fn stream_error(error: &ApiError) -> String {
     crate::sse(
-        Some("error"),
-        &json!({"type": "error", "message": error.message, "code": error.kind, "param": null, "sequence_number": 2}),
+        Some("response.failed"),
+        &json!({
+            "type": "response.failed",
+            "sequence_number": 2,
+            "response": {
+                "id": "resp_failed",
+                "object": "response",
+                "status": "failed",
+                "output": [],
+                "error": {"code": error.kind, "message": error.message},
+            },
+        }),
     )
 }
 
@@ -633,5 +659,34 @@ mod tests {
             .collect();
         assert_eq!(numbers, (0..numbers.len() as u64).collect::<Vec<_>>());
         assert!(text.contains("\"type\":\"response.completed\""));
+    }
+
+    #[test]
+    fn a_failure_in_the_middle_of_a_stream_is_a_failed_response_that_names_the_reason() {
+        let text = stream_error(&ApiError::upstream("the model refused it".to_string()));
+        assert!(text.starts_with("event: response.failed\n"), "{text}");
+        let data: Value = serde_json::from_str(
+            text.lines()
+                .find_map(|l| l.strip_prefix("data: "))
+                .expect("data"),
+        )
+        .expect("JSON");
+        assert_eq!(data["type"], "response.failed");
+        assert_eq!(data["response"]["status"], "failed");
+        assert_eq!(data["response"]["error"]["message"], "the model refused it");
+    }
+
+    #[test]
+    fn what_is_sent_while_the_model_works_is_an_event_a_client_counts() {
+        let text = ping("local", "m");
+        assert!(
+            text.starts_with(
+                "event: response.in_progress
+"
+            ),
+            "{text}"
+        );
+        assert!(text.contains("\"status\":\"in_progress\""), "{text}");
+        assert!(!text.starts_with(':'), "a comment is not an event");
     }
 }

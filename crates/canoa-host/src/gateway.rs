@@ -224,10 +224,10 @@ impl Gateway {
                     waited += tick;
                     if waited >= self.keep_alive {
                         waited = Duration::ZERO;
-                        let said = if api == Api::Messages {
-                            anthropic::ping()
-                        } else {
-                            KEEP_ALIVE.to_owned()
+                        let said = match api {
+                            Api::Messages => anthropic::ping(),
+                            Api::Responses => responses::ping(id, &model),
+                            Api::Chat => KEEP_ALIVE.to_owned(),
                         };
                         let mut out = shared.lock().unwrap_or_else(PoisonError::into_inner);
                         if out
