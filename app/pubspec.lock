@@ -95,8 +95,8 @@ packages:
     dependency: "direct main"
     description:
       path: dart
-      ref: caa9bf6dcf8485fb179f092bbd2cd9db17861670
-      resolved-ref: caa9bf6dcf8485fb179f092bbd2cd9db17861670
+      ref: 169125d3bfcb1b2cb1c3b33b297e373f2930c54a
+      resolved-ref: 169125d3bfcb1b2cb1c3b33b297e373f2930c54a
       url: "https://github.com/Boriken-Dev/coqui-aos.git"
     source: git
     version: "0.0.0-alpha.0"
