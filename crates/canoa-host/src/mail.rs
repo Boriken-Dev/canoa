@@ -27,14 +27,14 @@ pub(crate) mod related;
 pub(crate) mod tools;
 pub(crate) mod xml;
 
+#[cfg(test)]
+mod commands_tests;
 #[cfg(all(test, windows))]
 #[allow(
     unsafe_code,
     reason = "the stand-in server runs the system's security package, which has no safe binding"
 )]
 mod sspi_server;
-#[cfg(test)]
-mod commands_tests;
 #[cfg(test)]
 pub(crate) mod standin;
 #[cfg(test)]
