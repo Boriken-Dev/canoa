@@ -2,10 +2,6 @@
 //! (the form and the system store) and from every library canoa.cfg's entries and extensions load, a script's included. Nothing
 //! here names a provider the host does not find in a registry.
 #![allow(
-    dead_code,
-    reason = "read by the control methods that list, show, set and forget what is kept"
-)]
-#![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
     reason = "the catalog is the host's"

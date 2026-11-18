@@ -6,10 +6,6 @@
 //! is asked for again after it does. A value kept for one session ends with it. Nothing here writes a value to a log, an error or a
 //! listing: the table the person sees holds names, where each came from and how long it has left.
 #![allow(
-    dead_code,
-    reason = "read by the control methods that list, show, set and forget what is kept"
-)]
-#![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
     reason = "locks and the clock are std's"

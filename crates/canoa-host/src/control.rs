@@ -157,12 +157,17 @@ pub enum Grant {
     /// which keeps a password in the host's account store and has the host connect to the server the account names with it. The
     /// accounts are what a key holding `mail` then reads, so it is as much as access to the person's mail.
     MailSetup,
+    /// `secrets/providers`, `secrets/list`, `secrets/reveal`, `secrets/forget` and `secrets/set`: the list of the secrets this host holds
+    /// (where each is kept, its name, how long it has left), showing the value of one on request, forgetting one and setting one by a
+    /// form sealed to the key that asked. A secret is whatever an agent may be given a handle to use, so this is as much as access to
+    /// them. A key never holds it unless canoa.cfg gives it; the application in this process does.
+    Secrets,
 }
 
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 26] {
+    pub fn all() -> [Self; 27] {
         [
             Self::LedgerRead,
             Self::LedgerWrite,
@@ -190,6 +195,7 @@ impl Grant {
             Self::ToolsProvide,
             Self::Mail,
             Self::MailSetup,
+            Self::Secrets,
         ]
     }
 
@@ -223,6 +229,7 @@ impl Grant {
             Self::ToolsProvide => "tools.provide",
             Self::Mail => "mail",
             Self::MailSetup => "mail.setup",
+            Self::Secrets => "secrets",
         }
     }
 
@@ -763,6 +770,14 @@ impl Control {
             .ok_or((REFUSED, "this host does not manage accounts".to_owned()))
     }
 
+    /// The vault of the secrets this host holds, when it has the means to seal a typed answer, which is what makes it keep any.
+    fn vault(&self) -> Result<Arc<crate::secrets::vault::Vault>, (i32, String)> {
+        self.sealer
+            .as_ref()
+            .map(|sealer| Arc::clone(sealer.0.vault()))
+            .ok_or((REFUSED, "this host keeps no secrets".to_owned()))
+    }
+
     fn mail_setup(&self) -> Result<&mail_setup::MailSetup, (i32, String)> {
         self.mail.as_ref().ok_or((
             REFUSED,
@@ -1101,6 +1116,12 @@ impl Control {
                         .and_then(|()| self.mail_setup())
                         .and_then(|setup| setup.call(method, &params))
                 }
+                Some(
+                    method @ ("secrets/providers" | "secrets/list" | "secrets/reveal"
+                    | "secrets/forget"),
+                ) => allow(caller, Grant::Secrets)
+                    .and_then(|()| self.vault())
+                    .and_then(|vault| secrets::call(&vault, method, &params)),
                 Some(method @ ("usage/summary" | "usage/limits")) => {
                     allow(caller, Grant::Usage).and_then(|()| self.usage_call(method, &params))
                 }
@@ -1498,6 +1519,7 @@ fn is_apply(line: &[u8]) -> bool {
                 .is_some_and(|method| {
                     method == "store/apply"
                         || method == "host/pair"
+                        || secrets::is_set(method)
                         || accounts::Long::of(method).is_some()
                 })
     })
@@ -1545,6 +1567,36 @@ impl Control {
                 channel,
                 &|other| self.handle(caller, other),
             );
+        }
+        if request
+            .get("method")
+            .and_then(Value::as_str)
+            .is_some_and(secrets::is_set)
+        {
+            if let Err((code, message)) = allow(caller, Grant::Secrets) {
+                return error_line(&id, code, &message);
+            }
+            let peer = match caller {
+                Caller::Owner => None,
+                Caller::Peer { id, .. } => Some(id.as_str()),
+            };
+            let asker = self
+                .sealer
+                .as_ref()
+                .and_then(|sealer| sealer.0.asker_of(peer));
+            return match self.vault() {
+                Ok(vault) => secrets::set(
+                    &vault,
+                    asker.as_ref(),
+                    self.sealer
+                        .as_ref()
+                        .map_or(crate::secrets::ask::ASK_WAIT, |sealer| sealer.1),
+                    &request,
+                    channel,
+                    &|other| self.handle(caller, other),
+                ),
+                Err((code, message)) => error_line(&id, code, &message),
+            };
         }
         if let Some(long) = request
             .get("method")
@@ -1729,6 +1781,9 @@ mod providers_tests;
 mod say;
 #[cfg(test)]
 mod say_tests;
+mod secrets;
+#[cfg(test)]
+mod secrets_tests;
 mod speech;
 #[cfg(test)]
 mod speech_lend_tests;

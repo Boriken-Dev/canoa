@@ -898,6 +898,8 @@ paths = ["path/to/guatiao/bindings/python/guatiao/src"]
 
 The vault is never unlocked for you: until the key is given, a request for a name Bitwarden answers falls back to asking you, and a wrong or expired key does the same. The key goes to `bw` in its environment, never on a command line.
 
+The **Secrets** section of the app lists what Canoa holds: each secret's provider and name, its value hidden until you press Show, and how long it is kept. Forget takes one out (of the system store too, when it was kept there), and Set a secret asks for a value in a form only the app and the host can read.
+
 A value that comes with an end of its own (a token that expires) is kept no longer than that end, whatever you chose. Nothing is written to a log.
 
 ### Skill sources
