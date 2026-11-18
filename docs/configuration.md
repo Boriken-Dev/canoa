@@ -428,12 +428,34 @@ with why and the Store runtime that installs it (Runtimes: Python, Node.js, Git 
 overlay's card in the Store and **Effective setup** show it with **Install from the Store**. Nothing is installed without
 you, and an overlay that needs a program the computer lacks still applies.
 
+An overlay's dependencies and setup are prepared when you install or sync it, on the yes you give on its page, which lists
+what will run first: each dependency file (`lib/python/requirements.txt`, `lib/node/package.json`, or the ones `runtime`
+names) with the package manager, whether it is pinned and that it fetches from the network, and the setup with its
+interpreter, time limit and what it says of the network. Preparing installs the dependencies into an environment of the
+overlay's own (`overlays/.environments/NAME/`, a virtual environment for Python and a `node_modules` folder for Node.js,
+made beside the overlay and never inside it, so the overlay's digest never covers it), then runs its setup as the
+specification's phases say (`install` the first time, `sync` after, with the state directory `overlays/.state/NAME/`), and
+records the digest it prepared in `overlays/.prepared/NAME.json`. It runs outside any agent's session, and a step that fails
+ends it with the end of what it printed and leaves the record and the earlier environment as they were. Canoa gives every
+overlay an environment of its own, so a shared or named `environment` is not shared. A setup that says it needs no network
+is not kept from it, and the plan says so. A session puts the packages after the overlay's own `lib/python/` and
+`lib/node/`, and says per dependency file and setup whether it is prepared for the version installed; an overlay installed
+or updated since then reports them as not done, and its card in the Store has **Prepare…**, which lists what runs and asks
+again. Removing an overlay runs its setup as `remove` and takes its environment, state and record away.
+
+The commands an overlay's `scripts` name are exposed as launchers in `overlays/.environments/NAME/commands/`, a folder first
+on the `PATH` of the agent's processes (never before the agent's own program, which is found on the host's `PATH`). A
+launcher runs the script under its interpreter, found on the host's own `PATH` (Python, Node.js, `sh`, `bash`, PowerShell 7),
+with the arguments it was given, in the caller's directory and environment, with no time limit, and ends with the script's
+status; on Windows it is a `.cmd` file, so `cmd.exe` reads its arguments before the script does. Two commands whose names
+differ only by the case of ASCII letters, in one overlay or two, are exposed by neither, and the report says so.
+
 Canoa does not apply yet, and **Settings → Profiles** lists as "not applied by Canoa yet": env scripts (`env.<ext>`,
-`env_scripts`), `setup`, dependencies (`lib/python/requirements.txt`, `lib/node/package.json`), `scripts`, `mcp.skills`, an MCP server's `timeout` and its working directory (it runs in the session's), other
+`env_scripts`), `mcp.skills`, an MCP server's `timeout` and its working directory (it runs in the session's), other
 harnesses' hints. Each line names its overlay. An overlay's own `bin/` goes first on `PATH`, and its `lib/python/` and
 `lib/node/` on `PYTHONPATH` and `NODE_PATH`, ahead of the host's own entries, for the agent and the programs it starts.
 A `paths` entry that leaves the overlay's folder is refused, and a `paths` entry may set only those three of the variables
-Canoa keeps to itself. Canoa runs nothing of an overlay.
+Canoa keeps to itself.
 
 From git, the desktop app installs an overlay into `overlays/NAME/` beside canoa.cfg, with `overlays/NAME.json`
 recording the source, the commit, each file's git blob id and **the tree digest** of what it wrote, and its history in
