@@ -47,6 +47,12 @@ pub(crate) struct PowerShell {
     timeout: Duration,
     /// Text run after the helper and before the request, which a test uses to put a stand-in for Outlook in its place.
     prelude: String,
+    /// The helper script that defines `Invoke-CanoaMail`.
+    script: &'static str,
+    /// What the errors call the program the helper reaches.
+    label: &'static str,
+    /// What a call that outlasts its time is likely waiting for, said after the time.
+    waiting: &'static str,
 }
 
 /// What PowerShell is started with: it takes its script from standard input as one string, so the text is not parsed line by line.
@@ -68,7 +74,18 @@ impl PowerShell {
             }),
             timeout,
             prelude: String::new(),
+            script: SCRIPT,
+            label: "Outlook",
+            waiting: ": Outlook may be waiting for the person to allow programmatic access",
         }
+    }
+
+    /// The same process started for another helper `script`, which defines `Invoke-CanoaMail`; `label` names what it reaches.
+    pub(crate) fn with_script(mut self, script: &'static str, label: &'static str) -> Self {
+        self.script = script;
+        self.label = label;
+        self.waiting = "";
+        self
     }
 
     /// The same, with `prelude` run before each request.
@@ -86,11 +103,13 @@ impl Runner for PowerShell {
             .split_first()
             .ok_or_else(|| MailError::Bad("the Outlook command is empty".to_owned()))?;
         let input = format!(
-            "{SCRIPT}\n{}\nInvoke-CanoaMail '{}'\n",
+            "{}\n{}\nInvoke-CanoaMail '{}'\n",
+            self.script,
             self.prelude,
             BASE64.encode(request.to_string().as_bytes())
         );
-        let unreachable = |why: String| MailError::Unreachable(format!("Outlook: {why}"));
+        let label = self.label;
+        let unreachable = |why: String| MailError::Unreachable(format!("{label}: {why}"));
         let mut command = Command::new(program);
         command
             .args(args)
@@ -127,8 +146,9 @@ impl Runner for PowerShell {
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(unreachable(format!(
-                        "no answer in {} seconds: Outlook may be waiting for the person to allow programmatic access",
-                        self.timeout.as_secs()
+                        "no answer in {} seconds{}",
+                        self.timeout.as_secs(),
+                        self.waiting
                     )));
                 }
                 Ok(None) => thread::sleep(Duration::from_millis(20)),
@@ -155,7 +175,7 @@ impl Runner for PowerShell {
             Ok(answer["result"].clone())
         } else {
             let why = answer["error"].as_str().unwrap_or("it failed");
-            Err(MailError::Backend(format!("Outlook said: {why}")))
+            Err(MailError::Backend(format!("{label} said: {why}")))
         }
     }
 }

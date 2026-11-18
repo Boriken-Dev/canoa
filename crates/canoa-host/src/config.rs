@@ -640,6 +640,8 @@ pub struct MailConfig {
 pub enum MailBackend {
     /// Exchange Server's web services (EWS).
     Ews,
+    /// Exchange Online through Microsoft Graph, with a token from the person's Windows sign-in.
+    Graph,
     /// Classic Outlook for Windows, through a PowerShell helper that drives its object model.
     Outlook,
 }
@@ -660,9 +662,11 @@ pub enum MailAuth {
 pub struct MailAccount {
     /// What reaches the mailbox.
     pub backend: MailBackend,
-    /// The mailbox's address, which Autodiscover asks about (`ews`).
+    /// The mailbox's address, which Autodiscover asks about (`ews`), or the account Windows is asked to sign in as when it
+    /// holds several (`graph`).
     pub email: Option<String>,
-    /// The EWS address; Autodiscover finds it from `email` when this is not given (`ews`).
+    /// The EWS address; Autodiscover finds it from `email` when this is not given (`ews`). For `graph`, Graph's address
+    /// (default `https://graph.microsoft.com/v1.0`).
     pub server: Option<String>,
     /// The Autodiscover address to ask instead of the two the address's domain suggests (`ews`).
     pub autodiscover: Option<String>,
@@ -674,8 +678,14 @@ pub struct MailAccount {
     pub password_env: Option<String>,
     /// The Outlook profile to log on to; the one Outlook is running with otherwise (`outlook`).
     pub profile: Option<String>,
-    /// The program and arguments that run the Outlook helper, instead of Windows PowerShell with the helper script (`outlook`).
+    /// The program and arguments that run the helper, instead of Windows PowerShell with the helper script (`outlook`,
+    /// `graph`).
     pub command: Option<Vec<String>>,
+    /// The application (client) id of the app registration in Entra ID that the Windows sign-in is asked for a token for
+    /// (`graph`).
+    pub client_id: Option<String>,
+    /// The tenant the registration is in: its id or domain, `organizations` when not given (`graph`).
+    pub tenant: Option<String>,
     /// How long one call may take, in seconds (default 60).
     pub timeout_secs: u64,
 }
@@ -1748,6 +1758,8 @@ struct RawMailAccount {
     password_env: Option<String>,
     profile: Option<String>,
     command: Option<Vec<String>>,
+    client_id: Option<String>,
+    tenant: Option<String>,
     timeout_secs: Option<u64>,
 }
 
@@ -1789,14 +1801,55 @@ impl RawMail {
             }
             let backend = match raw.backend.as_deref() {
                 Some("ews") => MailBackend::Ews,
+                Some("graph") => MailBackend::Graph,
                 Some("outlook") => MailBackend::Outlook,
-                _ => return Err(invalid("backend is ews or outlook")),
+                _ => return Err(invalid("backend is ews, graph or outlook")),
             };
             let timeout_secs = raw.timeout_secs.unwrap_or(60);
             if !(1..=3600).contains(&timeout_secs) {
                 return Err(invalid("timeout_secs is 1 to 3600"));
             }
+            if backend != MailBackend::Graph && (raw.client_id.is_some() || raw.tenant.is_some()) {
+                return Err(invalid("client_id and tenant are for graph"));
+            }
             let auth = match backend {
+                MailBackend::Graph => {
+                    if raw.autodiscover.is_some()
+                        || raw.auth.is_some()
+                        || raw.user.is_some()
+                        || raw.password_env.is_some()
+                        || raw.profile.is_some()
+                    {
+                        return Err(invalid(
+                            "graph signs in as Windows does: it takes client_id, tenant, email, server and command, not autodiscover, auth, user, password_env or profile",
+                        ));
+                    }
+                    if raw.client_id.as_deref().is_none_or(str::is_empty) {
+                        return Err(invalid(
+                            "graph needs the client_id of an app registration in Entra ID (a public client with the delegated permission Mail.ReadWrite), or use the outlook backend, which needs none",
+                        ));
+                    }
+                    if raw.tenant.as_deref().is_some_and(str::is_empty) {
+                        return Err(invalid("tenant is an id or a domain"));
+                    }
+                    if raw
+                        .server
+                        .as_deref()
+                        .is_some_and(|address| !mail_address(address))
+                    {
+                        return Err(invalid(
+                            "server is an https address (http only on this computer, since a token would cross the network in the clear)",
+                        ));
+                    }
+                    if raw
+                        .command
+                        .as_ref()
+                        .is_some_and(|c| c.first().is_none_or(String::is_empty))
+                    {
+                        return Err(invalid("command names a program"));
+                    }
+                    MailAuth::Windows
+                }
                 MailBackend::Outlook => {
                     if raw.email.is_some()
                         || raw.server.is_some()
@@ -1876,6 +1929,8 @@ impl RawMail {
                     password_env: raw.password_env,
                     profile: raw.profile,
                     command: raw.command,
+                    client_id: raw.client_id,
+                    tenant: raw.tenant,
                     timeout_secs,
                 },
             );

@@ -2095,13 +2095,45 @@ fn host_mail_names_accounts_that_hold_no_password_and_refuses_what_would_send_on
             "backend = \"outlook\"\nserver = \"https://x\"",
             "signs in as Outlook",
         ),
-        ("backend = \"imap\"", "backend is ews or outlook"),
-        ("", "backend is ews or outlook"),
+        ("backend = \"imap\"", "backend is ews, graph or outlook"),
+        ("", "backend is ews, graph or outlook"),
         ("backend = \"outlook\"\ntimeout_secs = 0", "timeout_secs"),
+        ("backend = \"graph\"", "client_id of an app registration"),
+        (
+            "backend = \"graph\"\nclient_id = \"c\"\nuser = \"u\"",
+            "not autodiscover",
+        ),
+        (
+            "backend = \"graph\"\nclient_id = \"c\"\nserver = \"http://graph.example.com/v1.0\"",
+            "https address",
+        ),
+        (
+            "backend = \"ews\"\nemail = \"a@b\"\nclient_id = \"c\"",
+            "for graph",
+        ),
+        ("backend = \"outlook\"\ntenant = \"t\"", "for graph"),
     ] {
         let error = parse(&format!("[host.mail.accounts.a]\n{bad}\n")).expect_err(bad);
         assert!(error.to_string().contains(why), "{bad}: {error}");
     }
+    let graph = parse(
+        "[host.mail.accounts.cloud]\nbackend = \"graph\"\nclient_id = \"11111111-2222-3333-4444-555555555555\"\ntenant = \"example.com\"\nemail = \"ana@example.com\"\n",
+    )
+    .expect("parses");
+    let cloud = &graph.mail.accounts["cloud"];
+    assert_eq!(cloud.backend, MailBackend::Graph);
+    assert_eq!(
+        (cloud.client_id.as_deref(), cloud.tenant.as_deref()),
+        (
+            Some("11111111-2222-3333-4444-555555555555"),
+            Some("example.com")
+        )
+    );
+    assert!(cloud.server.is_none(), "Graph's own address is the default");
+    assert!(
+        parse("[host.mail.accounts.g]\nbackend = \"graph\"\nclient_id = \"c\"\nserver = \"http://localhost:9/v1.0\"\n").is_ok(),
+        "plain http is for this computer"
+    );
     assert!(parse("[host.mail.accounts.Bad_Name]\nbackend = \"outlook\"\n").is_err());
     assert!(
         parse("[host.mail.accounts.a]\nbackend = \"outlook\"\npassword = \"x\"\n").is_err(),

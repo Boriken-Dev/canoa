@@ -5,6 +5,8 @@
 //! - `ews`: Exchange Server's web services ([`ews`]), signed in with a user name and password the environment holds. The server
 //!   is named or found by Autodiscover. Signing in with the Windows logon is one function ([`ews`]'s transport) that is not
 //!   filled in yet.
+//! - `graph`: Exchange Online through Microsoft Graph ([`graph`]), with a token taken silently from the person's Windows sign-in
+//!   for an app registration the account names; Exchange Online has no web services after 2027-04-01.
 //! - `outlook`: classic Outlook for Windows, through a helper that drives its object model ([`outlook`]); it covers every account
 //!   Outlook holds and signs in as Outlook does.
 //!
@@ -17,6 +19,7 @@
 )]
 
 mod ews;
+mod graph;
 pub(crate) mod model;
 mod outlook;
 pub(crate) mod related;
@@ -34,6 +37,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use canoa::network::{Network, Secret};
 
 use self::ews::{Auth, Ews, EwsSettings};
+use self::graph::{DEFAULT_SERVER, Graph, GraphSettings, Wam};
 use self::model::{Backend, MailError};
 use self::outlook::Outlook;
 use crate::config::{MailAccount, MailAuth, MailBackend, MailConfig};
@@ -71,6 +75,7 @@ impl Mailboxes {
                 let account = account.clone();
                 let kind = match account.backend {
                     MailBackend::Ews => "ews",
+                    MailBackend::Graph => "graph",
                     MailBackend::Outlook => "outlook",
                 };
                 Account {
@@ -217,6 +222,28 @@ fn backend_of(account: &MailAccount) -> Result<Arc<dyn Backend>, MailError> {
                     auth,
                     timeout,
                 },
+                Network::current(),
+            )))
+        }
+        MailBackend::Graph => {
+            let client_id = account.client_id.as_deref().unwrap_or_default();
+            let tenant = account.tenant.as_deref().unwrap_or("organizations");
+            let tokens = Wam::powershell(
+                account.command.clone(),
+                client_id,
+                tenant,
+                account.email.clone(),
+                timeout,
+            );
+            Ok(Arc::new(Graph::new(
+                GraphSettings {
+                    server: account
+                        .server
+                        .clone()
+                        .unwrap_or_else(|| DEFAULT_SERVER.to_owned()),
+                    timeout,
+                },
+                Arc::new(tokens),
                 Network::current(),
             )))
         }
