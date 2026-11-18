@@ -167,10 +167,17 @@ impl Stores {
         let mut registry =
             coqui_acp_api::guatiao::library::Registry::new("canoa", env!("CARGO_PKG_VERSION"));
         crate::provider::open(&mut registry, &extension.origin).map_err(|e| e.to_string())?;
-        let offer = registry
-            .offer::<dyn StoreExtension>(&extension.provider)
-            .ok_or_else(|| format!("no provider {}", extension.provider))?
-            .map_err(|_| format!("{} is not a store_extension", extension.provider))?;
+        let Some(found) = registry.offer::<dyn StoreExtension>(&extension.provider) else {
+            return Err(format!("no provider {}", extension.provider));
+        };
+        // A library of another kind (secret providers, say) adds no store types; the host offers its providers where they belong.
+        let Ok(offer) = found else {
+            tracing::debug!(
+                extension = extension.name.as_str(),
+                "it adds no store types"
+            );
+            return Ok(());
+        };
         let info = offer
             .default_instance()
             .ok_or_else(|| "it needs settings".to_owned())?

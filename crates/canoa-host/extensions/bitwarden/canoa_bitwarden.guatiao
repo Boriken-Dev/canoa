@@ -1,0 +1,7 @@
+# What the Python source reads before importing anything: the module, which is the library, and the kinds its providers serve.
+# `paths` go on sys.path while it is open, relative to this file: the kind's own module sits in the canoa crate, and a copy of it
+# beside this file takes the place of that path when the folder is installed on its own.
+type = "python"
+module = "canoa_bitwarden"
+kinds = ["secret_provider"]
+paths = [".", "../../../canoa/python"]

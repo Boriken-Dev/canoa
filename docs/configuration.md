@@ -885,6 +885,19 @@ command = "bw"
 session = { from = "form", name = "bw_session" }   # the key that opens the vault is a secret you gave Canoa, never written here
 ```
 
+**Bitwarden** is a provider written as a Python library, so it needs no build and is shared between computers as the files it is. It reads an item of your vault by name through Bitwarden's own `bw` command, so `bw` has to be installed and signed in (`bw login`). Add the library as an extension, point a name or the default at it and give the key `bw unlock --raw` prints as the secret `bw_session`:
+
+```toml
+[host.extensions.bitwarden]
+source = "guatiao_source_py.dll"          # Guatiao's Python source, built for the Python you have
+provider = "bitwarden"                    # it adds no Store type, so this only names its provider
+[host.extensions.bitwarden.source_settings]
+dirs = ["extensions/bitwarden"]           # the folder of canoa_bitwarden.py
+paths = ["path/to/guatiao/bindings/python/guatiao/src"]
+```
+
+The vault is never unlocked for you: until the key is given, a request for a name Bitwarden answers falls back to asking you, and a wrong or expired key does the same. The key goes to `bw` in its environment, never on a command line.
+
 A value that comes with an end of its own (a token that expires) is kept no longer than that end, whatever you chose. Nothing is written to a log.
 
 ### Skill sources
