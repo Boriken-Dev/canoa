@@ -129,7 +129,15 @@ fn the_bundled_agents_are_listed_with_what_each_says_of_itself() {
     let rows = rows(bundled::ALL);
     assert_eq!(
         ids(&rows),
-        ["claude", "codex", "antigravity", "grok", "pi", "gemini"],
+        [
+            "claude",
+            "codex",
+            "antigravity",
+            "grok",
+            "opencode",
+            "pi",
+            "gemini"
+        ],
         "{rows:?}"
     );
     let claude = row(&rows, "claude");
@@ -175,7 +183,7 @@ fn a_build_without_an_agent_lists_no_trace_of_it() {
     let rows = rows(&without);
     assert_eq!(
         ids(&rows),
-        ["codex", "antigravity", "grok", "pi", "gemini"],
+        ["codex", "antigravity", "grok", "opencode", "pi", "gemini"],
         "{rows:?}"
     );
     let text = serde_json::to_string(&rows).expect("rows are JSON");
@@ -200,7 +208,7 @@ fn an_agent_a_library_adds_is_listed_with_its_kinds_like_a_bundled_one() {
     assert_eq!(zed["accounts"]["kinds"][0]["id"], "zed-key");
     assert_eq!(zed["accounts"]["logins"][0]["produces"], "zed-key");
     // The others are listed as before.
-    assert_eq!(rows.len(), 7);
+    assert_eq!(rows.len(), 8);
 }
 
 #[test]
@@ -227,7 +235,15 @@ fn the_control_method_lists_only_the_loaded_agents_to_a_reader_of_the_config() {
         .unwrap_or_else(|| panic!("{answer}"));
     assert_eq!(
         ids(listed),
-        ["claude", "codex", "antigravity", "grok", "pi", "gemini"]
+        [
+            "claude",
+            "codex",
+            "antigravity",
+            "grok",
+            "opencode",
+            "pi",
+            "gemini"
+        ]
     );
     let other = super::Caller::Peer {
         id: "sha256:bb".to_owned(),

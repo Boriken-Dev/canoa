@@ -45,6 +45,11 @@ pub(crate) const ALL: &[Bundle] = &[
         preset: canoa_grok::PRESET,
     },
     Bundle {
+        name: "canoa-opencode",
+        library: canoa_opencode::library,
+        preset: canoa_opencode::PRESET,
+    },
+    Bundle {
         name: "canoa-pi",
         library: canoa_pi::library,
         preset: canoa_pi::PRESET,

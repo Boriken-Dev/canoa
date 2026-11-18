@@ -16,6 +16,7 @@ use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
     MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
 };
+use canoa::vendor::{AgentVendor, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
 use canoa::store::recipe::{
@@ -34,8 +35,44 @@ const ASSET_HOSTS: [&str; 2] = [
 
 /// How the host starts OpenCode when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("OpenCode", "opencode")
+    .agent("opencode")
     .harness("opencode")
     .search(&["~/.opencode/bin"]);
+
+/// OpenCode's mark: Canoa's own drawing of a pair of angle brackets around a dot, in the text's colour.
+pub const MARK: &str = include_str!("../mark.svg");
+
+/// Who OpenCode is, as the host and the application show it: its name, mark, credential standards and the name it reports.
+#[derive(Default, Debug, Clone, Copy, coqui_acp_api::guatiao::Provider)]
+#[provider(AgentVendor, id = "opencode_vendor", crate = ::coqui_acp_api::guatiao)]
+pub struct OpenCodeVendor;
+
+impl AgentVendor for OpenCodeVendor {
+    fn describe(&self) -> Result<VendorInfo, ProviderError> {
+        let mut info = VendorInfo::new("opencode", "OpenCode");
+        info.program = Some("OpenCode".to_owned());
+        info.aos = Some("opencode".to_owned());
+        info.standards = vec![
+            StandardTitle::new("opencode", "OpenCode"),
+            StandardTitle::new("opencode-key", "OpenCode provider key"),
+        ];
+        info.names = vec!["OpenCode".to_owned()];
+        info.mark = Some(MARK.to_owned());
+        Ok(info)
+    }
+}
+
+// What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is
+// read, so a bundled agent and an outside one are offered and chosen alike.
+coqui_acp_api::guatiao::local_providers!(
+    id = "canoa-opencode",
+    version = env!("CARGO_PKG_VERSION"),
+    providers = [
+        coqui_acp_harness::stdio::OpenCodeProvider,
+        coqui_acp_harness::stdio::OpenCodeAccounts,
+        OpenCodeVendor
+    ]
+);
 
 /// OpenCode.
 #[derive(Debug, Default, Clone, Copy)]

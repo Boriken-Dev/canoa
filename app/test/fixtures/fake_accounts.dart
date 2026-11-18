@@ -189,9 +189,9 @@ const opencodeCatalog = {
 final class FakeAccountsHost implements AccountsHost {
   FakeAccountsHost({List<AccountInfo>? accounts, List<AgentProvider>? providers})
     : accounts = accounts ?? [],
-      providers = providers ?? providersOf(const ['claude', 'codex']);
+      providers = providers ?? providersOf(const ['claude', 'codex', 'opencode']);
 
-  /// The agents the host says it has loaded; the two that make accounts unless a test says otherwise.
+  /// The agents the host says it has loaded; the three that make accounts unless a test says otherwise.
   final List<AgentProvider> providers;
 
   final List<AccountInfo> accounts;

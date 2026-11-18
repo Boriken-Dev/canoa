@@ -102,7 +102,7 @@ pub struct ServeOptions {
     /// The host's directory for what it keeps, where an agent started only to read its usage gets an empty working
     /// directory; without one, no such agent is started.
     pub state_dir: Option<PathBuf>,
-    /// Whether the host's own sources (Claude, Codex, Antigravity, Grok, OpenCode and Pi) are served too, over [`Local`] only.
+    /// Whether the host's own sources (every bundled agent's) are served too, over [`Local`] only.
     pub local_sources: bool,
     /// The programs the control channel's `store/*` methods keep, and the ids of the stores it offers; without it, the built-in
     /// stores over this user's own programs folder.

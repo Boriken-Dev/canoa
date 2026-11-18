@@ -85,7 +85,7 @@ void main() {
       expect(names.label(reportedName: 'gemini-cli', entry: 'x'), 'Gemini CLI');
       expect(names.label(reportedName: 'pi-acp', entry: 'x'), 'Pi');
       expect(names.label(reportedName: 'coqui-acp-pi', entry: 'Pi'), 'Pi', reason: 'a translator no description names is the entry it runs as');
-      expect(names.label(reportedName: 'OpenCode', entry: 'x'), 'x', reason: 'no loaded agent says it is OpenCode');
+      expect(names.label(reportedName: 'OpenCode', entry: 'x'), 'OpenCode');
       expect(names.label(markers: ['grokShell'], entry: 'x'), 'Grok');
     });
 

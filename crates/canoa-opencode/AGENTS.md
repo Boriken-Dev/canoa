@@ -2,13 +2,13 @@
 
 Header-file-style reference for `canoa-opencode`: everything Canoa offers for OpenCode in one crate, so it can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No Cargo features. `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `serde_json`.
+MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No Cargo features. `#![forbid(unsafe_code)]`. Depends on `canoa` (features `store`, `vendor`), `coqui-acp-api`, `coqui-acp-harness`, `serde_json`.
 
 ## Exports
 
 ```rust
 pub const PRESET: SourcePreset;
-// = SourcePreset::new("OpenCode", "opencode").harness("opencode").search(&["~/.opencode/bin"])
+// = SourcePreset::new("OpenCode", "opencode").agent("opencode").harness("opencode").search(&["~/.opencode/bin"])
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OpenCodeRecipe;
@@ -19,6 +19,16 @@ impl canoa::store::recipe::Recipe for OpenCodeRecipe { /* every required method 
 - `OpenCodeRecipe`: OpenCode's Store recipe: the release's archive for the platform (`opencode-<windows|linux>-<x64|arm64>`, a `.zip` on Windows and a `.tar.gz` on Linux, each holding the one program) from the publisher's GitHub releases, checked against the SHA-256 the release lists for that file. With no version it takes GitHub's newest release; a version a person names is read from its own tag (`v<version>`). No channels. A release that lists no archive or no digest for the platform is refused.
 
 Each item is public at this one path. `OpenCodeRecipe` is not a Store provider: `canoa-host` wraps it in its engine as the guatiao provider `opencode_store`.
+
+## Description and library
+
+```rust
+pub const MARK: &str;                 // the contents of mark.svg: Canoa's own drawing, brackets around a dot, in the text's colour
+pub struct OpenCodeVendor;            // an `agent_vendor` provider (id `opencode_vendor`): title, program, registry id, credential standards, reported name, mark
+pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, for `Registry::register_local`: coqui-acp's `OpenCodeProvider`, `OpenCodeAccounts` and the vendor description
+```
+
+The host lists the crate in `bundled.rs` and nowhere else names the agent: its name, mark and standards reach the host and the application through `providers/list`, as an outside library's would.
 
 ## Gotchas
 
