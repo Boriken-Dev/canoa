@@ -871,7 +871,7 @@ max_total_bytes = 1073741824        # every history together
 - `entry` and `session` are the source entry's name and the session id its client used. A session with no history, an
   entry that is not a harness and a host that records nothing answer `-32003` or `-32002` with the reason.
 - A move imports the history into the target at a **new** UUID the host makes (never an existing session), by the provider's
-  `import_session`: Claude and Codex write their own session files; OpenCode writes it into the target account's folder (`opencode import`; the session then has the host's UUID); an entry whose provider replays (`replay_max_bytes` set on
+  `import_session`: Claude and Codex write their own session files; OpenCode writes it into the target account's folder, or with no account into the store its environment names (`opencode import`; the session then has the host's UUID); an entry whose provider replays (`replay_max_bytes` set on
   its settings) carries the history as context in the first prompt and says so (`replayed`, and `replayed_as_prompt` among the
   losses); any other provider refuses with its reason. The new session then has a history of its own (`recorded`), which can be
   exported or moved again. A client opens it by `session/resume` or `session/load` of that id on the target's entry.
