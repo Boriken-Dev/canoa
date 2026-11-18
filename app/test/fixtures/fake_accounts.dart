@@ -135,6 +135,38 @@ const opencodeCatalog = {
   ],
   'logins': [
     {
+      'id': 'provider-key',
+      'title': "A provider's key, kept by OpenCode",
+      'description': 'Runs `opencode auth login` for a provider and types the key it asks for',
+      'produces': 'opencode-login',
+      'steps': ['ask'],
+      'remote': true,
+      'inputs': {
+        'type': 'object',
+        'properties': {
+          'provider': {'type': 'string', 'title': 'Provider', 'examples': ['openrouter', 'openai']},
+          'method': {'type': 'string', 'title': 'Login method', 'examples': ['Manually enter API Key']},
+        },
+        'required': ['provider'],
+      },
+    },
+    {
+      'id': 'provider-code',
+      'title': 'Sign in with a code',
+      'description': 'Runs `opencode auth login` for a provider that shows a page and a code to confirm there',
+      'produces': 'opencode-login',
+      'steps': ['open_url', 'user_code'],
+      'remote': true,
+      'inputs': {
+        'type': 'object',
+        'properties': {
+          'provider': {'type': 'string', 'title': 'Provider', 'examples': ['github-copilot', 'openai']},
+          'method': {'type': 'string', 'title': 'Login method', 'examples': ['ChatGPT Pro/Plus (headless)']},
+        },
+        'required': ['provider'],
+      },
+    },
+    {
       'id': 'api-key',
       'title': 'Provider API key',
       'description': "Asks which environment variable the key goes in (a provider's own is suggested, any other name works) and then the key",

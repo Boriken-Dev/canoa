@@ -202,7 +202,7 @@ fn the_catalog_names_the_kinds_and_the_ways_to_sign_in() {
 }
 
 #[test]
-fn opencodes_kinds_and_its_one_sign_in_are_listed_and_its_source_can_be_offered_accounts() {
+fn opencodes_kinds_and_its_sign_ins_are_listed_and_its_source_can_be_offered_accounts() {
     let host = host();
     let link = host.local.open("@control").expect("a link");
     let catalog =
@@ -222,8 +222,12 @@ fn opencodes_kinds_and_its_one_sign_in_are_listed_and_its_source_can_be_offered_
         .iter()
         .filter_map(|method| method["id"].as_str())
         .collect();
-    assert_eq!(methods, ["api-key"]);
-    let key = &catalog["logins"][0];
+    assert_eq!(methods, ["provider-key", "provider-code", "api-key"]);
+    for own in &catalog["logins"].as_array().expect("logins")[..2] {
+        assert_eq!(own["produces"], "opencode-login");
+        assert_eq!(own["inputs"]["required"], json!(["provider"]));
+    }
+    let key = &catalog["logins"][2];
     assert_eq!(key["produces"], "opencode-provider-key");
     // The providers' variables are suggestions, not the only names the form takes.
     let variable = &key["inputs"]["properties"]["variable"];

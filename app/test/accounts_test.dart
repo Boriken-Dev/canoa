@@ -120,6 +120,29 @@ void main() {
     expect(host.inputsGiven.single, {'variable': 'ACME_GATEWAY_KEY'});
   });
 
+  testWidgets("OpenCode's own sign-in asks which provider and which login method, with suggestions, and takes what is written", (tester) async {
+    final host = FakeAccountsHost();
+    final controller = _controller(host);
+    await _show(tester, controller);
+    await tester.tap(find.byKey(const Key('add-account-opencode')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('login-method provider-code')), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('add-account-name')), 'chatgpt');
+    await tester.tap(find.byKey(const Key('login-method provider-code')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('add-account-start')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('program-ask')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('ask-suggest-provider-openai')));
+    await tester.tap(find.byKey(const Key('ask-suggest-method-ChatGPT Pro/Plus (headless)')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('ask-submit')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(host.inputsGiven.single, {'provider': 'openai', 'method': 'ChatGPT Pro/Plus (headless)'});
+    expect(host.signIns.single.method, 'provider-code');
+  });
+
   testWidgets('away from the host Codex signs in by a device code unless the person chooses the browser', (tester) async {
     final host = FakeAccountsHost();
     await _show(tester, _controller(host, hostIsHere: false));
