@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-Six Cargo features (`vendor` is the `agent_vendor` kind and `profile-item` the `profile_item` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
+Seven Cargo features (`vendor` is the `agent_vendor` kind, `profile-item` the `profile_item` kind and `secret` the `secret_provider` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
 The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`) and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
 
@@ -58,6 +58,38 @@ pub fn bad_value_error(why) -> ProviderError;   pub fn internal_error(why) -> Pr
 - `apply` runs when a session starts, with the values already checked against `schema`; it answers what the session gets: `env` (variables its programs are given; one the profile's own environment sets keeps that value), `args` (added to the command line of a program the host starts), `settings` (`model`, `effort`, `mode`, `context`, `access.sandbox`, `access.network`, `access.approvals`: the session's own, a key it does not have is refused), `network` and `notes` (lines for the report, which carry no value).
 - `NetworkEffect::mode` is one of `system` (the host runs a proxy on its loopback address, shared by every session whose item makes the same settings, which sends each connection as the host's own network would), `none` (the programs are given no proxy: `NO_PROXY=*`, which the host's own process starter reads as no system proxy to add, and the host's own requests for the session go direct), `proxy` (the proxy at `url`, given to the programs as it is), `pac` (as `system`, chosen by the PAC script at `url`) and `command` (a program the host starts, in which `{listen}` stands for the `host:port` it must listen on). `intercept` is a list of `ClientCertificateHost { pattern, identity }` whose first entry matching a destination says which client certificate the host's proxy presents to it, ending the program's TLS for that destination alone (every other stays a tunnel): `pattern` is a host name, `*.name` (the name and what is under it), an address, or any other regular expression matched against the whole host without regard to case (`HostPattern::parse`, `matches(host)`, `is_plain()`; `.*` is every host); `identity` is `system` (the default, `SYSTEM_IDENTITY`: the keystores' or `client_certificate`'s own choice) or the SHA-256 thumbprint in hex of one certificate (`thumbprint()` normalizes colons and case). Only `system` and `pac`, which run that proxy, take it, and an unreadable pattern or identity is a `problem()`. `bypass` is hosts that go direct in the `NO_PROXY` form; `user` and the name of a host variable holding its password (`password_variable`) are the proxy login, and the password is never in a profile.
 - `ItemInfo::problem` and `ItemEffect::problem` say why a description or an answer cannot be used (a bad id, a form that does not fit its schema, a variable name that is no name, a value over `MAX_TEXT`, a network that lacks its address or program).
+
+## `canoa::secret_provider` (feature `secret`)
+
+The `secret_provider` kind: somewhere a secret comes from and, for some, goes to. The person's form, the operating system's credential store and a password manager are providers of this kind, the ones Canoa carries and the ones an extension adds alike, so Canoa names none of them. Needs `guatiao`; the models are plain data, so a provider can be a script (`include/canoa.secret.kinds.json` is its description, `include/canoa.secret.schemas.json` its models' schemas).
+
+```rust
+pub const KIND: &str = "secret_provider";
+pub const MAX_NAME: usize = 256;  pub const MAX_VALUE: usize = 65536;  pub const MAX_NAMES: usize = 1000;
+#[non_exhaustive] pub struct ProviderInfo { pub title: String, pub description: Option<String>, pub can_store: bool, pub can_list: bool, pub needs_person: bool }   // ToValue, FromValue, Schema, Clone, Debug, Eq; unknown keys refused
+ProviderInfo::new(title); .problem() -> Option<String>
+#[non_exhaustive] pub struct Named { pub name: String }                              // Named::new(name)
+#[non_exhaustive] pub struct Keeping { pub name: String, pub value: Secret<String> } // Keeping::new(name, value)
+#[non_exhaustive] pub struct Held { pub value: Option<Secret<String>>, pub expires_in: Option<u64> }   // Held::none(), Held::of(value), .expiring(seconds)
+#[non_exhaustive] pub struct Names { pub names: Vec<String> }                        // Names::new(names)
+#[guatiao::kind(name = "secret_provider")] pub trait SecretProvider: Send + Sync {
+    fn describe(&self) -> Result<ProviderInfo, ProviderError>;
+    fn names(&self) -> Result<Names, ProviderError>;          // the names it holds, never values; UNSUPPORTED unless can_list
+    fn get(&self, request: Named) -> Result<Held, ProviderError>;     // Held::none() when it holds nothing under the name
+    fn put(&self, request: Keeping) -> Result<(), ProviderError>;     // UNSUPPORTED unless can_store
+    fn forget(&self, request: Named) -> Result<(), ProviderError>;    // UNSUPPORTED unless can_store; not having it is no error
+}
+pub fn name_problem(name: &str) -> Option<String>;   // 1 to MAX_NAME bytes, no control character
+pub fn unsupported(why) / unavailable(why) / bad_value(why) / internal(why) -> ProviderError   // UNSUPPORTED, GONE, BAD_VALUE, INTERNAL
+```
+
+- **One configuration, one instance.** A provider declares its settings as a guatiao schema (`config = ..., form = ...` on the provider, a secret setting a `Secret<String>`), and the host makes an instance for each entry of `[secrets.providers]`. Every setting has a default, so the host can make an instance with none to describe the provider.
+- **No call lists values.** `names` answers names only, so a host never asks for a whole store. A value is text.
+- **`needs_person`** says answering needs someone at the screen (a form to fill, a vault to unlock): the host asks such a provider of no session whose person is not there. `can_store` and `can_list` say what `put`, `forget` and `names` do.
+- **A value may carry its own end.** `Held::expires_in` is seconds from now; the host keeps the value no longer than that, whatever the person chose, and asks again after.
+- **`GONE` is "cannot answer now"** (locked, signed out, not installed). The reason holds no value; the host then asks the person for the secret itself.
+- **Written in a script.** A Python library serves it: `describe()` returns a dict with a `title` and the flags it sets (an absent flag is false), `get()` a dict with `value` and `expires_in` (empty for nothing held), `names()` a dict with `names`; a `Held`'s value and a request's keys cross as plain data.
+
 Each kind's description is `include/canoa.<kind>.kinds.json` and every model's schema `include/canoa.<kind>.schemas.json`, checked current by `tests/script_kinds.rs` for `agent_vendor` (`vendor`) and `store_extension` (`store`); regenerate with `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor --test script_kinds`. A library written in Python or JavaScript is built against them with the Canoa SDK (`bindings/python/canoa-sdk`, `bindings/js/canoa-sdk`), one base class per kind.
 
 ## `canoa::network` (feature `network`)

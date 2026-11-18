@@ -15,6 +15,9 @@ mod settings;
 #[cfg(feature = "network")]
 #[cfg_attr(docsrs, doc(cfg(feature = "network")))]
 pub mod network;
+#[cfg(feature = "secret")]
+#[cfg_attr(docsrs, doc(cfg(feature = "secret")))]
+pub mod secret_provider;
 #[cfg(feature = "speech")]
 #[cfg_attr(docsrs, doc(cfg(feature = "speech")))]
 pub mod speech;
