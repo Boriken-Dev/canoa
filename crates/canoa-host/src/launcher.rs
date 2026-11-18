@@ -16,6 +16,9 @@
 )]
 
 use core::time::Duration;
+use std::fs::OpenOptions;
+use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
@@ -135,6 +138,52 @@ pub(crate) fn run(
         }
     }
     Ok(())
+}
+
+/// Starts `command` (the program, then its arguments) again with no console and no input, its output appended to `log`, and
+/// returns its process id: the launcher that `--detach` leaves running, while the console program that started it ends. A
+/// console window of a program started at sign-in stays for as long as it runs, so the one that stays is started without one.
+pub(crate) fn start_hidden(command: &[String], log: &Path) -> Result<u32, String> {
+    let (program, args) = command.split_first().ok_or("no program to start")?;
+    if let Some(dir) = log.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|error| format!("{} could not be made: {error}", dir.display()))?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log)
+        .map_err(|error| format!("{} could not be opened: {error}", log.display()))?;
+    let errors = file
+        .try_clone()
+        .map_err(|error| format!("{} could not be shared: {error}", log.display()))?;
+    let mut child = Command::new(program);
+    child
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(file)
+        .stderr(errors);
+    leave_console(&mut child);
+    child
+        .spawn()
+        .map(|child| child.id())
+        .map_err(|error| format!("the launcher could not be started: {error}"))
+}
+
+/// No console at all (`DETACHED_PROCESS`; `CREATE_NO_WINDOW` is ignored beside it), and a process group of its own, so that
+/// what ends the starter's console does not reach it.
+#[cfg(windows)]
+fn leave_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt as _;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+}
+
+#[cfg(unix)]
+fn leave_console(command: &mut Command) {
+    use std::os::unix::process::CommandExt as _;
+    command.process_group(0);
 }
 
 /// The program `home` records for starting Canoa, else `program` with `serve`.

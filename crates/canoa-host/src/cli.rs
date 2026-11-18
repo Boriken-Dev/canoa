@@ -814,6 +814,12 @@ struct LauncherArgs {
     /// Say whether the entry is registered and whether a launcher answers at the add-in's address.
     #[arg(long, conflicts_with_all = ["install", "uninstall"])]
     status: bool,
+    /// Start the launcher again with no console window and end at once, printing its process id: its output goes to
+    /// launcher.log in the home's `office` folder. What the Windows entry runs, since `canoa.exe` is a console program. On
+    /// Windows the launcher holds every handle this process held, so a caller that reads a pipe of this process to its end
+    /// waits for the launcher to end: have the output go to a file or a terminal.
+    #[arg(long, conflicts_with_all = ["install", "uninstall", "status"])]
+    detach: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1682,6 +1688,9 @@ fn office_launcher(args: &LauncherArgs, front: &dyn Front) -> Result<(), Failed>
         let place = crate::launcher::login::Place::current().map_err(Failed::run)?;
         return office_login(action, &args.config, front, &place);
     }
+    if args.detach {
+        return office_detach(&args.config, front);
+    }
     let args = &args.config;
     let web = office_web(args, front)?;
     let home = home_of(front)?;
@@ -1701,9 +1710,34 @@ fn office_launcher(args: &LauncherArgs, front: &dyn Front) -> Result<(), Failed>
     .map_err(Failed::run)
 }
 
-/// What the sign-in entry runs: this program, its leading arguments and `office-launcher`, with the
-/// `--config` it was given.
-fn login_command(args: &ConfigArgs, front: &dyn Front) -> Result<Vec<String>, Failed> {
+/// `canoa office-launcher --detach`: the launcher, started again with no console, and this process ends.
+fn office_detach(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
+    // The launcher checks this itself, but its answer would be in a log nobody is reading when it is started at sign-in.
+    office_web(args, front)?;
+    let home = home_of(front)?;
+    let command = login_command(args, front, false)?;
+    let log = home.dir().join("office").join("launcher.log");
+    let id = crate::launcher::start_hidden(&command, &log).map_err(Failed::run)?;
+    print(
+        front,
+        &if args.format == Format::Json {
+            serde_json::json!({"pid": id, "log": log.display().to_string()}).to_string()
+        } else {
+            format!(
+                "the launcher runs with no window (process {id}); it writes to {}",
+                log.display()
+            )
+        },
+    )
+}
+
+/// What the sign-in entry runs: this program, its leading arguments and `office-launcher`, with the `--config` it was given
+/// and, with `detach`, the flag that starts it with no console.
+fn login_command(
+    args: &ConfigArgs,
+    front: &dyn Front,
+    detach: bool,
+) -> Result<Vec<String>, Failed> {
     let program = front
         .program()
         .map_err(|error| Failed::run(format!("this program cannot find itself: {error}")))?;
@@ -1716,6 +1750,7 @@ fn login_command(args: &ConfigArgs, front: &dyn Front) -> Result<Vec<String>, Fa
         &program.path,
         &leading,
         args.config.as_deref(),
+        detach,
     ))
 }
 
@@ -1738,7 +1773,7 @@ fn office_login(
         LoginAction::Install => {
             // The check the launcher makes when it starts: an entry that fails at every sign-in helps nobody.
             office_web(args, front)?;
-            let command = login_command(args, front)?;
+            let command = login_command(args, front, place.needs_detach())?;
             place.install(&command).map_err(Failed::run)?;
             print(
                 front,
@@ -1754,7 +1789,7 @@ fn office_login(
             let home = home_of(front)?;
             let status = crate::launcher::login::status(
                 place,
-                &login_command(args, front)?,
+                &login_command(args, front, place.needs_detach())?,
                 address,
                 crate::launcher::host_runs(&home),
             )
@@ -2596,6 +2631,9 @@ mod office_login_tests {
             ["--install", "--uninstall"],
             ["--install", "--status"],
             ["--uninstall", "--status"],
+            ["--detach", "--install"],
+            ["--detach", "--uninstall"],
+            ["--detach", "--status"],
         ] {
             assert!(
                 Cli::try_parse_from(["canoa", "office-launcher", both[0], both[1]]).is_err(),
@@ -2603,5 +2641,6 @@ mod office_login_tests {
             );
         }
         assert!(Cli::try_parse_from(["canoa", "office-launcher", "--install"]).is_ok());
+        assert!(Cli::try_parse_from(["canoa", "office-launcher", "--detach"]).is_ok());
     }
 }

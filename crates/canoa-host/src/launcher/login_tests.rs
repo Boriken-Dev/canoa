@@ -74,19 +74,23 @@ fn a_property_list_holds_the_arguments_and_they_come_back_whole() {
 
 #[test]
 fn the_command_runs_this_program_with_the_config_it_was_given_made_absolute() {
-    let none = command_of(Path::new("/bin/canoa"), &[], None);
+    let none = command_of(Path::new("/bin/canoa"), &[], None, false);
     assert_eq!(none, vec!["/bin/canoa", "office-launcher"]);
-    let blank = command_of(Path::new("/bin/canoa"), &[], Some(""));
+    let blank = command_of(Path::new("/bin/canoa"), &[], Some(""), false);
     assert_eq!(blank, none, "an empty name names nothing");
 
     let leading = vec!["--canoa-child".to_owned()];
-    let named = command_of(Path::new("/bin/canoa"), &leading, Some("canoa.cfg"));
+    let named = command_of(Path::new("/bin/canoa"), &leading, Some("canoa.cfg"), false);
     assert_eq!(
         &named[..4],
         ["/bin/canoa", "--canoa-child", "office-launcher", "--config"]
     );
     let absolute = std::path::absolute("canoa.cfg").expect("absolute");
     assert_eq!(named[4], absolute.display().to_string());
+
+    let hidden = command_of(Path::new("/bin/canoa"), &leading, Some("canoa.cfg"), true);
+    assert_eq!(hidden[..hidden.len() - 1], named, "only --detach is added");
+    assert_eq!(hidden.last().map(String::as_str), Some("--detach"));
 
     let list = config_value("+a.cfg");
     assert!(list.starts_with('+'));
@@ -208,6 +212,35 @@ fn status_says_whether_it_is_registered_and_whether_a_launcher_answers() {
     let none = status(&place, &wanted, None, false).expect("status");
     assert!(!none.answers && none.describe(false).contains("address: none"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_run_value_starts_the_launcher_detached_and_an_entry_without_that_is_not_current() {
+    let place = Place::RunKey(r"Software\Canoa\Test".to_owned());
+    assert!(place.needs_detach(), "a console program started at sign-in");
+    assert!(!Place::Autostart(PathBuf::from("a")).needs_detach());
+    assert!(!Place::LaunchAgents(PathBuf::from("a")).needs_detach());
+
+    let program = Path::new(r"C:\Program Files\Canoa\canoa.exe");
+    let config = Some(r"C:\Users\me\canoa.cfg");
+    let wanted = command_of(program, &[], config, true);
+    assert_eq!(
+        place.text_of(&wanted),
+        r#""C:\Program Files\Canoa\canoa.exe" office-launcher --config C:\Users\me\canoa.cfg --detach"#
+    );
+
+    // What `reg query` lists is what `status` compares with what `--install` would write now.
+    let listing = |written: &str| {
+        format!("\r\nHKEY_CURRENT_USER\\Run\r\n    {VALUE}    REG_SZ    {written}\r\n")
+    };
+    let held = value_in(&listing(&place.text_of(&wanted)), VALUE);
+    assert_eq!(held, Some(place.text_of(&wanted)));
+    let before = place.text_of(&command_of(program, &[], config, false));
+    assert_ne!(
+        value_in(&listing(&before), VALUE),
+        Some(place.text_of(&wanted)),
+        "an entry written without --detach is not current: --install replaces it"
+    );
 }
 
 /// A key of its own under `HKCU\Software\CanoaTest`, deleted when the test ends, so the person's Run key is never written.

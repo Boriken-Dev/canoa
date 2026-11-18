@@ -74,6 +74,13 @@ impl Place {
         }
     }
 
+    /// Whether the entry's program gets a console window of its own at sign-in unless it ends in a moment: the Run value of
+    /// Windows starts `canoa.exe`, a console program, whose window would stay as long as the launcher runs. The entry names
+    /// `--detach` there, so the window is gone as soon as the launcher has started itself without one.
+    pub(crate) const fn needs_detach(&self) -> bool {
+        matches!(self, Self::RunKey(_))
+    }
+
     /// What the entry holds for `command` (the program, then its arguments), as a person reads it: the Run value, the
     /// desktop entry's `Exec`, the property list's arguments joined by spaces.
     pub(crate) fn text_of(&self, command: &[String]) -> String {
@@ -361,14 +368,23 @@ pub(crate) fn config_value(named: &str) -> String {
     format!("{plus}{}", made.join(&separator.to_string()))
 }
 
-/// What the entry runs: `program`, its leading arguments, `office-launcher` and, for a named config, `--config` and it.
-pub(crate) fn command_of(program: &Path, leading: &[String], config: Option<&str>) -> Vec<String> {
+/// What the entry runs: `program`, its leading arguments, `office-launcher`, for a named config `--config` and it, and with
+/// `detach` the `--detach` that makes the launcher start itself again with no console and end.
+pub(crate) fn command_of(
+    program: &Path,
+    leading: &[String],
+    config: Option<&str>,
+    detach: bool,
+) -> Vec<String> {
     let mut command = vec![program.display().to_string()];
     command.extend(leading.iter().cloned());
     command.push("office-launcher".to_owned());
     if let Some(named) = config.filter(|value| !value.is_empty()) {
         command.push("--config".to_owned());
         command.push(config_value(named));
+    }
+    if detach {
+        command.push("--detach".to_owned());
     }
     command
 }
