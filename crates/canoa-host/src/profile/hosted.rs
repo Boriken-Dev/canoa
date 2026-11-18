@@ -1743,11 +1743,13 @@ fn mcp_digest(layer: &LayerId, server: &McpServer, program: Option<&str>) -> Str
 }
 
 /// The program a stdio server's `command` names, absolute: as written when absolute, from its layer's directory when it
-/// holds a separator, else the first match on the host's `PATH` (with `PATHEXT` on Windows), where only absolute entries
+/// holds a separator, else the first match on the host's `PATH` with the folders its overlay adds to `PATH` (`additions`: those
+/// that go first come first, those that go last after the host's own), with `PATHEXT` on Windows, where only absolute entries
 /// count, since a relative one would name whatever directory the agent runs in.
 fn program_of(
     command: &str,
     dir: Option<&Path>,
+    additions: &[(PathBuf, bool)],
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Result<String, String> {
     if Path::new(command).is_absolute() {
@@ -1759,7 +1761,22 @@ fn program_of(
             .ok_or_else(|| format!("{command} is relative, and its layer has no directory"));
     }
     let not_found = || format!("{command} is not found on the host's PATH");
-    let path = lookup("PATH").ok_or_else(not_found)?;
+    let own = lookup("PATH").unwrap_or_default();
+    let first = additions
+        .iter()
+        .filter(|(_, last)| !last)
+        .map(|(folder, _)| folder.clone());
+    let last = additions
+        .iter()
+        .filter(|(_, last)| *last)
+        .map(|(folder, _)| folder.clone());
+    let path = std::env::join_paths(first.chain(std::env::split_paths(&own)).chain(last))
+        .map_err(|_| not_found())?
+        .to_string_lossy()
+        .into_owned();
+    if path.is_empty() {
+        return Err(not_found());
+    }
     let extensions: Vec<String> = if cfg!(windows) && Path::new(command).extension().is_none() {
         lookup("PATHEXT")
             .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_owned())
@@ -1893,7 +1910,8 @@ fn ready_mcp(
     };
     let acp = match server {
         McpServer::Stdio { command, args, env } => {
-            program_of(command, sourced.dir.as_deref(), lookup).and_then(|program| {
+            let additions = overlay.map(overlay::path_additions).unwrap_or_default();
+            program_of(command, sourced.dir.as_deref(), &additions, lookup).and_then(|program| {
                 resolved(name, "env", env, &mut value).map(|env| Acp {
                     target: program,
                     pairs: env,

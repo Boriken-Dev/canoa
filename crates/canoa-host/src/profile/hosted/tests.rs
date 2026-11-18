@@ -441,6 +441,93 @@ fn install_overlay(temp: &Temp) -> String {
     digest
 }
 
+/// A small real program and the arguments that make it end with status 0, to put in an overlay's `bin/` as a server's command.
+fn small_program() -> (PathBuf, Vec<&'static str>) {
+    if cfg!(windows) {
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        (
+            PathBuf::from(root).join("System32").join("cmd.exe"),
+            vec!["/d", "/c", "exit 0"],
+        )
+    } else {
+        (PathBuf::from("/bin/sh"), vec!["-c", "exit 0"])
+    }
+}
+
+#[test]
+fn an_mcp_servers_bare_command_is_found_in_its_overlays_bin_as_well_as_on_the_hosts_path_and_starts()
+ {
+    let temp = temp_with_skill();
+    let (original, args) = small_program();
+    let tool = program("canoa-test-overlay-tool");
+    temp.write("overlays/tools/overlay.cfg", "[[mcp.servers]]\nname = \"tool\"\ntransport = \"stdio\"\ncommand = \"canoa-test-overlay-tool\"\n");
+    std::fs::create_dir_all(temp.0.join("overlays/tools/bin")).expect("bin");
+    std::fs::copy(&original, temp.0.join("overlays/tools/bin").join(&tool)).expect("a program");
+    // The same name on the host's own path is not the one an overlay's server runs: the overlay's own folder comes first.
+    temp.write(&format!("bin/{tool}"), "");
+    let digest = digest_of(&temp, "overlays/tools");
+    temp.write(
+        "overlays/tools.json",
+        &json!({"source": "x", "commit": "y", "digest": digest, "files": {}}).to_string(),
+    );
+    let offer = offer_of(&temp, &config_with("overlays = [\"tools\"]\n"));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
+    let server = item(&parts.report, "mcp.tool");
+    assert_eq!(server["state"], "off", "{}", parts.report);
+    let allowed = server["digest"].as_str().expect("a digest").to_owned();
+
+    let offer = offer_of(
+        &temp,
+        &config_with(&format!(
+            "overlays = [\"tools\"]\nallow_mcp = {{ tool = \"{allowed}\" }}\n"
+        )),
+    );
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
+    let started = parts
+        .servers
+        .iter()
+        .find(|server| server["name"] == "tool")
+        .unwrap_or_else(|| panic!("the server is given to the agent: {}", parts.report));
+    let command = PathBuf::from(started["command"].as_str().expect("a command"));
+    let inside = temp.0.join("overlays/tools/bin").join(&tool);
+    assert!(
+        command == inside
+            || cfg!(windows)
+                && command
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&inside.to_string_lossy()),
+        "{command:?} is not {inside:?}"
+    );
+    // What the agent is given starts.
+    let status = std::process::Command::new(&command)
+        .args(&args)
+        .status()
+        .expect("starts");
+    assert!(status.success(), "{status}");
+
+    // A command no folder holds is still not found, and the host's own path still finds what only it holds.
+    temp.write(
+        "overlays/tools/overlay.cfg",
+        "[[mcp.servers]]\nname = \"tool\"\ntransport = \"stdio\"\ncommand = \"canoa-test-absent-program\"\n",
+    );
+    let digest = digest_of(&temp, "overlays/tools");
+    temp.write(
+        "overlays/tools.json",
+        &json!({"source": "x", "commit": "y", "digest": digest, "files": {}}).to_string(),
+    );
+    let offer = offer_of(&temp, &config_with("overlays = [\"tools\"]\n"));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let parts = parts_for(&connection, Some("claude-code"), &claude(), &lookup);
+    assert_eq!(
+        item(&parts.report, "mcp.tool")["state"],
+        "refused",
+        "{}",
+        parts.report
+    );
+}
+
 #[test]
 fn an_overlays_mcp_server_stays_off_until_allow_mcp_names_it_at_its_digest() {
     let temp = temp_with_skill();

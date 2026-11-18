@@ -1337,6 +1337,9 @@ impl Serving {
         crate::network::install(&config.network).map_err(|error| ServeError::Network {
             what: error.to_string(),
         })?;
+        // The agents the harness starts in this process are found on this process's PATH and in the Store's runtimes, never on a
+        // PATH a profile puts first.
+        coqui_acp_harness::set_program_dirs(crate::sources::runtime_dirs);
         let adapted;
 
         let config = match &options.portal {

@@ -672,6 +672,31 @@ fn probe(overlay: &Probed<'_>) -> Result<aos::Effective, aos::Error> {
     aos::effective(manifest, &facts)
 }
 
+/// The folders an overlay adds to `PATH` on its OS, absolute, each with whether it goes after the host's own entries: its `bin/`
+/// by default, and what its `paths` name. Where a program the overlay's text names (an MCP server's command) is looked for besides
+/// the host's `PATH`.
+pub(crate) fn path_additions(aos: &AosLayer) -> Vec<(PathBuf, bool)> {
+    let tree = OverlayTree::from_paths(aos.files.iter().cloned());
+    aos::paths_of(&aos.manifest, &tree)
+        .iter()
+        .filter(|addition| {
+            on_os(addition, &aos.os)
+                && text_of(addition, "variable").eq_ignore_ascii_case("PATH")
+                && aos::valid_relative_path(text_of(addition, "path"))
+        })
+        .map(|addition| {
+            (
+                PathBuf::from(resolve_path(
+                    &aos.root,
+                    text_of(addition, "path"),
+                    aos.os == "windows",
+                )),
+                text_of(addition, "position") == "append",
+            )
+        })
+        .collect()
+}
+
 /// What the specification's functions say an overlay needs and has to prepare, on its OS.
 pub(crate) struct Inspected {
     /// What it needs of the computer it runs on.

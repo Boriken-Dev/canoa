@@ -175,7 +175,7 @@ impl Hooks {
             let mut found = BTreeMap::new();
             for name in aos::INTERPRETERS {
                 for program in programs_of(name) {
-                    if let Ok(path) = program_of(program, None, lookup) {
+                    if let Ok(path) = program_of(program, None, &[], lookup) {
                         found.insert(name, PathBuf::from(path));
                         break;
                     }
