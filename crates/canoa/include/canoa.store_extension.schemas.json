@@ -1,0 +1,93 @@
+{
+  "ExtensionInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "publisher": {
+        "type": "string",
+        "description": "Who publishes it."
+      },
+      "types": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "A word of lower-case letters and digits, 1 to 32, that no built-in type uses."
+            },
+            "title": {
+              "type": "string",
+              "description": "The type's name in the plural, for the Store's index."
+            },
+            "icon": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The name of one of the application's icons, or a small image the extension ships as a `data:image/png;base64,...` or `data:image/webp;base64,...` address (at most [`MAX_ICON_TEXT`] characters), or none for the default icon. A name the application does not know draws the default."
+            },
+            "stores": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The `program_store` providers the type lists, in order."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title",
+            "stores"
+          ]
+        },
+        "description": "The store types it adds.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "title",
+      "publisher"
+    ]
+  },
+  "ExtensionType": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "A word of lower-case letters and digits, 1 to 32, that no built-in type uses."
+      },
+      "title": {
+        "type": "string",
+        "description": "The type's name in the plural, for the Store's index."
+      },
+      "icon": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The name of one of the application's icons, or a small image the extension ships as a `data:image/png;base64,...` or `data:image/webp;base64,...` address (at most [`MAX_ICON_TEXT`] characters), or none for the default icon. A name the application does not know draws the default."
+      },
+      "stores": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The `program_store` providers the type lists, in order."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title",
+      "stores"
+    ]
+  }
+}

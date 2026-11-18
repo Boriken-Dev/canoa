@@ -1,0 +1,22 @@
+{
+  "kinds": [
+    {
+      "name": "store_extension",
+      "floor_hash": 2738807673,
+      "object": false,
+      "doc": "Adds types to the Store. The same answer on every call, with nothing run and no connection opened.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What this extension adds."
+        }
+      ]
+    }
+  ]
+}

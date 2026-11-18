@@ -1,0 +1,97 @@
+//! The description of the `agent_vendor` and `store_extension` kinds, and their models' schemas: what a library written in Python or
+//! JavaScript is built against. Regenerate the files with
+//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor --test script_kinds`.
+#![cfg(all(feature = "store", feature = "vendor"))]
+#![allow(
+    clippy::std_instead_of_core,
+    clippy::std_instead_of_alloc,
+    reason = "a test names what it uses from std"
+)]
+
+use std::path::PathBuf;
+
+use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtensionVtable};
+use canoa::vendor::{AgentVendorVtable, ModeTitle, StandardTitle, VendorInfo};
+use coqui_acp_api::guatiao::Schema;
+use guatiao_serde::Serializable;
+use serde_json::Value as Json;
+
+fn file(path: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
+}
+
+fn pretty(value: &Json) -> String {
+    let mut text = serde_json::to_string_pretty(value).expect("written");
+    text.push('\n');
+    text
+}
+
+fn committed(path: &str, fresh: &Json) {
+    let path = file(path);
+    if std::env::var_os("CANOA_WRITE_KINDS").is_some() {
+        std::fs::create_dir_all(path.parent().expect("a directory")).expect("directory");
+        std::fs::write(&path, pretty(fresh)).expect("the file is written");
+    }
+    let committed = std::fs::read_to_string(&path).expect("the file is committed");
+    // Compared as documents: another crate's `preserve_order` in the build changes the order a JSON object is written in.
+    let committed: Json = serde_json::from_str(&committed).expect("the committed file is JSON");
+    assert!(&committed == fresh, "regenerate {}", path.display());
+}
+
+fn schema_of<T: Schema>() -> Json {
+    let value = T::schema().expect("a model describes itself");
+    serde_json::to_value(Serializable::from(&value)).expect("a schema is JSON")
+}
+
+fn schemas(models: Vec<(&str, Json)>) -> Json {
+    Json::Object(
+        models
+            .into_iter()
+            .map(|(name, schema)| (name.to_owned(), schema))
+            .collect(),
+    )
+}
+
+fn document(description: &str) -> Json {
+    serde_json::from_str(&format!("{{\"kinds\":[{description}]}}"))
+        .expect("a kind's description is JSON")
+}
+
+#[test]
+fn the_committed_vendor_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.vendor.kinds.json",
+        &document(&AgentVendorVtable::description()),
+    );
+}
+
+#[test]
+fn the_committed_vendor_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.vendor.schemas.json",
+        &schemas(vec![
+            ("VendorInfo", schema_of::<VendorInfo>()),
+            ("StandardTitle", schema_of::<StandardTitle>()),
+            ("ModeTitle", schema_of::<ModeTitle>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_extension_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.store_extension.kinds.json",
+        &document(&StoreExtensionVtable::description()),
+    );
+}
+
+#[test]
+fn the_committed_extension_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.store_extension.schemas.json",
+        &schemas(vec![
+            ("ExtensionInfo", schema_of::<ExtensionInfo>()),
+            ("ExtensionType", schema_of::<ExtensionType>()),
+        ]),
+    );
+}

@@ -1,0 +1,163 @@
+{
+  "VendorInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "agent": {
+        "type": "string",
+        "description": "The id the agent goes by: the id of its `acp_harness` provider when it has one (`claude`), else the lower-case name of its source. Every other provider and source of the agent names it this way."
+      },
+      "title": {
+        "type": "string",
+        "description": "Its name for people, such as `Claude`."
+      },
+      "program": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The program's name for people, such as `Claude Code`; absent when it is the title."
+      },
+      "vendor": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The vendor a session on it is stamped with (`AGENTS_VENDOR`), such as `anthropic`; absent for an agent with none."
+      },
+      "aos": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The agent's id in the standard registry of harnesses (`claude-code`); absent when the registry has none."
+      },
+      "model_variable": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The variable the running model is read from in the agent's environment (`ANTHROPIC_MODEL`)."
+      },
+      "standards": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The standard's id, such as `anthropic-api`."
+            },
+            "title": {
+              "type": "string",
+              "description": "What a person reads for it, such as `Anthropic API`."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title"
+          ]
+        },
+        "description": "The credential standards that are the vendor's own, with their names for people.",
+        "default": []
+      },
+      "names": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The names the agent reports for itself in ACP's `initialize` (`agentInfo.name`), which tell its sessions apart.",
+        "default": []
+      },
+      "markers": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The keys of `initialize`'s `_meta` that are `true` for this agent and no other, for one that reports no `agentInfo` name.",
+        "default": []
+      },
+      "modes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The mode's id, as the agent names it."
+            },
+            "title": {
+              "type": "string",
+              "description": "What a person reads for it."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title"
+          ]
+        },
+        "description": "The modes the agent is known to offer before it has run.",
+        "default": []
+      },
+      "mark": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Its mark as SVG text: `path` elements with a `d` and an optional `fill`, in the `viewBox`'s square. A path with no `fill`, or `currentColor`, is drawn in the text's colour. At most [`MAX_DOCUMENT_TEXT`] characters."
+      },
+      "look": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Its look as a JSON document with an `id`, a `label`, the agent's `vendor` and, for `light` and `dark`, colour tokens."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "agent",
+      "title"
+    ]
+  },
+  "StandardTitle": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The standard's id, such as `anthropic-api`."
+      },
+      "title": {
+        "type": "string",
+        "description": "What a person reads for it, such as `Anthropic API`."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title"
+    ]
+  },
+  "ModeTitle": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The mode's id, as the agent names it."
+      },
+      "title": {
+        "type": "string",
+        "description": "What a person reads for it."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title"
+    ]
+  }
+}

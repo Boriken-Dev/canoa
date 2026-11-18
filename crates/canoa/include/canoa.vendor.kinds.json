@@ -1,0 +1,22 @@
+{
+  "kinds": [
+    {
+      "name": "agent_vendor",
+      "floor_hash": 1152284818,
+      "object": false,
+      "doc": "Describes an agent. The same answer on every call, with nothing run and no connection opened.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Who the agent is."
+        }
+      ]
+    }
+  ]
+}
