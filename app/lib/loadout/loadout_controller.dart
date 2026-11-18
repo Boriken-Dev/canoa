@@ -12,7 +12,7 @@ import 'package:flutter/foundation.dart';
 import '../config/canoa_config.dart';
 import '../profile/overlay_layer.dart';
 import '../profile/profile.dart';
-import '../profile/overlays.dart' show FetchedTree, OverlayException, ScannedSkill, SkillHit, SkillScan;
+import '../profile/overlays.dart' show OverlayException, ScannedSkill, SkillHit, SkillScan;
 import '../profile/profile_home.dart';
 import '../profile/profile_layers.dart';
 import '../profile/skill_copies.dart';
@@ -46,7 +46,8 @@ const knownCatalogs = <KnownCatalog>[
 ];
 
 /// The label a catalog added from [spec] gets when the person gives none: its repository's name.
-/// The skills a generated catalog lists, from the host's `store/catalog` answer: each names the source that holds it.
+/// The skills a catalog lists, from the host's `store/catalog` answer: each names the source that holds it, and a source the host
+/// scanned names the commit it read.
 SkillScan skillListingOf(Map<Object?, Object?> answer) {
   final listed = answer['skills'];
   return SkillScan(
@@ -71,6 +72,9 @@ SkillScan skillListingOf(Map<Object?, Object?> answer) {
 
 /// The address a generated registry is chosen and recorded under: `store:` and its label.
 const generatedRegistryPrefix = 'store:';
+
+/// The label the host gives the official registry, which the MCP servers type always offers.
+const officialRegistryLabel = 'official';
 
 String catalogLabelFor(String spec) {
   final base = spec.split('@').first.split('#').first.split('/').where((part) => part.isNotEmpty).lastOrNull ?? 'catalog';
@@ -101,7 +105,6 @@ class LoadoutController extends ChangeNotifier {
     required this.save,
     this.agents = const [],
     this.registry = officialRegistry,
-    this.fetch,
     this.findProgram,
     this.overlayNeeds,
     this.index,
@@ -128,7 +131,7 @@ class LoadoutController extends ChangeNotifier {
   /// the app has no host.
   final CatalogTypesRead? catalogTypes;
 
-  /// Reads a catalog of Skills or MCP servers that a program or an extension generates; none where the app has no host.
+  /// Reads a catalog of Skills or MCP servers through the host, whichever provider serves it; none where the app has no host.
   final CatalogRead? readCatalog;
 
   /// What the host last said of each type that reads catalogs.
@@ -141,7 +144,6 @@ class LoadoutController extends ChangeNotifier {
   final List<String> agents;
   /// The official registry, which is always offered first.
   final String registry;
-  final RegistryFetch? fetch;
   final FindProgram? findProgram;
 
   /// Asks the host what an installed overlay needs of this computer; none where the app has no host.
@@ -190,6 +192,15 @@ class LoadoutController extends ChangeNotifier {
       address.startsWith(generatedRegistryPrefix) && generatedRegistryLabels.contains(address.substring(generatedRegistryPrefix.length))
           ? address.substring(generatedRegistryPrefix.length)
           : null;
+
+  /// The label the host knows the registry [address] by: `official` for the official one, the label canoa.cfg keeps an added address
+  /// under, or a generated registry's own. Null for an address canoa.cfg does not hold.
+  String? registryLabelOf(String address) {
+    if (address == registry) return officialRegistryLabel;
+    final generated = generatedRegistryOf(address);
+    if (generated != null) return generated;
+    return config.storeRegistryLabels.entries.where((each) => each.value == address).firstOrNull?.key;
+  }
 
   List<McpRegistryEntry> registryEntries = const [];
   String? registryNext, registryProblem;
@@ -463,26 +474,18 @@ class LoadoutController extends ChangeNotifier {
       if (value.provider != readProvider) key,
   ];
 
-  /// Reads which skills [label]'s source holds, at the commit its ref names now; for a generated catalog, its listing.
+  /// Reads which skills [label]'s source holds, through the host: at the commit its ref names now, or the listing a program or an
+  /// extension makes.
   Future<void> scanSkillSource(String label) async {
     final home = this.home;
-    final generated = generatedSkillSources.contains(label);
-    final source = skillSources[label];
-    if (home == null || (source == null && !generated) || scanningSource != null) return;
+    if (home == null || (skillSources[label] == null && !generatedSkillSources.contains(label)) || scanningSource != null) return;
     scanningSource = label;
     skillScanProblems.remove(label);
     notifyListeners();
     try {
-      if (generated) {
-        final read = readCatalog;
-        if (read == null) throw const CatalogReadFailed('Catalogs are read through the host, and this app has none');
-        skillScans[label] = skillListingOf(await read('skills', label));
-      } else {
-        skillScans[label] = await home.overlays.scanSkills(source!.repo, ref: source.ref, path: source.path, own: skillSourceIsOwn(label));
-      }
-    } on OverlayException catch (error) {
-      skillScans.remove(label);
-      skillScanProblems[label] = error.message;
+      final read = readCatalog;
+      if (read == null) throw const CatalogReadFailed('Catalogs are read through the host, and this app has none');
+      skillScans[label] = skillListingOf(await read('skills', label));
     } on CatalogReadFailed catch (error) {
       skillScans.remove(label);
       skillScanProblems[label] = error.message;
@@ -728,10 +731,12 @@ class LoadoutController extends ChangeNotifier {
     return loadRegistry();
   }
 
-  /// One page of a registry a program or an extension generates, as the host reads it.
-  Future<McpRegistryPage> _readGeneratedRegistry(String label, String search, String? cursor) async {
+  /// One page of the registry [address], as the host reads it from the catalog it is kept as.
+  Future<McpRegistryPage> _readRegistry(String address, String search, String? cursor) async {
     final read = readCatalog;
-    if (read == null) throw const RegistryRefusal('Generated registries are read through the host, and this app has none');
+    if (read == null) throw const RegistryRefusal('Registries are read through the host, and this app has none');
+    final label = registryLabelOf(address);
+    if (label == null) throw RegistryRefusal('canoa.cfg holds no registry $address');
     try {
       final answer = await read('mcps', label, search: search, cursor: cursor);
       return parseRegistryPage(jsonEncode({'servers': answer['servers'], 'metadata': answer['metadata']}));
@@ -740,30 +745,9 @@ class LoadoutController extends ChangeNotifier {
     }
   }
 
-  /// A git registry's one page: the list file at the ref's commit.
-  Future<McpRegistryPage> _readGitRegistry(String address) async {
-    final home = this.home;
-    if (home == null) throw const RegistryRefusal('A git registry is read through the host, and this app has none');
-    final source = gitRegistrySource(address);
-    final FetchedTree tree;
-    try {
-      tree = await home.overlays.fetchCatalog(gitRegistryLabel(address), source);
-    } on OverlayException catch (error) {
-      throw RegistryRefusal('It cannot be fetched: $error');
-    }
-    final file = await tree.file(source.path, maxBytes: maxRegistryBytes);
-    if (file == null) throw RegistryRefusal('It has no file ${source.path} at that commit');
-    final bytes = file.bytes;
-    if (bytes == null) throw const RegistryRefusal("The registry's file is larger than Canoa reads");
-    return parseRegistryPage(utf8.decode(bytes, allowMalformed: true));
-  }
-
   /// Reads the registry's first page for [search], or the next page of the last search.
   Future<void> loadRegistry({String? search, bool more = false}) async {
-    final read = fetch;
-    final generated = generatedRegistryOf(selectedRegistry);
-    final git = generated == null && isGitRegistry(selectedRegistry);
-    if (read == null && !git && generated == null) {
+    if (readCatalog == null) {
       registryProblem = 'Registries are read through the host, and this app has none';
       registryRead = true;
       notifyListeners();
@@ -778,11 +762,7 @@ class LoadoutController extends ChangeNotifier {
     registryProblem = null;
     notifyListeners();
     try {
-      final page = generated != null
-          ? await _readGeneratedRegistry(generated, _registryQuery, more ? registryNext : null)
-          : git
-          ? await _readGitRegistry(selectedRegistry)
-          : parseRegistryPage(await read!(listUri(selectedRegistry, search: _registryQuery, cursor: more ? registryNext : null)));
+      final page = await _readRegistry(selectedRegistry, _registryQuery, more ? registryNext : null);
       // A search the registry does not take is narrowed here, so a registry that ignores `search` still answers it.
       final words = _registryQuery.toLowerCase().split(RegExp(r'\s+')).where((word) => word.isNotEmpty);
       registryEntries = [

@@ -12,6 +12,7 @@ import 'package:canoa/loadout/loadout_controller.dart';
 import 'package:canoa/loadout/mcp_registry.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/catalog_standin.dart';
 import 'fixtures/store_fixtures.dart';
 import 'mcp_registry_test.dart' show npmServer, page;
 
@@ -24,7 +25,7 @@ Map<String, Object?> teamServer() => {
   ],
 };
 
-/// What the host's `registry/fetch` does for the app, against a server of the test's own.
+/// What the host's `store/catalog` fetches for a registry's list, against a server of the test's own.
 Future<String> _read(Uri uri) async {
   final client = HttpClient();
   try {
@@ -71,7 +72,8 @@ void main() {
       await request.response.close();
     });
     final saved = <CanoaConfig>[];
-    final controller = LoadoutController(
+    late final LoadoutController controller;
+    controller = LoadoutController(
       config: CanoaConfig.parse(''),
       home: null,
       save: (changed) async {
@@ -79,7 +81,7 @@ void main() {
         return changed;
       },
       agents: const ['Claude'],
-      fetch: _read,
+      readCatalog: standInCatalogRead(MemoryOverlays(), () => controller.config, registry: _read),
     );
     try {
       final address = 'http://127.0.0.1:${server.port}';
@@ -115,7 +117,8 @@ void main() {
     const location = 'https://git.example/lists.git';
     final overlays = MemoryOverlays()..put(location, {'servers.json': page([teamServer(), npmServer()])});
     final saved = <CanoaConfig>[];
-    final controller = LoadoutController(
+    late final LoadoutController controller;
+    controller = LoadoutController(
       config: CanoaConfig.parse(''),
       home: MemoryHome(overlays),
       save: (changed) async {
@@ -124,7 +127,8 @@ void main() {
       },
       agents: const ['Claude'],
       // The official registry is not reachable here: nothing may read it.
-      fetch: (uri) async => throw StateError('no HTTP registry is read: $uri'),
+      readCatalog: standInCatalogRead(overlays, () => controller.config,
+          registry: (uri) async => throw StateError('no HTTP registry is read: $uri')),
     );
     try {
       final spec = '$location@main#servers.json';

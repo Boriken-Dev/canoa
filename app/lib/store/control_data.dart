@@ -1,12 +1,9 @@
-/// What the Store reads from outside the page, asked of the host over its control channel: an MCP registry's list, whether a
-/// runtime is on the host's PATH, and the document kept of what each catalog's entries provide. The page itself fetches nothing
-/// from any origin, so a served page and the desktop app do the same work in the same place.
+/// What the Store reads from outside the page, asked of the host over its control channel: whether a runtime is on the host's PATH
+/// and the document kept of what each catalog's entries provide. The page itself fetches nothing from any origin, so a served page and the desktop app do the same work in the same place.
 library;
 
-import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
 import '../loadout/loadout_controller.dart' show FindProgram;
-import '../loadout/mcp_registry.dart';
 import 'contents_reader.dart';
 import 'contents_storage.dart';
 import 'overlay_contents.dart' show OverlayContents;
@@ -16,23 +13,6 @@ Future<Map<Object?, Object?>> _ask(HostControl control, String method, Map<Strin
   final result = await client.call(method, params, null, wait);
   return result is Map<Object?, Object?> ? result : const {};
 }
-
-/// Reads a registry's list through the host's `registry/fetch`, which holds the limits (no redirect, 20 seconds, 4 MiB). A refusal
-/// of the host, or a host that cannot be reached, is a [RegistryRefusal] with its words.
-RegistryFetch controlRegistryFetch(HostControl control) => (uri) async {
-  try {
-    final answer = await _ask(control, 'registry/fetch', {'url': uri.toString()}, const Duration(seconds: 40));
-    final body = answer['body'];
-    if (body is! String) throw const RegistryRefusal('The host gave no registry answer');
-    return body;
-  } on ControlFailed catch (error) {
-    throw RegistryRefusal(error.message);
-  } on RegistryRefusal {
-    rethrow;
-  } on Object catch (error) {
-    throw RegistryRefusal('The host could not be reached: $error');
-  }
-};
 
 /// Looks a program up on the host's PATH through `host/which`; null when it is not there or the host cannot say.
 FindProgram controlFindProgram(HostControl control) => (program) async {

@@ -34,17 +34,13 @@ String page(List<Map<String, Object?>> servers, {String? next, bool latest = tru
 });
 
 void main() {
-  group('the list address', () {
-    test('is the registry\'s v0.1 servers endpoint with the limit, cursor and search', () {
-      final uri = listUri('https://registry.example.com/', search: ' git ', cursor: 'a:1', limit: 10);
-      expect(uri.toString(), 'https://registry.example.com/v0.1/servers?limit=10&cursor=a%3A1&search=git');
-    });
-
-    test('is https, or http for this computer only, and carries no user information', () {
-      expect(() => listUri('http://registry.example.com'), throwsA(isA<RegistryRefusal>()));
-      expect(() => listUri('https://user:pw@registry.example.com'), throwsA(isA<RegistryRefusal>()));
-      expect(() => listUri('https://registry.example.com?x=1'), throwsA(isA<RegistryRefusal>()));
-      expect(listUri('http://127.0.0.1:8080').host, '127.0.0.1');
+  group('an address that can be a registry', () {
+    test('is https, or http for this computer only, and carries no user information or query', () {
+      expect(registryProblemOf('https://registry.example.com/'), isNull);
+      expect(registryProblemOf('http://127.0.0.1:8080'), isNull);
+      expect(registryProblemOf('http://registry.example.com'), contains('https address'));
+      expect(registryProblemOf('https://user:pw@registry.example.com'), isNotNull);
+      expect(registryProblemOf('https://registry.example.com?x=1'), contains('https address'));
     });
   });
 

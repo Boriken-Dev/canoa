@@ -38,7 +38,6 @@ class StoreSection extends StatefulWidget {
     required this.onSave,
     this.agents = const [],
     this.programs,
-    this.fetchRegistry,
     this.findProgram,
     this.overlayNeeds,
     this.registry = officialRegistry,
@@ -70,8 +69,6 @@ class StoreSection extends StatefulWidget {
   /// The programs the connected host's Store keeps; none where that host does not grant them, which hides the Agents type.
   final ProgramStores? programs;
 
-  /// Reads a registry's answer; null where the app reads no registry.
-  final RegistryFetch? fetchRegistry;
   final FindProgram? findProgram;
 
   /// Asks the host what an installed overlay needs of this computer; none where the app has no host.
@@ -120,7 +117,6 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     save: widget.onSave,
     agents: widget.agents,
     registry: widget.registry,
-    fetch: widget.fetchRegistry,
     findProgram: widget.findProgram,
     overlayNeeds: widget.overlayNeeds,
     index: widget.index,

@@ -88,7 +88,7 @@ void main() {
               saved.add(changed);
               return current = changed;
             },
-            fetchRegistry: (uri) async => '',
+            readCatalog: standInCatalogRead(overlays, () => current, registry: (uri) async => ''),
             findProgram: (program) async => '/usr/bin/$program',
           ),
         ));

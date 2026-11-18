@@ -38,7 +38,7 @@ void main() {
             index: standInIndex(overlays, () => CanoaConfig.parse(text)),
             agents: const ['Claude', 'Codex'],
             onSave: (changed) async => changed,
-            fetchRegistry: (uri) async => registryAnswer,
+            readCatalog: standInCatalogRead(overlays, () => CanoaConfig.parse(text), registry: (uri) async => registryAnswer),
             findProgram: (program) async => '/usr/bin/$program',
           ),
         ));

@@ -985,8 +985,7 @@ class _CanoaAppState extends State<CanoaApp> {
     programs: _programs,
     extensionTypes: _storeTypes(),
     runtimes: _programs == null ? null : _extensionsHeld?.runtimes,
-    // The host reads registries and looks programs up, for a page and the desktop alike.
-    fetchRegistry: _control == null ? null : controlRegistryFetch(_control),
+    // The host reads catalogs and looks programs up, for a page and the desktop alike.
     findProgram: _control == null ? null : controlFindProgram(_control),
     overlayNeeds: _control == null ? null : controlOverlayNeeds(_control),
     index: ControlStoreIndex.over(_control)?.catalogs,

@@ -37,13 +37,14 @@ GitOverlay gitRegistrySource(String address) {
 /// The label a git registry's checkout is kept under, beside the catalogs': fixed by its address.
 String gitRegistryLabel(String address) => 'registry-${sha256.convert(utf8.encode(address)).toString().substring(0, 16)}';
 
-/// Why [address] cannot be a registry, or null when it can: a git source of a list file, or an HTTP registry's address.
+/// Why [address] cannot be a registry, or null when it can: a git source of a list file, or an HTTP registry's address. The host
+/// reads it and holds its limits; this only says no before it is written to canoa.cfg.
 String? registryProblemOf(String address) {
   try {
     if (isGitRegistry(address)) {
       gitRegistrySource(address);
     } else {
-      listUri(address);
+      _checkHttpRegistry(address);
     }
     return null;
   } on RegistryRefusal catch (error) {
@@ -60,9 +61,6 @@ String registryShown(String address) {
 /// The most a listing body may hold, so a registry cannot make the app read without end.
 const maxRegistryBytes = 4 * 1024 * 1024;
 
-/// Reads the text at a URI; the app's own implementation uses HTTPS only.
-typedef RegistryFetch = Future<String> Function(Uri uri);
-
 /// Why a registry or its answer is refused, said to the person.
 final class RegistryRefusal implements Exception {
   const RegistryRefusal(this.message);
@@ -71,21 +69,14 @@ final class RegistryRefusal implements Exception {
   String toString() => message;
 }
 
-/// The list endpoint of [base] for one page: `GET <base>/v0.1/servers?limit=&cursor=&search=`. Only an `https` registry is read,
-/// or `http` on the loopback address for a registry run on this computer.
-Uri listUri(String base, {String? search, String? cursor, int limit = 30}) {
+/// Only an `https` registry is read, or `http` on the loopback address for a registry run on this computer.
+void _checkHttpRegistry(String base) {
   final uri = Uri.tryParse(base);
   final loopback = uri != null && (uri.host == 'localhost' || uri.host == '127.0.0.1' || uri.host == '::1' || uri.host == '[::1]');
   if (uri == null || !uri.hasAuthority || uri.userInfo.isNotEmpty || uri.hasQuery || uri.hasFragment ||
       !(uri.scheme == 'https' || (uri.scheme == 'http' && loopback))) {
     throw const RegistryRefusal('A registry is an https address with no user information or query');
   }
-  final path = uri.path.endsWith('/') ? uri.path.substring(0, uri.path.length - 1) : uri.path;
-  return uri.replace(path: '$path/v0.1/servers', queryParameters: {
-    'limit': '$limit',
-    if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
-    if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
-  });
 }
 
 Object? _canonical(Object? value) => switch (value) {

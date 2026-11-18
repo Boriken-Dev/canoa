@@ -97,7 +97,7 @@ void main() {
             },
         agents: const ['Claude'],
         onSave: (changed) async => changed,
-        fetchRegistry: (uri) async => '{"servers": []}',
+        readCatalog: standInCatalogRead(overlays, () => config, registry: (uri) async => '{"servers": []}'),
       ),
     ));
     await tester.pumpAndSettle();

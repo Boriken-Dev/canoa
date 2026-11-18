@@ -5,9 +5,12 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/loadout/mcp_registry.dart';
 import 'package:canoa/profile/aos_support.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
+import 'package:canoa/store/catalog_types.dart' show CatalogRead, CatalogReadFailed;
+import 'package:canoa/store/skill_sources.dart';
 import 'package:canoa/store/store.dart';
 import 'package:canoa/store/store_index.dart';
 import 'package:canoa/store/store_settings.dart';
@@ -151,3 +154,71 @@ CatalogIcon _icon(TreeFile? found, String path, StoreSettings settings) {
 /// `[store.overlays.catalogs]` from its canoa.cfg each time it is asked.
 CatalogIndex standInIndex(OverlayManager overlays, CanoaConfig Function() current) =>
     ({bool refresh = false}) => standInCatalogs(overlays, current());
+
+/// The host's `store/catalog` for a page in a widget test, for every `read` source of Skills and MCP servers, answered the way the
+/// host answers: a skills source is scanned (through [overlays]' `skill/scan`) and each skill names its source; a registry's list is
+/// what [registry] serves at its list address, or the file a git registry names. [current] is the configuration the person has now.
+/// A catalog another provider makes is [CatalogReadFailed]: a test that has one brings its own reader.
+CatalogRead standInCatalogRead(OverlayManager overlays, CanoaConfig Function() current,
+    {Future<String> Function(Uri uri)? registry}) {
+  return (type, label, {search, cursor}) async {
+    final config = current();
+    try {
+      switch (type) {
+        case 'skills':
+          final source = config.skillSources[label];
+          if (source == null) throw CatalogReadFailed('canoa.cfg has no skills source $label');
+          final own = !(aos.normalizeName(label) == aos.normalizeName(defaultSkillSourceLabel) && source.spec == defaultSkillSourceSpec);
+          final scan = await overlays.scanSkills(source.repo, ref: source.ref, path: source.path, own: own);
+          return {
+            'type': type,
+            'label': label,
+            'provider': 'read',
+            'commit': scan.commit,
+            'skills': [
+              for (final skill in scan.skills)
+                if (source.only == null || skill.name.toLowerCase() == source.only!.toLowerCase())
+                  {
+                    'name': skill.name,
+                    'description': skill.description,
+                    'path': skill.path,
+                    'problem': ?skill.problem,
+                    'source': source.spec,
+                  },
+            ],
+            'skipped': scan.skipped,
+            'truncated': scan.truncated,
+          };
+        case 'mcps':
+          final address = aos.normalizeName(label) == 'official' ? officialRegistry : config.storeRegistryLabels[label];
+          if (address == null) throw CatalogReadFailed('canoa.cfg has no registry $label');
+          final String body;
+          if (isGitRegistry(address)) {
+            final source = gitRegistrySource(address);
+            final tree = await overlays.fetchCatalog(gitRegistryLabel(address), source);
+            final file = await tree.file(source.path, maxBytes: maxRegistryBytes);
+            if (file == null) throw CatalogReadFailed('It has no file ${source.path} at that commit');
+            final bytes = file.bytes;
+            if (bytes == null) throw const CatalogReadFailed("The registry's file is larger than Canoa reads");
+            body = utf8.decode(bytes, allowMalformed: true);
+          } else {
+            final base = Uri.parse(address);
+            final path = base.path.endsWith('/') ? base.path.substring(0, base.path.length - 1) : base.path;
+            body = await (registry ?? (uri) async => throw CatalogReadFailed('no registry is served at $uri'))(base.replace(path: '$path/v0.1/servers', queryParameters: {
+              'limit': '30',
+              if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+              if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+            }));
+          }
+          parseRegistryPage(body);
+          final list = jsonDecode(body) as Map<Object?, Object?>;
+          return {'type': type, 'label': label, 'provider': 'read', 'servers': list['servers'], 'metadata': list['metadata'] ?? const {}};
+      }
+    } on OverlayException catch (error) {
+      throw CatalogReadFailed(error.message);
+    } on RegistryRefusal catch (error) {
+      throw CatalogReadFailed(error.message);
+    }
+    throw CatalogReadFailed('no catalogs of the type $type');
+  };
+}

@@ -1,4 +1,4 @@
-// Registries, runtimes and the catalogs' cache are the host's work, asked over its control channel, so a served page and the
+// Runtimes and the catalogs' cache are the host's work, asked over its control channel, so a served page and the
 // desktop app read them in one place; while a desktop's host is down it does the same work itself.
 @TestOn('vm')
 library;
@@ -8,7 +8,6 @@ import 'dart:convert';
 
 import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_tool.dart';
-import 'package:canoa/loadout/mcp_registry.dart';
 import 'package:canoa/store/control_data.dart';
 import 'package:canoa/store/overlay_needs.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -44,16 +43,6 @@ final class _Host implements HostLink {
 HostControl _over(_Host host) => HostControl.dialing(() async => host);
 
 void main() {
-  test('a registry page is read by the host from the address, and its words are the refusal', () async {
-    final host = _Host((method, params) => params['url'].toString().contains('bad') ? 'error:The registry answered 404' : {'body': '{"servers":[]}'});
-    final fetch = controlRegistryFetch(_over(host));
-    expect(await fetch(Uri.parse('https://registry.example/v0.1/servers?limit=30')), '{"servers":[]}');
-    expect(host.asked.single.$1, 'registry/fetch');
-    expect(host.asked.single.$2['url'], 'https://registry.example/v0.1/servers?limit=30');
-    await expectLater(fetch(Uri.parse('https://registry.example/bad/v0.1/servers')),
-        throwsA(isA<RegistryRefusal>().having((e) => e.message, 'message', 'The registry answered 404')));
-  });
-
   test('a runtime is found where the host says, and is missing when it says nothing or cannot answer', () async {
     final host = _Host((method, params) => {'found': {'npx': '/usr/bin/npx', 'uvx': null}});
     final find = controlFindProgram(_over(host));

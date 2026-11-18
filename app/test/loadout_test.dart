@@ -90,7 +90,7 @@ void main() {
           saved.add(changed);
           return changed;
         },
-        fetchRegistry: fetch ?? (uri) async => registryAnswer,
+        readCatalog: standInCatalogRead(overlays, () => saved.isEmpty ? config : saved.last, registry: fetch ?? (uri) async => registryAnswer),
         findProgram: findProgram ?? (program) async => '/usr/bin/$program',
         overlayNeeds: overlayNeeds,
         runtimes: runtimes,

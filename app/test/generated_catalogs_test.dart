@@ -1,6 +1,6 @@
-// Catalogs of Skills and MCP servers that a program or an extension generates: the page asks the host's `store/catalog` for the label,
-// lists what it answers, and installs a skill by reading the source the listing names. The host's own reading is tested in canoa-host;
-// here the host is a stand-in.
+// Catalogs of Skills and MCP servers, whichever provider serves them (a source or registry the host reads, a program, an extension):
+// the page asks the host's `store/catalog` for the label, lists what it answers, and installs a skill from the source it names. The
+// host's own reading is tested in canoa-host; here the host is a stand-in whose answers have the shape the Rust ones have.
 @Timeout(Duration(minutes: 3))
 library;
 
@@ -21,6 +21,7 @@ import 'skills_from_source_test.dart' show pdfFiles;
 
 const commit = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
 const tools = 'https://example.test/team/tools.git';
+const anthropics = 'https://github.com/anthropics/skills.git';
 
 const generated = '''$withCatalog
 [store.skills.catalogs.made]
@@ -30,6 +31,9 @@ command = ["make-skills"]
 [store.mcps.catalogs.made]
 provider = "command"
 command = ["make-servers"]
+
+[store.mcps.catalogs.team]
+source = "https://registry.team.test"
 ''';
 
 void main() {
@@ -45,7 +49,8 @@ void main() {
         commit: commit,
         skills: [ScannedSkill(name: 'pdf', description: 'Reads PDFs.', path: 'skills/pdf')],
       )
-      ..putSkill('$tools@$commit#skills/pdf', pdfFiles);
+      ..putSkill('$tools@$commit#skills/pdf', pdfFiles)
+      ..putSkill('$anthropics@$commit#skills/pdf', pdfFiles);
     saved = [];
     asked = [];
     failure = null;
@@ -54,6 +59,20 @@ void main() {
   Future<Map<Object?, Object?>> readCatalog(String type, String label, {String? search, String? cursor}) async {
     asked.add('$type/$label/${search ?? ''}/${cursor ?? ''}');
     if (failure != null) throw CatalogReadFailed('$failure');
+    if (type == 'skills' && label == 'anthropics') {
+      // What the host answers for a `read` source: the commit it scanned, and each skill with the source it was found in.
+      return {
+        'type': 'skills',
+        'label': label,
+        'provider': 'read',
+        'commit': commit,
+        'skills': [
+          {'name': 'pdf', 'description': 'Reads PDFs.', 'source': 'anthropics/skills', 'path': 'skills/pdf'},
+        ],
+        'skipped': 1,
+        'truncated': false,
+      };
+    }
     if (type == 'skills') {
       return {
         'commit': null,
@@ -91,7 +110,6 @@ void main() {
           return changed;
         },
         readCatalog: readCatalog,
-        fetchRegistry: (uri) async => '{}',
         findProgram: (program) async => '/usr/bin/$program',
       ),
     ));
@@ -137,12 +155,48 @@ void main() {
     await open(tester, 'mcps');
     expect(find.byKey(const Key('mcps-registry-store:made')), findsOneWidget);
     await tapKey(tester, 'mcps-registry-store:made');
-    expect(asked, ['mcps/made//']);
+    expect(asked, ['mcps/official//', 'mcps/made//']);
     expect(find.byKey(const Key('mcp-entry-io.github.ana/files')), findsOneWidget);
     expect(find.byKey(const Key('mcps-registry-remove')), findsOneWidget);
 
     await tapKey(tester, 'mcps-registry-remove');
-    expect(saved.last.catalogSpecs('mcps'), isEmpty, reason: 'its entry is gone from canoa.cfg');
+    expect(saved.last.catalogSpecs('mcps').keys, ['team'], reason: 'its entry is gone from canoa.cfg, and the registry added by address stays');
     expect(find.byKey(const Key('mcps-registry-store:made')), findsNothing);
+  });
+
+  testWidgets('a read skills source is listed through the host too, and installing a skill from it reads no scan of its own', (tester) async {
+    await open(tester, 'skills');
+    expect(asked, isEmpty);
+    await tapKey(tester, 'skills-source-anthropics');
+    expect(asked, ['skills/anthropics//']);
+    expect(overlays.scanned, isEmpty, reason: 'the host scanned the source; the page asks nothing of skill/scan to list it');
+    expect(find.byKey(const Key('store-source-skill-anthropics-pdf')), findsOneWidget);
+    expect(find.textContaining('Read at commit $commit'), findsOneWidget);
+    expect(find.textContaining('none of your git settings'), findsOneWidget);
+
+    await tapKey(tester, 'store-source-skill-install-anthropics-pdf');
+    expect(find.byKey(const Key('store-skill-review')), findsOneWidget);
+    expect(overlays.skillFetches, isEmpty);
+    await tapKey(tester, 'store-skill-install-confirm');
+    expect(overlays.skillFetches, ['$anthropics@$commit#skills/pdf'], reason: 'the commit the host read is the one fetched');
+    expect(overlays.scanned, isEmpty);
+    expect(overlays.skills.keys, ['pdf']);
+  });
+
+  testWidgets('the official registry and one the person added are read through the host by label', (tester) async {
+    await open(tester, 'mcps');
+    expect(asked, ['mcps/official//'], reason: 'the official registry is the host fixed row');
+    expect(find.byKey(const Key('mcp-entry-io.github.ana/files')), findsOneWidget);
+
+    await tapKey(tester, 'mcps-registry-registry.team.test');
+    expect(asked, ['mcps/official//', 'mcps/team//']);
+    expect(find.byKey(const Key('mcp-entry-io.github.ana/files')), findsOneWidget);
+  });
+
+  testWidgets('a registry the host cannot read says why', (tester) async {
+    failure = 'The registry answered 404';
+    await open(tester, 'mcps');
+    expect(find.byKey(const Key('mcps-registry-problem')), findsOneWidget);
+    expect(find.textContaining('The registry answered 404'), findsOneWidget);
   });
 }

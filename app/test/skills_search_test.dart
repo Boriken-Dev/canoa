@@ -115,7 +115,7 @@ void main() {
             saved.add(changed);
             return changed;
           },
-          fetchRegistry: (uri) async => '{}',
+          readCatalog: standInCatalogRead(overlays, () => saved.isEmpty ? config : saved.last, registry: (uri) async => '{}'),
           findProgram: (program) async => '/usr/bin/$program',
         ),
       ));
