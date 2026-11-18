@@ -436,6 +436,25 @@ canoa accounts add local --harness claude --method foundry-local --input model=q
 - **`engine`** is `service` (the default: the model lives in the Foundry Local service) or `sdk` (the model lives in this
   program, through Foundry Local's Rust SDK, which needs a build with the `foundry` feature and `library`, a copy of its native
   library made outside the installed package: Windows does not let a program outside the package load one from it).
+- **A model's window.** The window is how many tokens a prompt and its answer may take together: a model's own
+  `genai_config.json` says what it was built for (`model.context_length`, the most it can be set to) and what a session over
+  it allows as cached (`search.max_length`). The Store's page of a Foundry model shows both and offers a setting, kept in
+  canoa.cfg:
+
+  ```toml
+  [foundry.windows]
+  "qwen3-1.7b-generic-gpu:2" = 16384
+  ```
+
+  A number above the model's context length is lowered to it, and the page says so. Foundry Local's cache is never edited
+  (a re-download would undo that): with `engine = "sdk"` the host makes a folder of its own for the model under
+  `foundry-windows/` in its home, with a hard link to each of the cached model's files and its own `genai_config.json` whose
+  `search.max_length` is the window, and registers it in the SDK's local catalog. The weights are linked, never copied: on a
+  drive that cannot link them (Canoa's home and Foundry Local's cache on different drives) the account's gateway is refused
+  with that said, since copying gigabytes silently is not a choice to make for the person. The setting is read when a gateway
+  starts. **The `service` engine ignores it**: the Foundry Local service loads the models of its own cache and has no call to
+  load another folder (its routes as measured on 0.14.0 include `/catalogs/local/v1/`, which listed no model, and none that registers one), so
+  the host logs that the window was not used. The NPU builds are compiled for 4096 tokens and cannot be raised.
 
 ## Granting a key the Store and accounts
 
