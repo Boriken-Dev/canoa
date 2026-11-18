@@ -1496,7 +1496,7 @@ fn a_guesser_who_keeps_under_the_windows_limit_is_stopped_by_the_days() {
     let rig = two_step_rig(|settings| {
         settings.max_factor_failures_per_person = 100;
         settings.max_factor_failures_per_day = 3;
-        settings.factor_day = Duration::from_millis(700);
+        settings.factor_day = Duration::from_secs(3);
         // The window is shorter than the day, so only the day's count still holds the failures.
         settings.failure_window = Duration::from_millis(150);
     });
@@ -1505,6 +1505,8 @@ fn a_guesser_who_keeps_under_the_windows_limit_is_stopped_by_the_days() {
         assert_eq!(code_at(&rig, "10.1.2.3", &pending, "000000").status, 401);
         thread::sleep(Duration::from_millis(200));
     }
+    // A day long enough that a loaded machine stays inside it, then waited out from the last failure.
+    let last_failure = std::time::Instant::now();
     let pending = first_step(&rig, "10.1.2.3");
     let before = calls(&rig);
     let right = code_at(&rig, "10.1.2.3", &pending, "123456");
@@ -1515,7 +1517,10 @@ fn a_guesser_who_keeps_under_the_windows_limit_is_stopped_by_the_days() {
         before,
         "the right code is not checked once the day's count is full"
     );
-    thread::sleep(Duration::from_millis(800));
+    thread::sleep(
+        (last_failure + Duration::from_millis(3200))
+            .saturating_duration_since(std::time::Instant::now()),
+    );
     let pending = first_step(&rig, "10.1.2.3");
     assert_eq!(code_at(&rig, "10.1.2.3", &pending, "123456").status, 303);
 }
