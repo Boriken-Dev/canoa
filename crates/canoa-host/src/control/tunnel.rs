@@ -157,7 +157,7 @@ fn new_token() -> Result<String, getrandom::Error> {
 }
 
 /// What the app's connection is carried to: the proxy's tunnel, or a server with the TLS made.
-enum Upstream {
+pub(crate) enum Upstream {
     Plain(Connection),
     Secure(SecureConnection),
 }
@@ -211,13 +211,18 @@ fn serve(listener: &TcpListener, mut upstream: Upstream, wait: Duration, token: 
         upstream.end();
         return;
     };
+    carry(Arc::new(client), upstream);
+}
+
+/// Carries `client`'s bytes to `upstream` and back until either end closes.
+pub(crate) fn carry(client: Arc<TcpStream>, upstream: Upstream) {
     // Whatever the proxy connection was given for its own setup, a tunnel idles as long as the two ends like.
     let socket = upstream.socket();
     let _ = socket.set_read_timeout(None);
     let _ = socket.set_write_timeout(None);
     let _ = client.set_nodelay(true);
     match upstream {
-        Upstream::Plain(Connection::Tcp(stream)) => pump_tcp(client, stream),
+        Upstream::Plain(Connection::Tcp(stream)) => pump_tcp(client, Arc::new(stream)),
         other => pump_polling(&client, other),
     }
 }
@@ -263,24 +268,22 @@ fn opens_with(client: &mut TcpStream, token: &[u8]) -> bool {
     different == 0 && client.set_read_timeout(None).is_ok()
 }
 
-/// Both directions at once, each on its own thread; a half-close passes on, an error ends both.
-fn pump_tcp(client: TcpStream, upstream: TcpStream) {
-    let (Ok(mut client_read), Ok(mut upstream_write)) = (client.try_clone(), upstream.try_clone())
-    else {
-        return;
-    };
+/// Both directions at once, each on its own thread; a half-close passes on, an error ends both. Each socket is one handle that both
+/// threads use, never a duplicate: on Windows a duplicate's `shutdown` could answer "not connected" while the connection was up, and
+/// the far end then never heard that this one was done.
+fn pump_tcp(client: Arc<TcpStream>, upstream: Arc<TcpStream>) {
+    let (from, to) = (Arc::clone(&client), Arc::clone(&upstream));
     let forward = thread::spawn(move || {
-        if io::copy(&mut client_read, &mut upstream_write).is_err() {
-            let _ = upstream_write.shutdown(Shutdown::Both);
+        if io::copy(&mut &*from, &mut &*to).is_err() {
+            let _ = to.shutdown(Shutdown::Both);
         } else {
-            let _ = upstream_write.shutdown(Shutdown::Write);
+            let _ = to.shutdown(Shutdown::Write);
         }
     });
-    let (mut upstream_read, mut client_write) = (upstream, client);
-    if io::copy(&mut upstream_read, &mut client_write).is_err() {
-        let _ = client_write.shutdown(Shutdown::Both);
+    if io::copy(&mut &*upstream, &mut &*client).is_err() {
+        let _ = client.shutdown(Shutdown::Both);
     } else {
-        let _ = client_write.shutdown(Shutdown::Write);
+        let _ = client.shutdown(Shutdown::Write);
     }
     let _ = forward.join();
 }

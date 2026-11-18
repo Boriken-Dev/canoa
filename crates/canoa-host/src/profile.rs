@@ -1532,6 +1532,7 @@ fn position(text: &str, offset: usize) -> (usize, usize) {
 }
 
 mod commands;
+mod extras;
 pub(crate) mod hosted;
 pub(crate) mod items;
 mod launch;

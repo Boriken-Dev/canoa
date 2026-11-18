@@ -3397,3 +3397,112 @@ fn a_variable_the_profiles_own_environment_sets_keeps_its_value() {
         "{report}"
     );
 }
+
+#[test]
+fn the_bundled_identity_item_gives_the_sessions_programs_the_name_git_commits_under() {
+    let temp = temp_with_skill();
+    let offer = offer_with_items(
+        &temp,
+        "[profiles.default.items.identity]\nname = \"Ana Ruiz\"\nemail = \"ana@example.test\"\n",
+        crate::profile::items::ItemCatalog::from_registries(Vec::new()),
+    );
+    let (connection, report) = item_report(&offer, None);
+    assert_eq!(var(&connection, "GIT_AUTHOR_NAME"), Some("Ana Ruiz"));
+    assert_eq!(
+        var(&connection, "GIT_COMMITTER_EMAIL"),
+        Some("ana@example.test")
+    );
+    let how = item(&report, "items.identity")["how"]
+        .as_str()
+        .expect("text");
+    assert!(
+        how.contains("GIT_AUTHOR_NAME") && !how.contains("Ana"),
+        "{how}"
+    );
+}
+
+#[test]
+fn the_bundled_proxy_item_gives_the_sessions_programs_the_network_its_mode_names() {
+    let temp = temp_with_skill();
+    let offer_for = |items: &str| {
+        offer_with_items(
+            &temp,
+            &format!("[profiles.default.items.proxy]\n{items}"),
+            crate::profile::items::ItemCatalog::from_registries(Vec::new()),
+        )
+    };
+    // Its own proxy: the programs are given it as it is.
+    let own = offer_for("mode = \"proxy\"\nurl = \"http://gateway.example:3128\"\n");
+    let (connection, report) = item_report(&own, None);
+    assert_eq!(
+        var(&connection, "HTTPS_PROXY"),
+        Some("http://gateway.example:3128")
+    );
+    assert_eq!(
+        item(&report, "items.proxy.network")["state"],
+        "applied",
+        "{report}"
+    );
+    // None: no proxy variable at all.
+    let none = offer_for("mode = \"none\"\n");
+    let (connection, report) = item_report(&none, None);
+    assert_eq!(var(&connection, "HTTPS_PROXY"), None);
+    assert_eq!(
+        item(&report, "items.proxy.network")["state"],
+        "applied",
+        "{report}"
+    );
+    // The system's, the default: a proxy the host runs for the session, which stops with it.
+    let system = offer_for("");
+    let (connection, report) = item_report(&system, None);
+    let url = var(&connection, "HTTPS_PROXY").expect("a proxy").to_owned();
+    assert!(url.starts_with("http://canoa:"), "{url}");
+    let how = item(&report, "items.proxy.network")["how"]
+        .as_str()
+        .expect("text");
+    assert!(
+        how.contains("following the system") && !how.contains("canoa:"),
+        "{how}"
+    );
+    let address: core::net::SocketAddr = url
+        .rsplit_once('@')
+        .and_then(|(_, address)| address.parse().ok())
+        .expect("an address");
+    assert!(
+        std::net::TcpStream::connect_timeout(&address, core::time::Duration::from_secs(2)).is_ok()
+    );
+    drop(connection);
+    assert!(
+        std::net::TcpStream::connect_timeout(&address, core::time::Duration::from_millis(500))
+            .is_err(),
+        "the proxy ends with the session"
+    );
+    // A proxy the profile's own environment names is kept.
+    let named = offer_with_items(
+        &temp,
+        "[profile.env.HTTPS_PROXY]\nvalue = \"http://mine.example:1\"\n[profiles.default.items.proxy]\nmode = \"proxy\"\nurl = \"http://gateway.example:3128\"\n",
+        crate::profile::items::ItemCatalog::from_registries(Vec::new()),
+    );
+    let (connection, _) = item_report(&named, None);
+    assert_eq!(
+        var(&connection, "HTTPS_PROXY"),
+        Some("http://mine.example:1")
+    );
+}
+
+#[test]
+fn a_network_that_cannot_be_made_is_refused_in_the_report_and_the_session_still_starts() {
+    let temp = temp_with_skill();
+    let offer = offer_with_items(
+        &temp,
+        "[profiles.default.items.proxy]\nmode = \"command\"\ncommand = [\"/no/such/program\"]\n",
+        crate::profile::items::ItemCatalog::from_registries(Vec::new()),
+    );
+    let (connection, report) = item_report(&offer, None);
+    assert_eq!(var(&connection, "HTTPS_PROXY"), None);
+    assert_eq!(
+        item(&report, "items.proxy.network")["state"],
+        "refused",
+        "{report}"
+    );
+}

@@ -1708,7 +1708,7 @@ mod skill_search;
 #[cfg(test)]
 mod skills_tests;
 mod stores;
-mod tunnel;
+pub(crate) mod tunnel;
 #[cfg(test)]
 mod tunnel_tests;
 

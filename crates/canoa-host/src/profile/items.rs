@@ -1,5 +1,5 @@
 //! The profile items this host offers: each is a provider of the `profile_item` kind, the ones Canoa carries (the model, the effort,
-//! the mode, the starting instructions, the access) registered the way an extension's
+//! the mode, the starting instructions, the access) and the bundled ones (a proxy, an identity) registered the way an extension's
 //! are, and those the libraries of canoa.cfg's entries and extensions add. Nothing here names an item the host does not find in a
 //! registry: a profile's values for an item no provider offers are kept and reported as not applied.
 //!
@@ -38,6 +38,8 @@ mod tests;
 
 /// The origin of the items Canoa itself carries.
 pub(crate) const BUILT_IN: &str = "built-in";
+/// The origin of the items that ship with the host as extensions.
+pub(crate) const BUNDLED: &str = "bundled";
 
 /// The ids of the items that are the session's own settings, kept in a profile under their own names (`model = "..."`,
 /// `access = { ... }`) instead of under `items`.
@@ -232,7 +234,7 @@ impl core::fmt::Debug for ItemCatalog {
 /// An item as the catalog lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Listed {
-    /// Where its provider comes from: `built-in`, or the name of the entry or extension that loads it.
+    /// Where its provider comes from: `built-in`, `bundled`, or the name of the entry or extension that loads it.
     pub(crate) origin: String,
     pub(crate) info: ItemInfo,
 }
@@ -262,17 +264,24 @@ impl Listed {
 }
 
 impl ItemCatalog {
-    /// The built-in items alone.
+    /// The built-in and the bundled items alone.
     pub(crate) fn built_in() -> Arc<Self> {
         static KEPT: OnceLock<Arc<ItemCatalog>> = OnceLock::new();
         Arc::clone(KEPT.get_or_init(|| Arc::new(Self::from_registries(Vec::new()))))
     }
 
-    /// The built-in items, then those `registries` offer, each registry as its origin names it. An item whose id an
+    /// The built-in and the bundled items, then those `registries` offer, each registry as its origin names it. An item whose id an
     /// earlier one took, or that cannot be described, is left out and logged.
     pub(crate) fn from_registries(registries: Vec<(String, Registry)>) -> Self {
         let mut found: Vec<(String, Registry)> = Vec::new();
-        for (origin, name, library) in [(BUILT_IN, "canoa-profile-items", library as Library)] {
+        for (origin, name, library) in [
+            (BUILT_IN, "canoa-profile-items", library as Library),
+            (
+                BUNDLED,
+                "canoa-profile-extras",
+                super::extras::library as Library,
+            ),
+        ] {
             match registry_of(name, library) {
                 Ok(registry) => found.push((origin.to_owned(), registry)),
                 Err(why) => tracing::warn!("the {origin} profile items are not offered: {why}"),
@@ -325,7 +334,7 @@ impl ItemCatalog {
         Self { entries }
     }
 
-    /// The built-in items, and those the libraries of `config`'s entries and extensions add. Each library is opened as the
+    /// The built-in and bundled items, and those the libraries of `config`'s entries and extensions add. Each library is opened as the
     /// host opens it for `providers/list`: an extension whose pin no longer matches is left out.
     pub(crate) fn of(config: &Config) -> Self {
         Self::from_registries(crate::control::providers::loaded(config))
@@ -570,7 +579,7 @@ pub(crate) fn variables_of(applied: &[Applied]) -> Vec<(&str, &Variable)> {
     out
 }
 
-/// The items a host offers, held by the profiles it serves: the built-in items alone until the host has opened its
+/// The items a host offers, held by the profiles it serves: the built-in and bundled items alone until the host has opened its
 /// extensions' libraries.
 #[derive(Clone, Default)]
 pub struct ItemSet(Option<Arc<ItemCatalog>>);
@@ -594,7 +603,7 @@ impl PartialEq for ItemSet {
 impl Eq for ItemSet {}
 
 impl ItemSet {
-    /// The items `config`'s libraries offer, with the built-in ones.
+    /// The items `config`'s libraries offer, with the built-in and bundled ones.
     pub(crate) fn of(config: &Config) -> Self {
         Self(Some(Arc::new(ItemCatalog::of(config))))
     }

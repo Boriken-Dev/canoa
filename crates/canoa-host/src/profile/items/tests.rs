@@ -56,6 +56,8 @@ fn the_items_are_the_providers_the_registries_offer_the_built_in_ones_first() {
             ("effort", "built-in"),
             ("mode", "built-in"),
             ("model", "built-in"),
+            ("identity", "bundled"),
+            ("proxy", "bundled"),
             ("region", "regions"),
         ]
     );
@@ -257,4 +259,66 @@ fn the_first_item_to_set_a_variable_keeps_it_and_the_last_to_ask_decides_the_net
         network_of(&applied).map(|each| each.mode.as_str()),
         Some("system")
     );
+}
+
+#[test]
+fn the_bundled_identity_gives_git_its_name_and_address_and_the_account_label() {
+    let applied = ItemCatalog::built_in().apply_all(
+        &one(
+            "identity",
+            &json!({"name": "Ana Ruiz", "email": "ana@example.test", "account": "work", "variables": ["TEAM=core"]}),
+        ),
+        None,
+    );
+    let effect = done(&applied, "identity");
+    let names: Vec<&str> = effect.env.iter().map(|each| each.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "GIT_AUTHOR_NAME",
+            "GIT_COMMITTER_NAME",
+            "GIT_AUTHOR_EMAIL",
+            "GIT_COMMITTER_EMAIL",
+            "AGENTS_ACCOUNT",
+            "TEAM"
+        ]
+    );
+    assert_eq!(effect.env[0].value, "Ana Ruiz");
+    assert_eq!(effect.env[3].value, "ana@example.test");
+    // A line that is not NAME=value is the provider's refusal, not a variable.
+    let bad =
+        ItemCatalog::built_in().apply_all(&one("identity", &json!({"variables": ["TEAM"]})), None);
+    assert!(not(&bad, "identity").contains("NAME=value"));
+    // Nothing set is nothing done.
+    let empty = ItemCatalog::built_in().apply_all(&one("identity", &json!({})), None);
+    assert!(done(&empty, "identity").env.is_empty());
+    assert_eq!(empty[0].how(), "sets nothing for this session");
+}
+
+#[test]
+fn the_bundled_proxy_asks_for_the_network_its_mode_names() {
+    let catalog = ItemCatalog::built_in();
+    let mode = |held: Value| {
+        let applied = catalog.apply_all(&one("proxy", &held), None);
+        done(&applied, "proxy").network.expect("a network")
+    };
+    assert_eq!(mode(json!({})).mode, "system", "system is the default");
+    assert_eq!(mode(json!({"mode": "none"})).mode, "none");
+    let own = mode(
+        json!({"mode": "proxy", "url": "http://p.example:3128", "bypass": ["a.example"], "user": "me", "password_variable": "PW"}),
+    );
+    assert_eq!(own.url.as_deref(), Some("http://p.example:3128"));
+    assert_eq!(own.bypass, ["a.example"]);
+    assert_eq!(own.password_variable.as_deref(), Some("PW"));
+    let command = mode(json!({"mode": "command", "command": ["myproxy", "--listen", "{listen}"]}));
+    assert_eq!(command.command, ["myproxy", "--listen", "{listen}"]);
+    // An address is needed for a proxy and a program for a command.
+    for held in [
+        json!({"mode": "proxy"}),
+        json!({"mode": "pac"}),
+        json!({"mode": "command"}),
+    ] {
+        let applied = catalog.apply_all(&one("proxy", &held), None);
+        assert!(not(&applied, "proxy").contains("needs"), "{held}");
+    }
 }

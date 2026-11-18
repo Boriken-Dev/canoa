@@ -24,7 +24,9 @@ fn the_list_is_what_the_loaded_providers_say_of_their_items() {
         .collect();
     assert_eq!(
         ids,
-        ["access", "context", "effort", "mode", "model", "region"]
+        [
+            "access", "context", "effort", "mode", "model", "identity", "proxy", "region"
+        ]
     );
     let region = row(&answer, "region");
     assert_eq!(region["origin"], "regions");
@@ -42,6 +44,7 @@ fn the_list_is_what_the_loaded_providers_say_of_their_items() {
     let access = row(&answer, "access");
     assert_eq!(access["stored"], "setting");
     assert_eq!(access["origin"], "built-in");
+    assert_eq!(row(&answer, "proxy")["origin"], "bundled");
 }
 
 #[test]
@@ -91,7 +94,7 @@ fn the_list_is_read_with_the_grant_that_reads_the_configuration() {
     assert!(
         listed["result"]["items"]
             .as_array()
-            .is_some_and(|items| items.iter().any(|each| each["id"] == "model")),
+            .is_some_and(|items| items.iter().any(|each| each["id"] == "proxy")),
         "{listed}"
     );
 }

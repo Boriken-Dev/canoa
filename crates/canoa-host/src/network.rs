@@ -7,6 +7,7 @@
 
 use canoa::network::Network;
 
+pub(crate) mod session;
 #[cfg(test)]
 pub(crate) mod standins;
 #[cfg(test)]

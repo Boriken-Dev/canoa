@@ -22,16 +22,13 @@ use coqui_syshttp::client::{AgentBuilder, OriginAgent};
 use coqui_syshttp::tls::{
     CertificateInfo, ClientCertificates, Identity, Selector, Tls, TlsBuilder, Trust,
 };
-use coqui_syshttp::{
-    BypassRules, Credentials, Dialect, Negotiate, Proxy, ProxyConnector, ProxySetting, Resolver,
-    Route,
-};
+use coqui_syshttp::{Credentials, Negotiate, Proxy, ProxyConnector, ProxySetting, Resolver, Route};
 use rustls::pki_types::pem::PemObject as _;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{ClientConnection, StreamOwned};
 
 pub use coqui_syshttp::client::OriginAgent as LoginAgent;
-pub use coqui_syshttp::{ChildEnvironment, Connection, OriginAuth, Secret};
+pub use coqui_syshttp::{BypassRules, ChildEnvironment, Connection, Dialect, OriginAuth, Secret};
 
 /// How long the variables made for a program stay as they are before the system is asked again.
 const CHILD_CACHE: Duration = Duration::from_secs(60);

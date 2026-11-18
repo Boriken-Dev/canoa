@@ -169,25 +169,54 @@ context = "Answer briefly."
 What a profile may set is not a list in Canoa: each thing is an **item**, a provider of the `profile_item` kind that says its name, the
 harnesses it is for and the form it asks for, and that turns the values you gave it into what a session gets (environment
 variables, arguments for a program the host starts, values of the session's own settings, the network its programs use). The model,
-effort, mode, starting instructions and access are items Canoa carries, kept in a profile under their own keys; an extension of
-canoa.cfg's `[host.extensions]` (or a library or source an agent entry loads) adds more the same way. Settings → Profiles draws a form
-for each item the host lists (`profile_items/list`; the access, which the editor had no row for, is one), and a profile keeps what
-you entered for an item under `items`:
+effort, mode, starting instructions and access are items Canoa carries, kept in a profile under their own keys; a proxy and an
+identity are items that ship with the host as extensions, and an extension of canoa.cfg's `[host.extensions]` (or a library or source
+an agent entry loads) adds more the same way. Settings → Profiles draws a form for each item the host lists
+(`profile_items/list`), and a profile keeps what you entered for an item under `items`:
 
 ```toml
 [profiles."Behind the gateway"]
 model = "opus"
 
-[profiles."Behind the gateway".items.region]    # an item an extension adds: its fields are the extension's
-name = "north"
-hosts = ["a.example", "b.example"]
+[profiles."Behind the gateway".items.identity]
+name = "Ana Ruiz"
+email = "ana@example.test"
+account = "work"                       # what AGENTS_ACCOUNT says to the session's programs
+variables = ["TEAM=core"]              # any other NAME=value
+
+[profiles."Behind the gateway".items.proxy]
+mode = "system"                        # system (the default), none, proxy, pac or command
 ```
 
-A session applies each item its profile holds when it starts, and a started session's profile report lists each (`items.ID`) and
-what it became, by the names of the variables and settings and never their values. A variable the profile's own `[profile.env]`
-already sets keeps that value, and the report says so. An item for a harness other than the session's, an item whose values do not
-fit its form, and an item no provider offers any more (its extension was removed) are not applied and say why; the profile keeps the
-values, and putting the extension back applies them again.
+A session applies each item its profile holds when it starts, and a started session's profile report lists each (`items.ID`) and what it became, by
+the names of the variables and settings and never their values. A variable the profile's own `[profile.env]` already sets keeps that
+value, and the report says so. An item for a harness other than the session's, an item whose values do not fit its form, and an item
+no provider offers any more (its extension was removed) are not applied and say why; the profile keeps the values, and putting the
+extension back applies them again.
+
+**Identity** (`items.identity`): `name` and `email` become `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME`, `GIT_AUTHOR_EMAIL` and
+`GIT_COMMITTER_EMAIL`; `account` is `AGENTS_ACCOUNT`; `variables` are further `NAME=value` lines.
+
+**Proxy** (`items.proxy`): how the session's programs reach the network, by `mode`:
+
+- `system` (the default): the host runs a proxy on its loopback address for this session alone and gives the programs
+  `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` for it (and `NO_PROXY` for this computer and `bypass`). It sends each connection
+  the way the host's own network does: the system's proxy chosen per destination (PAC, WPAD), logged in to as the host logs in
+  (Basic, Negotiate, NTLM) and carried through a CONNECT tunnel, with the hosts on `bypass` (in the `NO_PROXY` form) going
+  direct, so a program that only knows a plain proxy behaves as the system does. The programs' address carries a secret of the
+  session as the proxy's password, since the proxy answers with your own logon session: another process on this computer that
+  lacks it is refused. The proxy ends with the session.
+- `none`: the programs are given no proxy variable, and what they inherit from you is theirs.
+- `proxy`: the proxy at `url`, `[scheme://][user[:password]@]host[:port]`, given to the programs as it is; `user` and
+  `password_variable` (the name of a variable of the host that holds the password) log in to it.
+- `pac`: as `system`, choosing the route by the PAC script at `url` (an address, or a file), with `user` and `password_variable`
+  for a proxy it names.
+- `command`: a program of your own, `command` (the program first, then its arguments, in which `{listen}` is the `host:port` it
+  must listen on); the host starts it for the session, waits until it listens, gives its address to the programs and ends it with
+  the session.
+
+A client certificate (mTLS) to an origin is not added: a CONNECT tunnel carries the TLS the program itself makes, and a proxy
+cannot add one without ending that TLS.
 
 A later layer wins per key. Environment variables, skills and MCP servers merge by name: a later layer's entry replaces a
 lower one's whole and keeps its place, and `remove = true` takes it out. `unset = ["model"]` takes back a lower layer's

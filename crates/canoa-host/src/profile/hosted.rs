@@ -490,6 +490,9 @@ pub(crate) struct Connection {
     launched_as: Option<Target>,
     /// The arguments the access and the profile's items add to that program's command line, which `canoa launch` appends.
     launch_args: Vec<String>,
+    /// How its programs reach the network, when an item of the profile says: the proxy the host runs for the session stops with
+    /// the connection.
+    _session_network: Option<crate::network::session::SessionNetwork>,
 }
 
 /// What the host knows of the session its connection's environment is made for.
@@ -859,13 +862,41 @@ impl Connection {
                 launch_args.extend(effect.args.iter().cloned());
             }
         }
-        if items::network_of(&applied).is_some() {
-            notes.push(Item::new(
-                "items.network",
-                LayerId::new(LayerKind::Session, ""),
-                State::Unsupported,
-                "an item asks how the session's programs reach the network, which this host does not apply",
-            ));
+        // How the session's programs reach the network, as the last item that asks for one says: its variables are given unless the
+        // profile's own environment names the same, and the host's own requests for the session go through the same network.
+        let mut session_network = None;
+        if let Some(asked) = items::network_of(&applied) {
+            let id = applied
+                .iter()
+                .rev()
+                .find(|each| {
+                    matches!(&each.outcome, items::Outcome::Done(effect) if effect.network.is_some())
+                })
+                .map(|each| each.id.clone())
+                .unwrap_or_default();
+            let layer = LayerId::new(LayerKind::Session, "");
+            match crate::network::session::start(asked, lookup) {
+                Ok(started) => {
+                    for (name, value) in &started.variables {
+                        if !env.iter().any(|(each, _)| same_name(each, name)) {
+                            env.push((name.clone(), Secret(value.clone())));
+                        }
+                    }
+                    notes.push(Item::new(
+                        format!("items.{id}.network"),
+                        &layer,
+                        State::Applied,
+                        format!("its programs reach the network {}", started.description),
+                    ));
+                    session_network = Some(started);
+                }
+                Err(why) => notes.push(Item::new(
+                    format!("items.{id}.network"),
+                    &layer,
+                    State::Refused,
+                    why,
+                )),
+            }
         }
         for item in &applied {
             let layer = LayerId::new(LayerKind::Session, "");
@@ -965,6 +996,7 @@ impl Connection {
             session: session.clone(),
             launched_as,
             launch_args,
+            _session_network: session_network,
         })
     }
 
