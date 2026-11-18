@@ -11,6 +11,7 @@ import 'config/connection.dart' show Connection, ConnectionKind, ConnectionTrans
 import 'config/canoa_config_file.dart';
 import 'desktop/desktop_shell.dart';
 import 'desktop/host_control.dart';
+import 'net/system_http.dart';
 import 'desktop/host_supervisor.dart';
 import 'desktop/host_tool.dart';
 import 'sources/control_choices.dart';
@@ -249,6 +250,9 @@ Future<void> main(List<String> args) async {
   // In the host's home on a desktop that runs one or on the host that served the page, else beside canoa.cfg, or in this
   // origin's IndexedDB on the web.
   final keptByHost = host != null && host.phase != HostPhase.off && host.phase != HostPhase.absent;
+  // What the app asks of another host for itself (its list, a probe of a saved connection) goes out through the Canoa on this
+  // computer, which follows the system's proxy, login and certificates; a page's requests are its browser's.
+  if (served == null && keptByHost) useHostNetwork(HostControl(host));
   // The extension's panel uses the Canoa on this computer by default, once its key is paired with it.
   final localHost = served == null && !keptByHost ? platformLocalHostBridge() : null;
   // The chat alone in the extension's panel chooses among the loadouts and profiles of the person's canoa.cfg on this computer.

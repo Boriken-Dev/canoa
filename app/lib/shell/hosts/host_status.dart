@@ -7,6 +7,7 @@ import '../../acp/connect.dart' show chatEndpoints;
 import '../../acp/served_host.dart';
 import '../../auth/peer_proof.dart' show MethodUnavailable, PeerMethod;
 import '../../config/connection.dart';
+import '../../net/system_http.dart';
 
 /// Where a host stands, as the last look at it found it.
 enum HostState {
@@ -85,7 +86,16 @@ Future<HostStatus> probeConnection(Connection connection, {http.Client? client, 
 Future<HostStatus> _probeHost(Connection connection, http.Client? client, Duration timeout) async {
   final base = Uri.parse(connection.address);
   final list = base.resolve('canoa.json');
-  final reply = await (client ?? http.Client()).get(list).timeout(timeout);
+  final ask = client ?? systemHttpClient();
+  try {
+    return await _readHostList(connection, ask, list, timeout);
+  } finally {
+    if (client == null) ask.close();
+  }
+}
+
+Future<HostStatus> _readHostList(Connection connection, http.Client ask, Uri list, Duration timeout) async {
+  final reply = await ask.get(list).timeout(timeout);
   if (reply.statusCode != 200) return HostStatus(HostState.offline, detail: 'It answered ${reply.statusCode} for its list.');
   final host = ServedHost.parse(reply.body);
   if (host == null) return const HostStatus(HostState.offline, detail: 'That address does not serve a Canoa host\'s list.');

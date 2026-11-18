@@ -6,6 +6,7 @@ import '../acp/served_host.dart';
 import '../config/connection.dart';
 import '../desktop/control_client.dart' show ControlFailed;
 import '../desktop/host_control.dart';
+import '../net/system_http.dart';
 import '../served/host_files.dart';
 import 'host_folders.dart';
 
@@ -105,7 +106,7 @@ final class RemoteHost {
 
 /// Reads the list a Canoa host serves at [connection]'s address, or throws a [StateError] saying why not.
 Future<ServedHost> fetchServedHost(Connection connection, {http.Client? client, Duration timeout = const Duration(seconds: 8)}) async {
-  final ask = client ?? http.Client();
+  final ask = client ?? systemHttpClient();
   try {
     final reply = await ask.get(Uri.parse(connection.address).resolve('canoa.json')).timeout(timeout);
     if (reply.statusCode != 200) throw StateError('${connection.name} answered ${reply.statusCode} for its list.');

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../auth/peer_proof.dart';
+import '../net/system_http.dart';
 import '../served/app_base.dart';
 import '../served/navigate.dart';
 import '../served/web_mode.dart';
@@ -113,7 +114,7 @@ final class ServedHost {
 /// (in a page, by default, the browser goes there and this never answers, since the page is leaving), and the answer is null.
 Future<ServedHost?> loadServedHost({http.Client? client, Uri? base, void Function(Uri login)? signedOut}) async {
   if (!_inPage && base == null) return null;
-  final ask = client ?? http.Client();
+  final ask = client ?? systemHttpClient();
   try {
     final page = base ?? appBase();
     final response = await ask.get(page.resolve('canoa.json'));
