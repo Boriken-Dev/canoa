@@ -117,7 +117,7 @@ fn rig_with(served: &[(&str, &[u8])], library: &str) -> Rig {
     std::fs::write(
         &config,
         format!(
-            "[store.extension_catalogs]\nteam = \"{}@main#extensions.toml\"\n",
+            "[store.extensions.catalogs]\nteam = \"{}@main#extensions.toml\"\n",
             // The catalog is a folder of this computer, named by its path as the person writes it.
             upstream.to_string_lossy().replace('\\', "/")
         ),
@@ -578,7 +578,7 @@ fn the_catalogs_are_listed_to_a_key_that_reads_overlays_and_none_until_the_table
 
     // The overlay catalogs are a table of their own: naming the same file there lists no extension.
     let text = std::fs::read_to_string(&rig.config).expect("canoa.cfg");
-    let overlay_only = text.replace("[store.extension_catalogs]", "[catalogs]");
+    let overlay_only = text.replace("[store.extensions.catalogs]", "[store.overlays.catalogs]");
     std::fs::write(&rig.config, overlay_only).expect("written");
     let none = ask(
         &rig.control,

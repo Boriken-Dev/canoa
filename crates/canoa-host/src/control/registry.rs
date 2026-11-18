@@ -83,7 +83,7 @@ impl Registry {
         {
             return Err((
                 REFUSED,
-                "this key may read only the registries canoa.cfg lists under [store] registries, and the official one".to_owned(),
+                "this key may read only the registries canoa.cfg lists under [store.mcps.catalogs], and the official one".to_owned(),
             ));
         }
         let body = self.read(url, "registry", REGISTRY_TIME, MAX_REGISTRY_BYTES)?;
@@ -370,18 +370,16 @@ fn same_base(listed: &str, base: &str) -> bool {
     listed.trim_end_matches('/').eq_ignore_ascii_case(base)
 }
 
-/// The registries a key may read: the official one and what `[store] registries` lists, git sources left out.
+/// The registries a key may read: the official one and what `[store.mcps.catalogs]` lists, git sources left out.
 pub(crate) fn listed_bases(store: &Value) -> Vec<String> {
     std::iter::once(OFFICIAL.to_owned())
         .chain(
-            store
-                .get("registries")
-                .and_then(Value::as_array)
+            crate::store::catalogs::read(crate::store::catalogs::table_of(store, "mcps"))
                 .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-                .filter(|address| !address.contains(['@', '#']))
-                .map(str::to_owned),
+                .filter_map(Result::ok)
+                .filter(|entry| entry.provider == crate::store::catalogs::READ)
+                .filter_map(|entry| entry.source().map(str::to_owned))
+                .filter(|address| !address.contains(['@', '#'])),
         )
         .collect()
 }

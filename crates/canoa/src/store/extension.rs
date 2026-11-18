@@ -55,6 +55,38 @@ pub struct ExtensionType {
     pub icon: Option<String>,
     /// The `program_store` providers the type lists, in order.
     pub stores: Vec<String>,
+    /// What its catalogs are called, when the type reads catalogs: the Store then offers it a list of them and, to add one, the
+    /// `catalog_source` providers that serve the type.
+    pub catalogs: Option<CatalogWords>,
+}
+
+/// What a Store type calls its catalogs, in its own words.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct CatalogWords {
+    /// What one is called: `catalog`, `source`, `registry`.
+    pub noun: String,
+    /// The same in the plural.
+    pub plural: String,
+    /// What the type lists, in the plural: `overlays`, `skills`.
+    pub lists: String,
+}
+
+impl CatalogWords {
+    /// Words for the catalogs of a type that lists `lists`.
+    #[must_use]
+    pub fn new(
+        noun: impl Into<String>,
+        plural: impl Into<String>,
+        lists: impl Into<String>,
+    ) -> Self {
+        Self {
+            noun: noun.into(),
+            plural: plural.into(),
+            lists: lists.into(),
+        }
+    }
 }
 
 /// What an extension adds, from [`StoreExtension::describe`].
@@ -84,6 +116,7 @@ impl ExtensionType {
             title: title.into(),
             icon: None,
             stores: stores.into_iter().map(Into::into).collect(),
+            catalogs: None,
         }
     }
 

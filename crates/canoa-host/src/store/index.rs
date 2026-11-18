@@ -9,7 +9,7 @@
     reason = "files, threads and clocks are std's"
 )]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,8 +47,13 @@ pub(crate) struct CatalogSource {
     pub(crate) repo: String,
     pub(crate) reference: String,
     pub(crate) path: String,
-    /// Whether the file is an extensions catalog (`[store] extension_catalogs`) and not an overlay catalog (`[catalogs]`).
+    /// Whether the file is an extensions catalog (`[store.extensions.catalogs]`) and not an overlay catalog
+    /// (`[store.overlays.catalogs]`).
     pub(crate) extensions: bool,
+    /// The `catalog_source` provider that reads it; `repo`, `reference` and `path` name a git source only for `read`.
+    pub(crate) provider: String,
+    /// What the provider's form holds.
+    pub(crate) fields: serde_json::Map<String, Value>,
 }
 
 impl CatalogSource {
@@ -76,16 +81,16 @@ impl CatalogSource {
     }
 }
 
-/// One `[catalogs]` row: the source, or why it is no source. A bad row still shows as a source with its reason.
+/// One row of a type's catalogs: the source, or why it is no source. A bad row still shows as a source with its reason.
 pub(crate) type Row = Result<CatalogSource, (String, String)>;
 
-/// The label and source of the catalog offered first, until `[catalogs]` names the label: `false` removes it, a source
+/// The label and source of the catalog offered first, until `[store.overlays.catalogs]` names the label: `false` removes it, a source
 /// replaces it. canoa.cfg's reader in the app holds the same pair.
 pub(crate) const DEFAULT_CATALOG_LABEL: &str = "boriken";
 pub(crate) const DEFAULT_CATALOG_SPEC: &str =
     "https://github.com/Boriken-Dev/agent-overlays.git@main#catalog.toml";
 
-/// The catalogs in effect: the default one, unless `[catalogs]` names its label, then the table's own rows.
+/// The catalogs in effect: the default one, unless the table names its label, then the table's own rows.
 pub(crate) fn catalog_rows(section: &Value) -> Vec<Row> {
     let named = section.as_object().is_some_and(|table| {
         table.keys().any(|label| {
@@ -108,34 +113,37 @@ pub(crate) fn catalog_rows(section: &Value) -> Vec<Row> {
     rows
 }
 
-/// Reads `[catalogs]`, a table of label to `<repository>@<ref>#<path>`, in the order of the labels. A label set to
-/// `false` lists nothing.
+/// Reads a type's table of catalogs, as `[store.overlays.catalogs]` has it, in the order of the labels. A label set to `false`
+/// lists nothing.
 pub(crate) fn parse_sources(section: &Value) -> Vec<Row> {
     parse_table(section, false)
 }
 
-/// Reads `[store] extension_catalogs`, a table of label to `<repository>@<ref>#<file>`, as [`parse_sources`] reads `[catalogs]`.
-/// No label is offered until the table names one.
+/// Reads `[store.extensions.catalogs]` as [`parse_sources`] reads `[store.overlays.catalogs]`. No label is offered until the
+/// table names one.
 pub(crate) fn parse_extension_sources(section: &Value) -> Vec<Row> {
     parse_table(section, true)
 }
 
 fn parse_table(section: &Value, extensions: bool) -> Vec<Row> {
-    let Some(table) = section.as_object() else {
-        return Vec::new();
-    };
-    let mut seen = BTreeSet::new();
-    table
-        .iter()
-        .filter(|(_, value)| **value != Value::Bool(false))
-        .map(|(label, value)| {
-            let problem = |why: &str| (label.clone(), why.to_owned());
-            if !valid_overlay_name(label) || !seen.insert(coqui_aos::normalize_name(label)) {
-                return Err(problem(
-                    "The label is not a name this host keeps a catalog under",
-                ));
+    super::catalogs::read(section)
+        .into_iter()
+        .map(|parsed| {
+            let entry = parsed?;
+            let problem = |why: &str| (entry.label.clone(), why.to_owned());
+            if entry.provider != super::catalogs::READ {
+                return Ok(CatalogSource {
+                    label: entry.label.clone(),
+                    spec: entry.spec(),
+                    repo: String::new(),
+                    reference: String::new(),
+                    path: String::new(),
+                    extensions,
+                    provider: entry.provider.clone(),
+                    fields: entry.fields.clone(),
+                });
             }
-            let spec = value.as_str().ok_or_else(|| {
+            let spec = entry.source().ok_or_else(|| {
                 problem("It is not a git source, <repository>@<ref>#<catalog file>")
             })?;
             let canonical = if spec.starts_with("git+") {
@@ -149,12 +157,14 @@ fn parse_table(section: &Value, extensions: bool) -> Vec<Row> {
                     reference,
                     path,
                 }) => Ok(CatalogSource {
-                    label: label.clone(),
+                    label: entry.label.clone(),
                     spec: spec.to_owned(),
                     repo,
                     reference,
                     path,
                     extensions,
+                    provider: entry.provider.clone(),
+                    fields: entry.fields.clone(),
                 }),
                 _ => Err(problem(
                     "It is not a git source, <repository>@<ref>#<catalog file>",
@@ -203,6 +213,8 @@ pub(crate) struct StoreIndex {
     ttl: Duration,
     cache_bytes: u64,
     slots: Mutex<BTreeMap<String, Arc<Slot>>>,
+    /// The providers a catalog that is not a git source is read through.
+    sources: Mutex<super::sources::Sources>,
 }
 
 impl Default for StoreIndex {
@@ -230,7 +242,13 @@ impl StoreIndex {
             ttl,
             cache_bytes,
             slots: Mutex::new(BTreeMap::new()),
+            sources: Mutex::new(super::sources::Sources::built_in()),
         }
+    }
+
+    /// Reads the catalogs that are not git sources through `sources` from now on.
+    pub(crate) fn use_sources(&self, sources: super::sources::Sources) {
+        *lock(&self.sources) = sources;
     }
 
     fn slot(&self, label: &str) -> Arc<Slot> {
@@ -413,6 +431,9 @@ impl StoreIndex {
         prior: Option<&Cached>,
         attempt: u64,
     ) -> Result<Cached, String> {
+        if source.provider != super::catalogs::READ {
+            return self.refresh_read(source, prior, attempt);
+        }
         let revision = overlays
             .remote_revision(&source.repo, &source.reference)
             .map_err(|(_, why)| why)?;
@@ -439,6 +460,78 @@ impl StoreIndex {
             .ok_or("the fetch named no commit")?
             .to_owned();
         let built = self.build(overlays, source, &commit)?;
+        let next = Cached {
+            spec: source.spec.clone(),
+            commit,
+            checked: attempt,
+            attempted: attempt,
+            name: built.name,
+            description: built.description,
+            entries: Arc::new(built.entries),
+            problem: None,
+        };
+        self.write(source, &next);
+        self.prune(source, &next.commit);
+        Ok(next)
+    }
+
+    /// Asks the catalog's provider for its text, on every refresh, and indexes it as a fetched catalog is. A provider that fails
+    /// leaves the last good index as it was (the caller keeps it) and says why.
+    fn refresh_read(
+        &self,
+        source: &CatalogSource,
+        prior: Option<&Cached>,
+        attempt: u64,
+    ) -> Result<Cached, String> {
+        use sha2::Digest as _;
+
+        let sources = lock(&self.sources).clone();
+        let kind = if source.extensions {
+            "extensions"
+        } else {
+            "overlays"
+        };
+        let request = canoa::store::source::ReadRequest::new(
+            kind,
+            source.label.as_str(),
+            Value::Object(source.fields.clone()).to_string(),
+        );
+        let text = sources.read(&source.provider, request)?;
+        let commit = data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(text.as_bytes()));
+        if let Some(prior) = prior
+            && prior.problem.is_none()
+            && prior.commit == commit
+        {
+            let mut same = prior.clone();
+            same.checked = attempt;
+            same.attempted = attempt;
+            self.write(source, &same);
+            return Ok(same);
+        }
+        // The text is the one file there is: the catalog, named for the format it is in.
+        let mut generated = source.clone();
+        generated.path = if text.trim_start().starts_with('{') {
+            "catalog.json"
+        } else if source.extensions {
+            "extensions.toml"
+        } else {
+            "catalog.toml"
+        }
+        .to_owned();
+        let served = generated.path.clone();
+        let bytes = text.into_bytes();
+        let at = move |paths: &[String], _max: u64, list: Option<&str>| -> Result<Files, String> {
+            let files = paths
+                .iter()
+                .map(|path| {
+                    let found =
+                        (*path == served).then(|| (bytes.len() as u64, Some(bytes.clone())));
+                    (path.clone(), found)
+                })
+                .collect();
+            Ok((files, list.map(|_| None)))
+        };
+        let built = self.build_with(&generated, &commit, &at)?;
         let next = Cached {
             spec: source.spec.clone(),
             commit,
@@ -577,12 +670,24 @@ impl StoreIndex {
         let at = |paths: &[String], max: u64, list: Option<&str>| {
             read_files(overlays, source, commit, paths, max, list)
         };
+        self.build_with(source, commit, &at)
+    }
+
+    /// The index of the catalog `source` names, reading its files through `at`.
+    fn build_with(
+        &self,
+        source: &CatalogSource,
+        commit: &str,
+        at: &Reader,
+    ) -> Result<Built, String> {
         let (files, dirs) = at(
             std::slice::from_ref(&source.path),
             CATALOG_BYTES,
             Some(&source.path),
         )?;
-        let base = format!("git+{}@{}#{}", source.repo, source.reference, source.path);
+        // A catalog a provider answered with is in no repository, so nothing in it is relative to one.
+        let base = (!source.repo.is_empty())
+            .then(|| format!("git+{}@{}#{}", source.repo, source.reference, source.path));
         let mut listed: Vec<Listed> = Vec::new();
         let (mut name, mut description) = (None, None);
         if source.extensions {
@@ -622,7 +727,7 @@ impl StoreIndex {
                     let read = coqui_aos::read_catalog(
                         bytes,
                         &source.path,
-                        Some(&base),
+                        base.as_deref(),
                         &Settings::default(),
                     )
                     .map_err(|error| {
@@ -690,8 +795,8 @@ impl StoreIndex {
                 item.base = Some(folder.to_owned());
             }
         }
-        let manifests = self.read_manifests(&at, &listed);
-        let icons = self.read_icons(&at, &listed);
+        let manifests = self.read_manifests(at, &listed);
+        let icons = self.read_icons(at, &listed);
         let mut entries = Vec::new();
         let mut icon_budget = self.icon_room();
         let icon_dir = self
@@ -1141,7 +1246,9 @@ fn answer_of(source: &CatalogSource, cached: &Cached, stale: bool, refreshing: b
     let mut shown = json!({
         "id": format!("{}:{}", if source.extensions { "extensions" } else { "catalog" }, source.label),
         "kind": if source.extensions { "extension_catalog" } else { "catalog" },
+        "type": if source.extensions { "extensions" } else { "overlays" },
         "label": source.label,
+        "provider": source.provider,
         "spec": source.spec,
         "commit": cached.commit,
         "checked": cached.checked,

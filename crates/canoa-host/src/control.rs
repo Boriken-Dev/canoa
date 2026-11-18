@@ -903,17 +903,21 @@ impl Control {
                 Some("providers/list") => allow(caller, Grant::ConfigRead)
                     .and_then(|()| self.loaded_config())
                     .map(|config| providers::list(&config)),
-                Some("config/set") => allow(caller, Grant::ConfigWrite).and_then(|()| {
-                    self.files
-                        .config_set(&params, caller.may(Grant::ConfigWriteSessions))
-                }),
+                Some("config/set") => allow(caller, Grant::ConfigWrite)
+                    .and_then(|()| self.guard_sources(caller, &params))
+                    .and_then(|()| {
+                        self.files
+                            .config_set(&params, caller.may(Grant::ConfigWriteSessions))
+                    }),
                 Some("config/check") if names_host(&params) => {
                     allow(caller, Grant::Hosting).and_then(|()| self.files.host_set(&params, false))
                 }
-                Some("config/check") => allow(caller, Grant::ConfigWrite).and_then(|()| {
-                    self.files
-                        .config_check(&params, caller.may(Grant::ConfigWriteSessions))
-                }),
+                Some("config/check") => allow(caller, Grant::ConfigWrite)
+                    .and_then(|()| self.guard_sources(caller, &params))
+                    .and_then(|()| {
+                        self.files
+                            .config_check(&params, caller.may(Grant::ConfigWriteSessions))
+                    }),
                 Some("host/keys") => allow(caller, Grant::Hosting)
                     .and_then(|()| self.keys_store())
                     .and_then(|store| hosting::keys(store)),
@@ -921,6 +925,7 @@ impl Control {
                     .and_then(|()| self.keys_store())
                     .and_then(|store| hosting::accept(store, &params)),
                 Some("extension/catalogs") => self.extension_catalogs(caller, &params),
+                Some("store/catalogs") => self.store_catalogs(caller, &params),
                 Some("extension/plan") => {
                     allow(caller, Grant::Hosting).and_then(|()| self.extension_plan(&params))
                 }
@@ -1144,18 +1149,47 @@ impl Control {
         })
     }
 
+    /// canoa.cfg's `[store]` table as the person wrote it, or null.
+    pub(crate) fn store_section(&self) -> Value {
+        self.files
+            .config_get(&json!({"section": "store"}))
+            .ok()
+            .and_then(|answer| answer.get("value").cloned())
+            .unwrap_or(Value::Null)
+    }
+
+    /// A key that does not hold `hosting` may not write a `[store]` that names a catalog source other than `read` it did not find
+    /// there: `command` runs a program as the person and an extension's source is code the host loaded, so choosing one is the
+    /// same trust as naming a library.
+    fn guard_sources(&self, caller: &Caller, params: &Value) -> Result<(), (i32, String)> {
+        if caller.may(Grant::Hosting)
+            || params.get("section").and_then(Value::as_str) != Some("store")
+        {
+            return Ok(());
+        }
+        let wanted = params.get("value").unwrap_or(&Value::Null);
+        if crate::store::catalogs::names_new_source(&self.store_section(), wanted) {
+            return Err((
+                DENIED,
+                "a catalog that runs a program or reads through an extension's source takes the hosting grant".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The catalog sources this host offers: the built-in ones, and those of the extensions it loaded.
+    pub(crate) fn catalog_sources(&self) -> crate::store::sources::Sources {
+        self.stores().map_or_else(
+            |_| crate::store::sources::Sources::built_in(),
+            Stores::sources,
+        )
+    }
+
     /// `registry/fetch`: the person running the host reads any registry; a key reads the official one and those canoa.cfg lists.
     fn registry_fetch(&self, caller: &Caller, params: &Value) -> Result<Value, (i32, String)> {
         let bases = match caller {
             Caller::Owner => None,
-            Caller::Peer { .. } => Some(registry::listed_bases(
-                &self
-                    .files
-                    .config_get(&json!({"section": "store"}))
-                    .ok()
-                    .and_then(|answer| answer.get("value").cloned())
-                    .unwrap_or(Value::Null),
-            )),
+            Caller::Peer { .. } => Some(registry::listed_bases(&self.store_section())),
         };
         self.registry.fetch(params, bases.as_deref())
     }
@@ -1636,6 +1670,9 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
 }
 
 pub(crate) mod accounts;
+mod catalog_types;
+#[cfg(test)]
+mod catalog_types_tests;
 mod changes;
 #[cfg(test)]
 mod changes_tests;

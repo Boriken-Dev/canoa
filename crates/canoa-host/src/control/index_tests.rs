@@ -380,7 +380,7 @@ fn configured(rig: &Rig, cfg_catalogs: &str) -> Control {
     std::fs::create_dir_all(config.parent().expect("parent")).expect("dir");
     std::fs::write(
         &config,
-        format!("[catalogs]\nboriken = false\n{cfg_catalogs}\n"),
+        format!("[store.overlays.catalogs]\nboriken = false\n{cfg_catalogs}\n"),
     )
     .expect("config");
     Control::open(

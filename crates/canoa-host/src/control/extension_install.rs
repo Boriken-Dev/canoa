@@ -161,18 +161,14 @@ fn file_name_of(url: &str) -> Result<String, (i32, String)> {
 }
 
 impl Control {
-    /// The extension catalogs `[store] extension_catalogs` names, each answered from the index: none until the table names one.
+    /// The extension catalogs `[store.extensions.catalogs]` names, each answered from the index: none until the table names one.
     fn extension_rows(&self) -> Vec<Row> {
-        let section = self
-            .files
-            .config_get(&json!({"section": "store"}))
-            .ok()
-            .and_then(|answer| answer.pointer("/value/extension_catalogs").cloned())
-            .unwrap_or(Value::Null);
-        parse_extension_sources(&section)
+        let store = self.store_section();
+        parse_extension_sources(crate::store::catalogs::table_of(&store, "extensions"))
     }
 
     fn extension_answers(&self, refresh: bool) -> Vec<Answer> {
+        self.index.use_sources(self.catalog_sources());
         self.index.catalogs_spaced(
             &self.overlays,
             &self.extension_rows(),
@@ -182,7 +178,7 @@ impl Control {
     }
 
     /// `extension/catalogs` `{"refresh"?: bool}` -> `{"schema": 1, "sources": [...], "entries": [...]}`: the extensions catalogs of
-    /// `[store] extension_catalogs`, shaped as `store/index` answers for `[catalogs]`, with each entry's `extension` (provider,
+    /// `[store.extensions.catalogs]`, shaped as `store/index` answers for `[store.overlays.catalogs]`, with each entry's `extension` (provider,
     /// digest, `load` and `needs`). A key reads them with `overlay.read`, and `refresh`, which fetches, takes `overlay.write`.
     pub(super) fn extension_catalogs(&self, caller: &Caller, params: &Value) -> Outcome {
         if !caller.may(Grant::OverlayRead) {

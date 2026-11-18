@@ -97,11 +97,11 @@ fn host(scratch: Scratch, repo: &Path) -> Hosted {
         scratch,
         move |dir| {
             let kept = std::fs::read_to_string(dir.join("canoa.cfg")).unwrap_or_default();
-            if kept.contains("extension_catalogs") {
+            if kept.contains("extensions.catalogs") {
                 return kept;
             }
             format!(
-                "[store.extension_catalogs]\nteam = \"{catalog}@main#extensions.toml\"\n\n{}",
+                "[store.extensions.catalogs]\nteam = \"{catalog}@main#extensions.toml\"\n\n{}",
                 entry("fixture", "")
             )
         },

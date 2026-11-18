@@ -2,6 +2,7 @@
 //! the tools a store fetches and unpacks with, and the stores built into this binary.
 
 pub mod builtin;
+pub(crate) mod catalogs;
 pub mod contract;
 pub mod echo;
 pub mod engine;
@@ -19,6 +20,7 @@ pub mod registry;
 pub mod runtimes;
 pub mod shelf;
 pub mod shell_stores;
+pub(crate) mod sources;
 pub(crate) mod text;
 pub mod tools;
 pub mod whisper;

@@ -48,13 +48,9 @@ impl Control {
         let mut sources = Vec::new();
         let mut entries = Vec::new();
         if catalogs {
-            let section = self
-                .files
-                .config_get(&json!({"section": "catalogs"}))
-                .ok()
-                .and_then(|answer| answer.get("value").cloned())
-                .unwrap_or(Value::Null);
-            let rows = catalog_rows(&section);
+            let store = self.store_section();
+            let rows = catalog_rows(crate::store::catalogs::table_of(&store, "overlays"));
+            self.index.use_sources(self.catalog_sources());
             for (row, answer) in
                 rows.iter().zip(
                     self.index

@@ -39,6 +39,8 @@ pub(crate) struct Stores {
     runtimes: Vec<String>,
     /// The store types the extensions of canoa.cfg add.
     types: Vec<AddedType>,
+    /// The catalog sources the host has built in and the extensions add.
+    sources: crate::store::sources::Sources,
 }
 
 /// Checks the bytes of an extension the Store installed against the digest it recorded, before any of it is loaded, so a file that
@@ -113,7 +115,38 @@ impl Stores {
             providers,
             runtimes: Vec::new(),
             types: Vec::new(),
+            sources: crate::store::sources::Sources::built_in(),
         }
+    }
+
+    /// These stores offering `sources`, as a host with the extensions that add them loaded does.
+    #[cfg(test)]
+    pub(crate) fn with_sources(mut self, sources: crate::store::sources::Sources) -> Self {
+        self.sources = sources;
+        self
+    }
+
+    /// The catalog sources this host offers.
+    pub(crate) fn sources(&self) -> crate::store::sources::Sources {
+        self.sources.clone()
+    }
+
+    /// The store types the extensions add that read catalogs, in the words each gave.
+    pub(crate) fn catalog_types(&self) -> Vec<crate::store::catalogs::TypeCatalogs> {
+        self.types
+            .iter()
+            .filter_map(|added| {
+                let words = added.info.catalogs.as_ref()?;
+                Some(crate::store::catalogs::TypeCatalogs {
+                    id: added.info.id.clone(),
+                    title: added.info.title.clone(),
+                    noun: words.noun.clone(),
+                    plural: words.plural.clone(),
+                    lists: words.lists.clone(),
+                    default: None,
+                })
+            })
+            .collect()
     }
 
     /// The same, also offering the store types the `extensions` of canoa.cfg add. Each extension's library is loaded into a
@@ -176,7 +209,11 @@ impl Stores {
             });
         }
         drop(offer);
-        self.programs.add_registry(Arc::new(registry));
+        let registry = Arc::new(registry);
+        let mut sources = self.sources.clone();
+        sources.add(Some(&extension.name), Arc::clone(&registry))?;
+        self.sources = sources;
+        self.programs.add_registry(registry);
         self.types.extend(added);
         Ok(())
     }

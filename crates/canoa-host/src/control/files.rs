@@ -47,7 +47,6 @@ pub const SECTIONS: &[&str] = &[
     "appearance",
     "assets",
     "attachments",
-    "catalogs",
     "connections",
     "defaults",
     "loadouts",

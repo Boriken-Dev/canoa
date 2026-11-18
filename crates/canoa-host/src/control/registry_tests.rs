@@ -133,7 +133,7 @@ fn a_key_needs_the_grant_and_reads_only_listed_registries() {
     let none = peer("k", &[Grant::OverlayRead]);
     let denied = ask(&control, &none, "registry/fetch", json!({"url": LIST}));
     assert_eq!(denied["error"]["code"], -32001, "{denied}");
-    // With the grant but no [store] registries (this control has no canoa.cfg), only the official registry is read.
+    // With the grant but no [store.mcps.catalogs] (this control has no canoa.cfg), only the official registry is read.
     let key = peer("k", &[Grant::OverlayWrite]);
     let other = ask(&control, &key, "registry/fetch", json!({"url": LIST}));
     assert_eq!(other["error"]["code"], -32002, "{other}");
@@ -149,7 +149,7 @@ fn a_key_needs_the_grant_and_reads_only_listed_registries() {
 
 #[test]
 fn the_bases_a_key_may_read_are_the_official_one_and_the_http_ones_listed() {
-    let store = json!({"registries": ["https://a.example/", "https://git.example/r.git@main#list.json", "https://b.example/x"]});
+    let store = json!({"mcps": {"catalogs": {"a": "https://a.example/", "git": "https://git.example/r.git@main#list.json", "b": "https://b.example/x"}}});
     let bases = listed_bases(&store);
     assert_eq!(bases.len(), 3, "{bases:?}");
     assert!(same_base(

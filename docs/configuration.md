@@ -41,7 +41,7 @@ A higher layer is merged over the lower ones, key by key:
 
 - A key in a higher layer replaces the same key below it, and tables merge by key.
 - Arrays replace whole, never element by element.
-- Named entries replace whole, by name, never key by key: `[host.agents.NAME]`, `[host.providers.NAME]`, `[host.tools.NAME]`, `[host.profiles.NAME]`, `[host.accounts.NAME]`, `[agents.NAME]`, `[profile.mcp.NAME]`, `[profile.skills.NAME]`, `[profile.env.NAME]`, `[overlays]` and `[catalogs]` entries. A higher `[agents.Claude]` therefore drops a lower one's `[agents.Claude.profile]`.
+- Named entries replace whole, by name, never key by key: `[host.agents.NAME]`, `[host.providers.NAME]`, `[host.tools.NAME]`, `[host.profiles.NAME]`, `[host.accounts.NAME]`, `[agents.NAME]`, `[profile.mcp.NAME]`, `[profile.skills.NAME]`, `[profile.env.NAME]`, `[overlays]` entries and each Store type's `[store.TYPE.catalogs.LABEL]`. A higher `[agents.Claude]` therefore drops a lower one's `[agents.Claude.profile]`.
 - A layer cannot remove a key a lower one sets: a null in YAML or JSON is the same as leaving the key out.
 - Relative `library` and `source` paths, and the `overlays/` folder, are taken from the directory of your own file.
 
@@ -75,7 +75,7 @@ Configuration tables:
 - `title` on a `[host.agents.NAME]` entry (text, 1 to 64 characters, not blank, no control characters; optional): what the app shows for the entry in its source picker instead of the entry's name. A provider or tool entry takes none. It is listed beside `harness` (the provider id) in the host's lines and in `/canoa.json`, which is how the app learns both.
 - `usage` on a `[host.agents.NAME]` entry with `program`: `"antigravity"` (the only value) makes `canoa` read that agent's quota as `reported` usage buckets, the way [usage](acp-client.md#usage) describes. The app's Add an agent sets it when the command is `agy acp`.
 - [overlays], [profile] and `[agents.NAME.profile]`: profiles, described [below](#profiles).
-- [catalogs] and [store]: the overlay store's catalogs and limits, described [below](#the-overlay-store); `[store.extension_catalogs]` lists [extensions catalogs](#extensions-catalogs); `[store] skills_search` turns on [searching skills.sh](#searching-skillssh).
+- [store]: the Store's limits and [the catalogs of each Store type](#catalogs-of-each-store-type), `[store.TYPE.catalogs.LABEL]`; the overlay store is described [below](#the-overlay-store), `[store.extensions.catalogs]` lists [extensions catalogs](#extensions-catalogs), and `[store] skills_search` turns on [searching skills.sh](#searching-skillssh).
 
 The session list is `sessions.json` beside canoa.cfg on a desktop, and this origin's IndexedDB in a web build, a PWA or the extension. Removing a session from it never deletes the agent's own session. It also keeps, per source, what its agent offered (model, effort, mode and its other choices) and took with a prompt when it last ran, and the last model, effort and mode the agent took from you.
 
@@ -681,8 +681,8 @@ adds one.
   with the overlay); a name it gives that `[profile.mcp]` lacks is reported. With no `[defaults] loadout`, a session
   starts with every overlay and every server, as before loadouts: the first time the app changes what new sessions
   start with, it writes a loadout named `Default` that holds that. The old `[loadout]` table (`off`, `skills`,
-  `registries`, `mcp`) is not read: `registries` and the notes on installed servers are `[store] registries` and
-  `[store.mcp.NAME]` now.
+  `registries`, `mcp`) is not read: the registries are `[store.mcps.catalogs]` and the notes on installed servers
+  are `[store.mcp.NAME]` now.
 - **A default loadout for each kind of client.** `[defaults.clients]` names, per kind (`browser`, `outlook`, `word`, `excel`,
   `powerpoint`), the loadout a session starts with when it names none and its client says which kind it is, in
   `initialize`'s `_meta["dev.boriken.canoa/client"]`: the browser extension's side panel and the Outlook, Word, Excel and
@@ -727,7 +727,7 @@ adds one.
   off for every agent in `[agents.NAME.mcp]`, so nothing starts until you allow it.
   A team's own servers can be listed by another registry that serves the same API, added by its `https` address (or
   `http` on the loopback address), or by a git repository holding a JSON file in the API's list shape, added as
-  `<repository>@<ref>#<file>`; they are kept in `[store] registries` and chosen beside the official one in Discover.
+  `<repository>@<ref>#<file>`; they are kept in `[store.mcps.catalogs]` and chosen beside the official one in Discover.
   A git list is fetched at its ref like a catalog and read as one page.
 - **Applying a change.** The host reads canoa.cfg's layers again when each session of its own sources starts, so a
   change to `[overlays]`, `[profile]` or `[agents.*.mcp]` reaches the next session and ends none that is open. A file
@@ -747,8 +747,9 @@ loadout = "review"            # what a session that names no loadout starts with
 outlook = "mail"
 word = "writing"
 
-[store]
-registries = ["https://registry.team.example", "https://git.team.example/lists.git@main#servers.json"]
+[store.mcps.catalogs]          # a label of yours for each registry
+team = "https://registry.team.example"
+lists = "https://git.team.example/lists.git@main#servers.json"
 
 [store.mcp.files]             # where an MCP server the store installed came from
 registry = "https://registry.modelcontextprotocol.io"
@@ -789,9 +790,44 @@ endpoints = ["https://tools.corp.example/"]   # addresses the programs reach, fo
 
 Paths are read from the folder of canoa.cfg. The host starts only with a setting it can use: a proxy it cannot read, a `proxy_password_env` variable that is not set, or a certificate file that is missing is refused at start, with the key named. Git's client certificate is not chosen from the keystore as a browser's is: Git for Windows presents one only when its `http.sslCert` names it, which a source the person typed gets from their own git configuration.
 
+### Catalogs of each Store type
+
+Every Store type reads catalogs of its own kind, in its own format, and lists only those. They are written the same way for every
+type, `[store.TYPE.catalogs.LABEL]`, where `TYPE` is `overlays`, `skills`, `mcps`, `extensions`, or the id of a type an extension
+adds, and `LABEL` is a name of yours (a letter, then letters, digits, `-` or `_`, at most 64). A catalog added under one type is
+never listed under another: Settings, from a type's page, shows and changes that type's catalogs only.
+
+A catalog is read by a **catalog source**, a provider of the host (a `catalog_source` Guatiao kind, so an extension can add one).
+A label's value is the source `read` reads, or a table naming the provider and what its form asks for, or `false`, which takes a default
+catalog away:
+
+```toml
+[store.overlays.catalogs]
+boriken = false                                                       # the default catalog, taken away
+team = "https://github.com/example/overlays.git@main#catalog.toml"    # the same as { provider = "read", source = "..." }
+
+[store.overlays.catalogs.generated]
+provider = "command"                                                  # run on each refresh; what it prints is the catalog
+command = ["python", "make_catalog.py", "--team"]
+cwd = "C:/work/catalogs"                                              # optional: the folder it runs in
+timeout = 60                                                          # optional: seconds it may run
+```
+
+Each source describes itself to the Store: its name, the types it serves (or all of them) and the fields of its form, which is what
+Store settings shows when you add a catalog to a type. Two come with Canoa. **`read`** reads what the type reads itself: a git source
+(overlays and extensions), `owner/repo`, a git URL or a folder (skills), a registry's address (MCP servers). **`command`** runs a
+program you name, as you and with your environment, each time the catalog is refreshed, and takes its standard output (or the file named
+by `file`, in the folder it ran in) as the catalog in the type's own format, read exactly as a fetched one is. It serves the overlays
+and extensions types, whose catalogs the host indexes. A program that fails, runs past its time, prints nothing or prints more than 4 MiB
+leaves the catalog as the last good run made it and shows why, with the end of what it wrote on its error stream. An extension adds
+sources by offering `catalog_source` providers in its library.
+
+Naming a source other than `read`, in a file a page writes through the host, takes the `hosting` grant: choosing one starts a program as
+you or code an extension supplied, so it is the same trust as naming a library.
+
 ### Skill sources
 
-Skills are looked for the way `npx skills add` looks, in their own list beside `[catalogs]`: `[store.skill_sources]`, a label of yours
+Skills are looked for the way `npx skills add` looks, in their own list, `[store.skills.catalogs]`, a label of yours
 for each source written as that command takes it. In Store, Skills, Discover the sources are chips beside Catalogs; choosing one is what
 fetches its repository (nothing is fetched by listing it), reads which skills it holds and lists them, and installing one asks first, with
 the commit that was read shown, and fetches exactly that commit.
@@ -815,7 +851,7 @@ add is yours, so it is fetched as you would from a shell, which reads a private 
 default, use Remove this source or set `anthropics = false`; giving the label a source of yours replaces it.
 
 ```toml
-[store.skill_sources]
+[store.skills.catalogs]
 anthropics = false                                  # leave out the source Canoa offers by default
 web = "addyosmani/web-quality-skills"               # a label of yours = a source as above
 ```
@@ -842,12 +878,12 @@ is dropped, and one whose repository has no `SKILL.md` for it says so. Turning t
 ### Extensions catalogs
 
 An extension is code the host loads to add to Canoa: today a library that adds store types. Store, Extensions lists the extensions of
-the **extensions catalogs** you name in `[store.extension_catalogs]`, a label of yours for each, written as a catalog is in
-`[catalogs]` (`<repository>@<ref>#<file>`) but a list of its own: none is offered until you add one, and a catalog of overlays is
+the **extensions catalogs** you name in `[store.extensions.catalogs]`, a label of yours for each, written as a catalog is in
+`[store.overlays.catalogs]` (`<repository>@<ref>#<file>`) but a list of its own: none is offered until you add one, and a catalog of overlays is
 never read as one of extensions. Canoa's own format, described here, is not the overlay catalog's.
 
 ```toml
-[store.extension_catalogs]
+[store.extensions.catalogs]
 team = "https://github.com/example/canoa-extensions.git@main#extensions.toml"
 ```
 
@@ -927,7 +963,7 @@ what the Store installed) and removes an extension with its files; one you name 
 
 ### The overlay store
 
-Store, Overlays, Discover lists the overlays of the catalogs `[catalogs]` names, to search, read about and
+Store, Overlays, Discover lists the overlays of the catalogs `[store.overlays.catalogs]` names, to search, read about and
 install. A catalog is an [AOS catalog](https://github.com/Boriken-Dev/agent-overlay-spec/blob/main/spec/v0/catalog.md):
 a file in a git repository, TOML, JSON (or, with any other name, `overlay.cfg`'s rule), listing overlays by name and
 source, with a summary, an icon, tags and the like for each. Canoa fetches it as it fetches an overlay (git objects at
@@ -942,7 +978,7 @@ set `boriken = false` in your own canoa.cfg: that is kept across restarts and ne
 `boriken` a source of yours replaces it, and Settings, Add, or the Store's own offer brings it back.
 
 ```toml
-[catalogs]
+[store.overlays.catalogs]
 boriken = false   # leave out the catalog Canoa offers by default
 team = "https://github.com/example/overlays.git@main#catalog.toml"   # a label of yours = <repository>@<ref>#<catalog file>
 
@@ -987,7 +1023,7 @@ its default.
 - **Text from a catalog or a manifest** is shown as plain text, with every control, invisible or bidirectional
   character named as `<U+XXXX>`; a line break is named too wherever one line is shown, and a description is set
   apart, after the source, pin, commit and digest. A source is shown without user information or query, and one that
-  holds a password is refused, in `[catalogs]` and from a catalog.
+  holds a password is refused, in `[store.overlays.catalogs]` and from a catalog.
 
 Only git sources with a branch, tag or commit install: an entry whose source is a directory, a URL that is not git, or
 git with no ref is listed, and its page says why it does not install. `homepage` and `repository` are shown whole as links that open in the system's browser when tapped, never fetched by

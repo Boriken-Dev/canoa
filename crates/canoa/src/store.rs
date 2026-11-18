@@ -20,6 +20,7 @@ use coqui_acp_api::{Environment, LoginAnswer, LoginForm, ProcessSpawner};
 
 pub mod extension;
 pub mod recipe;
+pub mod source;
 
 /// How long an `apply` may run before the host cancels it, in milliseconds, by default.
 pub const DEFAULT_APPLY_TIMEOUT_MS: u64 = 1_800_000;
