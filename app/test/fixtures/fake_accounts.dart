@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:canoa/accounts/account_models.dart';
 import 'package:canoa/accounts/accounts_host.dart';
 import 'package:canoa/acp/link_secret.dart';
+import 'package:canoa/providers/provider_catalog.dart';
+import 'providers_fixture.dart';
 import 'package:coqui_acp/secret.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretCardEnvironment;
 
@@ -185,7 +187,12 @@ const opencodeCatalog = {
 };
 
 final class FakeAccountsHost implements AccountsHost {
-  FakeAccountsHost({List<AccountInfo>? accounts}) : accounts = accounts ?? [];
+  FakeAccountsHost({List<AccountInfo>? accounts, List<AgentProvider>? providers})
+    : accounts = accounts ?? [],
+      providers = providers ?? providersOf(const ['claude', 'codex']);
+
+  /// The agents the host says it has loaded; the two that make accounts unless a test says otherwise.
+  final List<AgentProvider> providers;
 
   final List<AccountInfo> accounts;
   final catalogs = <String, Object?>{'claude': claudeCatalog, 'codex': codexCatalog, 'opencode': opencodeCatalog};
@@ -199,6 +206,9 @@ final class FakeAccountsHost implements AccountsHost {
   final offerHarness = <String, String?>{};
   int cancelled = 0;
   String? removeRefusal;
+
+  @override
+  Future<List<AgentProvider>> providersLoaded() async => List.of(providers);
 
   @override
   Future<AccountCatalog> catalog(String harness) async => AccountCatalog.parse(catalogs[harness] ?? {'harness': harness});

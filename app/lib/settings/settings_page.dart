@@ -4,6 +4,7 @@ import '../accounts/accounts_controller.dart';
 import '../accounts/accounts_section.dart';
 import '../config/canoa_config.dart';
 import '../ledger/session_ledger.dart';
+import '../providers/provider_catalog.dart';
 import '../mail/mail_accounts.dart';
 import '../mail/mail_section.dart';
 import '../permissions/permission_rules.dart';
@@ -45,11 +46,11 @@ const _sections = [
   SettingsSection(id: 'notifications', group: 'App', title: 'Notifications', icon: Icons.notifications_none, keywords: 'alerts permission question finished browser toast'),
   SettingsSection(id: 'voice', group: 'App', title: 'Voice', icon: Icons.mic_none, keywords: 'dictation speech microphone input device language push to talk transcribe audio read aloud voice speak speaker playback tts text to speech'),
   SettingsSection(id: 'shortcuts', group: 'App', title: 'Shortcuts', icon: Icons.keyboard_outlined, keywords: 'keyboard keys chords hotkeys'),
-  SettingsSection(id: 'sources', group: 'Agents', title: 'Sources', icon: Icons.hub_outlined, keywords: 'agents providers programs claude codex command install update version ready'),
+  SettingsSection(id: 'sources', group: 'Agents', title: 'Sources', icon: Icons.hub_outlined, keywords: 'agents providers programs command install update version ready'),
   SettingsSection(id: 'profiles', group: 'Agents', title: 'Profiles', icon: Icons.layers_outlined, keywords: 'overlays layers model effort mode skills trusted directories project'),
   SettingsSection(id: 'mcp', group: 'Agents', title: 'MCP servers', icon: Icons.extension_outlined, keywords: 'tools servers mcp allowed per agent'),
   SettingsSection(id: 'permissions', group: 'Agents', title: 'Permissions', icon: Icons.shield_outlined, keywords: 'bypass mode allow once remembered rules protected paths log revoke full access'),
-  SettingsSection(id: 'accounts', group: 'Agents', title: 'Accounts', icon: Icons.manage_accounts_outlined, keywords: 'login sign in api key subscription claude codex grok credentials add remove several'),
+  SettingsSection(id: 'accounts', group: 'Agents', title: 'Accounts', icon: Icons.manage_accounts_outlined, keywords: 'login sign in api key subscription credentials add remove several'),
   SettingsSection(id: 'mail', group: 'Agents', title: 'Mail', icon: Icons.mail_outline, keywords: 'email exchange outlook ews mailbox inbox messages password account add remove test sign in'),
   SettingsSection(id: 'shells', group: 'Agents', title: 'Shells', icon: Icons.terminal, keywords: 'bash git bash powershell pwsh wsl msys2 terminal shell command windows'),
   SettingsSection(id: 'usage', group: 'Agents', title: 'Usage', icon: Icons.speed, keywords: 'limit warn percent quota'),
@@ -197,11 +198,15 @@ class SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
+  /// The names of the loaded agents, which the sections about agents are also found by.
+  String _agentWords(SettingsSection section) =>
+      section.id == 'sources' || section.id == 'accounts' ? providerCatalog.providers.map((each) => '${each.title} ${each.program}').join(' ') : '';
+
   List<SettingsSection> get _matching {
     final words = _search.text.toLowerCase().split(' ').where((word) => word.isNotEmpty);
     return [
       for (final section in _available)
-        if (words.every((word) => '${section.title} ${section.keywords}'.toLowerCase().contains(word))) section,
+        if (words.every((word) => '${section.title} ${section.keywords} ${_agentWords(section)}'.toLowerCase().contains(word))) section,
     ];
   }
 

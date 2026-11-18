@@ -4,6 +4,7 @@ import 'package:coqui_acp_chat/coqui_acp_chat.dart' show UsageReport;
 import 'package:flutter/foundation.dart';
 
 import '../config/canoa_config.dart';
+import '../providers/provider_catalog.dart';
 import 'account_models.dart';
 import 'accounts_host.dart';
 
@@ -17,7 +18,6 @@ class AccountsController extends ChangeNotifier {
     required this.host,
     required this.config,
     required this.change,
-    this.harnesses = const ['claude', 'codex', 'opencode'],
     this.usage,
     this.holder,
     this.hostIsHere = true,
@@ -31,9 +31,6 @@ class AccountsController extends ChangeNotifier {
   /// Writes a change to canoa.cfg (an entry offering an account) and restarts the host so it serves it.
   final ChangeAccountConfig change;
 
-  /// The providers an account can be added to, besides any a source of the host runs.
-  final List<String> harnesses;
-
   /// What the sessions on an account have last heard of its allowances, by the account's id.
   final UsageReport? Function(String accountId)? usage;
 
@@ -45,6 +42,8 @@ class AccountsController extends ChangeNotifier {
   final String? Function(String account)? holder;
 
 
+  /// What the host last said it has loaded; null until it has, when what the app already knows of the host's agents stands in.
+  List<AgentProvider>? _agents;
   List<AccountInfo> _accounts = const [];
   List<AccountEntry> _entries = const [];
   final _catalogs = <String, AccountCatalog>{};
@@ -62,8 +61,12 @@ class AccountsController extends ChangeNotifier {
   String? get problem => _problem;
   bool get loading => _loading;
 
-  /// Every provider an account can be added to: the host's, then the sources' that run one.
-  List<String> get providers => {...harnesses, ..._accounts.map((each) => each.harness)}.toList();
+  /// Every provider an account can be added to: those the host has loaded that make accounts, then any an account is already
+  /// held for.
+  List<String> get providers => {
+    for (final each in _agents ?? providerCatalog.providers) if (each.accounts != null) each.id,
+    ..._accounts.map((each) => each.harness),
+  }.toList();
 
   /// The accounts of [harness], in canoa.cfg's order.
   List<AccountInfo> of(String harness) => [for (final each in _accounts) if (each.harness == harness) each];
@@ -145,6 +148,13 @@ class AccountsController extends ChangeNotifier {
     _notify();
     try {
       _accounts = await host.list();
+      try {
+        final loaded = await host.providersLoaded();
+        _agents = loaded;
+        providerCatalog.replace(loaded);
+      } on Object {
+        // A host with no list of its agents leaves what the app already knew of them.
+      }
       try {
         _entries = await host.entries();
       } on Object {

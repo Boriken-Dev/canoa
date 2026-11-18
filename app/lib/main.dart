@@ -16,6 +16,7 @@ import 'desktop/host_supervisor.dart';
 import 'desktop/host_tool.dart';
 import 'sources/control_choices.dart';
 import 'sources/source_choices.dart';
+import 'providers/provider_catalog.dart';
 import 'sources/source_icons.dart' show sourceProvider;
 import 'extension/composer_extension.dart';
 import 'extension/local_host.dart';
@@ -1556,10 +1557,10 @@ class _CanoaAppState extends State<CanoaApp> {
 
   List<AgentSource> get _hostedSources => hostedSources(widget.host?.listening ?? const []);
 
-  /// The host's own Claude and Codex sources: the ones whose earlier sessions it can bring in from the programs' folders.
+  /// The host's own sources whose earlier sessions it can bring in from the programs' folders, as the host says of each agent.
   List<AgentSource> get _importable => [
     for (final source in _hostedSources)
-      if (source.local && (source.harness == 'claude' || source.harness == 'codex')) source,
+      if (source.local && providerCatalog.byId(source.harness)?.imports == true) source,
   ];
 
   /// The offer on the welcome page, when this app has a host that can do it. Nothing is read until the person asks.
@@ -1623,6 +1624,7 @@ class _CanoaAppState extends State<CanoaApp> {
   /// it before is read once more, since an account made or a grant changed meanwhile would otherwise stay unseen until a reload.
   Future<void> _hostCameBack() async {
     unawaited(_loadLooks());
+    unawaited(_loadProviders());
     await _grants?.refresh();
     if (!mounted) return;
     if (_grants?.may(HostGrants.accounts) ?? false) unawaited(_accountsHeld?.refresh());
@@ -2816,6 +2818,7 @@ class _CanoaAppState extends State<CanoaApp> {
     // The host was started anew: which accounts it has is asked again.
     if (widget.host?.listening.isNotEmpty ?? false) {
       if (!vendorLooks.answered) unawaited(_loadLooks());
+      if (!providerCatalog.answered) unawaited(_loadProviders());
       unawaited(_grants?.refresh());
       unawaited(_accounts?.refresh());
       unawaited(_running?.refresh());
@@ -2929,6 +2932,7 @@ class _CanoaAppState extends State<CanoaApp> {
     _reconnects = _control?.reconnected.listen((_) => unawaited(_hostCameBack()));
     scheduleMicrotask(() {
       unawaited(_loadLooks());
+      unawaited(_loadProviders());
       unawaited(_grants?.refresh());
       unawaited(_accounts?.refresh());
       _running?.keepFresh();
@@ -3288,13 +3292,26 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
+  /// Asks the host which agents it has loaded: the only place the app learns which agents there are, what each is called, and what its
+  /// mark looks like. Until it answers, none is known.
+  Future<void> _loadProviders() async {
+    final control = _control;
+    if (control == null) return;
+    try {
+      final client = await control.ready(wait: false);
+      providerCatalog.adopt(await client.call('providers/list', const {}));
+    } on Object catch (error) {
+      providerCatalog.failed(error is ControlFailed ? error.message : error is StateError ? error.message : 'no link');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     _popout
       ..look = config.look.name
       ..density = config.density.name;
     return ListenableBuilder(
-      listenable: vendorLooks,
+      listenable: Listenable.merge([vendorLooks, providerCatalog]),
       builder: (_, _) => config.followProvider
           ? ListenableBuilder(listenable: Listenable.merge([store, _layout]), builder: (_, _) => _app(_familyShown()))
           : _app(config.look),

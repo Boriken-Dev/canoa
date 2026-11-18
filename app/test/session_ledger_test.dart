@@ -78,15 +78,15 @@ DateTime Function() _ticking() {
 
 void main() {
   group('harness names', () {
-    test('the adapters that name themselves, Gemini, OpenCode and Grok each have their harness', () {
+    test('the adapters that name themselves, Gemini and Grok each have the harness a loaded agent says they are', () {
       final names = HarnessNames();
       expect(names.label(reportedName: '@agentclientprotocol/claude-agent-acp', entry: 'Claude'), 'Claude Code');
       expect(names.label(reportedName: '@agentclientprotocol/codex-acp', entry: 'Codex'), 'Codex');
-      expect(names.label(reportedName: 'gemini-cli', entry: 'x'), 'Gemini');
+      expect(names.label(reportedName: 'gemini-cli', entry: 'x'), 'Gemini CLI');
       expect(names.label(reportedName: 'pi-acp', entry: 'x'), 'Pi');
-      expect(names.label(reportedName: 'coqui-acp-pi', entry: 'x'), 'Pi');
-      expect(names.label(reportedName: 'OpenCode', entry: 'x'), 'OpenCode');
-      expect(names.label(grokShell: true, entry: 'x'), 'Grok');
+      expect(names.label(reportedName: 'coqui-acp-pi', entry: 'Pi'), 'Pi', reason: 'a translator no description names is the entry it runs as');
+      expect(names.label(reportedName: 'OpenCode', entry: 'x'), 'x', reason: 'no loaded agent says it is OpenCode');
+      expect(names.label(markers: ['grokShell'], entry: 'x'), 'Grok');
     });
 
     test('an unknown or absent name falls back to the entry, and canoa.cfg extends and overrides the map', () {
@@ -128,7 +128,8 @@ void main() {
 
     test('Grok: no agentInfo, its version and shell in _meta', () async {
       final identity = await initialized(_v1(meta: {'agentVersion': '1.0.70', 'grokShell': true}));
-      expect((identity.name, identity.grokShell, identity.version), (null, true, '1.0.70'));
+      expect((identity.name, identity.version), (null, '1.0.70'));
+      expect(identity.markers, ['grokShell']);
     });
   });
 

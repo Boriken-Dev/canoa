@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/permissions/permission_rules.dart';
+import 'package:canoa/providers/provider_catalog.dart';
 import 'dart:io' show FileSystemException;
 
 import 'package:canoa/session_store.dart';
@@ -19,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:toml/toml.dart';
 
 import 'fixtures/app_fixture.dart';
+import 'fixtures/providers_fixture.dart';
 import 'fixtures/settings_fixture.dart';
 
 final digest = 'sha256:${'b' * 64}';
@@ -190,6 +192,22 @@ void main() {
       await tester.enterText(find.byKey(const Key('settings-search')), '');
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('settings-nav-general')), findsOneWidget);
+    });
+
+    testWidgets('a search finds the sections about agents by the names of the agents the host loaded, and by no other', (tester) async {
+      await openSettings(tester);
+      await tester.enterText(find.byKey(const Key('settings-search')), 'claude');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('settings-nav-sources')), findsOneWidget);
+      providerCatalog.replace(providersOf(const ['codex']));
+      addTearDown(listBundledProviders);
+      await tester.enterText(find.byKey(const Key('settings-search')), 'claude ');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('settings-nav-sources')), findsNothing, reason: 'no loaded agent is called Claude');
+      expect(find.byKey(const Key('settings-no-match')), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('settings-search')), 'codex');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('settings-nav-sources')), findsOneWidget);
     });
 
     testWidgets('at phone width the list is a page, a section another, and back goes to the list', (tester) async {

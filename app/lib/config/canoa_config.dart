@@ -6,6 +6,7 @@ import 'package:toml/toml.dart';
 
 import '../accounts/account_models.dart' show AccountEntry;
 import '../acp/agent_commands.dart';
+import '../providers/provider_catalog.dart';
 import '../voice/speech_backend.dart' show VoiceProfile;
 import 'config_layers.dart';
 import 'connection.dart';
@@ -433,13 +434,12 @@ final class CanoaConfig {
   /// Whether the agent entry [name] is open to every paired key: it names no `peers`.
   bool hostEntryIsOpen(String name) => _hostAgents[name] is Map && (_hostAgents[name] as Map)['peers'] == null;
 
-  /// The entry that is the agent itself for the provider [harness]: Claude's or Codex's own source when canoa.cfg or the host names
-  /// it, else the first entry that runs the provider, else the name the host makes one with (a source's own, or the provider's with
-  /// a capital).
+  /// The entry that is the agent itself for the provider [harness]: the source the host serves of its own for it when canoa.cfg or the
+  /// host names it, else the first entry that runs the provider, else the name the host makes one with (a source's own, or the
+  /// provider's with a capital).
   String ownEntryOf(String harness) {
-    const sources = {'claude': 'Claude', 'codex': 'Codex', 'opencode': 'OpenCode'};
     final running = hostEntriesRunning(harness);
-    final source = sources[harness];
+    final source = providerCatalog.byId(harness)?.source;
     if (source != null && running.contains(source)) return source;
     if (running.isNotEmpty) return running.first;
     return source ?? '${harness[0].toUpperCase()}${harness.substring(1)}';

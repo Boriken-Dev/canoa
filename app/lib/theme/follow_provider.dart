@@ -1,4 +1,4 @@
-import '../sources/source_icons.dart';
+import '../providers/provider_catalog.dart';
 import 'look.dart';
 import 'vendor_looks.dart';
 
@@ -6,6 +6,6 @@ import 'vendor_looks.dart';
 /// lists ([vendorLooks]); any other agent, a vendor the host lists none for, and every section but the conversations keep [chosen].
 LookId familyFor({required LookId chosen, required bool follow, required bool inConversations, String? provider}) {
   if (!follow || !inConversations) return chosen;
-  final vendor = markIdOf(provider);
+  final vendor = providerCatalog.resolve(provider)?.id;
   return vendor == null ? chosen : vendorLooks.familyOfVendor(vendor) ?? chosen;
 }

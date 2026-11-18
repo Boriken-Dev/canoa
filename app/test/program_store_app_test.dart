@@ -49,8 +49,8 @@ Future<void> _openSources(WidgetTester tester) async {
 void main() {
   testWidgets('starting the app asks the host only for the copies: no publisher, no plan, no install', (tester) async {
     final host = await _app(tester, _host(latest: '1.0.0'));
-    // Reads only: the looks the host lists, the store types its extensions add and the shared sessions running come with the copies.
-    expect(host.calls.toSet().difference({'store/list', 'store/report claude_like_store', 'accounts/list', 'looks/list', 'store/extensions', 'sessions/running'}),
+    // Reads only: the looks and the agents the host lists, the store types its extensions add and the shared sessions running come with the copies.
+    expect(host.calls.toSet().difference({'store/list', 'store/report claude_like_store', 'accounts/list', 'looks/list', 'providers/list', 'store/extensions', 'sessions/running'}),
         isEmpty, reason: '${host.calls}');
     expect((host.params['store/report'] ?? []).every((each) => !each.containsKey('probe')), isTrue);
   });

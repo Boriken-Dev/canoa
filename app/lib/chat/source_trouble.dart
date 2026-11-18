@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../accounts/accounts_controller.dart';
 import '../accounts/add_account_dialog.dart';
+import '../providers/provider_catalog.dart';
 import '../selectable.dart';
 import '../session_store.dart';
 import '../sources/source_choices.dart';
@@ -46,11 +47,8 @@ final class SourceTrouble {
   bool get blocksStart => kind != TroubleKind.failed;
 
   /// The program's name as a person knows it.
-  static String programName(AgentSource source) => switch (source.harness) {
-    'claude' => 'Claude Code',
-    'codex' => 'Codex',
-    _ => source.displayName,
-  };
+  static String programName(AgentSource source) =>
+      (source.harness == null ? null : providerCatalog.byId(source.harness)?.program) ?? source.displayName;
 }
 
 /// What is wrong with [source], from what the host listed for it; null when nothing is, or the host has not said. A source's own

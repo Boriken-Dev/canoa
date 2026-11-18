@@ -2473,7 +2473,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       entry: session.agent,
       place: session.place,
       reportedName: identity.name,
-      grokShell: identity.grokShell,
+      markers: identity.markers,
       version: identity.version,
       reopenBy: identity.reopenBy,
       cwd: session.cwd,

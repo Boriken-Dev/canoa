@@ -42,8 +42,9 @@ final class AgentIdentity {
   /// `agentInfo` in v1, `info` in v2; null when the agent sent none.
   String? name, title, version;
 
-  /// Grok's ACP sends no `agentInfo`, only `_meta.grokShell` and `_meta.agentVersion`.
-  bool grokShell = false;
+  /// The keys of `initialize`'s `_meta` that are `true`: an agent that sends no `agentInfo` (Grok's sends `grokShell` and
+  /// `agentVersion`) is known by them.
+  List<String> markers = const [];
 
   /// The usage extension, when the agent advertised it.
   UsageSupport? usage;
@@ -83,7 +84,7 @@ final class AgentIdentity {
     }
     final meta = result['_meta'];
     if (meta is Map) {
-      grokShell = meta['grokShell'] == true;
+      markers = [for (final MapEntry(:key, :value) in meta.entries) if (value == true && key is String) key];
       this.version ??= _text(meta['agentVersion']);
     }
     final capabilities = result[version == 2 ? 'capabilities' : 'agentCapabilities'];

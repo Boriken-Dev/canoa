@@ -1,9 +1,10 @@
-// The vendors' marks: the Dart path data is the files in assets/icons/agents, each known provider draws its mark, any other
+// The vendors' marks: what a host lists is the files of the vendor crates, each listed provider draws its mark, any other
 // id and a command a person wrote keep the generic icons, and the source picker draws them in both looks.
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/session_store.dart';
+import 'package:canoa/providers/provider_catalog.dart';
 import 'package:canoa/sources/agent_marks.dart';
 import 'package:canoa/sources/source_icons.dart';
 import 'package:canoa/sources/sources.dart';
@@ -25,36 +26,48 @@ Widget _host(Widget child, {Color? ink}) => MaterialApp(
 void main() {
   setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/agent_marks_test.dart')));
 
-  test('the marks are the path data of the files beside SOURCES.md', () {
-    expect(agentMarks.keys, _known);
+  test('the marks a host lists are the files of the vendor crates', () {
+    expect([for (final each in providerCatalog.providers) if (each.mark != null) each.id], _known);
     for (final id in _known) {
-      final svg = File('assets/icons/agents/$id.svg').readAsStringSync();
+      final svg = File('../crates/canoa-$id/mark.svg').readAsStringSync();
       final root = RegExp('<svg[^>]*>').firstMatch(svg)![0]!;
       final box = RegExp(r'viewBox="0 0 (\d+) (\d+)"').firstMatch(root)!;
-      expect((double.parse(box[1]!), double.parse(box[2]!)), (agentMarks[id]!.side, agentMarks[id]!.side), reason: id);
+      final mark = providerCatalog.byId(id)!.mark!;
+      expect((double.parse(box[1]!), double.parse(box[2]!)), (mark.side, mark.side), reason: id);
       final shapes = RegExp('<path[^>]*>').allMatches(svg).map((m) => m[0]!).toList();
-      expect(shapes, hasLength(agentMarks[id]!.shapes.length), reason: id);
+      expect(shapes, hasLength(mark.shapes.length), reason: id);
       for (var i = 0; i < shapes.length; i++) {
-        expect(RegExp(r'\sd="([^"]*)"').firstMatch(shapes[i])![1], agentMarks[id]!.shapes[i].$1, reason: '$id shape $i');
+        expect(RegExp(r'\sd="([^"]*)"').firstMatch(shapes[i])![1], mark.shapes[i].$1, reason: '$id shape $i');
         final fill = RegExp(r'\sfill="#([0-9A-Fa-f]{6})"').firstMatch(shapes[i]) ?? RegExp(r'\sfill="#([0-9A-Fa-f]{6})"').firstMatch(root);
-        expect(agentMarks[id]!.shapes[i].$2, fill == null ? isNull : Color(0xFF000000 | int.parse(fill[1]!, radix: 16)), reason: '$id shape $i');
+        expect(mark.shapes[i].$2, fill == null ? isNull : Color(0xFF000000 | int.parse(fill[1]!, radix: 16)), reason: '$id shape $i');
       }
     }
   });
 
   test('every mark parses and stays inside its box', () {
-    for (final entry in agentMarks.entries) {
-      for (final (d, _) in entry.value.shapes) {
+    for (final provider in providerCatalog.providers) {
+      final mark = provider.mark;
+      if (mark == null) continue;
+      for (final (d, _) in mark.shapes) {
         final bounds = parseSvgPath(d).getBounds();
-        expect(bounds.isEmpty, isFalse, reason: entry.key);
+        expect(bounds.isEmpty, isFalse, reason: provider.id);
         // getBounds is the control points' box, which an arc's curve overshoots a little.
-        final side = entry.value.side, slack = side * 0.3;
-        expect(bounds.left, greaterThan(-slack), reason: entry.key);
-        expect(bounds.top, greaterThan(-slack), reason: entry.key);
-        expect(bounds.right, lessThan(side + slack), reason: entry.key);
-        expect(bounds.bottom, lessThan(side + slack), reason: entry.key);
+        final side = mark.side, slack = side * 0.3;
+        expect(bounds.left, greaterThan(-slack), reason: provider.id);
+        expect(bounds.top, greaterThan(-slack), reason: provider.id);
+        expect(bounds.right, lessThan(side + slack), reason: provider.id);
+        expect(bounds.bottom, lessThan(side + slack), reason: provider.id);
       }
     }
+  });
+
+  test('text that is no square mark with a path is no mark', () {
+    expect(parseMarkSvg('<svg viewBox="0 0 10 20"><path d="M0 0H1Z"/></svg>'), isNull);
+    expect(parseMarkSvg('<svg viewBox="0 0 10 10"></svg>'), isNull);
+    expect(parseMarkSvg('not svg'), isNull);
+    final mark = parseMarkSvg('<svg viewBox="0 0 10 10" fill="#112233"><path d="M0 0H1Z"/><path fill="#445566" d="M1 1H2Z"/></svg>')!;
+    expect(mark.side, 10.0);
+    expect(mark.shapes.map((each) => each.$2).toList(), [const Color(0xFF112233), const Color(0xFF445566)]);
   });
 
   test('a path command the marks do not use is refused', () {

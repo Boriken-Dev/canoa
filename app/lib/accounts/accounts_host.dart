@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../acp/link_secret.dart';
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
+import '../providers/provider_catalog.dart';
 import 'account_models.dart';
 
 /// A page the sign-in asks the person to open, and the code to confirm there when it has one.
@@ -121,6 +122,9 @@ class SignIn extends ChangeNotifier {
 
 /// What the app asks of the host about accounts. Nothing it returns holds a credential.
 abstract interface class AccountsHost {
+  /// The agents the host has loaded: which have accounts to add, and what each is called and looks like.
+  Future<List<AgentProvider>> providersLoaded();
+
   /// The kinds and sign-in methods of [harness]'s provider.
   Future<AccountCatalog> catalog(String harness);
 
@@ -158,6 +162,13 @@ final class ControlAccountsHost implements AccountsHost {
 
   Future<Object?> _call(String method, Map<String, Object?> params) async =>
       (await _control.ready(wait: false)).call(method, params);
+
+  @override
+  Future<List<AgentProvider>> providersLoaded() async {
+    final result = await _call('providers/list', const {});
+    final listed = result is Map ? result['providers'] : null;
+    return [if (listed is List) for (final each in listed) ?AgentProvider.parse(each)];
+  }
 
   @override
   Future<AccountCatalog> catalog(String harness) async => AccountCatalog.parse(await _call('accounts/catalog', {'harness': harness}));

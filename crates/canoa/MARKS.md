@@ -2,7 +2,7 @@
 
 Each mark names the program a person runs; it is the vendor's trademark, shown for that purpose only, and nothing here
 grants a right in it. None is redrawn: the path data is the vendor's or the icon set's, unchanged. `canoa-claude`'s,
-`canoa-codex`'s, `canoa-antigravity`'s and `canoa-grok`'s have the fill attribute named below added; no path was edited.
+`canoa-codex`'s, `canoa-antigravity`'s and `canoa-grok`'s have the fill attribute named below added; no path was edited. `canoa-opencode`'s mark is the exception: it is Canoa's own drawing, not the vendor's logo.
 Each is the `mark.svg` of its `canoa-<vendor>` crate, which the vendor's `agent_vendor` description serves as `mark`; the application's `test/agent_marks_test.dart` checks that what a host lists is exactly these files.
 
 | File | Agent id | Origin | Terms | Fill |
@@ -12,6 +12,7 @@ Each is the `mark.svg` of its `canoa-<vendor>` crate, which the vendor's `agent_
 | `canoa-antigravity/mark.svg` | `antigravity` | The path of the mark in the logo menu ("Copy logo") of https://antigravity.google, fetched 2026-11-13. The page's own copy lays gradient layers over this shape; only the shape and its flat base fill `#3186FF` are kept, since the gradients do not survive at 16-20 px. | The page offers the logo to copy; it states no further terms. The mark is Google's trademark. | `#3186FF` (the file's own) |
 | `canoa-grok/mark.svg` | `grok` | The two glyph paths of https://grok.com/images/favicon.svg (the site's own favicon, an SVG; the rounded tile, blur and outline layers around the glyph are left out), fetched 2026-11-13. | No reuse terms are stated. The mark is xAI's trademark, shown to name the program the person runs; using it is the project owner's decision. | `currentColor` (monochrome: the text colour) |
 | `canoa-pi/mark.svg` | `pi` | https://pi.dev/logo-auto.svg, the file the site's logo menu downloads as `pi-logo.svg`, fetched 2026-11-13, unchanged. | Offered for download by the site, which states no further terms. | three colours, the file's own |
+| `canoa-opencode/mark.svg` | `opencode` | Drawn for Canoa: a pair of angle brackets around a dot, on a 24-unit box. It is not OpenCode's logo and copies none of it. | Canoa's own, under the project's licence. | `currentColor` (monochrome: the text colour) |
 
 ## Not here
 

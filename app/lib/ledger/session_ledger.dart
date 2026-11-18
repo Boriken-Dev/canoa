@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../chat/agent_events.dart' show ConfigOption, chatLimits;
 import '../chat/session_options.dart';
+import '../providers/provider_catalog.dart';
 import '../client/relation.dart';
 import '../workspace/workspace_template.dart' show defaultWorkspace;
 import '../worktree/worktree.dart';
@@ -25,32 +26,19 @@ enum SessionPlace {
   static SessionPlace? named(Object? name) => values.where((place) => place.name == name).firstOrNull;
 }
 
-/// The harness each `agentInfo` name stands for. The host's translators and three adapters report their own name rather than
-/// the harness's, and Grok reports none: [grokName] stands for an agent whose `_meta.grokShell` is set.
-const Map<String, String> builtInHarnesses = {
-  'coqui-acp-claude': 'Claude Code',
-  'coqui-acp-codex': 'Codex',
-  '@agentclientprotocol/claude-agent-acp': 'Claude Code',
-  '@agentclientprotocol/codex-acp': 'Codex',
-  'gemini-cli': 'Gemini',
-  'Antigravity ACP Server': 'Antigravity',
-  'coqui-acp-pi': 'Pi',
-  'pi-acp': 'Pi',
-  'OpenCode': 'OpenCode',
-  grokName: 'Grok',
-};
-
-/// The name an agent with `_meta.grokShell` and no `agentInfo` is looked up by.
-const String grokName = 'grok';
-
-/// Harness labels: [builtInHarnesses], extended and overridden by canoa.cfg's `[harnesses]`.
+/// Harness labels: what the loaded agents call themselves, extended and overridden by canoa.cfg's `[harnesses]`.
 final class HarnessNames {
-  HarnessNames([Map<String, String> extra = const {}]) : _names = {...builtInHarnesses, ...extra};
+  HarnessNames([Map<String, String> extra = const {}]) : _names = extra;
   final Map<String, String> _names;
 
-  /// The harness for what an agent reported, else the agent entry or preset it was started from.
-  String label({String? reportedName, bool grokShell = false, required String entry}) =>
-      _names[reportedName ?? (grokShell ? grokName : '')] ?? entry;
+  /// The harness for what an agent reported (its `agentInfo` name, or the `_meta` keys it set to `true` when it sent none), else
+  /// the agent entry or preset it was started from.
+  String label({String? reportedName, List<String> markers = const [], required String entry}) {
+    final own = _names[reportedName ?? ''];
+    if (own != null) return own;
+    final known = reportedName != null ? providerCatalog.byReportedName(reportedName) : providerCatalog.byMarkers(markers);
+    return known?.program ?? entry;
+  }
 }
 
 /// A message's role and text, kept only when the person turned that on.
@@ -89,7 +77,7 @@ final class LedgerEntry {
     required this.lastUsed,
     this.harness = '',
     this.reportedName,
-    this.grokShell = false,
+    this.markers = const [],
     this.version,
     this.cwd,
     this.title,
@@ -152,7 +140,7 @@ final class LedgerEntry {
   /// The label [HarnessNames] gives it.
   String harness;
   String? reportedName;
-  bool grokShell;
+  List<String> markers;
 
   /// The version the agent reported: an adapter's, for an adapter.
   String? version;
@@ -208,7 +196,7 @@ final class LedgerEntry {
   Map<String, Object?> toJson() => {
     'harness': harness,
     'reportedName': ?reportedName,
-    if (grokShell) 'grokShell': true,
+    if (markers.isNotEmpty) 'markers': markers,
     'version': ?version,
     'entry': entry,
     'where': place.name,
@@ -257,7 +245,7 @@ final class LedgerEntry {
       lastUsed: lastUsed,
       harness: text('harness') ?? entry,
       reportedName: text('reportedName'),
-      grokShell: json['grokShell'] == true,
+      markers: [if (json['markers'] is List) for (final each in json['markers'] as List) if (each is String) each],
       version: text('version'),
       cwd: text('cwd'),
       title: text('title'),
@@ -495,7 +483,7 @@ class SessionLedger extends ChangeNotifier {
 
   void _apply() {
     for (final entry in _entries) {
-      entry.harness = _names.label(reportedName: entry.reportedName, grokShell: entry.grokShell, entry: entry.entry);
+      entry.harness = _names.label(reportedName: entry.reportedName, markers: entry.markers, entry: entry.entry);
       if (!_settings.keepText) {
         entry.messages = const [];
       } else if (entry.messages.length > _settings.textMessages) {
@@ -513,7 +501,7 @@ class SessionLedger extends ChangeNotifier {
     required String entry,
     required SessionPlace place,
     String? reportedName,
-    bool grokShell = false,
+    List<String> markers = const [],
     String? version,
     String? reopenBy,
     String? cwd,
@@ -555,7 +543,7 @@ class SessionLedger extends ChangeNotifier {
     found
       ..lastUsed = now
       ..reportedName = reportedName
-      ..grokShell = grokShell
+      ..markers = markers
       ..version = version
       ..reopenBy = reopenBy
       ..cwd = cwd ?? found.cwd

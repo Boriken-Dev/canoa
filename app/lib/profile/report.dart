@@ -4,6 +4,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../providers/provider_catalog.dart';
 import 'profiles_panel.dart' show visible;
 
 /// Where the host puts its report in an answer's `_meta`.
@@ -24,15 +25,8 @@ const presetMeta = 'dev.boriken.canoa/preset';
 /// canoa.cfg's `[defaults.clients]` gives that kind, else `[defaults] loadout`.
 const clientMeta = 'dev.boriken.canoa/client';
 
-/// Each harness's name, by its AOS harness id.
-const harnessLabels = {
-  'claude-code': 'Claude Code',
-  'codex': 'Codex',
-  'gemini-cli': 'Gemini CLI',
-  'pi': 'Pi',
-  'opencode': 'OpenCode',
-  'grok': 'Grok',
-};
+/// A harness's name by its AOS harness id: the loaded agent's program, else the id as written.
+String harnessLabel(String harness) => providerCatalog.byAos(harness)?.program ?? harness;
 
 /// What became of one part of a profile.
 enum ItemState {
@@ -83,7 +77,7 @@ final class ProfileReport {
             ? '${item.layer.substring('overlay:'.length)}: ${item.key} (${item.state.label})'
             : '${item.key} (${item.state.label})',
     };
-    return 'Profile for ${harnessLabels[harness] ?? harness}${loadout == null ? '' : ' (loadout $loadout)'}: ${applied.length} applied'
+    return 'Profile for ${harnessLabel(harness)}${loadout == null ? '' : ' (loadout $loadout)'}: ${applied.length} applied'
         '${missed.isEmpty ? '' : '; not applied: ${missed.join(', ')}'}';
   }
 }
@@ -165,7 +159,7 @@ class ProfileReportDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: Text('Profile for ${harnessLabels[report.harness] ?? report.harness}'),
+    title: Text('Profile for ${harnessLabel(report.harness)}'),
     content: SizedBox(
       width: 640,
       child: SingleChildScrollView(

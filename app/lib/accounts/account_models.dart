@@ -2,6 +2,8 @@
 /// here holds a credential; the host keeps those and says only whether an account is signed in.
 library;
 
+import '../providers/provider_catalog.dart';
+
 Map<String, Object?> _map(Object? value) => value is Map
     ? {for (final MapEntry(:key, :value) in value.entries) '$key': value}
     : const {};
@@ -10,22 +12,9 @@ List<String> _texts(Object? value) => [if (value is List) for (final each in val
 
 String _text(Object? value, [String fallback = '']) => value is String ? value : fallback;
 
-/// What a person reads for a credential standard the host names (`claude-code`, `anthropic-api`). An id this list does not know is
-/// shown as the host wrote it, since a provider may name its own.
-String standardTitle(String id) => switch (id) {
-  'claude-code' => 'Claude Code',
-  'anthropic-api' => 'Anthropic API',
-  'codex' => 'Codex',
-  'openai-api' => 'OpenAI API',
-  'grok' => 'Grok',
-  'xai-api' => 'xAI API',
-  'gemini-api' => 'Gemini API',
-  'antigravity' => 'Antigravity',
-  'pi' => 'Pi',
-  'opencode' => 'OpenCode',
-  'opencode-key' => 'OpenCode provider key',
-  _ => id,
-};
+/// What a person reads for a credential standard the host names (`claude-code`, `anthropic-api`): the title the agent that owns it
+/// gives. An id no loaded agent owns is shown as the host wrote it.
+String standardTitle(String id) => providerCatalog.standardTitle(id);
 
 /// [standards] as one line, in the order the host gave them.
 String standardsText(Iterable<String> standards) => standards.map(standardTitle).join(', ');

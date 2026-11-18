@@ -1,17 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../providers/provider_catalog.dart';
 import 'agent_marks.dart';
 import 'sources.dart';
 import 'svg_path.dart';
 
-/// The key of [agentMarks] that an id, a standard or a harness belongs to, or null when it has no mark: its first word names
-/// the agent, so `claude`, `claude-code`, `claude_store` and `anthropic-api` are Claude's, `codex` and `openai-api` Codex's,
-/// `grok` and `xai-api` Grok's. One function serves a source, a Store program and an account.
+/// The id of the loaded agent that has a mark and that [name] means, or null when it has none: see [ProviderCatalog.resolve] for
+/// what a name may be. One function serves a source, a Store program and an account.
 String? markIdOf(String? name) {
-  if (name == null) return null;
-  final word = name.trim().toLowerCase().split(RegExp(r'[-_\s.]')).first;
-  final id = switch (word) { 'anthropic' => 'claude', 'openai' => 'codex', 'xai' => 'grok', _ => word };
-  return agentMarks.containsKey(id) ? id : null;
+  final provider = providerCatalog.resolve(name);
+  return provider?.mark == null ? null : provider!.id;
 }
 
 /// The first of [names] that has a mark, as [markIdOf] reads each.
@@ -45,10 +43,12 @@ class SourceMark extends StatelessWidget {
   final Color? color;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(listenable: providerCatalog, builder: _draw);
+
+  Widget _draw(BuildContext context, Widget? _) {
     final theme = IconTheme.of(context);
     final side = size ?? theme.size ?? 24;
-    final mark = agentMarks[markIdOf(_fromSource ? sourceProvider(source) : provider)];
+    final mark = providerCatalog.markOf(_fromSource ? sourceProvider(source) : provider);
     if (mark == null) {
       return Icon(_fromSource ? sourceIcon(source) : providerIcon(provider), size: side, color: color);
     }

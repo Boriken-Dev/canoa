@@ -1,13 +1,11 @@
+import '../providers/provider_catalog.dart';
 import '../sources/sources.dart';
 
-/// The `acp_harness` provider ids Canoa knows, which a source of the same name stands for.
-const _providerIds = {'claude', 'codex', 'grok', 'antigravity', 'opencode', 'pi'};
-
-/// The harness a [source] stands for, for `${handler}`: its provider id (`claude`, `codex`, `grok`, `antigravity`, `opencode`, `pi`, or a
-/// hosted entry's own `harness`), else its label.
+/// The harness a [source] stands for, for `${handler}`: its provider id (a loaded agent's, or a hosted entry's own `harness`), else
+/// its label.
 String handlerOf(AgentSource source) {
   final id = source.harness ?? source.label.toLowerCase();
-  return source.harness != null || _providerIds.contains(id) ? id : source.label;
+  return source.harness != null || providerCatalog.byId(id) != null ? id : source.label;
 }
 
 /// The separator of a path written for another machine, from the folder it starts with: a drive letter or a share is Windows.

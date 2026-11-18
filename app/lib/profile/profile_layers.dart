@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 
+import '../providers/provider_catalog.dart';
 import 'aos_support.dart';
 import 'overlay_layer.dart';
 import 'profile.dart';
@@ -12,9 +13,6 @@ import 'skill_copies.dart';
 /// Canoa's own layer, lowest of all. It sets the standard access, the same for every agent: no sandbox, the network on and
 /// everything asked first. Every other value comes from a layer the person can see and change.
 const builtInProfile = Profile(access: ProfileAccess(sandbox: 'none', network: true, approvals: 'ask'));
-
-/// The AOS harness id of each of Canoa's agent presets, whose `[harness.<id>]` hints apply to it.
-const presetHarnesses = {'Claude': 'claude-code', 'Codex': 'codex', 'Grok': 'grok', 'OpenCode': 'opencode', 'Pi': 'pi'};
 
 /// Why a layer is not in the merge, or what to know about one that is.
 final class LayerNote {
@@ -48,7 +46,7 @@ final class ProfileLayers {
 /// The layers for [agent]: built-in, each AOS overlay of [overlays] in composition order (by `priority`, then name),
 /// the [user]'s own, the project's in [workingDirectory] once trusted, the agent entry's from [agents], then
 /// [session]. An overlay's files are digested each time and checked against its record and its pin; the hints of
-/// [harness] (by default the preset's, from [presetHarnesses]) apply, and an `[about]` icon is kept within
+/// [harness] (by default the AOS id the loaded agent [agent] names) apply, and an `[about]` icon is kept within
 /// [iconLimits]. With no [home], as in a web build, overlays and projects are left out and say so.
 Future<ProfileLayers> profileLayers({
   required Map<String, OverlaySource> overlays,
@@ -62,7 +60,7 @@ Future<ProfileLayers> profileLayers({
   aos.Settings? iconLimits,
   Map<String, String> skillPins = const {},
 }) async {
-  harness ??= presetHarnesses[agent];
+  harness ??= providerCatalog.resolve(agent)?.aos;
   final layers = <Layer>[const Layer(LayerId(LayerKind.builtIn), builtInProfile)];
   final notes = <LayerNote>[];
   final found = <String, Layer>{};

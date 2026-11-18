@@ -4,6 +4,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretRequestCard
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../providers/provider_catalog.dart';
 import '../sources/source_icons.dart';
 import '../store/links.dart';
 import '../store/programs.dart' show ProgramAsk;
@@ -16,11 +17,7 @@ import 'accounts_host.dart';
 final RegExp accountName = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
 
 /// What the person sees of a provider's name: `claude` is Claude.
-String harnessTitle(String harness) => switch (harness) {
-  '' => harness,
-  'opencode' => 'OpenCode',
-  _ => '${harness[0].toUpperCase()}${harness.substring(1)}',
-};
+String harnessTitle(String harness) => providerCatalog.titleOf(harness);
 
 /// Adds an account: the provider and a name, then one of the provider's own ways to sign in, then what that way asks. A key or
 /// a code is typed into the sealed form the host asks for, which goes to the host and is never held here.
@@ -37,7 +34,7 @@ class AddAccountDialog extends StatefulWidget {
 }
 
 class _AddAccountDialogState extends State<AddAccountDialog> {
-  late String _harness = widget.harness ?? widget.accounts.providers.first;
+  late String _harness = widget.harness ?? widget.accounts.providers.firstOrNull ?? '';
   final _name = TextEditingController();
   Future<AccountCatalog>? _catalog;
   String? _method;

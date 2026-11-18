@@ -7,25 +7,7 @@
 /// itself: a layer reads them and may set its own from them.
 library;
 
-/// The harness ids and vendors dotagents' registry uses, by the id Canoa names a harness with. A harness with no vendor of
-/// its own has none, and then no `AGENTS_VENDOR`.
-const _harnesses = {
-  'claude-code': 'anthropic',
-  'codex': 'openai',
-  'gemini-cli': 'google',
-  'antigravity': 'google',
-  'pi': '',
-  'grok': 'xai',
-  'opencode': '',
-};
-
-/// The vendor-native variable a harness's running model is read from, in dotagents' registry.
-const _modelVariables = {
-  'claude-code': 'ANTHROPIC_MODEL',
-  'codex': 'OPENAI_MODEL',
-  'gemini-cli': 'GEMINI_MODEL',
-  'pi': 'PI_MODEL',
-};
+import '../providers/provider_catalog.dart';
 
 /// What identifies a session, as far as the host knows it. Each is set only when it has a value.
 final class SessionWho {
@@ -89,9 +71,10 @@ final class SessionVariables {
     }
 
     if (who.harness case final harness?) {
-      final variable = _modelVariables[harness];
+      final known = providerCatalog.byAos(harness);
+      final variable = known?.modelVariable;
       put('AGENTS_HARNESS', harness);
-      put('AGENTS_VENDOR', _harnesses[harness]);
+      put('AGENTS_VENDOR', known?.vendor);
       put('AGENT', harness);
       put(
         'AGENTS_MODEL',
@@ -131,34 +114,19 @@ final class SessionVariables {
   List<String> provides,
   String? harness,
 ) {
-  String? providerOf(String name) => switch (name) {
-    'claude-code' || 'anthropic-api' || 'claude' || 'anthropic' => 'anthropic',
-    'codex' || 'openai-api' || 'openai' => 'openai',
-    'grok' || 'xai-api' || 'xai' => 'xai',
-    'gemini-api' || 'antigravity' || 'gemini-cli' || 'google' => 'google',
-    'foundry-local' => 'microsoft-foundry',
-    _ => null,
-  };
+  // The vendor a name belongs to: an agent's id, a standard it owns, its AOS id or the vendor's own name.
+  String? providerOf(String name) => providerCatalog.resolve(name)?.vendor;
   if (kind == 'foundry-local') return ('local', 'microsoft-foundry');
-  const prefixes = {
-    'anthropic': 'anthropic',
-    'claude': 'anthropic',
-    'openai': 'openai',
-    'codex': 'openai',
-    'xai': 'xai',
-    'grok': 'xai',
-    'gemini': 'google',
-    'antigravity': 'google',
-  };
-  final byPrefix = prefixes.entries
-      .where((entry) => kind.startsWith(entry.key))
-      .map((entry) => entry.value)
-      .firstOrNull;
+  final byPrefix = [
+    for (final each in providerCatalog.providers)
+      if (each.vendor != null) ...[
+        if (kind.startsWith(each.vendor!)) each.vendor!,
+        if (kind.startsWith(each.id)) each.vendor!,
+      ],
+  ].firstOrNull;
   final provider =
       byPrefix ??
-      (kind == 'harness-login' && harness != null
-          ? providerOf(harness)
-          : null) ??
+      (kind == 'harness-login' && harness != null ? providerOf(harness) : null) ??
       provides.map(providerOf).nonNulls.firstOrNull;
   final category = kind == 'harness-login' || kind.endsWith('-login')
       ? 'subscription'

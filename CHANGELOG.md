@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **What the app lists of agents is what the host loaded.** Add account, Usage, the source picker, the profile report, a session's identity variables and the marks and names drawn everywhere come from the host's `providers/list`, which is made of the providers each loaded library offers: a new `agent_vendor` kind says an agent's name, mark, vendor, credential standards and reported names, and the `canoa-<vendor>` crates register their description beside the harness and account providers they carry, through the same registration a library from canoa.cfg uses (`bundled.rs` lists them). A host that loads no Claude has no Claude account type, mark, name or source anywhere, and an agent a library adds appears the same way as one Canoa carries. `looks/list` serves the looks of the loaded agents. A Pi offer now keeps the profile and the reach of a built-in source, as Claude's and Codex's do.
+
 ### Fixed
 - **A proxy variable you left empty no longer stops the host's proxy from reaching a program.** On Linux and macOS, where `https_proxy` and `HTTPS_PROXY` are two variables, an empty lower-case one that a program reads first meant "no proxy", so a program the host started went direct although the host had added its own `HTTPS_PROXY`; the empty one is now taken out of that program's environment when the host adds the proxy. A proxy you did set is still never replaced.
 - **Install from the Store installs the runtime an overlay needs.** On an overlay's card and in Effective setup the button opened the Runtimes page and left the install to a second visit; it now shows the host's plan for the runtime (what it downloads, from where, how it is checked), installs it on your yes, and the overlay's lines are read again. With several missing runtimes, Effective setup goes through each one's plan in turn.

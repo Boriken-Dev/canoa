@@ -1,3 +1,5 @@
+import '../providers/provider_catalog.dart';
+
 /// An agent this computer can run: a program speaking ACP on its standard streams, which canoa.cfg's `[agents.NAME]` names.
 final class AgentCommand {
   const AgentCommand({
@@ -17,14 +19,17 @@ final class AgentCommand {
   final String? usage;
 }
 
-/// The `usage` canoa.cfg's host entry for [command] gets: the command's own, else the one of the program the host knows the
-/// quota of, found by program name (without a directory or extension) and arguments, so `agy acp` typed by a person is
+/// The `usage` canoa.cfg's host entry for [command] gets: the command's own, else the one of the program a loaded agent says reports
+/// its quota, found by program name (without a directory or extension) and arguments, so `agy acp` typed by a person is
 /// Antigravity's.
 String? usageFor(AgentCommand command) {
   if (command.usage != null) return command.usage;
   String name(String program) =>
       program.split(RegExp(r'[\\/]')).last.toLowerCase().replaceFirst(RegExp(r'\.(exe|cmd|bat)$'), '');
-  if (name(command.program) == 'agy' && _sameArgs(const ['acp'], command.args)) return 'antigravity';
+  for (final provider in providerCatalog.providers) {
+    final launch = provider.launch;
+    if (launch != null && name(command.program) == name(launch.$1) && _sameArgs(launch.$2, command.args)) return launch.$3;
+  }
   return null;
 }
 

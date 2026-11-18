@@ -11,8 +11,8 @@ import 'package:canoa/accounts/accounts_section.dart';
 import 'package:canoa/chat/session_picker.dart' show machineLoginLabel;
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
+import 'package:canoa/providers/provider_catalog.dart';
 import 'package:canoa/session_store.dart';
-import 'package:canoa/sources/agent_marks.dart';
 import 'package:canoa/sources/source_icons.dart';
 import 'package:canoa/store/store_section.dart';
 import 'package:canoa/theme/look.dart';
@@ -34,7 +34,7 @@ String? _markAt(WidgetTester tester, Finder finder) {
 }
 
 AccountsController _controller(FakeAccountsHost host) =>
-    AccountsController(host: host, harnesses: const ['claude', 'codex', 'foundry'], config: () => const CanoaConfig(), change: (_) async {});
+    AccountsController(host: host, config: () => const CanoaConfig(), change: (_) async {});
 
 final _accounts = [
   account('work', kind: 'claude-login'),
@@ -66,8 +66,8 @@ void main() {
     expect(markIdOf(null), isNull);
     expect(accountMarkId('foundry', 'foundry-local'), isNull);
     expect(accountMarkId('custom', 'anthropic-api-key'), 'claude', reason: 'the kind is the standard when the harness has no mark');
-    for (final id in agentMarks.keys) {
-      expect(markIdOf(id), id);
+    for (final provider in providerCatalog.providers.where((each) => each.mark != null)) {
+      expect(markIdOf(provider.id), provider.id);
     }
   });
 
