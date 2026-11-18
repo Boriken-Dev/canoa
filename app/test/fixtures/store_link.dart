@@ -176,12 +176,26 @@ final class FakeStoreHost {
   Object? _answer(String method, Map<String, Object?> given) {
     // What the host grants this key is not a store request, so it is not in [calls].
     if (method == 'host/grants') return {'grants': grants};
-    if (method == 'foundry/models' || method == 'foundry/model') {
+    if (method == 'foundry/models' || method == 'foundry/model' || method == 'foundry/window') {
       calls.add(method);
       params.putIfAbsent(method, () => []).add(given);
       if (failures[method] case final failure?) throw failure;
       if (method == 'foundry/models') return {'installed': foundryInstalled, 'models': foundryModels};
       final model = foundryModels.firstWhere((each) => each['id'] == given['model']);
+      if (method == 'foundry/window') {
+        // The host keeps the number in canoa.cfg and lowers it to the model's own context length.
+        final window = Map<String, Object?>.from(model['window'] is Map ? model['window']! as Map<Object?, Object?> : const {});
+        var tokens = given['window'] as int?;
+        String? note;
+        final limit = window['context_length'] as int?;
+        if (tokens != null && limit != null && tokens > limit) {
+          note = '$tokens tokens is above the model\'s own context length: the window is $limit tokens';
+          tokens = limit;
+        }
+        window['chosen'] = tokens;
+        model['window'] = window;
+        return {'ok': true, 'model': given['model'], 'window': tokens, 'note': note};
+      }
       switch (given['action']) {
         case 'download':
           model['cached'] = true;

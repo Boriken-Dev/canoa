@@ -37,6 +37,13 @@ Future<void> _open(WidgetTester tester, ExtensionStoreItem item) async {
   await tester.pumpAndSettle();
 }
 
+/// A window tall enough for the model page's whole list, so its buttons can be tapped.
+void _tall(WidgetTester tester) {
+  tester.view.physicalSize = const Size(900, 2000);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+}
+
 void main() {
   test('the models are listed with where each stands, and a host without Foundry Local says to install it', () async {
     final host = FakeStoreHost([])
@@ -129,6 +136,7 @@ void main() {
   });
 
   testWidgets('a Whisper model has a page with Use as speech provider, which makes the provider and loads nothing', (tester) async {
+    _tall(tester);
     final host = FakeStoreHost([])
       ..foundryInstalled = true
       ..foundryModels = [_model('openai-whisper-tiny-generic-cpu', cached: true), _model('qwen3-14b-generic-gpu:2')];
@@ -136,7 +144,9 @@ void main() {
     final type = foundryModelsType(models);
     await tester.runAsync(type.load!);
     final items = type.items();
-    expect(items[1].details, isNull, reason: 'a chat model is not a speech model');
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => items[1].details!(context, null))));
+    expect(find.byKey(const Key('foundry-use-speech')), findsNothing, reason: 'a chat model is not a speech model, and its page has the window only');
+    expect(find.byKey(const Key('foundry-window')), findsOneWidget);
     await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => items[0].details!(context, null))));
     expect(find.byKey(const Key('foundry-speech-not-loaded')), findsOneWidget);
     expect(find.textContaining('never loads a model'), findsOneWidget);
@@ -181,6 +191,80 @@ void main() {
     await tester.pumpAndSettle();
     expect(host.params['foundry/model']!.single['action'], 'unload');
     expect(type.items().single.installed, isFalse);
+    models.dispose();
+  });
+
+  testWidgets('a model page shows the model\'s own window and keeps the one the person sets, lowered to its context length', (tester) async {
+    _tall(tester);
+    final downloaded = _model('qwen3-14b-generic-gpu:2', cached: true)..['window'] = {'context_length': 40960, 'max_length': 8192, 'chosen': null};
+    final host = FakeStoreHost([])
+      ..foundryInstalled = true
+      ..foundryModels = [downloaded];
+    final models = _models(host);
+    final type = foundryModelsType(models);
+    await tester.runAsync(type.load!);
+    final item = type.items().single;
+    expect(item.details, isNotNull, reason: 'the tile opens a page');
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => item.details!(context, null))));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('40960 tokens'), findsOneWidget);
+    expect(find.textContaining('8192 tokens'), findsOneWidget);
+    expect(find.textContaining('none: the model runs with its own'), findsOneWidget);
+    expect(find.byKey(const Key('foundry-window-engine')), findsOneWidget);
+    expect(find.textContaining('sdk engine'), findsWidgets);
+    expect(find.textContaining('does not use this setting'), findsOneWidget);
+    expect(tester.widget<OutlinedButton>(find.byKey(const Key('foundry-window-clear'))).onPressed, isNull, reason: 'there is nothing to remove');
+
+    await tester.enterText(find.byKey(const Key('foundry-window-field')), '16384');
+    await tester.tap(find.byKey(const Key('foundry-window-set')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(host.params['foundry/window']!.single, {'model': 'qwen3-14b-generic-gpu:2', 'window': 16384});
+    expect(find.text('Kept: 16384 tokens.'), findsOneWidget);
+    expect(find.textContaining('Your setting: 16384 tokens'), findsOneWidget);
+    expect(models.models.single.chosenWindow, 16384, reason: 'the list was read again');
+
+    await tester.enterText(find.byKey(const Key('foundry-window-field')), '100000');
+    await tester.tap(find.byKey(const Key('foundry-window-set')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('above the model\'s own context length: the window is 40960 tokens'), findsOneWidget);
+    expect(models.models.single.chosenWindow, 40960);
+
+    await tester.tap(find.byKey(const Key('foundry-window-clear')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(host.params['foundry/window']!.last, {'model': 'qwen3-14b-generic-gpu:2', 'window': null});
+    expect(models.models.single.chosenWindow, isNull);
+    models.dispose();
+  });
+
+  testWidgets('a window that is not a number of tokens is not sent, and a refusal is shown as the host worded it', (tester) async {
+    _tall(tester);
+    final host = FakeStoreHost([])
+      ..foundryInstalled = true
+      ..foundryModels = [_model('m')];
+    final models = _models(host);
+    final type = foundryModelsType(models);
+    await tester.runAsync(type.load!);
+    final item = type.items().single;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) => item.details!(context, null))));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('foundry-window-unknown')), findsOneWidget, reason: 'a model not downloaded has no numbers of its own');
+    for (final bad in ['', '0', 'many', '-3']) {
+      await tester.enterText(find.byKey(const Key('foundry-window-field')), bad);
+      await tester.tap(find.byKey(const Key('foundry-window-set')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('foundry-window-failed')), findsOneWidget, reason: 'for "$bad"');
+    }
+    expect(host.params['foundry/window'], isNull);
+
+    host.failures['foundry/window'] = ControlFailed(-32002, 'this host was not started with a canoa.cfg a page may edit');
+    await tester.enterText(find.byKey(const Key('foundry-window-field')), '4096');
+    await tester.tap(find.byKey(const Key('foundry-window-set')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    expect(find.text('this host was not started with a canoa.cfg a page may edit'), findsOneWidget);
     models.dispose();
   });
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../desktop/control_client.dart';
 import '../selectable.dart';
+import 'entry_details.dart';
 import 'programs_view.dart' show hostWords;
 import 'store_extension.dart';
 
@@ -23,7 +24,19 @@ const Duration modelWait = Duration(hours: 4, minutes: 10);
 
 /// One model, as the host listed it.
 final class FoundryModel {
-  const FoundryModel({required this.id, this.alias, this.task, this.device, this.sizeMb, this.description = '', this.cached = false, this.loaded = false});
+  const FoundryModel({
+    required this.id,
+    this.alias,
+    this.task,
+    this.device,
+    this.sizeMb,
+    this.description = '',
+    this.cached = false,
+    this.loaded = false,
+    this.contextLength,
+    this.maxLength,
+    this.chosenWindow,
+  });
 
   factory FoundryModel.fromJson(Map<Object?, Object?> json) => FoundryModel(
     id: json['id'] as String,
@@ -34,7 +47,12 @@ final class FoundryModel {
     description: json['description'] is String ? json['description'] as String : '',
     cached: json['cached'] == true,
     loaded: json['loaded'] == true,
+    contextLength: _tokens(json['window'], 'context_length'),
+    maxLength: _tokens(json['window'], 'max_length'),
+    chosenWindow: _tokens(json['window'], 'chosen'),
   );
+
+  static int? _tokens(Object? window, String key) => window is Map && window[key] is num ? (window[key] as num).toInt() : null;
 
   /// The name the command line takes.
   final String id;
@@ -49,6 +67,13 @@ final class FoundryModel {
 
   /// Whether Canoa can use it to turn speech into text: Foundry Local transcribes with Whisper models, which take a file.
   bool get speech => '$id ${alias ?? ''}'.toLowerCase().contains('whisper');
+
+  /// The window the model's own files say, once it is downloaded: the most it was built for (`context_length`) and the most a
+  /// prompt and its answer take together as it is cached (`max_length`).
+  final int? contextLength, maxLength;
+
+  /// The window the person set for it in canoa.cfg, or null when they set none.
+  final int? chosenWindow;
 
   /// What the row says of the model: where it stands, then what it is.
   String get summary => [loaded ? 'Loaded' : cached ? 'Downloaded' : 'Not downloaded', if (description.isNotEmpty) description].join(' · ');
@@ -105,6 +130,18 @@ class FoundryModels extends ChangeNotifier {
     return answer is Map && answer['name'] is String ? answer['name'] as String : 'foundry';
   }
 
+  /// Sets the window [model] is run with to [tokens], or takes the setting away with null. Returns the host's note when it lowered
+  /// the number to the model's own context length; throws what the host refuses with. The list is read again after.
+  Future<String?> setWindow(String model, int? tokens) async {
+    final client = await _control();
+    try {
+      final answer = await client.call('foundry/window', {'model': model, 'window': tokens}, null, const Duration(seconds: 30));
+      return answer is Map && answer['note'] is String ? answer['note'] as String : null;
+    } finally {
+      await refresh();
+    }
+  }
+
   /// Asks the host to `download`, `load` or `unload` [model], on a link of its own since a download takes long; throws what it
   /// refuses with. The list is read again after, whatever came of it.
   Future<void> run(String model, String action) async {
@@ -146,7 +183,7 @@ ExtensionStoreType foundryModelsType(FoundryModels models) => ExtensionStoreType
           tags: [?model.task, ?model.device],
           installed: model.loaded,
           install: (context) => _choose(context, models, model),
-          details: model.speech ? (context, config) => FoundrySpeechPage(models: models, model: model) : null,
+          details: (context, config) => FoundryModelPage(models: models, id: model.id),
         ),
     ];
   },
@@ -207,76 +244,215 @@ Future<void> _choose(BuildContext context, FoundryModels models, FoundryModel mo
   }
 }
 
-/// The page of a Whisper model: what Foundry Local says of it and "Use as speech provider", which makes the host's provider that
-/// sends dictation to the model through Foundry Local's service. The audio stays on the host's computer.
-class FoundrySpeechPage extends StatefulWidget {
-  const FoundrySpeechPage({super.key, required this.models, required this.model});
+/// One model's page: what Foundry Local says of it, the window its own files give it and the window the person may set instead, and,
+/// for a Whisper model, "Use as speech provider", which makes the host's provider that sends dictation to the model.
+/// The setting is kept in canoa.cfg by the host and is used when an account runs the model with the sdk engine, which makes
+/// Canoa's own folder for it; Foundry Local's cache and the service's run of the model are not changed.
+class FoundryModelPage extends StatefulWidget {
+  const FoundryModelPage({super.key, required this.models, required this.id});
 
   final FoundryModels models;
-  final FoundryModel model;
+  final String id;
 
   @override
-  State<FoundrySpeechPage> createState() => _FoundrySpeechPageState();
+  State<FoundryModelPage> createState() => _FoundryModelPageState();
 }
 
-class _FoundrySpeechPageState extends State<FoundrySpeechPage> {
-  String? _made;
-  String? _problem;
+class _FoundryModelPageState extends State<FoundryModelPage> {
+  final _field = TextEditingController();
+  int? _shown;
+  String? _said;
+  String? _failed;
   bool _busy = false;
+  String? _made;
+  String? _speechProblem;
+
+  @override
+  void dispose() {
+    _field.dispose();
+    super.dispose();
+  }
+
+  FoundryModel? get _model {
+    for (final each in widget.models.models) {
+      if (each.id == widget.id) return each;
+    }
+    return null;
+  }
+
+  Future<void> _set(int? tokens) async {
+    setState(() {
+      _busy = true;
+      _said = null;
+      _failed = null;
+    });
+    try {
+      final note = await widget.models.setWindow(widget.id, tokens);
+      if (!mounted) return;
+      setState(() => _said = note ?? (tokens == null ? 'The setting is removed: the model runs with its own window.' : 'Kept: $tokens tokens.'));
+    } on Object catch (error) {
+      if (mounted) setState(() => _failed = hostWords(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   Future<void> _use() async {
     setState(() {
       _busy = true;
-      _problem = null;
+      _speechProblem = null;
     });
     try {
-      final name = await widget.models.useForSpeech(widget.model.id);
+      final name = await widget.models.useForSpeech(widget.id);
       if (mounted) setState(() => _made = name);
     } on Object catch (error) {
-      if (mounted) setState(() => _problem = hostWords(error));
+      if (mounted) setState(() => _speechProblem = hostWords(error));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    final model = widget.model;
-    final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: AppBar(title: Text(model.id)),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text(model.summary, key: const Key('foundry-speech-summary')),
-          const SizedBox(height: 12),
-          const Text(
-            'Dictation can send its audio to this model through the Foundry Local service on the host: the audio is written to a temporary file there, '
-            'handed to the service and removed afterwards, and nothing is sent to another service. Canoa never loads a model for you, so load it '
-            'with + on the list first.',
-          ),
-          if (!model.loaded)
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.models,
+    builder: (context, _) {
+      final model = _model;
+      if (model == null) {
+        return Scaffold(
+          appBar: AppBar(title: const Text('Model')),
+          body: const Padding(padding: EdgeInsets.all(16), child: Text('Foundry Local does not list this model now.', key: Key('foundry-model-gone'))),
+        );
+      }
+      final chosen = model.chosenWindow;
+      if (_shown != chosen) {
+        _shown = chosen;
+        _field.text = chosen == null ? '' : '$chosen';
+      }
+      String tokens(int? value) => value == null ? 'not known' : '$value tokens';
+      final own = model.contextLength != null || model.maxLength != null;
+      return EntryDetails(
+        key: Key('foundry-model-${model.id}'),
+        title: model.id,
+        leading: const Icon(Icons.memory, size: 56),
+        from: 'Foundry Local',
+        summary: model.summary,
+        state: model.loaded ? 'Loaded' : model.cached ? 'Downloaded' : null,
+        overview: {
+          'Alias': ?model.alias,
+          'Task': ?model.task,
+          'Device': ?model.device,
+        },
+        contents: false,
+        sections: [
+          if (model.speech)
+            DetailSection(key: const Key('foundry-speech'), title: 'Speech to text', children: [
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text(
+                  'Dictation can send its audio to this model through the Foundry Local service on the host: the audio is written to a temporary file there, '
+                  'handed to the service and removed afterwards, and nothing is sent to another service. Canoa never loads a model for you, so load it '
+                  'with + on the list first.',
+                ),
+              ),
+              if (!model.loaded)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'It is not loaded now.',
+                    key: const Key('foundry-speech-not-loaded'),
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton(key: const Key('foundry-use-speech'), onPressed: _busy ? null : () => unawaited(_use()), child: const Text('Use as speech provider')),
+                ),
+              ),
+              if (_made case final made?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text('Added as the provider "$made". Choose it in Settings, Voice.', key: const Key('foundry-speech-done')),
+                ),
+              if (_speechProblem case final problem?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(problem, key: const Key('foundry-speech-failed'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ),
+            ]),
+          DetailSection(key: const Key('foundry-window'), title: 'Window', children: [
+            if (!own)
+              Text(
+                model.cached ? 'The model\'s own files did not say.' : 'Not downloaded: its own window is read once it is.',
+                key: const Key('foundry-window-unknown'),
+              )
+            else ...[
+              DetailField(label: 'Most the model takes (context length)', value: tokens(model.contextLength)),
+              DetailField(label: 'Prompt and answer together, as cached (max length)', value: tokens(model.maxLength)),
+            ],
+            DetailField(label: 'Your setting', value: chosen == null ? 'none: the model runs with its own' : tokens(chosen)),
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                'A longer window lets a longer prompt through and keeps more memory for the text so far; a shorter one keeps less. It cannot go above the model\'s context length.',
+                key: Key('foundry-window-about'),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text(
+                'It applies when an account runs this model with the sdk engine: Canoa then makes a folder of its own for the model, with links to Foundry Local\'s files and its own configuration, so Foundry Local\'s cache is never changed. It takes effect the next time the account\'s gateway starts. The Foundry Local service engine runs the model as it is cached and does not use this setting.',
+                key: Key('foundry-window-engine'),
+              ),
+            ),
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Text('It is not loaded now.', key: const Key('foundry-speech-not-loaded'), style: TextStyle(color: scheme.onSurfaceVariant)),
+              child: Row(children: [
+                SizedBox(
+                  width: 160,
+                  child: TextField(
+                    key: const Key('foundry-window-field'),
+                    controller: _field,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Window in tokens', isDense: true),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  key: const Key('foundry-window-set'),
+                  onPressed: _busy
+                      ? null
+                      : () {
+                          final tokens = int.tryParse(_field.text.trim());
+                          if (tokens == null || tokens < 1) {
+                            setState(() {
+                              _said = null;
+                              _failed = 'A window is a whole number of tokens, at least 1.';
+                            });
+                            return;
+                          }
+                          unawaited(_set(tokens));
+                        },
+                  child: const Text('Set'),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  key: const Key('foundry-window-clear'),
+                  onPressed: _busy || chosen == null ? null : () => unawaited(_set(null)),
+                  child: const Text('Remove setting'),
+                ),
+              ]),
             ),
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton(key: const Key('foundry-use-speech'), onPressed: _busy ? null : () => unawaited(_use()), child: const Text('Use as speech provider')),
-          ),
-          if (_made case final made?)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text('Added as the provider "$made". Choose it in Settings, Voice.', key: const Key('foundry-speech-done')),
-            ),
-          if (_problem case final problem?)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text(problem, key: const Key('foundry-speech-failed'), style: TextStyle(color: scheme.error)),
-            ),
+            if (_said != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(_said!, key: const Key('foundry-window-said'))),
+            if (_failed != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(_failed!, key: const Key('foundry-window-failed'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+          ]),
         ],
-      ),
-    );
-  }
+      );
+    },
+  );
 }
