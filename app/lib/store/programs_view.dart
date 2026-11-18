@@ -213,6 +213,25 @@ Future<bool> runProgramAction(BuildContext context, ProgramStores programs, Prog
   }
 }
 
+/// Installs the runtime [provider] that the host's Store lists for a program an overlay needs: the host's plan is shown for the
+/// person to confirm, then run with its progress. Says so when the host lists no such runtime now. The result is whether it was
+/// installed, so a caller that asks the host what the overlay needs again knows to.
+Future<bool> installRuntime(BuildContext context, ProgramStores programs, String provider) async {
+  try {
+    await programs.ensure();
+  } on Object catch (error) {
+    if (context.mounted) await _showError(context, 'Install $provider', hostWords(error));
+    return false;
+  }
+  final status = programs.status(provider);
+  if (status == null) {
+    if (context.mounted) await _showError(context, 'Install $provider', 'The host does not list this runtime now.');
+    return false;
+  }
+  if (!context.mounted) return false;
+  return runProgramAction(context, programs, status, status.hasManaged ? 'update' : 'install');
+}
+
 /// Puts the host's copy of [status]'s program back to the version before, after the person confirms.
 Future<void> rollBack(BuildContext context, ProgramStores programs, ProgramStatus status) async {
   final title = status.info.title;

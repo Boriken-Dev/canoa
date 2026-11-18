@@ -110,7 +110,7 @@ import 'served/control_overlays.dart' show ControlOverlayManager;
 import 'served/control_profile_home.dart' show ControlProfileHome;
 import 'store/control_data.dart';
 import 'store/overlay_needs.dart';
-import 'store/store_runtimes.dart' show runtimesTypeId;
+import 'store/programs_view.dart' show installRuntime;
 import 'profile/profile_home_platform.dart';
 import 'acp/usage_wire.dart' show ProfileApprover, noApproval;
 import 'profile/approval_dialog.dart';
@@ -979,6 +979,7 @@ class _CanoaAppState extends State<CanoaApp> {
     agents: _profileAgents,
     programs: _programs,
     extensionTypes: _storeTypes(),
+    runtimes: _programs == null ? null : _extensionsHeld?.runtimes,
     // The host reads registries and looks programs up, for a page and the desktop alike.
     fetchRegistry: _control == null ? null : controlRegistryFetch(_control),
     findProgram: _control == null ? null : controlFindProgram(_control),
@@ -2465,10 +2466,15 @@ class _CanoaAppState extends State<CanoaApp> {
           },
           unsupported: session.presetUnsupported,
           overlayNeeds: _control == null ? null : controlOverlayNeeds(_control),
-          onInstallRuntime: () {
-            Navigator.of(above).pop();
-            unawaited(_showLoadout().then((_) => _storeSelection.select(runtimesTypeId)));
-          },
+          onInstallRuntime: _programs == null
+              ? null
+              : (providers) async {
+                  final runtimes = _extensionsHeld?.runtimes;
+                  if (runtimes == null) return;
+                  for (final provider in providers) {
+                    if (!above.mounted || !await installRuntime(above, runtimes, provider)) break;
+                  }
+                },
         ),
       ),
     ));

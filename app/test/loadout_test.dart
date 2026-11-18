@@ -7,6 +7,7 @@ import 'dart:convert';
 
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/store/overlay_needs.dart';
+import 'package:canoa/store/programs.dart' show ProgramStores;
 import 'package:canoa/store/store_section.dart';
 import 'package:canoa/loadout/mcp_registry.dart' show RegistryRefusal;
 import 'package:canoa/loadout/loadout_controller.dart' show knownCatalogs;
@@ -15,6 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/catalog_standin.dart';
 import 'fixtures/store_fixtures.dart';
+import 'fixtures/store_link.dart';
 import 'mcp_registry_test.dart' show npmServer, page;
 import 'skills_from_source_test.dart' show pdfFiles, pinOf, skillsHost;
 
@@ -73,7 +75,7 @@ void main() {
 
   Future<void> open(WidgetTester tester, {String text = withCatalog, Size size = const Size(1280, 2000),
       List<String> agents = const ['Claude', 'Codex'], Future<String?> Function(String)? findProgram,
-      Future<String> Function(Uri)? fetch, OverlayNeeds? overlayNeeds}) async {
+      Future<String> Function(Uri)? fetch, OverlayNeeds? overlayNeeds, ProgramStores? runtimes}) async {
     await tester.binding.setSurfaceSize(size);
     addTearDown(() => tester.binding.setSurfaceSize(null));
     config = CanoaConfig.parse(text);
@@ -91,6 +93,7 @@ void main() {
         fetchRegistry: fetch ?? (uri) async => registryAnswer,
         findProgram: findProgram ?? (program) async => '/usr/bin/$program',
         overlayNeeds: overlayNeeds,
+        runtimes: runtimes,
       ),
     ));
     await tester.pumpAndSettle();
@@ -183,6 +186,65 @@ void main() {
     expect(find.byKey(const Key('overlay-needs-install-review-null')), findsNothing);
     // Not applied by Canoa no longer lists what the host checks.
     expect(find.descendant(of: card, matching: find.textContaining('runtime')), findsNothing);
+  });
+
+  testWidgets("Install from the Store shows the host's plan for the runtime, installs it on the yes, and the card's lines refresh", (tester) async {
+    final host = FakeStoreHost([
+      FakeStore(
+        'python_store',
+        title: 'Python',
+        runtime: true,
+        commands: ['python', 'python3'],
+        latest: '3.13.1',
+        plan: {
+          'install': planOf('install', '3.13.1', bytes: 40 * 1024 * 1024, downloads: [
+            {'url': 'https://example.invalid/cpython-3.13.1.tar.gz', 'bytes': 40 * 1024 * 1024, 'check': {'kind': 'sha256', 'value': 'c0' * 32}},
+          ]),
+        },
+      ),
+    ]);
+    var found = false;
+    host.afterApply = (store, plan) {
+      store.copies = [copyOf('3.13.1')];
+      found = true;
+    };
+    final runtimes = host.programs(kind: 'runtimes');
+    addTearDown(runtimes.dispose);
+    await tester.runAsync(runtimes.refresh);
+    await open(tester, runtimes: runtimes, overlayNeeds: (name) async => name != 'review'
+        ? const []
+        : [
+            found
+                ? const NeedLine(key: 'runtime.python', met: true, how: 'found /programs/python/bin/python')
+                : const NeedLine(key: 'runtime.python', met: false, how: "Python 3.11 or later is needed; the Store's Python installs it", offer: 'python_store'),
+          ]);
+    await installReview(tester);
+    await tapKey(tester, 'overlays-installed');
+    final card = find.byKey(const Key('overlay-installed-review'));
+    expect(find.descendant(of: card, matching: find.textContaining('Needs python:')), findsOneWidget);
+
+    // The button asks the host for its plan and shows it; a no installs nothing and the card is as it was.
+    await tapKey(tester, 'overlay-needs-install-review-python_store');
+    expect(host.params['store/plan']!.last, containsPair('action', 'install'));
+    expect(host.params['store/plan']!.last, containsPair('provider', 'python_store'));
+    expect(find.byKey(const Key('plan-confirm')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('plan-cancel')));
+    await tester.pumpAndSettle();
+    expect(host.calls.where((call) => call.startsWith('store/apply')), isEmpty);
+    expect(find.descendant(of: card, matching: find.textContaining('Needs python:')), findsOneWidget);
+
+    // A yes runs the plan, and the host is asked again what the overlay needs.
+    await tapKey(tester, 'overlay-needs-install-review-python_store');
+    await tester.tap(find.byKey(const Key('plan-confirm')));
+    for (var i = 0; i < 40 && find.byKey(const Key('program-done')).evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    await tester.tap(find.byKey(const Key('program-close')));
+    await tester.pumpAndSettle();
+    expect(host.calls.where((call) => call == 'store/apply python_store'), hasLength(1));
+    expect(find.descendant(of: card, matching: find.textContaining('Needs python:')), findsNothing);
+    expect(find.descendant(of: card, matching: find.text('Found on this computer: python')), findsOneWidget);
+    expect(find.byKey(const Key('overlay-needs-install-review-python_store')), findsNothing);
   });
 
   testWidgets('an overlay whose needs are all met, or that the host cannot ask about, offers nothing to install', (tester) async {

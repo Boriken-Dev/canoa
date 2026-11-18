@@ -33,7 +33,7 @@ MemoryOverlays _installed() {
   return overlays;
 }
 
-Future<void> _open(WidgetTester tester, {OverlayNeeds? needs, void Function()? onInstall}) async {
+Future<void> _open(WidgetTester tester, {OverlayNeeds? needs, Future<void> Function(List<String> providers)? onInstall}) async {
   await tester.binding.setSurfaceSize(const Size(900, 1400));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(MaterialApp(
@@ -56,36 +56,43 @@ Future<void> _open(WidgetTester tester, {OverlayNeeds? needs, void Function()? o
 
 void main() {
   testWidgets('a program an overlay needs and this computer lacks is listed, with the Store to install it from', (tester) async {
-    var shown = 0;
+    final asked = <List<String>>[];
     await _open(
       tester,
       needs: (name) async => name == 'review'
-          ? const [
-              NeedLine(key: 'runtime.commands: git', met: true, how: 'found /usr/bin/git'),
-              NeedLine(key: 'runtime.python', met: false, how: "Python 3.11 or later is needed; the Store's Python installs it", offer: 'python_store'),
+          ? [
+              const NeedLine(key: 'runtime.commands: git', met: true, how: 'found /usr/bin/git'),
+              if (asked.isEmpty)
+                const NeedLine(key: 'runtime.python', met: false, how: "Python 3.11 or later is needed; the Store's Python installs it", offer: 'python_store')
+              else
+                const NeedLine(key: 'runtime.python', met: true, how: 'found /programs/python/bin/python'),
             ]
           : const [],
-      onInstall: () => shown++,
+      onInstall: (providers) async => asked.add(providers),
     );
     expect(find.byKey(const Key('effective-needs-review-runtime.python')), findsOneWidget);
     expect(find.textContaining("overlay:review: needs python: Python 3.11 or later is needed"), findsOneWidget);
     expect(find.byKey(const Key('effective-needs-review-runtime.commands: git')), findsNothing, reason: 'what is met is not a need');
     await tester.tap(find.byKey(const Key('effective-needs-install')));
-    expect(shown, 1);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(asked, [['python_store']], reason: 'the runtime the host offers is the one installed');
+    expect(find.byKey(const Key('effective-needs-review-runtime.python')), findsNothing, reason: 'the host is asked again once it is installed');
+    expect(find.byKey(const Key('effective-needs-install')), findsNothing);
   });
 
   testWidgets('a need no Store runtime provides offers nothing to install', (tester) async {
     await _open(
       tester,
       needs: (_) async => const [NeedLine(key: 'runtime.commands: canoa-absent', met: false, how: 'canoa-absent is needed and is not on the PATH')],
-      onInstall: () {},
+      onInstall: (_) async {},
     );
     expect(find.byKey(const Key('effective-needs-review-runtime.commands: canoa-absent')), findsOneWidget);
     expect(find.byKey(const Key('effective-needs-install')), findsNothing);
   });
 
   testWidgets('a host that says nothing of an overlay lists no need for it', (tester) async {
-    await _open(tester, onInstall: () {});
+    await _open(tester, onInstall: (_) async {});
     expect(find.textContaining('needs '), findsNothing);
     expect(find.byKey(const Key('effective-needs-install')), findsNothing);
   });

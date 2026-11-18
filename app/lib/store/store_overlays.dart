@@ -11,6 +11,8 @@ import '../profile/profiles_panel.dart' show OverlayIcon, OverlayUpdateDialog, v
 import '../selectable.dart';
 import 'overlay_needs.dart' show NeedLine;
 import 'overlay_page.dart' show OverlayPage, oneLine;
+import 'programs.dart' show ProgramStores;
+import 'programs_view.dart' show installRuntime;
 import 'store.dart';
 import 'store_banner.dart';
 import 'store_cards.dart';
@@ -21,13 +23,17 @@ import 'store_view.dart';
 
 /// The Overlays type: the overlays canoa.cfg names, and the overlays the catalogs list.
 class OverlaysBody extends StatefulWidget {
-  const OverlaysBody({super.key, required this.controller, required this.view, this.showType});
+  const OverlaysBody({super.key, required this.controller, required this.view, this.showType, this.runtimes});
 
   final LoadoutController controller;
   final StoreView view;
 
-  /// Shows another type of the Store by its id, for an overlay that needs a runtime the Runtimes type installs.
+  /// Shows another type of the Store by its id, for an overlay that needs a runtime when there are no [runtimes] to install it from.
   final void Function(String id)? showType;
+
+  /// The runtimes the host's Store installs, for a program an overlay needs and this computer lacks; none where the host does not
+  /// grant installing programs.
+  final ProgramStores? runtimes;
 
   @override
   State<OverlaysBody> createState() => _OverlaysBodyState();
@@ -188,7 +194,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
           for (final offer in {for (final line in unmet) ?line.offer})
             TextButton(
               key: Key('overlay-needs-install-$name-$offer'),
-              onPressed: widget.showType == null ? null : () => widget.showType!(runtimesTypeId),
+              onPressed: widget.runtimes == null && widget.showType == null ? null : () => unawaited(_installRuntime(offer)),
               child: const Text('Install from the Store'),
             ),
           if (unmet.any((line) => line.runs != null) && c.home != null)
@@ -212,6 +218,18 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
         ]),
       ]),
     );
+  }
+
+  /// Shows the host's plan for the runtime [offer] and installs it on the yes, then asks the host what the overlays need again. With
+  /// no runtimes to install from, shows the Runtimes type.
+  Future<void> _installRuntime(String offer) async {
+    final runtimes = widget.runtimes;
+    if (runtimes == null) {
+      widget.showType?.call(runtimesTypeId);
+      return;
+    }
+    if (!await installRuntime(context, runtimes, offer)) return;
+    await c.refresh();
   }
 
   static String _short(String digest) => digest.length > 19 ? '${digest.substring(0, 19)}…' : digest;

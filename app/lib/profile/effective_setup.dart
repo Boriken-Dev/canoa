@@ -3,6 +3,8 @@
 /// and the choices the agent cannot take, each with why. It reads the layers as Settings, Profiles does and shows them the same way.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
@@ -50,8 +52,9 @@ class EffectiveSetup extends StatefulWidget {
   /// Asks the host what an installed overlay needs of this computer; none where the app has no host.
   final OverlayNeeds? overlayNeeds;
 
-  /// Shows the Store's Runtimes, for a program an overlay needs and this computer lacks.
-  final void Function()? onInstallRuntime;
+  /// Installs the Store runtimes (provider ids) that give a program an overlay needs and this computer lacks, one after another,
+  /// each once the person has confirmed the host's plan for it; none where the host does not grant installing programs.
+  final Future<void> Function(List<String> providers)? onInstallRuntime;
 
   @override
   State<EffectiveSetup> createState() => _EffectiveSetupState();
@@ -63,6 +66,9 @@ class _EffectiveSetupState extends State<EffectiveSetup> {
 
   /// What each overlay of the setup needs of this computer, by name.
   Map<String, List<NeedLine>> _needs = const {};
+
+  /// The overlays whose needs are asked, in the order of the layers.
+  List<String> _overlays = const [];
 
   @override
   void initState() {
@@ -91,11 +97,26 @@ class _EffectiveSetupState extends State<EffectiveSetup> {
       return;
     }
     if (mounted) setState(() => _layers = found);
+    _overlays = [for (final layer in found.layers) if (layer.id.kind == LayerKind.overlay) layer.id.name];
+    await _loadNeeds();
+  }
+
+  /// Asks the host again what each overlay needs.
+  Future<void> _loadNeeds() async {
     final ask = widget.overlayNeeds;
     if (ask == null) return;
-    final names = [for (final layer in found.layers) if (layer.id.kind == LayerKind.overlay) layer.id.name];
+    final names = _overlays;
     final lines = await Future.wait([for (final name in names) ask(name)]);
     if (mounted) setState(() => _needs = {for (var i = 0; i < names.length; i++) names[i]: lines[i]});
+  }
+
+  /// Installs what the host's Store offers for each unmet need, then reads the needs again.
+  Future<void> _installRuntimes() async {
+    final install = widget.onInstallRuntime;
+    if (install == null) return;
+    final offers = {for (final lines in _needs.values) for (final line in lines) if (!line.met) ?line.offer}.toList();
+    await install(offers);
+    await _loadNeeds();
   }
 
   /// The choices the agent cannot take: what the profile asked and the agent lacks, then each effective value the agent lists
@@ -151,7 +172,7 @@ class _EffectiveSetupState extends State<EffectiveSetup> {
             alignment: Alignment.centerLeft,
             child: TextButton(
               key: const Key('effective-needs-install'),
-              onPressed: widget.onInstallRuntime,
+              onPressed: () => unawaited(_installRuntimes()),
               child: const Text('Install from the Store'),
             ),
           ),

@@ -117,6 +117,9 @@ class StoreExtensions extends ChangeNotifier {
   Future<void>? _asking;
   final _held = <ProgramStores>[];
 
+  /// The runtimes the host's Store keeps, which the Runtimes type lists and an overlay's unmet need is installed from.
+  ProgramStores get runtimes => _runtimes;
+
   /// Runtimes first, then Foundry Local's models and the Extensions the catalogs list, then what extensions add, in the host's order.
   List<ExtensionStoreType> get types => _types;
 

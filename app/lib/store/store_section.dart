@@ -49,6 +49,7 @@ class StoreSection extends StatefulWidget {
     this.contentsReader,
     this.readAhead = true,
     this.extensionTypes = const [],
+    this.runtimes,
   });
 
   /// Whether the page is a section of the shell, which never pops: what it changes is saved as it is changed.
@@ -94,6 +95,10 @@ class StoreSection extends StatefulWidget {
 
   /// The store types extensions add, listed after the built-in ones.
   final List<ExtensionStoreType> extensionTypes;
+
+  /// The runtimes the host's Store installs, which an overlay's unmet need is installed from; none where the host does not grant
+  /// installing programs.
+  final ProgramStores? runtimes;
 
   @override
   State<StoreSection> createState() => StoreSectionState();
@@ -423,7 +428,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
                 for (final each in types)
                   switch (_builtin(each)) {
                     StoreType.agents => AgentsBody(programs: widget.programs!, view: viewOf(each)),
-                    StoreType.overlays => OverlaysBody(controller: controller, view: viewOf(each), showType: _showType),
+                    StoreType.overlays => OverlaysBody(controller: controller, view: viewOf(each), showType: _showType, runtimes: widget.runtimes),
                     StoreType.skills => SkillsBody(controller: controller, view: viewOf(each)),
                     StoreType.mcps => McpsBody(controller: controller, view: viewOf(each)),
                     null => ExtensionBody(type: _extension(each)!, view: viewOf(each), config: controller.config),

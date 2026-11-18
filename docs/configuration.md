@@ -425,8 +425,9 @@ What an overlay needs of the computer it runs on (`runtime`: the operating syste
 minimum version, commands, and the interpreters its scripts name) is checked when a session starts, against the `PATH` the
 session starts from and then the Store's runtimes. A satisfied need counts as applied; a missing one is listed as `off`
 with why and the Store runtime that installs it (Runtimes: Python, Node.js, Git Bash, PowerShell), and an installed
-overlay's card in the Store and **Effective setup** show it with **Install from the Store**. Nothing is installed without
-you, and an overlay that needs a program the computer lacks still applies.
+overlay's card in the Store and **Effective setup** show it with **Install from the Store**, which shows the host's plan
+for that runtime (what it downloads, from where, how it is checked) and installs it on your yes, then asks again what the
+overlay needs. Nothing is installed without you, and an overlay that needs a program the computer lacks still applies.
 
 An overlay's dependencies and setup are prepared when you install or sync it, on the yes you give on its page, which lists
 what will run first: each dependency file (`lib/python/requirements.txt`, `lib/node/package.json`, or the ones `runtime`
