@@ -88,6 +88,10 @@ fn sdk_engine(settings: &Foundry, copies: Option<&Path>) -> Result<Arc<dyn Engin
             tracing::warn!("{}: {note}", settings.model);
         }
     }
+    // The model lives in this process, so naming this engine is the person's choice to load it here; it is unloaded with the engine.
+    engine
+        .load()
+        .map_err(|error| format!("{} could not be loaded: {error}", settings.model))?;
     Ok(Arc::new(engine) as Arc<dyn Engine>)
 }
 

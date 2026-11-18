@@ -76,12 +76,12 @@ pub mod daemon {      // feature `daemon`
     impl DaemonEngine { pub fn open(config: &DaemonConfig, home: &Path) -> Result<Self, EngineError>; }   // finds the service, checks it lists the model; loads nothing
 }
 pub mod sdk {         // feature `sdk`
-    #[non_exhaustive] pub struct SdkConfig { pub model: String, pub library: Option<PathBuf>, pub window: Option<SdkWindow> }
+    #[non_exhaustive] pub struct SdkConfig { pub model: String, pub library: Option<PathBuf>, pub cache: Option<PathBuf>, pub window: Option<SdkWindow> }
     #[non_exhaustive] pub struct SdkWindow { pub tokens: u64, pub folder: PathBuf }   // SdkWindow::new(tokens, folder)
     pub struct SdkEngine;
     impl SdkEngine {
         pub fn open(config: &SdkConfig) -> Result<Self, EngineError>;   // with a window: makes the adjusted copy and registers it in the SDK's local catalog; the model must be downloaded
-        pub fn load(&self) -> Result<(), EngineError>; pub fn unload(&self) -> Result<(), EngineError>;
+        pub fn load(&self) -> Result<(), EngineError>; /* registers the execution providers, then loads */ pub fn unload(&self) -> Result<(), EngineError>;
         pub fn adjusted(&self) -> Option<&window::Adjusted>;
     }
 }
@@ -157,3 +157,5 @@ pub mod account {
 - The Foundry Local service's model list says every Qwen calls tools; only `qwen3-14b-generic-gpu:2` returned structured calls when measured, so `DaemonEngine` offers tools and lets the service refuse, in its own words (`EngineError::Refused`).
 - The service's streaming delivers no tokens in 0.14.0: `DaemonEngine` forces `stream: false`, and a request abandoned mid-stream leaves the model held.
 - The SDK's native library cannot be loaded from the installed Windows package (access is denied to a program outside it): `SdkConfig::library` names a copy, or `FOUNDRY_LOCAL_LIB_DIR` does. With the SDK pointed at a running service, its catalog is empty, so `SdkEngine` always runs in-process.
+- The SDK keeps its own folder of models unless told: `SdkConfig::cache` (default: Foundry Local's `.foundry/cache/models` in the person's home, when it exists) is what lets it find a model the service downloaded. Without it the model is "not found at path" when loaded.
+- A model needs its execution provider registered in the process before it loads (`SdkEngine::load` does it, and loads nothing else); the engine unloads the model it loaded when it is dropped, and keeps a handle on the SDK's native manager for the life of the process, since releasing the manager ended the process with a fail-fast (0xC0000409) on Windows ARM64 with the WebGPU provider.

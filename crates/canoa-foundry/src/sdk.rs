@@ -14,6 +14,7 @@
 #![allow(deprecated)]
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use foundry_local_sdk::{
@@ -33,6 +34,9 @@ pub struct SdkConfig {
     /// The native library, a file or the directory that holds it; where the SDK looks (`FOUNDRY_LOCAL_LIB_DIR`, then beside the
     /// program) when `None`.
     pub library: Option<PathBuf>,
+    /// The folder the downloaded models are in; Foundry Local's own (`.foundry/cache/models` in the person's home) when `None` and
+    /// it exists. The SDK's default is a cache of the program's own, which holds nothing Foundry Local downloaded.
+    pub cache: Option<PathBuf>,
     /// The window to run the model with, when it is not the one the model has.
     pub window: Option<SdkWindow>,
 }
@@ -44,6 +48,7 @@ impl SdkConfig {
         Self {
             model: model.into(),
             library: None,
+            cache: None,
             window: None,
         }
     }
@@ -98,6 +103,12 @@ const COPIED_NUMBERS: &[&str] = &[
 
 /// The task a registered model needs when the catalog entry it copies names none.
 const DEFAULT_TASK: &str = "chat-completion";
+
+/// Foundry Local's own folder of downloaded models, when `home` has one.
+fn foundry_cache(home: &std::path::Path) -> Option<PathBuf> {
+    let dir = home.join(".foundry").join("cache").join("models");
+    dir.is_dir().then_some(dir)
+}
 
 fn failed(error: impl core::fmt::Display) -> EngineError {
     EngineError::Failed(error.to_string())
@@ -157,13 +168,28 @@ async fn register_window(
 /// A model run by the SDK, in this process.
 pub struct SdkEngine {
     runtime: tokio::runtime::Runtime,
-    // Kept alive: every client and session of the SDK hangs off the manager.
-    _manager: Arc<FoundryLocalManager>,
+    // Every client and session of the SDK hangs off the manager, which also registers the execution providers a model needs.
+    manager: Arc<FoundryLocalManager>,
     model: Arc<Model>,
     /// The adjusted copy the model runs from, when a window was set.
     adjusted: Option<crate::window::Adjusted>,
     /// One request at a time: a model answers one, and a second session on it is not what the service was measured with.
     one_at_a_time: Mutex<()>,
+    /// Whether [`SdkEngine::load`] loaded the model and it is still loaded.
+    loaded: AtomicBool,
+}
+
+/// What goes with the engine is the model it loaded. The SDK's native manager stays for the life of the process: releasing it
+/// ends the process with a fail-fast on the machine this was measured on (Windows ARM64, the WebGPU provider), so a handle on it
+/// is kept, and the next engine opened here finds it again.
+impl Drop for SdkEngine {
+    fn drop(&mut self) {
+        if self.loaded.swap(false, Ordering::SeqCst) {
+            let _ = self.runtime.block_on(self.model.unload());
+        }
+        core::mem::forget(Arc::clone(&self.manager));
+        core::mem::forget(Arc::clone(&self.model));
+    }
 }
 
 impl core::fmt::Debug for SdkEngine {
@@ -190,6 +216,13 @@ impl SdkEngine {
         if let Some(library) = &config.library {
             sdk = sdk.library_path(library.to_string_lossy().into_owned());
         }
+        let cache = config
+            .cache
+            .clone()
+            .or_else(|| std::env::home_dir().and_then(|home| foundry_cache(&home)));
+        if let Some(cache) = cache {
+            sdk = sdk.model_cache_dir(cache.to_string_lossy().into_owned());
+        }
         let manager = FoundryLocalManager::create(sdk).map_err(failed)?;
         let mut model = runtime
             .block_on(manager.catalog().get_model_variant(&config.model))
@@ -202,10 +235,11 @@ impl SdkEngine {
         }
         Ok(Self {
             runtime,
-            _manager: manager,
+            manager,
             model,
             adjusted,
             one_at_a_time: Mutex::new(()),
+            loaded: AtomicBool::new(false),
         })
     }
 
@@ -222,7 +256,25 @@ impl SdkEngine {
     ///
     /// The model could not be loaded, or is not downloaded.
     pub fn load(&self) -> Result<(), EngineError> {
-        self.runtime.block_on(self.model.load()).map_err(failed)
+        let loaded = self.runtime.block_on(async {
+            // A model runs on an execution provider (WebGPU, QNN) that the process registers first; the service does this itself.
+            let eps = self.manager.download_and_register_eps(None).await;
+            self.model.load().await.map_err(|error| match eps {
+                Ok(eps) if !eps.success => EngineError::Failed(format!(
+                    "{error} (execution providers: {}; failed: {})",
+                    eps.status,
+                    eps.failed_eps.join(", ")
+                )),
+                Err(why) => EngineError::Failed(format!(
+                    "{error} (the execution providers could not be registered: {why})"
+                )),
+                Ok(_) => failed(error),
+            })
+        });
+        if loaded.is_ok() {
+            self.loaded.store(true, Ordering::SeqCst);
+        }
+        loaded
     }
 
     /// Unloads the model from this process.
@@ -231,6 +283,7 @@ impl SdkEngine {
     ///
     /// The model could not be unloaded.
     pub fn unload(&self) -> Result<(), EngineError> {
+        self.loaded.store(false, Ordering::SeqCst);
         self.runtime.block_on(self.model.unload()).map_err(failed)
     }
 
@@ -332,5 +385,47 @@ mod live {
             "{:?}",
             engine.model()
         );
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn foundry_locals_own_folder_of_models_is_the_one_used_when_the_home_has_it() {
+        let home = std::env::temp_dir().join(format!("canoa-foundry-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&home).expect("a folder");
+        assert_eq!(foundry_cache(&home), None);
+        let models = home.join(".foundry").join("cache").join("models");
+        std::fs::create_dir_all(&models).expect("the models folder");
+        assert_eq!(foundry_cache(&home), Some(models));
+        std::fs::remove_dir_all(&home).expect("removed");
+    }
+}
+
+#[cfg(test)]
+mod live_models {
+    use super::*;
+
+    /// Needs the native library (`CANOA_FOUNDRY_LIBRARY`) and the model downloaded by Foundry Local. Loads it, so it uses the
+    /// memory the model takes, and unloads it when the engine goes.
+    #[test]
+    #[ignore = "needs Foundry Local's native library and the model downloaded; loads it"]
+    fn a_model_loaded_here_answers_and_goes_with_its_engine_and_a_later_engine_loads_again() {
+        let model = std::env::var("CANOA_FOUNDRY_MODEL")
+            .unwrap_or_else(|_| "qwen3-1.7b-generic-gpu:2".to_owned());
+        for round in 0..2 {
+            let mut config = SdkConfig::new(model.clone());
+            config.library = std::env::var_os("CANOA_FOUNDRY_LIBRARY").map(PathBuf::from);
+            let engine = SdkEngine::open(&config).expect("opens");
+            assert!(matches!(engine.model(), Err(EngineError::NotLoaded(_))));
+            engine.load().expect("loads");
+            assert!(engine.model().is_ok(), "round {round}");
+            let answer = engine
+                .chat(&serde_json::json!({"max_tokens": 16, "messages": [{"role": "user", "content": "/no_think Say OK."}]}))
+                .expect("answers");
+            assert!(answer["choices"][0]["message"]["content"].is_string());
+        }
     }
 }
