@@ -865,6 +865,28 @@ the label `official`: it cannot be removed or replaced, and no label of yours ma
 Naming a source other than `read`, in a file a page writes through the host, takes the `hosting` grant: choosing one starts a program as
 you or code an extension supplied, so it is the same trust as naming a library.
 
+### Secrets
+
+When an agent needs a password or a key it asks for it by name, and Canoa answers from what it already holds before it asks you. Where a secret comes from is a provider: **the form** (you type it in the app), **the system store** (Windows' Credential Manager, the Secret Service on Linux, the Keychain on a Mac) and any a library adds, such as a Bitwarden one written as a script. The form that asks you also asks how long to keep what you type: this once, for this session, until Canoa closes, for 15 minutes, an hour, 8 hours or a day, or **Remember** in the system store. An agent never sees the value, only a handle, and using it still asks you as any command does.
+
+```toml
+[secrets]
+default = "form"          # who answers a name nothing else names
+store = "system"          # where Remember keeps it; "none" takes the choice away
+keep = "session"          # what the form offers first
+
+[secrets.names]
+github_token = "work"     # this name is answered by the entry below
+
+[secrets.providers.work]
+provider = "bitwarden"
+keep = "close"            # what this entry gives stays until Canoa closes, or less if it says so itself
+command = "bw"
+session = { from = "form", name = "bw_session" }   # the key that opens the vault is a secret you gave Canoa, never written here
+```
+
+A value that comes with an end of its own (a token that expires) is kept no longer than that end, whatever you chose. Nothing is written to a log.
+
 ### Skill sources
 
 Skills are looked for the way `npx skills add` looks, in their own list, `[store.skills.catalogs]`, a label of yours

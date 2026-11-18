@@ -58,6 +58,13 @@ pub(super) fn observe(event: &Event) {
             handle,
             secret,
         } => tracing::info!(session = %session_id, %handle, field = %secret, "a secret was kept"),
+        Event::Recalled {
+            session_id,
+            handle,
+            secret,
+        } => {
+            tracing::info!(session = %session_id, %handle, field = %secret, "a secret was answered from what is held")
+        }
         Event::Asked { session_id, action } => {
             tracing::info!(session = %session_id, "a secret's use was put to the person: {}", describe(action));
         }
@@ -570,6 +577,7 @@ impl Link {
         if let Some(held) = held {
             self.hub.tokens.remove(&held.digest);
             self.secrets.end_session(session);
+            self.hub.vault.end_session(session);
         }
     }
 
@@ -582,6 +590,7 @@ impl Link {
         for (session, held) in sessions {
             self.hub.tokens.remove(&held.digest);
             self.secrets.end_session(&session);
+            self.hub.vault.end_session(&session);
         }
         let pending: Vec<[u8; 32]> = lock(&self.state)
             .pending
@@ -732,6 +741,35 @@ impl Frontend for Front {
         match self.link.upgrade() {
             Some(link) if link.bypass(&self.session) => Mode::Bypass,
             _ => Mode::Ask,
+        }
+    }
+
+    fn recall(&self, field: &str) -> Option<zeroize::Zeroizing<Vec<u8>>> {
+        self.link.upgrade()?.hub.vault.recall(&self.session, field)
+    }
+
+    fn keeps(&self) -> Vec<coqui_acp_secrets::Keep> {
+        self.link.upgrade().map_or_else(Vec::new, |link| {
+            link.hub
+                .vault
+                .keeps()
+                .into_iter()
+                .map(|keep| coqui_acp_secrets::Keep::new(keep.id(), keep.label()))
+                .collect()
+        })
+    }
+
+    fn remember(&self, field: &str, value: &[u8], keep: &str) {
+        let Some(link) = self.link.upgrade() else {
+            return;
+        };
+        if let Err(why) = link
+            .hub
+            .vault
+            .remember(Some(&self.session), field, value, keep)
+        {
+            // The reason holds no value: the person's choice could not be kept, and the secret is the session's all the same.
+            tracing::info!(session = %self.session, field, "a secret could not be kept as chosen: {why}");
         }
     }
 }

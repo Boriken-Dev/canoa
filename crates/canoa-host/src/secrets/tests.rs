@@ -765,3 +765,169 @@ fn a_connection_from_another_user_is_dropped_even_with_the_right_bearer() {
     };
     assert!(theirs.is_empty(), "another user was answered: {theirs}");
 }
+
+/// What the application in this process answers a form the host put to it, with `plain` the plain values as JSON text and `typed` the
+/// value of the one secret field: the same sealing the person's app does, bound by the link's secret.
+fn app_answers(hub: &Hub, request: &Value, plain: &str, field: &str, typed: &str) -> Value {
+    use coqui_acp::secret::{
+        DEFAULT_LIFETIME, LinkKey, LinkRole, Method as WireMethod, Prover, RequestParams,
+        RequestReply, Verifier,
+    };
+
+    let key = LinkKey::derive(&*hub.link_secret().expect("a link secret")).expect("a key");
+    let verifier = Verifier::builder(key.identity(LinkRole::App))
+        .link(&key, LinkRole::App)
+        .expect("the app's side")
+        .build();
+    let prover = Prover::linked(&key, LinkRole::App);
+    let params = RequestParams::from_value(&request["params"]).expect("a request of the extension");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("a clock")
+        .as_secs();
+    let collector = verifier
+        .collector(
+            &key.identity(LinkRole::Host),
+            WireMethod::Request,
+            &params.context,
+            &params.recipient,
+            now,
+        )
+        .expect("a collector");
+    let sealed = std::collections::BTreeMap::from([(
+        field.to_owned(),
+        collector.seal(field, typed).expect("sealed"),
+    )]);
+    let auth = collector
+        .authenticate(&prover, plain, &sealed, now, DEFAULT_LIFETIME)
+        .expect("bound to the request");
+    let reply = RequestReply::Accept {
+        plain: plain.to_owned(),
+        sealed,
+        auth,
+    };
+    json!({"jsonrpc": "2.0", "id": request["id"], "result": reply.to_value()})
+}
+
+#[test]
+fn an_agents_request_is_answered_from_what_is_held_and_otherwise_asked_with_the_ways_to_keep_it_and_kept_as_chosen()
+ {
+    use sha2::{Digest as _, Sha256};
+
+    const VALUE: &str = "zq9-not-a-real-secret-7f3a";
+    let dir = Dir::new("kept");
+    let (hub, _) = hub(&dir, Method::WebCrypto);
+    let link = hub.local_link().expect("the in-process link");
+    offer(&link, "link-hmac-sha256");
+    http_agent(&link);
+    let given = servers(&new_session(&link, 2, &std::env::temp_dir()));
+    let token = given[0]["headers"][0]["value"]
+        .as_str()
+        .expect("a bearer")
+        .trim_start_matches("Bearer ")
+        .to_owned();
+    answer(&link, 2, &json!({"sessionId": "s1"}));
+    let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
+    let grant = hub
+        .tokens
+        .find(&digest)
+        .expect("the bearer opens the session");
+    let tools = super::link::tools_of(&grant).expect("the session has its tools");
+    let ask = json!({"message": "The deploy needs a token",
+        "schema": {"type": "object", "properties": {"deploy_token": {"type": "string", "writeOnly": true}}, "required": ["deploy_token"]}});
+
+    // Nothing is held: the person is asked, in a form that also asks how long to keep it.
+    let first = {
+        let tools = tools.clone();
+        let ask = ask.clone();
+        std::thread::spawn(move || tools.call("secret_request", &ask))
+    };
+    let request = loop {
+        if let Some(message) = link.drain().into_iter().next() {
+            break serde_json::from_slice::<Value>(&message).expect("JSON");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    let schema = request["params"]["schema"].as_str().expect("a schema");
+    assert!(
+        schema.contains("_keep") && schema.contains("Until Canoa closes"),
+        "{schema}"
+    );
+    assert!(schema.contains("\"const\":\"close\""), "{schema}");
+    let reply = app_answers(
+        &hub,
+        &request,
+        r#"{"_keep":"close"}"#,
+        "deploy_token",
+        VALUE,
+    );
+    assert!(link.taken_from_client(reply.to_string().as_bytes()));
+    let result = first.join().expect("the call ended");
+    let result: Value = serde_json::from_str(&result.text).expect("JSON");
+    assert_eq!(result["status"], "accepted", "{result}");
+    assert!(result["handles"]["deploy_token"].is_string());
+    assert!(!result.to_string().contains(VALUE));
+    assert!(
+        result["plain"].get("_keep").is_none(),
+        "the agent is not told how it was kept"
+    );
+
+    // It was kept until Canoa closes, as chosen: another session's agent asking for the name is answered, and nobody is asked.
+    assert_eq!(
+        hub.vault()
+            .recall("s2", "deploy_token")
+            .as_deref()
+            .map(|v| v.as_slice()),
+        Some(VALUE.as_bytes())
+    );
+    let second = tools.call("secret_request", &ask);
+    let second: Value = serde_json::from_str(&second.text).expect("JSON");
+    assert_eq!(second["status"], "accepted", "{second}");
+    assert_ne!(
+        second["handles"]["deploy_token"],
+        result["handles"]["deploy_token"]
+    );
+    assert!(link.drain().is_empty(), "the person was asked again");
+    assert!(!second.to_string().contains(VALUE));
+}
+
+#[test]
+fn what_was_kept_for_a_session_ends_with_the_session() {
+    let dir = Dir::new("session_end");
+    let (hub, _) = hub(&dir, Method::WebCrypto);
+    let link = hub.local_link().expect("the in-process link");
+    offer(&link, "link-hmac-sha256");
+    http_agent(&link);
+    new_session(&link, 2, &std::env::temp_dir());
+    answer(&link, 2, &json!({"sessionId": "s1"}));
+    hub.vault()
+        .remember(Some("s1"), "mine", b"zq9-not-a-real-secret-7f3a", "session")
+        .expect("kept");
+    assert!(hub.vault().recall("s1", "mine").is_some());
+    link.client_said(
+        json!({"jsonrpc": "2.0", "id": 9, "method": "session/close", "params": {"sessionId": "s1"}})
+            .to_string()
+            .into_bytes(),
+    );
+    assert!(
+        hub.vault().recall("s1", "mine").is_none(),
+        "the session closed"
+    );
+    // A connection that ends clears what its sessions were given, whichever way they ended.
+    new_session(&link, 3, &std::env::temp_dir());
+    answer(&link, 3, &json!({"sessionId": "s3"}));
+    hub.vault()
+        .remember(
+            Some("s3"),
+            "theirs",
+            b"zq9-not-a-real-secret-7f3a",
+            "session",
+        )
+        .expect("kept");
+    assert!(hub.vault().recall("s3", "theirs").is_some());
+    link.close();
+    assert!(
+        hub.vault().recall("s3", "theirs").is_none(),
+        "the connection ended"
+    );
+}

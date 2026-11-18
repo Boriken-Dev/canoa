@@ -16,9 +16,13 @@
 )]
 
 pub(crate) mod ask;
+mod builtin;
+pub(crate) mod catalog;
 mod http;
 mod layers;
 mod link;
+pub(crate) mod settings;
+pub(crate) mod vault;
 pub(crate) use link::is_bypass;
 #[cfg(test)]
 mod tests;
@@ -93,6 +97,8 @@ pub(crate) struct Hub {
     bridge: BridgeCommand,
     tokens: Arc<Tokens>,
     server: Mutex<Option<http::Listener>>,
+    /// The secrets the person has given and the providers that hold more: what an agent's request is answered from.
+    vault: Arc<vault::Vault>,
 }
 
 /// The identity of the host as a binding method and the keys to make and check one with, for one paired peer.
@@ -120,7 +126,13 @@ impl Hub {
             bridge,
             tokens: Arc::new(Tokens::default()),
             server: Mutex::new(None),
+            vault: vault::Vault::new(),
         })
+    }
+
+    /// The vault of this host's secrets.
+    pub(crate) fn vault(&self) -> &Arc<vault::Vault> {
+        &self.vault
     }
 
     /// The secrets of one connection whose peer proved itself as `peer`, or `None` when it has no identity of its own to be

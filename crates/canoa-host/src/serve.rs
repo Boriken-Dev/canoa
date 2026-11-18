@@ -1413,6 +1413,10 @@ impl Serving {
             &store,
             delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
         );
+        secrets.vault().configure(
+            secrets::catalog::Catalog::of(config),
+            secrets::settings::source_of(options.config_file.clone()),
+        );
         // Turning the key change off is every method's to do: WebCrypto has none and takes only `false`, and ends a session at
         // its limit.
         let mut builder =

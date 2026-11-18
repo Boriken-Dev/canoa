@@ -1161,6 +1161,31 @@ An agent asks the person for a password or a key, or shows them one, and neither
 - **Stdio agents.** An agent that does not say `mcpCapabilities.http` gets the same tools as a stdio server running `canoa mcp-bridge` (the delegation tools' bridge), the address and bearer in its environment.
 - **Not served.** A Noise app whose page does not know the host's static key, and a native app that reaches a host over the network (it has no key of its own to bind with).
 
+## Secret providers (`[secrets]`, `canoa_host::secrets`)
+
+An agent asks for a secret by name, and it is answered from what is held before the person is asked. Where a secret comes from is a `secret_provider` (`canoa::secret_provider`): the host carries the person's form (`form`, which holds nothing and is asked in the app) and the operating system's credential store (`system`, Windows' Credential Manager, the Secret Service or the Keychain, kept under the service `dev.boriken.canoa.secrets`, with an index entry that names what it holds), and a library of `[host.extensions.NAME]` or of an entry adds more, a script's included. The providers are offered the way profile items and agents are: built-in first, then those the loaded libraries offer, a provider whose id was taken or that cannot be described left out and logged.
+
+```toml
+[secrets]
+default = "form"                   # the entry that answers a name no line of `names` gives
+store = "system"                   # the entry "Remember" keeps a typed secret in; "none" offers no such way
+keep = "session"                   # what the form offers first: once, session, close, 15m, 1h, 8h, 1d, ttl:SECONDS
+[secrets.names]
+github_token = "work"
+[secrets.providers.work]
+provider = "bitwarden"             # the provider's id
+keep = "close"                     # how long a value this entry gave is kept in memory (default session)
+command = "bw"                     # any other key is the provider's own setting, checked against its schema
+session = { from = "form", name = "bw_session" }   # a setting that is another secret; never asked for, only read
+```
+
+- **Read at each use, hidden from `config/get`.** The section is read from canoa.cfg every time it is needed (a change applies at the next request) and no page edits it through `config/set`. A section that cannot be read is not used, with the reason in the log, and the defaults answer. `form` and `system` exist without being written.
+- **The request path.** `coqui-acp-secrets`' `secret_request` asks the session's frontend (`Front`) first: `recall(name)` reads the vault (the cache, then the entry that answers the name, then the `store` entry), and answers with handles and no question when every question is a secret one it holds. Otherwise the form goes to the app with one more question, `_keep`, offering the ways below, and the answer is `remember`ed as chosen. A provider whose `needs_person` is set is never asked by `recall`. The agent is never told how a secret was kept.
+- **How long.** `once` keeps nothing; `session` keeps it for that ACP session and ends with it (`session/close` or the connection ending); `close` until Canoa closes; `15m`, `1h`, `8h`, `1d` or `ttl:SECONDS` for that time; `store` puts it in the `store` entry's provider for good (the system store), from where it is read afterwards. What a provider gave is kept as its entry's `keep` says. **A value is kept no longer than the shorter of what was chosen and what its provider said** (`Held::expires_in`); an answer of 0 is not given.
+- **A setting that is another secret** (`{from, name}`) is read from the cache or from the entry `from` (which never asks the person), through at most four providers; a secret that is not held leaves the provider not asked at all.
+- **Nothing prints a value.** The vault's `Debug`, its rows and errors name providers and names only; a provider's error is logged by its message, which holds no value by the kind's contract.
+- **Permissions are unchanged.** Recalling a secret gives a session a handle, and every use of it still goes through the session's permission mode. A session in full access can use any secret a provider holds under a name it guesses; no tool lists names to an agent.
+
 ## The store tools (`[host.store] tools`)
 
 ```rust
