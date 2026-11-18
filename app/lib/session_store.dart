@@ -612,6 +612,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// Starts a draft's agent on its first message; set by the app. Without it a draft cannot start.
   DraftStarter? starter;
 
+  /// The default profile as canoa.cfg has it now: what a new draft that was given no profile wants, as if it had been given it.
+  /// A draft keeps what it starts with, so a later edit of the profile reaches new drafts only.
+  Preset? Function()? defaultPresetOf;
+
   /// Whether the files of a session's folder are the ones the host the app asks about holds, so that links and repositories are
   /// asked of it and a rule for a path can be made; set by the app. Without it only a session on this computer in an app with
   /// files of its own can.
@@ -1097,6 +1101,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     for (final choice in pending.values) {
       session.chat.holdChoice(choice);
     }
+    if (preset == null && presetWants.isEmpty && pending.isEmpty) _wantDefaultPreset(session);
     session.attachments.addAll(attachments.take(maxAttachments));
     _keepDraft(session);
     _askChoices(source);
@@ -1205,6 +1210,20 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     _settlePreset(session);
     _keepDraft(session);
     notifyListeners();
+  }
+
+  /// Gives [session], a new draft that names no profile, what the default profile sets: the model, effort and mode it wants, its
+  /// cache lifetime and its loadout. The draft keeps no profile name, so it reads as the default one.
+  void _wantDefaultPreset(ChatSession session) {
+    final preset = defaultPresetOf?.call();
+    if (preset == null) return;
+    for (final (key, value) in [('model', preset.model), ('effort', preset.effort), ('mode', preset.mode)]) {
+      if (value != null) session.presetWants[key] = value;
+    }
+    if (CacheLifetime.named(preset.cacheLifetime) case final lifetime? when session.cacheLifetime == null) {
+      session.cacheLifetime = lifetime;
+    }
+    if (preset.loadout != null && session.loadout == null) session.loadout = preset.loadout;
   }
 
   /// Chooses, for every draft, the values its profile asked for that its source has now listed.

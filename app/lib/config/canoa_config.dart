@@ -804,25 +804,30 @@ final class CanoaConfig {
 
   /// `[profiles.NAME]`: the named presets of a session's own values (source, model, effort, mode, starting instructions, cache
   /// lifetime and a loadout), in the order written. `[profile]` stays the person's own layer that every session gets.
+  ///
+  /// The default profile, [presetDefault], is always the first: it is the one a session that names no other starts with, and it
+  /// is there, setting nothing, until the person edits it.
   Map<String, Preset> get presets => _presets(tables['profiles']);
 
   static Map<String, Preset> _presets(Object? raw) {
-    if (raw == null) return const {};
-    if (raw is! Map) throw const FormatException('canoa.cfg: profiles must be a table');
-    final out = <String, Preset>{};
-    for (final MapEntry(:key, :value) in raw.entries) {
+    if (raw != null && raw is! Map) throw const FormatException('canoa.cfg: profiles must be a table');
+    final read = <String, Preset>{};
+    for (final MapEntry(:key, :value) in (raw as Map? ?? const {}).entries) {
       if (!isPresetName('$key')) {
         throw FormatException('canoa.cfg: profiles.$key: $presetNameRule');
       }
       if (value is! Map) throw FormatException('canoa.cfg: profiles.$key must be a table');
-      out['$key'] = Preset.read('$key', value);
+      read['$key'] = Preset.read('$key', value);
     }
-    return out;
+    return {presetDefault: read.remove(presetDefault) ?? const Preset(), ...read};
   }
 
-  /// This configuration with [presets] as `[profiles]`.
-  CanoaConfig withPresets(Map<String, Preset> presets) =>
-      _withTable('profiles', {for (final MapEntry(:key, :value) in presets.entries) key: value.toTable()});
+  /// This configuration with [presets] as `[profiles]`. The default profile is written whatever is given: it cannot be removed.
+  CanoaConfig withPresets(Map<String, Preset> presets) => _withTable('profiles', {
+    presetDefault: (presets[presetDefault] ?? const Preset()).toTable(),
+    for (final MapEntry(:key, :value) in presets.entries)
+      if (key != presetDefault) key: value.toTable(),
+  });
 
   /// This configuration with [change] applied to the loadout a session that names none starts with; the first change writes it
   /// as `Default`, holding what the session started with until now.
@@ -1827,6 +1832,9 @@ final class Loadout {
 }
 
 /// Whether [name] is one a profile may have: 1 to 64 of ASCII letters, digits, spaces, `-`, `_` and `.`, with no space at either end.
+/// The name of the profile that is always there and cannot be removed: what a session that names no other profile starts with.
+const presetDefault = 'default';
+
 /// A profile is chosen by its name in a footer, so it may read as words.
 bool isPresetName(String name) => RegExp(r'^[A-Za-z0-9_.-]([A-Za-z0-9 _.-]{0,62}[A-Za-z0-9_.-])?$').hasMatch(name);
 

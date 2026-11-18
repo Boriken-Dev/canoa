@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
-import '../config/canoa_config.dart' show Preset, isPresetName, presetNameRule;
+import '../config/canoa_config.dart' show Preset, isPresetName, presetDefault, presetNameRule;
 import '../session_store.dart';
 import '../sources/source_icons.dart';
 import 'agent_events.dart' show Choice, ConfigOption;
@@ -360,8 +360,10 @@ List<Widget> loadoutChoices({
     ),
 ];
 
-/// The items that choose a profile by name, led by one for none; [onChoose] gets null for it. Listed alike by the composer's
-/// profile control and the chat-only client's picker.
+/// The items that choose a profile by name, led by the default profile (the one a session that names none starts with);
+/// [onChoose] gets null for it. Listed alike by the composer's profile control and the chat-only client's picker.
+///
+/// The default profile is the first item, never one of [names] twice, and it reads as chosen while [chosen] is null or its name.
 List<Widget> profileChoices({
   required Iterable<String> names,
   required String? chosen,
@@ -370,11 +372,11 @@ List<Widget> profileChoices({
   MenuItemButton(
     key: const Key('profile-choice-none'),
     closeOnActivate: false,
-    leadingIcon: Icon(chosen == null ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18),
+    leadingIcon: Icon(chosen == null || chosen == presetDefault ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18),
     onPressed: () => onChoose(null),
-    child: const Text('No profile'),
+    child: const Text('Default'),
   ),
-  for (final name in names)
+  for (final name in names.where((name) => name != presetDefault))
     MenuItemButton(
       key: Key('profile-choice $name'),
       closeOnActivate: false,
@@ -480,7 +482,10 @@ class PresetChooser extends StatelessWidget {
   final ChatSession session;
   final ComposerKit kit;
 
-  Preset? get _held => kit.presets[session.preset];
+  /// The profile the draft starts with: the one it names, else the default profile.
+  String get _name => session.preset ?? presetDefault;
+
+  Preset? get _held => kit.presets[_name];
 
   /// Starts the draft over from the profile [name], with its source if the app has it.
   void _use(String name) {
@@ -520,12 +525,12 @@ class PresetChooser extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = session.preset;
+    final name = _name;
     final held = _held;
     final changes = held == null ? const <String>[] : store.presetChanges(session, held);
     final modified = changes.isNotEmpty;
-    final missing = name != null && held == null;
-    final label = name == null ? 'Profile' : '$name${modified ? ' · Modified' : ''}';
+    final missing = held == null;
+    final label = session.preset == null && !modified ? 'Profile' : '$name${modified ? ' · Modified' : ''}';
     final why = [
       if (missing) '$name is no longer in canoa.cfg',
       if (modified) 'Changed from the profile: ${changes.join(', ').replaceAll('_', ' ')}',
@@ -535,11 +540,11 @@ class PresetChooser extends StatelessWidget {
       menuChildren: [
         ...profileChoices(
           names: kit.presets.keys,
-          chosen: name,
+          chosen: session.preset,
           onChoose: (chosen) => chosen == null ? store.usePreset(session, null, null) : _use(chosen),
         ),
         const Divider(height: 1),
-        if (kit.savePreset != null && name != null && held != null && modified)
+        if (kit.savePreset != null && held != null && modified)
           MenuItemButton(
             key: const Key('profile-save-changes'),
             leadingIcon: const Icon(Icons.save_outlined, size: 18),
@@ -557,7 +562,7 @@ class PresetChooser extends StatelessWidget {
           MenuItemButton(
             key: const Key('profile-reset'),
             leadingIcon: const Icon(Icons.restart_alt, size: 18),
-            onPressed: () => _use(name!),
+            onPressed: () => _use(name),
             child: const Text('Back to the profile'),
           ),
         if (kit.onSetup != null)

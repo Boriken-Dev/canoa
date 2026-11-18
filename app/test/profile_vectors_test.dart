@@ -144,8 +144,14 @@ void main() {
         return;
       }
       expect(vector.containsKey('presets'), isTrue, reason: 'accepted, and the vector refuses it');
-      expect({for (final MapEntry(:key, :value) in config.presets.entries) key: value.toTable()}, vector['presets']);
-      expect(config.presets.keys.toList(), (vector['presets'] as Map).keys.toList(), reason: 'the file\'s order');
+      // The default profile is always there; a file with none holds it empty, which the host reads as no table at all.
+      final held = {
+        for (final MapEntry(:key, :value) in config.presets.entries)
+          if (key != presetDefault || (vector['presets'] as Map).containsKey(presetDefault)) key: value.toTable(),
+      };
+      expect(held, vector['presets']);
+      expect(held.keys.toList(), (vector['presets'] as Map).keys.toList(), reason: 'the file order');
+      expect(config.presets.keys.first, presetDefault, reason: 'the default profile leads');
       if (vector['use'] case final String used) {
         final layers = [
           Layer(const LayerId(LayerKind.user), config.profile),

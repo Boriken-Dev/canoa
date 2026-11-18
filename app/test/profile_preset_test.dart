@@ -73,6 +73,24 @@ void main() {
     await finish(tester);
   });
 
+  testWidgets('a new draft that names no profile starts with the default profile, and does not read as modified', (tester) async {
+    final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
+    final config = _config({'default': const Preset(model: 'opus', effort: 'high'), 'Deep review': _deep});
+    await pumpApp(tester, _store(), profileHome: _home(), config: config, linked: agent.openLink);
+    await _draft(tester, 'Claude');
+    expect(_pill(tester, 'option-model'), 'Opus 5.5 · High', reason: 'the default profile\'s model and effort, with no profile chosen');
+    expect(_pill(tester, 'profile-pill'), 'Profile');
+    await pick(tester, 'option-effort', 'Low');
+    expect(_pill(tester, 'profile-pill'), 'default · Modified', reason: 'changed from the default profile');
+    // The default is the first choice, chosen by none, and is listed once.
+    await tester.tap(find.byKey(const Key('profile-pill')));
+    await frames(tester);
+    expect(find.byKey(const Key('profile-choice-none')), findsOneWidget);
+    expect(find.byKey(const Key('profile-choice default')), findsNothing);
+    expect(find.descendant(of: find.byKey(const Key('profile-choice-none')), matching: find.text('Default')), findsOneWidget);
+    await finish(tester);
+  });
+
   testWidgets('changing a value marks the profile Modified; Save changes writes canoa.cfg and Back to the profile undoes it', (tester) async {
     final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
     final written = await pumpApp(tester, _store(), profileHome: _home(), config: _config(), linked: agent.openLink);
@@ -116,7 +134,7 @@ void main() {
     await tester.tap(find.byKey(const Key('profile-name-save')));
     await settle(tester);
 
-    expect(written.last.presets.keys, ['Deep review', 'Quick look']);
+    expect(written.last.presets.keys, ['default', 'Deep review', 'Quick look']);
     final made = written.last.presets['Quick look']!;
     expect(made.model, 'haiku');
     expect(made.effort, 'high');
@@ -223,11 +241,33 @@ void main() {
       return written;
     }
 
+    testWidgets('the default profile is edited and copied but never removed, and keeps its name', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final written = await pumpPanel(tester, CanoaConfig.parse('[profiles.default]\nmodel = "opus"\n'));
+      expect(find.byKey(const Key('profile-edit-default')), findsOneWidget);
+      expect(find.byKey(const Key('profile-copy-default')), findsOneWidget);
+      expect(find.byKey(const Key('profile-delete-default')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('profile-edit-default')));
+      await tester.pump();
+      expect(tester.widget<TextField>(find.byKey(const Key('profile-edit-name'))).enabled, isFalse);
+      await tester.enterText(find.byKey(const Key('profile-edit-effort')), 'high');
+      await tester.tap(find.byKey(const Key('profile-edit-save')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(written.last.presets['default'], const Preset(model: 'opus', effort: 'high'));
+      // Whatever is written keeps it, even a write that names none.
+      expect(written.last.withPresets(const {}).tables['profiles'], {'default': <String, dynamic>{}});
+    });
+
     testWidgets('a new profile is written with its starting instructions, and an edit, a copy and a delete follow', (tester) async {
       await tester.binding.setSurfaceSize(const Size(900, 1600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final written = await pumpPanel(tester, CanoaConfig.parse('[loadouts.lean]\n'));
-      expect(find.byKey(const Key('profiles-none')), findsOneWidget);
+      // The default profile is there before any is made.
+      expect(find.byKey(const Key('profile-row-default')), findsOneWidget);
+      expect(find.byKey(const Key('profile-delete-default')), findsNothing, reason: 'it cannot be removed');
 
       await tester.tap(find.byKey(const Key('profile-new')));
       await tester.pump();
@@ -252,7 +292,7 @@ void main() {
       await tester.tap(find.byKey(const Key('profile-edit-save')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(written.last.presets.keys, ['Deeper'], reason: 'renamed in place');
+      expect(written.last.presets.keys, ['default', 'Deeper'], reason: 'renamed in place');
       expect(written.last.presets['Deeper'], const Preset(model: 'opus', context: 'Read the tests first.'));
 
       await tester.tap(find.byKey(const Key('profile-copy-Deeper')));
@@ -266,14 +306,14 @@ void main() {
       await tester.tap(find.byKey(const Key('profile-edit-save')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(written.last.presets.keys, ['Deeper', 'Third']);
+      expect(written.last.presets.keys, ['default', 'Deeper', 'Third']);
 
       await tester.tap(find.byKey(const Key('profile-delete-Deeper')));
       await tester.pump();
       await tester.tap(find.byKey(const Key('profile-delete-confirm')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(written.last.presets.keys, ['Third']);
+      expect(written.last.presets.keys, ['default', 'Third']);
     });
   });
 }

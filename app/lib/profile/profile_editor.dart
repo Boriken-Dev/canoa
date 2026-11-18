@@ -121,6 +121,8 @@ class _ProfileEditorState extends State<ProfileEditor> {
         TextField(
           key: const Key('profile-edit-name'),
           controller: _name,
+          // The default profile keeps its name: sessions that name none start with it.
+          enabled: widget.original != presetDefault,
           decoration: InputDecoration(labelText: 'Name', errorText: _nameProblem),
           onChanged: (_) => setState(() {}),
         ),

@@ -147,14 +147,14 @@ class ProfilesPanelState extends State<ProfilesPanel> {
           ),
       ]),
       const Text('A profile holds the values a new session starts with, chosen by name at its footer: its source, model, effort, '
-          'mode and starting instructions. Your own profile (the user layer below) is what every session gets, whatever profile it is given; '
-          'a profile sits above it. The account and the permissions are never part of a profile.'),
-      if (presets.isEmpty && editing == null) const Text('None yet.', key: Key('profiles-none')),
+          'mode and starting instructions. The default profile is always there: a session that names no other starts with it, '
+          'and what you set in it is what every new session gets. Your own profile (the user layer below) is what every session gets, '
+          'whatever profile it is given; a profile sits above it. The account and the permissions are never part of a profile.'),
       for (final MapEntry(key: name, value: preset) in presets.entries)
         ListTile(
           key: Key('profile-row-$name'),
           dense: true,
-          title: Text(name),
+          title: Text(name == presetDefault ? 'Default' : name),
           subtitle: Text(visible(_presetSummary(preset).isEmpty ? 'Sets nothing' : _presetSummary(preset))),
           trailing: widget.onChange == null
               ? null
@@ -169,11 +169,13 @@ class ProfilesPanelState extends State<ProfilesPanel> {
                     onPressed: editing != null ? null : () => setState(() => _editing = (original: null, preset: preset)),
                     child: const Text('Copy'),
                   ),
-                  TextButton(
-                    key: Key('profile-delete-$name'),
-                    onPressed: editing != null ? null : () => unawaited(_deletePreset(name)),
-                    child: const Text('Delete'),
-                  ),
+                  // The default profile is always there: it can be edited and copied, never removed.
+                  if (name != presetDefault)
+                    TextButton(
+                      key: Key('profile-delete-$name'),
+                      onPressed: editing != null ? null : () => unawaited(_deletePreset(name)),
+                      child: const Text('Delete'),
+                    ),
                 ]),
         ),
       if (editing != null)

@@ -2921,6 +2921,7 @@ class _CanoaAppState extends State<CanoaApp> {
             drafts: widget.drafts, embedLimit: config.embedLimit);
     store.queueDelivery = config.sessions.queueDelivery;
     store.starter = _startDraft;
+    store.defaultPresetOf = () => config.presets[presetDefault];
     store.choicesLoader = _askChoices;
     store.accountChoicesLoader = _askChoicesAs;
     store.defaultAccountOf = _defaultAccountOf;
