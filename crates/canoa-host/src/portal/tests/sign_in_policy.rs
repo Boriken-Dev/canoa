@@ -121,6 +121,38 @@ fn the_page_and_the_methods_offer_what_the_network_rule_allows_from_where_the_br
     );
 }
 
+/// A rule for browsers, then one for every client: the first allows a password, the second a certificate.
+const BROWSER_RULE: &str = r#"
+[[sign_in_policy.config.rule]]
+clients = ["browser"]
+allow = [["password"]]
+
+[[sign_in_policy.config.rule]]
+allow = [["certificate"]]
+"#;
+
+#[test]
+fn a_rule_for_browsers_decides_alone_since_the_portal_fixes_its_client() {
+    let rig = rig(
+        |settings| {
+            settings.sign_in_policy = Settings::from_toml(BROWSER_RULE).unwrap().sign_in_policy;
+        },
+        0,
+    );
+    assert_eq!(methods_at(&rig, Some("203.0.113.7")), ["password"]);
+    // The same rules asked with a client kind nobody verified are held to both answers, which share no method.
+    let policy = &rig.inner.policy;
+    let claimed = policy::offer_context(None);
+    let mut unverified = claimed.clone();
+    unverified.attributes.clear();
+    assert!(claimed.client_is_verified() && !unverified.client_is_verified());
+    assert_eq!(
+        policy.decide(claimed).unwrap().offers[0].method,
+        Method::Password
+    );
+    assert!(policy.decide(unverified).unwrap().offers.is_empty());
+}
+
 #[test]
 fn the_address_is_the_one_the_trusted_proxy_reports_and_unknown_when_it_reports_none() {
     // The proxy itself is inside 10/8: if the chain drops the browser's address, nobody is inside because of it.

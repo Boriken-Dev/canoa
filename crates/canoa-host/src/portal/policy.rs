@@ -197,7 +197,8 @@ impl Policy {
 }
 
 /// The context of a sign-in from `address` (`None` when the proxy did not say), for `purpose`, with `person` once a step named
-/// someone and the steps `done`.
+/// someone and the steps `done`. The client is a browser because this portal serves a page and nothing else, not because the
+/// request says so, so it is marked verified and a rule's `clients` decides alone.
 #[must_use]
 pub fn context(
     purpose: &str,
@@ -218,6 +219,7 @@ pub fn context(
         person,
         ..SignInContext::default()
     }
+    .with_verified_client()
 }
 
 /// The page's offer: nothing has been passed yet.
