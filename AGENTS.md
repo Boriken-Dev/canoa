@@ -30,6 +30,8 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | `crates/canoa-launch/` | The Windows portable launcher: carries the built app folder, unpacks it once per version, verifies and starts it; `app/tool/portable.py` builds it and the Linux AppImage |
 | `clients/browser/chromium/` | MV3 browser extension code and permission policy |
 | `clients/office/` | The Office add-in: manifests for Outlook and for Word, Excel and PowerPoint, rendered for an origin by `render.mjs`; the task pane page that frames the chat-only app for the open item; `canoa-host` carries the pages and serves them with `[host.web] office = true` |
+| `bindings/python/canoa-sdk/`, `bindings/js/canoa-sdk/` | The SDKs for writing a provider in Python or JavaScript: one base class per kind, a settings form from a dataclass or `s` schema; their kinds are written from `crates/canoa/include/canoa.*.kinds.json` (`tools/write_kinds.{py,mjs}`, `--check`); their `AGENTS.md` is the API |
+| `examples/providers/` | One provider per kind in each language, written with the SDKs; `crates/canoa-host/tests/script_providers.rs` loads them through the host |
 | `docs/` | Architecture and interoperability contracts; `docs/roadmap.md` is the one status table |
 | `tools/` | Offline dependency mirroring |
 
@@ -85,6 +87,9 @@ cargo build -p canoa-ffi --lib
 # a real voice's audio (Piper's `--output_raw`, 22050 Hz) played by the web app's own Web Audio player in a real browser; CANOA_E2E_TELL_RATE=44100 is the control that must fail
 (cd app && dart compile js -O1 -o <dir>/page.js tool/voice_page.dart)
 (cd clients/browser/chromium && CANOA_E2E_BROWSER=<Edge> CANOA_E2E_PAGE=<dir> CANOA_E2E_PCM=<voice.pcm> node e2e/voice_pcm.mjs)
+# providers written with the SDKs, loaded through the host (Python needs its shared library; JavaScript needs a C compiler for QuickJS)
+CANOA_TEST_PYTHON=python3 CANOA_TEST_JS=1 cargo test -p canoa-host --test script_providers   # needs `cargo build -p canoa-host --example stdio_agent`
+(cd bindings/python/canoa-sdk && GUATIAO_LIBRARY=<guatiao_source_py built by the test> PYTHONPATH=<guatiao>/bindings/python/guatiao/src pytest)
 mkdocs build --strict
 ```
 

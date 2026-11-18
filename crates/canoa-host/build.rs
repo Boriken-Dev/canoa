@@ -1,4 +1,5 @@
-//! Turns on the test of a Python source entry when `CANOA_TEST_PYTHON` names an interpreter; without it the test is
+//! Turns on the test of a Python source entry when `CANOA_TEST_PYTHON` names an interpreter, and the test of a JavaScript source
+//! entry when `CANOA_TEST_JS` is set (it needs a C compiler, since QuickJS is built into the source); without either the test is
 //! ignored, which a run reports, instead of passing without having run. With the `web` feature, builds in the site
 //! `CANOA_WEB_DIST` names, and refuses to build without one. Nothing here runs a program.
 
@@ -8,7 +9,12 @@ use std::path::{Path, PathBuf};
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=CANOA_TEST_PYTHON");
+    println!("cargo:rerun-if-env-changed=CANOA_TEST_JS");
     println!("cargo:rustc-check-cfg=cfg(canoa_test_python)");
+    println!("cargo:rustc-check-cfg=cfg(canoa_test_js)");
+    if std::env::var_os("CANOA_TEST_JS").is_some_and(|js| !js.is_empty()) {
+        println!("cargo:rustc-cfg=canoa_test_js");
+    }
     if std::env::var_os("CANOA_TEST_PYTHON").is_some_and(|python| !python.is_empty()) {
         println!("cargo:rustc-cfg=canoa_test_python");
     }

@@ -1,0 +1,7 @@
+type = "js"
+name = "quill_vendor"
+version = "1.0.0"
+main = "quill_vendor.js"
+kinds = ["agent_vendor"]
+# This folder, and the SDK the module imports by a relative path.
+paths = [".", "../../../../bindings/js/canoa-sdk/src"]

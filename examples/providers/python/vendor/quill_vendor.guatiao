@@ -1,0 +1,4 @@
+type = "python"
+module = "quill_vendor"
+kinds = ["agent_vendor"]
+paths = ["."]

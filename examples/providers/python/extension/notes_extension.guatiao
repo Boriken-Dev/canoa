@@ -1,0 +1,4 @@
+type = "python"
+module = "notes_extension"
+kinds = ["store_extension"]
+paths = ["."]
