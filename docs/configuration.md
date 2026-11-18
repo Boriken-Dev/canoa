@@ -186,7 +186,11 @@ variables = ["TEAM=core"]              # any other NAME=value
 
 [profiles."Behind the gateway".items.proxy]
 mode = "system"                        # system (the default), none, proxy, pac or command
-client_certificate_hosts = ["api.corp.example", "*.mtls.example"]   # system and pac: hosts the proxy presents your client certificate to
+client_certificate_hosts = [                       # system and pac: hosts the proxy presents a client certificate to, first match wins
+  { pattern = "api.corp.example" },                # a host, *.name, an address or a regular expression matched against the whole host
+  { pattern = "(db|cache)[.]corp[.]example", identity = "system" },   # system (the default) or a thumbprint the host lists
+  { pattern = ".*", identity = "3a7bd3e2360a3d29eea436fcfb7e44c735d117c42d1c1835420b6b9942dd4f1b" },   # every other host
+]
 ```
 
 A session applies each item its profile holds when it starts, and a started session's profile report lists each (`items.ID`) and what it became, by
@@ -200,13 +204,13 @@ extension back applies them again.
 
 **Proxy** (`items.proxy`): how the session's programs reach the network, by `mode`:
 
-- `system` (the default): the host runs a proxy on its loopback address for this session alone and gives the programs
+- `system` (the default): the host runs a proxy on its loopback address (the one other sessions with these settings share) and gives the programs
   `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` for it (and `NO_PROXY` for this computer and `bypass`). It sends each connection
   the way the host's own network does: the system's proxy chosen per destination (PAC, WPAD), logged in to as the host logs in
   (Basic, Negotiate, NTLM) and carried through a CONNECT tunnel, with the hosts on `bypass` (in the `NO_PROXY` form) going
   direct, so a program that only knows a plain proxy behaves as the system does. The programs' address carries a secret of the
-  session as the proxy's password, since the proxy answers with your own logon session: another process on this computer that
-  lacks it is refused. The proxy ends with the session.
+  proxy as its password, since the proxy answers with your own logon session: another process on this computer that
+  lacks it is refused. The proxy ends with the last session that uses it.
 - `none`: the programs are given `NO_PROXY=*` and no proxy: the host adds no system proxy to them, and a proxy variable they
   inherit from you is overridden by it for a program that reads `NO_PROXY`. The host's own requests for the session (the
   knowledge tools' search by meaning and by a model) go direct too.
@@ -218,28 +222,47 @@ extension back applies them again.
   must listen on); the host starts it for the session, waits until it listens, gives its address to the programs and ends it with
   the session.
 
-**A client certificate to an origin** (mTLS) is carried only where you ask, for the hosts `client_certificate_hosts` names (a host,
-`*.name` for a name and everything under it, or an address) and only by the `system` and `pac` modes, whose proxy is the host's
-own. A CONNECT tunnel carries the TLS the program makes itself, so a proxy cannot add a certificate to it; for these hosts alone
-the proxy ends the program's TLS instead. It makes its own TLS to the host first, through the network: the server is verified as
-the operating system verifies it and the client certificate your keystores (or `[host.network] client_certificate`) choose is
-presented, and a host that cannot be verified, or that wants a certificate you have none for, is the program's `502` with the
-reason. It then answers the program's TLS with a certificate for that host signed by an authority made for this session when
-its proxy starts, and carries the bytes between. Every other host stays a tunnel, untouched.
+**A client certificate to an origin** (mTLS) is carried only where you ask, for the hosts `client_certificate_hosts` names, and only by
+the `system` and `pac` modes, whose proxy is the host's own. It is a list of entries, each a `pattern` and an `identity`; the first
+entry whose pattern matches a destination decides, and a destination no entry matches is not touched. A `pattern` is a host name
+(`api.corp.example`), `*.name` for a name and everything under it, an address, or any other regular expression, which must match
+the whole host and ignores case (`(api|auth)[.]corp[.]example`; `.*` matches every host, so one entry can cover them all). It is
+matched against the destination as the program names it: a name, or an address written out. The `identity` is `system` (the
+default: what your keystores, or `[host.network] client_certificate`, choose by the authorities the server names, as a browser
+would) or the thumbprint (SHA-256, in hex) of one certificate, picked from the list the host gives of the client certificates it
+holds: the Windows certificate store, the macOS Keychain, a PKCS#11 module where one is set up, and the `[host.network]` file
+(`network/client_certificates`: subject, issuer, expiry and thumbprint, never a key; the form shows it as a pick for each entry,
+as a browser asks which certificate to send). A certificate that is not held here, has expired, or may not authenticate a client
+is the program's `502`, and nothing is sent to the destination.
 
-The session's programs are told to trust that authority, and nothing else is: it is never added to the operating system's store,
-your browser's or any other of your programs'. Its certificate, with the operating system's roots beside it where a program
-replaces its roots by a file, is written in the session's private directory, which goes with the session, and named by
-`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `PIP_CERT`, `CARGO_HTTP_CAINFO` and
-`NPM_CONFIG_CAFILE` (and, alone, by `NODE_EXTRA_CA_CERTS`, which adds to the roots Node carries). The authority is the
-session's alone: its key exists only in the host's memory, is written to no file, and goes with the session, so two sessions never
-share one. Its certificate says it may vouch for the hosts the item names and no others (a critical X.509 name constraint, which
-every TLS library checks: `*.name` becomes the name and what is under it, an address stays that address), so a program that
-trusts it, or anyone who gets hold of the session's bundle files, cannot be shown a valid certificate for any other host. A host
-named as `name` is permitted with its subdomains too: a DNS constraint cannot be narrower. A program that reads none of these, uses its own trust (Windows' own tools, a browser)
-or pins the certificates it accepts fails for those hosts: nothing can be done about that here. A host both named here and on
-`bypass` is reached as the network chooses, not directly. What the session's report says of the proxy names the hosts it ends TLS
-for.
+A CONNECT tunnel carries the TLS the program makes itself, so a proxy cannot add a certificate to it; for the destinations an entry
+matches, and no others, the proxy ends the program's TLS instead. It makes its own TLS to the host first, through the network: the
+server is verified as the operating system verifies it and the entry's certificate is presented, and a host that cannot be
+verified, or that wants a certificate you have none for, is the program's `502` with the reason. It then answers the program's
+TLS with a certificate for that host, made the first time a program connects to it and kept, by host name or address, until a
+day before it expires, and carries the bytes between. Every other host stays a tunnel, untouched.
+
+The session's programs are told to trust the authority that signs those certificates, and nothing else is: it is never added to
+the operating system's store, your browser's or any other of your programs'. Its certificate, with the operating system's roots
+beside it where a program replaces its roots by a file, is written in the session's private directory, which goes with the
+session, and named by `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `PIP_CERT`, `CARGO_HTTP_CAINFO`
+and `NPM_CONFIG_CAFILE` (and, alone, by `NODE_EXTRA_CA_CERTS`, which adds to the roots Node carries). The authority is the host
+process's: made in memory the first time a proxy needs it and shared by every session, its key is written to no file and goes with
+the process. When every pattern is a plain host, `*.name` or address, the authority is limited to exactly those (a critical X.509
+name constraint, which every TLS library checks: `*.name` becomes the name and what is under it, an address stays that address),
+so a program that trusts it, or anyone who gets hold of the session's bundle files, cannot be shown a valid certificate for any
+other host; a host named as `name` is permitted with its subdomains too, since a DNS constraint cannot be narrower, and a set of
+hosts that differs is another authority. A regular expression cannot be said as a constraint, so a session that has one is
+given the process's one authority that has no limit: it can vouch for any host to a program that trusts it, but only the host
+process holds its key, which is why a pattern should be as narrow as the hosts need. A program that reads none of these, uses its
+own trust (Windows' own tools, a browser) or pins the certificates it accepts fails for those hosts: nothing can be done about
+that here. A host both matched here and on `bypass` is reached as the network chooses, not directly. What the session's report
+says of the proxy names the patterns it ends TLS for.
+
+**Sessions share a proxy.** The `system` and `pac` modes run one proxy for every session whose proxy item makes the same settings
+(mode, address, bypass list, login, patterns and their certificates, and the `[host.network]` it follows), with a secret of its
+own: it starts when the first such session does and ends when the last does. `[host.network] proxy_idle_seconds` keeps it that
+long after its last session for the next one that asks (default 0: it ends with its last session).
 
 A later layer wins per key. Environment variables, skills and MCP servers merge by name: a later layer's entry replaces a
 lower one's whole and keeps its place, and `remove = true` takes it out. `unset = ["model"]` takes back a lower layer's
@@ -786,6 +809,7 @@ client_certificate = "system"    # system (the default), none, or a PEM file hol
 ca_file = "roots.pem"            # trust exactly these certificates, replacing the system's
 git_tls = "system"               # system (Schannel on Windows) or git (git's own and the person's git configuration)
 endpoints = ["https://tools.corp.example/"]   # addresses the programs reach, for a PAC script to choose their proxy by
+proxy_idle_seconds = 0             # how long the proxy a profile's system or pac mode runs is kept after its last session
 ```
 
 Paths are read from the folder of canoa.cfg. The host starts only with a setting it can use: a proxy it cannot read, a `proxy_password_env` variable that is not set, or a certificate file that is missing is refused at start, with the key named. Git's client certificate is not chosen from the keystore as a browser's is: Git for Windows presents one only when its `http.sslCert` names it, which a source the person typed gets from their own git configuration.

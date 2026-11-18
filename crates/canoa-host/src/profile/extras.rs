@@ -127,7 +127,7 @@ impl ProfileItem for ProxyItem {
     fn describe(&self) -> Result<ItemInfo, ProviderError> {
         let mut info = ItemInfo::new("proxy", "Proxy");
         info.help = Some(
-            "How this session's programs reach the network. By default the host runs a proxy for the session alone, which sends each connection as this computer's own network would."
+            "How this session's programs reach the network. By default the host runs a proxy (shared with the sessions that have the same settings) which sends each connection as this computer's own network would."
                 .to_owned(),
         );
         info.taking::<ProxyValues>()
