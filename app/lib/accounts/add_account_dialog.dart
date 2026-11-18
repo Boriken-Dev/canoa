@@ -16,7 +16,11 @@ import 'accounts_host.dart';
 final RegExp accountName = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
 
 /// What the person sees of a provider's name: `claude` is Claude.
-String harnessTitle(String harness) => harness.isEmpty ? harness : '${harness[0].toUpperCase()}${harness.substring(1)}';
+String harnessTitle(String harness) => switch (harness) {
+  '' => harness,
+  'opencode' => 'OpenCode',
+  _ => '${harness[0].toUpperCase()}${harness.substring(1)}',
+};
 
 /// Adds an account: the provider and a name, then one of the provider's own ways to sign in, then what that way asks. A key or
 /// a code is typed into the sealed form the host asks for, which goes to the host and is never held here.

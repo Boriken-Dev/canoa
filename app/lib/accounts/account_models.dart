@@ -22,6 +22,8 @@ String standardTitle(String id) => switch (id) {
   'gemini-api' => 'Gemini API',
   'antigravity' => 'Antigravity',
   'pi' => 'Pi',
+  'opencode' => 'OpenCode',
+  'opencode-key' => 'OpenCode provider key',
   _ => id,
 };
 

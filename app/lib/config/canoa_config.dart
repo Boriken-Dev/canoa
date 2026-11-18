@@ -437,7 +437,7 @@ final class CanoaConfig {
   /// it, else the first entry that runs the provider, else the name the host makes one with (a source's own, or the provider's with
   /// a capital).
   String ownEntryOf(String harness) {
-    const sources = {'claude': 'Claude', 'codex': 'Codex'};
+    const sources = {'claude': 'Claude', 'codex': 'Codex', 'opencode': 'OpenCode'};
     final running = hostEntriesRunning(harness);
     final source = sources[harness];
     if (source != null && running.contains(source)) return source;

@@ -82,6 +82,32 @@ void main() {
     expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNotNull);
   });
 
+  testWidgets('OpenCode is listed with its mark, and Add account offers its provider-key sign-in with what that kind weakens', (tester) async {
+    // No account of its own yet: the group is there because the section offers OpenCode, not because an account names it.
+    final host = FakeAccountsHost();
+    final controller = _controller(host);
+    await _show(tester, controller);
+    expect(find.byKey(const Key('accounts-opencode')), findsOneWidget);
+    expect(find.text('OpenCode'), findsWidgets);
+    expect(find.text('Opencode'), findsNothing);
+    await tester.tap(find.byKey(const Key('add-account-opencode')));
+    await tester.pumpAndSettle();
+    expect(controller.catalogIfKnown('opencode')?.kind('opencode-provider-key')?.title, 'OpenCode provider key');
+    expect(controller.catalogIfKnown('opencode')?.kind('opencode-login')?.provides, ['opencode']);
+    expect(find.byKey(const Key('login-method api-key')), findsOneWidget);
+    expect(find.text('Provider API key'), findsOneWidget);
+    expect(find.text('the credential is in the environment of every program the agent runs'), findsWidgets);
+    await tester.enterText(find.byKey(const Key('add-account-name')), 'groq-two');
+    await tester.tap(find.byKey(const Key('login-method api-key')));
+    await tester.pump();
+    expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNotNull);
+    await tester.tap(find.byKey(const Key('add-account-start')));
+    await tester.pumpAndSettle();
+    // The variable is asked first, as a choice among the ones OpenCode reads.
+    expect(find.byKey(const Key('program-ask')), findsOneWidget);
+    expect(find.text('Variable'), findsWidgets);
+  });
+
   testWidgets('away from the host Codex signs in by a device code unless the person chooses the browser', (tester) async {
     final host = FakeAccountsHost();
     await _show(tester, _controller(host, hostIsHere: false));

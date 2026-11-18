@@ -17,7 +17,7 @@ class AccountsController extends ChangeNotifier {
     required this.host,
     required this.config,
     required this.change,
-    this.harnesses = const ['claude', 'codex'],
+    this.harnesses = const ['claude', 'codex', 'opencode'],
     this.usage,
     this.holder,
     this.hostIsHere = true,

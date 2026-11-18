@@ -102,11 +102,61 @@ const codexCatalog = {
   ],
 };
 
+/// OpenCode as its provider says it: a key for one provider (asked first which variable it is for), and the sign-in its own `auth.json`
+/// keeps, which no method drives.
+const opencodeCatalog = {
+  'harness': 'opencode',
+  'kinds': [
+    {
+      'id': 'opencode-login',
+      'provides': ['opencode'],
+      'title': 'OpenCode sign-in',
+      'rotates': true,
+      'state_dir': true,
+      'notices': ['the login is kept in a file that what the agent runs can read'],
+    },
+    {
+      'id': 'opencode-provider-key',
+      'provides': ['opencode-key'],
+      'title': 'OpenCode provider key',
+      'state_dir': true,
+      'settings': {
+        'type': 'object',
+        'properties': {
+          'variable': {
+            'type': 'string',
+            'enum': ['OPENAI_API_KEY', 'GROQ_API_KEY'],
+          },
+        },
+        'required': ['variable'],
+      },
+      'notices': ['the credential is in the environment of every program the agent runs'],
+    },
+  ],
+  'logins': [
+    {
+      'id': 'api-key',
+      'title': 'Provider API key',
+      'description': 'Asks which provider\'s variable the key is for, then the key',
+      'produces': 'opencode-provider-key',
+      'steps': ['ask'],
+      'remote': true,
+      'inputs': {
+        'type': 'object',
+        'properties': {
+          'variable': {'type': 'string', 'title': 'Variable', 'enum': ['OPENAI_API_KEY', 'GROQ_API_KEY']},
+        },
+        'required': ['variable'],
+      },
+    },
+  ],
+};
+
 final class FakeAccountsHost implements AccountsHost {
   FakeAccountsHost({List<AccountInfo>? accounts}) : accounts = accounts ?? [];
 
   final List<AccountInfo> accounts;
-  final catalogs = <String, Object?>{'claude': claudeCatalog, 'codex': codexCatalog};
+  final catalogs = <String, Object?>{'claude': claudeCatalog, 'codex': codexCatalog, 'opencode': opencodeCatalog};
   final signIns = <SignIn>[];
   final inputsGiven = <Map<String, String>>[];
   final removed = <String>[];
