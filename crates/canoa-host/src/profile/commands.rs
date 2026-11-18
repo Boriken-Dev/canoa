@@ -324,11 +324,11 @@ mod tests {
         assert!(why.contains("is not a file of the overlay"), "{why}");
         let launcher = made[1].1.as_ref().expect("a launcher");
         let mut run = if cfg!(windows) {
-            let mut command = std::process::Command::new("cmd.exe");
+            let mut command = crate::spawn::Command::new("cmd.exe");
             command.args(["/d", "/c"]).arg(launcher);
             command
         } else {
-            std::process::Command::new(launcher)
+            crate::spawn::Command::new(launcher)
         };
         let output = run.args(["one", "two words"]).output().expect("runs");
         assert_eq!(

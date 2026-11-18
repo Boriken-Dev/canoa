@@ -224,14 +224,17 @@ fn dependencies_install_into_an_environment_of_the_overlays_own_and_setup_runs_i
     assert_eq!(again.digest.to_string(), plan.digest);
     // Setup ran as `install`, with the overlay's root and a state directory it could write to.
     let log = std::fs::read_to_string(home.state("needy").join("phases.log"))
-        .expect("setup wrote its log");
+        .expect("setup wrote its log")
+        .replace("\r\n", "\n");
     assert_eq!(log, "install install needy\n");
 
     // A sync rebuilds the environment and runs setup again as `sync`, in the state the first left.
     let second = run(&plan, Change::Sync, &home, &finder, &env).expect("synced");
     assert_eq!(second.phase, Some(Phase::Sync));
     assert_eq!(second.steps, ["deps:python", "setup", "record"]);
-    let log = std::fs::read_to_string(home.state("needy").join("phases.log")).expect("log");
+    let log = std::fs::read_to_string(home.state("needy").join("phases.log"))
+        .expect("log")
+        .replace("\r\n", "\n");
     assert_eq!(log, "install install needy\nsync sync needy\n");
     assert!(
         PathBuf::from(&home.packages("needy")["python"])

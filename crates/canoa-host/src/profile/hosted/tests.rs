@@ -441,6 +441,19 @@ fn install_overlay(temp: &Temp) -> String {
     digest
 }
 
+/// Whether two paths name one file as Windows reads them: the same text with either separator, in any case.
+fn same_file_name(a: &Path, b: &Path) -> bool {
+    let text = |path: &Path| {
+        let text = path.to_string_lossy().replace('/', "\\");
+        if cfg!(windows) {
+            text.to_ascii_lowercase()
+        } else {
+            text
+        }
+    };
+    text(a) == text(b)
+}
+
 /// A small real program and the arguments that make it end with status 0, to put in an overlay's `bin/` as a server's command.
 fn small_program() -> (PathBuf, Vec<&'static str>) {
     if cfg!(windows) {
@@ -493,11 +506,7 @@ fn an_mcp_servers_bare_command_is_found_in_its_overlays_bin_as_well_as_on_the_ho
     let command = PathBuf::from(started["command"].as_str().expect("a command"));
     let inside = temp.0.join("overlays/tools/bin").join(&tool);
     assert!(
-        command == inside
-            || cfg!(windows)
-                && command
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case(&inside.to_string_lossy()),
+        same_file_name(&command, &inside),
         "{command:?} is not {inside:?}"
     );
     // What the agent is given starts.
@@ -2378,7 +2387,12 @@ fn what_preparing_made_reaches_the_session_only_for_the_version_it_was_made_for(
         .expect("PYTHONPATH")
         .to_owned();
     let sep = if cfg!(windows) { ';' } else { ':' };
-    assert_eq!(path, format!("{own}{sep}{}", packages.display()));
+    let (head, tail) = path.split_once(sep).expect("two folders");
+    assert_eq!(head, own);
+    assert!(
+        same_file_name(Path::new(tail), &packages),
+        "{tail} is not {packages:?}"
+    );
     assert!(
         env_value(&connection, &aos::state_variable("needy"))
             .is_some_and(|state| state.ends_with("needy")),
