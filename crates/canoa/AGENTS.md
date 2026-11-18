@@ -19,7 +19,8 @@ pub struct NetworkSettings { pub proxy: ProxyChoice, pub proxy_user: Option<Stri
 pub enum ProxyChoice { System, None, Proxy(String), Pac(String) }                      // default System
 pub enum ClientCertificate { System, None, File(PathBuf) }                              // default System; File is a PEM chain and its unencrypted key
 pub enum GitTls { System, Git }                                                         // default System
-pub use coqui_syshttp::{ChildEnvironment, Secret};
+pub use coqui_syshttp::{ChildEnvironment, OriginAuth, Secret};
+pub use coqui_syshttp::client::OriginAgent as LoginAgent;
 impl Network {
     pub fn new(&NetworkSettings) -> Result<Network, NetworkError>;   // a proxy that cannot be read, an unreadable or empty ca_file or client certificate
     pub fn with(Resolver, TlsBuilder) -> Network;                    // the caller's own resolver and TLS, for a test
@@ -27,13 +28,14 @@ impl Network {
     pub fn current() -> Arc<Network>;                                // the one installed, else the system's
     pub fn install(Network) -> Arc<Network>;                         // the process's
     pub fn agent(&self, ureq::config::Config) -> Result<ureq::Agent, NetworkError>;
+    pub fn login_agent(&self, ureq::config::Config, OriginAuth) -> Result<LoginAgent, NetworkError>;   // `agent`, and `LoginAgent::run(http::Request<bytes>)` answers a server's 401
     pub fn child_variables(&self, endpoints: &[String]) -> Vec<(String, String)>;   // cached for a minute; the person's `endpoints` are added
     pub fn variables_for(&self, urls: &[String]) -> Vec<(String, String)>;
     pub fn resolver(&self) -> &Resolver;  pub fn git_tls(&self) -> GitTls;
 }
 ```
 
-`agent` takes the timeouts, redirects and limits of the `Config` and none of its proxy or TLS settings: every request asks the resolver for its proxy, connects through it with its login (Negotiate or NTLM through SSPI on Windows when `negotiate` is not `Some(false)`; Basic from `proxy_user`), verifies with the system's verifier (or exactly `ca_file`) and answers a certificate request from the keystores (or `client_certificate`). Loopback is never sent through a proxy unless `no_proxy` holds `<-loopback>`. `child_variables` and `variables_for` are `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (lower case too off Windows) for a program: a proxy chosen per URL is resolved for the endpoints named, and nothing is given when everything goes direct. The credentials are in the proxy URL, so the variables belong to the child only. The `speech_endpoint` and `speech_say_endpoint` providers build their client from `Network::current()`.
+`agent` takes the timeouts, redirects and limits of the `Config` and none of its proxy or TLS settings: every request asks the resolver for its proxy, connects through it with its login (Negotiate or NTLM through SSPI on Windows when `negotiate` is not `Some(false)`; Basic from `proxy_user`), verifies with the system's verifier (or exactly `ca_file`) and answers a certificate request from the keystores (or `client_certificate`). `login_agent` also answers a server's own `401` for the hosts its `OriginAuth` names (`OriginAuth::builder().basic(hosts, Credentials)`, `.negotiate(hosts)` for the logon session, Windows only here, `.negotiate_as(hosts, Credentials)`): only requests sent through `LoginAgent::run` are answered, with the body held in memory and sent once per leg; the person's `negotiate` setting is about a proxy and does not gate it. Loopback is never sent through a proxy unless `no_proxy` holds `<-loopback>`. `child_variables` and `variables_for` are `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (lower case too off Windows) for a program: a proxy chosen per URL is resolved for the endpoints named, and nothing is given when everything goes direct. The credentials are in the proxy URL, so the variables belong to the child only. The `speech_endpoint` and `speech_say_endpoint` providers build their client from `Network::current()`.
 
 ## `Registry`
 
