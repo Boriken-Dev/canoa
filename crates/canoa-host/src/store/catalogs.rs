@@ -134,6 +134,8 @@ pub(crate) struct TypeCatalogs {
     pub(crate) lists: String,
     /// The catalog offered until the person removes it or gives its label another source.
     pub(crate) default: Option<(&'static str, &'static str)>,
+    /// A catalog the type always offers first, which no canoa.cfg entry removes or replaces: its label is the type's own.
+    pub(crate) fixed: Option<(&'static str, &'static str)>,
 }
 
 /// The types the Store has of its own that read catalogs.
@@ -146,6 +148,7 @@ pub(crate) fn built_in_types() -> Vec<TypeCatalogs> {
             plural: plural.to_owned(),
             lists: lists.to_owned(),
             default,
+            fixed: None,
         };
     vec![
         words(
@@ -167,15 +170,18 @@ pub(crate) fn built_in_types() -> Vec<TypeCatalogs> {
             "skills",
             Some(("anthropics", "https://github.com/anthropics/skills")),
         ),
-        words(
-            "mcps",
-            "MCP servers",
-            "registry",
-            "registries",
-            "MCP servers",
-            // The official registry is always offered first and cannot be taken away, so it is no row of the table.
-            None,
-        ),
+        TypeCatalogs {
+            // The official registry is always offered first and cannot be taken away or replaced.
+            fixed: Some((OFFICIAL_LABEL, crate::control::registry::OFFICIAL)),
+            ..words(
+                "mcps",
+                "MCP servers",
+                "registry",
+                "registries",
+                "MCP servers",
+                None,
+            )
+        },
         words(
             "extensions",
             "Extensions",
@@ -187,8 +193,47 @@ pub(crate) fn built_in_types() -> Vec<TypeCatalogs> {
     ]
 }
 
-/// One type's rows for the Store: the default (unless the table names its label or sets it to `false`) and then the table's own,
-/// each with the provider and fields as canoa.cfg has them. A row that is no catalog says why.
+/// The label of the official MCP registry, which the MCP servers type always offers.
+pub(crate) const OFFICIAL_LABEL: &str = "official";
+
+fn same_label(a: &str, b: &str) -> bool {
+    coqui_aos::normalize_name(a) == coqui_aos::normalize_name(b)
+}
+
+/// The catalog `label` of `kind`: the fixed one, one canoa.cfg's `table` names, or the default (while the table does not name or
+/// remove its label). The error says why there is none.
+pub(crate) fn find(kind: &TypeCatalogs, table: &Value, label: &str) -> Result<Entry, String> {
+    let read = |label: &str, source: &str| Entry {
+        label: label.to_owned(),
+        provider: READ.to_owned(),
+        fields: Map::from_iter([("source".to_owned(), json!(source))]),
+    };
+    if let Some((fixed, source)) = kind.fixed
+        && same_label(fixed, label)
+    {
+        return Ok(read(fixed, source));
+    }
+    let named = table
+        .as_object()
+        .is_some_and(|table| table.keys().any(|key| same_label(key, label)));
+    if !named
+        && let Some((default, source)) = kind.default
+        && same_label(default, label)
+    {
+        return Ok(read(default, source));
+    }
+    for parsed in self::read(table) {
+        match parsed {
+            Ok(entry) if same_label(&entry.label, label) => return Ok(entry),
+            Err((each, why)) if same_label(&each, label) => return Err(why),
+            _ => {}
+        }
+    }
+    Err(format!("{} has no catalog {label:?}", kind.title))
+}
+
+/// One type's rows for the Store: the fixed catalog, the default (unless the table names its label or sets it to `false`) and
+/// then the table's own, each with the provider and fields as canoa.cfg has them. A row that is no catalog says why.
 pub(crate) fn rows_of(kind: &TypeCatalogs, table: &Value) -> Vec<Value> {
     let named = |label: &str| {
         table.as_object().is_some_and(|table| {
@@ -198,6 +243,16 @@ pub(crate) fn rows_of(kind: &TypeCatalogs, table: &Value) -> Vec<Value> {
         })
     };
     let mut rows = Vec::new();
+    if let Some((label, source)) = kind.fixed {
+        rows.push(json!({
+            "label": label,
+            "provider": READ,
+            "fields": {"source": source},
+            "source": source,
+            "default": true,
+            "fixed": true,
+        }));
+    }
     if let Some((label, source)) = kind.default
         && !named(label)
     {
@@ -210,7 +265,16 @@ pub(crate) fn rows_of(kind: &TypeCatalogs, table: &Value) -> Vec<Value> {
         }));
     }
     for parsed in read(table) {
+        let taken = |label: &str| {
+            kind.fixed
+                .is_some_and(|(fixed, _)| same_label(fixed, label))
+        };
         rows.push(match parsed {
+            Ok(entry) if taken(&entry.label) => json!({
+                "label": entry.label,
+                "problem": "The label is the host's own: the official registry is always offered and cannot be replaced",
+                "default": false,
+            }),
             Ok(entry) => {
                 let mut row = json!({
                     "label": entry.label,

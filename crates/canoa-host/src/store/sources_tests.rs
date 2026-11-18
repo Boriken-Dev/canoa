@@ -58,10 +58,35 @@ impl CatalogSourceProvider for Everywhere {
     }
 }
 
+/// A source serving Skills and MCP servers, which answers in the form each documents.
+#[derive(Default, Provider)]
+#[provider(CatalogSourceProvider, id = "lister", crate = ::coqui_acp_api::guatiao)]
+pub(crate) struct Lister;
+
+impl CatalogSourceProvider for Lister {
+    fn describe(&self) -> Result<SourceInfo, ProviderError> {
+        let mut info = SourceInfo::new("lister", "A lister");
+        info.types = vec!["skills".to_owned(), "mcps".to_owned()];
+        Ok(info)
+    }
+
+    fn read(&self, request: ReadRequest) -> Result<String, ProviderError> {
+        if STANDIN_FAILS.load(Ordering::SeqCst) {
+            return Err(canoa::store::recipe::internal_error("the stand-in is down"));
+        }
+        Ok(if request.kind == "skills" {
+            json!({"skills": [{"name": "from-extension", "description": "Listed by an extension.", "source": "owner/repo"}]})
+        } else {
+            json!({"servers": [{"server": {"name": "io.example/ext", "description": "Listed by an extension."}}]})
+        }
+        .to_string())
+    }
+}
+
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-standin-sources",
     version = "0",
-    providers = [Standin, Everywhere]
+    providers = [Standin, Everywhere, Lister]
 );
 
 /// The built-in sources and the stand-in, as a host with that extension loaded holds them.
@@ -110,7 +135,7 @@ fn fail(text: &str) -> Vec<String> {
 }
 
 #[test]
-fn read_and_command_are_built_in_and_say_which_types_they_serve_and_what_their_forms_ask() {
+fn read_and_command_are_built_in_and_serve_every_type_with_the_forms_they_ask() {
     let sources = Sources::built_in();
     let listed: Vec<(&SourceInfo, Option<&str>)> = sources.list().collect();
     let ids: Vec<&str> = listed.iter().map(|(info, _)| info.id.as_str()).collect();
@@ -128,8 +153,18 @@ fn read_and_command_are_built_in_and_say_which_types_they_serve_and_what_their_f
     assert!(read.fields[0].required);
 
     let command = sources.info("command").expect("command");
-    assert!(command.serves("overlays") && command.serves("extensions"));
-    assert!(!command.serves("skills") && !command.serves("mcps"));
+    assert!(command.types.is_empty(), "it serves every type");
+    assert!(
+        [
+            "overlays",
+            "extensions",
+            "skills",
+            "mcps",
+            "a_type_an_extension_added"
+        ]
+        .iter()
+        .all(|kind| command.serves(kind))
+    );
     let names: Vec<&str> = command
         .fields
         .iter()

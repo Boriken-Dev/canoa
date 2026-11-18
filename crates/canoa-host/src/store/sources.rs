@@ -74,11 +74,11 @@ impl CatalogSourceProvider for CommandSource {
         let mut info = SourceInfo::new("command", "Run a program");
         info.help = Some(
             "A program and its arguments, run each time the catalog is refreshed, as you, with your environment. What it prints is \
-             the catalog."
+             the catalog, in the form the type reads: an overlay or extension catalog file, a JSON list of skills, or a registry's \
+             list of MCP servers."
                 .to_owned(),
         );
-        // The catalogs the host itself indexes; Skills and MCP servers read theirs from the place they name.
-        info.types = vec!["overlays".to_owned(), "extensions".to_owned()];
+        // It serves every type: what it prints is read in the form the type documents.
         let mut command = SourceField::new("command", "Program and arguments", "list").required();
         command.help = Some("The program first, then each argument.".to_owned());
         let mut cwd = SourceField::new("cwd", "Folder", "path");

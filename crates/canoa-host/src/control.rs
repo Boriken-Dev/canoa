@@ -26,7 +26,7 @@ pub use files::{
 pub(crate) use files::{Files, UploadLimits, foundry_windows_in};
 pub(crate) use import::{Homes, IMPORT_KEY};
 pub(crate) use moves::Moves;
-pub(crate) use overlays::{OverlayLimits, Overlays};
+pub(crate) use overlays::{OverlayLimits, Overlays, valid_skill_name};
 pub(crate) use registry::Registry;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -98,7 +98,7 @@ pub enum Grant {
     /// host fetches nothing for these. Also `store/contents` and `store/contents_put`: the key's own cache of what the entries of a
     /// catalog provide, which no other key reads.
     OverlayRead,
-    /// `registry/fetch` (one page of an MCP registry's list, from the official registry or one `[store] registries` lists), `overlay/check`, `overlay/apply`, `overlay/remove`, `overlay/discard`, `catalog/fetch`, `catalog/remove`, `skill/fetch`, `skill/scan`, `skill/save`, `skill/remove` and `skill/search` (the skills directory `[store] skills_search` names, once the person turned it on): fetch sources with
+    /// `registry/fetch` (one page of an MCP registry's list, from the official registry or one `[store.mcps.catalogs]` lists), `store/catalog` (the entries of one Skills or MCP servers catalog), `overlay/check`, `overlay/apply`, `overlay/remove`, `overlay/discard`, `catalog/fetch`, `catalog/remove`, `skill/fetch`, `skill/scan`, `skill/save`, `skill/remove` and `skill/search` (the skills directory `[store] skills_search` names, once the person turned it on): fetch sources with
     /// git as this user and install what AOS digests, under the overlays folder beside canoa.cfg. Nothing is run.
     OverlayWrite,
     /// `host/restart`: ends this host so that its supervisor starts it again with the canoa.cfg then.
@@ -926,6 +926,8 @@ impl Control {
                     .and_then(|store| hosting::accept(store, &params)),
                 Some("extension/catalogs") => self.extension_catalogs(caller, &params),
                 Some("store/catalogs") => self.store_catalogs(caller, &params),
+                Some("store/catalog") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| self.store_catalog(caller, &params)),
                 Some("extension/plan") => {
                     allow(caller, Grant::Hosting).and_then(|()| self.extension_plan(&params))
                 }
@@ -1670,6 +1672,9 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
 }
 
 pub(crate) mod accounts;
+mod catalog_read;
+#[cfg(test)]
+mod catalog_read_tests;
 mod catalog_types;
 #[cfg(test)]
 mod catalog_types_tests;

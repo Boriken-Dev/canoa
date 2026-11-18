@@ -144,6 +144,7 @@ impl Stores {
                     plural: words.plural.clone(),
                     lists: words.lists.clone(),
                     default: None,
+                    fixed: None,
                 })
             })
             .collect()

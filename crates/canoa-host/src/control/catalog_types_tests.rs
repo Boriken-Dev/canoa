@@ -99,7 +99,7 @@ fn each_type_lists_only_its_own_catalogs() {
     let all = ask(&control, &Caller::Owner, "store/catalogs", json!({}));
     assert_eq!(labels(&all, "overlays"), ["team"], "{all}");
     assert_eq!(labels(&all, "skills"), ["mine"], "{all}");
-    assert_eq!(labels(&all, "mcps"), ["corp"], "{all}");
+    assert_eq!(labels(&all, "mcps"), ["official", "corp"], "{all}");
     assert_eq!(labels(&all, "extensions"), ["plugins"], "{all}");
 
     let one = ask(
@@ -140,12 +140,16 @@ fn a_catalog_written_under_one_type_is_not_listed_under_another() {
     let answer = ask(&control, &Caller::Owner, "store/catalogs", json!({}));
     assert_eq!(labels(&answer, "skills"), ["anthropics", "only_skills"]);
     assert_eq!(labels(&answer, "overlays"), ["boriken"], "only its default");
-    assert!(labels(&answer, "mcps").is_empty());
+    assert_eq!(
+        labels(&answer, "mcps"),
+        ["official"],
+        "only the official registry"
+    );
     assert!(labels(&answer, "extensions").is_empty());
 }
 
 #[test]
-fn a_source_limited_to_one_type_is_offered_only_in_that_types_form_with_the_fields_it_describes() {
+fn a_source_is_offered_in_the_forms_of_the_types_it_serves_with_the_fields_it_describes() {
     let rig = Rig::new("catalog-types-sources");
     let control = rig.control("", true);
     let answer = ask(&control, &Caller::Owner, "store/catalogs", json!({}));
@@ -164,11 +168,11 @@ fn a_source_limited_to_one_type_is_offered_only_in_that_types_form_with_the_fiel
     };
     assert_eq!(
         sources("skills"),
-        ["read", "everywhere", "standin"],
+        ["read", "command", "everywhere", "lister", "standin"],
         "{answer}"
     );
     assert_eq!(sources("overlays"), ["read", "command", "everywhere"]);
-    assert_eq!(sources("mcps"), ["read", "everywhere"]);
+    assert_eq!(sources("mcps"), ["read", "command", "everywhere", "lister"]);
     assert_eq!(sources("extensions"), ["read", "command", "everywhere"]);
 
     let skills = answer["result"]["types"]
@@ -177,7 +181,7 @@ fn a_source_limited_to_one_type_is_offered_only_in_that_types_form_with_the_fiel
         .iter()
         .find(|each| each["type"] == "skills")
         .expect("skills");
-    let standin = &skills["sources"][2];
+    let standin = &skills["sources"][4];
     assert_eq!(standin["extension"], "standin_ext");
     assert_eq!(standin["fields"][0]["name"], "team");
     assert_eq!(standin["fields"][0]["label"], "Team name");
