@@ -214,6 +214,10 @@ impl Mailbox {
 #[derive(Clone, Debug)]
 pub(crate) struct Logged {
     /// Which connection carried it, from 0.
+    #[cfg_attr(
+        not(windows),
+        expect(dead_code, reason = "read by the Windows sign-in tests")
+    )]
     pub(crate) connection: usize,
     pub(crate) path: String,
     pub(crate) operation: String,
@@ -248,6 +252,10 @@ struct Shared {
     sent: Mutex<Vec<String>>,
     demand: Demand,
     /// The accounts a security-package exchange authenticated.
+    #[cfg_attr(
+        not(windows),
+        expect(dead_code, reason = "written and read by the Windows sign-in")
+    )]
     users: Mutex<Vec<String>>,
     connections: AtomicUsize,
     stop: AtomicBool,
@@ -271,6 +279,13 @@ pub(crate) struct Standin {
 
 impl Standin {
     /// A server that asks for `login` (user and password) as Basic, or for nothing when it is `None`. A refusal offers Negotiate too.
+    #[cfg_attr(
+        not(windows),
+        expect(
+            clippy::needless_update,
+            reason = "the demand's other fields are Windows-only"
+        )
+    )]
     pub(crate) fn start(mailbox: Mailbox, login: Option<(&str, &str)>) -> Self {
         Self::launch(
             mailbox,
