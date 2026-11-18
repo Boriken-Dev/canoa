@@ -589,4 +589,3 @@ BuiltEnvironment buildOverlayEnvironment(List<AosLayer> layers, String? Function
   }
   return last ?? BuiltEnvironment._(aos.Environment([], windows), const {});
 }
-
