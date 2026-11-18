@@ -17,7 +17,7 @@ from typing import Any, ClassVar, Dict, List, Optional, Sequence
 
 from guatiao import Ref, provide
 from guatiao.errors import Unsupported
-from guatiao.kinds import Taken
+from guatiao.kinds import Taken, ValueAnswer
 
 from . import kinds
 from ._model import Model
@@ -58,7 +58,7 @@ class StoreExtension(WithForm, provide.Provider, kinds.StoreExtension):
         """The description, from the class attributes."""
         return ExtensionInfo(self.title, self.publisher, list(self.types))
 
-    def describe(self) -> kinds.ValueAnswer:
+    def describe(self) -> ValueAnswer:
         return self.info().to_data()
 
 
@@ -74,21 +74,21 @@ class ProgramStore(WithForm, provide.Provider, kinds.ProgramStore, abstract=True
         """The `StoreInfo` this provider answers `describe` with."""
         raise NotImplementedError("a ProgramStore says its info()")
 
-    def describe(self) -> kinds.ValueAnswer:
+    def describe(self) -> ValueAnswer:
         return self.info()
 
     @abstract
     def program(
         self, query: Ref, spawner: Taken[kinds.ProcessSpawner], tools: Taken[kinds.InstallTools]
-    ) -> kinds.ValueAnswer:
+    ) -> ValueAnswer:
         raise Unsupported("program is not implemented")
 
     @abstract
-    def latest(self, query: Ref, tools: Taken[kinds.InstallTools]) -> kinds.ValueAnswer:
+    def latest(self, query: Ref, tools: Taken[kinds.InstallTools]) -> ValueAnswer:
         raise Unsupported("latest is not implemented")
 
     @abstract
-    def plan(self, request: Ref, tools: Taken[kinds.InstallTools]) -> kinds.ValueAnswer:
+    def plan(self, request: Ref, tools: Taken[kinds.InstallTools]) -> ValueAnswer:
         raise Unsupported("plan is not implemented")
 
     @abstract
@@ -98,5 +98,5 @@ class ProgramStore(WithForm, provide.Provider, kinds.ProgramStore, abstract=True
         spawner: Taken[kinds.ProcessSpawner],
         tools: Taken[kinds.InstallTools],
         prompter: Taken[kinds.InstallPrompter],
-    ) -> kinds.ValueAnswer:
+    ) -> ValueAnswer:
         raise Unsupported("apply is not implemented")

@@ -38,7 +38,8 @@ class WithForm:
     ) -> None:
         if form is not None:
             meta = {**(meta or {}), **form_meta(form)}
-        super().__init_subclass__(meta=meta, **keywords)
+        # The next class in the bases is guatiao.provide.Provider, which takes `meta`; `object` does not, so the checker cannot see it.
+        super().__init_subclass__(meta=meta, **keywords)  # type: ignore[call-arg]
         if not abstract:
             left = sorted(
                 name for name in dir(cls) if getattr(getattr(cls, name, None), "__canoa_abstract__", False)

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar, List, Optional, Sequence
 
 from guatiao import provide
+from guatiao.kinds import ValueAnswer
 
 from . import kinds
 from ._model import Model
@@ -97,5 +98,5 @@ class AgentVendor(WithForm, provide.Provider, kinds.AgentVendor):
             look=self.look,
         )
 
-    def describe(self) -> kinds.ValueAnswer:
+    def describe(self) -> ValueAnswer:
         return self.info().to_data()

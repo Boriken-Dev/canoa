@@ -11,7 +11,7 @@ from typing import Any, ClassVar, Dict, List, Optional, Sequence
 
 from guatiao import Ref, provide
 from guatiao.errors import Unsupported
-from guatiao.kinds import Taken
+from guatiao.kinds import Taken, ValueAnswer
 
 from . import kinds
 from ._model import Model
@@ -59,7 +59,7 @@ class SpeechProvider(WithForm, provide.Provider, kinds.SpeechProvider, abstract=
             list(self.hints),
         )
 
-    def describe(self) -> kinds.ValueAnswer:
+    def describe(self) -> ValueAnswer:
         return self.info().to_data()
 
     @abstract
@@ -77,11 +77,11 @@ class SpeechOutput(WithForm, provide.Provider, kinds.SpeechOutput, abstract=True
         """The `OutputInfo` this provider answers `describe` with."""
         raise NotImplementedError("a SpeechOutput says its info()")
 
-    def describe(self) -> kinds.ValueAnswer:
+    def describe(self) -> ValueAnswer:
         return self.info()
 
     @abstract
-    def voices(self, query: Ref, spawner: Taken[kinds.ProcessSpawner]) -> kinds.ValueAnswer:
+    def voices(self, query: Ref, spawner: Taken[kinds.ProcessSpawner]) -> ValueAnswer:
         raise Unsupported("voices is not implemented")
 
     @abstract
