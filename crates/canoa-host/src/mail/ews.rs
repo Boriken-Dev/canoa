@@ -15,7 +15,9 @@ use canoa::network::Network;
 use self::request::{FolderRef, well_known};
 pub(crate) use self::transport::Auth;
 use self::transport::Transport;
-use super::model::{Backend, Change, Draft, Folder, MailError, Message, Page, Query, Summary};
+use super::model::{
+    Backend, Change, Draft, Folder, MailError, Message, Page, Query, Summary, find_folder,
+};
 use super::xml::Element;
 
 /// How many Autodiscover redirects are followed.
@@ -152,35 +154,7 @@ impl Ews {
     /// The folder `name` is the id, path or name of, among the mailbox's own folders.
     fn lookup(&self, name: &str) -> Result<FolderRef, MailError> {
         let folders = self.folders()?;
-        let wanted = name.trim().trim_matches('/').to_lowercase();
-        if let Some(folder) = folders.iter().find(|folder| folder.id == name.trim()) {
-            return Ok(FolderRef::Id(folder.id.clone()));
-        }
-        let by_path: Vec<&Folder> = folders
-            .iter()
-            .filter(|folder| folder.path.to_lowercase() == wanted)
-            .collect();
-        let matches = if by_path.is_empty() {
-            folders
-                .iter()
-                .filter(|folder| folder.name.to_lowercase() == wanted)
-                .collect()
-        } else {
-            by_path
-        };
-        match matches.as_slice() {
-            [one] => Ok(FolderRef::Id(one.id.clone())),
-            [] => Err(MailError::Bad(format!(
-                "no folder is named {name}: mail_list names the folders"
-            ))),
-            many => Err(MailError::Bad(format!(
-                "{name} is more than one folder ({}): name it by its path",
-                many.iter()
-                    .map(|folder| folder.path.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))),
-        }
+        find_folder(&folders, name).map(|folder| FolderRef::Id(folder.id.clone()))
     }
 }
 

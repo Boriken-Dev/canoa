@@ -25,20 +25,7 @@ impl FolderRef {
     }
 }
 
-/// The well-known folder a name means, in any of the spellings a person or an agent uses.
-pub(super) fn well_known(name: &str) -> Option<&'static str> {
-    Some(match name.trim().to_lowercase().as_str() {
-        "inbox" => "inbox",
-        "sent" | "sentitems" | "sent items" | "sent mail" => "sentitems",
-        "drafts" | "draft" => "drafts",
-        "archive" => "archive",
-        "deleted" | "deleteditems" | "deleted items" | "trash" | "bin" => "deleteditems",
-        "junk" | "junkemail" | "junk email" | "spam" => "junkemail",
-        "outbox" => "outbox",
-        "root" | "all" | "mailbox" | "msgfolderroot" => "msgfolderroot",
-        _ => return None,
-    })
-}
+pub(super) use crate::mail::model::well_known;
 
 /// The whole envelope around one operation.
 pub(super) fn envelope(operation: &str) -> String {

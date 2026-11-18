@@ -234,3 +234,56 @@ pub(crate) trait Backend: Send + Sync + fmt::Debug {
     /// Applies `change` to each message.
     fn change(&self, ids: &[String], change: &Change) -> Result<(), MailError>;
 }
+
+/// The well-known folder a name stands for, by the names Exchange and Graph share (`sentitems`, `deleteditems`, `junkemail`,
+/// `archive`, ...), or `msgfolderroot` for the whole mailbox.
+pub(crate) fn well_known(name: &str) -> Option<&'static str> {
+    Some(match name.trim().to_lowercase().as_str() {
+        "inbox" => "inbox",
+        "sent" | "sentitems" | "sent items" | "sent mail" => "sentitems",
+        "drafts" | "draft" => "drafts",
+        "archive" => "archive",
+        "deleted" | "deleteditems" | "deleted items" | "trash" | "bin" => "deleteditems",
+        "junk" | "junkemail" | "junk email" | "spam" => "junkemail",
+        "outbox" => "outbox",
+        "root" | "all" | "mailbox" | "msgfolderroot" => "msgfolderroot",
+        _ => return None,
+    })
+}
+
+/// The folder `name` is the id, path or name of, among `folders`.
+///
+/// # Errors
+///
+/// No folder, or more than one, answers to the name.
+pub(crate) fn find_folder<'a>(folders: &'a [Folder], name: &str) -> Result<&'a Folder, MailError> {
+    let wanted = name.trim().trim_matches('/').to_lowercase();
+    if let Some(folder) = folders.iter().find(|folder| folder.id == name.trim()) {
+        return Ok(folder);
+    }
+    let by_path: Vec<&Folder> = folders
+        .iter()
+        .filter(|folder| folder.path.to_lowercase() == wanted)
+        .collect();
+    let matches = if by_path.is_empty() {
+        folders
+            .iter()
+            .filter(|folder| folder.name.to_lowercase() == wanted)
+            .collect()
+    } else {
+        by_path
+    };
+    match matches.as_slice() {
+        [one] => Ok(one),
+        [] => Err(MailError::Bad(format!(
+            "no folder is named {name}: mail_list names the folders"
+        ))),
+        many => Err(MailError::Bad(format!(
+            "{name} is more than one folder ({}): name it by its path",
+            many.iter()
+                .map(|folder| folder.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
