@@ -4,10 +4,10 @@
 //! `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` on Windows, a property list in `~/Library/LaunchAgents` on macOS, a
 //! desktop entry in `~/.config/autostart` elsewhere. Nothing needs elevation, and removing deletes that one entry by its name.
 
+use crate::spawn::Command;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 /// The value's name under the Run key.

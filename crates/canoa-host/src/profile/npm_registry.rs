@@ -92,7 +92,7 @@ fn pack(node: &Path, scratch: &Path, name: &str, version: &str) -> Vec<u8> {
     let packed = scratch.join("packed");
     std::fs::create_dir_all(&packed).expect("a folder");
     let npm = finder_for(node).find("npm").expect("npm beside node");
-    let done = std::process::Command::new(&npm)
+    let done = crate::spawn::Command::new(&npm)
         .arg("pack")
         .arg(&source)
         .arg("--pack-destination")

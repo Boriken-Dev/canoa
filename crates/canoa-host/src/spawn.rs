@@ -895,7 +895,13 @@ mod tests {
     #[test]
     fn no_process_is_started_by_std_outside_this_module() {
         // native.rs starts Canoa for the browser from the relay, a process of its own that is not inside an application.
-        const OWN: [&str; 3] = ["profile/launch.rs", "accounts/private.rs", "native.rs"];
+        // launcher.rs starts the Office launcher detached, to outlive the command that started it.
+        const OWN: [&str; 4] = [
+            "profile/launch.rs",
+            "accounts/private.rs",
+            "native.rs",
+            "launcher.rs",
+        ];
         fn scan(dir: &Path, root: &Path, found: &mut Vec<String>) {
             for entry in std::fs::read_dir(dir).expect("a directory") {
                 let path = entry.expect("an entry").path();
