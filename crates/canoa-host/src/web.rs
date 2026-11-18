@@ -1691,7 +1691,7 @@ fn launch(shared: &Shared, request: &httparse::Request<'_, '_>, from: Option<IpA
 }
 
 /// The answer to a request under `/office/tools/`: the pane's tools. `open` registers an Office application, `poll` waits for what
-/// the host has for it, `send` carries one message of the pane's and `close` ends it. Only the page that this server serves, on this
+/// the host has for it (and, with `after`, names the last message the pane handled), `send` carries one message of the pane's and `close` ends it. Only the page that this server serves, on this
 /// computer, may ask.
 fn tools(
     shared: &Shared,
@@ -1725,7 +1725,18 @@ fn tools(
     let post = request.method == Some("POST");
     let (status, answer) = match (action, post) {
         ("open", true) => tools.open(value("app")),
-        ("poll", false) => tools.poll(session),
+        ("poll", false) => match value("after") {
+            "" => tools.poll(session, 0),
+            after => after.parse().map_or_else(
+                |_| {
+                    (
+                        400,
+                        serde_json::json!({ "said": "after is the last number the pane handled" }),
+                    )
+                },
+                |after| tools.poll(session, after),
+            ),
+        },
         ("send", true) => tools.send(session, body),
         ("close", true) => tools.close(session),
         _ => (

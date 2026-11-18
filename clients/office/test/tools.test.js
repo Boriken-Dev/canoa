@@ -24,12 +24,18 @@ async function until(found, what) {
 }
 
 /**
- * The host as the pane sees it: `/office/tools/open|poll|send|close` over `fetch`. `say` queues what the host has for the pane and
- * `sent` is what the pane answered.
+ * The host as the pane sees it: `/office/tools/open|poll|send|close` over `fetch`. `say` queues what the host has for the pane, as
+ * the host does: numbered from 1 and kept until a poll names a number at or past it. `sent` is what the pane answered, `polls` the
+ * `after` of each poll, `lose` makes the answers of the next polls fail on the way, after the host has them ready, and `resend`
+ * makes the next polls answer everything it ever said, as a host that did not hear the acknowledgement would.
  */
 function fakeHost({ refuse } = {}) {
-  const host = { queue: [], sent: [], opened: [], closed: [], headers: [], session: 0, forget: false, ended: false };
-  host.say = (message) => host.queue.push(message);
+  const host = { queue: [], sent: [], opened: [], closed: [], headers: [], polls: [], session: 0, forget: false, ended: false, last: 0, lose: 0, resend: 0, said: [] };
+  host.say = (message) => {
+    host.last += 1;
+    host.queue.push({ number: host.last, message });
+    host.said.push({ number: host.last, message });
+  };
   host.fetchImpl = async (url, init = {}) => {
     const [path, query] = url.split('?');
     const params = new URLSearchParams(query);
@@ -40,12 +46,24 @@ function fakeHost({ refuse } = {}) {
       host.opened.push(params.get('app'));
       host.session += 1;
       host.forget = false;
+      host.queue = [];
+      host.said = [];
+      host.last = 0;
       return answer(200, { session: `s${host.session}` });
     }
     if (path.endsWith('/poll')) {
       if (host.ended || host.forget || params.get('session') !== `s${host.session}`) return answer(410, { ended: true });
+      const after = Number(params.get('after'));
+      host.polls.push(after);
+      host.queue = host.queue.filter(({ number }) => number > after);
       if (host.queue.length === 0) await tick(10);
-      return answer(200, { messages: host.queue.splice(0) });
+      const held = host.resend > 0 ? host.said.slice() : host.queue.slice();
+      if (host.resend > 0) host.resend -= 1;
+      if (host.lose > 0) {
+        host.lose -= 1;
+        throw new TypeError('the request was aborted');
+      }
+      return answer(200, { first: held[0]?.number ?? host.last + 1, messages: held.map(({ message }) => message) });
     }
     if (path.endsWith('/send')) {
       host.sent.push(JSON.parse(init.body));
@@ -130,6 +148,52 @@ test('the pane registers as its application with the secret, and a session lists
   await tick(60);
   assert.equal(host.sent.filter((m) => m.message?.id === 2).length, 0);
   await until(() => status.includes('stopped'), 'the loop ended');
+});
+
+test('a poll whose answer is lost is followed by one that gets the same messages again, and each is handled once', async () => {
+  let runs = 0;
+  const count = { name: 'count', description: 'Counts', inputSchema: { type: 'object' }, run: async () => ({ runs: (runs += 1) }) };
+  const { host, pane } = setup({ tools: [count] });
+  void pane.start();
+  await until(() => host.opened.length === 1, 'registered');
+  await until(() => host.polls.length > 0, 'polling');
+  host.lose = 1;
+  host.open();
+  host.request(1, 'tools/call', { name: 'count', arguments: {} });
+  // The poll that took the open and the call failed on the way; the next one asks from nothing handled and gets both.
+  const answered = await host.answerTo(1);
+  assert.equal(JSON.parse(answered.result.content[0].text).runs, 1);
+  assert.equal(host.lose, 0, 'the answer was lost');
+  assert.ok(host.polls.filter((after) => after === 0).length >= 2, `asked from nothing twice: ${host.polls}`);
+  assert.deepEqual(pane.sessions(), [{ agent: 'Claude', where: 'the Canoa app on this computer' }]);
+
+  await pane.stop();
+});
+
+test('a message the host sends twice with the same number is handled once, and a new registration starts the numbers again', async () => {
+  let runs = 0;
+  const count = { name: 'count', description: 'Counts', inputSchema: { type: 'object' }, run: async () => ({ runs: (runs += 1) }) };
+  const { host, pane } = setup({ tools: [count] });
+  void pane.start();
+  await until(() => host.opened.length === 1, 'registered');
+  host.open();
+  host.request(1, 'tools/call', { name: 'count', arguments: {} });
+  await host.answerTo(1);
+  // The host says everything again, with a new call after it: the first two were handled and are not run again.
+  host.request(2, 'tools/call', { name: 'count', arguments: {} });
+  host.resend = 1;
+  await host.answerTo(2);
+  assert.equal(runs, 2, 'the repeated call did not run again');
+  assert.equal(host.sent.filter((m) => m.message?.id === 1).length, 1, 'and was not answered twice');
+
+  // The host forgets the session: the pane registers again and its numbers start from 1.
+  host.forget = true;
+  await until(() => host.opened.length === 2, 'registered again');
+  host.open();
+  host.request(1, 'tools/call', { name: 'count', arguments: {} });
+  await until(() => host.sent.filter((m) => m.message?.id === 1).length === 2, 'the new session is served');
+  assert.equal(runs, 3);
+  await pane.stop();
 });
 
 test('a read returns the open item\'s content, and says which item it was', async () => {

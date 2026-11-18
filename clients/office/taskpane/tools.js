@@ -20,6 +20,8 @@ const MAX_LABEL = 80;
 /** How long a write waits for the person before it is refused. */
 export const ASK_MS = 120_000;
 const RETRY_MIN_MS = 1000;
+/** How soon a poll that failed is asked again. */
+const POLL_RETRY_MIN_MS = 250;
 const RETRY_MAX_MS = 15_000;
 
 const label = (value) => (typeof value === 'string' ? value.replace(/\p{Cf}|\p{Cc}/gu, ' ').trim().slice(0, MAX_LABEL) : '');
@@ -72,6 +74,8 @@ export function createPaneTools({
   /** @type {Map<string, {id: string, agent: string, where: string, running: number}>} */
   let streams = new Map();
   let session = null;
+  /** The number of the last message of the host's that this pane has handled, which each poll names so the host lets go of those. */
+  let seen = 0;
   let stopped = false;
   let running = null;
 
@@ -207,26 +211,59 @@ export function createPaneTools({
     return body.session;
   }
 
+  /** Polls until the host says it has forgotten the session. A poll that fails is asked again for the same session. */
+  async function poll() {
+    let wait = POLL_RETRY_MIN_MS;
+    let failing = false;
+    while (!stopped) {
+      let body;
+      try {
+        const response = await fetchImpl(`${TOOLS_PATH}/poll?${new URLSearchParams({ session, after: String(seen) })}`, {
+          credentials: 'same-origin',
+          headers: headersFor(key),
+          cache: 'no-store',
+        });
+        // The host forgot this session (it restarted, or the pane was quiet too long): register again.
+        if (response.status === 410 || response.status === 404) return;
+        if (!response.ok) throw new Error(`the host answered ${response.status}`);
+        body = await response.json();
+      } catch {
+        // The answer did not arrive, or the host is not there. The host keeps what it sent until a poll names it, so the session
+        // is asked again, a little later each time; a host that came back without it says so with a 410.
+        failing = true;
+        onStatus('waiting');
+        if (!stopped) await sleep(wait);
+        wait = Math.min(wait * 2, RETRY_MAX_MS);
+        continue;
+      }
+      if (failing) {
+        failing = false;
+        wait = POLL_RETRY_MIN_MS;
+        onStatus('connected');
+      }
+      // The host numbers what it sends and keeps it until a poll names the number: an answer the browser dropped is sent again by
+      // the next poll, and a message this pane already handled is not handled twice.
+      const { first, messages } = body ?? {};
+      if (!Number.isSafeInteger(first) || !Array.isArray(messages)) continue;
+      messages.forEach((message, offset) => {
+        const number = first + offset;
+        if (number <= seen) return;
+        seen = number;
+        heard(message);
+      });
+    }
+  }
+
   async function loop() {
     let wait = RETRY_MIN_MS;
     while (!stopped) {
       try {
         session = await register();
         streams = new Map();
+        seen = 0;
         onStatus('connected');
         wait = RETRY_MIN_MS;
-        while (!stopped) {
-          const response = await fetchImpl(`${TOOLS_PATH}/poll?${new URLSearchParams({ session })}`, {
-            credentials: 'same-origin',
-            headers: headersFor(key),
-            cache: 'no-store',
-          });
-          // The host forgot this session (it restarted, or the pane was quiet too long): register again.
-          if (response.status === 410 || response.status === 404) break;
-          if (!response.ok) throw new Error(`the host answered ${response.status}`);
-          const { messages } = await response.json();
-          for (const message of Array.isArray(messages) ? messages : []) heard(message);
-        }
+        await poll();
       } catch {
         // The host is not there or refused: try again, a little later each time.
       }

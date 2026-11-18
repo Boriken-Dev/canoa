@@ -296,6 +296,13 @@ asked for), which is the standing the host gives it everywhere else. A pane that
 tools away from every session; a session started while it is closed has no such server, and one that outlives it is told the
 list changed.
 
+A request the browser drops loses nothing. The host numbers what it sends a pane, from 1, and keeps each message until a poll
+names its number: `poll?session=S&after=N` says the pane has handled everything up to `N`, and the answer is `{"first": F,
+"messages": [...]}`, message `i` being number `F + i`. A poll whose answer never arrived is followed by one that names the same
+`N`, and gets the same messages again; the pane drops a number it has handled, so a call runs once. What the host keeps is bounded
+(256 messages or 16 MiB, the oldest going first), and a pane that fails a poll asks again for the same session, a little later each
+time, until the host answers or says it has forgotten the session.
+
 | Application | Reads | Asked in the pane first |
 | --- | --- | --- |
 | Outlook (`ReadItem`) | `outlook_get_item`: subject, sender, recipients, dates, body as text, attachment names, conversation id. `outlook_get_attachment` | `outlook_draft_reply`: opens Outlook's reply form with the text; nothing is sent |

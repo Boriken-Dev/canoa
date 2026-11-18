@@ -139,6 +139,8 @@ impl Pane {
             );
             let (stop, heard) = (Arc::clone(&stop), Arc::clone(&heard));
             std::thread::spawn(move || {
+                // The last message handled, which each poll names.
+                let mut handled = 0_u64;
                 while !stop.load(Ordering::SeqCst) {
                     let headers: Vec<(&str, &str)> = secret
                         .as_deref()
@@ -148,14 +150,26 @@ impl Pane {
                     let (status, body) = call(
                         &authority,
                         "GET",
-                        &format!("/office/tools/poll?session={session}"),
+                        &format!("/office/tools/poll?session={session}&after={handled}"),
                         &headers,
                         b"",
                     );
                     if status != 200 {
                         return;
                     }
-                    for message in body["messages"].as_array().cloned().unwrap_or_default() {
+                    let first = body["first"].as_u64().expect("the first number");
+                    for (offset, message) in body["messages"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let number = first + offset as u64;
+                        if number <= handled {
+                            continue;
+                        }
+                        handled = number;
                         heard.lock().expect("lock").push(message.clone());
                         if message["type"] != "mcp" {
                             continue;
@@ -363,5 +377,126 @@ fn with_the_secret_on_the_pane_is_refused_without_it_and_served_with_it() {
     );
     let mut pane = Pane::open(&authority, "word", Some(secret)).expect("accepted with it");
     pane.close();
+    host.stop();
+}
+
+/// A poll whose request was sent and whose answer nobody read, as when the browser aborts the request.
+fn poll_lost(authority: &str, session: &str, after: u64) {
+    let mut tcp = TcpStream::connect(authority).expect("it connects");
+    let request = format!(
+        "GET /office/tools/poll?session={session}&after={after} HTTP/1.1
+Host: {authority}
+Origin: http://{authority}
+Sec-Fetch-Site: same-origin
+Connection: close
+
+"
+    );
+    tcp.write_all(request.as_bytes()).expect("sent");
+    // The host takes the request up and waits for something to say; the connection ends before it answers.
+    std::thread::sleep(Duration::from_millis(300));
+    drop(tcp);
+}
+
+#[test]
+fn a_poll_whose_answer_the_browser_dropped_is_followed_by_one_that_gets_the_same_messages_again() {
+    let host = Hosted::start_with_setup(config(false), &["--web", &site().to_string_lossy()]);
+    let authority = authority(&host);
+    let work = host.scratch.0.join("work");
+    std::fs::create_dir_all(&work).expect("a folder");
+    let (status, opened) = call(&authority, "POST", "/office/tools/open?app=word", &[], b"");
+    assert_eq!(status, 200);
+    let pane = opened["session"].as_str().expect("a session").to_owned();
+    let poll = |after: u64| {
+        call(
+            &authority,
+            "GET",
+            &format!("/office/tools/poll?session={pane}&after={after}"),
+            &[],
+            b"",
+        )
+    };
+
+    // The poll that waits is dropped; a session then asks for the tools, and the host tells the pane into that dead request.
+    poll_lost(&authority, &pane, 0);
+    let link = host.local.open("agent").expect("a link");
+    let id = session(&link, &work);
+    let asking = std::thread::spawn(move || {
+        let said = prompt(&link, 3, &id, "ListOn canoa-word");
+        (said, link)
+    });
+
+    // The next poll still names nothing handled, and is given what the dropped one took.
+    let until = Instant::now() + Duration::from_secs(20);
+    let (first, messages) = loop {
+        let (status, got) = poll(0);
+        assert_eq!(status, 200, "{got}");
+        let messages = got["messages"].as_array().cloned().unwrap_or_default();
+        if messages
+            .iter()
+            .any(|m| m["message"]["method"] == "tools/list")
+        {
+            break (got["first"].as_u64().expect("a first number"), messages);
+        }
+        assert!(
+            Instant::now() < until,
+            "the host asks the pane for its tools"
+        );
+    };
+    assert_eq!(first, 1, "numbered from 1, nothing let go: {messages:?}");
+    assert_eq!(messages[0]["type"], "open", "{messages:?}");
+    assert_eq!(
+        messages[0]["session"],
+        json!({"agent": "agent", "via": "app"})
+    );
+
+    // Asking again with nothing acknowledged gives them a third time, the same; naming the first as handled lets it go, and only
+    // what comes after it is answered.
+    let (_, third) = poll(0);
+    assert_eq!(third["first"], 1, "{third}");
+    assert_eq!(third["messages"].as_array().expect("messages"), &messages);
+    let (_, fourth) = poll(1);
+    assert_eq!(fourth["first"], 2, "{fourth}");
+    assert_eq!(
+        fourth["messages"].as_array().expect("messages"),
+        &messages[1..]
+    );
+
+    // The pane answers the call it was sent, and the session that asked has its tools.
+    let call_message = messages
+        .iter()
+        .find(|m| m["message"]["method"] == "tools/list")
+        .expect("the call");
+    let answer = json!({"type": "mcp", "stream": call_message["stream"], "message": {
+        "jsonrpc": "2.0", "id": call_message["message"]["id"],
+        "result": {"tools": [{"name": "word_get_text", "description": "The text", "inputSchema": {"type": "object"}}]}
+    }});
+    assert_eq!(
+        call(
+            &authority,
+            "POST",
+            &format!("/office/tools/send?session={pane}"),
+            &[],
+            answer.to_string().as_bytes()
+        )
+        .0,
+        200
+    );
+    let (said, link) = asking.join().expect("the prompt ends");
+    assert_eq!(said, "word_get_text");
+
+    assert_eq!(
+        call(
+            &authority,
+            "GET",
+            &format!("/office/tools/poll?session={pane}&after=x"),
+            &[],
+            b""
+        )
+        .0,
+        400,
+        "after is a number"
+    );
+    drop(link);
     host.stop();
 }
