@@ -3,6 +3,9 @@
 //! It makes the call OpenAI-compatible servers answer, `POST` of a `multipart/form-data` body with the audio as a WAV
 //! `file`, a `model`, and the hints it can express (`language`, and the vocabulary as `prompt`); the answer is JSON with a
 //! `text`, and every other member of it that is a text, number or boolean (`language`, `duration`) becomes front matter.
+//! A server on the same computer that reads the recording from a file (Foundry Local's) is called with
+//! [`EndpointRequest::LocalFile`] instead: the audio is written to a temporary WAV file, its path is posted as JSON, and the
+//! file is removed when the call ends.
 //!
 //! The endpoint takes the recording whole, so audio is kept until the person stops, up to the setting's `max_seconds`. It is
 //! kept once, as it arrives, and the request reads it where it is.
@@ -11,7 +14,8 @@ use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
-use std::io::Read;
+use std::io::{Read, Write as _};
+use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -40,6 +44,22 @@ const fn default_timeout() -> u32 {
     120
 }
 
+/// How the recording is handed to the endpoint.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[map(rename_all = "snake_case")]
+pub enum EndpointRequest {
+    /// `multipart/form-data` with the audio as a WAV `file`: what OpenAI-compatible servers read.
+    #[default]
+    Multipart,
+    /// JSON `{"model", "filename"}` naming a WAV file this host wrote for the call: for a server on this computer that opens the
+    /// recording itself. The file is private to the person and removed when the call ends, whatever the answer.
+    LocalFile,
+}
+
+const fn default_request() -> EndpointRequest {
+    EndpointRequest::Multipart
+}
+
 /// What the endpoint provider is configured with.
 #[derive(ToValue, FromValue, Schema, Form, Debug, Clone)]
 #[form(section(id = "endpoint", label = "Endpoint"))]
@@ -57,6 +77,10 @@ pub struct EndpointSettings {
     #[schema(section = "endpoint", title = "Key")]
     #[form(widget = "password")]
     pub api_key: Option<Secret<String>>,
+    /// How the recording is handed over: as a multipart upload, or as the path of a file on this computer.
+    #[map(default = default_request())]
+    #[schema(advanced, section = "endpoint", title = "Request")]
+    pub request: EndpointRequest,
     /// The longest recording kept, in seconds; a longer one is refused rather than held.
     #[map(default = default_max_seconds())]
     #[schema(advanced, section = "endpoint", title = "Longest recording")]
@@ -77,6 +101,7 @@ impl EndpointSettings {
             url: url.into(),
             model: None,
             api_key: None,
+            request: default_request(),
             max_seconds: default_max_seconds(),
             timeout_seconds: default_timeout(),
         }
@@ -177,8 +202,124 @@ fn plain(value: &serde_json::Value) -> Option<Value> {
     }
 }
 
+/// A file of the recording this host wrote for one call, removed when it is dropped.
+struct Scratch(PathBuf);
+
+impl Scratch {
+    /// Writes `parts` one after another to a new file in the temporary folder that only the person can open.
+    fn write(parts: &[&[u8]]) -> Result<Self, ProviderError> {
+        let name = alloc::format!(
+            "canoa-speech-{}-{}.wav",
+            std::process::id(),
+            BOUNDARIES.fetch_add(1, Ordering::Relaxed)
+        );
+        let path = std::env::temp_dir().join(name);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&path).map_err(|error| {
+            internal(alloc::format!(
+                "the recording could not be written: {error}"
+            ))
+        })?;
+        let scratch = Self(path);
+        for part in parts {
+            file.write_all(part).map_err(|error| {
+                internal(alloc::format!(
+                    "the recording could not be written: {error}"
+                ))
+            })?;
+        }
+        Ok(scratch)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 impl Recording {
     fn send(&self, audio: &[u8]) -> Result<Transcript, ProviderError> {
+        match self.settings.request {
+            EndpointRequest::Multipart => self.send_multipart(audio),
+            EndpointRequest::LocalFile => self.send_file(audio),
+        }
+    }
+
+    fn agent(&self) -> Result<ureq::Agent, ProviderError> {
+        let config = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_global(Some(Duration::from_secs(u64::from(
+                self.settings.timeout_seconds,
+            ))))
+            .build();
+        crate::network::Network::current()
+            .agent(config)
+            .map_err(|error| internal(alloc::format!("the endpoint could not be reached: {error}")))
+    }
+
+    /// The call with the recording in a file this host wrote, named in a JSON body.
+    fn send_file(&self, audio: &[u8]) -> Result<Transcript, ProviderError> {
+        let wav = wav_header(
+            &self.request.format,
+            Some(u32::try_from(audio.len()).unwrap_or(u32::MAX)),
+        );
+        let scratch = Scratch::write(&[&wav[..], audio])?;
+        let mut body = serde_json::Map::new();
+        if let Some(model) = self
+            .settings
+            .model
+            .as_deref()
+            .filter(|text| !text.is_empty())
+        {
+            body.insert("model".to_owned(), serde_json::Value::from(model));
+        }
+        body.insert(
+            "filename".to_owned(),
+            serde_json::Value::from(scratch.0.to_string_lossy().into_owned()),
+        );
+        let mut call = self
+            .agent()?
+            .post(&self.settings.url)
+            .header("Content-Type", "application/json");
+        if let Some(key) = &self.settings.api_key {
+            call = call.header("Authorization", alloc::format!("Bearer {}", key.expose()));
+        }
+        let mut answer = call
+            .send(serde_json::Value::Object(body).to_string().into_bytes())
+            .map_err(|error| {
+                internal(alloc::format!("the endpoint could not be reached: {error}"))
+            })?;
+        let status = answer.status();
+        let text = answer
+            .body_mut()
+            .with_config()
+            .limit(MAX_ANSWER)
+            .read_to_string()
+            .map_err(|error| {
+                internal(alloc::format!(
+                    "the endpoint's answer could not be read: {error}"
+                ))
+            })?;
+        drop(scratch);
+        if !status.is_success() {
+            let shown: String = text.trim().chars().take(MAX_ERROR_BODY).collect();
+            return Err(internal(alloc::format!(
+                "the endpoint answered {}: {shown}",
+                status.as_u16()
+            )));
+        }
+        // The request's own number says nothing to the person.
+        Ok(read_answer(&text, &["id"]))
+    }
+
+    fn send_multipart(&self, audio: &[u8]) -> Result<Transcript, ProviderError> {
         let boundary = boundary();
         let mut head = Vec::new();
         if let Some(model) = self
@@ -216,18 +357,8 @@ impl Recording {
         let tail = alloc::format!("\r\n--{boundary}--\r\n").into_bytes();
         let length = head.len() + WAV_HEADER_LEN + audio.len() + tail.len();
 
-        let config = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .timeout_global(Some(Duration::from_secs(u64::from(
-                self.settings.timeout_seconds,
-            ))))
-            .build();
-        let agent = crate::network::Network::current()
-            .agent(config)
-            .map_err(|error| {
-                internal(alloc::format!("the endpoint could not be reached: {error}"))
-            })?;
-        let mut call = agent
+        let mut call = self
+            .agent()?
             .post(&self.settings.url)
             .header(
                 "Content-Type",
@@ -265,12 +396,13 @@ impl Recording {
                 status.as_u16()
             )));
         }
-        Ok(read_answer(&text))
+        Ok(read_answer(&text, &[]))
     }
 }
 
-/// The transcript an endpoint's answer holds: JSON with `text`, or else the body as the text.
-fn read_answer(answer: &str) -> Transcript {
+/// The transcript an endpoint's answer holds: JSON with `text`, or else the body as the text. The members named in `skip` are
+/// not front matter.
+fn read_answer(answer: &str, skip: &[&str]) -> Transcript {
     let Ok(serde_json::Value::Object(members)) = serde_json::from_str::<serde_json::Value>(answer)
     else {
         return Transcript::new(answer.trim());
@@ -282,6 +414,7 @@ fn read_answer(answer: &str) -> Transcript {
     let mut front = Map::new();
     for (key, value) in &members {
         if key != "text"
+            && !skip.contains(&key.as_str())
             && let Some(value) = plain(value)
         {
             front.set(key, value);

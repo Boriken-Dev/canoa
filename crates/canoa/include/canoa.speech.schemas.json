@@ -376,6 +376,22 @@
         "description": "A key sent as `Authorization: Bearer`, when the endpoint asks for one.",
         "x-section": "endpoint"
       },
+      "request": {
+        "type": "string",
+        "enum": [
+          "multipart",
+          "local_file"
+        ],
+        "x-enum-labels": {
+          "multipart": "`multipart/form-data` with the audio as a WAV `file`: what OpenAI-compatible servers read.",
+          "local_file": "JSON `{\"model\", \"filename\"}` naming a WAV file this host wrote for the call: for a server on this computer that opens the recording itself. The file is private to the person and removed when the call ends, whatever the answer."
+        },
+        "title": "Request",
+        "description": "How the recording is handed over: as a multipart upload, or as the path of a file on this computer.",
+        "x-section": "endpoint",
+        "x-advanced": true,
+        "default": "multipart"
+      },
       "max_seconds": {
         "type": "integer",
         "minimum": 0,

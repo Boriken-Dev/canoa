@@ -25,7 +25,7 @@ pub mod say_system;
 pub mod spoken;
 
 pub use command::{CommandSettings, CommandSpeech};
-pub use endpoint::{EndpointSettings, EndpointSpeech};
+pub use endpoint::{EndpointRequest, EndpointSettings, EndpointSpeech};
 pub use say_command::{CommandSay, CommandSaySettings, SayInput, SayOutput};
 pub use say_endpoint::{EndpointSay, EndpointSaySettings};
 pub use say_piper::{PiperSettings, PiperSpeech};

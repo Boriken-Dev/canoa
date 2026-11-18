@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use canoa::speech::builtin::command::{CommandInput, MAX_OUTPUT};
 use canoa::speech::builtin::{
-    CommandSettings, CommandSpeech, EndpointSettings, EndpointSpeech, wav_header,
+    CommandSettings, CommandSpeech, EndpointRequest, EndpointSettings, EndpointSpeech, wav_header,
 };
 use canoa::speech::{
     AudioFormat, Heard, Hints, OPUS, OpenRequest, SpeechInfo, SpeechProvider, SpeechProviderVtable,
@@ -375,6 +375,15 @@ struct Received {
 
 /// Answers the next request on the loopback with `status` and `body`, and hands the request back.
 fn endpoint_standin(status: &str, body: &str) -> (String, mpsc::Receiver<Received>) {
+    endpoint_standin_seen(status, body, |_| {})
+}
+
+/// As [`endpoint_standin`], and runs `seen` on the request before it answers, while the caller is still waiting.
+fn endpoint_standin_seen(
+    status: &str,
+    body: &str,
+    seen: impl FnOnce(&Received) + Send + 'static,
+) -> (String, mpsc::Receiver<Received>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
     let url = format!(
         "http://{}/v1/audio/transcriptions",
@@ -412,11 +421,12 @@ fn endpoint_standin(status: &str, body: &str) -> (String, mpsc::Receiver<Receive
             assert!(read > 0, "the request ended inside its body");
             body_bytes.extend_from_slice(&chunk[..read]);
         }
-        sent.send(Received {
+        let request = Received {
             head,
             body: body_bytes,
-        })
-        .expect("handed back");
+        };
+        seen(&request);
+        sent.send(request).expect("handed back");
         write!(
             stream,
             "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -550,4 +560,99 @@ fn the_wav_header_is_the_one_a_reader_expects() {
 
 fn spawner() -> Object<dyn ProcessSpawner> {
     LocalSpawner::new().into_object()
+}
+
+/// The path a local-file request names, from its JSON body.
+fn named_file(request: &Received) -> PathBuf {
+    let body: Json = serde_json::from_slice(&request.body).expect("the body is JSON");
+    PathBuf::from(body["filename"].as_str().expect("a filename"))
+}
+
+#[test]
+fn a_local_file_request_names_a_wav_the_host_wrote_and_removes_it_after() {
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(None::<(PathBuf, Vec<u8>)>));
+    let kept = std::sync::Arc::clone(&seen);
+    let (url, received) = endpoint_standin_seen(
+        "200 OK",
+        r#"{"id":"abc","text":" from a file "}"#,
+        move |request| {
+            let path = named_file(request);
+            let bytes = std::fs::read(&path).expect("the file exists while the call waits");
+            *kept.lock().expect("lock") = Some((path, bytes));
+        },
+    );
+    let mut settings = EndpointSettings::new(url);
+    settings.model = Some("openai-whisper-tiny-generic-cpu".to_owned());
+    settings.request = EndpointRequest::LocalFile;
+    settings.api_key = Some(Secret::new("not-a-key".to_owned()));
+    let session = open(&EndpointSpeech::from(settings));
+    session.push(&pcm_second()).expect("taken");
+    let answer = session.finish().expect("the endpoint answers");
+
+    assert_eq!(answer.text, "from a file");
+    assert!(
+        !answer.front_matter.to_string().contains("abc"),
+        "the request's own id is not front matter: {}",
+        answer.front_matter
+    );
+    let request = received
+        .recv_timeout(Duration::from_secs(5))
+        .expect("a request");
+    assert!(
+        request.head.contains("application/json"),
+        "{}",
+        request.head
+    );
+    assert!(!request.head.contains("multipart"), "{}", request.head);
+    let body: Json = serde_json::from_slice(&request.body).expect("JSON");
+    assert_eq!(body["model"], "openai-whisper-tiny-generic-cpu");
+    let (path, wav) = seen
+        .lock()
+        .expect("lock")
+        .take()
+        .expect("the file was read");
+    let header = wav_header(&AudioFormat::pcm(16_000), Some(32_000));
+    assert_eq!(wav[..header.len()], header, "a WAV header comes first");
+    assert_eq!(wav.len(), header.len() + 32_000, "then the whole recording");
+    assert!(
+        !path.exists(),
+        "the recording's file is removed after the call"
+    );
+}
+
+#[test]
+fn a_local_file_request_that_is_refused_still_removes_its_file() {
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(None::<PathBuf>));
+    let kept = std::sync::Arc::clone(&seen);
+    let (url, _received) = endpoint_standin_seen(
+        "400 Bad Request",
+        r#"{"error":"model not loaded"}"#,
+        move |request| *kept.lock().expect("lock") = Some(named_file(request)),
+    );
+    let mut settings = EndpointSettings::new(url);
+    settings.request = EndpointRequest::LocalFile;
+    let session = open(&EndpointSpeech::from(settings));
+    session.push(&pcm_second()).expect("taken");
+    let said = session.finish().expect_err("refused").message.to_string();
+    assert!(
+        said.contains("400") && said.contains("not loaded"),
+        "{said}"
+    );
+    let path = seen.lock().expect("lock").take().expect("seen");
+    assert!(!path.exists());
+}
+
+#[test]
+fn a_request_setting_a_config_does_not_name_is_the_upload_the_endpoints_always_made() {
+    let value = map(&[("url", Value::from("http://127.0.0.1:1/"))]);
+    let settings = EndpointSettings::from_value(&value).expect("read");
+    assert_eq!(settings.request, EndpointRequest::Multipart);
+    let value = map(&[
+        ("url", Value::from("http://127.0.0.1:1/")),
+        ("request", Value::from("local_file")),
+    ]);
+    assert_eq!(
+        EndpointSettings::from_value(&value).expect("read").request,
+        EndpointRequest::LocalFile
+    );
 }

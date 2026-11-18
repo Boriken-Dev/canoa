@@ -342,7 +342,8 @@ neither limiting which program or address the person names (they run as the pers
 pub struct CommandSettings { pub program: String, pub args: Vec<String>, pub input: CommandInput, pub partials: bool, pub timeout_seconds: u32 }
 pub enum CommandInput { Wav /* default */, Pcm }
 pub struct CommandSpeech;      // From<CommandSettings>; the `speech_command` provider
-pub struct EndpointSettings { pub url: String, pub model: Option<String>, pub api_key: Option<Secret<String>>, pub max_seconds: u32, pub timeout_seconds: u32 }
+pub struct EndpointSettings { pub url: String, pub model: Option<String>, pub api_key: Option<Secret<String>>, pub request: EndpointRequest, pub max_seconds: u32, pub timeout_seconds: u32 }
+pub enum EndpointRequest { Multipart /* default */, LocalFile }
 pub struct EndpointSpeech;     // From<EndpointSettings>; the `speech_endpoint` provider
 pub fn wav_header(format: &AudioFormat, data_len: Option<u32>) -> [u8; 44];   // None: both sizes 0xFFFF_FFFF, a stream of unknown length
 pub const WAV_HEADER_LEN: usize = 44;
@@ -363,6 +364,10 @@ pub const WAV_HEADER_LEN: usize = 44;
   is, with a `Content-Length`. The answer's `text` is the transcript and each other member that is a string, number or boolean (`language`,
   `duration`) is front matter; arrays and objects are not. A plain-text answer is the text. A status outside 2xx is an error with the first
   300 bytes of its body. It answers no partial text and uses no voice profile.
+  With `request = LocalFile` (`"local_file"` in a table; for a server on the same computer that opens the recording itself, such as Foundry Local's
+  `/v1/audio/transcriptions`) `finish` instead writes the recording as a WAV to a new file in the temporary folder (mode 0600 on Unix), `POST`s
+  `application/json` `{"model", "filename"}` with the file's absolute path (the key as `Authorization: Bearer` when set; no language or prompt, which
+  that route was not measured to take) and removes the file when the call ends, whatever the answer. The answer is read as above, without its `id`.
 
 ## `speech_output` (`canoa::speech::output`, feature `speech`)
 
