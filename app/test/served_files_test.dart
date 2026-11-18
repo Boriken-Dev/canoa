@@ -326,7 +326,7 @@ own_profile = true
 
   test('a directory of overlays is a catalog through the host, as it is from git directly', () async {
     final overlays = ControlOverlayManager(control());
-    GitOverlay at(String path) => CanoaConfig.parse('[catalogs]\ndirs = "${team.location}@main#$path"\n').catalogs['dirs']!;
+    GitOverlay at(String path) => CanoaConfig.parse('[store.overlays.catalogs]\ndirs = "${team.location}@main#$path"\n').catalogs['dirs']!;
     final source = at('overlays');
     final loaded = await loadCatalog(overlays, 'dirs', source, const StoreSettings());
     expect(loaded.problem, isNull);
@@ -400,7 +400,7 @@ own_profile = true
     var current = await config.load();
     expect(current.overlays, isEmpty);
 
-    final catalogs = CanoaConfig.parse('[catalogs]\nteam = "${team.location}@main#catalog.toml"\n');
+    final catalogs = CanoaConfig.parse('[store.overlays.catalogs]\nteam = "${team.location}@main#catalog.toml"\n');
     final listing = StoreListing([
       for (final MapEntry(key: label, value: source) in catalogs.catalogs.entries)
         await loadCatalog(overlays, label, source, const StoreSettings()),

@@ -21,6 +21,8 @@ import '../store/contents_storage.dart';
 import '../store/contents_store.dart';
 import '../store/overlay_needs.dart';
 import '../store/overlay_page.dart' show SaveConfig;
+import '../config/catalog_specs.dart';
+import '../store/catalog_types.dart';
 import '../store/skill_sources.dart';
 import '../store/skills.dart';
 import '../store/store.dart';
@@ -77,6 +79,7 @@ class LoadoutController extends ChangeNotifier {
     this.findProgram,
     this.overlayNeeds,
     this.index,
+    this.catalogTypes,
     ContentsStorage? contentsStorage,
     ContentsReader? contentsReader,
     DateTime Function()? now,
@@ -93,6 +96,16 @@ class LoadoutController extends ChangeNotifier {
 
   /// The host's catalog index, which every catalog the store lists is read from; none where the app has no host.
   final CatalogIndex? index;
+
+  /// Asks the host which Store types read catalogs, what each calls them, which it lists and which sources can add one; none where
+  /// the app has no host.
+  final CatalogTypesRead? catalogTypes;
+
+  /// What the host last said of each type that reads catalogs.
+  List<CatalogType> types = const [];
+
+  /// What the host says of the type [id], or null before it has said or for a type that reads no catalogs.
+  CatalogType? typeOf(String id) => types.where((type) => type.id == id).firstOrNull;
 
   /// The agents the app offers, which an MCP server is allowed or turned off for.
   final List<String> agents;
@@ -129,7 +142,7 @@ class LoadoutController extends ChangeNotifier {
   /// The registry the Discover list reads: [registry] or one the person added.
   late String selectedRegistry = registry;
 
-  /// The registries offered: the official one, then those `[store] registries` names.
+  /// The registries offered: the official one, then those `[store.mcps.catalogs]` names.
   List<String> get registries => [registry, ...config.storeRegistries.where((address) => address != registry)];
 
   List<McpRegistryEntry> registryEntries = const [];
@@ -170,6 +183,7 @@ class LoadoutController extends ChangeNotifier {
     }
     loaded = found;
     listing = StoreListing(found);
+    await loadTypes();
     loadingCatalogs = false;
     // Discovery reads what every entry provides, so that opening one asks for nothing; a refresh the person asked for reads it
     // all again.
@@ -177,6 +191,65 @@ class LoadoutController extends ChangeNotifier {
       readingAhead = store.readAhead(found, ttl: Duration(seconds: config.store.contentsTtlSeconds), force: again);
     }
     await refresh();
+  }
+
+  /// Reads what the host says of the types that read catalogs. A host that does not answer leaves what was known.
+  Future<void> loadTypes() async {
+    final read = catalogTypes;
+    if (read == null) return;
+    try {
+      types = await read();
+    } on Object {
+      // The catalogs themselves say why they could not be read; the forms stay as they were.
+    }
+    notifyListeners();
+  }
+
+  /// Adds the catalog [label] of the Store type [type], read by [provider] from [fields]. The type's own reader checks a source the
+  /// `read` provider reads; any other provider's fields are checked against what its form needs. Gives why it cannot be added, or
+  /// null. The label is optional: a catalog gets one from where it reads.
+  Future<String?> addCatalogOf(String type, String label, String provider, Map<String, Object?> fields) async {
+    final source = provider == readProvider ? '${fields['source'] ?? ''}'.trim() : null;
+    var name = label.trim();
+    if (name.isEmpty) name = source != null && source.isNotEmpty ? catalogLabelFor(source) : provider;
+    if (provider == readProvider) {
+      if (source == null || source.isEmpty) return 'Name a source';
+      switch (type) {
+        case 'skills':
+          return addSkillSource(source);
+        case 'mcps':
+          return addRegistry(source);
+      }
+    }
+    final taken = config.catalogSpecs(type).keys.toList();
+    if (type == 'overlays') taken.addAll(config.overlayCatalogs.keys);
+    if (taken.any((key) => aos.normalizeName(key) == aos.normalizeName(name))) return 'Another catalog has the label $name';
+    final CanoaConfig changed;
+    try {
+      changed = type == 'overlays' && provider == readProvider
+          ? config.withCatalog(name, source!)
+          : config.withCatalogOf(type, name, CatalogSpec(provider, fields));
+    } on FormatException catch (error) {
+      return error.message.replaceFirst('canoa.cfg: ', '');
+    }
+    await apply(changed);
+    await load();
+    return null;
+  }
+
+  /// Takes the catalog [label] of the Store type [type] away. What the type's default is, the host said.
+  Future<void> removeCatalogOf(String type, String label) async {
+    switch (type) {
+      case 'overlays':
+        return removeCatalog(label);
+      case 'skills':
+        return removeSkillSource(label);
+      case 'mcps':
+        final address = config.storeRegistryLabels[label];
+        if (address != null) return removeRegistry(address);
+    }
+    await apply(config.withoutCatalogOf(type, label, fallback: typeOf(type)?.defaultLabel));
+    await load();
   }
 
   /// Reads what changes without a fetch: the skills here and the layers.
@@ -219,8 +292,11 @@ class LoadoutController extends ChangeNotifier {
   Future<CanoaConfig?> apply(CanoaConfig changed) async {
     final saved = await save(changed);
     if (saved != null) {
+      final storeChanged = '${_config.tables['store']}' != '${saved.tables['store']}';
       _config = saved;
       await refresh();
+      // What the host lists under each type follows `[store]`.
+      if (storeChanged) await loadTypes();
     }
     return saved;
   }
@@ -274,7 +350,7 @@ class LoadoutController extends ChangeNotifier {
 
   Future<void> addCatalog(String label, String spec) async {
     final name = label.trim().isEmpty ? catalogLabelFor(spec.trim()) : label.trim();
-    if (config.catalogs.keys.any((key) => aos.normalizeName(key) == aos.normalizeName(name))) {
+    if (config.overlayCatalogs.keys.any((key) => aos.normalizeName(key) == aos.normalizeName(name))) {
       problem = 'Another catalog has the label $name';
       notifyListeners();
       return;
@@ -524,7 +600,7 @@ class LoadoutController extends ChangeNotifier {
     return apply(config.withInstalledMcp(name, definition, entry.origin(selectedRegistry), agents: agents));
   }
 
-  /// Reads [address] from now on, after adding it to `[store] registries`. Gives why it cannot be one, or null.
+  /// Reads [address] from now on, after adding it to `[store.mcps.catalogs]`. Gives why it cannot be one, or null.
   Future<String?> addRegistry(String address) async {
     address = address.trim();
     if (registryProblemOf(address) case final why?) return why;

@@ -95,12 +95,12 @@ void main() {
     });
   });
 
-  group('canoa.cfg [store.skill_sources]', () {
+  group('canoa.cfg [store.skills.catalogs]', () {
     test('Anthropic\'s skills are first, and a label of its own or false replaces or removes it', () {
       expect(CanoaConfig.parse('').skillSources.keys, ['anthropics']);
-      expect(CanoaConfig.parse('[store.skill_sources]\nweb = "addyosmani/web-quality-skills"\n').skillSources.keys, ['anthropics', 'web']);
-      expect(CanoaConfig.parse('[store.skill_sources]\nanthropics = false\n').skillSources, isEmpty);
-      final replaced = CanoaConfig.parse('[store.skill_sources]\nanthropics = "owner/mine"\n').skillSources;
+      expect(CanoaConfig.parse('[store.skills.catalogs]\nweb = "addyosmani/web-quality-skills"\n').skillSources.keys, ['anthropics', 'web']);
+      expect(CanoaConfig.parse('[store.skills.catalogs]\nanthropics = false\n').skillSources, isEmpty);
+      final replaced = CanoaConfig.parse('[store.skills.catalogs]\nanthropics = "owner/mine"\n').skillSources;
       expect(replaced['anthropics']!.repo, 'https://github.com/owner/mine.git');
     });
 
@@ -117,16 +117,16 @@ void main() {
     });
 
     test('a store limit saved beside them keeps them', () {
-      final config = CanoaConfig.parse('[store]\ncatalog_max_entries = 3000\n[store.skill_sources]\nweb = "o/r"\n');
+      final config = CanoaConfig.parse('[store]\ncatalog_max_entries = 3000\n[store.skills.catalogs]\nweb = "o/r"\n');
       expect(config.store.catalogMaxEntries, 3000);
       expect(config.withSkillSource('two', 'o/two').store.catalogMaxEntries, 3000);
     });
 
     test('a label or source that is wrong refuses the file', () {
       for (final text in [
-        '[store.skill_sources]\n"1bad" = "o/r"\n',
-        '[store.skill_sources]\nweb = 3\n',
-        '[store.skill_sources]\nweb = "https://example.test/SKILL.md"\n',
+        '[store.skills.catalogs]\n"1bad" = "o/r"\n',
+        '[store.skills.catalogs]\nweb = 3\n',
+        '[store.skills.catalogs]\nweb = "https://example.test/SKILL.md"\n',
         '[store]\nskill_sources = "o/r"\n',
       ]) {
         expect(() => CanoaConfig.parse(text), throwsFormatException, reason: text);
@@ -252,7 +252,7 @@ void main() {
 
     testWidgets('a skill from a source the person typed is fetched with their own settings', (tester) async {
       overlays.putSkill('$typed@$commit#skills/performance', {'SKILL.md': '---\nname: performance\ndescription: Makes pages fast.\n---\nBody.\n'});
-      await open(tester, text: '$withCatalog[store.skill_sources]\nweb = "addyosmani/web-quality-skills"\n');
+      await open(tester, text: '$withCatalog[store.skills.catalogs]\nweb = "addyosmani/web-quality-skills"\n');
       await tapKey(tester, 'skills-source-web');
       await tapKey(tester, 'store-source-skill-install-web-performance');
       await tapKey(tester, 'store-skill-install-confirm');
@@ -274,7 +274,7 @@ void main() {
     testWidgets('a source that cannot be read says so, and a skill whose name is not its folder\'s cannot be installed', (tester) async {
       overlays.scans[anthropics] = scanOf([const ScannedSkill(name: 'odd', description: 'Odd one.', path: 'skills/other', problem: 'its name is odd, and the name has to be its folder\'s, other')]);
       overlays.scans.remove(typed);
-      await open(tester, text: '$withCatalog[store.skill_sources]\nweb = "addyosmani/web-quality-skills"\n');
+      await open(tester, text: '$withCatalog[store.skills.catalogs]\nweb = "addyosmani/web-quality-skills"\n');
       await tapKey(tester, 'skills-source-anthropics');
       expect(find.textContaining('Cannot be installed: its name is odd'), findsOneWidget);
       final install = tester.widget<IconButton>(find.byKey(const Key('store-source-skill-install-anthropics-odd')));

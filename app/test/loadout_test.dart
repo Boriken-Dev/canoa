@@ -54,7 +54,7 @@ MemoryOverlays world() => MemoryOverlays()
   ..put(teamRepo, {'overlay.cfg': reviewCfg})
   ..putSkill('$skillsHost/pdf.git', pdfFiles);
 
-const withCatalog = '[catalogs]\nboriken = false\nmain = "$catalogRepo@main#catalog.toml"\n';
+const withCatalog = '[store.overlays.catalogs]\nboriken = false\nmain = "$catalogRepo@main#catalog.toml"\n';
 
 final registryAnswer = page([
   npmServer(),
@@ -349,7 +349,7 @@ void main() {
   });
 
   testWidgets('with no catalog, Discover offers a known catalog and a spec to paste, and no bare repository field', (tester) async {
-    await open(tester, text: '[catalogs]\nboriken = false\n');
+    await open(tester, text: '[store.overlays.catalogs]\nboriken = false\n');
     await tapKey(tester, 'overlays-discover');
     expect(find.byKey(const Key('catalogs-empty')), findsOneWidget);
     expect(find.byKey(Key('known-catalog-$defaultCatalogLabel')), findsOneWidget);
@@ -363,7 +363,7 @@ void main() {
   });
 
   testWidgets('Boriken Dev\'s catalog is the only one offered to start from', (tester) async {
-    await open(tester, text: '[catalogs]\nboriken = false\n');
+    await open(tester, text: '[store.overlays.catalogs]\nboriken = false\n');
     await tapKey(tester, 'overlays-discover');
     expect(find.byKey(Key('known-catalog-$defaultCatalogLabel')), findsOneWidget);
     expect(find.byKey(const Key('known-catalog-aos-examples')), findsNothing);
@@ -371,13 +371,13 @@ void main() {
   });
 
   testWidgets('the default catalog removed comes back from the empty state under its own label', (tester) async {
-    await open(tester, text: '[catalogs]\nboriken = false\n');
+    await open(tester, text: '[store.overlays.catalogs]\nboriken = false\n');
     await tapKey(tester, 'overlays-discover');
     expect(find.byKey(Key('known-catalog-$defaultCatalogLabel')), findsOneWidget);
     await tapKey(tester, 'known-catalog-add-$defaultCatalogLabel');
     expect(saved.last.catalogs.keys, [defaultCatalogLabel]);
     expect(saved.last.catalogs[defaultCatalogLabel]!.spec, defaultCatalogSpec);
-    expect(saved.last.tables['catalogs'], {defaultCatalogLabel: defaultCatalogSpec});
+    expect(saved.last.catalogTable('overlays'), {defaultCatalogLabel: defaultCatalogSpec});
   });
 
   testWidgets('a skill the catalog offers is shown with its source and pin, fetched on a yes, chosen and on for new sessions', (tester) async {
@@ -409,7 +409,7 @@ void main() {
   });
 
   testWidgets('a skill pasted as a source is reviewed before it is fetched, and refused when its directory is no name', (tester) async {
-    await open(tester, text: '[catalogs]\nboriken = false\n');
+    await open(tester, text: '[store.overlays.catalogs]\nboriken = false\n');
     await openTab(tester, 'skills');
     await tapKey(tester, 'skills-discover');
     await tester.enterText(find.byKey(const Key('skills-paste')), 'https://example.invalid/skills.git@main#');

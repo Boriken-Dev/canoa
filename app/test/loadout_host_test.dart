@@ -48,7 +48,7 @@ void main() {
       final config = Directory('$root/config')..createSync();
       final agent = exampleBinary('profile_agent')!;
       final base = CanoaConfig.parse('[agents.Profiled]\nprogram = ${jsonEncode(agent)}\n'
-          '[catalogs]\nboriken = false\nmain = "${catalog.location}@main#catalog.toml"\n');
+          '[store.overlays.catalogs]\nboriken = false\nmain = "${catalog.location}@main#catalog.toml"\n');
       await File('${config.path}/canoa.cfg').writeAsString(base.encode());
       // The host library in this process, as in the app; a source of its own with no address leaves it idle, not running.
       host = HostSupervisor(LibraryHostTool(

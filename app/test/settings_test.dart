@@ -110,7 +110,7 @@ type = "stdio"
 command = "own-mcp"
 args = ["--serve"]
 
-[catalogs]
+[store.overlays.catalogs]
 boriken = false
 main = "https://example.invalid/catalog.git@main#catalog.json"
 
@@ -147,7 +147,7 @@ void main() {
   test('the canoa.cfg used here holds every table, and writes back whole', () {
     final names = tomlOf(every).keys.toSet();
     expect(names, containsAll(['desktop', 'network', 'assets', 'appearance', 'sessions', 'harnesses', 'notifications', 'attachments',
-      'usage', 'voice', 'permissions', 'sources', 'agents', 'host', 'overlays', 'profile', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults', 'profiles']));
+      'usage', 'voice', 'permissions', 'sources', 'agents', 'host', 'overlays', 'profile', 'store', 'skill_pins', 'loadouts', 'defaults', 'profiles']));
     expect(changedTables(every, CanoaConfig.parse(every.encode())), isEmpty);
   });
 
@@ -500,7 +500,7 @@ void main() {
       await tester.tap(find.byKey(const Key('catalog-add')));
       await tester.pumpAndSettle();
       expect(h.last.catalogs.keys, ['main', 'extra']);
-      expect(changedTables(every, h.last), {'catalogs'});
+      expect(changedTables(every, h.last), {'store'});
 
       await tester.tap(find.byKey(const Key('catalog-remove-main')));
       await tester.pumpAndSettle();
@@ -509,13 +509,13 @@ void main() {
     });
 
     testWidgets('the default catalog is listed first, and removing it writes false to the person\'s own file', (tester) async {
-      final h = await openSettings(tester, config: CanoaConfig.parse('[catalogs]\nmine = "https://example.invalid/m.git@main#c.toml"\n'), section: 'catalogs');
+      final h = await openSettings(tester, config: CanoaConfig.parse('[store.overlays.catalogs]\nmine = "https://example.invalid/m.git@main#c.toml"\n'), section: 'catalogs');
       expect(find.byKey(const Key('catalog-boriken')), findsOneWidget);
       expect(find.text(defaultCatalogSpec), findsOneWidget);
       await tester.tap(find.byKey(const Key('catalog-remove-boriken')));
       await tester.pumpAndSettle();
       expect(h.last.catalogs.keys, ['mine']);
-      expect(tomlOf(h.last)['catalogs'], {'boriken': false, 'mine': 'https://example.invalid/m.git@main#c.toml'});
+      expect(h.last.catalogTable('overlays'), {'boriken': false, 'mine': 'https://example.invalid/m.git@main#c.toml'});
       expect(CanoaConfig.parse(h.last.encode()).catalogs.keys, ['mine'], reason: 'it stays removed when the file is read again');
     });
 
@@ -525,11 +525,11 @@ void main() {
       await tester.enterText(find.byKey(const Key('limit-catalog_max_depth')), '90');
       await tester.pumpAndSettle();
       expect(h.last.store.catalogMaxDepth, 90);
-      expect(tomlOf(h.last)['store'], {'catalog_max_bytes': 100000, 'catalog_max_depth': 90});
+      expect((tomlOf(h.last)['store'] as Map)..remove('overlays'), {'catalog_max_bytes': 100000, 'catalog_max_depth': 90});
       await tester.enterText(find.byKey(const Key('limit-catalog_max_bytes')), '${4 * 1024 * 1024}');
       await tester.enterText(find.byKey(const Key('limit-catalog_max_depth')), '64');
       await tester.pumpAndSettle();
-      expect(tomlOf(h.last).containsKey('store'), isFalse);
+      expect((tomlOf(h.last)['store'] as Map).keys, ['overlays'], reason: 'the limits are back to their defaults and so not written');
       expect(changedTables(every, h.last), {'store'});
     });
   });

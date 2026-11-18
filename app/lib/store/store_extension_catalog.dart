@@ -48,7 +48,7 @@ final class CatalogExtension {
   final Map<String, Object?> about;
 }
 
-/// One extensions catalog of `[store.extension_catalogs]`, as the host indexed it, or why it could not.
+/// One extensions catalog of `[store.extensions.catalogs]`, as the host indexed it, or why it could not.
 final class ExtensionCatalog {
   const ExtensionCatalog({
     required this.label,

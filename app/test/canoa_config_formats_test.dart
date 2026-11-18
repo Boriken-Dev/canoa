@@ -17,8 +17,10 @@ Map<String, dynamic> _rich() => {
   'permissions': {'default_mode': 'manual'},
   'sources': {'hidden': ['Gemini']},
   'usage': {'warn_permille': 800, 'limit_phrases': ['rate limit']},
-  'catalogs': {'team': 'https://example.org/o.git@main#catalog.toml'},
-  'store': {'catalog_max_bytes': 4194304},
+  'store': {
+    'catalog_max_bytes': 4194304,
+    'overlays': {'catalogs': {'team': 'https://example.org/o.git@main#catalog.toml'}},
+  },
   'skill_pins': {'review': _digest()},
   'host': {
     'origins': ['https://app.example'],
@@ -29,7 +31,7 @@ Map<String, dynamic> _rich() => {
 };
 
 // The tables Settings leaves alone, whichever section changed.
-const _untouched = ['catalogs', 'store', 'skill_pins'];
+const _untouched = ['store', 'skill_pins'];
 
 CanoaConfig _sessions(CanoaConfig c, int keep) => c.copyWith(
   sessions: LedgerSettings(
@@ -52,9 +54,9 @@ final _changes = <String, ({CanoaConfig Function(CanoaConfig) change, bool Funct
     change: (c) => c.withHostAgent(name: 'mine', program: 'agent', listen: '127.0.0.1:7811'),
     shown: (c) => c.hostEntries.any((entry) => entry.name == 'mine'),
   ),
-  'catalogs': (
+  'store': (
     change: (c) => c.withCatalog('mine', 'https://example.org/p.git@main#catalog.toml'),
-    shown: (c) => (c.tables['catalogs'] as Map).containsKey('mine'),
+    shown: (c) => c.catalogSpecs('overlays').containsKey('mine'),
   ),
 };
 

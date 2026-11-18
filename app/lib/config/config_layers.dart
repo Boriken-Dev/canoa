@@ -179,7 +179,7 @@ const configEntryPaths = <List<String>>[
   ['profile', 'skills', '*'],
   ['profile', 'env', '*'],
   ['overlays', '*'],
-  ['catalogs', '*'],
+  ['store', '*', 'catalogs', '*'],
   ['connections', '*'],
 ];
 

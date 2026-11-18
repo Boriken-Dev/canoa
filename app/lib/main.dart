@@ -110,6 +110,7 @@ import 'profile/overlays.dart' show NoOverlays;
 import 'profile/profile_home.dart' show ProfileHome;
 import 'served/control_overlays.dart' show ControlOverlayManager;
 import 'served/control_profile_home.dart' show ControlProfileHome;
+import 'store/catalog_types.dart' show ControlCatalogTypes;
 import 'store/control_data.dart';
 import 'store/overlay_needs.dart';
 import 'store/programs_view.dart' show installRuntime;
@@ -989,6 +990,7 @@ class _CanoaAppState extends State<CanoaApp> {
     findProgram: _control == null ? null : controlFindProgram(_control),
     overlayNeeds: _control == null ? null : controlOverlayNeeds(_control),
     index: ControlStoreIndex.over(_control)?.catalogs,
+    catalogTypes: ControlCatalogTypes.over(_control)?.read,
   );
 
   /// The store types after the built-in ones: Runtimes and what extensions add, where the host grants installing programs.

@@ -85,7 +85,7 @@ class _CatalogsSectionState extends State<CatalogsSection> {
             SettingsRow(
               key: Key('catalog-$label'),
               title: label,
-              configKey: ['catalogs', label],
+              configKey: ['store', 'overlays', 'catalogs', label],
               description: source.spec,
               control: IconButton(
                 key: Key('catalog-remove-$label'),

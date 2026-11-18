@@ -105,7 +105,7 @@ void main() {
   });
 
   group('the Store section', () {
-    final config = CanoaConfig.parse('[catalogs]\nboriken = false\nteam = "$_teamRepo@main#catalog.toml"\nother = "$_otherRepo@main#catalog.toml"\n');
+    final config = CanoaConfig.parse('[store.overlays.catalogs]\nboriken = false\nteam = "$_teamRepo@main#catalog.toml"\nother = "$_otherRepo@main#catalog.toml"\n');
     late MemoryOverlays overlays;
     late List<CanoaConfig> saved;
     late ShellLayout layout;

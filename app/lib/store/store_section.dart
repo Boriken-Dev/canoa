@@ -14,6 +14,7 @@ import 'overlay_page.dart' show SaveConfig, shownTags;
 import 'programs.dart';
 import 'overlay_needs.dart';
 import 'programs_view.dart';
+import 'catalog_types.dart' show CatalogTypesRead;
 import 'store_catalogs.dart';
 import 'store_extension.dart';
 import 'store_index.dart';
@@ -43,6 +44,7 @@ class StoreSection extends StatefulWidget {
     this.registry = officialRegistry,
     this.embedded = false,
     this.index,
+    this.catalogTypes,
     this.now,
     this.selection,
     this.contentsStorage,
@@ -77,6 +79,9 @@ class StoreSection extends StatefulWidget {
 
   /// The host's catalog index; none where the app has no host, which leaves the catalogs empty.
   final CatalogIndex? index;
+
+  /// Asks the host what each Store type that reads catalogs calls them and which sources can add one; none where the app has no host.
+  final CatalogTypesRead? catalogTypes;
 
   /// The clock the "updated … ago" line reads; the time of day when null.
   final DateTime Function()? now;
@@ -115,6 +120,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     findProgram: widget.findProgram,
     overlayNeeds: widget.overlayNeeds,
     index: widget.index,
+    catalogTypes: widget.catalogTypes,
     contentsStorage: widget.contentsStorage,
     contentsReader: widget.contentsReader,
     now: widget.now,
@@ -318,7 +324,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
       case StoreType.overlays:
       case StoreType.skills:
         if (c.index == null || c.home == null) return 'The desktop app reads the catalogs';
-        if (c.config.catalogs.isEmpty) return 'No catalogs yet';
+        if (c.config.overlayCatalogs.isEmpty) return 'No catalogs yet';
         if (c.loadingCatalogs) return 'Reading the catalogs…';
         final shown = _scoped(id);
         final times = [for (final catalog in shown) ?catalog.checked];
@@ -359,7 +365,20 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     }
   }
 
-  void _openSettings() => Navigator.of(context).push<void>(selectablePage(builder: (_) => StoreSettingsPage(controller: controller)));
+  /// The settings of the type being shown: its own catalogs, and what only it has beside them.
+  void _openSettings() {
+    final current = type;
+    final builtin = _builtin(current);
+    Navigator.of(context).push<void>(selectablePage(
+      builder: (_) => StoreSettingsPage(
+        controller: controller,
+        type: current,
+        title: _labelOf(current),
+        loadedDetail: builtin == StoreType.overlays,
+        extras: [if (builtin == StoreType.skills) SkillsSearchSwitch(controller: controller)],
+      ),
+    ));
+  }
 
   /// A catalog the person removed can still be the chosen filter of [id]'s page, where it would hide every entry and leave no
   /// chip to undo it: it is forgotten, and the tags chosen in it with it.
@@ -371,7 +390,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     final extension = _extension(id);
     final present = extension != null
         ? {for (final item in extension.items()) item.catalog}
-        : {...controller.config.catalogs.keys, for (final loaded in controller.loaded) loaded.label};
+        : {...controller.config.overlayCatalogs.keys, for (final loaded in controller.loaded) loaded.label};
     if (view.catalogs.every(present.contains)) return;
     view.catalogs.removeWhere((label) => !present.contains(label));
     view.tags.clear();
@@ -565,7 +584,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     } else if (_extension(current) case final extension?) {
       byCatalog = _catalogFilter(view, {for (final item in extension.items()) item.catalog}.toList());
     }
-    if (builtin == StoreType.overlays && view.discover && controller.config.catalogs.isNotEmpty) {
+    if (builtin == StoreType.overlays && view.discover && controller.config.overlayCatalogs.isNotEmpty) {
       if (controller.listing case final listing? when listing.tags.isNotEmpty) {
         // The tags of the chosen catalog only: another catalog's tag would find nothing here.
         for (final tag in {...listing.topTags(shownTags, catalogs: view.catalogs), ...view.tags}) {

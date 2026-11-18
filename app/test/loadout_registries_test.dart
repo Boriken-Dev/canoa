@@ -35,7 +35,7 @@ Future<String> _read(Uri uri) async {
 }
 
 void main() {
-  test('registries are a list of addresses in [store], in the order added, that the file keeps', () {
+  test('registries are the catalogs of the MCP servers type, in the order added, that the file keeps', () {
     final base = CanoaConfig.parse('');
     expect(base.storeRegistries, isEmpty);
     final two = base.withStoreRegistries(['https://registry.team.test', 'https://git.team.test/lists.git@main#servers.json']);
@@ -43,12 +43,12 @@ void main() {
     expect(read.storeRegistries, ['https://registry.team.test', 'https://git.team.test/lists.git@main#servers.json']);
     expect(CanoaConfig.parse(read.withStoreRegistries([]).encode()).storeRegistries, isEmpty);
     for (final text in [
-      '[store]\nregistries = "https://x.test"\n',
-      '[store]\nregistries = [1]\n',
-      '[store]\nregistries = ["a b"]\n',
-      '[store]\nregistries = ["https://x.test", "https://x.test"]\n',
+      '[store.mcps.catalogs]\none = 1\n',
+      '[store.mcps.catalogs]\none = "a b"\n',
+      '[store.mcps.catalogs]\none = "https://x.test"\ntwo = "https://x.test"\n',
+      '[store]\nmcps = "https://x.test"\n',
     ]) {
-      expect(() => CanoaConfig.parse(text), throwsA(isA<FormatException>().having((e) => e.message, 'message', contains('registries'))), reason: text);
+      expect(() => CanoaConfig.parse(text), throwsA(isA<FormatException>().having((e) => e.message, 'message', contains('store'))), reason: text);
     }
   });
 

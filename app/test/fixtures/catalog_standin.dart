@@ -148,6 +148,6 @@ CatalogIcon _icon(TreeFile? found, String path, StoreSettings settings) {
 }
 
 /// The index a page is given in a widget test: [current] is the configuration the person has now, since the host reads
-/// `[catalogs]` from its canoa.cfg each time it is asked.
+/// `[store.overlays.catalogs]` from its canoa.cfg each time it is asked.
 CatalogIndex standInIndex(OverlayManager overlays, CanoaConfig Function() current) =>
     ({bool refresh = false}) => standInCatalogs(overlays, current());

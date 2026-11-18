@@ -171,8 +171,8 @@ void main() {
     expect(preview.requires, isEmpty);
     expect(preview.setup, isEmpty);
   });
-  test('a source holding a password is refused, in [catalogs] and from a catalog', () {
-    expect(() => CanoaConfig.parse('[catalogs]\nteam = "https://u:tok@example.invalid/c.git@main#c.toml"\n'),
+  test('a source holding a password is refused, in [store.overlays.catalogs] and from a catalog', () {
+    expect(() => CanoaConfig.parse('[store.overlays.catalogs]\nteam = "https://u:tok@example.invalid/c.git@main#c.toml"\n'),
         throwsFormatException);
     final catalog = aos.readCatalog(
         Uint8List.fromList(utf8.encode('[overlays]\nx = "https://u:tok@example.invalid/x.git@main"\n')), 'c.toml',
@@ -195,8 +195,8 @@ void main() {
     }
   });
 
-  test('canoa.cfg keeps [catalogs] and [store], and refuses what they may not hold', () {
-    final config = CanoaConfig.parse('[catalogs]\nteam = "https://example.invalid/c.git@main#catalog.toml"\n\n'
+  test('canoa.cfg keeps [store.overlays.catalogs] and [store], and refuses what they may not hold', () {
+    final config = CanoaConfig.parse('[store.overlays.catalogs]\nteam = "https://example.invalid/c.git@main#catalog.toml"\n\n'
         '[store]\nicon_max_bytes = 1024\n');
     expect(config.catalogs['team']!.path, 'catalog.toml');
     expect(config.store.iconLimits.iconBytes, 1024);
@@ -207,10 +207,10 @@ void main() {
     expect(config.withoutCatalog('team').catalogs.keys, ['boriken'], reason: 'only the default is left');
     expect(const StoreSettings(iconMaxWidth: 4096).nonDefaults, ['icon_max_width = 4096 (default 1024)']);
     for (final bad in [
-      '[catalogs]\nteam = "https://example.invalid/c.git@main"\n',
-      '[catalogs]\n"my catalog" = "https://example.invalid/c.git@main#c.toml"\n',
-      '[catalogs]\nteam = "https://example.invalid/c.git@main#c.toml"\nTeam = "https://example.invalid/d.git@main#c.toml"\n',
-      '[catalogs]\nteam = "http://example.invalid/c.git@main#c.toml"\n',
+      '[store.overlays.catalogs]\nteam = "https://example.invalid/c.git@main"\n',
+      '[store.overlays.catalogs]\n"my catalog" = "https://example.invalid/c.git@main#c.toml"\n',
+      '[store.overlays.catalogs]\nteam = "https://example.invalid/c.git@main#c.toml"\nTeam = "https://example.invalid/d.git@main#c.toml"\n',
+      '[store.overlays.catalogs]\nteam = "http://example.invalid/c.git@main#c.toml"\n',
       '[store]\nicon_max_bytes = -1\n',
       '[store]\nicon_max_pixels = 1\n',
     ]) {
@@ -224,22 +224,22 @@ void main() {
     expect(fresh.catalogs[defaultCatalogLabel]!.spec, defaultCatalogSpec);
     expect(fresh.catalogs[defaultCatalogLabel]!.path, 'catalog.toml');
 
-    final beside = CanoaConfig.parse('[catalogs]\nzeta = "https://example.invalid/z.git@main#c.toml"\n');
+    final beside = CanoaConfig.parse('[store.overlays.catalogs]\nzeta = "https://example.invalid/z.git@main#c.toml"\n');
     expect(beside.catalogs.keys, [defaultCatalogLabel, 'zeta'], reason: 'the default stays first, the person\'s own beside it');
 
     final removed = beside.withoutCatalog(defaultCatalogLabel);
     expect(removed.catalogs.keys, ['zeta']);
-    expect(removed.tables['catalogs'], {defaultCatalogLabel: false, 'zeta': 'https://example.invalid/z.git@main#c.toml'});
+    expect(removed.catalogTable('overlays'), {defaultCatalogLabel: false, 'zeta': 'https://example.invalid/z.git@main#c.toml'});
     // A restart reads the same file again.
     expect(CanoaConfig.parse(removed.encode()).catalogs.keys, ['zeta']);
     expect(CanoaConfig.parse(const CanoaConfig().withoutCatalog(defaultCatalogLabel).encode()).catalogs, isEmpty);
 
     // Adding the label again brings a catalog back; a source of the person's own under that label replaces the default.
     expect(removed.withCatalog(defaultCatalogLabel, defaultCatalogSpec).catalogs.keys, ['boriken', 'zeta']);
-    final replaced = CanoaConfig.parse('[catalogs]\nboriken = "https://example.invalid/mine.git@dev#c.toml"\n');
+    final replaced = CanoaConfig.parse('[store.overlays.catalogs]\nboriken = "https://example.invalid/mine.git@dev#c.toml"\n');
     expect(replaced.catalogs.keys, ['boriken']);
     expect(replaced.catalogs['boriken']!.reference, 'dev');
-    expect(() => CanoaConfig.parse('[catalogs]\nboriken = true\n'), throwsFormatException);
+    expect(() => CanoaConfig.parse('[store.overlays.catalogs]\nboriken = true\n'), throwsFormatException);
   });
 
   group('the store\'s pages', () {
@@ -247,7 +247,7 @@ void main() {
     const publicRepo = 'https://example.invalid/public.git';
     late MemoryOverlays overlays;
     late List<CanoaConfig> saved;
-    final config = CanoaConfig.parse('[catalogs]\nteam = "$teamRepo@main#catalog.toml"\n'
+    final config = CanoaConfig.parse('[store.overlays.catalogs]\nteam = "$teamRepo@main#catalog.toml"\n'
         'public = "$publicRepo@main#catalog.json"\n');
 
     setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/store_test.dart')));
@@ -431,7 +431,7 @@ path = "s\u202Eh.sh"
         (tester) async {
       await tester.binding.setSurfaceSize(const Size(1280, 2400));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      final byHand = CanoaConfig.parse('[catalogs]\nteam = "$teamRepo@main#catalog.toml"\npublic = "$publicRepo@main#catalog.json"\n'
+      final byHand = CanoaConfig.parse('[store.overlays.catalogs]\nteam = "$teamRepo@main#catalog.toml"\npublic = "$publicRepo@main#catalog.json"\n'
           '[overlays]\ndocs-tools = "$teamRepo@main#overlays/docs-tools"\n');
       await tester.pumpWidget(MaterialApp(
         home: StoreSection(readAhead: false, config: byHand, home: MemoryHome(overlays), index: standInIndex(overlays, () => byHand), onSave: (changed) async => changed),

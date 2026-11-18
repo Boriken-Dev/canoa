@@ -12,7 +12,6 @@ const hostConfigSections = [
   'appearance',
   'assets',
   'attachments',
-  'catalogs',
   'connections',
   'defaults',
   'loadouts',

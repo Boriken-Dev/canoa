@@ -142,7 +142,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: StoreSection(
         readAhead: false,
-          config: CanoaConfig.parse('[catalogs]\nteam = "https://example.invalid/team.git@main#catalog.toml"\n'),
+          config: CanoaConfig.parse('[store.overlays.catalogs]\nteam = "https://example.invalid/team.git@main#catalog.toml"\n'),
           home: MemoryHome(overlays),
           index: index,
           onSave: (changed) async => changed,

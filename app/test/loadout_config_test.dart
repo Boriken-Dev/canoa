@@ -101,7 +101,7 @@ void main() {
   });
 
   test('the store keeps its limits, its registries and the origins of its servers in one table', () {
-    final config = CanoaConfig.parse('[store]\ncatalog_max_bytes = 100000\nregistries = ["https://registry.team.test"]\n');
+    final config = CanoaConfig.parse('[store]\ncatalog_max_bytes = 100000\n\n[store.mcps.catalogs]\nteam = "https://registry.team.test"\n');
     expect(config.store.catalogMaxBytes, 100000);
     final limited = config.withStore(config.store.withLimit('catalog_max_depth', 70));
     final read = CanoaConfig.parse(limited.encode());

@@ -17,7 +17,7 @@ enum StoreType {
 
 /// What the toolbar holds for one type: the Installed/Discover switch, the search and the filters. It is kept per type, so
 /// leaving a type and coming back, or opening an entry's details and returning, finds them as they were.
-/// What [StoreView.source] holds while the Skills page shows the skills directory's search: no label of `[store.skill_sources]` can
+/// What [StoreView.source] holds while the Skills page shows the skills directory's search: no label of `[store.skills.catalogs]` can
 /// start with a question mark.
 const skillsSearchSource = '?search';
 
@@ -32,7 +32,7 @@ class StoreView extends ChangeNotifier {
   final tags = <String>{};
   final catalogs = <String>{};
 
-  /// The Skills page's Discover reads this skill source (a label of `[store.skill_sources]`, or [skillsSearchSource] for the
+  /// The Skills page's Discover reads this skill source (a label of `[store.skills.catalogs]`, or [skillsSearchSource] for the
   /// directory's search) instead of the catalogs; null reads the catalogs.
   String? source;
 

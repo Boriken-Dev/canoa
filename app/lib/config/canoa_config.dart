@@ -8,6 +8,7 @@ import '../accounts/account_models.dart' show AccountEntry;
 import '../acp/agent_commands.dart';
 import '../providers/provider_catalog.dart';
 import '../voice/speech_backend.dart' show VoiceProfile;
+import 'catalog_specs.dart';
 import 'config_layers.dart';
 import 'connection.dart';
 import '../chat/modes.dart' show modeOrder;
@@ -145,7 +146,7 @@ const defaultVoiceBackend = 'system';
 /// `[defaults.clients]`: the browser's side panel, and the task panes of Outlook, Word, Excel and PowerPoint.
 const clientKinds = ['browser', 'outlook', 'word', 'excel', 'powerpoint'];
 
-/// The label and source of the catalog Canoa offers first, until the person removes it (`[catalogs] boriken = false`) or gives
+/// The label and source of the catalog Canoa offers first, until the person removes it (`[store.overlays.catalogs] boriken = false`) or gives
 /// that label a catalog of their own. The host reads the same pair.
 const defaultCatalogLabel = 'boriken';
 const defaultCatalogSpec = 'https://github.com/Boriken-Dev/agent-overlays.git@main#catalog.toml';
@@ -630,31 +631,93 @@ final class CanoaConfig {
     return _withTable('overlays', raw, overlays: overlays);
   }
 
-  /// `[catalogs]`: each catalog the store lists, by the label the person gives it, a git source whose `#path` names the
-  /// catalog file.
-  Map<String, GitOverlay> get catalogs => _catalogs(tables['catalogs']);
+  /// `[store.overlays.catalogs]`: each catalog of overlays the Store lists that the `read` provider reads, by the label the
+  /// person gives it, a git source whose `#path` names the catalog file. A catalog another provider reads is in
+  /// [overlayCatalogs] only.
+  Map<String, GitOverlay> get catalogs => _catalogs(catalogTable('overlays'));
 
-  /// `[store.extension_catalogs]`: each extensions catalog the Store lists, by the label the person gives it, a git source
-  /// (`<repository>@<ref>#<file>`) whose file lists extensions in Canoa's own format. The host reads them; none is listed
-  /// until the table names one, so this is empty by default.
-  Map<String, String> get extensionCatalogs => _extensionCatalogs((tables['store'] as Map?)?['extension_catalogs']);
+  /// `[store.extensions.catalogs]`: each extensions catalog the Store lists that the `read` provider reads, by the label the
+  /// person gives it, a git source (`<repository>@<ref>#<file>`) whose file lists extensions in Canoa's own format. The host reads
+  /// them; none is listed until the table names one, so this is empty by default.
+  Map<String, String> get extensionCatalogs => _extensionCatalogs(catalogTable('extensions'));
 
   static Map<String, String> _extensionCatalogs(Object? raw) {
-    if (raw == null) return const {};
-    if (raw is! Map) throw const FormatException('canoa.cfg: store.extension_catalogs must be a table');
     final out = <String, String>{};
+    for (final MapEntry(:key, :value) in parseCatalogSpecs('extensions', raw).entries) {
+      if (value.source case final source?) out[key] = source;
+    }
+    return out;
+  }
+
+  /// `[store.<type>.catalogs]` as the person's file and the layers below it merge: the raw table, or null.
+  Object? catalogTable(String type) => _catalogsIn(tables['store'], type);
+
+  static Object? _catalogsIn(Object? store, String type) {
+    final kind = store is Map ? store[type] : null;
+    return kind is Map ? kind['catalogs'] : null;
+  }
+
+  /// The catalogs of the Store type [type] as canoa.cfg names them, whichever provider reads each, in the file's order. A label
+  /// set to `false` lists nothing. Nothing a default adds is here: the host says which defaults a type has.
+  Map<String, CatalogSpec> catalogSpecs(String type) => parseCatalogSpecs(type, catalogTable(type));
+
+  /// Every catalog of overlays: the default, unless the table names its label, then the table's own, whichever provider reads each.
+  Map<String, CatalogSpec> get overlayCatalogs {
+    final own = catalogSpecs('overlays');
+    final named = own.keys.any((label) => normalizeName(label) == normalizeName(defaultCatalogLabel));
+    final offFirst = (catalogTable('overlays') as Map?)?.keys.any((key) => normalizeName('$key') == normalizeName(defaultCatalogLabel)) ?? false;
+    return {
+      if (!named && !offFirst) defaultCatalogLabel: CatalogSpec.read(defaultCatalogSpec),
+      ...own,
+    };
+  }
+
+  /// Reads the table of catalogs of [type]. Throws [FormatException] for a label that is no label, one given twice as AOS compares
+  /// names, or a value that is no catalog.
+  static Map<String, CatalogSpec> parseCatalogSpecs(String type, Object? raw) {
+    if (raw == null) return const {};
+    if (raw is! Map) throw FormatException('canoa.cfg: store.$type.catalogs must be a table');
+    final out = <String, CatalogSpec>{};
     final normalized = <String>{};
     for (final MapEntry(:key, :value) in raw.entries) {
       final label = '$key';
       if (!isCatalogLabel(label) || !normalized.add(normalizeName(label))) {
-        throw FormatException('canoa.cfg: store.extension_catalogs.$label: a label is a letter, then letters, digits, - or _, at most 64, unique when compared as names are');
+        throw FormatException('canoa.cfg: store.$type.catalogs.$label: a label is a letter, then letters, digits, - or _, at most '
+            '64, unique when compared as AOS compares names');
       }
-      if (value is! String || value.isEmpty) {
-        throw FormatException('canoa.cfg: store.extension_catalogs.$label is a git source, <repository>@<ref>#<extensions file>');
-      }
-      out[label] = value;
+      if (value == false) continue;
+      out[label] = CatalogSpec.parse('store.$type.catalogs.$label', value);
     }
     return out;
+  }
+
+  /// This configuration with the catalog [spec] of the Store type [type] labelled [label]. Throws [FormatException].
+  CanoaConfig withCatalogOf(String type, String label, CatalogSpec spec) {
+    final raw = _deepCopy((catalogTable(type) as Map?) ?? const {})..[label] = spec.toRaw();
+    parseCatalogSpecs(type, raw);
+    return _withCatalogTable(type, raw);
+  }
+
+  /// This configuration without the catalog [label] of the Store type [type]. A [fallback] label (the type's default) is recorded
+  /// as `false` in this layer, so it stays gone without touching a lower layer.
+  CanoaConfig withoutCatalogOf(String type, String label, {String? fallback}) {
+    final raw = _deepCopy((catalogTable(type) as Map?) ?? const {});
+    final key = raw.keys.cast<String>().where((each) => normalizeName(each) == normalizeName(label)).firstOrNull;
+    if (fallback != null && normalizeName(label) == normalizeName(fallback)) {
+      raw[key ?? fallback] = false;
+    } else {
+      raw.remove(key ?? label);
+    }
+    return _withCatalogTable(type, raw);
+  }
+
+  /// This configuration with [raw] as the table of catalogs of [type], and every other key of `[store]` as it was.
+  CanoaConfig _withCatalogTable(String type, Map<String, dynamic> raw) {
+    final store = {...((tables['store'] as Map?) ?? const {}).cast<String, dynamic>()};
+    final kind = {...((store[type] as Map?) ?? const {}).cast<String, dynamic>()}..remove('catalogs');
+    if (raw.isNotEmpty) kind['catalogs'] = raw;
+    kind.isEmpty ? store.remove(type) : store[type] = kind;
+    return _withTable('store', store);
   }
 
   /// `[skill_pins]`: the tree digest the person requires of a skill from elsewhere, by its name in lower case. A skill is
@@ -854,22 +917,34 @@ final class CanoaConfig {
   /// and version there, and the digest of the `server.json` that was shown and accepted.
   Map<String, McpOrigin> get storeMcp => _storeExtras(tables['store']).mcp;
 
-  /// `[store] registries`: the MCP registries the person added beside the official one, in the order added. Each is the address of
-  /// a registry that serves the MCP Registry's API, or a git source (`<repository>@<ref>#<file>`) of a file in that API's list
-  /// shape. Whether an address can be read is for the page to say when it is used.
+  /// `[store.mcps.catalogs]`: the MCP registries the person added beside the official one, in the order added, that the `read`
+  /// provider reads. Each is the address of a registry that serves the MCP Registry's API, or a git source
+  /// (`<repository>@<ref>#<file>`) of a file in that API's list shape. Whether an address can be read is for the page to say when
+  /// it is used.
   List<String> get storeRegistries => _storeExtras(tables['store']).registries;
+
+  /// The registries by the label each is kept under.
+  Map<String, String> get storeRegistryLabels => _registryLabels(catalogTable('mcps'));
+
+  static Map<String, String> _registryLabels(Object? raw) {
+    final out = <String, String>{};
+    for (final MapEntry(:key, :value) in parseCatalogSpecs('mcps', raw).entries) {
+      final address = value.source;
+      if (address == null) continue;
+      if (address.runes.any((rune) => rune <= 0x20 || rune == 0x7f)) {
+        throw FormatException('canoa.cfg: store.mcps.catalogs.$key is the address of a registry, with no spaces or control characters');
+      }
+      out[key] = address;
+    }
+    if (out.length > 16) throw const FormatException('canoa.cfg: store.mcps.catalogs lists at most 16 registries beside the official one');
+    if (out.values.toSet().length != out.length) throw const FormatException('canoa.cfg: store.mcps.catalogs lists a registry twice');
+    return out;
+  }
 
   static ({Map<String, McpOrigin> mcp, List<String> registries}) _storeExtras(Object? raw) {
     if (raw == null) return (mcp: const {}, registries: const []);
     if (raw is! Map) throw const FormatException('canoa.cfg: store must be a table');
-    final registries = raw['registries'];
-    if (registries != null &&
-        (registries is! List ||
-            registries.length > 16 ||
-            registries.toSet().length != registries.length ||
-            registries.any((address) => address is! String || address.isEmpty || address.runes.any((rune) => rune <= 0x20 || rune == 0x7f)))) {
-      throw const FormatException('canoa.cfg: store.registries is a list of at most 16 different registry addresses');
-    }
+    final registries = _registryLabels(_catalogsIn(raw, 'mcps'));
     final mcp = <String, McpOrigin>{};
     final rawMcp = raw['mcp'];
     if (rawMcp != null && rawMcp is! Map) throw const FormatException('canoa.cfg: store.mcp must be a table');
@@ -880,21 +955,49 @@ final class CanoaConfig {
       }
       mcp['$key'] = origin;
     }
-    return (mcp: mcp, registries: [for (final address in (registries as List?) ?? const []) address as String]);
+    return (mcp: mcp, registries: registries.values.toList());
   }
 
-  /// This configuration with [mcp] and [registries] (each left as it is when omitted) in `[store]`, beside its limits.
+  /// This configuration with [mcp] and [registries] (each left as it is when omitted) in `[store]`, beside its limits. A registry
+  /// already kept keeps its label; a new one is labelled for its host.
   CanoaConfig _withStoreExtras({Map<String, McpOrigin>? mcp, List<String>? registries}) {
     final now = _storeExtras(tables['store']);
-    final mcpNow = mcp ?? now.mcp, registriesNow = registries ?? now.registries;
-    final table = {...((tables['store'] as Map?) ?? const {}).cast<String, dynamic>()}
-      ..remove('mcp')
-      ..remove('registries');
-    return _withTable('store', {
+    final mcpNow = mcp ?? now.mcp;
+    var out = this;
+    if (registries != null) {
+      final raw = _deepCopy((catalogTable('mcps') as Map?) ?? const {});
+      final kept = _registryLabels(raw);
+      // Registries no longer wanted go, those the `read` provider does not read stay.
+      for (final MapEntry(:key, :value) in kept.entries) {
+        if (!registries.contains(value)) raw.remove(key);
+      }
+      final taken = {for (final key in raw.keys) normalizeName(key)};
+      for (final address in registries) {
+        if (kept.containsValue(address)) continue;
+        final label = _registryLabel(address, taken);
+        taken.add(normalizeName(label));
+        raw[label] = address;
+      }
+      out = out._withCatalogTable('mcps', raw);
+    }
+    final table = {...((out.tables['store'] as Map?) ?? const {}).cast<String, dynamic>()}..remove('mcp');
+    return out._withTable('store', {
       ...table,
-      if (registriesNow.isNotEmpty) 'registries': registriesNow,
       if (mcpNow.isNotEmpty) 'mcp': {for (final MapEntry(:key, :value) in mcpNow.entries) key: value.toMap()},
     });
+  }
+
+  /// A label for the registry at [address]: its host, as a catalog label, made different from those [taken].
+  static String _registryLabel(String address, Set<String> taken) {
+    final host = Uri.tryParse(address)?.host ?? '';
+    var base = host.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    if (base.isEmpty || !RegExp(r'^[A-Za-z]').hasMatch(base)) base = 'registry_$base';
+    if (base.length > 60) base = base.substring(0, 60);
+    var label = base;
+    for (var n = 2; taken.contains(normalizeName(label)) || !isCatalogLabel(label); n++) {
+      label = '${base}_$n';
+    }
+    return label;
   }
 
   /// This configuration with the MCP server [name] defined as [definition] in `[profile.mcp]` and [origin] noted in
@@ -918,43 +1021,33 @@ final class CanoaConfig {
     return out._withEachLoadout((loadout) => loadout.withMcp(name, false));
   }
 
-  /// `[store.skill_sources]`: where the Skills page looks for skills, by the label the person gives each, as `npx skills add` takes a
+  /// `[store.skills.catalogs]`: where the Skills page looks for skills, by the label the person gives each, as `npx skills add` takes a
   /// source (`owner/repo`, a git URL, a folder). Anthropic's `anthropics/skills` is first unless the table names its label: `false`
-  /// removes it, a source replaces it.
-  Map<String, SkillSource> get skillSources => _skillSources((tables['store'] as Map?)?['skill_sources']);
+  /// removes it, a source replaces it. A source another provider reads is in [catalogSpecs] only.
+  Map<String, SkillSource> get skillSources => _skillSources(catalogTable('skills'));
 
   /// The most skill sources the person adds beside the default.
   static const maxSkillSources = 32;
 
   static Map<String, SkillSource> _skillSources(Object? raw) {
-    if (raw != null && raw is! Map) throw const FormatException('canoa.cfg: store.skill_sources must be a table');
+    final specs = parseCatalogSpecs('skills', raw);
+    final named = {for (final key in (raw as Map? ?? const {}).keys) normalizeName('$key')};
     final given = <String, SkillSource>{};
-    final normalized = <String>{};
-    for (final MapEntry(:key, :value) in (raw as Map? ?? const {}).entries) {
-      final label = '$key';
-      if (!isCatalogLabel(label) || !normalized.add(normalizeName(label))) {
-        throw FormatException('canoa.cfg: store.skill_sources.$label: a label is a letter, then letters, digits, - or _, at most '
-            '64, unique when compared as AOS compares names');
-      }
-      switch (value) {
-        case false:
-          break;
-        case final String spec:
-          try {
-            given[label] = SkillSource.parse(spec);
-          } on FormatException catch (error) {
-            throw FormatException('canoa.cfg: store.skill_sources.$label: ${error.message}');
-          }
-        default:
-          throw FormatException('canoa.cfg: store.skill_sources.$label is a source, owner/repo or a git URL or a folder, or false');
+    for (final MapEntry(:key, :value) in specs.entries) {
+      final spec = value.source;
+      if (spec == null) continue;
+      try {
+        given[key] = SkillSource.parse(spec);
+      } on FormatException catch (error) {
+        throw FormatException('canoa.cfg: store.skills.catalogs.$key: ${error.message}');
       }
     }
     if (given.length > maxSkillSources) {
-      throw const FormatException('canoa.cfg: store.skill_sources holds at most $maxSkillSources sources');
+      throw const FormatException('canoa.cfg: store.skills.catalogs holds at most $maxSkillSources sources');
     }
     final own = given.keys.where((label) => normalizeName(label) == normalizeName(defaultSkillSourceLabel));
     return {
-      if (!normalized.contains(normalizeName(defaultSkillSourceLabel)))
+      if (!named.contains(normalizeName(defaultSkillSourceLabel)))
         defaultSkillSourceLabel: SkillSource.parse(defaultSkillSourceSpec),
       for (final label in own) label: given[label]!,
       for (final MapEntry(:key, :value) in given.entries)
@@ -962,27 +1055,16 @@ final class CanoaConfig {
     };
   }
 
-  CanoaConfig _withSkillSourceTable(Map<String, dynamic> raw) {
-    _skillSources(raw);
-    final table = {...((tables['store'] as Map?) ?? const {}).cast<String, dynamic>()}..remove('skill_sources');
-    return _withTable('store', {...table, if (raw.isNotEmpty) 'skill_sources': raw});
-  }
-
   /// This configuration with the skill source [spec] labelled [label]. Throws [FormatException].
-  CanoaConfig withSkillSource(String label, String spec) =>
-      _withSkillSourceTable(_deepCopy(((tables['store'] as Map?)?['skill_sources'] as Map?) ?? const {})..[label] = spec);
+  CanoaConfig withSkillSource(String label, String spec) {
+    final raw = _deepCopy((catalogTable('skills') as Map?) ?? const {})..[label] = spec;
+    _skillSources(raw);
+    return _withCatalogTable('skills', raw);
+  }
 
   /// This configuration without the skill source [label]. The default one is recorded as `false` in this layer, so it stays gone
   /// without touching a lower layer.
-  CanoaConfig withoutSkillSource(String label) {
-    final raw = _deepCopy(((tables['store'] as Map?)?['skill_sources'] as Map?) ?? const {});
-    if (normalizeName(label) == normalizeName(defaultSkillSourceLabel)) {
-      raw[raw.keys.cast<String>().where((key) => normalizeName(key) == normalizeName(label)).firstOrNull ?? defaultSkillSourceLabel] = false;
-    } else {
-      raw.remove(label);
-    }
-    return _withSkillSourceTable(raw);
-  }
+  CanoaConfig withoutSkillSource(String label) => withoutCatalogOf('skills', label, fallback: defaultSkillSourceLabel);
 
   /// `[store] skills_search`: the skills directory the Skills page searches, as the host asks it. Absent or `false` is off, which
   /// it is until the person turns it on; `true` is [defaultSkillsSearch]; an address is another directory that answers the same.
@@ -1022,7 +1104,7 @@ final class CanoaConfig {
     return _withTable('store', {...table, if (on) 'skills_search': true});
   }
 
-  /// This configuration with [registries] as `[store] registries`, in the order given.
+  /// This configuration with [registries] as `[store.mcps.catalogs]`, in the order given.
   CanoaConfig withStoreRegistries(List<String> registries) => _withStoreExtras(registries: registries);
 
   /// This configuration with [name] in, or out of, the servers a new session starts with. Nothing changes while no loadout is the
@@ -1088,7 +1170,7 @@ final class CanoaConfig {
   Map<String, dynamic>? _storeExtrasTable() {
     final raw = tables['store'];
     if (raw is! Map) return null;
-    return {for (final key in const ['registries', 'mcp', 'skill_sources', 'extension_catalogs', 'skills_search']) if (raw[key] != null) key: raw[key]};
+    return {for (final MapEntry(:key, :value) in raw.entries) if (!StoreSettings.keys.contains(key)) '$key': value};
   }
 
   /// `[agents.NAME.mcp]`: for each agent, by label, the MCP servers the person turned on (`true`) or off (`false`), and
@@ -1176,30 +1258,19 @@ final class CanoaConfig {
     return _withTable('agents', raw);
   }
 
-  /// The catalogs in effect: the default first, unless the table names its label (`false` removes it, a source replaces it),
-  /// then the table's own, a label set to `false` listing nothing.
+  /// The catalogs of overlays the `read` provider reads, in effect: the default first, unless the table names its label (`false`
+  /// removes it, a source replaces it), then the table's own, a label set to `false` listing nothing.
   static Map<String, GitOverlay> _catalogs(Object? raw) {
-    if (raw != null && raw is! Map) throw const FormatException('canoa.cfg: catalogs must be a table');
+    final specs = parseCatalogSpecs('overlays', raw);
+    final named = {for (final key in (raw as Map? ?? const {}).keys) normalizeName('$key')};
     final given = <String, GitOverlay>{};
-    final normalized = <String>{};
-    for (final MapEntry(:key, :value) in (raw as Map? ?? const {}).entries) {
-      final label = '$key';
-      if (!isCatalogLabel(label) || !normalized.add(normalizeName(label))) {
-        throw FormatException('canoa.cfg: catalogs.$label: a label is a letter, then letters, digits, - or _, at most '
-            '64, unique when compared as AOS compares names');
-      }
-      switch (value) {
-        case false:
-          break;
-        case final String spec:
-          given[label] = _catalogSource(label, spec);
-        default:
-          throw FormatException('canoa.cfg: catalogs.$label is a git source, <repository>@<ref>#<catalog file>, or false');
-      }
+    for (final MapEntry(:key, :value) in specs.entries) {
+      final spec = value.source;
+      if (spec != null) given[key] = _catalogSource(key, spec);
     }
     final own = given.keys.where((label) => normalizeName(label) == normalizeName(defaultCatalogLabel));
     return {
-      if (!normalized.contains(normalizeName(defaultCatalogLabel))) defaultCatalogLabel: _catalogSource(defaultCatalogLabel, defaultCatalogSpec),
+      if (!named.contains(normalizeName(defaultCatalogLabel))) defaultCatalogLabel: _catalogSource(defaultCatalogLabel, defaultCatalogSpec),
       for (final label in own) label: given[label]!,
       for (final MapEntry(:key, :value) in given.entries)
         if (!own.contains(key)) key: value,
@@ -1214,12 +1285,12 @@ final class CanoaConfig {
     try {
       source = OverlaySource.parseGit(spec);
     } on ProfileException {
-      throw FormatException('canoa.cfg: catalogs.$label is not <repository>@<ref>#<catalog file> of a source git may '
+      throw FormatException('canoa.cfg: store.overlays.catalogs.$label is not <repository>@<ref>#<catalog file> of a source git may '
           'fetch');
     }
-    if (source.path.isEmpty) throw FormatException('canoa.cfg: catalogs.$label names no catalog file after #');
+    if (source.path.isEmpty) throw FormatException('canoa.cfg: store.overlays.catalogs.$label names no catalog file after #');
     if (holdsPassword(source.repo)) {
-      throw FormatException('canoa.cfg: catalogs.$label holds a password, which canoa.cfg may not; use a credential '
+      throw FormatException('canoa.cfg: store.overlays.catalogs.$label holds a password, which canoa.cfg may not; use a credential '
           'helper');
     }
     return source;
@@ -1254,24 +1325,16 @@ final class CanoaConfig {
   CanoaConfig withoutConnection(String name) =>
       _withTable('connections', _deepCopy((tables['connections'] as Map?) ?? const {})..remove(name));
 
-  /// This configuration with the catalog [spec] labelled [label] in `[catalogs]`. Throws [FormatException].
+  /// This configuration with the catalog [spec] labelled [label] in `[store.overlays.catalogs]`. Throws [FormatException].
   CanoaConfig withCatalog(String label, String spec) {
-    final raw = _deepCopy((tables['catalogs'] as Map?) ?? const {})..[label] = spec;
+    final raw = _deepCopy((catalogTable('overlays') as Map?) ?? const {})..[label] = spec;
     _catalogs(raw);
-    return _withTable('catalogs', raw);
+    return _withCatalogTable('overlays', raw);
   }
 
-  /// This configuration without the catalog [label]. The default one is recorded as `false` in this layer, so it stays gone
-  /// without touching a lower layer.
-  CanoaConfig withoutCatalog(String label) {
-    final raw = _deepCopy((tables['catalogs'] as Map?) ?? const {});
-    if (normalizeName(label) == normalizeName(defaultCatalogLabel)) {
-      raw[raw.keys.cast<String>().where((key) => normalizeName(key) == normalizeName(label)).firstOrNull ?? defaultCatalogLabel] = false;
-    } else {
-      raw.remove(label);
-    }
-    return _withTable('catalogs', raw);
-  }
+  /// This configuration without the catalog [label] of overlays. The default one is recorded as `false` in this layer, so it stays
+  /// gone without touching a lower layer.
+  CanoaConfig withoutCatalog(String label) => withoutCatalogOf('overlays', label, fallback: defaultCatalogLabel);
 
   /// This configuration with the overlay [name] from [source], pinned to [pin]: `NAME = { source, pin }`.
   CanoaConfig withOverlay(String name, GitOverlay source, String pin) {
@@ -1353,7 +1416,7 @@ final class CanoaConfig {
     final readFrom = ConfigSource(format: own.format, marked: own.marked, layers: below, own: own.data);
     for (final name in data.keys) {
       if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions', 'notifications', 'catalogs', 'store', 'skill_pins', 'loadouts', 'defaults', 'profiles', 'sources', 'attachments', 'usage', 'voice', 'speech', 'connections'}
+            'permissions', 'notifications', 'store', 'skill_pins', 'loadouts', 'defaults', 'profiles', 'sources', 'attachments', 'usage', 'voice', 'speech', 'connections'}
           .contains(name)) {
         throw FormatException('canoa.cfg: unknown table $name');
       }
@@ -1552,15 +1615,20 @@ final class CanoaConfig {
     }
     final rawProfile = data['profile'];
     if (rawProfile != null && rawProfile is! Map) throw const FormatException('canoa.cfg: profile must be a table');
-    _catalogs(data['catalogs']);
+    _catalogs(_catalogsIn(data['store'], 'overlays'));
     _connections(data['connections']);
     _skillPins(data['skill_pins']);
     _defaultLoadout(data['defaults'], _loadouts(data['loadouts']));
     _presets(data['profiles']);
     _storeExtras(data['store']);
-    _skillSources((data['store'] as Map?)?['skill_sources']);
+    _skillSources(_catalogsIn(data['store'], 'skills'));
     _skillsSearch((data['store'] as Map?)?['skills_search']);
-    _extensionCatalogs((data['store'] as Map?)?['extension_catalogs']);
+    _extensionCatalogs(_catalogsIn(data['store'], 'extensions'));
+    if (data['store'] is Map) {
+      for (final MapEntry(:key, :value) in (data['store'] as Map).entries) {
+        if (value is Map && value.containsKey('catalogs')) parseCatalogSpecs('$key', value['catalogs']);
+      }
+    }
     _agentMcp(agentTables);
     _agentHooks(agentTables);
     final protectedPaths = permissions['protected'] == null ? null : protectedLinesOf(permissions['protected']);
@@ -1579,7 +1647,6 @@ final class CanoaConfig {
         if (data['overlays'] != null) 'overlays': rawOverlays,
         'profile': ?rawProfile,
         if (agentTables.isNotEmpty) 'agents': agentTables,
-        'catalogs': ?data['catalogs'],
         'connections': ?data['connections'],
         // The host's speech providers: programs and keys the app does not edit here but must write back as it found them.
         'speech': ?data['speech'],

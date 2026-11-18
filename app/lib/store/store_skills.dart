@@ -455,7 +455,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
           ]),
         ),
         if (offered.isEmpty && !c.loadingCatalogs)
-          Text(c.config.catalogs.isEmpty
+          Text(c.config.overlayCatalogs.isEmpty
               ? 'No catalogs yet, so nothing is offered. Add one in Store settings, or paste a skill below.'
               : 'None of your catalogs offers a skill that is not here already. Paste one below.',
               key: const Key('skills-nothing'))

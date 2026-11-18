@@ -142,8 +142,8 @@ void main() {
     const mine = 'https://example.org/mine.git@main#catalog.toml';
     const theirs = 'https://example.org/theirs.git@main#catalog.toml';
     final config = _layered(
-      own: {'catalogs': {'team': mine}, 'store': {'catalog_max_bytes': 2000}},
-      system: {'catalogs': {'team': theirs, 'more': theirs}, 'store': {'catalog_max_bytes': 1000}},
+      own: {'store': {'overlays': {'catalogs': {'team': mine}}, 'catalog_max_bytes': 2000}},
+      system: {'store': {'overlays': {'catalogs': {'team': theirs, 'more': theirs}}, 'catalog_max_bytes': 1000}},
     );
     final h = await openSettings(tester, config: config, section: 'catalogs');
     expect(_from, findsOneWidget, reason: 'the catalog only the system names');
@@ -151,7 +151,7 @@ void main() {
     await tester.ensureVisible(_reset.first);
     await tester.tap(_reset.first);
     await tester.pumpAndSettle();
-    expect((h.last.tables['catalogs'] as Map)['team'], theirs);
+    expect((h.last.catalogTable('overlays') as Map)['team'], theirs);
     await _resetOne(tester);
     expect((h.last.tables['store'] as Map)['catalog_max_bytes'], 1000);
   });

@@ -294,7 +294,7 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
 
   Widget _discover(BuildContext context, List<Widget> head) {
     if (c.home == null) return CardList(header: [...head, const Text('The desktop app fetches catalogs and installs overlays.')]);
-    if (c.config.catalogs.isEmpty) return CardList(header: [...head, NoCatalogs(controller: c)]);
+    if (c.config.overlayCatalogs.isEmpty) return CardList(header: [...head, NoCatalogs(controller: c)]);
     final listing = c.listing;
     final inScope = [
       for (final listed in listing?.entries ?? const <ListedEntry>[])

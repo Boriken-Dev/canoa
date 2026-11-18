@@ -56,7 +56,7 @@ void main() {
   setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/store_contents_test.dart')));
 
   group('ContentsStore', () {
-    final config = CanoaConfig.parse('[catalogs]\nteam = "$_repo@main#catalog.toml"\n');
+    final config = CanoaConfig.parse('[store.overlays.catalogs]\nteam = "$_repo@main#catalog.toml"\n');
     late MemoryOverlays overlays;
     late MemoryContentsStorage storage;
     late DateTime clock;
@@ -133,7 +133,7 @@ void main() {
   });
 
   group('an entry page', () {
-    final config = CanoaConfig.parse('[catalogs]\nteam = "$_repo@main#catalog.toml"\n');
+    final config = CanoaConfig.parse('[store.overlays.catalogs]\nteam = "$_repo@main#catalog.toml"\n');
 
     testWidgets('lists what the overlay provides once the catalog is read, and never asks for a fetch', (tester) async {
       final overlays = MemoryOverlays()

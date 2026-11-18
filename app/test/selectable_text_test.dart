@@ -133,7 +133,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: Builder(builder: (context) => TextButton(
         onPressed: () => Navigator.of(context).push<CanoaConfig>(selectablePage(
-          builder: (_) => StoreSection(config: CanoaConfig.parse('[catalogs]\nboriken = false\n'), home: MemoryHome(MemoryOverlays()), onSave: (changed) async => changed),
+          builder: (_) => StoreSection(config: CanoaConfig.parse('[store.overlays.catalogs]\nboriken = false\n'), home: MemoryHome(MemoryOverlays()), onSave: (changed) async => changed),
         )),
         child: const Text('open the Store'),
       )),
