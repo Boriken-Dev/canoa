@@ -536,7 +536,7 @@ pub fn OverlaySource::parse_git(source: &str) -> Result<OverlaySource, ProfileEr
 #[non_exhaustive] pub struct OverlayInput<'a> { pub identity, root, os: &'a str, pub harness: Option<&'a str>, pub pinned: bool, pub tree: &'a [aos::TreeEntry] }
 pub fn OverlayInput::new(identity, root, os, tree) -> OverlayInput   // no harness, not pinned
 pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal>   // reads nothing but input.tree
-#[non_exhaustive] pub struct AosLayer { pub identity, root, os, digest: String, pub pinned: bool, pub manifest: Map<String, Value>, pub files: BTreeSet<String>, pub texts: BTreeMap<String, Vec<u8>>, pub references: Vec<(String, String, bool)>, pub not_applied: Vec<String>, pub elsewhere: Vec<coqui_aos::SkillEntry> }
+#[non_exhaustive] pub struct AosLayer { pub identity, root, os, digest: String, pub pinned: bool, pub manifest: Map<String, Value>, pub files: BTreeSet<String>, pub texts: BTreeMap<String, Vec<u8>>, pub references: Vec<(String, String, bool)>, pub not_applied: Vec<String>, pub elsewhere: Vec<coqui_aos::SkillEntry>, pub allowed: Option<String>, pub packages: BTreeMap<String, String>, pub state: Option<String> }
 #[non_exhaustive] pub struct OverlayReport { pub layer: LayerId, pub digest: String, pub not_applied: Vec<String>, pub non_defaults: Vec<coqui_aos::NonDefaultSetting> }   pub fn OverlayReport::view(&self) -> Value
 #[non_exhaustive] pub struct OverlayRefusal { pub code: &'static str, pub subject: String }   // code: name, digest, manifest, invalid, env-file, reserved
 
