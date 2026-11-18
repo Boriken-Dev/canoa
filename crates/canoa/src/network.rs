@@ -17,15 +17,16 @@ use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::Instant;
 
 use coqui_syshttp::client::{AgentBuilder, OriginAgent};
-use coqui_syshttp::tls::{ClientCertificates, Identity, Selector, TlsBuilder, Trust};
+use coqui_syshttp::tls::{ClientCertificates, Identity, Selector, Tls, TlsBuilder, Trust};
 use coqui_syshttp::{
     BypassRules, Credentials, Dialect, Negotiate, Proxy, ProxyConnector, ProxySetting, Resolver,
+    Route,
 };
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::pem::PemObject as _;
 
 pub use coqui_syshttp::client::OriginAgent as LoginAgent;
-pub use coqui_syshttp::{ChildEnvironment, OriginAuth, Secret};
+pub use coqui_syshttp::{ChildEnvironment, Connection, OriginAuth, Secret};
 
 /// How long the variables made for a program stay as they are before the system is asked again.
 const CHILD_CACHE: Duration = Duration::from_secs(60);
@@ -276,6 +277,37 @@ impl Network {
     /// The operating system's certificate verifier cannot start, or a proxy login cannot.
     pub fn agent(&self, config: ureq::config::Config) -> Result<ureq::Agent, NetworkError> {
         let tls = self.tls.clone().build()?;
+        let connector = self.connector(&tls)?;
+        Ok(AgentBuilder::new()
+            .resolver(self.resolver.clone())
+            .tls(tls)
+            .connector(connector)
+            .config(config)
+            .build()?)
+    }
+
+    /// A connection to the host and port of `url` (`http` or `https`, the scheme only choosing the
+    /// default port) through the proxy this network chooses for it, logged in as
+    /// [`agent`](Self::agent) logs in; `None` when the URL goes direct, which the caller then opens
+    /// itself. The bytes it carries are the caller's: no TLS to the server is made here.
+    ///
+    /// # Errors
+    ///
+    /// The proxy cannot be asked or reached, refuses the login, or is a kind that cannot carry a
+    /// tunnel (SOCKS).
+    pub fn tunnel(&self, url: &str) -> Result<Option<Connection>, NetworkError> {
+        if matches!(
+            self.resolver.lookup(url)?.first(),
+            None | Some(Route::Direct)
+        ) {
+            return Ok(None);
+        }
+        let tls = self.tls.clone().build()?;
+        let connector = self.connector(&tls)?;
+        Ok(Some(connector.connect_url(&self.resolver, url)?))
+    }
+
+    fn connector(&self, tls: &Tls) -> Result<ProxyConnector, NetworkError> {
         let mut connector = ProxyConnector::builder();
         if self.negotiate && coqui_syshttp::auth::negotiate_available() {
             connector = connector.negotiate(Negotiate::builder().proxies(["*"]).build()?);
@@ -283,12 +315,7 @@ impl Network {
         // A proxy reached over TLS is verified by the same trust; it is no one's client-certificate
         // host, so what a server would be sent is never asked for it.
         connector = connector.proxy_tls(tls.client_config("proxy")?);
-        Ok(AgentBuilder::new()
-            .resolver(self.resolver.clone())
-            .tls(tls)
-            .connector(connector.build())
-            .config(config)
-            .build()?)
+        Ok(connector.build())
     }
 
     /// [`Network::agent`] that also answers a server's `401` as `auth` says (Basic, or Negotiate and NTLM with the logon

@@ -369,6 +369,8 @@ pub(crate) struct Control {
     registry: Registry,
     /// The requests the app sends through this host's network.
     fetch: fetch::Fetch,
+    /// The connections the app makes to a remote host, carried through this host's network.
+    tunnel: tunnel::Tunnel,
     /// The catalogs and programs, indexed for `store/index`.
     index: Arc<crate::store::index::StoreIndex>,
     /// Where an extension a catalog lists is kept, and how it is fetched.
@@ -483,6 +485,7 @@ impl Control {
             overlays: Arc::new(Overlays::default()),
             registry: Registry::default(),
             fetch: fetch::Fetch::default(),
+            tunnel: tunnel::Tunnel::default(),
             index: Arc::new(crate::store::index::StoreIndex::default()),
             extensions: extension_install::ExtensionInstall::default(),
             restart: Arc::new(AtomicBool::new(false)),
@@ -580,6 +583,14 @@ impl Control {
     #[must_use]
     pub(crate) fn with_fetch(mut self, fetch: fetch::Fetch) -> Self {
         self.fetch = fetch;
+        self
+    }
+
+    /// Carries `network/tunnel` connections through `tunnel`'s network instead of the process's.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_tunnel(mut self, tunnel: tunnel::Tunnel) -> Self {
+        self.tunnel = tunnel;
         self
     }
 
@@ -971,6 +982,9 @@ impl Control {
                 Some("network/fetch") => {
                     owner_only_network(caller).and_then(|()| self.fetch.run(&params))
                 }
+                Some("network/tunnel") => {
+                    owner_only_network(caller).and_then(|()| self.tunnel.run(&params))
+                }
                 Some("host/which") => allow(caller, Grant::StoreRead)
                     .and_then(|()| registry::which(&params, &crate::sources::runtime_dirs())),
                 Some("host/restart") => {
@@ -1332,8 +1346,8 @@ fn owner_only_history(caller: &Caller) -> Result<(), (i32, String)> {
     }
 }
 
-/// What the app fetches through this host is sent as the person's computer, with its proxy login and client certificates: only this
-/// process asks for it, and no grant says otherwise.
+/// What the app fetches or dials through this host is sent as the person's computer, with its proxy login and client certificates:
+/// only this process asks for it, and no grant says otherwise.
 fn owner_only_network(caller: &Caller) -> Result<(), (i32, String)> {
     match caller {
         Caller::Owner => Ok(()),
@@ -1672,6 +1686,9 @@ mod skill_search;
 #[cfg(test)]
 mod skills_tests;
 mod stores;
+mod tunnel;
+#[cfg(test)]
+mod tunnel_tests;
 
 #[cfg(test)]
 mod tests;

@@ -21,6 +21,7 @@ pub enum ClientCertificate { System, None, File(PathBuf) }                      
 pub enum GitTls { System, Git }                                                         // default System
 pub use coqui_syshttp::{ChildEnvironment, OriginAuth, Secret};
 pub use coqui_syshttp::client::OriginAgent as LoginAgent;
+pub use coqui_syshttp::{ChildEnvironment, Connection, Secret};
 impl Network {
     pub fn new(&NetworkSettings) -> Result<Network, NetworkError>;   // a proxy that cannot be read, an unreadable or empty ca_file or client certificate
     pub fn with(Resolver, TlsBuilder) -> Network;                    // the caller's own resolver and TLS, for a test
@@ -29,6 +30,7 @@ impl Network {
     pub fn install(Network) -> Arc<Network>;                         // the process's
     pub fn agent(&self, ureq::config::Config) -> Result<ureq::Agent, NetworkError>;
     pub fn login_agent(&self, ureq::config::Config, OriginAuth) -> Result<LoginAgent, NetworkError>;   // `agent`, and `LoginAgent::run(http::Request<bytes>)` answers a server's 401
+    pub fn tunnel(&self, url: &str) -> Result<Option<Connection>, NetworkError>;   // a TCP connection to the url's host and port through the proxy chosen for it, logged in; None when it goes direct; no TLS is made to the server
     pub fn child_variables(&self, endpoints: &[String]) -> Vec<(String, String)>;   // cached for a minute; the person's `endpoints` are added
     pub fn variables_for(&self, urls: &[String]) -> Vec<(String, String)>;
     pub fn resolver(&self) -> &Resolver;  pub fn git_tls(&self) -> GitTls;
