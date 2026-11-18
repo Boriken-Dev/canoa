@@ -86,15 +86,28 @@ impl Registry {
                 "this key may read only the registries canoa.cfg lists under [store] registries, and the official one".to_owned(),
             ));
         }
+        let body = self.read(url, "registry", REGISTRY_TIME, MAX_REGISTRY_BYTES)?;
+        Ok(json!({"body": String::from_utf8_lossy(&body)}))
+    }
+
+    /// One answer of `url` as bytes, with no redirect followed: `what` names the service in the words of a refusal, `time` is how
+    /// long it has to answer and again to send its body, and an answer of more than `most` bytes is refused.
+    pub(super) fn read(
+        &self,
+        url: &str,
+        what: &str,
+        time: Duration,
+        most: u64,
+    ) -> Result<Vec<u8>, (i32, String)> {
         let limits = ToolsLimits {
-            response_timeout: REGISTRY_TIME,
-            body_timeout: REGISTRY_TIME,
+            response_timeout: time,
+            body_timeout: time,
             ..ToolsLimits::default()
         };
         let reply = self
             .transport
             .get(url, &limits)
-            .map_err(|why| (REFUSED, format!("The registry cannot be reached: {why}")))?;
+            .map_err(|why| (REFUSED, format!("The {what} cannot be reached: {why}")))?;
         if reply.status != 200 {
             let redirect = if reply.status / 100 == 3 {
                 " (a redirect, which Canoa does not follow)"
@@ -103,27 +116,27 @@ impl Registry {
             };
             return Err((
                 REFUSED,
-                format!("The registry answered {}{redirect}", reply.status),
+                format!("The {what} answered {}{redirect}", reply.status),
             ));
         }
         let mut body = Vec::new();
         reply
             .body
-            .take(MAX_REGISTRY_BYTES + 1)
+            .take(most + 1)
             .read_to_end(&mut body)
             .map_err(|error| {
                 (
                     REFUSED,
-                    format!("The registry did not finish its answer: {error}"),
+                    format!("The {what} did not finish its answer: {error}"),
                 )
             })?;
-        if body.len() as u64 > MAX_REGISTRY_BYTES {
+        if body.len() as u64 > most {
             return Err((
                 REFUSED,
-                "The registry's answer is larger than Canoa reads".to_owned(),
+                format!("The {what}'s answer is larger than Canoa reads"),
             ));
         }
-        Ok(json!({"body": String::from_utf8_lossy(&body)}))
+        Ok(body)
     }
 
     /// The folder of `caller`'s documents: the person's own, or one per key, so a key never reads what another wrote.

@@ -98,7 +98,7 @@ pub enum Grant {
     /// host fetches nothing for these. Also `store/contents` and `store/contents_put`: the key's own cache of what the entries of a
     /// catalog provide, which no other key reads.
     OverlayRead,
-    /// `registry/fetch` (one page of an MCP registry's list, from the official registry or one `[store] registries` lists), `overlay/check`, `overlay/apply`, `overlay/remove`, `overlay/discard`, `catalog/fetch`, `catalog/remove`, `skill/fetch`, `skill/scan`, `skill/save` and `skill/remove`: fetch sources with
+    /// `registry/fetch` (one page of an MCP registry's list, from the official registry or one `[store] registries` lists), `overlay/check`, `overlay/apply`, `overlay/remove`, `overlay/discard`, `catalog/fetch`, `catalog/remove`, `skill/fetch`, `skill/scan`, `skill/save`, `skill/remove` and `skill/search` (the skills directory `[store] skills_search` names, once the person turned it on): fetch sources with
     /// git as this user and install what AOS digests, under the overlays folder beside canoa.cfg. Nothing is run.
     OverlayWrite,
     /// `host/restart`: ends this host so that its supervisor starts it again with the canoa.cfg then.
@@ -921,6 +921,9 @@ impl Control {
                     .and_then(|()| self.overlays.skill_remove(&params)),
                 Some("registry/fetch") => allow(caller, Grant::OverlayWrite)
                     .and_then(|()| self.registry_fetch(caller, &params)),
+                Some("skill/search") => {
+                    allow(caller, Grant::OverlayWrite).and_then(|()| self.skill_search(&params))
+                }
                 Some("store/read_ahead") => allow(caller, Grant::OverlayWrite).and_then(|()| {
                     self.overlays
                         .read_ahead(caller, &params, &|repo| self.may_read_source(caller, repo))
@@ -1607,6 +1610,7 @@ mod profiles_tests;
 pub(crate) mod registry;
 #[cfg(test)]
 mod skill_scan_tests;
+mod skill_search;
 #[cfg(test)]
 mod skills_tests;
 mod stores;
