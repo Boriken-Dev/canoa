@@ -14,7 +14,7 @@ serves them under `/office/` when `[host.web] office = true`. [`README.md`](READ
   test in `crates/canoa-host/src/web/tests.rs` saying what it relaxes and that every other route keeps its headers.
 - Inline script is refused by the policy: scripts are files of this origin. Office.js is loaded from `<head>` at the address in
   `office.rs` (`JS_ORIGIN`); a page that loads it from another address fails under the policy.
-- `launch.js` is pure like `relation.js` (`fetch` and the clock are arguments), so `npm test` covers it.
+- `launch.js` and `tools.js` are pure like `relation.js` (`fetch`, the clock, the open item and the question put to the person are arguments), and so are the tool modules, which take Office.js's `Office`, `Word` or `Excel` as an argument: tests give them stand-ins. A tool that changes anything is `write: true`, which `tools.js` asks in the pane before it runs; a new write tool without it would run unasked. The wire (`/office/tools/open|poll|send|close`) is the host's `web/local.rs`: change both sides together. A tool answer is capped well under the host's 4 MiB message limit.
 - The pane's address carries the home's secret as `office_key` when the manifest does (`render.mjs --secret-file`); `launch.js` reads it and sends it as `x-canoa-office-key`, `appAddress` passes it to the app, and `app/lib/served/local_admission.dart` sends it with its request.
 - `launch.html` is not a page of the pane: the launcher (`canoa office-launcher`) answers `taskpane.html` with it when no host runs.
 - `render.mjs` keeps one add-in id per manifest kind (`IDS`): changing one makes Office treat the add-in as a new one.
@@ -27,8 +27,8 @@ serves them under `/office/` when `[host.web] office = true`. [`README.md`](READ
 
 ```sh
 cd clients/office && npm test          # node --test, no dependencies
-cargo test -p canoa-host --lib -- launcher web::local     # the launcher and the secret
-cargo test -p canoa-host --test office_local     # a real host: the secret, a restart
+cargo test -p canoa-host --lib -- launcher web::local     # the launcher, the secret and the panes' sessions
+cargo test -p canoa-host --test office_tools     # a real host: a pane's tools reach a session, the secret, a restart
 cargo test -p canoa-host --lib -- web:: office     # the routes' policies
 cargo test -p canoa-host --features portal --lib -- portal::tests::office     # the portal's side (Unix only)
 cargo test -p canoa-host --test web                # a real host: HTTPS, and the page's key accepted with no pairing

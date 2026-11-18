@@ -13,6 +13,9 @@
       #status { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       button { font: inherit; color: inherit; background: #24394a; border: 1px solid #3a5469; border-radius: 4px; padding: 2px 8px; cursor: pointer; }
       iframe { flex: 1; width: 100%; border: 0; }
+      #ask { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: #3a2f12; border-bottom: 1px solid #6b5a22; font-size: 12px; }
+      #ask[hidden] { display: none; }
+      #ask-text { flex: 1; overflow-wrap: anywhere; }
     </style>
   </head>
   <body>
@@ -20,6 +23,11 @@
       <span id="status" role="status">Loading Canoa</span>
       <button id="signin" type="button" hidden>Sign in</button>
       <button id="start" type="button" hidden>Start Canoa</button>
+    </div>
+    <div id="ask" role="alertdialog" aria-labelledby="ask-text" hidden>
+      <span id="ask-text"></span>
+      <button id="ask-yes" type="button">Allow</button>
+      <button id="ask-no" type="button">Don't allow</button>
     </div>
     <iframe id="canoa" title="Canoa"></iframe>
     <script type="module" src="taskpane.js"></script>

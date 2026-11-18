@@ -22,7 +22,7 @@ use crate::serve::{Admission, Gate, Listening, NotAdmitted, Serving};
 
 mod local;
 mod office;
-pub(crate) use local::{LAUNCH_PATH, Launcher, Secret};
+pub(crate) use local::{LAUNCH_PATH, Launcher, Secret, Tools};
 pub(crate) use office::{ICON_FILE, Office, Route, frame_source};
 
 /// Where the site is served when canoa.cfg does not say: loopback, port 7800.
@@ -331,6 +331,8 @@ struct Shared {
     local: bool,
     /// The home's secret, when `[host.web] office_secret` asks for a request to carry it.
     secret: Option<Secret>,
+    /// The Office applications' tools, carried by the pane's own requests.
+    tools: Option<Arc<Tools>>,
     /// Set for a server that is only the offer to start a host, which answers nothing else.
     launcher: Option<Launcher>,
     /// The list at [`HOST_INDEX`] as a page reached over loopback reads it, and as any other page does.
@@ -339,11 +341,12 @@ struct Shared {
     stopped: Arc<AtomicBool>,
 }
 
-/// What a server on the person's own computer is given besides admitting a page's key: the home's secret and, for a server that is
-/// only the offer to start a host, the launcher.
+/// What a server on the person's own computer is given besides admitting a page's key: the home's secret, the Office
+/// applications' tools, and, for a server that is only the offer to start a host, the launcher.
 #[derive(Default)]
 pub(crate) struct Extras {
     pub(crate) secret: Option<Secret>,
+    pub(crate) tools: Option<Arc<Tools>>,
     pub(crate) launcher: Option<Launcher>,
 }
 
@@ -386,10 +389,16 @@ impl WebServer {
         let local = web.office && web.office_local;
         let admission = local.then(|| serving.admission(web.office_secret));
         let mut extras = Extras::default();
-        if local && web.office_secret {
-            let dir = serving.office_dir().ok_or(WebError::Secret(None))?;
-            extras.secret =
-                Some(Secret::load(&dir).map_err(|error| WebError::Secret(Some(error)))?);
+        if local {
+            if web.office_secret {
+                let dir = serving.office_dir().ok_or(WebError::Secret(None))?;
+                extras.secret =
+                    Some(Secret::load(&dir).map_err(|error| WebError::Secret(Some(error)))?);
+            }
+            let opener = serving.local();
+            extras.tools = Some(Tools::new(move || {
+                opener.open(crate::client_tools::NAME).ok()
+            }));
         }
         Self::bind_with(
             web,
@@ -420,6 +429,7 @@ impl WebServer {
             None,
             Extras {
                 secret,
+                tools: None,
                 launcher: Some(launcher),
             },
         )
@@ -553,6 +563,9 @@ impl WebServer {
             .collect();
         let local = admission.is_some() || extras.launcher.is_some();
         let stopped = Arc::new(AtomicBool::new(false));
+        if let Some(tools) = &extras.tools {
+            Tools::watch(tools, &stopped);
+        }
         Ok(Self {
             listener,
             bound,
@@ -578,6 +591,7 @@ impl WebServer {
                 admission,
                 local,
                 secret: extras.secret,
+                tools: extras.tools,
                 launcher: extras.launcher,
                 stopped,
             }),
@@ -1216,6 +1230,19 @@ fn exchange<W: Wire>(shared: &Shared, mut wire: W, from: Option<IpAddr>) {
             }
         };
         served += 1;
+        // Only the pane's tools take a body, and only up to what a tool provider's message may be.
+        let mut body_length = 0;
+        if let Some(wanted) = body_wanted(shared, &buffer[..length]) {
+            if wanted > local::MAX_MESSAGE {
+                let _ = send(shared, &mut wire, Answer::refusal(413), false, false);
+                break;
+            }
+            body_length = wanted;
+            if read_body(&mut wire, &mut buffer, length + wanted, &shared.limits).is_err() {
+                break;
+            }
+        }
+        let body = buffer[length..length + body_length].to_vec();
         let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
         let mut request = httparse::Request::new(&mut headers);
         if !matches!(
@@ -1224,7 +1251,7 @@ fn exchange<W: Wire>(shared: &Shared, mut wire: W, from: Option<IpAddr>) {
         ) {
             break;
         }
-        let (mut reply, head) = answer(shared, &request, from);
+        let (mut reply, head) = answer(shared, &request, from, &body);
         // A name the host serves over HTTPS stays on HTTPS; localhost and addresses, which other servers share, do not.
         if shared.tls.is_some()
             && header(&request, "host").is_some_and(|host| {
@@ -1246,9 +1273,56 @@ fn exchange<W: Wire>(shared: &Shared, mut wire: W, from: Option<IpAddr>) {
         if send(shared, &mut wire, reply, head, keep).is_err() || !keep {
             break;
         }
-        buffer.drain(..length);
+        buffer.drain(..length + body_length);
     }
     wire.finish();
+}
+
+/// How long the body of the request whose head is `head` is, when it is one that takes a body: `POST` of a tools message, on a
+/// server that carries the pane's tools. `Some(usize::MAX)` for a length that cannot be read, which is too long to take.
+fn body_wanted(shared: &Shared, head: &[u8]) -> Option<usize> {
+    shared.tools.as_ref()?;
+    let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
+    let mut request = httparse::Request::new(&mut headers);
+    request.parse(head).ok()?;
+    if !tools_send(&request) {
+        return None;
+    }
+    Some(
+        header(&request, "content-length")
+            .and_then(|length| length.trim().parse::<usize>().ok())
+            .unwrap_or(usize::MAX),
+    )
+}
+
+/// Whether the request is `POST` of a message from the pane's tools.
+fn tools_send(request: &httparse::Request<'_, '_>) -> bool {
+    request.method == Some("POST")
+        && request
+            .path
+            .and_then(|target| target.split(['?', '#']).next())
+            .and_then(|path| path.strip_prefix(local::TOOLS_PATH))
+            == Some("/send")
+        && count_headers(request, "transfer-encoding") == 0
+        && count_headers(request, "content-length") == 1
+}
+
+/// Reads until `buffer` holds `until` bytes, within the time a request has to arrive.
+fn read_body<W: Wire>(
+    wire: &mut W,
+    buffer: &mut Vec<u8>,
+    until: usize,
+    limits: &Limits,
+) -> Result<(), ()> {
+    wire.until(after(limits.request_time));
+    let mut chunk = [0_u8; CHUNK];
+    while buffer.len() < until {
+        match wire.read(&mut chunk) {
+            Ok(0) | Err(_) => return Err(()),
+            Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+        }
+    }
+    Ok(())
 }
 
 /// The value of the one header called `name`, or `None` when there is none.
@@ -1326,6 +1400,9 @@ const fn reason(status: u16) -> &'static str {
         404 => "Not Found",
         405 => "Method Not Allowed",
         408 => "Request Timeout",
+        409 => "Conflict",
+        410 => "Gone",
+        413 => "Content Too Large",
         421 => "Misdirected Request",
         431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
@@ -1339,6 +1416,7 @@ fn answer(
     shared: &Shared,
     request: &httparse::Request<'_, '_>,
     from: Option<IpAddr>,
+    body: &[u8],
 ) -> (Answer, bool) {
     let head = request.method == Some("HEAD");
     let asked_path = request
@@ -1350,15 +1428,21 @@ fn answer(
     let launching = request.method == Some("POST")
         && shared.launcher.is_some()
         && asked_path == Some(LAUNCH_PATH);
-    let posting = admitting || launching;
+    let tools_route = shared.tools.is_some()
+        && asked_path.is_some_and(|path| {
+            path.strip_prefix(local::TOOLS_PATH)
+                .is_some_and(|rest| rest.starts_with('/'))
+        });
+    let posting = admitting || launching || (tools_route && request.method == Some("POST"));
     if !head && !posting && request.method != Some("GET") {
         let mut refused = Answer::refusal(405);
         refused.headers.push(("Allow", "GET, HEAD".to_owned()));
         return (refused, false);
     }
-    let body_follows = count_headers(request, "transfer-encoding") > 0
-        || count_headers(request, "content-length") > 1
-        || header(request, "content-length").is_some_and(|length| length.trim() != "0");
+    let body_follows = !(shared.tools.is_some() && tools_send(request))
+        && (count_headers(request, "transfer-encoding") > 0
+            || count_headers(request, "content-length") > 1
+            || header(request, "content-length").is_some_and(|length| length.trim() != "0"));
     // One Host in every request, HTTP/1.0 included, so none goes unchecked.
     if body_follows || count_headers(request, "host") != 1 {
         return (Answer::refusal(400), head);
@@ -1377,6 +1461,9 @@ fn answer(
     }
     if launching {
         return (launch(shared, request, from), false);
+    }
+    if tools_route {
+        return (tools(shared, request, target, from, body), false);
     }
     if shared.launcher.is_some() {
         return launcher_page(shared, target, head);
@@ -1601,6 +1688,53 @@ fn launch(shared: &Shared, request: &httparse::Request<'_, '_>, from: Option<IpA
             false,
         )
     }
+}
+
+/// The answer to a request under `/office/tools/`: the pane's tools. `open` registers an Office application, `poll` waits for what
+/// the host has for it, `send` carries one message of the pane's and `close` ends it. Only the page that this server serves, on this
+/// computer, may ask.
+fn tools(
+    shared: &Shared,
+    request: &httparse::Request<'_, '_>,
+    target: &str,
+    from: Option<IpAddr>,
+    body: &[u8],
+) -> Answer {
+    if let Err((status, said)) = own_page(shared, request, from) {
+        return json_answer(status, &serde_json::json!({ "said": said }), false);
+    }
+    let Some(tools) = &shared.tools else {
+        return json_answer(403, &serde_json::json!({ "said": "not here" }), false);
+    };
+    let (path, query) = target
+        .split_once('?')
+        .map_or((target, ""), |(path, query)| {
+            (path, query.split('#').next().unwrap_or(query))
+        });
+    let value = |name: &str| {
+        query
+            .split('&')
+            .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
+            .unwrap_or_default()
+    };
+    let session = value("session");
+    let action = path
+        .strip_prefix(local::TOOLS_PATH)
+        .unwrap_or_default()
+        .trim_start_matches('/');
+    let post = request.method == Some("POST");
+    let (status, answer) = match (action, post) {
+        ("open", true) => tools.open(value("app")),
+        ("poll", false) => tools.poll(session),
+        ("send", true) => tools.send(session, body),
+        ("close", true) => tools.close(session),
+        _ => (
+            405,
+            serde_json::json!({ "said": "not a request of the tools" }),
+        ),
+    };
+    // A connection of its own for each: a poll that holds messages is never cut by the lifetime of a kept connection.
+    json_answer(status, &answer, false)
 }
 
 /// What a server that only offers to start a host answers a `GET`: the add-in's page as the offer, its script and the icon, and

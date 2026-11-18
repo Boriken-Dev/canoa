@@ -44,7 +44,7 @@ test('the documents manifest names the hosts it is asked for, all three by defau
   const all = render('documents', { origin });
   assert.ok(balanced(all.replace(/<\?xml[^>]*\?>|<!--[\s\S]*?-->/g, '')));
   for (const name of ['Document', 'Workbook', 'Presentation']) assert.ok(all.includes(`<Host Name="${name}"/>`), name);
-  assert.ok(all.includes('<Permissions>ReadDocument</Permissions>'));
+  assert.ok(all.includes('<Permissions>ReadWriteDocument</Permissions>'), 'the tools write when the person allows it');
   const one = render('documents', { origin, hosts: ['Workbook', 'Workbook'] });
   assert.equal(one.match(/<Host Name=/g).length, 1);
   assert.throws(() => render('documents', { origin, hosts: ['Mailbox'] }), /unknown host/);

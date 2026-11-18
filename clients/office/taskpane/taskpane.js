@@ -16,6 +16,10 @@ import {
   relationMessage,
   sameRelation,
 } from './relation.js';
+import { createPaneTools } from './tools.js';
+import { excelTools } from './tools-excel.js';
+import { outlookTools } from './tools-outlook.js';
+import { wordTools } from './tools-word.js';
 
 const frame = document.getElementById('canoa');
 const status = document.getElementById('status');
@@ -245,6 +249,67 @@ function openSignIn() {
   });
 }
 
+const askBox = document.getElementById('ask');
+const askText = document.getElementById('ask-text');
+const askYes = document.getElementById('ask-yes');
+const askNo = document.getElementById('ask-no');
+/** The questions wait their turn: one is shown at a time. */
+let asking = Promise.resolve();
+
+/**
+ * Asks the person, in the pane, whether an agent may change what is open. Resolves true only for "Allow"; a question withdrawn
+ * (`signal` aborted) or never answered is a refusal.
+ */
+function askInPane({ agent, where, tool, summary, item, signal }) {
+  const turn = asking.then(
+    () =>
+      new Promise((resolve) => {
+        if (signal.aborted) {
+          resolve(false);
+          return;
+        }
+        const named = item ? ` in "${item}"` : '';
+        askText.textContent = `${agent} (${where}) wants to run ${tool}${named}: ${summary}`;
+        askBox.hidden = false;
+        askNo.focus();
+        const done = (answer) => {
+          askBox.hidden = true;
+          askYes.onclick = null;
+          askNo.onclick = null;
+          resolve(answer);
+        };
+        askYes.onclick = () => done(true);
+        askNo.onclick = () => done(false);
+        signal.addEventListener('abort', () => done(false), { once: true });
+      }),
+  );
+  asking = turn.catch(() => {});
+  return turn;
+}
+
+/**
+ * Offers this application's tools to the Canoa's sessions while the pane is open: Outlook's open item, Word's document, Excel's
+ * workbook. The pane keeps asking the host for what its sessions send; closing the pane takes the tools away.
+ */
+function offerTools(app) {
+  const make = {
+    outlook: () => (typeof Office !== 'undefined' ? outlookTools(Office) : null),
+    word: () => (typeof Word !== 'undefined' ? wordTools(Word) : null),
+    excel: () => (typeof Excel !== 'undefined' ? excelTools(Excel) : null),
+  }[app];
+  const tools = make?.() ?? null;
+  if (tools === null) return;
+  const paneTools = createPaneTools({
+    app,
+    tools,
+    relation: () => (app === 'outlook' ? mailRelation() : documentRelation(app)),
+    ask: askInPane,
+    key,
+  });
+  void paneTools.start();
+  window.addEventListener('pagehide', () => void paneTools.stop());
+}
+
 // Office.js defines `Office` before this module runs; without it (a browser tab, a blocked script) the pane says so.
 if (typeof Office === 'undefined') {
   say('Office.js did not load');
@@ -268,5 +333,6 @@ if (typeof Office === 'undefined') {
     }
     await checkGate();
     if (gate !== 'signed-out') await refresh();
+    if (onThisComputer) offerTools(client);
   });
 }

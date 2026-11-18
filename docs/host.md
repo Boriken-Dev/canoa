@@ -572,7 +572,9 @@ at a loopback name, from the page's own origin, for a key that has connected onc
 can do (`[host.native] control`), and the keys it was given are kept, so a restart of the host needs no new request. Do not set it
 behind a proxy.
 
-Two more things belong to the same setting. **A secret**, for a computer other accounts use: `office_secret = true` makes the
+Three more things belong to the same setting. **The pane's tools:** while the pane is open in Outlook, Word or Excel, every session
+of this Canoa can use that application's tools (`canoa-outlook`, `canoa-word`, `canoa-excel`: the open item, the document, the
+workbook), and a change is asked in the pane first. **A secret**, for a computer other accounts use: `office_secret = true` makes the
 host keep one in its home and refuse the page's requests that do not carry it; the manifest is rendered with it. **Starting Canoa
 from the pane:** `canoa office-launcher`, a small program you leave running, holds the pane's address while no Canoa runs and shows a
 page with **Start Canoa**, which starts it. `clients/office/README.md` in the repository says how to set each up.

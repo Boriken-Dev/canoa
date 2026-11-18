@@ -12,12 +12,12 @@ Nothing here is published to a marketplace. You render a manifest for your own h
 | Path | What |
 | --- | --- |
 | `outlook/manifest.xml.in` | The Outlook manifest (`MailApp`): a Canoa button on a message being read or written, pinnable, `ReadItem` permission, Mailbox 1.5 |
-| `documents/manifest.xml.in` | The Word, Excel and PowerPoint manifest (`TaskPaneApp`), `ReadDocument` permission |
+| `documents/manifest.xml.in` | The Word, Excel and PowerPoint manifest (`TaskPaneApp`), `ReadWriteDocument` permission (the tools write when the person allows it in the pane) |
 | `render.mjs` | Fills a manifest in for your origin: `node render.mjs outlook --origin https://canoa.example --out outlook.xml` (`documents` takes `--hosts Document,Workbook,Presentation`, all three by default; `--secret-file <home>/office/secret` puts the home's secret in the pane's address) |
-| `taskpane/` | The pages the host serves: `taskpane.html` and `taskpane.js` (read the open item through Office.js, frame the chat, carry the sign-in), `relation.js` (the relation of an item and the messages the pane and the app exchange, with no Office.js in it), `dialog.html` and `dialog.js` (the Office dialog that carries a sign-in result back as a string), `launch.js`, `launch.html` and `launch-page.js` (starting a host that is not running, and the secret) |
+| `taskpane/` | The pages the host serves: `taskpane.html` and `taskpane.js` (read the open item through Office.js, frame the chat, carry the sign-in), `relation.js` (the relation of an item and the messages the pane and the app exchange, with no Office.js in it), `dialog.html` and `dialog.js` (the Office dialog that carries a sign-in result back as a string), `launch.js`, `launch.html` and `launch-page.js` (starting a host that is not running, and the secret), `tools.js` with `tools-outlook.js`, `tools-word.js` and `tools-excel.js` (the tools the pane offers) |
 | `sideload.ps1` | Registers or removes a rendered manifest for Word, Excel and PowerPoint on Windows (`add`, `remove`, `status`; `-Key` names another registry key, which is how its test runs) |
 | `e2e/local.mjs` | A real Chromium against a host with `office_local` over HTTPS: the pages load under the policy and the page's key is accepted with no pairing |
-| `test/` | `npm test` runs `node --test` over `relation.js`, `launch.js`, `render.mjs` and `sideload.ps1` (the last on a scratch registry key, skipped without PowerShell on Windows) |
+| `test/` | `npm test` runs `node --test` over `relation.js`, `launch.js`, `tools.js` and the tool modules (against stand-ins for Office.js), `render.mjs` and `sideload.ps1` (the last on a scratch registry key, skipped without PowerShell on Windows) |
 
 The pages are compiled into `canoa-host` and answered under `/office/` only when the configuration says so; the manifests are not
 served by it. The app they frame is the web app the host already serves, under `/office/app/`. Both the standalone host
@@ -220,7 +220,7 @@ and its own settings are not measured here.
 | A page that points its own name at this computer (DNS rebinding) | The `Host` of the request must be a loopback name, and the web server turns away any other. |
 | Another computer | The listener is loopback, and `office_local` is refused on any other address. A proxy on this computer in front of a loopback listener would make every request look local: the proxied request carries the public name in `Host` and the browser's `Origin`, which fail the checks, but do not set `office_local` behind a proxy. |
 | A program of yours on this computer | Nothing, and nothing is meant to: it can read the host's home and trust store directly, and it can send any header. |
-| Another account on this computer | Nothing by default. It can connect to the loopback port, connect with a key of its own, and send the headers the page sends, and so get that key accepted and run an agent as you. With `office_secret = true` (below) it also needs the secret in your home, which it cannot read. |
+| Another account on this computer | Nothing by default. It can connect to the loopback port, connect with a key of its own, and send the headers the page sends, and so get that key accepted and run an agent as you, or offer tools to your sessions. With `office_secret = true` (below) it also needs the secret in your home, which it cannot read. |
 | A program that listens on the port while Canoa is stopped | Office loads `https://localhost:7800`, and a program without the certificate's key cannot answer it. The key is a file in your own profile. |
 
 Microsoft documents that WebView2 keeps its own browser data in a user data folder per host application ("Manage user data
@@ -232,7 +232,7 @@ launches. Whether Office keeps its web view's data between launches is not state
 
 Off by default: the computer is yours, and nothing here asks you to prove it. On a computer another account can also log in to,
 add `office_secret = true` beside `office_local`. The host then makes `<home>/office/secret` (64 random hexadecimal digits, mode
-`0600` where the system has modes, in your profile elsewhere) and refuses `POST /office/admit` and the launcher's
+`0600` where the system has modes, in your profile elsewhere) and refuses `POST /office/admit`, the pane's tools and the launcher's
 `POST /office/launch` unless the request carries it in the `X-Canoa-Office-Key` header. The pane learns it from its own address:
 render the manifest with it,
 
@@ -273,7 +273,29 @@ The host keeps the keys it admitted in `<home>/office/admitted.json` (their ids 
 restart a key the trust store still accepts is held as the page's key again at once, with the control grants it had, so the chat
 reconnects with no reload and no new request. `canoa revoke` takes the key out of the trust store and so out of what is held at the
 next start. The pane, for its part, looks at the host every five seconds and loads the chat again when it answers after being away,
-and the pane loads the chat again by itself.
+and the tools below register again by themselves.
+
+## Tools the pane offers
+
+While the pane is open in Outlook, Word or Excel, the Canoa on this computer offers every session it starts that application's tools
+as an MCP server of its own: `canoa-outlook`, `canoa-word`, `canoa-excel`. The pane registers with the host's `@tools` door, as the
+browser extension does for `canoa-browser`, but carried by the page's own requests (`/office/tools/open`, `poll`, `send`, `close`)
+and not by a proven link: the page is the host's own, on this computer, from its own origin (and with the secret, when one is
+asked for), which is the standing the host gives it everywhere else. A pane that stops asking for 45 seconds, or closes, takes its
+tools away from every session; a session started while it is closed has no such server, and one that outlives it is told the
+list changed.
+
+| Application | Reads | Asked in the pane first |
+| --- | --- | --- |
+| Outlook (`ReadItem`) | `outlook_get_item`: subject, sender, recipients, dates, body as text, attachment names, conversation id. `outlook_get_attachment` | `outlook_draft_reply`: opens Outlook's reply form with the text; nothing is sent |
+| Word (`ReadWriteDocument`) | `word_get_text`, `word_get_selection`, `word_list_comments` | `word_insert_text`, `word_replace_selection`, `word_add_comment` |
+| Excel (`ReadWriteDocument`) | `excel_get_selection`, `excel_list_tables`, `excel_get_table`, `excel_read_range` | `excel_write_range` (must fit its range) |
+
+Office.js gives a pane the open item and nothing of the rest of the mailbox, and the conversation as an id only, so there are no
+tools to search mail or list a thread's other messages. A read answers at once, and says which item it came from (the same kind and
+hashed key the app relates sessions by). A write shows a bar in the pane naming the agent, where it runs (the host's word, a claim)
+and what it would do, with **Allow** and **Don't allow**; with no answer in two minutes it is refused, and so is one whose open item
+changed while the person was asked. Each call is asked on its own; what the person allowed once is not remembered.
 
 ## How the relation is made
 
@@ -319,8 +341,11 @@ A host that does not serve a portal never goes through this.
 None of this has run in an Office client. Microsoft's pages describe the behaviours; these points they do not settle, and
 the code does not guess them:
 
-0. The launcher: that Office loads the pane's address again after the launcher has answered it, and that a pane opened while the
-   launcher holds the address shows its page at all.
+0. The tools and the launcher: that `fetch` long polls (20 seconds) are not cut by Office's web view, that `pagehide` runs in a
+   closing pane (the host takes the tools away after 45 seconds of silence when it does not), that the Word and Excel APIs the tools
+   call exist at the version a client has (Word 1.4 for comments, Excel 1.1), that Office loads the pane's address again after
+   the launcher has answered it, and that a pane opened while the launcher holds the address shows its page at all.
+
 1. Which origins frame a task pane in each client. The list in the host is a start (Outlook on the web's own addresses and
    two wildcards); check the browser console's blocked-frame report in each client and add with `office_frames`.
 2. Whether Office.js needs anything beyond its one origin under this policy (`script-src` and `connect-src` name it alone);

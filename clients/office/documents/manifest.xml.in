@@ -21,6 +21,7 @@
   <DefaultSettings>
     <SourceLocation DefaultValue="{{ORIGIN}}/office/taskpane.html{{KEY}}"/>
   </DefaultSettings>
-  <!-- Read document: the address of the open document, which is what a session is tied to. Nothing is written to it. -->
-  <Permissions>ReadDocument</Permissions>
+  <!-- Read and write document: the address of the open document is what a session is tied to, and the tools the pane offers read it
+       and, when the person allows a change in the pane, write to it. -->
+  <Permissions>ReadWriteDocument</Permissions>
 </OfficeApp>

@@ -12,7 +12,7 @@
 //! | `/office/app/canoa.json` | the host's list of entries, as `/canoa.json` answers it, for the app page that asks for it beside itself |
 //! | `/office/icon-N.png` | `Cross-Origin-Resource-Policy: cross-origin`, since Office draws it from its own origin |
 //!
-//! `taskpane.js`, `relation.js`, `dialog.js`, `launch.js` and `launch-page.js` are scripts of this origin and
+//! `taskpane.js`, `relation.js`, `dialog.js`, `launch.js`, `launch-page.js` and the `tools*.js` files are scripts of this origin and
 //! are answered with the usual headers. `launch.html` is the page a server that only offers to start a host shows in place of
 //! `taskpane.html`. Every other path under `/office/` is the site's, as before.
 
@@ -103,6 +103,26 @@ const PAGES: &[Page] = &[
     Page {
         name: "launch-page.js",
         body: include_str!("../../../../clients/office/taskpane/launch-page.js"),
+        kind: Kind::Script,
+    },
+    Page {
+        name: "tools.js",
+        body: include_str!("../../../../clients/office/taskpane/tools.js"),
+        kind: Kind::Script,
+    },
+    Page {
+        name: "tools-outlook.js",
+        body: include_str!("../../../../clients/office/taskpane/tools-outlook.js"),
+        kind: Kind::Script,
+    },
+    Page {
+        name: "tools-word.js",
+        body: include_str!("../../../../clients/office/taskpane/tools-word.js"),
+        kind: Kind::Script,
+    },
+    Page {
+        name: "tools-excel.js",
+        body: include_str!("../../../../clients/office/taskpane/tools-excel.js"),
         kind: Kind::Script,
     },
 ];

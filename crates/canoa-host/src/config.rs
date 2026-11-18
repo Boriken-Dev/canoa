@@ -824,7 +824,7 @@ pub struct WebConfig {
     /// reached at a loopback name and its own origin, asks `POST /office/admit` and gets what `[host.native] control` gives a
     /// browser key. Only with `office`, and only with a loopback `listen`: behind a proxy every request looks local.
     pub office_local: bool,
-    /// With `office_local`, the add-in's requests from the page (admitting its key, starting a host) carry a secret kept in
+    /// With `office_local`, the add-in's requests from the page (admitting its key, its tools, starting a host) carry a secret kept in
     /// the home, which the manifest rendered for this computer holds, so that another account on a shared computer cannot make
     /// them. Off by default: the computer is the person's own.
     pub office_secret: bool,
