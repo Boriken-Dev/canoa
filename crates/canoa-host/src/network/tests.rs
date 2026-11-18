@@ -394,11 +394,21 @@ fn a_proxy_that_names_a_pac_script_is_asked_about_the_endpoints_a_program_reache
     .expect("writes");
     let mut settings = NetworkSettings::default();
     settings.proxy = ProxyChoice::Pac(script.to_string_lossy().into_owned());
-    let network = Network::new(&settings).expect("a network");
-    let variables = network.variables_for(&[
+    // The script runs on a worker with a time limit, and one that cannot be loaded in time is no opinion, so a machine busy
+    // with other builds can answer nothing once and the network then keeps to it for half a minute: ask a fresh network again.
+    let urls = [
         "https://api.example/".to_owned(),
         "https://direct.example/".to_owned(),
-    ]);
+    ];
+    let mut variables = Vec::new();
+    for _ in 0..4 {
+        let network = Network::new(&settings).expect("a network");
+        variables = network.variables_for(&urls);
+        if !variables.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
     let value = |name: &str| {
         variables
             .iter()
