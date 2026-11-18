@@ -613,6 +613,8 @@ With no `[host.network]` table every fetch the host makes (the Store's downloads
 - the client certificate: when a server asks for one, the one a browser would offer from the operating system's keystores (the Windows certificate store, the macOS Keychain, a PKCS #11 module through p11-kit) that the server's named authorities issued, with the policy Edge and Chrome read;
 - git (overlay and skill sources): started with the proxy for the remote it is fetching and, on Windows, with `http.sslBackend=schannel`, so it uses the same certificate store; a git configuration of the person's own (`http.proxy`) still wins where the source is one they named.
 
+The desktop app's own requests (the list a saved connection's host serves at `canoa.json`, its status probe, the terminal check) are sent by the host it runs through `network/fetch`, so they follow the same settings; the app's own library would use none of them. A served page's requests are its browser's.
+
 A program the host starts (an agent, Node or Python, `git`) is given `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` for that proxy when its environment names none; variables the person or the entry set are never replaced. A proxy chosen per URL (PAC, WPAD) cannot be written as variables, so it is asked about the addresses the programs reach (the package registries, GitHub, the agents' own services; `endpoints` adds to them) and the proxy it names for those is the one given. Each key below is an override and none is needed:
 
 ```toml
