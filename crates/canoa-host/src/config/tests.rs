@@ -2065,6 +2065,16 @@ fn host_mail_names_accounts_that_hold_no_password_and_refuses_what_would_send_on
         MailAuth::Windows,
         "no user asks for the logon"
     );
+    let stored = parse(
+        "[host.mail.accounts.s]\nbackend = \"ews\"\nserver = \"https://mail.example.com/EWS/Exchange.asmx\"\nuser = \"u\"\nid = \"0b8d-1\"\n",
+    )
+    .expect("a stored password is named by its id");
+    let stored = &stored.mail.accounts["s"];
+    assert_eq!(
+        (stored.id.as_deref(), stored.password_env.as_deref()),
+        (Some("0b8d-1"), None)
+    );
+    assert_eq!(stored.auth, MailAuth::Basic);
     let local = parse(
         "[host.mail.accounts.t]\nbackend = \"ews\"\nserver = \"http://127.0.0.1:9/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n",
     );
@@ -2087,6 +2097,19 @@ fn host_mail_names_accounts_that_hold_no_password_and_refuses_what_would_send_on
             "backend = \"ews\"\nemail = \"a@b\"\nauth = \"windows\"\nuser = \"u\"",
             "takes no user",
         ),
+        (
+            "backend = \"ews\"\nemail = \"a@b\"\nauth = \"windows\"\nid = \"x\"",
+            "takes no user, password_env or id",
+        ),
+        (
+            "backend = \"ews\"\nemail = \"a@b\"\nuser = \"u\"\nid = \"\"",
+            "canoa mail add",
+        ),
+        (
+            "backend = \"ews\"\nemail = \"a@b\"\nuser = \"u\"\npassword = \"hunter2\"",
+            "a setting this host does not know",
+        ),
+        ("backend = \"outlook\"\nid = \"x\"", "signs in as Outlook"),
         (
             "backend = \"ews\"\nemail = \"a@b\"\nprofile = \"p\"",
             "for outlook",

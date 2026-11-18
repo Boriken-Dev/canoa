@@ -2,8 +2,8 @@
 //! message, drafted into and organized, from any session. `[host.mail.accounts.NAME]` names each mailbox and the backend that
 //! reaches it:
 //!
-//! - `ews`: Exchange Server's web services ([`ews`]), signed in with a user name and password the environment holds. The server
-//!   is named or found by Autodiscover. Signing in with the Windows logon is one function ([`ews`]'s transport) that is not
+//! - `ews`: Exchange Server's web services ([`ews`]), signed in with a user name and a password: the one the host's account
+//!   store holds (`canoa mail add` puts it there) or the one a variable names. The server is named or found by Autodiscover. Signing in with the Windows logon is one function ([`ews`]'s transport) that is not
 //!   filled in yet.
 //! - `graph`: Exchange Online through Microsoft Graph ([`graph`]), with a token taken silently from the person's Windows sign-in
 //!   for an app registration the account names; Exchange Online has no web services after 2027-04-01.
@@ -18,6 +18,7 @@
     reason = "locks and the environment are std's"
 )]
 
+pub(crate) mod commands;
 mod ews;
 mod graph;
 pub(crate) mod model;
@@ -26,6 +27,8 @@ pub(crate) mod related;
 pub(crate) mod tools;
 pub(crate) mod xml;
 
+#[cfg(test)]
+mod commands_tests;
 #[cfg(test)]
 pub(crate) mod standin;
 #[cfg(test)]
@@ -40,7 +43,11 @@ use self::ews::{Auth, Ews, EwsSettings};
 use self::graph::{DEFAULT_SERVER, Graph, GraphSettings, Wam};
 use self::model::{Backend, MailError};
 use self::outlook::Outlook;
+use crate::accounts::Accounts;
 use crate::config::{MailAccount, MailAuth, MailBackend, MailConfig};
+
+/// The key a mail account's password has in the record the account store keeps for it.
+pub(crate) const PASSWORD_KEY: &str = "password";
 
 /// A mailbox: its name, and the backend, made the first time it is asked for so that a password set after the host started, or a
 /// server that is down now, is not fixed at startup.
@@ -67,12 +74,14 @@ pub(crate) struct Mailboxes {
 }
 
 impl Mailboxes {
-    pub(crate) fn from_config(config: &MailConfig) -> Self {
+    /// The mailboxes `config` names; a password the account store holds is read from `store` when the account is first used.
+    pub(crate) fn from_config(config: &MailConfig, store: Option<Arc<Accounts>>) -> Self {
         let accounts = config
             .accounts
             .iter()
             .map(|(name, account)| {
                 let account = account.clone();
+                let store = store.clone();
                 let kind = match account.backend {
                     MailBackend::Ews => "ews",
                     MailBackend::Graph => "graph",
@@ -81,7 +90,7 @@ impl Mailboxes {
                 Account {
                     name: name.clone(),
                     made: Mutex::new(None),
-                    make: Box::new(move || backend_of(&account)),
+                    make: Box::new(move || backend_of(&account, store.as_deref())),
                     kind,
                 }
             })
@@ -191,28 +200,61 @@ pub(crate) fn ews_for_tests(standin: &standin::Standin, password: &str) -> Ews {
     )
 }
 
+/// The password of a Basic account: the variable `password_env` names when it is given, else the account store's.
+///
+/// # Errors
+///
+/// There is none: the variable holds nothing, or the store does not, or the store failed (its words are for the log).
+fn password_of(account: &MailAccount, store: Option<&Accounts>) -> Result<Secret, MailError> {
+    if let Some(variable) = account
+        .password_env
+        .as_deref()
+        .filter(|name| !name.is_empty())
+    {
+        return std::env::var(variable)
+            .ok()
+            .filter(|password| !password.is_empty())
+            .map(Secret::new)
+            .ok_or_else(|| {
+                MailError::Auth(format!(
+                    "the variable {variable} holds no password: set it in the environment the host runs in"
+                ))
+            });
+    }
+    let missing = || {
+        MailError::Auth(
+            "the account has no stored password: run `canoa mail add` for it again".to_owned(),
+        )
+    };
+    let id = account.id.as_deref().ok_or_else(missing)?;
+    let store = store.ok_or_else(|| {
+        MailError::Auth("the host has no account store to read the password from".to_owned())
+    })?;
+    let record = store.load(id).map_err(|error| {
+        tracing::warn!("a mail account's password could not be read: {error}");
+        MailError::Auth("the host's account store could not be read".to_owned())
+    })?;
+    record
+        .and_then(|record| record.credentials.get(PASSWORD_KEY).cloned())
+        .filter(|password| !password.is_empty())
+        .map(Secret::new)
+        .ok_or_else(missing)
+}
+
 /// The backend an account asks for.
-fn backend_of(account: &MailAccount) -> Result<Arc<dyn Backend>, MailError> {
+fn backend_of(
+    account: &MailAccount,
+    store: Option<&Accounts>,
+) -> Result<Arc<dyn Backend>, MailError> {
     let timeout = Duration::from_secs(account.timeout_secs);
     match account.backend {
         MailBackend::Ews => {
             let auth = match account.auth {
                 MailAuth::Windows => Auth::Windows,
-                MailAuth::Basic => {
-                    let variable = account.password_env.as_deref().unwrap_or_default();
-                    let password = std::env::var(variable)
-                        .ok()
-                        .filter(|password| !password.is_empty())
-                        .ok_or_else(|| {
-                            MailError::Auth(format!(
-                                "the variable {variable} holds no password: set it in the environment the host runs in"
-                            ))
-                        })?;
-                    Auth::Basic {
-                        user: account.user.clone().unwrap_or_default(),
-                        password: Secret::new(password),
-                    }
-                }
+                MailAuth::Basic => Auth::Basic {
+                    user: account.user.clone().unwrap_or_default(),
+                    password: password_of(account, store)?,
+                },
             };
             Ok(Arc::new(Ews::new(
                 EwsSettings {

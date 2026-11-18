@@ -1405,7 +1405,14 @@ impl Serving {
                 setting.default
             );
         }
-        let accounts = if config.accounts.is_empty() {
+        // A mail account's password rests in the same store, which a host with no home has none of.
+        let mail_passwords = config
+            .mail
+            .accounts
+            .values()
+            .any(|account| account.id.is_some())
+            && options.state_dir.is_some();
+        let accounts = if config.accounts.is_empty() && !mail_passwords {
             None
         } else {
             let Some(home) = &options.state_dir else {
@@ -2076,7 +2083,7 @@ impl Serving {
                 .shared
                 .store_tools
                 .serve_extra(Arc::new(crate::mail::tools::MailTools::new(
-                    crate::mail::Mailboxes::from_config(&config.mail),
+                    crate::mail::Mailboxes::from_config(&config.mail, accounts.clone()),
                 )));
         }
         serving.door = serving.open_door(config, options);

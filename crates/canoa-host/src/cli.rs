@@ -311,6 +311,12 @@ enum Command {
         #[command(subcommand)]
         command: AccountsCommand,
     },
+    /// Make, list and remove the mail accounts the host's mail tools read: a password rests in the account store and never in
+    /// canoa.cfg, which holds the id it rests under.
+    Mail {
+        #[command(subcommand)]
+        command: MailCommand,
+    },
     /// Run an agent with the environment the first line of standard input gives: what `serve` runs for an agent entry
     /// with profiles. The rest of standard input goes to the agent.
     Launch {
@@ -490,6 +496,59 @@ enum AccountsCommand {
         #[command(flatten)]
         config: ConfigArgs,
     },
+}
+
+/// What `canoa mail` does.
+#[derive(Debug, Subcommand)]
+enum MailCommand {
+    /// List the mail accounts of canoa.cfg with their state; never a password.
+    List {
+        #[command(flatten)]
+        config: ConfigArgs,
+    },
+    /// Add a mail account: a password it needs is typed without echo, or read from standard input when that is not a terminal,
+    /// and never taken from the command line. It rests in the account store; canoa.cfg gets `[host.mail.accounts.NAME]`.
+    Add {
+        /// The account's name: 1 to 32 lower-case letters, digits, `-` and `_`.
+        name: String,
+        /// What reaches the mailbox: `ews` (Exchange Server) or `outlook` (classic Outlook for Windows).
+        #[arg(long, value_enum)]
+        backend: MailBackendArg,
+        /// The mailbox's address, which Autodiscover asks about (ews).
+        #[arg(long)]
+        email: Option<String>,
+        /// The EWS address, when Autodiscover is not to find it (ews).
+        #[arg(long)]
+        server: Option<String>,
+        /// The Autodiscover address to ask (ews).
+        #[arg(long)]
+        autodiscover: Option<String>,
+        /// The user name, which signs in with a password (ews); without it the Windows logon is used.
+        #[arg(long)]
+        user: Option<String>,
+        /// The Outlook profile to log on to (outlook).
+        #[arg(long)]
+        profile: Option<String>,
+        /// How long one call may take, in seconds.
+        #[arg(long)]
+        timeout_secs: Option<u64>,
+        #[command(flatten)]
+        config: ConfigArgs,
+    },
+    /// Forget a mail account: its stored password and its table in canoa.cfg. Nothing changes in the mailbox.
+    Remove {
+        /// The account's name.
+        name: String,
+        #[command(flatten)]
+        config: ConfigArgs,
+    },
+}
+
+/// The backends `canoa mail add` names.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum MailBackendArg {
+    Ews,
+    Outlook,
 }
 
 /// The command line `canoa agent` serves.
@@ -1514,6 +1573,41 @@ fn accounts(command: AccountsCommand, front: &dyn Front) -> Result<(), Failed> {
     }
 }
 
+fn mail(command: MailCommand, front: &dyn Front) -> Result<(), Failed> {
+    use crate::mail::commands as run;
+    match command {
+        MailCommand::List { config } => run::list(&account_env(&config, front)?, config.format),
+        MailCommand::Add {
+            name,
+            backend,
+            email,
+            server,
+            autodiscover,
+            user,
+            profile,
+            timeout_secs,
+            config,
+        } => run::add(
+            &account_env(&config, front)?,
+            &name,
+            &run::NewAccount {
+                backend: Some(match backend {
+                    MailBackendArg::Ews => crate::MailBackend::Ews,
+                    MailBackendArg::Outlook => crate::MailBackend::Outlook,
+                }),
+                email,
+                server,
+                autodiscover,
+                user,
+                profile,
+                timeout_secs,
+            },
+            config.format,
+        ),
+        MailCommand::Remove { name, config } => run::remove(&account_env(&config, front)?, &name),
+    }
+}
+
 fn layers(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
     let layers = layers_of(args, front, true)?;
     match args.format {
@@ -1850,6 +1944,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
             .map_err(Failed::run)
         }
         Command::Accounts { command } => accounts(command, front),
+        Command::Mail { command } => mail(command, front),
         Command::Native { action } => native(action, front),
         Command::NativeHost { origin, .. } => native_host(&origin, front),
         Command::McpBridge => mcp_bridge(),

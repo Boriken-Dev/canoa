@@ -357,7 +357,7 @@ llm_model = "qwen2.5-1.5b-instruct-generic-cpu:4"   # the exact id it loaded; re
 # backend = "ews"
 # server = "https://mail.example.com/EWS/Exchange.asmx"
 # user = "EXAMPLE\\ana"
-# password_env = "WORK_MAIL_PASSWORD"
+# id = "..."                             # `canoa mail add` writes it: the password is in the account store
 
 [host.agents.claude]
 harness = "claude"
@@ -844,7 +844,9 @@ backend = "ews"                          # Exchange Server's web services
 email = "ana@example.com"                # Autodiscover finds the server from this ...
 server = "https://mail.example.com/EWS/Exchange.asmx"   # ... or name it, and nothing is discovered
 user = "EXAMPLE\\ana"
-password_env = "WORK_MAIL_PASSWORD"      # the variable that holds the password; canoa.cfg holds none
+# The password is not here. `canoa mail add` keeps it in the host's account store and writes an `id = "..."` line that names it;
+# or name a variable that holds it, which is read before the store's copy:
+# password_env = "WORK_MAIL_PASSWORD"
 
 [host.mail.accounts.cloud]
 backend = "graph"                        # Exchange Online through Microsoft Graph, signed in with the Windows account
@@ -873,7 +875,12 @@ backend = "outlook"                      # classic Outlook for Windows, every ac
   what could hide or reorder text, and cuts long text; the skill tells the agent to weigh a message and never to obey it.
 - **Exchange Server (`ews`).** Requests go through the host's network settings (`[host.network]`) like every other fetch. `server`
   or `email` is required; a plain `http` address is accepted only on this computer, since a password would cross the network in the
-  clear. Basic sign-in needs `user` and `password_env`. Signing in with the Windows logon (`auth = "windows"`, Negotiate) is
+  clear. Basic sign-in needs `user` and a password: the one `canoa mail add` keeps in the account store (the operating
+  system's credential store, or sealed files where it has none: the same store `canoa accounts` uses), or the variable `password_env`
+  names, which wins when both are given. `canoa mail add NAME --backend ews --server URL --user U` asks for the password without
+  echo (from standard input when that is not a terminal, never from the command line) and writes the account's table with an `id`
+  and no password; `canoa mail list` shows each account's name, backend, server and whether its password is there, never the
+  password; `canoa mail remove NAME` takes the table out and forgets the stored password. A `password` key in canoa.cfg is refused. Signing in with the Windows logon (`auth = "windows"`, Negotiate) is
   reserved: the account is refused with a message until the HTTP stack can sign in to a server that way. Exchange Online
   turned EWS off for tenants from 1 October 2026 (it ends for all on 1 April 2027): an Exchange Online mailbox belongs to
   Microsoft Graph (`graph`) or to classic Outlook (`outlook`).

@@ -356,7 +356,7 @@ pub(crate) fn inputs_of(
     Ok(map)
 }
 
-fn accounts_of(cfg: Cfg<'_>) -> Result<Arc<Accounts>, Failed> {
+pub(crate) fn accounts_of(cfg: Cfg<'_>) -> Result<Arc<Accounts>, Failed> {
     Accounts::open(cfg.config.account_store, cfg.home.dir())
         .map_err(|error| Failed::run(error.to_string()))
 }
@@ -452,7 +452,7 @@ pub(crate) fn list(env: &Env<'_>, format: Format) -> Result<(), Failed> {
 }
 
 /// A lowercase version 4 UUID, which Canoa never gives to two accounts.
-fn new_id() -> Result<String, Failed> {
+pub(crate) fn new_id() -> Result<String, Failed> {
     let mut bytes = [0_u8; 16];
     getrandom::fill(&mut bytes).map_err(|error| Failed::run(format!("no randomness: {error}")))?;
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
@@ -754,7 +754,7 @@ pub(crate) fn sign_in_relayed(
 }
 
 /// A TOML basic string.
-fn quote(text: &str) -> String {
+pub(crate) fn quote(text: &str) -> String {
     let mut out = String::from("\"");
     for c in text.chars() {
         match c {
@@ -772,7 +772,7 @@ fn quote(text: &str) -> String {
 }
 
 /// A JSON value as inline TOML; `None` for one TOML cannot hold.
-fn toml_of(value: &serde_json::Value) -> Option<String> {
+pub(crate) fn toml_of(value: &serde_json::Value) -> Option<String> {
     Some(match value {
         serde_json::Value::Null => return None,
         serde_json::Value::Bool(b) => b.to_string(),
@@ -796,7 +796,7 @@ fn toml_of(value: &serde_json::Value) -> Option<String> {
     })
 }
 
-fn read_cfg(path: &Path) -> Result<String, Failed> {
+pub(crate) fn read_cfg(path: &Path) -> Result<String, Failed> {
     match fs::read_to_string(path) {
         Ok(text) => Ok(text),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
@@ -804,14 +804,20 @@ fn read_cfg(path: &Path) -> Result<String, Failed> {
     }
 }
 
-/// Writes `text` over `path`, beside it first, and only if it is a canoa.cfg this host reads.
-fn write_cfg(path: &Path, text: &str) -> Result<(), Failed> {
+/// Whether `text` is a canoa.cfg this host reads, as the file at `path` would be.
+pub(crate) fn check_cfg(path: &Path, text: &str) -> Result<(), Failed> {
     Config::from_str_named(
         text,
         file_name(path),
         path.parent().unwrap_or_else(|| Path::new("")),
     )
-    .map_err(|error| Failed::run(format!("the edited canoa.cfg would not be read: {error}")))?;
+    .map(|_| ())
+    .map_err(|error| Failed::run(format!("the edited canoa.cfg would not be read: {error}")))
+}
+
+/// Writes `text` over `path`, beside it first, and only if it is a canoa.cfg this host reads.
+pub(crate) fn write_cfg(path: &Path, text: &str) -> Result<(), Failed> {
+    check_cfg(path, text)?;
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)
             .map_err(|error| Failed::run(format!("{}: {error}", dir.display())))?;
@@ -842,14 +848,14 @@ fn block_of(name: &str, account: &AccountConfig) -> String {
     block
 }
 
-fn file_name(path: &Path) -> &str {
+pub(crate) fn file_name(path: &Path) -> &str {
     path.file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("canoa.cfg")
 }
 
 /// The registered name of the format `text` is in, by its file's name or first line.
-fn format_of(path: &Path, text: &str) -> Result<String, Failed> {
+pub(crate) fn format_of(path: &Path, text: &str) -> Result<String, Failed> {
     let options = anycfg::Options::new().name(file_name(path));
     crate::format::formats()
         .detect(text.as_bytes(), options)
@@ -858,7 +864,7 @@ fn format_of(path: &Path, text: &str) -> Result<String, Failed> {
 }
 
 /// A JSON value as TOML's model, which is what canoa.cfg is read as; `None` for one it cannot hold.
-fn toml_value(value: &serde_json::Value) -> Option<toml::Value> {
+pub(crate) fn toml_value(value: &serde_json::Value) -> Option<toml::Value> {
     Some(match value {
         serde_json::Value::Null => return None,
         serde_json::Value::Bool(b) => toml::Value::Boolean(*b),
@@ -879,7 +885,7 @@ fn toml_value(value: &serde_json::Value) -> Option<toml::Value> {
 }
 
 /// A file in YAML or JSON, edited as a document and written back in its own format: its comments and layout are not kept.
-fn edit_document(
+pub(crate) fn edit_document(
     path: &Path,
     text: &str,
     format: &str,
@@ -906,48 +912,71 @@ fn edit_document(
 }
 
 fn append_account(path: &Path, name: &str, account: &AccountConfig) -> Result<(), Failed> {
-    let _one = config_writes();
-    let mut text = read_cfg(path)?;
-    let format = format_of(path, &text)?;
-    if format != "toml" {
-        let edited = edit_document(path, &text, &format, |table| {
-            let mut block = toml::Table::new();
-            block.insert(
-                "harness".into(),
-                toml::Value::String(account.harness.clone()),
-            );
-            block.insert("kind".into(), toml::Value::String(account.kind.clone()));
-            block.insert("id".into(), toml::Value::String(account.id.clone()));
-            if let Some(settings) = &account.settings
-                && let Some(value) =
-                    toml_value(&serde_json::Value::Object(settings.as_map().clone()))
-            {
-                block.insert("settings".into(), value);
-            }
-            let host = table
-                .entry("host")
-                .or_insert_with(|| toml::Value::Table(toml::Table::new()));
-            let accounts = host
-                .as_table_mut()
-                .ok_or_else(|| Failed::run("[host] is not a table".to_owned()))?
-                .entry("accounts")
-                .or_insert_with(|| toml::Value::Table(toml::Table::new()));
-            accounts
-                .as_table_mut()
-                .ok_or_else(|| Failed::run("[host.accounts] is not a table".to_owned()))?
-                .insert(name.to_owned(), toml::Value::Table(block));
-            Ok(())
-        })?;
-        return write_cfg(path, &edited);
+    let mut block = toml::Table::new();
+    block.insert(
+        "harness".into(),
+        toml::Value::String(account.harness.clone()),
+    );
+    block.insert("kind".into(), toml::Value::String(account.kind.clone()));
+    block.insert("id".into(), toml::Value::String(account.id.clone()));
+    if let Some(settings) = &account.settings
+        && let Some(value) = toml_value(&serde_json::Value::Object(settings.as_map().clone()))
+    {
+        block.insert("settings".into(), value);
     }
+    append_table(
+        path,
+        &["host", "accounts"],
+        name,
+        (&block_of(name, account), block),
+    )
+}
+
+/// The text of canoa.cfg with the table `[section.NAME]` added, in the file's own format: `block` is the table as TOML text,
+/// for a file in TOML, which keeps its comments and layout, and as a table, for one in another format.
+pub(crate) fn with_table(
+    path: &Path,
+    text: &str,
+    section: &[&str],
+    name: &str,
+    (as_text, as_table): (&str, toml::Table),
+) -> Result<String, Failed> {
+    let format = format_of(path, text)?;
+    if format != "toml" {
+        return edit_document(path, text, &format, |table| {
+            let mut at = &mut *table;
+            for key in section {
+                at = at
+                    .entry(*key)
+                    .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                    .as_table_mut()
+                    .ok_or_else(|| Failed::run(format!("{key} is not a table")))?;
+            }
+            at.insert(name.to_owned(), toml::Value::Table(as_table));
+            Ok(())
+        });
+    }
+    let mut text = text.to_owned();
     if !text.is_empty() && !text.ends_with('\n') {
         text.push('\n');
     }
     if !text.is_empty() {
         text.push('\n');
     }
-    text.push_str(&block_of(name, account));
-    write_cfg(path, &text)
+    text.push_str(as_text);
+    Ok(text)
+}
+
+/// Adds the table `[section.NAME]` to the file at `path`; see [`with_table`].
+pub(crate) fn append_table(
+    path: &Path,
+    section: &[&str],
+    name: &str,
+    block: (&str, toml::Table),
+) -> Result<(), Failed> {
+    let _one = config_writes();
+    let text = read_cfg(path)?;
+    write_cfg(path, &with_table(path, &text, section, name, block)?)
 }
 
 /// Held while canoa.cfg is read, changed and written back, so that an offer, an account added or removed and a setting saved never
@@ -1086,31 +1115,42 @@ pub(crate) fn set_offered(
 
 /// Takes the block `add` wrote for `name` out of the file. An account written some other way is for its writer to remove.
 fn remove_account(path: &Path, name: &str) -> Result<(), Failed> {
+    remove_table(path, &["host", "accounts"], name, "canoa accounts add")
+}
+
+/// Takes the table `[section.NAME]`, as `writer` wrote it, out of the file at `path`.
+pub(crate) fn remove_table(
+    path: &Path,
+    section: &[&str],
+    name: &str,
+    writer: &str,
+) -> Result<(), Failed> {
     let _one = config_writes();
     let text = read_cfg(path)?;
     let format = format_of(path, &text)?;
+    let header = format!("[{}.{name}]", section.join("."));
+    let by_hand = || {
+        Failed::usage(format!(
+            "canoa.cfg does not hold {header} as `{writer}` writes it: remove it from the file by hand"
+        ))
+    };
     if format != "toml" {
         let edited = edit_document(path, &text, &format, |table| {
-            let removed = table
-                .get_mut("host")
-                .and_then(toml::Value::as_table_mut)
-                .and_then(|host| host.get_mut("accounts"))
-                .and_then(toml::Value::as_table_mut)
-                .and_then(|accounts| accounts.remove(name));
-            removed.map(|_| ()).ok_or_else(|| {
-                Failed::usage(format!(
-                    "canoa.cfg does not hold [host.accounts.{name}] as `canoa accounts add` writes it: remove the account from it by hand"
-                ))
-            })
+            let mut at = Some(&mut *table);
+            for key in section {
+                at = at
+                    .and_then(|table| table.get_mut(*key))
+                    .and_then(toml::Value::as_table_mut);
+            }
+            at.and_then(|accounts| accounts.remove(name))
+                .map(|_| ())
+                .ok_or_else(by_hand)
         })?;
         return write_cfg(path, &edited);
     }
-    let header = format!("[host.accounts.{name}]");
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let Some(start) = lines.iter().position(|line| line.trim() == header) else {
-        return Err(Failed::usage(format!(
-            "canoa.cfg does not hold {header} as `canoa accounts add` writes it: remove the account from it by hand"
-        )));
+        return Err(by_hand());
     };
     let end = lines[start + 1..]
         .iter()

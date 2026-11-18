@@ -656,7 +656,8 @@ pub enum MailAuth {
     Windows,
 }
 
-/// One `[host.mail.accounts.NAME]`. It holds no password: `password_env` names the variable that does.
+/// One `[host.mail.accounts.NAME]`. It holds no password: `password_env` names the variable that does, and `id` names the entry
+/// of the host's account store that does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MailAccount {
@@ -674,8 +675,10 @@ pub struct MailAccount {
     pub auth: MailAuth,
     /// The account's user name for Basic (`ews`).
     pub user: Option<String>,
-    /// The variable that holds the password for Basic (`ews`).
+    /// The variable that holds the password for Basic (`ews`); it is used before a stored password.
     pub password_env: Option<String>,
+    /// The id the password for Basic rests under in the host's account store, which `canoa mail add` writes (`ews`).
+    pub id: Option<String>,
     /// The Outlook profile to log on to; the one Outlook is running with otherwise (`outlook`).
     pub profile: Option<String>,
     /// The program and arguments that run the helper, instead of Windows PowerShell with the helper script (`outlook`,
@@ -1756,6 +1759,7 @@ struct RawMailAccount {
     auth: Option<String>,
     user: Option<String>,
     password_env: Option<String>,
+    id: Option<String>,
     profile: Option<String>,
     command: Option<Vec<String>>,
     client_id: Option<String>,
@@ -1857,9 +1861,10 @@ impl RawMail {
                         || raw.auth.is_some()
                         || raw.user.is_some()
                         || raw.password_env.is_some()
+                        || raw.id.is_some()
                     {
                         return Err(invalid(
-                            "outlook signs in as Outlook does: it takes profile and command, not email, server, autodiscover, auth, user or password_env",
+                            "outlook signs in as Outlook does: it takes profile and command, not email, server, autodiscover, auth, user, password_env or id",
                         ));
                     }
                     if raw
@@ -1899,17 +1904,19 @@ impl RawMail {
                     match auth {
                         MailAuth::Basic => {
                             if raw.user.as_deref().is_none_or(str::is_empty)
-                                || raw.password_env.as_deref().is_none_or(str::is_empty)
+                                || (raw.password_env.as_deref().is_none_or(str::is_empty)
+                                    && raw.id.as_deref().is_none_or(str::is_empty))
                             {
                                 return Err(invalid(
-                                    "basic needs a user and the password_env that names the variable holding the password",
+                                    "basic needs a user and a password: `canoa mail add` stores one under an id, or password_env names the variable holding it",
                                 ));
                             }
                         }
                         MailAuth::Windows => {
-                            if raw.user.is_some() || raw.password_env.is_some() {
+                            if raw.user.is_some() || raw.password_env.is_some() || raw.id.is_some()
+                            {
                                 return Err(invalid(
-                                    "windows signs in as you: it takes no user or password_env",
+                                    "windows signs in as you: it takes no user, password_env or id",
                                 ));
                             }
                         }
@@ -1927,6 +1934,7 @@ impl RawMail {
                     auth,
                     user: raw.user,
                     password_env: raw.password_env,
+                    id: raw.id,
                     profile: raw.profile,
                     command: raw.command,
                     client_id: raw.client_id,
