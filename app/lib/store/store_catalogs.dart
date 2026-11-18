@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 
+import '../config/canoa_config.dart';
 import '../loadout/loadout_controller.dart';
 import 'overlay_page.dart' show oneLine;
 import 'store.dart';
@@ -22,6 +23,7 @@ class StoreSettingsPage extends StatelessWidget {
       builder: (context, _) {
         final c = controller;
         final text = Theme.of(context).textTheme;
+        final address = c.skillsSearch;
         return ListView(key: const Key('store-settings-page'), padding: const EdgeInsets.all(16), children: [
           Text('Catalogs ${c.config.catalogs.length}', style: text.titleMedium),
           const SizedBox(height: 4),
@@ -36,6 +38,21 @@ class StoreSettingsPage extends StatelessWidget {
           for (final catalog in c.loaded) CatalogTile(controller: c, catalog: catalog),
           const SizedBox(height: 8),
           CatalogAddForm(controller: c),
+          const SizedBox(height: 24),
+          Text('Skills', style: text.titleMedium),
+          SwitchListTile(
+            key: const Key('store-skills-search'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Search skills.sh'),
+            subtitle: Text(
+              "Off until you turn it on. skills.sh is a third party's directory of skills, and its search is not documented. While this is on, "
+              'Skills, Discover can send it the words you search for, and nothing else. A result only says which repository holds a skill: '
+              'installing it reads that repository with git like any source, and asks first.'
+              '${address == null || address == CanoaConfig.defaultSkillsSearch ? '' : ' Asking $address, as canoa.cfg says.'}',
+            ),
+            value: c.skillsSearch != null,
+            onChanged: c.busy != null ? null : (on) => unawaited(c.setSkillsSearch(on)),
+          ),
           const SizedBox(height: 16),
           for (final nonDefault in c.config.store.nonDefaults) Text('[store] $nonDefault', style: text.bodySmall),
         ]);

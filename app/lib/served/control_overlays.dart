@@ -216,6 +216,17 @@ final class ControlOverlayManager implements OverlayManager {
   }
 
   @override
+  Future<List<SkillHit>> searchSkills(String query) async {
+    final answer = await _call('skill/search', {'query': query}, const Duration(seconds: 40));
+    final listed = answer['skills'];
+    return [
+      if (listed is List<Object?>)
+        for (final each in listed)
+          ?SkillHit.fromJson(each),
+    ];
+  }
+
+  @override
   Future<void> saveSkill(SkillCopy copy) async {
     await _call('skill/save', {
       ...copy.toJson(),

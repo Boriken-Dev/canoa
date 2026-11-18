@@ -143,11 +143,46 @@ abstract interface class OverlayManager {
   /// [OverlayException] for a transport that fails.
   Future<SkillScan> scanSkills(String repo, {String? ref, String path = '', bool own = false});
 
+  /// The skills a skills directory (skills.sh) lists for [query], most installed first, through the host, which asks the directory
+  /// only while `[store] skills_search` is on. A hit names a repository and a skill in it: the directory sends no files, and installing
+  /// one reads the repository itself. Throws [OverlayException] when the search is off or the directory cannot be reached.
+  Future<List<SkillHit>> searchSkills(String query);
+
   /// Writes [copy] (its files, then its record) as the skill's copy, replacing any other of that name.
   Future<void> saveSkill(SkillCopy copy);
 
   /// Removes the skill [name]'s files and record.
   Future<void> removeSkill(String name);
+}
+
+/// One result of a skills directory's search: where a skill lives, and how many installs the directory counted for it.
+final class SkillHit {
+  const SkillHit({required this.source, required this.skillId, required this.name, required this.installs});
+
+  /// The GitHub repository, `owner/repo`.
+  final String source;
+
+  /// The skill's name in it, which is the name of its folder.
+  final String skillId;
+  final String name;
+  final int installs;
+
+  /// `owner/repo/skill`, how the directory writes it.
+  String get id => '$source/$skillId';
+
+  static final _repository = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$');
+  static final _skill = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$');
+
+  /// A hit as the host lists it, or null when it is not a skill of a GitHub `owner/repo`: a directory is a third party, so a
+  /// result that names a folder, a URL or anything else than a repository and a plain skill name is not followed.
+  static SkillHit? fromJson(Object? json) {
+    if (json is! Map<Object?, Object?>) return null;
+    final source = json['source'], skill = json['skillId'];
+    if (source is! String || skill is! String || !_repository.hasMatch(source) || !_skill.hasMatch(skill)) return null;
+    final name = json['name'];
+    final installs = json['installs'];
+    return SkillHit(source: source, skillId: skill, name: name is String && name.isNotEmpty ? name : skill, installs: installs is int && installs > 0 ? installs : 0);
+  }
 }
 
 /// One skill a source holds, as its `SKILL.md` says.
@@ -241,6 +276,9 @@ class NoOverlays implements OverlayManager {
 
   @override
   Future<SkillScan> scanSkills(String repo, {String? ref, String path = '', bool own = false}) async => throw _none;
+
+  @override
+  Future<List<SkillHit>> searchSkills(String query) async => throw _none;
 
   @override
   Future<void> saveSkill(SkillCopy copy) async => throw _none;

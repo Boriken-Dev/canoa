@@ -90,6 +90,9 @@ final class FakeOverlays implements OverlayManager {
   Future<SkillScan> scanSkills(String repo, {String? ref, String path = '', bool own = false}) => throw UnimplementedError();
 
   @override
+  Future<List<SkillHit>> searchSkills(String query) => throw UnimplementedError();
+
+  @override
   Future<void> saveSkill(SkillCopy copy) => throw UnimplementedError();
 
   @override

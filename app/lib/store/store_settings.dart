@@ -65,11 +65,11 @@ final class StoreSettings {
   ];
 
   /// `[store]` as canoa.cfg has it. Throws [FormatException] for an unknown key or a value that is not a whole number,
-  /// 0 or more. `registries`, `mcp` and `skill_sources` are the store's other settings, read by `CanoaConfig.storeRegistries`, `CanoaConfig.storeMcp`
-  /// and `CanoaConfig.skillSources`.
+  /// 0 or more. `registries`, `mcp`, `skill_sources` and `skills_search` are the store's other settings, read by `CanoaConfig.storeRegistries`,
+  /// `CanoaConfig.storeMcp`, `CanoaConfig.skillSources` and `CanoaConfig.skillsSearch`.
   static StoreSettings parse(Map<dynamic, dynamic> table) {
     for (final key in table.keys) {
-      if (!keys.contains(key) && key != 'registries' && key != 'mcp' && key != 'skill_sources' && key != 'extension_catalogs') throw FormatException('canoa.cfg: store: invalid key $key');
+      if (!keys.contains(key) && key != 'registries' && key != 'mcp' && key != 'skill_sources' && key != 'extension_catalogs' && key != 'skills_search') throw FormatException('canoa.cfg: store: invalid key $key');
     }
     int read(String key, int fallback) {
       final value = table[key] ?? fallback;

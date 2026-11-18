@@ -347,7 +347,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
   void _forgetGoneCatalogs(String id) {
     final view = viewOf(id);
     // A skill source the person removed is no longer the one Skills reads: it goes back to the catalogs.
-    if (view.source case final source? when !controller.skillSources.containsKey(source)) view.source = null;
+    if (view.source case final source? when !controller.skillSources.containsKey(source) && !(source == skillsSearchSource && controller.skillsSearch != null)) view.source = null;
     if (view.catalogs.isEmpty) return;
     final extension = _extension(id);
     final present = extension != null

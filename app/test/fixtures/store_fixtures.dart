@@ -301,6 +301,16 @@ final class MemoryOverlays implements OverlayManager {
     return scans[repo] ?? (throw const OverlayException('The source has no branch or tag of that name'));
   }
 
+  /// What the directory lists for each query, and every query asked. A query with no entry is an answer the host refuses.
+  final hits = <String, List<SkillHit>>{};
+  final searched = <String>[];
+
+  @override
+  Future<List<SkillHit>> searchSkills(String query) async {
+    searched.add(query);
+    return hits[query] ?? (throw const OverlayException('Skill search is off: turn it on in Store settings'));
+  }
+
   /// Skills (lower-case names) whose copy cannot be written.
   final failSave = <String>{};
 

@@ -979,6 +979,44 @@ final class CanoaConfig {
     return _withSkillSourceTable(raw);
   }
 
+  /// `[store] skills_search`: the skills directory the Skills page searches, as the host asks it. Absent or `false` is off, which
+  /// it is until the person turns it on; `true` is [defaultSkillsSearch]; an address is another directory that answers the same.
+  /// Null when off.
+  String? get skillsSearch => _skillsSearch((tables['store'] as Map?)?['skills_search']);
+
+  /// The directory `skills_search = true` names.
+  static const defaultSkillsSearch = 'https://skills.sh';
+
+  static String? _skillsSearch(Object? raw) {
+    switch (raw) {
+      case null || false:
+        return null;
+      case true:
+        return defaultSkillsSearch;
+      case final String address:
+        final uri = Uri.tryParse(address);
+        final loopback = uri != null && (uri.host == 'localhost' || uri.host == '127.0.0.1' || uri.host == '[::1]' || uri.host == '::1');
+        if (uri == null ||
+            address.runes.any((rune) => rune <= 0x20 || rune == 0x7f || rune == 0x5c) ||
+            !(uri.scheme == 'https' || (uri.scheme == 'http' && loopback)) ||
+            uri.host.isEmpty ||
+            uri.userInfo.isNotEmpty ||
+            uri.hasQuery ||
+            uri.hasFragment) {
+          throw const FormatException('canoa.cfg: store.skills_search is true, false, or the address of a skills directory: https, or http to this computer, with no user information, query or fragment');
+        }
+        return address.replaceAll(RegExp(r'/+$'), '');
+      default:
+        throw const FormatException('canoa.cfg: store.skills_search is true, false, or the address of a skills directory');
+    }
+  }
+
+  /// This configuration with the skills search turned [on] (`true` in `[store]`) or off (the key removed).
+  CanoaConfig withSkillsSearch(bool on) {
+    final table = {...((tables['store'] as Map?) ?? const {}).cast<String, dynamic>()}..remove('skills_search');
+    return _withTable('store', {...table, if (on) 'skills_search': true});
+  }
+
   /// This configuration with [registries] as `[store] registries`, in the order given.
   CanoaConfig withStoreRegistries(List<String> registries) => _withStoreExtras(registries: registries);
 
@@ -1045,7 +1083,7 @@ final class CanoaConfig {
   Map<String, dynamic>? _storeExtrasTable() {
     final raw = tables['store'];
     if (raw is! Map) return null;
-    return {for (final key in const ['registries', 'mcp', 'skill_sources', 'extension_catalogs']) if (raw[key] != null) key: raw[key]};
+    return {for (final key in const ['registries', 'mcp', 'skill_sources', 'extension_catalogs', 'skills_search']) if (raw[key] != null) key: raw[key]};
   }
 
   /// `[agents.NAME.mcp]`: for each agent, by label, the MCP servers the person turned on (`true`) or off (`false`), and
@@ -1516,6 +1554,7 @@ final class CanoaConfig {
     _presets(data['profiles']);
     _storeExtras(data['store']);
     _skillSources((data['store'] as Map?)?['skill_sources']);
+    _skillsSearch((data['store'] as Map?)?['skills_search']);
     _extensionCatalogs((data['store'] as Map?)?['extension_catalogs']);
     _agentMcp(agentTables);
     _agentHooks(agentTables);

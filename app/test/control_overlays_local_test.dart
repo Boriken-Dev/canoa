@@ -124,4 +124,21 @@ void main() {
     await manager.fetchSkillFiles(aos.Source.parse('https://git.example/t.git@main#skills/review'), own: true);
     expect(host.params.last, {'repo': 'https://git.example/t.git', 'ref': 'main', 'path': 'skills/review', 'own': true});
   });
+
+  test('a search goes to the host as the words typed, and only a result naming a GitHub owner/repo is kept', () async {
+    final host = _Host((method, params) => {
+      'from': 'https://skills.sh',
+      'skills': [
+        {'id': 'anthropics/skills/pdf', 'source': 'anthropics/skills', 'skillId': 'pdf', 'name': 'pdf', 'installs': 231770},
+        {'id': 'x', 'source': 'https://evil.example/o/r', 'skillId': 'pdf', 'name': 'pdf', 'installs': 9},
+        {'id': 'y', 'source': '/etc', 'skillId': 'passwd', 'name': 'p', 'installs': 9},
+        'text',
+      ],
+    });
+    final manager = ControlOverlayManager(HostControl.dialing(() async => host));
+    final hits = await manager.searchSkills('pdf tools');
+    expect(host.asked.last, 'skill/search');
+    expect(host.params.last, {'query': 'pdf tools'});
+    expect([for (final hit in hits) (hit.id, hit.installs)], [('anthropics/skills/pdf', 231770)]);
+  });
 }

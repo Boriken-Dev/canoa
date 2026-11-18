@@ -12,7 +12,7 @@ import 'package:flutter/foundation.dart';
 import '../config/canoa_config.dart';
 import '../profile/overlay_layer.dart';
 import '../profile/profile.dart';
-import '../profile/overlays.dart' show FetchedTree, OverlayException, SkillScan;
+import '../profile/overlays.dart' show FetchedTree, OverlayException, ScannedSkill, SkillHit, SkillScan;
 import '../profile/profile_home.dart';
 import '../profile/profile_layers.dart';
 import '../profile/skill_copies.dart';
@@ -360,6 +360,87 @@ class LoadoutController extends ChangeNotifier {
     skillScans.remove(label);
     skillScanProblems.remove(label);
     notifyListeners();
+  }
+
+  /// The skills directory the Skills page searches, or null while the search is off, which it is until the person turns it on.
+  String? get skillsSearch => config.skillsSearch;
+
+  /// The last search's results, the text it was for, why it failed, and whether one is running; and the result being looked up.
+  List<SkillHit> skillHits = const [];
+  String? skillSearchedFor, skillSearchProblem, resolvingHit;
+  bool searchingSkills = false;
+
+  /// Turns the skills search on or off in canoa.cfg. Off forgets what was found.
+  Future<void> setSkillsSearch(bool on) async {
+    await apply(config.withSkillsSearch(on));
+    if (!on) {
+      skillHits = const [];
+      skillSearchedFor = null;
+      skillSearchProblem = null;
+    }
+    notifyListeners();
+  }
+
+  /// Asks the directory for the skills that match [text], through the host. Only what the person typed leaves this computer.
+  Future<void> searchSkills(String text) async {
+    final home = this.home;
+    final query = text.trim();
+    if (home == null || searchingSkills || skillsSearch == null) return;
+    skillSearchProblem = null;
+    if (query.runes.length < 2) {
+      skillSearchProblem = 'Type at least two characters to search';
+      notifyListeners();
+      return;
+    }
+    searchingSkills = true;
+    notifyListeners();
+    try {
+      skillHits = await home.overlays.searchSkills(query);
+      skillSearchedFor = query;
+    } on OverlayException catch (error) {
+      skillHits = const [];
+      skillSearchedFor = null;
+      skillSearchProblem = error.message;
+    } on Object catch (error) {
+      skillHits = const [];
+      skillSearchedFor = null;
+      skillSearchProblem = 'The search could not be made (${error.runtimeType})';
+    } finally {
+      searchingSkills = false;
+      notifyListeners();
+    }
+  }
+
+  /// Finds [hit] in its repository, the way any source is read: the repository is fetched with none of the person's git settings,
+  /// credentials or keys, and its `SKILL.md` files say which skill is meant. What the directory sent is only where to look. Null,
+  /// with [skillSearchProblem] saying why, when the repository cannot be read or holds no such skill.
+  Future<({SkillSource source, SkillScan scan, ScannedSkill skill})?> resolveSkillHit(SkillHit hit) async {
+    final home = this.home;
+    if (home == null || resolvingHit != null) return null;
+    resolvingHit = hit.id;
+    skillSearchProblem = null;
+    notifyListeners();
+    try {
+      final source = SkillSource.parse(hit.source);
+      final scan = await home.overlays.scanSkills(source.repo, own: false);
+      final wanted = hit.skillId.toLowerCase();
+      final skill = scan.skills.where((each) => each.name.toLowerCase() == wanted).firstOrNull ??
+          scan.skills.where((each) => each.path.split('/').last.toLowerCase() == wanted).firstOrNull;
+      if (skill == null) {
+        skillSearchProblem = '${hit.source} holds no skill called ${hit.skillId}: the directory lists it, but the repository has no SKILL.md for it';
+        return null;
+      }
+      return (source: source, scan: scan, skill: skill);
+    } on OverlayException catch (error) {
+      skillSearchProblem = error.message;
+      return null;
+    } on Object catch (error) {
+      skillSearchProblem = 'The repository could not be read (${error.runtimeType})';
+      return null;
+    } finally {
+      resolvingHit = null;
+      notifyListeners();
+    }
   }
 
   /// Fetches the skill [item] reviewed, as the person's own choice, and turns it on for new sessions.

@@ -4,7 +4,7 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 
 import '../loadout/loadout_controller.dart';
-import '../profile/overlays.dart' show ScannedSkill, SkillScan;
+import '../profile/overlays.dart' show ScannedSkill, SkillHit, SkillScan;
 import '../profile/profile.dart';
 import '../profile/profiles_panel.dart' show visible;
 import '../profile/skill_copies.dart';
@@ -38,6 +38,7 @@ class SkillsBody extends StatefulWidget {
 class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMixin {
   final spec = TextEditingController();
   final sourceText = TextEditingController();
+  final searchText = TextEditingController();
   String? sourceProblem;
 
   LoadoutController get c => widget.controller;
@@ -50,6 +51,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
   void dispose() {
     spec.dispose();
     sourceText.dispose();
+    searchText.dispose();
     super.dispose();
   }
 
@@ -155,6 +157,17 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
             tooltip: 'Read the skills in ${value.shown}',
             selected: chosen == key,
             onSelected: c.scanningSource != null ? null : (_) => unawaited(_choose(key)),
+          ),
+        if (c.skillsSearch case final address?)
+          ChoiceChip(
+            key: const Key('skills-from-search'),
+            label: Text('Search ${Uri.tryParse(address)?.host ?? address}'),
+            tooltip: 'Search the skills ${Uri.tryParse(address)?.host ?? address} lists',
+            selected: chosen == skillsSearchSource,
+            onSelected: (_) {
+              view.source = skillsSearchSource;
+              view.changed();
+            },
           ),
         if (chosen != null && sources.containsKey(chosen))
           TextButton(
@@ -306,8 +319,87 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     );
   }
 
+  /// The skills a directory lists for what the person types. The directory is a third party: what it returns is only which
+  /// repository holds a skill, and installing one reads the repository itself, as for a source, and asks first.
+  Widget _fromSearch(BuildContext context, List<Widget> head) {
+    final text = Theme.of(context).textTheme;
+    final host = Uri.tryParse(c.skillsSearch ?? '')?.host ?? 'the directory';
+    final problem = c.skillSearchProblem;
+    final searched = c.skillSearchedFor;
+    return CardList(
+      header: [
+        ...head,
+        _sourceRow(context),
+        Text(
+          'Only the words you search for are sent to $host, a third party. A result names a repository; nothing is installed until '
+          'you say yes to the skill, after Canoa has read the repository itself.',
+          key: const Key('skills-search-note'),
+          style: text.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(
+            child: TextField(
+              key: const Key('skills-search-query'),
+              controller: searchText,
+              decoration: InputDecoration(labelText: 'Search $host', hintText: 'pdf, web performance, ...'),
+              onSubmitted: (_) => unawaited(c.searchSkills(searchText.text)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.tonal(
+            key: const Key('skills-search-go'),
+            onPressed: c.searchingSkills ? null : () => unawaited(c.searchSkills(searchText.text)),
+            child: const Text('Search'),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        if (c.searchingSkills || c.resolvingHit != null) const LinearProgressIndicator(),
+        if (problem != null)
+          Text(visible(problem), key: const Key('skills-search-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        if (searched != null) ...[
+          Row(children: [
+            Text('Skills for "${oneLine(searched)}"', style: text.titleMedium),
+            const SizedBox(width: 8),
+            Chip(key: const Key('store-count'), label: Text('${c.skillHits.length}'), visualDensity: VisualDensity.compact),
+          ]),
+          if (c.skillHits.isEmpty) const Text('Nothing was found.', key: Key('skills-search-nothing')),
+        ] else if (problem == null)
+          const Text('Type what the skill is for, then Search.', key: Key('skills-search-unsearched')),
+      ],
+      cards: [for (final hit in c.skillHits) _hitTile(hit)],
+    );
+  }
+
+  Widget _hitTile(SkillHit hit) => StoreTile(
+    key: Key('store-search-skill-${hit.source}/${hit.skillId}'),
+    leading: const SizedBox.square(dimension: 48, child: Center(child: LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined))),
+    title: hit.name,
+    summary: hit.id,
+    by: '${_installs(hit.installs)} · ${hit.source}',
+    installed: c.skills.containsKey(skillKey(hit.skillId)),
+    installKey: Key('store-search-skill-install-${hit.source}/${hit.skillId}'),
+    onOpen: () => unawaited(_installHit(hit)),
+    onInstall: c.busy != null || c.resolvingHit != null ? null : () => unawaited(_installHit(hit)),
+  );
+
+  static String _installs(int installs) => installs == 1 ? '1 install' : '$installs installs';
+
+  /// Reads the hit's repository as any source is read, finds the skill in it, and reviews it for install.
+  Future<void> _installHit(SkillHit hit) async {
+    final found = await c.resolveSkillHit(hit);
+    if (found == null || !mounted) return;
+    if (found.skill.problem != null) {
+      c.skillSearchProblem = '${hit.id} cannot be installed: ${found.skill.problem}';
+      c.notifyListeners();
+      return;
+    }
+    await _reviewScanned(found.source, found.scan, found.skill, false);
+  }
+
   Widget _discover(BuildContext context, List<Widget> head) {
     final chosenSource = view.source;
+    if (chosenSource == skillsSearchSource && c.skillsSearch != null) return _fromSearch(context, head);
     if (chosenSource != null && c.skillSources.containsKey(chosenSource)) return _fromSource(context, head, chosenSource);
     final offered = c.skillsOffered();
     final inScope = [for (final item in offered) if (view.catalogs.isEmpty || view.catalogs.contains(item.$1)) item];
