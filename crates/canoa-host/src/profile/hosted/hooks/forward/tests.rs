@@ -140,10 +140,14 @@ fn a_secret_ends_with_its_session_and_with_the_connection() {
     assert_eq!(raw(addr_of(&path), line.as_bytes()), None);
     assert!(host.take().is_empty());
     let addr = addr_of(&path);
+    // Dropping the host joins its accepting thread, so its listener is closed once this returns. That the port refuses a
+    // connection is not asserted: the tests of this module run side by side, and one that binds a listener right after
+    // this one's closes can be given the same number. What is asserted is that nothing answers the secret at the address.
     drop(host);
-    assert!(
-        TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err(),
-        "the listener went with the connection"
+    assert_eq!(
+        raw(addr, line.as_bytes()),
+        None,
+        "nothing answers the secret once the connection is gone"
     );
 }
 
