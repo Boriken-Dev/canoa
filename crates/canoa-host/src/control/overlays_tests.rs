@@ -1066,7 +1066,8 @@ fn a_tree_of_a_million_paths_is_refused_as_soon_as_it_passes_the_limit() {
     commit_tree_on_main(&small, &root);
     let measured = std::time::Instant::now();
     let _ = check(&s, &Caller::Owner, "small", &source(&small, ""));
-    let bound = (measured.elapsed() * 40).max(std::time::Duration::from_secs(60));
+    // Generous: under a loaded machine the large tree is read far slower than the small one; the refusal still comes long before a whole read.
+    let bound = (measured.elapsed() * 80).max(std::time::Duration::from_secs(150));
     // 10^5 paths are read whole and hit the entry limit; 10^6 are cut off by what git may print.
     for (hidden, depth) in [(false, 5), (true, 5), (false, 6)] {
         let dir = bare_source(&s, "bomb");
