@@ -191,6 +191,12 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
               onPressed: widget.showType == null ? null : () => widget.showType!(runtimesTypeId),
               child: const Text('Install from the Store'),
             ),
+          if (unmet.any((line) => line.runs != null) && c.home != null)
+            TextButton(
+              key: Key('overlay-prepare-$name'),
+              onPressed: c.busy != null ? null : () => unawaited(_prepare(name, [for (final line in unmet) ?line.runs])),
+              child: const Text('Prepare…'),
+            ),
           if (source is GitOverlay && c.home != null)
             TextButton(
               key: Key('overlay-update-$name'),
@@ -220,6 +226,31 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
       final record = await home.overlays.apply(update);
       await c.apply(c.config.withOverlayPin(name, record.digest!));
     });
+  }
+
+  /// Asks before running what preparing [name] runs, listed as the host says it does.
+  Future<void> _prepare(String name, List<String> runs) async {
+    final yes = await showSelectableDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Prepare $name?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('This runs, outside any agent, on this computer:'),
+            const SizedBox(height: 8),
+            for (final (index, line) in runs.indexed) Text(oneLine(line), key: Key('overlay-prepare-line-$index')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(key: const Key('overlay-prepare-confirm'), onPressed: () => Navigator.pop(context, true), child: const Text('Run')),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    await c.prepareOverlay(name);
   }
 
   Future<void> _remove(String name, GitOverlay source) async {

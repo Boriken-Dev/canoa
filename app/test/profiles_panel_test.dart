@@ -45,6 +45,7 @@ String get teamDigest =>
 final class FakeOverlays implements OverlayManager {
   final records = <String, InstalledOverlay>{};
   final checked = <String>[];
+  final prepared = <String>[];
 
   @override
   InstalledOverlay? installed(String name) => records[name];
@@ -66,6 +67,9 @@ final class FakeOverlays implements OverlayManager {
 
   @override
   Future<void> remove(String name) async => records.remove(name);
+
+  @override
+  Future<void> prepare(String name) async => prepared.add(name);
 
   @override
   Future<Map<String, List<int>>> read(OverlayUpdate update) async =>
@@ -215,7 +219,8 @@ model = "claude-x"
     await tester.pumpAndSettle();
     expect(home.overlays.records, contains('team'));
     final report = tester.widget<Text>(find.byKey(const Key('overlay-report-team'))).data!;
-    expect(report, contains('setup: setup.sh: not applied by Canoa yet'));
+    expect(report, isNot(contains('setup: setup.sh')), reason: 'setup is prepared and reported by the host, not listed as not applied');
+    expect(home.overlays.prepared, ['team'], reason: 'the setup the dialog listed ran on the same yes');
     expect(report, contains(teamDigest));
     expect(report, isNot(contains('unpinned')), reason: 'applying pinned it');
   });

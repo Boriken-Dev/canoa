@@ -114,6 +114,11 @@ final class ControlOverlayManager implements OverlayManager {
   }
 
   @override
+  Future<void> prepare(String name) async {
+    await _call('overlay/prepare', {'name': name}, const Duration(minutes: 35));
+  }
+
+  @override
   Future<Map<String, List<int>>> read(OverlayUpdate update) async {
     final answer = await _call('overlay/read', {'token': _planOf(update)});
     return {

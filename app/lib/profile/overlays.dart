@@ -112,6 +112,11 @@ abstract interface class OverlayManager {
   /// Removes what [name] installed and fetched.
   Future<void> remove(String name);
 
+  /// Prepares the installed overlay [name]: installs its dependencies into an environment of its own and runs its setup, as the
+  /// specification's phases say, outside any agent's session. What it runs is what the plan listed. Throws [OverlayException]
+  /// with the step that failed and the end of what it printed.
+  Future<void> prepare(String name);
+
   /// The bytes of every file [update] lists, read from what [check] fetched, without installing anything: what a store
   /// shows an overlay would do is computed from these.
   Future<Map<String, List<int>>> read(OverlayUpdate update);
@@ -255,6 +260,9 @@ class NoOverlays implements OverlayManager {
 
   @override
   Future<void> remove(String name) async => throw _none;
+
+  @override
+  Future<void> prepare(String name) async => throw _none;
 
   @override
   Future<Map<String, List<int>>> read(OverlayUpdate update) async => throw _none;

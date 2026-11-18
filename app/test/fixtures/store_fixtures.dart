@@ -181,6 +181,10 @@ final class MemoryOverlays implements OverlayManager {
   final records = <String, InstalledOverlay>{};
   final installedFiles = <String, Map<String, List<int>>>{};
   final fetched = <String>[];
+
+  /// The overlays prepared, in order, and the failure the next preparation is to have.
+  final prepared = <String>[];
+  String? prepareFails;
   /// The catalog each check named, by the source it fetched (null: a source the person typed).
   final fetchedFrom = <String, String?>{};
   final _blobs = <String, List<int>>{};
@@ -242,6 +246,12 @@ final class MemoryOverlays implements OverlayManager {
   Future<void> remove(String name) async {
     records.remove(name);
     installedFiles.remove(name);
+  }
+
+  @override
+  Future<void> prepare(String name) async {
+    if (prepareFails case final why?) throw OverlayException(why);
+    prepared.add(name);
   }
 
   /// The trees [fetchCatalog] gave, by label.

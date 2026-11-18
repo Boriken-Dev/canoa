@@ -251,6 +251,14 @@ class LoadoutController extends ChangeNotifier {
   /// Whether new sessions start with the overlay [name].
   bool isDefaultOn(String name) => config.startingLoadout.overlays.contains(name);
 
+  /// Prepares the installed overlay [name] on the host: its dependencies and setup, as the plan the person said yes to listed.
+  Future<void> prepareOverlay(String name) async {
+    final home = this.home;
+    if (home == null) return;
+    await run('Preparing $name', () => home.overlays.prepare(name));
+    await refresh();
+  }
+
   Future<void> setDefault(String name, bool on) {
     return apply(config.withStartingOverlay(name, on));
   }

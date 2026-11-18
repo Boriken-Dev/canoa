@@ -7,7 +7,7 @@ import '../desktop/host_control.dart';
 
 /// One thing an overlay needs and whether this computer has it.
 final class NeedLine {
-  const NeedLine({required this.key, required this.met, required this.how, this.offer});
+  const NeedLine({required this.key, required this.met, required this.how, this.offer, this.runs});
 
   /// `runtime.python`, `runtime.commands: git`, `dependencies: lib/python/requirements.txt`, ...
   final String key;
@@ -20,6 +20,9 @@ final class NeedLine {
 
   /// The Store runtime (a provider id such as `python_store`) that installs it, when it is missing and one does.
   final String? offer;
+
+  /// For a dependency or a setup that preparing the overlay makes true: what preparing runs for it.
+  final String? runs;
 
   @override
   String toString() => '$key: $how';
@@ -43,6 +46,7 @@ OverlayNeeds controlOverlayNeeds(HostControl control) => (overlay) async {
             met: item['state'] == 'applied',
             how: item['how']! as String,
             offer: item['offer'] is String ? item['offer']! as String : null,
+            runs: item['runs'] is String ? item['runs']! as String : null,
           ),
     ];
   } on Object {

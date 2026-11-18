@@ -358,8 +358,9 @@ void main() {
       expect(shown, isNot(contains('offline')));
       expect(shown, contains('REVIEW_MODE'));
       expect(shown, contains('tracker'));
-      expect(shown, contains('setup: setup.sh: not applied by Canoa yet'));
-      expect(shown, contains('setup setup.sh: says it needs the network'));
+      expect(shown, isNot(contains('not applied by Canoa yet: setup')));
+      expect(shown, contains('Installing it also runs, outside any agent'));
+      expect(shown, contains('setup: setup.sh under sh (up to 300 s; says it needs the network), as install, then sync on each update'));
       expect(shown, contains('requires lint, which canoa.cfg does not name'));
       expect(find.byKey(const Key('store-pin-ok')), findsOneWidget);
       expect(overlays.records, isEmpty, reason: 'fetching installs nothing');

@@ -195,6 +195,74 @@ void main() {
     expect(find.descendant(of: card, matching: find.text('Install from the Store')), findsNothing);
   });
 
+  testWidgets('an overlay that has dependencies and a setup lists what will run, and is prepared on the yes that installs it', (tester) async {
+    overlays.put(teamRepo, {
+      'overlay.cfg': reviewCfg,
+      'lib/python/requirements.txt': 'requests==2.0\n',
+      'setup.py': 'pass\n',
+    });
+    await open(tester);
+    await tapKey(tester, 'overlays-discover');
+    await tapKey(tester, 'store-entry-main-review');
+    await tapKey(tester, 'store-fetch');
+    expect(find.byKey(const Key('store-prepares')), findsOneWidget);
+    expect(find.textContaining('dependencies: lib/python/requirements.txt (pip install, not pinned'), findsOneWidget);
+    expect(find.textContaining('setup: setup.py under python (up to 300 s; says it needs the network)'), findsOneWidget);
+    expect(overlays.prepared, isEmpty, reason: 'listing what runs runs nothing');
+    await tapKey(tester, 'store-install');
+    expect(overlays.records.keys, ['review']);
+    expect(overlays.prepared, ['review']);
+    expect(find.byKey(const Key('store-problem')), findsNothing);
+  });
+
+  testWidgets('an overlay with nothing to run is not prepared, and one whose preparation fails stays installed and says so', (tester) async {
+    await open(tester);
+    await installReview(tester);
+    expect(overlays.prepared, isEmpty, reason: 'nothing to prepare, so nothing was asked of the host');
+
+    overlays.put(teamRepo, {
+      'overlay.cfg': reviewCfg,
+      'lib/python/requirements.txt': 'requests==2.0\n',
+    });
+    overlays.prepareFails = 'dependencies (python) failed: it ended with exit code: 1:\nno matching distribution';
+    await tapKey(tester, 'overlays-discover');
+    await tapKey(tester, 'store-entry-main-review');
+    await tapKey(tester, 'store-fetch');
+    await tapKey(tester, 'store-install');
+    await tapKey(tester, 'store-move-pin');
+    expect(overlays.records.keys, ['review'], reason: 'the files are installed whatever the preparation did');
+    expect(saved.last.overlays.keys, ['review']);
+    expect(find.byKey(const Key('store-problem')), findsOneWidget);
+    expect(find.textContaining('Installed, but preparing it failed: dependencies (python) failed'), findsOneWidget);
+  });
+
+  testWidgets('what a card says is not prepared is run only after the person is shown it and says yes', (tester) async {
+    await open(tester, overlayNeeds: (name) async => const [
+      NeedLine(
+        key: 'dependencies: lib/python/requirements.txt',
+        met: false,
+        how: 'not done for this version: install or sync the overlay in Canoa',
+        runs: 'dependencies: lib/python/requirements.txt (pip install, not pinned; fetches from the network)',
+      ),
+      NeedLine(key: 'setup: setup.py', met: false, how: 'not done for this version', runs: 'setup: setup.py under python (up to 300 s)'),
+    ]);
+    await installReview(tester);
+    await tapKey(tester, 'overlays-installed');
+    final card = find.byKey(const Key('overlay-installed-review'));
+    expect(find.descendant(of: card, matching: find.textContaining('Needs dependencies: lib/python/requirements.txt')), findsOneWidget);
+    await tapKey(tester, 'overlay-prepare-review');
+    expect(find.byKey(const Key('overlay-prepare-line-0')), findsOneWidget);
+    expect(find.byKey(const Key('overlay-prepare-line-1')), findsOneWidget);
+    expect(overlays.prepared, isEmpty, reason: 'the list is shown first');
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(overlays.prepared, isEmpty);
+    await tapKey(tester, 'overlay-prepare-review');
+    await tester.tap(find.byKey(const Key('overlay-prepare-confirm')));
+    await tester.pumpAndSettle();
+    expect(overlays.prepared, ['review']);
+  });
+
   testWidgets('removing what the store installed takes its entry and its default with it', (tester) async {
     await open(tester);
     await installReview(tester);

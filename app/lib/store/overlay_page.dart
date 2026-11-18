@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
 import '../profile/overlay_layer.dart';
+import '../profile/overlays.dart' show OverlayException;
 import '../profile/profile.dart';
 import '../profile/profile_home.dart';
 import '../profile/skill_copies.dart';
@@ -141,11 +142,21 @@ class OverlayPageState extends State<OverlayPage> {
         catalog: widget.listed.label, movePin: movePin, report: report);
     if (mounted) setState(() => skillReport = report);
     final saved = await widget.onSave(changed);
+    final shown = preview;
     if (saved != null && mounted) {
       setState(() {
         config = saved;
         preview = null;
       });
+    }
+    // The dependencies and setup the page listed run now, on the yes that installed the files. The overlay stays installed when
+    // they fail, and its report says what was not done.
+    if (saved != null && shown != null && shown.prepares.isNotEmpty) {
+      try {
+        await widget.home!.overlays.prepare(shown.name);
+      } on OverlayException catch (error) {
+        if (mounted) setState(() => problem = 'Installed, but preparing it failed: ${error.message}');
+      }
     }
   });
 
@@ -417,8 +428,11 @@ class OverlayPageState extends State<OverlayPage> {
         ],
         const SizedBox(height: 8),
         Text('What it would do', style: text.titleMedium),
-        const Text('From its own overlay.cfg and files, as Settings, Profiles would apply it. Nothing of it has run, '
-            'and Canoa runs no setup, env script, dependency install or command of an overlay.'),
+        const Text('From its own overlay.cfg and files, as Settings, Profiles would apply it. Nothing of it has run.'),
+        if (found.prepares.isNotEmpty) ...[
+          Text('Installing it also runs, outside any agent, with the yes you give here:', key: const Key('store-prepares'), style: text.bodyMedium),
+          for (final line in found.prepares) Text(oneLine(line), style: text.bodySmall),
+        ],
         if (found.refusal case final why?)
           Text(visible('Canoa would leave it out: $why'), key: const Key('store-would-refuse'), style: error)
         else if (layer != null) ...[
@@ -430,10 +444,12 @@ class OverlayPageState extends State<OverlayPage> {
             ], report.nonDefaults)),
         ],
         for (final id in found.harnesses) Text(oneLine('harness.$id: hints for $id agents only'), style: text.bodySmall),
-        for (final (path, os, network) in found.setup)
-          Text(oneLine('setup $path${os == null ? '' : ' on ${os.join(', ')}'}: '
-              '${network ? 'says it needs the network' : 'declares no network'}; Canoa does not run it'),
-              style: text.bodySmall),
+        // What a manifest that cannot be applied declares, as written; an applicable one's setup is in the lines above.
+        if (found.prepares.isEmpty)
+          for (final (path, os, network) in found.setup)
+            Text(oneLine('setup $path${os == null ? '' : ' on ${os.join(', ')}'}: '
+                '${network ? 'says it needs the network' : 'declares no network'}'),
+                style: text.bodySmall),
         for (final name in found.requires)
           Text(oneLine(named.contains(aos.normalizeName(name))
               ? 'requires $name, which canoa.cfg names'

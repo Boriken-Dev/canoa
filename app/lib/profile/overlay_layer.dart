@@ -321,24 +321,15 @@ Layer overlayLayer({
   }
 
   bool on(String key) => !(manifest['defaults'] is Map && (manifest['defaults']! as Map)[key] == false);
-  for (final (field, stem) in const [('env_scripts', 'env'), ('setup', 'setup')]) {
-    if (on(field)) {
-      for (final extension in _defaultScripts) {
-        if (files.contains('$stem$extension')) notApplied.add('$field: $stem$extension');
-      }
-    }
-    for (final entry in (manifest[field] is List ? manifest[field]! as List : const [])) {
-      final line = '$field: ${entry is Map ? entry['path'] ?? '' : ''}';
-      if (!notApplied.contains(line)) notApplied.add(line);
+  // Setup, dependencies and the commands `scripts` expose are the host's to prepare and report when a session starts.
+  if (on('env_scripts')) {
+    for (final extension in _defaultScripts) {
+      if (files.contains('env$extension')) notApplied.add('env_scripts: env$extension');
     }
   }
-  if (on('deps')) {
-    for (final path in const ['lib/python/requirements.txt', 'lib/node/package.json']) {
-      if (files.contains(path)) notApplied.add('dependencies: $path');
-    }
-  }
-  for (final MapEntry(:key, :value) in sortedEntries(manifest['scripts'])) {
-    if (value != false) notApplied.add('scripts.$key');
+  for (final entry in (manifest['env_scripts'] is List ? manifest['env_scripts']! as List : const [])) {
+    final line = 'env_scripts: ${entry is Map ? entry['path'] ?? '' : ''}';
+    if (!notApplied.contains(line)) notApplied.add(line);
   }
 
   final about = <String, String>{};

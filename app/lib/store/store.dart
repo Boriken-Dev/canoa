@@ -17,6 +17,7 @@ import '../profile/overlays.dart';
 import '../profile/profile.dart';
 import '../profile/profile_home.dart';
 import '../profile/skill_copies.dart';
+import 'prepare_lines.dart';
 import 'skills.dart';
 
 /// Why the store will not do something, said to the person. Never quotes a file's content.
@@ -318,7 +319,10 @@ EntryState entryState(CanoaConfig config, String name, GitOverlay source, {Overl
 /// An overlay fetched, not installed, and what it would do, all from its own manifest and files.
 final class OverlayPreview {
   const OverlayPreview({required this.update, required this.manifest, required this.about, required this.ignored,
-      this.icon, this.iconRefused, this.layer, this.report, this.refusal, this.pinRefusal, this.skills});
+      this.icon, this.iconRefused, this.layer, this.report, this.refusal, this.pinRefusal, this.skills, this.prepares = const []});
+
+  /// What installing it would run besides copying its files: its dependencies installed and its setup, one line each.
+  final List<String> prepares;
 
   /// What installing it would change; the same object the install applies.
   final OverlayUpdate update;
@@ -435,7 +439,8 @@ Future<OverlayPreview> previewOverlay(OverlayManager overlays, String name, GitO
     refusal = '$error';
   }
   return OverlayPreview(update: update, manifest: manifest, about: about, ignored: ignored, icon: icon,
-      iconRefused: iconRefused, layer: layer, report: report, refusal: refusal, pinRefusal: pinRefusal, skills: skills);
+      iconRefused: iconRefused, layer: layer, report: report, refusal: refusal, pinRefusal: pinRefusal, skills: skills,
+      prepares: refusal == null ? prepareLines(manifest, files, os) : const []);
 }
 
 /// The pin canoa.cfg gives the overlay [name], when it names one, and the tree [preview] fetched has another digest:

@@ -5,6 +5,7 @@ import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
+import '../store/prepare_lines.dart';
 import '../store/skills.dart';
 import '../store/store_icon.dart';
 import '../store/store.dart' show installedManifests;
@@ -235,14 +236,29 @@ class ProfilesPanelState extends State<ProfilesPanel> {
     final update = await home.overlays.check(name, source);
     final skills = await _reviewSkills(home, name, update);
     if (!mounted) return;
+    final prepares = await _prepareLines(home, update);
+    if (!mounted) return;
     final apply = await showSelectableDialog<bool>(
-        context: context, builder: (_) => OverlayUpdateDialog(update: update, skills: skills));
+        context: context, builder: (_) => OverlayUpdateDialog(update: update, skills: skills, prepares: prepares));
     if (apply != true) return;
     final record = await home.overlays.apply(update);
     if (skills != null && !skills.isEmpty) await installSkills(home.overlays, skills);
     final pinned = await widget.onPin?.call(name, record.digest!);
     if (pinned != null && mounted) setState(() => config = pinned);
+    // What the dialog listed runs on the same yes, once the files are in place and pinned.
+    if (prepares.isNotEmpty) await home.overlays.prepare(name);
   });
+
+  /// What applying [update] also runs, from the manifest just fetched: none when it cannot be read.
+  Future<List<String>> _prepareLines(ProfileHome home, OverlayUpdate update) async {
+    try {
+      final files = await home.overlays.read(update);
+      final read = treeOfFiles(files);
+      return prepareLines(aos.readOverlay(read.tree, aos.defaultSettings).manifest, files, home.os);
+    } on aos.AosError {
+      return const [];
+    }
+  }
 
   /// What syncing [name] would do with the skills it names from elsewhere, from the manifest just fetched. No catalog is
   /// read here, so a name resolved through one before stays as it was resolved and a new one is reported unresolved.
@@ -433,8 +449,11 @@ String visible(String text) => text.replaceAllMapped(
 
 /// What installing or syncing an overlay changes, shown before anything is: the commits and every file.
 class OverlayUpdateDialog extends StatelessWidget {
-  const OverlayUpdateDialog({super.key, required this.update, this.skills});
+  const OverlayUpdateDialog({super.key, required this.update, this.skills, this.prepares = const []});
   final OverlayUpdate update;
+
+  /// What applying also runs, outside any agent: the dependencies installed and the setup, one line each.
+  final List<String> prepares;
 
   /// What applying does with the skills the overlay names from elsewhere; the one yes covers them.
   final SkillReview? skills;
@@ -471,8 +490,13 @@ class OverlayUpdateDialog extends StatelessWidget {
             SelectableText(visible(manifest), style: const TextStyle(fontFamily: 'monospace')),
           ] else
             const Text('It has no OVERLAY.md or overlay.cfg: its conventional files (skills, CONTEXT.md, env, rules) apply.'),
-          const Text('Nothing from it runs now, and Canoa runs no setup or env script of it. What it sets reaches agents '
-              'started after this; Settings, Profiles shows what Canoa does not apply.'),
+          if (prepares.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Text('Applying also runs, outside any agent, on this computer:', key: Key('overlay-prepares')),
+            for (final line in prepares) Text(visible(line)),
+          ],
+          const Text('Nothing else from it runs now. What it sets reaches agents started after this; Settings, Profiles shows '
+              'what Canoa does not apply.'),
         ],
       ))),
       actions: [
