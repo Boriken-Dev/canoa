@@ -125,26 +125,26 @@ const opencodeCatalog = {
         'properties': {
           'variable': {
             'type': 'string',
-            'enum': ['OPENAI_API_KEY', 'GROQ_API_KEY'],
+            'examples': ['OPENAI_API_KEY', 'GROQ_API_KEY'],
           },
         },
         'required': ['variable'],
       },
-      'notices': ['the credential is in the environment of every program the agent runs'],
+      'notices': ["the credential is in the environment of every program the agent runs, in the variable the account names, over the person's own value of it"],
     },
   ],
   'logins': [
     {
       'id': 'api-key',
       'title': 'Provider API key',
-      'description': 'Asks which provider\'s variable the key is for, then the key',
+      'description': "Asks which environment variable the key goes in (a provider's own is suggested, any other name works) and then the key",
       'produces': 'opencode-provider-key',
       'steps': ['ask'],
       'remote': true,
       'inputs': {
         'type': 'object',
         'properties': {
-          'variable': {'type': 'string', 'title': 'Variable', 'enum': ['OPENAI_API_KEY', 'GROQ_API_KEY']},
+          'variable': {'type': 'string', 'title': 'Variable', 'examples': ['OPENAI_API_KEY', 'GROQ_API_KEY']},
         },
         'required': ['variable'],
       },

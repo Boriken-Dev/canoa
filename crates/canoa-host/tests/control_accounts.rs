@@ -225,12 +225,15 @@ fn opencodes_kinds_and_its_one_sign_in_are_listed_and_its_source_can_be_offered_
     assert_eq!(methods, ["api-key"]);
     let key = &catalog["logins"][0];
     assert_eq!(key["produces"], "opencode-provider-key");
+    // The providers' variables are suggestions, not the only names the form takes.
+    let variable = &key["inputs"]["properties"]["variable"];
     assert!(
-        key["inputs"]["properties"]["variable"]["enum"]
+        variable["examples"]
             .as_array()
             .is_some_and(|variables| variables.iter().any(|name| name == "OPENAI_API_KEY")),
         "{key}"
     );
+    assert!(variable.get("enum").is_none(), "{key}");
     // The source is an entry that runs the provider, so an account can be offered to it.
     let entries = plain_call(&link, 2, "accounts/entries", json!({})).expect("entries");
     let opencode = entries["entries"]
@@ -285,6 +288,37 @@ fn an_account_is_added_by_a_key_asked_sealed_and_the_key_is_kept_nowhere_in_the_
             .any(|line| line.contains("_coqui_acp/secret_request")),
         "the form was put to the app"
     );
+    let hits = found_in(KEY, &written(&host, &app));
+    assert!(hits.is_empty(), "{hits:?}");
+    host.stop();
+}
+
+#[test]
+fn an_opencode_key_account_names_any_variable_but_the_hosts_own() {
+    let host = host();
+    let link = host.local.open("@control").expect("a link");
+    let mut app = app_of(&host);
+    let (_, added) = app.drive(
+        &link,
+        1,
+        "accounts/add",
+        &json!({"name": "gateway", "harness": "opencode", "method": "api-key",
+                "inputs": {"variable": "ACME_GATEWAY_KEY"}}),
+        &Typed::Fills(&[("api_key", KEY)]),
+    );
+    let added = added.expect("a variable no provider lists is taken");
+    assert_eq!(added["account"]["kind"], "opencode-provider-key");
+    let cfg = config_text(&host);
+    assert!(cfg.contains("ACME_GATEWAY_KEY"), "{cfg}");
+    let (_, refused) = app.drive(
+        &link,
+        2,
+        "accounts/add",
+        &json!({"name": "owned", "harness": "opencode", "method": "api-key",
+                "inputs": {"variable": "AOS_OVERLAY_NAME"}}),
+        &Typed::Fills(&[("api_key", KEY)]),
+    );
+    assert!(refused.is_err(), "a name the host owns is refused");
     let hits = found_in(KEY, &written(&host, &app));
     assert!(hits.is_empty(), "{hits:?}");
     host.stop();

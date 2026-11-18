@@ -96,16 +96,28 @@ void main() {
     expect(controller.catalogIfKnown('opencode')?.kind('opencode-login')?.provides, ['opencode']);
     expect(find.byKey(const Key('login-method api-key')), findsOneWidget);
     expect(find.text('Provider API key'), findsOneWidget);
-    expect(find.text('the credential is in the environment of every program the agent runs'), findsWidgets);
+    expect(find.textContaining('the credential is in the environment of every program the agent runs'), findsWidgets);
     await tester.enterText(find.byKey(const Key('add-account-name')), 'groq-two');
     await tester.tap(find.byKey(const Key('login-method api-key')));
     await tester.pump();
     expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNotNull);
     await tester.tap(find.byKey(const Key('add-account-start')));
     await tester.pumpAndSettle();
-    // The variable is asked first, as a choice among the ones OpenCode reads.
+    // The variable is asked first: a text field, with the providers' variables offered as suggestions, not as the only choices.
     expect(find.byKey(const Key('program-ask')), findsOneWidget);
     expect(find.text('Variable'), findsWidgets);
+    expect(find.byKey(const Key('ask-suggest-variable-OPENAI_API_KEY')), findsOneWidget);
+    expect(find.byKey(const Key('ask-suggest-variable-GROQ_API_KEY')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('ask-suggest-variable-GROQ_API_KEY')));
+    await tester.pump();
+    expect(tester.widget<TextField>(find.byKey(const Key('ask-field-variable'))).controller?.text, 'GROQ_API_KEY');
+    // Any other name is taken as written.
+    await tester.enterText(find.byKey(const Key('ask-field-variable')), 'ACME_GATEWAY_KEY');
+    await tester.tap(find.byKey(const Key('ask-submit')));
+    // The sign-in that starts keeps a spinner going, so the frames are pumped, not settled.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(host.inputsGiven.single, {'variable': 'ACME_GATEWAY_KEY'});
   });
 
   testWidgets('away from the host Codex signs in by a device code unless the person chooses the browser', (tester) async {

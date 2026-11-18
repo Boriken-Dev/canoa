@@ -565,14 +565,30 @@ class _AskDialogState extends State<AskDialog> {
                 onChanged: (chosen) => setState(() => _chosen[key] = chosen),
               )
             else
-              TextField(
-                key: Key('ask-field-$key'),
-                controller: _text[key],
-                obscureText: ProgramAsk.sensitive(value),
-                keyboardType: value['type'] == 'integer' || value['type'] == 'number' ? TextInputType.number : null,
-                decoration: InputDecoration(labelText: '${value['title'] ?? key}', helperText: value['description'] as String?),
-                onSubmitted: (_) => _submit(),
-              ),
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+                TextField(
+                  key: Key('ask-field-$key'),
+                  controller: _text[key],
+                  obscureText: ProgramAsk.sensitive(value),
+                  keyboardType: value['type'] == 'integer' || value['type'] == 'number' ? TextInputType.number : null,
+                  decoration: InputDecoration(labelText: '${value['title'] ?? key}', helperText: value['description'] as String?),
+                  onSubmitted: (_) => _submit(),
+                ),
+                // The schema's examples are suggestions: a tap fills the field, and any other text is as good.
+                if (value['examples'] is List && !ProgramAsk.sensitive(value))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Wrap(spacing: 6, runSpacing: 4, children: [
+                      for (final each in (value['examples'] as List).whereType<String>())
+                        ActionChip(
+                          key: Key('ask-suggest-$key-$each'),
+                          label: Text(each),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => setState(() => _text[key]!.text = each),
+                        ),
+                    ]),
+                  ),
+              ]),
           if (_problem != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
