@@ -205,7 +205,7 @@ fn asking(ca: &Ca) -> (TlsServer, Leaf) {
     (origin, ca.issue_client("Alice Example"))
 }
 
-fn direct() -> Resolver {
+pub(crate) fn direct() -> Resolver {
     Resolver::builder()
         .environment(Environment::from_pairs([("PATH", "x")]))
         .system(false)
@@ -250,7 +250,7 @@ fn a_fetch_presents_the_certificate_the_settings_name() {
 
 /// A keystore holding one identity: the stand-in for the operating system's.
 #[derive(Debug)]
-struct Keystore(Identity);
+pub(crate) struct Keystore(pub(crate) Identity);
 
 impl IdentitySource for Keystore {
     fn identities(&self) -> Result<Vec<Identity>, coqui_syshttp::Error> {
