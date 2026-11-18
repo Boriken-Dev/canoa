@@ -382,6 +382,24 @@ fn a_setup_that_fails_or_overruns_is_stopped_and_reported_with_what_it_printed()
 }
 
 #[test]
+fn an_overlay_whose_manifest_is_not_valid_has_no_plan() {
+    let scratch = Scratch::new("invalid");
+    scratch.write(
+        "overlays/broken/overlay.cfg",
+        "[[setup]]\ninterpreter = \"sh\"\npath = \"gone.sh\"\n",
+    );
+    let root = scratch.overlays().join("broken");
+    let digest = aos::tree_digest(&StdFs, &root, &Settings::default())
+        .expect("digest")
+        .digest
+        .to_string();
+    let refused = Plan::of("broken", &root, aos::current_os(), &digest)
+        .err()
+        .expect("refused");
+    assert!(refused.contains("not valid"), "{refused}");
+}
+
+#[test]
 fn an_overlay_with_nothing_to_prepare_runs_nothing_and_records_nothing() {
     let scratch = Scratch::new("nothing");
     let plan = plan_for(&scratch, "plain", &[("overlay.cfg", "name = \"plain\"\n")]);

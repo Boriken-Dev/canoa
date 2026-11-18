@@ -167,6 +167,17 @@ impl Plan {
     ) -> Result<Self, String> {
         let read = aos::read_overlay(&tree, &Settings::default())
             .map_err(|error| format!("its manifest cannot be read ({})", error.class))?;
+        // An overlay Canoa would leave out whole prepares nothing, as one whose paths leave its folder would run nothing of it.
+        let paths = OverlayTree::from_paths(tree.paths().map(str::to_owned));
+        if let Some(issue) = aos::validate(&read.manifest, Some(&paths))
+            .iter()
+            .find(|issue| !aos::applies(core::slice::from_ref(issue)))
+        {
+            return Err(format!(
+                "its manifest is not valid ({} {})",
+                issue.at, issue.code
+            ));
+        }
         let mut facts = Facts::new(os);
         facts.root = root.to_string_lossy().into_owned();
         facts.identity = identity.to_owned();
