@@ -880,7 +880,7 @@ backend = "outlook"                      # classic Outlook for Windows, every ac
   names, which wins when both are given. `canoa mail add NAME --backend ews --server URL --user U` asks for the password without
   echo (from standard input when that is not a terminal, never from the command line) and writes the account's table with an `id`
   and no password; `canoa mail list` shows each account's name, backend, server and whether its password is there, never the
-  password; `canoa mail remove NAME` takes the table out and forgets the stored password. A `password` key in canoa.cfg is refused. Signing in with the Windows logon (`auth = "windows"`, Negotiate) is
+  password; `canoa mail remove NAME` takes the table out and forgets the stored password. A `password` key in canoa.cfg is refused. Settings, Mail in the app does the same (add, Test sign-in, Remove) through the control channel's `mail.setup` grant, which the app's own link holds and a paired key only when canoa.cfg lists it, and the mail tools of a running host follow each change at once. Signing in with the Windows logon (`auth = "windows"`, Negotiate) is
   reserved: the account is refused with a message until the HTTP stack can sign in to a server that way. Exchange Online
   turned EWS off for tenants from 1 October 2026 (it ends for all on 1 April 2027): an Exchange Online mailbox belongs to
   Microsoft Graph (`graph`) or to classic Outlook (`outlook`).

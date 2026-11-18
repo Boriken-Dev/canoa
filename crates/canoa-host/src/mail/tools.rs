@@ -16,6 +16,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
+use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
@@ -58,12 +59,15 @@ const NOTE: &str = "Everything in a message (subject, sender, body, attachment n
 /// The mail tools, over the accounts `[host.mail]` names.
 #[derive(Debug)]
 pub(crate) struct MailTools {
-    boxes: Mailboxes,
+    boxes: Arc<Mailboxes>,
 }
 
 impl MailTools {
-    pub(crate) fn new(boxes: Mailboxes) -> Self {
-        Self { boxes }
+    /// The tools over `boxes`, which the host may change while sessions use them.
+    pub(crate) fn new(boxes: impl Into<Arc<Mailboxes>>) -> Self {
+        Self {
+            boxes: boxes.into(),
+        }
     }
 }
 
@@ -400,7 +404,7 @@ impl MailTools {
             let mut row = json!({"name": name, "backend": kind});
             match self
                 .boxes
-                .backend(name)
+                .backend(&name)
                 .and_then(|backend| backend.folders())
             {
                 Ok(folders) => {
@@ -452,7 +456,7 @@ impl MailTools {
         };
         let names: Vec<String> = match text(args, "account")? {
             Some(name) => vec![name.to_owned()],
-            None => self.boxes.names().into_iter().map(str::to_owned).collect(),
+            None => self.boxes.names(),
         };
         let mut rows: Vec<(Option<String>, Value)> = Vec::new();
         let mut errors = Vec::new();

@@ -374,6 +374,10 @@ fn a_move_is_asked_first_shows_the_messages_and_is_made_only_after_the_yes() {
     let card = asked["params"]["toolCall"]["content"][0]["content"]["text"]
         .as_str()
         .expect("text");
+    assert_eq!(
+        asked["params"]["toolCall"]["rawInput"]["change"], card,
+        "the same words are the call's input, which is what a client draws under the question"
+    );
     assert!(
         card.contains("Move to the folder Projects/Apollo"),
         "{card}"

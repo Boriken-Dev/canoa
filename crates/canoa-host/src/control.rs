@@ -152,12 +152,16 @@ pub enum Grant {
     /// mail of the accounts `[host.mail]` names. The mail is the person's own and what an agent reads of it enters its context, so
     /// a key gets it only when canoa.cfg says so; the application in this process holds it. Not a control method.
     Mail,
+    /// `mail/accounts`, `mail/add`, `mail/test` and `mail/remove`: list, add, sign in to and remove the mail accounts of canoa.cfg,
+    /// which keeps a password in the host's account store and has the host connect to the server the account names with it. The
+    /// accounts are what a key holding `mail` then reads, so it is as much as access to the person's mail.
+    MailSetup,
 }
 
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 25] {
+    pub fn all() -> [Self; 26] {
         [
             Self::LedgerRead,
             Self::LedgerWrite,
@@ -184,6 +188,7 @@ impl Grant {
             Self::Hosting,
             Self::ToolsProvide,
             Self::Mail,
+            Self::MailSetup,
         ]
     }
 
@@ -216,6 +221,7 @@ impl Grant {
             Self::Hosting => "hosting",
             Self::ToolsProvide => "tools.provide",
             Self::Mail => "mail",
+            Self::MailSetup => "mail.setup",
         }
     }
 
@@ -338,6 +344,8 @@ pub(crate) struct Control {
     history: Option<Moves>,
     /// The owner's accounts, once the host knows where canoa.cfg is.
     accounts: Option<accounts::Accounts>,
+    /// The mail accounts, once the host knows where canoa.cfg is.
+    mail: Option<mail_setup::MailSetup>,
     /// What the agents spent, once the host has a home to keep it in.
     usage: Option<Arc<crate::usage_log::UsageLog>>,
     /// The paired keys, so a key can take itself out.
@@ -461,6 +469,7 @@ impl Control {
             stores: OnceLock::new(),
             history: None,
             accounts: None,
+            mail: None,
             usage: None,
             trust: None,
             sealer: None,
@@ -654,6 +663,13 @@ impl Control {
         self
     }
 
+    /// Answers `mail/*` for a key that holds `mail.setup`.
+    #[must_use]
+    pub(crate) fn with_mail(mut self, mail: mail_setup::MailSetup) -> Self {
+        self.mail = Some(mail);
+        self
+    }
+
     /// Answers `sessions/running` from the sessions this host keeps.
     #[must_use]
     pub(crate) fn with_sessions(mut self, sessions: RunningSessions) -> Self {
@@ -709,6 +725,13 @@ impl Control {
         self.accounts
             .as_ref()
             .ok_or((REFUSED, "this host does not manage accounts".to_owned()))
+    }
+
+    fn mail_setup(&self) -> Result<&mail_setup::MailSetup, (i32, String)> {
+        self.mail.as_ref().ok_or((
+            REFUSED,
+            "this host does not manage mail accounts".to_owned(),
+        ))
     }
 
     fn stores(&self) -> Result<&Stores, (i32, String)> {
@@ -1013,6 +1036,11 @@ impl Control {
                 ) => allow(caller, Grant::Accounts)
                     .and_then(|()| self.accounts())
                     .and_then(|accounts| accounts.call(method, &params)),
+                Some(method @ ("mail/accounts" | "mail/add" | "mail/test" | "mail/remove")) => {
+                    allow(caller, Grant::MailSetup)
+                        .and_then(|()| self.mail_setup())
+                        .and_then(|setup| setup.call(method, &params))
+                }
                 Some(method @ ("usage/summary" | "usage/limits")) => {
                     allow(caller, Grant::Usage).and_then(|()| self.usage_call(method, &params))
                 }
@@ -1596,6 +1624,9 @@ mod index;
 mod looks;
 #[cfg(test)]
 mod looks_tests;
+pub(crate) mod mail_setup;
+#[cfg(test)]
+mod mail_setup_tests;
 mod say;
 #[cfg(test)]
 mod say_tests;

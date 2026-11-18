@@ -189,6 +189,8 @@ fn permission(session: &str, number: u64, card: &Card) -> Value {
             "kind": "other",
             "status": "pending",
             "content": [{"type": "content", "content": {"type": "text", "text": card.text}}],
+            // What a client draws under the question is the call's input, so the change is put there too.
+            "rawInput": {"change": card.text},
         },
         "options": [
             {"optionId": ALLOW, "name": "Allow", "kind": "allow_once"},

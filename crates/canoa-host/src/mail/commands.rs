@@ -60,6 +60,7 @@ impl Added {
 pub(crate) const fn backend_name(backend: MailBackend) -> &'static str {
     match backend {
         MailBackend::Ews => "ews",
+        MailBackend::Graph => "graph",
         MailBackend::Outlook => "outlook",
     }
 }

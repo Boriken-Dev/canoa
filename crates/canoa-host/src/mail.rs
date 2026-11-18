@@ -35,7 +35,7 @@ pub(crate) mod standin;
 mod tests;
 
 use core::time::Duration;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use canoa::network::{Network, Secret};
 
@@ -67,35 +67,51 @@ impl core::fmt::Debug for Account {
     }
 }
 
-/// The mailboxes of `[host.mail]`.
+/// The mailboxes of `[host.mail]`. They are made again when the accounts change ([`Mailboxes::reload`]), so a mailbox added from the
+/// application is used by the tools of sessions already running.
 #[derive(Debug, Default)]
 pub(crate) struct Mailboxes {
-    accounts: Vec<Account>,
+    accounts: RwLock<Vec<Arc<Account>>>,
+}
+
+/// The accounts `config` names, none of them made yet; a password the account store holds is read from `store` when the account
+/// is first used.
+fn accounts_of(config: &MailConfig, store: Option<&Arc<Accounts>>) -> Vec<Arc<Account>> {
+    config
+        .accounts
+        .iter()
+        .map(|(name, account)| {
+            let account = account.clone();
+            let store = store.cloned();
+            let kind = match account.backend {
+                MailBackend::Ews => "ews",
+                MailBackend::Graph => "graph",
+                MailBackend::Outlook => "outlook",
+            };
+            Arc::new(Account {
+                name: name.clone(),
+                made: Mutex::new(None),
+                make: Box::new(move || backend_of(&account, store.as_deref())),
+                kind,
+            })
+        })
+        .collect()
 }
 
 impl Mailboxes {
     /// The mailboxes `config` names; a password the account store holds is read from `store` when the account is first used.
     pub(crate) fn from_config(config: &MailConfig, store: Option<Arc<Accounts>>) -> Self {
-        let accounts = config
+        Self {
+            accounts: RwLock::new(accounts_of(config, store.as_ref())),
+        }
+    }
+
+    /// Takes the accounts `config` names now in place of those it had: each is made again the first time it is asked for.
+    pub(crate) fn reload(&self, config: &MailConfig, store: Option<Arc<Accounts>>) {
+        *self
             .accounts
-            .iter()
-            .map(|(name, account)| {
-                let account = account.clone();
-                let store = store.clone();
-                let kind = match account.backend {
-                    MailBackend::Ews => "ews",
-                    MailBackend::Graph => "graph",
-                    MailBackend::Outlook => "outlook",
-                };
-                Account {
-                    name: name.clone(),
-                    made: Mutex::new(None),
-                    make: Box::new(move || backend_of(&account, store.as_deref())),
-                    kind,
-                }
-            })
-            .collect();
-        Self { accounts }
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = accounts_of(config, store.as_ref());
     }
 
     /// Mailboxes that are already backends, for a test.
@@ -103,33 +119,48 @@ impl Mailboxes {
     pub(crate) fn with(backends: Vec<(&str, &'static str, Arc<dyn Backend>)>) -> Self {
         let accounts = backends
             .into_iter()
-            .map(|(name, kind, backend)| Account {
-                name: name.to_owned(),
-                made: Mutex::new(Some(backend)),
-                make: Box::new(|| Err(MailError::Bad("made by the test".to_owned()))),
-                kind,
+            .map(|(name, kind, backend)| {
+                Arc::new(Account {
+                    name: name.to_owned(),
+                    made: Mutex::new(Some(backend)),
+                    make: Box::new(|| Err(MailError::Bad("made by the test".to_owned()))),
+                    kind,
+                })
             })
             .collect();
-        Self { accounts }
+        Self {
+            accounts: RwLock::new(accounts),
+        }
+    }
+
+    /// The accounts now.
+    fn all(&self) -> Vec<Arc<Account>> {
+        self.accounts
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.accounts.is_empty()
+        self.accounts
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
     }
 
     /// The accounts' names and backends.
-    pub(crate) fn list(&self) -> Vec<(&str, &'static str)> {
-        self.accounts
+    pub(crate) fn list(&self) -> Vec<(String, &'static str)> {
+        self.all()
             .iter()
-            .map(|account| (account.name.as_str(), account.kind))
+            .map(|account| (account.name.clone(), account.kind))
             .collect()
     }
 
     /// The names of the accounts, in the file's order.
-    pub(crate) fn names(&self) -> Vec<&str> {
-        self.accounts
+    pub(crate) fn names(&self) -> Vec<String> {
+        self.all()
             .iter()
-            .map(|account| account.name.as_str())
+            .map(|account| account.name.clone())
             .collect()
     }
 
@@ -140,8 +171,8 @@ impl Mailboxes {
     /// No account has that name, or its backend cannot be made (a password variable that is not set).
     pub(crate) fn backend(&self, name: &str) -> Result<Arc<dyn Backend>, MailError> {
         let account = self
-            .accounts
-            .iter()
+            .all()
+            .into_iter()
             .find(|account| account.name == name)
             .ok_or_else(|| {
                 MailError::Bad(format!(
@@ -167,7 +198,8 @@ impl Mailboxes {
         &self,
         named: Option<&str>,
     ) -> Result<(String, Arc<dyn Backend>), MailError> {
-        let name = match (named, self.accounts.as_slice()) {
+        let all = self.all();
+        let name = match (named, all.as_slice()) {
             (Some(name), _) => name.to_owned(),
             (None, [only]) => only.name.clone(),
             (None, _) => {
@@ -239,6 +271,18 @@ fn password_of(account: &MailAccount, store: Option<&Accounts>) -> Result<Secret
         .filter(|password| !password.is_empty())
         .map(Secret::new)
         .ok_or_else(missing)
+}
+
+/// The backend an account asks for, made now.
+///
+/// # Errors
+///
+/// The backend cannot be made: there is no password for it.
+pub(crate) fn backend_for(
+    account: &MailAccount,
+    store: Option<&Accounts>,
+) -> Result<Arc<dyn Backend>, MailError> {
+    backend_of(account, store)
 }
 
 /// The backend an account asks for.

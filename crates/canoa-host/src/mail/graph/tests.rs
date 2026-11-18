@@ -1042,8 +1042,8 @@ fn an_account_names_a_graph_mailbox_without_reaching_anything() {
         std::path::Path::new("."),
     )
     .expect("parses");
-    let mailboxes = crate::mail::Mailboxes::from_config(&config.mail);
-    assert_eq!(mailboxes.list(), [("cloud", "graph")]);
+    let mailboxes = crate::mail::Mailboxes::from_config(&config.mail, None);
+    assert_eq!(mailboxes.list(), [("cloud".to_owned(), "graph")]);
     mailboxes
         .backend("cloud")
         .expect("made with no call to Windows or Graph");

@@ -4,6 +4,8 @@ import '../accounts/accounts_controller.dart';
 import '../accounts/accounts_section.dart';
 import '../config/canoa_config.dart';
 import '../ledger/session_ledger.dart';
+import '../mail/mail_accounts.dart';
+import '../mail/mail_section.dart';
 import '../permissions/permission_rules.dart';
 import '../profile/profile_home.dart';
 import '../profile/profiles_panel.dart' show ProfilesPanel;
@@ -48,6 +50,7 @@ const _sections = [
   SettingsSection(id: 'mcp', group: 'Agents', title: 'MCP servers', icon: Icons.extension_outlined, keywords: 'tools servers mcp allowed per agent'),
   SettingsSection(id: 'permissions', group: 'Agents', title: 'Permissions', icon: Icons.shield_outlined, keywords: 'bypass mode allow once remembered rules protected paths log revoke full access'),
   SettingsSection(id: 'accounts', group: 'Agents', title: 'Accounts', icon: Icons.manage_accounts_outlined, keywords: 'login sign in api key subscription claude codex grok credentials add remove several'),
+  SettingsSection(id: 'mail', group: 'Agents', title: 'Mail', icon: Icons.mail_outline, keywords: 'email exchange outlook ews mailbox inbox messages password account add remove test sign in'),
   SettingsSection(id: 'shells', group: 'Agents', title: 'Shells', icon: Icons.terminal, keywords: 'bash git bash powershell pwsh wsl msys2 terminal shell command windows'),
   SettingsSection(id: 'usage', group: 'Agents', title: 'Usage', icon: Icons.speed, keywords: 'limit warn percent quota'),
   SettingsSection(id: 'catalogs', group: 'Overlays', title: 'Catalogs', icon: Icons.storefront_outlined, keywords: 'store limits catalog sources icons size'),
@@ -76,6 +79,7 @@ class SettingsPage extends StatefulWidget {
     this.onPin,
     this.onLoadout,
     this.accounts,
+    this.mail,
     this.extensions,
     this.shells,
     this.usageSection = false,
@@ -129,6 +133,9 @@ class SettingsPage extends StatefulWidget {
   /// The accounts of this computer's host, for the Accounts section; none where the app runs no host.
   final AccountsController? accounts;
 
+  /// The mail accounts of this computer's host, for the Mail section; none where the key may not set them up.
+  final MailAccountsController? mail;
+
   /// The store extensions the host loads, for the Extensions section; none where the key may not change the host's settings.
   final ExtensionSettings? extensions;
 
@@ -163,7 +170,7 @@ class SettingsPageState extends State<SettingsPage> {
 
   List<SettingsSection> get _available => [
     for (final section in _sections)
-      if ((section.id != 'accounts' || widget.accounts != null) && (section.id != 'extensions' || widget.extensions != null) && (section.id != 'shells' || widget.shells != null) && (section.id != 'usage' || !widget.usageSection)) section,
+      if ((section.id != 'accounts' || widget.accounts != null) && (section.id != 'mail' || widget.mail != null) && (section.id != 'extensions' || widget.extensions != null) && (section.id != 'shells' || widget.shells != null) && (section.id != 'usage' || !widget.usageSection)) section,
   ];
 
   @override
@@ -264,6 +271,7 @@ class SettingsPageState extends State<SettingsPage> {
       'mcp' => McpSection(controller: controller, agents: widget.profileAgents, onLoadout: widget.onLoadout),
       'permissions' => PermissionsSection(controller: controller, rules: widget.rules, sources: widget.profileAgents),
       'accounts' => AccountsSection(controller: widget.accounts!),
+      'mail' => MailSection(key: const Key('settings-mail'), controller: widget.mail!),
       'usage' => UsageWarning(controller: controller),
       'catalogs' => CatalogsSection(controller: controller),
       'extensions' => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!),

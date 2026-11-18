@@ -1426,6 +1426,11 @@ impl Serving {
                 }
             })?)
         };
+        // The mailboxes the mail tools use, which the control channel's `mail/*` methods change while sessions run.
+        let mail_boxes = Arc::new(crate::mail::Mailboxes::from_config(
+            &config.mail,
+            accounts.clone(),
+        ));
         // The spend the agents report, kept in the home; a host with no home keeps none.
         let usage_log = options.state_dir.as_ref().map(|home| {
             Arc::new(crate::usage_log::UsageLog::open(
@@ -1870,7 +1875,12 @@ impl Serving {
                     control::Grant::all()
                         .into_iter()
                         .filter(|grant| {
-                            !matches!(grant, control::Grant::Discover | control::Grant::Mail)
+                            !matches!(
+                                grant,
+                                control::Grant::Discover
+                                    | control::Grant::Mail
+                                    | control::Grant::MailSetup
+                            )
                         })
                         .collect()
                 }),
@@ -2050,6 +2060,16 @@ impl Serving {
                         }
                         _ => kept,
                     };
+                    let kept = match (&options.account_layers, &options.state_dir) {
+                        (Some(layers), Some(home)) => {
+                            kept.with_mail(control::mail_setup::MailSetup::new(
+                                layers.clone(),
+                                home.clone(),
+                                Arc::clone(&mail_boxes),
+                            ))
+                        }
+                        _ => kept,
+                    };
                     match &options.programs {
                         Some((programs, providers)) => kept.with_stores(
                             control::Stores::new(Arc::clone(programs), providers.clone())
@@ -2078,13 +2098,14 @@ impl Serving {
             .serve_with(Arc::new(control::ToolsBackend(Arc::clone(
                 &serving.shared.control,
             ))));
-        if config.mail.tools != Some(false) && !config.mail.accounts.is_empty() {
+        // Offered to a session only while the mailboxes name an account, so one added later is used by the next session.
+        if config.mail.tools != Some(false) {
             serving
                 .shared
                 .store_tools
-                .serve_extra(Arc::new(crate::mail::tools::MailTools::new(
-                    crate::mail::Mailboxes::from_config(&config.mail, accounts.clone()),
-                )));
+                .serve_extra(Arc::new(crate::mail::tools::MailTools::new(Arc::clone(
+                    &mail_boxes,
+                ))));
         }
         serving.door = serving.open_door(config, options);
         serving.attach_delegation(config, dialer, usage_log.clone());

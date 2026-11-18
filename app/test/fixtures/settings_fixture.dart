@@ -1,6 +1,7 @@
 import 'package:canoa/accounts/accounts_controller.dart';
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
+import 'package:canoa/mail/mail_accounts.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/profile/profile_home.dart';
 import 'package:canoa/settings/settings_page.dart';
@@ -42,6 +43,7 @@ Future<SettingsHarness> openSettings(
   ThemeData? theme,
   String version = '',
   AccountsController? accounts,
+  MailAccountsController? mail,
   List<SpeechBackend> voiceBackends = const [],
   HostSpeechCatalog? hostSpeech,
   VoiceOutputs? voiceOutputs,
@@ -73,6 +75,7 @@ Future<SettingsHarness> openSettings(
       onLoadout: onLoadout,
       version: version,
       accounts: accounts,
+      mail: mail,
       voiceBackends: voiceBackends,
       hostSpeech: hostSpeech,
       voiceOutputs: voiceOutputs,
