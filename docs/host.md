@@ -603,7 +603,8 @@ of this Canoa can use that application's tools (`canoa-outlook`, `canoa-word`, `
 workbook), and a change is asked in the pane first. **A secret**, for a computer other accounts use: `office_secret = true` makes the
 host keep one in its home and refuse the page's requests that do not carry it; the manifest is rendered with it. **Starting Canoa
 from the pane:** `canoa office-launcher`, a small program you leave running, holds the pane's address while no Canoa runs and shows a
-page with **Start Canoa**, which starts it. `clients/office/README.md` in the repository says how to set each up.
+page with **Start Canoa**, which starts it; `canoa office-launcher --install` makes it start when you sign in (`--uninstall` stops that, `--status` says
+whether it does and whether a launcher answers). `clients/office/README.md` in the repository says how to set each up.
 
 The API header lists every setting.
 

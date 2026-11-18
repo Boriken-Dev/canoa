@@ -25,6 +25,8 @@ use crate::home::{Home, LockError};
 use crate::native::Launch;
 use crate::web::{Launcher, Secret, WebError, WebServer};
 
+pub(crate) mod login;
+
 /// How often the launcher looks at whether a host holds the home, and at whether the page asked.
 const POLL: Duration = Duration::from_millis(500);
 /// How many looks in a row find no host before the launcher takes the address, so that a host restarting does not meet it.

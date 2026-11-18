@@ -249,9 +249,20 @@ page asks again, with it. The secret is in the manifest, a file you can read: do
 
 Office loads the pane's first page from the address in the manifest, and a pane whose server is not running has no page to say
 anything: Office shows its own error. So the offer to start Canoa has to be served by something that holds that address while Canoa
-does not. That is `canoa office-launcher`, a small program you leave running (at login, with the system's own means: a Startup
-shortcut or a Run entry on Windows, a user unit elsewhere; this repository registers nothing for you). It reads the same canoa.cfg
+does not. That is `canoa office-launcher`, a small program you leave running. It reads the same canoa.cfg
 as the host (`[host.web]` with `office` and `office_local`, the same `listen`, `cert` and `key`).
+
+- **At sign-in.** `canoa office-launcher --install` registers it for this user, and only on your word: a Run value
+  (`CanoaOfficeLauncher` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`) on Windows, a LaunchAgent
+  (`~/Library/LaunchAgents/dev.boriken.canoa.office-launcher.plist`) on macOS, an autostart entry
+  (`$XDG_CONFIG_HOME/autostart/dev.boriken.canoa.office-launcher.desktop`, else `~/.config/autostart/`) elsewhere. Nothing needs
+  elevation. The entry runs `canoa office-launcher` and, when `--config` or `CANOA_CONFIG` named a canoa.cfg, `--config` with that
+  file made absolute (named nothing, it reads the same default files as every other command). It starts at the next sign-in, not
+  now; run `canoa office-launcher` once for this session. `--install` again replaces the entry, `--uninstall` deletes that one
+  entry and nothing else, and `--status` says whether it is registered, whether it is what `--install` would write now, and
+  whether a launcher answers at the add-in's address (something answers there and no host holds the home, which is the only time
+  the launcher holds it). `--install` refuses a canoa.cfg with no `[host.web]` that has `office` and `office_local`. On Windows
+  `canoa.exe` is a console program, so its window stays open for as long as the launcher runs.
 
 - While a host holds the home it does nothing but look every half second. A host that starts takes the home before it binds, the
   launcher lets go of the address at its next look, and a host that finds the address held waits for it a few seconds, so neither
