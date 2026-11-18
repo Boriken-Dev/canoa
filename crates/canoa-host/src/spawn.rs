@@ -278,8 +278,42 @@ impl Command {
         }
     }
 
+    /// The other spellings of the variable `name` (lower case and upper case) that the process would start with set to nothing:
+    /// where names are case-sensitive, a program that reads the lower-case one first takes it for "no proxy", and so would go
+    /// direct whatever the host puts in the other. `inherited` reads this process's own environment. None on Windows, where the
+    /// two spellings are one variable.
+    fn empty_spellings(
+        &self,
+        name: &str,
+        inherited: &dyn Fn(&str) -> Option<OsString>,
+    ) -> Vec<OsString> {
+        if cfg!(windows) {
+            return Vec::new();
+        }
+        [name.to_ascii_lowercase(), name.to_ascii_uppercase()]
+            .into_iter()
+            .filter(|other| other != name)
+            .filter(|other| {
+                match self
+                    .env
+                    .iter()
+                    .rev()
+                    .find(|(key, _)| key.to_str() == Some(other.as_str()))
+                {
+                    Some((_, value)) => value.as_ref().is_some_and(|value| value.is_empty()),
+                    None => {
+                        !self.clear_env && inherited(other).is_some_and(|value| value.is_empty())
+                    }
+                }
+            })
+            .map(OsString::from)
+            .collect()
+    }
+
     /// Gives the process the system's proxy as `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` when the environment it starts with names no
-    /// proxy: the person's own variables, or a caller's, are never replaced, and a name already set is left as it is.
+    /// proxy: the person's own variables, or a caller's, are never replaced, and a name already set is left as it is. A variable
+    /// the person left empty is no proxy: it does not stop the host's, and where names are case-sensitive it is removed from the
+    /// process rather than left to be read ahead of the host's.
     fn put_proxy_variables(&mut self) {
         let named = |key: &OsStr, name: &str| key.eq_ignore_ascii_case(name);
         let has = |this: &Self, name: &str| -> bool {
@@ -312,6 +346,9 @@ impl Command {
         };
         for (name, value) in variables {
             if !has(self, &name) {
+                for other in self.empty_spellings(&name, &|each| std::env::var_os(each)) {
+                    self.env.push((other, None));
+                }
                 self.env
                     .push((OsString::from(name), Some(OsString::from(value))));
             }
@@ -744,6 +781,34 @@ mod tests {
             Err(io::Error::from_raw_os_error(26))
         });
         assert_eq!((calls, busy.is_err()), (6, true));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_proxy_variable_left_empty_under_another_spelling_is_found_whether_explicit_or_inherited() {
+        let empty = |name: &str| (name == "https_proxy").then(OsString::new);
+        let set = |name: &str| (name == "https_proxy").then(|| OsString::from("http://x"));
+        let none = |_: &str| None;
+        let spelled = [OsString::from("https_proxy")];
+        let plain = Command::new("tool");
+        assert_eq!(plain.empty_spellings("HTTPS_PROXY", &empty), spelled);
+        assert!(plain.empty_spellings("HTTPS_PROXY", &none).is_empty());
+        assert!(plain.empty_spellings("HTTP_PROXY", &empty).is_empty());
+        // A value is a proxy, however it is spelled.
+        assert!(plain.empty_spellings("HTTPS_PROXY", &set).is_empty());
+        // The caller's own entry decides over this process's.
+        let mut own = Command::new("tool");
+        own.env("https_proxy", "http://x");
+        assert!(own.empty_spellings("HTTPS_PROXY", &empty).is_empty());
+        let mut removed = Command::new("tool");
+        removed.env_remove("https_proxy");
+        assert!(removed.empty_spellings("HTTPS_PROXY", &empty).is_empty());
+        // An environment that starts clear inherits nothing, and an empty entry of the caller's is found.
+        let mut cleared = Command::new("tool");
+        cleared.env_clear();
+        assert!(cleared.empty_spellings("HTTPS_PROXY", &empty).is_empty());
+        cleared.env("https_proxy", "");
+        assert_eq!(cleared.empty_spellings("HTTPS_PROXY", &none), spelled);
     }
 
     #[test]

@@ -350,6 +350,39 @@ fn a_program_whose_environment_names_a_proxy_keeps_it() {
     assert!(!seen.contains("carol"), "{seen}");
 }
 
+/// Where names are case-sensitive, a program that reads the lower-case proxy variable first goes direct when the person left it
+/// empty, so the host's proxy has to replace it, not sit beside it.
+#[test]
+#[cfg(unix)]
+fn a_proxy_variable_the_person_left_empty_does_not_shadow_the_one_the_host_adds() {
+    let dir = Dir::new("children-empty");
+    let mut command = printing_environment();
+    command
+        .env("https_proxy", "")
+        .env("http_proxy", "")
+        .env("no_proxy", "");
+    command.network(proxied(&dir.0));
+    let seen = environment_of(&mut command);
+    assert!(
+        seen.lines()
+            .any(|line| line == "HTTPS_PROXY=http://carol:pw@127.0.0.1:9"),
+        "{seen}"
+    );
+    for name in ["https_proxy", "http_proxy", "no_proxy"] {
+        assert!(
+            !seen
+                .lines()
+                .any(|line| line.starts_with(&format!("{name}="))),
+            "{name} in {seen}"
+        );
+    }
+    assert!(
+        seen.lines()
+            .any(|line| line == "NO_PROXY=localhost,127.0.0.1,::1"),
+        "{seen}"
+    );
+}
+
 #[test]
 fn a_proxy_that_names_a_pac_script_is_asked_about_the_endpoints_a_program_reaches() {
     let dir = Dir::new("children-pac");
