@@ -46,8 +46,8 @@ struct Ran {
 
 impl Hooks {
     /// Runs every overlay's env scripts that canoa.cfg's allowance lets run, in the order of application, and says what
-    /// they gave. `extra` is what the session adds to this process's own environment, which a script gets; `cwd` is where
-    /// the session starts.
+    /// they gave. `extra` is what the session adds to this process's own environment, which a script gets, and `pre_env` the
+    /// runs of the `pre-env` hooks, which the stack applies before any overlay's declarations.
     pub(in crate::profile::hosted) fn env_scripts(
         &mut self,
         overlays: &[ReadOverlay],
