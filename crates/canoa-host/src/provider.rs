@@ -430,6 +430,26 @@ mod tests {
     }
 
     #[test]
+    fn the_kinds_document_follows_the_kinds_an_entry_lists_and_a_kinds_that_is_no_list_is_left_to_the_source()
+     {
+        let kinds = |settings: &Settings| {
+            settings.as_map()["kinds"]
+                .as_array()
+                .expect("a list")
+                .clone()
+        };
+        let own = with_kinds(&settings(serde_json::json!({"kinds": ["mine.json"]})));
+        assert_eq!(kinds(&own).len(), 2);
+        assert_eq!(kinds(&own)[0], "mine.json");
+        assert_eq!(
+            kinds(&with_kinds(&settings(serde_json::json!({})))).len(),
+            1
+        );
+        let odd = settings(serde_json::json!({"kinds": "mine.json"}));
+        assert_eq!(with_kinds(&odd), odd);
+    }
+
+    #[test]
     fn the_host_line_shows_no_value() {
         let shown = format!(
             "{:?}",
