@@ -7,6 +7,7 @@ import '../acp/client.dart';
 import '../acp/pipe_channel.dart';
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
+import '../net/system_dial.dart';
 import '../chat/git_changes.dart';
 import 'worktree.dart';
 
@@ -93,7 +94,7 @@ Future<Map<String, Object?>> hostWorktreeRequest(
   Duration timeout = const Duration(seconds: 10),
   Duration answerTimeout = const Duration(minutes: 2),
 }) async => _worktreeRequest(
-  await connectWebChannel(endpoints, timeout: timeout),
+  await connectSystemChannel(endpoints, timeout: timeout),
   expectedPeerId: expectedPeerId, verifyPeer: verifyPeer, method: method, params: params,
   timeout: timeout, answerTimeout: answerTimeout,
 );

@@ -161,6 +161,9 @@ void main() {
         unorderedEquals([
           // The platform's client, which `systemHttpClient` hands out until a host is installed.
           'lib/net/system_http.dart',
+          // The client of a WebSocket the host carries (`network/tunnel`): its sockets are made by the host's tunnel, and a connection the
+          // system reaches directly is opened here.
+          'lib/net/system_dial_io.dart',
           // A served page's own requests to the host that served it: the browser's, with its proxy and certificates.
           'lib/served/local_admission.dart',
           'lib/served/portal_session.dart',

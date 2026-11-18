@@ -1,4 +1,5 @@
 import 'package:coqui_transport_web/coqui_transport_web.dart';
+import '../net/system_dial.dart';
 import 'client.dart';
 import 'pipe_channel.dart';
 
@@ -17,7 +18,8 @@ WebEndpoints chatEndpoints({
 /// Opens the preferred network transport, then proves the SAME expected peer
 /// identity on that selected transport before sending any ACP message.
 ///
-/// WebTransport -> WebSocket fallback happens only during transport opening.
+/// WebTransport -> WebSocket fallback happens only during transport opening. On a desktop that runs a host the WebSocket follows the
+/// system's proxy and its login (see `connectSystemChannel`).
 /// A rejected peer proof must close the link and must NOT trigger fallback.
 Future<VerifiedAgent> connectVerifiedAcp(
   WebEndpoints endpoints, {
@@ -32,7 +34,7 @@ Future<VerifiedAgent> connectVerifiedAcp(
   Map<String, Object?> initializeMeta = const {},
 }) async {
   return _verifiedAcp(
-    await connectWebChannel(
+    await connectSystemChannel(
       endpoints,
       timeout: timeout,
       webTransportDialer: webTransportDialer,
