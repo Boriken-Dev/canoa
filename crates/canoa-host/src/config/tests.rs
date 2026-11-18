@@ -2484,3 +2484,37 @@ fn the_network_proxy_is_system_none_a_pac_location_or_a_proxy() {
     assert!(parse("[host.network]\nproxy_password_env = \"X\"\n").is_err());
     assert!(parse("[host.network]\nother = 1\n").is_err());
 }
+
+#[test]
+fn the_default_profile_is_always_there_and_is_the_one_a_session_with_none_starts_with() {
+    let none = parse(
+        "[profiles.other]
+model = \"x\"
+",
+    )
+    .expect("parses");
+    let profile = none.local_profiles.for_agent("a").expect("a profile");
+    // With no `[profiles.default]` the default sets nothing, and naming it is not an error.
+    assert_eq!(profile.default_preset(), &Preset::default());
+    assert_eq!(
+        profile.resolve_preset(crate::config::DEFAULT_PRESET),
+        Ok(&Preset::default())
+    );
+    assert_eq!(
+        profile.resolve_preset("ghost"),
+        Err(crate::config::UnknownPreset("ghost".to_owned()))
+    );
+    // With one, it is that table's.
+    let set =
+        parse("[profiles.default]\nmodel = \"m\"\ncontext = \"Be brief.\"\n").expect("parses");
+    let profile = set.local_profiles.for_agent("a").expect("a profile");
+    assert_eq!(profile.default_preset().model.as_deref(), Some("m"));
+    assert_eq!(
+        profile
+            .resolve_preset("default")
+            .expect("held")
+            .context
+            .as_deref(),
+        Some("Be brief.")
+    );
+}

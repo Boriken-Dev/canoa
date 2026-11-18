@@ -1010,3 +1010,48 @@ fn a_connection_that_holds_a_credential_or_anything_but_its_five_keys_is_refused
     }
     let _ = fs::remove_dir_all(path.parent().expect("dir"));
 }
+
+#[test]
+fn the_default_profile_cannot_be_removed_by_a_write_of_the_profiles() {
+    let (path, control, caller) = editing(
+        "canoa.cfg",
+        "[profiles.default]\nmodel = \"m\"\n[profiles.deep]\neffort = \"high\"\n",
+    );
+    // Removing the whole section, or writing it without the default, is refused and the file is as it was.
+    let before = fs::read_to_string(&path).expect("file");
+    for value in [
+        json!(null),
+        json!({"deep": {"effort": "high"}}),
+        json!({"default": "m"}),
+    ] {
+        for method in ["config/set", "config/check"] {
+            let refused = ask(
+                &control,
+                &caller,
+                method,
+                json!({"section": "profiles", "value": value}),
+            );
+            assert_eq!(refused["error"]["code"], REFUSED, "{method} {refused}");
+            assert!(
+                refused["error"]["message"]
+                    .as_str()
+                    .expect("text")
+                    .contains("default profile"),
+                "{refused}"
+            );
+        }
+    }
+    assert_eq!(fs::read_to_string(&path).expect("file"), before);
+    // Another profile goes, the default stays, and editing the default is a write like any other.
+    let kept = ask(
+        &control,
+        &caller,
+        "config/set",
+        json!({"section": "profiles", "value": {"default": {"model": "n"}}}),
+    );
+    assert!(kept["result"].is_object(), "{kept}");
+    let text = fs::read_to_string(&path).expect("file");
+    assert!(text.contains("default"), "{text}");
+    assert!(!text.contains("deep"), "{text}");
+    let _ = fs::remove_dir_all(path.parent().expect("dir"));
+}

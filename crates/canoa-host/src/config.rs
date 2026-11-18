@@ -218,6 +218,16 @@ impl Preset {
     }
 }
 
+/// The name of the profile that is always there: `[profiles.default]`. It cannot be removed, and a session that names no other
+/// profile starts with it.
+pub const DEFAULT_PRESET: &str = "default";
+
+/// A profile that sets nothing: what the default profile is until the person edits it.
+fn empty_preset() -> &'static Preset {
+    static EMPTY: std::sync::OnceLock<Preset> = std::sync::OnceLock::new();
+    EMPTY.get_or_init(Preset::default)
+}
+
 /// A session asked for a preset `[profiles]` does not hold.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnknownPreset(pub String);
@@ -1024,9 +1034,20 @@ impl HostProfile {
     ///
     /// [`UnknownPreset`] when `name` is not in `[profiles]`.
     pub fn resolve_preset(&self, name: &str) -> Result<&Preset, UnknownPreset> {
+        match self.presets.get(name) {
+            Some(held) => Ok(held),
+            None if name == DEFAULT_PRESET => Ok(empty_preset()),
+            None => Err(UnknownPreset(name.to_owned())),
+        }
+    }
+
+    /// The preset a session starts with when it names none: `[profiles.default]`, or one that sets nothing when the file has no
+    /// such table.
+    #[must_use]
+    pub fn default_preset(&self) -> &Preset {
         self.presets
-            .get(name)
-            .ok_or_else(|| UnknownPreset(name.to_owned()))
+            .get(DEFAULT_PRESET)
+            .unwrap_or_else(|| empty_preset())
     }
 
     /// The loadout `[defaults.clients]` names for a client of `kind`, if it names one.

@@ -3157,3 +3157,39 @@ fn what_a_real_npm_installed_is_on_a_sessions_node_path_after_the_overlays_lib_n
         String::from_utf8_lossy(&printed.stderr)
     );
 }
+
+const WITH_DEFAULT: &str = "[profile]\nmodel = \"mine\"\n\
+    [profiles.default]\nmodel = \"calm\"\ncontext = \"Be brief.\"\n\
+    [profiles.deep]\nmodel = \"big\"\n";
+
+#[test]
+fn a_session_that_names_no_profile_starts_with_the_default_profile() {
+    let temp = temp_with_skill();
+    let offer = loadout_offer(&temp, WITH_DEFAULT);
+    let (_, report) = preset_report(&offer, None);
+    assert_eq!(item(&report, "model")["value"], "calm", "{report}");
+    assert_eq!(item(&report, "model")["layer"], "session", "{report}");
+    let context = items_of(&report, "context", "session");
+    assert_eq!(context.len(), 1, "{report}");
+    // Naming the default is the same as naming none, and another profile replaces it whole, as the default is no layer under it.
+    let (_, named) = preset_report(&offer, Some("default"));
+    assert_eq!(item(&named, "model")["value"], "calm", "{named}");
+    let (_, other) = preset_report(&offer, Some("deep"));
+    assert_eq!(item(&other, "model")["value"], "big", "{other}");
+    assert!(items_of(&other, "context", "session").is_empty(), "{other}");
+}
+
+#[test]
+fn a_file_with_no_default_profile_still_lets_a_session_name_it() {
+    let temp = temp_with_skill();
+    let offer = loadout_offer(&temp, PRESETS);
+    let first = serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"_meta": {PRESET_META: "default"}}}))
+    .expect("json");
+    assert_eq!(
+        choose_preset(&offer, 0, &first).expect("held"),
+        Some("default".to_owned())
+    );
+    let (_, report) = preset_report(&offer, Some("default"));
+    assert_eq!(item(&report, "model")["value"], "mine", "{report}");
+}

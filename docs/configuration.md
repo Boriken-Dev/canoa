@@ -150,6 +150,20 @@ It is chosen in a new session's footer. A value changed after choosing it reads 
 and *Save as new profile*; *Effective setup* lists every value beside its layer and what the agent does not offer. The
 account and the permissions are chosen apart from it. Settings → Profiles creates, edits, copies and deletes them.
 
+**The default profile** is `[profiles.default]`. It is always there, it cannot be removed, and a session that names no other
+profile starts with it: what you set in it (the model, the access, the starting instructions, whatever it holds) is what every new
+session gets unless it is given another. Without the table it sets nothing, and naming `default` is never an error. The footer
+lists it first, as *Default*; Settings → Profiles edits and copies it but offers no delete, and the host refuses a write of
+`[profiles]` that leaves `default` out. A session that names another profile gets that profile's values, not the default's: a
+profile is the whole of what it sets, above `[profile]`.
+
+```toml
+[profiles.default]
+effort = "medium"
+access = { sandbox = "none", network = true, approvals = "ask" }
+context = "Answer briefly."
+```
+
 A later layer wins per key. Environment variables, skills and MCP servers merge by name: a later layer's entry replaces a
 lower one's whole and keeps its place, and `remove = true` takes it out. `unset = ["model"]` takes back a lower layer's
 `model`, `effort`, `mode` or `context`. **Settings → Profiles** shows the effective profile of each agent, every value

@@ -581,10 +581,19 @@ impl Connection {
         let (name, listed) = &offer.profiles[index];
         let mut notes = Vec::new();
         let mut narrowed = listed.clone();
-        let preset = preset
-            .map(|asked| listed.resolve_preset(asked).map(|held| (asked, held)))
-            .transpose()
-            .map_err(|error| error.to_string())?;
+        // A session that names none starts with the default profile, when the file has one.
+        let preset = match preset {
+            Some(asked) => Some(
+                listed
+                    .resolve_preset(asked)
+                    .map(|held| (asked, held))
+                    .map_err(|error| error.to_string())?,
+            ),
+            None => listed
+                .presets
+                .get(crate::config::DEFAULT_PRESET)
+                .map(|held| (crate::config::DEFAULT_PRESET, held)),
+        };
         // The preset's loadout is the connection's unless the client named one; one the file no longer holds is said, and the
         // default applies.
         let mut loadout = loadout;

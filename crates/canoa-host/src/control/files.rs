@@ -655,6 +655,9 @@ impl Files {
         if section == "connections" {
             check_connections(value)?;
         }
+        if section == "profiles" {
+            check_profiles(value)?;
+        }
         let _all = crate::accounts::commands::config_writes();
         let (text, existed) = read_cfg(path)?;
         let name = path
@@ -881,6 +884,23 @@ fn forget_stale(dir: &Path) {
         if stale {
             let _ = fs::remove_file(entry.path());
         }
+    }
+}
+
+/// Refuses a `profiles` table with no `default` profile, or one that removes the section: the default profile is always there, so
+/// a write that would take it out is not made.
+fn check_profiles(value: &Value) -> Result<(), (i32, String)> {
+    let kept = value.as_object().is_some_and(|table| {
+        table
+            .get(crate::config::DEFAULT_PRESET)
+            .is_some_and(Value::is_object)
+    });
+    if kept {
+        Ok(())
+    } else {
+        Err(refused(
+            "the default profile cannot be removed: a write of the profiles keeps profiles.default, which a session that names no profile starts with",
+        ))
     }
 }
 
