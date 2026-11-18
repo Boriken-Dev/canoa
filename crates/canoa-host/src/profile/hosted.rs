@@ -487,6 +487,10 @@ pub(crate) struct Starting<'a> {
     pub(crate) who: Who<'a>,
     /// Variables the host sets for the session itself, which layers read and may set their own from.
     pub(crate) host: Vec<(String, String)>,
+    /// The variables the account the session runs on sets for the agent, with no credential among them: layers read them, and
+    /// the provider applies them after the profile's own environment, so a layer that sets one of them is told it does not
+    /// take effect.
+    pub(crate) account: Vec<(String, String)>,
 }
 
 impl Connection {
@@ -670,6 +674,14 @@ impl Connection {
         let model = starting(&layers, Scalar::Model);
         let effort = starting(&layers, Scalar::Effort);
         let effective = merge(&layers);
+        // The account's variables come before the host's own, since the provider applies them last.
+        let account_names: Vec<String> = starting_with
+            .account
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        let mut account_first = starting_with.account.clone();
+        account_first.extend(starting_with.host.iter().cloned());
         let session = Session::new(
             Who {
                 model: model.as_deref().or(starting_with.who.model),
@@ -679,7 +691,7 @@ impl Connection {
                 access: Some(effective.access.resolved()),
                 ..starting_with.who
             },
-            starting_with.host,
+            account_first,
             lookup,
         );
         let seen = session.lookup(lookup);
@@ -746,7 +758,14 @@ impl Connection {
         }
         let mut env_items = Vec::new();
         for (key, value) in &effective.env {
-            if env.iter().any(|(name, _)| name == key) {
+            if account_names.iter().any(|name| same_name(name, key)) {
+                env_items.push(Item::new(
+                    format!("env.{key}"),
+                    &value.layer,
+                    State::Unsupported,
+                    format!("the account the session runs on sets {key}, so its value is used, not this layer's"),
+                ));
+            } else if env.iter().any(|(name, _)| name == key) {
                 env_items.push(Item::new(
                     format!("env.{key}"),
                     &value.layer,
@@ -1290,6 +1309,11 @@ fn described(result: &Value) -> (Takes, Option<&str>) {
         .and_then(|info| info.get("name"))
         .and_then(Value::as_str);
     (takes, reported)
+}
+
+/// `name` is `other`, as the platform compares variable names.
+fn same_name(name: &str, other: &str) -> bool {
+    name == other || cfg!(windows) && name.eq_ignore_ascii_case(other)
 }
 
 /// The AOS harness id of what an agent reports as its name, else of an entry named as Canoa's presets are.

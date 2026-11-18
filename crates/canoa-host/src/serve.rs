@@ -2814,6 +2814,10 @@ fn give_agent_flow<C: Channel>(
                     ..Who::default()
                 },
                 host: hosted::host_variables(provider),
+                account: match &agent {
+                    Agent::Harness(harness) => harness.account_environment(first, any_account),
+                    Agent::Program { .. } => Vec::new(),
+                },
             },
         ) {
             Some(connection) => Some(connection),

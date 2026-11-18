@@ -454,6 +454,25 @@ impl Harness {
             .map(|(name, config, info)| (name.clone(), config.kind.clone(), info.provides.clone()))
     }
 
+    /// The variables that holding the account the first message chooses would set for the harness's program, with no
+    /// credential among them and nothing held or made: its directory and endpoint, as the harness's own provider names
+    /// them. A profile's layers read them before a session starts. The names the specification reserves are left out.
+    pub(crate) fn account_environment(&self, first: &[u8], any: bool) -> Vec<(String, String)> {
+        let (Some(offer), Ok(Some((_, config, info)))) = (&self.accounts, self.pick(first, any))
+        else {
+            return Vec::new();
+        };
+        let grant = offer.host.preview(config, info, self.runs());
+        let set = match self.id.as_str() {
+            "claude" => canoa_claude::acp::accounts::variables(&grant),
+            "codex" => canoa_codex::acp::accounts::variables(&grant),
+            _ => Vec::new(),
+        };
+        set.into_iter()
+            .filter(|(name, _)| !coqui_aos::is_reserved_variable(name))
+            .collect()
+    }
+
     /// The account the client's first message chooses for its connection, held for it: the one it names in `_meta`, else the
     /// entry's first; `None` for an entry that offers none. `holder` says who is holding it. With `any`, the client may also
     /// name an account of the provider the entry does not list, or `null` for the login the program has where it runs.

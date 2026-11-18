@@ -261,8 +261,10 @@ TEAM_NOTES = "${AOS_OVERLAY_ROOT}/notes/${AGENTS_HARNESS}"
 ```
 
 reads `notes/claude-code` for Claude Code and `notes/codex` for Codex. A variable the host itself sets for a session is
-read the same way; the endpoint and state folder an account gives a program are applied by its provider after these, so
-an overlay does not see them.
+read the same way, and so are the ones the account the session runs on gives the program: its state folder
+(`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) and endpoint (`ANTHROPIC_BASE_URL`), never a credential. The provider applies the
+account's after the profile's own variables, so a layer that sets one of them is told in the session's **Profile** line
+that the account's value is used.
 
 **Secrets** come from a reference, `from_env` or `from_file`, and are never written into a profile. A reference is
 resolved only when a session starts; the view shows the reference and the variable each MCP header or variable comes

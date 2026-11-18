@@ -610,3 +610,29 @@ fn an_unreachable_os_store_names_auto_and_file() {
 fn holds_files_in(home: &std::path::Path) -> bool {
     store::holds_files(&home.join("accounts"))
 }
+
+#[test]
+fn a_preview_names_the_directory_the_settings_and_the_standards_with_no_credential_and_makes_nothing()
+ {
+    let dir = Dir::new();
+    let accounts = accounts(&dir);
+    let mut info = AccountKindInfo::new("claude-login", "Claude");
+    info.state_dir = true;
+    let grant = accounts.preview(&config("id-p"), &info, Runs::plain("claude"));
+    let expected = accounts.state_dir("id-p");
+    assert_eq!(
+        grant.state_dir.as_deref(),
+        Some(expected.to_string_lossy().as_ref())
+    );
+    assert!(grant.credentials.expose().is_empty());
+    assert!(!expected.exists(), "a preview makes no directory");
+    // The login the program has where it runs has no directory of the host's.
+    let mut login = config("id-p");
+    login.kind = coqui_acp_api::HARNESS_LOGIN.to_owned();
+    assert!(
+        accounts
+            .preview(&login, &info, Runs::plain("claude"))
+            .state_dir
+            .is_none()
+    );
+}

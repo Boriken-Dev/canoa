@@ -2186,6 +2186,7 @@ fn an_overlay_reads_the_identity_variables_of_every_harness_and_the_agent_is_giv
                     ..Who::default()
                 },
                 host: Vec::new(),
+                account: Vec::new(),
             },
         );
         assert_eq!(
@@ -2207,6 +2208,7 @@ fn an_overlay_reads_the_identity_variables_of_every_harness_and_the_agent_is_giv
                 ..Who::default()
             },
             host: Vec::new(),
+            account: Vec::new(),
         },
     );
     assert_eq!(env_value(&connection, "WHO"), Some("pi"));
@@ -2221,6 +2223,7 @@ fn the_sessions_access_is_in_its_environment_and_an_overlay_reads_it() {
             ..Who::default()
         },
         host: Vec::new(),
+        account: Vec::new(),
     };
     // Nothing in a layer above the built-in one: the standard access.
     let connection = session_connection(
@@ -2274,6 +2277,7 @@ fn the_account_model_and_run_variables_are_set_only_when_they_have_a_value() {
                 ..Who::default()
             },
             host: Vec::new(),
+            account: Vec::new(),
         },
     );
     assert_eq!(
@@ -2297,6 +2301,7 @@ fn the_account_model_and_run_variables_are_set_only_when_they_have_a_value() {
                 ..Who::default()
             },
             host: Vec::new(),
+            account: Vec::new(),
         },
     );
     for name in [
@@ -2331,6 +2336,7 @@ fn an_overlays_own_value_replaces_an_identity_variable_and_the_hosts_variables_a
                 ..Who::default()
             },
             host: vec![("CODEX_HOME".to_owned(), "/state".to_owned())],
+            account: Vec::new(),
         },
     );
     assert_eq!(env_value(&connection, "AGENTS_MODEL"), Some("mine"));
@@ -2413,6 +2419,7 @@ fn access_connection(harness: Option<&'static str>, extra: &str) -> Connection {
                 ..Who::default()
             },
             host: Vec::new(),
+            account: Vec::new(),
         },
     )
     .expect("prepared")
@@ -2550,4 +2557,75 @@ fn a_variable_a_layer_sets_is_kept_and_the_report_says_the_access_did_not_set_it
     let parts = parts_for(&connection, Some("grok"), &Takes::default(), &lookup);
     let each = access_item(&parts, "access.env.GROK_SANDBOX").expect("reported");
     assert_eq!(each["state"], "not supported", "{each}");
+}
+
+#[test]
+fn a_layer_reads_the_variables_the_account_sets_before_the_hosts_own() {
+    let connection = session_connection(
+        "[env]\nSTATE = \"${CODEX_HOME}/x\"\nURL = \"${ANTHROPIC_BASE_URL}/v1\"\n",
+        Starting {
+            who: Who {
+                harness: Some("codex"),
+                ..Who::default()
+            },
+            host: vec![("CODEX_HOME".to_owned(), "/store".to_owned())],
+            account: vec![
+                ("CODEX_HOME".to_owned(), "/accounts/work/state".to_owned()),
+                (
+                    "ANTHROPIC_BASE_URL".to_owned(),
+                    "https://gateway.example".to_owned(),
+                ),
+            ],
+        },
+    );
+    assert_eq!(
+        env_value(&connection, "STATE"),
+        Some("/accounts/work/state/x")
+    );
+    assert_eq!(
+        env_value(&connection, "URL"),
+        Some("https://gateway.example/v1")
+    );
+    // What the host or the account sets is read, not handed on a second time.
+    assert_eq!(env_value(&connection, "ANTHROPIC_BASE_URL"), None);
+}
+
+#[test]
+fn a_layer_that_sets_what_the_account_sets_is_told_the_account_wins() {
+    let temp = temp_with_skill();
+    let offer = offer_of(
+        &temp,
+        &config_with(
+            "[host.profiles.main.env.ANTHROPIC_BASE_URL]\nvalue = \"https://layer.example\"\n",
+        ),
+    );
+    let connection = Connection::prepare_with(
+        &offer,
+        0,
+        "a",
+        &lookup,
+        Choices::default(),
+        Starting {
+            who: Who {
+                harness: Some("claude-code"),
+                ..Who::default()
+            },
+            host: Vec::new(),
+            account: vec![(
+                "ANTHROPIC_BASE_URL".to_owned(),
+                "https://gateway.example".to_owned(),
+            )],
+        },
+    )
+    .expect("prepared");
+    let parts = parts_for(&connection, Some("claude-code"), &Takes::default(), &lookup);
+    let each = access_item(&parts, "env.ANTHROPIC_BASE_URL").expect("reported");
+    assert_eq!(each["state"], "not supported", "{each}");
+    assert!(
+        each["how"].as_str().expect("how").contains("the account"),
+        "{each}"
+    );
+    // Another variable of the layer is still applied.
+    let token = access_item(&parts, "env.TOKEN").expect("reported");
+    assert_eq!(token["state"], "applied", "{token}");
 }

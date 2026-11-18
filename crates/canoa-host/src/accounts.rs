@@ -500,6 +500,25 @@ impl Accounts {
         Ok(grant)
     }
 
+    /// The grant [`Self::begin`] would give for the account `config` names, with no credential and nothing made: the
+    /// settings, the standards it provides and the directory its harness would run in. For the host to tell a profile's
+    /// layers what an account sets before a session starts.
+    pub(crate) fn preview(
+        &self,
+        config: &AccountConfig,
+        info: &AccountKindInfo,
+        runs: Runs<'_>,
+    ) -> AccountGrant {
+        let id = config.id.clone();
+        let mut grant = AccountGrant::new(id.clone(), config.kind.clone())
+            .settings(settings_value(config.settings.as_ref()))
+            .provides(info.provides.iter().cloned());
+        if config.kind != HARNESS_LOGIN && (info.state_dir || runs.directory(config, info)) {
+            grant = grant.state_dir(self.state_dir(&id).to_string_lossy().into_owned());
+        }
+        grant
+    }
+
     /// The account `name` of `config`, of the kind `info`, for one connection of `holder` to the harness `runs`, which may not
     /// be the one that made the account: the grant says which standards it provides, and `runs` applies it by one it accepts.
     pub(crate) fn begin(
