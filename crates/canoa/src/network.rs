@@ -138,6 +138,22 @@ pub struct ServerIdentity {
     pub sha256: Option<String>,
 }
 
+/// A client certificate a network can present, as a person chooses among them. It carries nothing secret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ClientIdentity {
+    /// The SHA-256 of the certificate as lower-case hex, which names it.
+    pub thumbprint: String,
+    /// Its subject (RFC 4514).
+    pub subject: String,
+    /// Its issuer (RFC 4514).
+    pub issuer: String,
+    /// When it expires, in seconds since the Unix epoch.
+    pub not_after: u64,
+    /// Where it is held: the keystore, or the file.
+    pub source: String,
+}
+
 /// A connection to a server over which TLS has been made and the server verified by this network's trust, and the client
 /// certificate it asked for answered from this network's keystores. It reads and writes the bytes inside the TLS.
 pub struct SecureConnection {
@@ -192,6 +208,8 @@ impl Write for SecureConnection {
 pub struct Network {
     resolver: Resolver,
     tls: TlsBuilder,
+    /// The identity of `client_certificate`'s file, which no keystore lists.
+    file_identity: Option<Identity>,
     negotiate: bool,
     git_tls: GitTls,
     endpoints: Vec<String>,
@@ -253,18 +271,25 @@ impl Network {
         if let Some(path) = &settings.ca_file {
             tls = tls.trust(Trust::Roots(read_roots(path)?));
         }
+        let mut file_identity = None;
         tls = tls.client_certificates(match &settings.client_certificate {
             ClientCertificate::System => ClientCertificates::Selector(Arc::new(Selector::system())),
             ClientCertificate::None => ClientCertificates::None,
-            ClientCertificate::File(path) => ClientCertificates::Identity(read_identity(path)?),
+            ClientCertificate::File(path) => {
+                let identity = read_identity(path)?;
+                file_identity = Some(identity.clone());
+                ClientCertificates::Identity(identity)
+            }
         });
-        Ok(Self::from_parts(
+        let mut network = Self::from_parts(
             resolver.build(),
             tls,
             settings.negotiate.unwrap_or(true),
             settings.git_tls,
             settings.endpoints.clone(),
-        ))
+        );
+        network.file_identity = file_identity;
+        Ok(network)
     }
 
     /// A network from a resolver and TLS settings of the caller's own, for a host or a test that
@@ -283,6 +308,7 @@ impl Network {
         Self {
             resolver,
             tls,
+            file_identity: None,
             negotiate,
             git_tls,
             endpoints,
@@ -383,6 +409,99 @@ impl Network {
     /// or the handshake fails (an untrusted or mismatched certificate, a server that wants a certificate this network cannot
     /// give).
     pub fn secure_tunnel(&self, url: &str) -> Result<SecureConnection, NetworkError> {
+        self.secure_tunnel_with(url, self.tls.clone())
+    }
+
+    /// [`secure_tunnel`](Self::secure_tunnel) presenting the certificate with `thumbprint` (SHA-256 in hex, as
+    /// [`client_identities`](Self::client_identities) lists it) to a server that asks for one, whatever authorities it names; `None`
+    /// presents what the network's own choice is, as `secure_tunnel` does.
+    ///
+    /// # Errors
+    ///
+    /// As [`secure_tunnel`](Self::secure_tunnel); and no connection is made when this network holds no certificate with that
+    /// thumbprint, it has expired or may not authenticate a client, or `client_certificate` is `none`.
+    pub fn secure_tunnel_as(
+        &self,
+        url: &str,
+        thumbprint: Option<&str>,
+    ) -> Result<SecureConnection, NetworkError> {
+        let Some(thumbprint) = thumbprint else {
+            return self.secure_tunnel(url);
+        };
+        let wanted = thumbprint.to_ascii_lowercase();
+        let identity = self
+            .identities()?
+            .into_iter()
+            .find(|identity| hex(identity.info().fingerprint()) == wanted)
+            .ok_or_else(|| {
+                NetworkError::new(alloc::format!(
+                    "no client certificate with the thumbprint {wanted} is available here"
+                ))
+            })?;
+        if !identity.info().valid_at(std::time::SystemTime::now()) {
+            return Err(NetworkError::new(alloc::format!(
+                "the client certificate {} is not valid now (expired or not yet valid)",
+                identity.info().subject()
+            )));
+        }
+        self.secure_tunnel_with(
+            url,
+            self.tls
+                .clone()
+                .client_certificates(ClientCertificates::Identity(identity)),
+        )
+    }
+
+    /// The client certificates this network can present, with what a person needs to tell them apart and never a key: the
+    /// operating system's keystores (the Windows store, the macOS Keychain, a PKCS#11 module where one is set up) when
+    /// `client_certificate` is `system`, the PEM file when it names one, none when it is `none`. Only those that may authenticate a
+    /// client are listed, those expiring last first.
+    pub fn client_identities(&self) -> Vec<ClientIdentity> {
+        let mut found: Vec<ClientIdentity> = self
+            .identities()
+            .unwrap_or_default()
+            .iter()
+            .map(|identity| {
+                let info = identity.info();
+                ClientIdentity {
+                    thumbprint: hex(info.fingerprint()),
+                    subject: info.subject().to_owned(),
+                    issuer: info.issuer().to_owned(),
+                    not_after: info
+                        .not_after()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |elapsed| elapsed.as_secs()),
+                    source: identity.label().to_owned(),
+                }
+            })
+            .collect();
+        found.sort_by_key(|identity| core::cmp::Reverse(identity.not_after));
+        found
+    }
+
+    /// Every identity this network may present, once each.
+    fn identities(&self) -> Result<Vec<Identity>, NetworkError> {
+        let tls = self.tls.clone().build()?;
+        let mut found: Vec<Identity> = self.file_identity.iter().cloned().collect();
+        if let Some(selector) = tls.selector() {
+            found.extend(selector.identities());
+        }
+        found.retain(|identity| identity.info().client_auth());
+        let mut seen = Vec::new();
+        found.retain(|identity| {
+            let print = *identity.info().fingerprint();
+            let new = !seen.contains(&print);
+            seen.push(print);
+            new
+        });
+        Ok(found)
+    }
+
+    fn secure_tunnel_with(
+        &self,
+        url: &str,
+        tls: TlsBuilder,
+    ) -> Result<SecureConnection, NetworkError> {
         let uri: ureq::http::Uri = url
             .parse()
             .map_err(|_| NetworkError::new("the address cannot be read"))?;
@@ -397,7 +516,7 @@ impl Network {
             .ok_or_else(|| NetworkError::new("the address names no host"))?;
         let name = ServerName::try_from(host.clone())
             .map_err(|_| NetworkError::new("the address names no valid server name"))?;
-        let tls = self.tls.clone().build()?;
+        let tls = tls.build()?;
         let connector = self.connector(&tls)?;
         let connection = connector.connect_url(&self.resolver, url)?;
         let config = tls.client_config(&host)?;
