@@ -69,7 +69,16 @@ impl ProfileItem for ProxyItem {
         let user = Field::new("user", "Proxy user name", "text");
         let mut password = Field::new("password_variable", "Variable holding the password", "text");
         password.help = Some("The name of an environment variable of the host that holds the proxy user's password; the password is never kept in the profile.".to_owned());
-        info.fields = vec![mode, url, command, bypass, user, password];
+        let mut certificate = Field::new(
+            "client_certificate_hosts",
+            "Hosts that get your client certificate",
+            "list",
+        );
+        certificate.help = Some(
+            "system and pac only. A host (example.com), a host and everything under it (*.example.com) or an address, one per line. For these alone the proxy ends the program's TLS with a certificate of this session's, signed by an authority kept in the host's home that the session's programs alone are told to trust, and makes its own TLS to the host, presenting the client certificate your keystores or [host.network] choose. A program that pins the certificates it trusts, or reads no CA file variable (Windows' own tools), fails for them. Empty ends no TLS."
+                .to_owned(),
+        );
+        info.fields = vec![mode, url, command, bypass, user, password, certificate];
         Ok(info)
     }
 
@@ -82,10 +91,12 @@ impl ProfileItem for ProxyItem {
         network.bypass = words(&values, "bypass");
         network.user = text(&values, "user");
         network.password_variable = text(&values, "password_variable");
+        network.intercept = words(&values, "client_certificate_hosts");
         if let Some(problem) = network.problem() {
             return Err(bad_value_error(problem));
         }
         let mut effect = ItemEffect::none();
+        let ended = network.intercept.join(", ");
         effect.network = Some(network);
         effect.notes.push(
             match mode.as_str() {
@@ -97,6 +108,11 @@ impl ProfileItem for ProxyItem {
             }
             .to_owned(),
         );
+        if !ended.is_empty() {
+            effect.notes.push(format!(
+                "ends TLS for {ended} to present your client certificate to them"
+            ));
+        }
         Ok(effect)
     }
 }

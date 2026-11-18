@@ -5,9 +5,12 @@
 //! its keystores, with the person's `[host.network]` overriding any of it. The programs the host starts (agents, runtimes, git)
 //! get the proxy as `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` when their environment names none.
 
-use canoa::network::Network;
+use std::sync::{PoisonError, RwLock};
+
+use canoa::network::{Network, NetworkSettings};
 
 pub(crate) mod session;
+pub(crate) mod session_ca;
 #[cfg(test)]
 pub(crate) mod standins;
 #[cfg(test)]
@@ -47,7 +50,21 @@ pub(crate) fn install(config: &NetworkConfig) -> Result<(), ConfigError> {
         what: format!("network: {error}"),
     })?;
     Network::install(network);
+    *INSTALLED.write().unwrap_or_else(PoisonError::into_inner) = Some(settings);
     Ok(())
+}
+
+/// What [`install`] last made the process's network from.
+static INSTALLED: RwLock<Option<NetworkSettings>> = RwLock::new(None);
+
+/// The settings the process's network was made from: the roots it trusts and the client certificate it presents, which a session's
+/// own network keeps while it chooses its own proxy. The defaults when none was installed.
+pub(crate) fn installed_settings() -> NetworkSettings {
+    INSTALLED
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+        .unwrap_or_default()
 }
 
 /// The proxy variables of a program that reaches what programs usually reach.

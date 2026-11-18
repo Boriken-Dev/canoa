@@ -122,6 +122,8 @@ windows-registry = "0.6"
 win32job = "2.0.3"
 is_elevated = "0.1"
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+# The roots the operating system trusts, as a program that reads a CA file is given them beside the session proxy's authority; already in the graph.
+rustls-native-certs = "0.8"
 windows-permissions = "0.2"
 win-msgbox = "0.2"
 object = { version = "0.40", default-features = false, features = ["read_core", "pe", "std"] }

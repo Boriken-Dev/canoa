@@ -186,6 +186,7 @@ variables = ["TEAM=core"]              # any other NAME=value
 
 [profiles."Behind the gateway".items.proxy]
 mode = "system"                        # system (the default), none, proxy, pac or command
+client_certificate_hosts = ["api.corp.example", "*.mtls.example"]   # system and pac: hosts the proxy presents your client certificate to
 ```
 
 A session applies each item its profile holds when it starts, and a started session's profile report lists each (`items.ID`) and what it became, by
@@ -217,8 +218,25 @@ extension back applies them again.
   must listen on); the host starts it for the session, waits until it listens, gives its address to the programs and ends it with
   the session.
 
-A client certificate (mTLS) to an origin is not added: a CONNECT tunnel carries the TLS the program itself makes, and a proxy
-cannot add one without ending that TLS.
+**A client certificate to an origin** (mTLS) is carried only where you ask, for the hosts `client_certificate_hosts` names (a host,
+`*.name` for a name and everything under it, or an address) and only by the `system` and `pac` modes, whose proxy is the host's
+own. A CONNECT tunnel carries the TLS the program makes itself, so a proxy cannot add a certificate to it; for these hosts alone
+the proxy ends the program's TLS instead. It makes its own TLS to the host first, through the network: the server is verified as
+the operating system verifies it and the client certificate your keystores (or `[host.network] client_certificate`) choose is
+presented, and a host that cannot be verified, or that wants a certificate you have none for, is the program's `502` with the
+reason. It then answers the program's TLS with a certificate for that host signed by an authority the host keeps in its home
+(`network/session-ca/ca.pem`, one per home, readable by you alone, made again each year), a certificate of this session's own,
+and carries the bytes between. Every other host stays a tunnel, untouched.
+
+The session's programs are told to trust that authority, and nothing else is: it is never added to the operating system's store,
+your browser's or any other of your programs'. Its certificate, with the operating system's roots beside it where a program
+replaces its roots by a file, is written in the session's private directory, which goes with the session, and named by
+`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `PIP_CERT`, `CARGO_HTTP_CAINFO` and
+`NPM_CONFIG_CAFILE` (and, alone, by `NODE_EXTRA_CA_CERTS`, which adds to the roots Node carries). Its key is in no variable, no
+report and no file a program is given. A program that reads none of these, uses its own trust (Windows' own tools, a browser)
+or pins the certificates it accepts fails for those hosts: nothing can be done about that here. A host both named here and on
+`bypass` is reached as the network chooses, not directly. What the session's report says of the proxy names the hosts it ends TLS
+for.
 
 A later layer wins per key. Environment variables, skills and MCP servers merge by name: a later layer's entry replaces a
 lower one's whole and keeps its place, and `remove = true` takes it out. `unset = ["model"]` takes back a lower layer's

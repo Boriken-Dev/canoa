@@ -54,6 +54,24 @@ pub(super) fn make(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Makes `dir` (and any parent it lacks) a directory of this user's alone that stays: unlike [`make`] it may be there already, from
+/// an earlier run, and is then made this user's alone again.
+///
+/// # Errors
+///
+/// The directory cannot be made, or is not, once made, this user's alone.
+pub(crate) fn keep(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    #[cfg(unix)]
+    {
+        std::fs::set_permissions(dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
+        check(dir)?;
+    }
+    #[cfg(windows)]
+    protect(dir)?;
+    Ok(())
+}
+
 /// Makes `path` inside a directory made by [`make`]: it must not exist, and only this user can enter it.
 ///
 /// # Errors

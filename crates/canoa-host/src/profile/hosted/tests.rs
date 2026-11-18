@@ -2596,6 +2596,7 @@ fn an_overlay_reads_the_identity_variables_of_every_harness_and_the_agent_is_giv
                     ..Who::default()
                 },
                 host: Vec::new(),
+                home: None,
                 account: Vec::new(),
             },
         );
@@ -2619,6 +2620,7 @@ fn an_overlay_reads_the_identity_variables_of_every_harness_and_the_agent_is_giv
                     ..Who::default()
                 },
                 host: Vec::new(),
+                home: None,
                 account: Vec::new(),
             },
         );
@@ -2643,6 +2645,7 @@ fn the_sessions_access_is_in_its_environment_and_an_overlay_reads_it() {
             ..Who::default()
         },
         host: Vec::new(),
+        home: None,
         account: Vec::new(),
     };
     // Nothing in a layer above the built-in one: the standard access.
@@ -2697,6 +2700,7 @@ fn the_account_model_and_run_variables_are_set_only_when_they_have_a_value() {
                 ..Who::default()
             },
             host: Vec::new(),
+            home: None,
             account: Vec::new(),
         },
     );
@@ -2721,6 +2725,7 @@ fn the_account_model_and_run_variables_are_set_only_when_they_have_a_value() {
                 ..Who::default()
             },
             host: Vec::new(),
+            home: None,
             account: Vec::new(),
         },
     );
@@ -2756,6 +2761,7 @@ fn an_overlays_own_value_replaces_an_identity_variable_and_the_hosts_variables_a
                 ..Who::default()
             },
             host: vec![("CODEX_HOME".to_owned(), "/state".to_owned())],
+            home: None,
             account: Vec::new(),
         },
     );
@@ -2839,6 +2845,7 @@ fn access_connection(harness: Option<&'static str>, extra: &str) -> Connection {
                 ..Who::default()
             },
             host: Vec::new(),
+            home: None,
             account: Vec::new(),
         },
     )
@@ -3037,6 +3044,7 @@ fn a_layer_reads_the_variables_the_account_sets_before_the_hosts_own() {
                 ..Who::default()
             },
             host: vec![("CODEX_HOME".to_owned(), "/store".to_owned())],
+            home: None,
             account: vec![
                 ("CODEX_HOME".to_owned(), "/accounts/work/state".to_owned()),
                 (
@@ -3079,6 +3087,7 @@ fn a_layer_that_sets_what_the_account_sets_is_told_the_account_wins() {
                 ..Who::default()
             },
             host: Vec::new(),
+            home: None,
             account: vec![(
                 "ANTHROPIC_BASE_URL".to_owned(),
                 "https://gateway.example".to_owned(),
@@ -3443,10 +3452,11 @@ fn the_bundled_proxy_item_gives_the_sessions_programs_the_network_its_mode_names
         "applied",
         "{report}"
     );
-    // None: no proxy variable at all.
+    // None: no proxy, which the host's own starter takes for no system proxy to add.
     let none = offer_for("mode = \"none\"\n");
     let (connection, report) = item_report(&none, None);
     assert_eq!(var(&connection, "HTTPS_PROXY"), None);
+    assert_eq!(var(&connection, "NO_PROXY"), Some("*"));
     assert_eq!(
         item(&report, "items.proxy.network")["state"],
         "applied",
@@ -3487,6 +3497,57 @@ fn the_bundled_proxy_item_gives_the_sessions_programs_the_network_its_mode_names
     assert_eq!(
         var(&connection, "HTTPS_PROXY"),
         Some("http://mine.example:1")
+    );
+}
+
+#[test]
+fn the_proxy_item_ends_tls_for_the_hosts_it_names_and_the_authoritys_key_is_not_in_the_session() {
+    let temp = temp_with_skill();
+    let offer_for = |items: &str| {
+        offer_with_items(
+            &temp,
+            &format!("[profiles.default.items.proxy]\n{items}"),
+            crate::profile::items::ItemCatalog::from_registries(Vec::new()),
+        )
+    };
+    let named =
+        offer_for("client_certificate_hosts = [\"api.example.test\", \"*.corp.example\"]\n");
+    let (connection, report) = item_report(&named, None);
+    let bundle = var(&connection, "SSL_CERT_FILE")
+        .expect("a bundle")
+        .to_owned();
+    assert!(
+        std::path::Path::new(&bundle).starts_with(connection.skills()),
+        "{bundle} is in the connection's private directory"
+    );
+    let text = std::fs::read_to_string(&bundle).expect("written");
+    assert!(text.contains("BEGIN CERTIFICATE") && !text.contains("PRIVATE KEY"));
+    assert!(var(&connection, "NODE_EXTRA_CA_CERTS").is_some());
+    let how = item(&report, "items.proxy.network")["how"]
+        .as_str()
+        .expect("text");
+    assert!(
+        how.contains("api.example.test") && how.contains("*.corp.example"),
+        "{how}"
+    );
+    assert!(
+        !report.to_string().contains("PRIVATE KEY"),
+        "no key in the report"
+    );
+    // With no proxy of the host's own to end TLS in, the profile is told so and nothing is ended.
+    let wrong = offer_for("mode = \"none\"\nclient_certificate_hosts = [\"api.example.test\"]\n");
+    let (connection, report) = item_report(&wrong, None);
+    assert_eq!(var(&connection, "SSL_CERT_FILE"), None);
+    assert_eq!(
+        item(&report, "items.proxy")["state"],
+        "not supported",
+        "{report}"
+    );
+    assert!(
+        item(&report, "items.proxy")["how"]
+            .as_str()
+            .is_some_and(|how| how.contains("system or pac")),
+        "{report}"
     );
 }
 

@@ -84,6 +84,10 @@ indexmap.workspace = true
 percent-encoding.workspace = true
 # The include and exclude filters of a knowledge index.
 rustls.workspace = true
+# The authority a session's proxy signs with when a profile has it carry a client certificate, and the roots the operating system
+# trusts that a program is given with it.
+rcgen.workspace = true
+rustls-native-certs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # An upload travels in base64; already in the graph (the web_peer example reads it too).
@@ -141,8 +145,6 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security_Authentication_Identity", "Win32_Security_Credentials"] }
 
 [dev-dependencies]
-# A certificate for the web app's HTTPS tests, at the version the bridge library (coqui-acp-bridge) already builds.
-rcgen.workspace = true
 # The keystore stand-in of the network tests names its identity source.
 coqui-syshttp.workspace = true
 # The peers the web_peer example plays the page of; already in the graph through coqui-acp-bridge.

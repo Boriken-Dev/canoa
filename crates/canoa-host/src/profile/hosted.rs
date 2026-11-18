@@ -110,7 +110,7 @@ const APPROVE_WAIT: Duration = Duration::from_secs(120);
 
 mod cache;
 mod hooks;
-mod private;
+pub(crate) mod private;
 pub(crate) use hooks::forward as forward_hook;
 mod template;
 
@@ -502,6 +502,8 @@ pub(crate) struct Starting<'a> {
     pub(crate) who: Who<'a>,
     /// Variables the host sets for the session itself, which layers read and may set their own from.
     pub(crate) host: Vec<(String, String)>,
+    /// The host's home, where the authority a session's proxy signs with is kept; none for a host without one.
+    pub(crate) home: Option<&'a Path>,
     /// The variables the account the session runs on sets for the agent, with no credential among them: layers read them, and
     /// the provider applies them after the profile's own environment, so a layer that sets one of them is told it does not
     /// take effect.
@@ -864,6 +866,7 @@ impl Connection {
         }
         // How the session's programs reach the network, as the last item that asks for one says: its variables are given unless the
         // profile's own environment names the same, and the host's own requests for the session go through the same network.
+        let skills = private::Private::new("canoa-profile");
         let mut session_network = None;
         if let Some(asked) = items::network_of(&applied) {
             let id = applied
@@ -875,7 +878,27 @@ impl Connection {
                 .map(|each| each.id.clone())
                 .unwrap_or_default();
             let layer = LayerId::new(LayerKind::Session, "");
-            match crate::network::session::start(asked, lookup) {
+            // What the session's programs are given to trust, when the proxy ends TLS for some destinations, goes in the connection's
+            // private directory, which is made only for that.
+            let private = if asked.intercept.is_empty() {
+                Ok(None)
+            } else {
+                skills.ensure().map(Some)
+            };
+            let services = match &private {
+                Ok(dir) => crate::network::session::Services {
+                    home: starting_with.home,
+                    private: *dir,
+                },
+                Err(_) => crate::network::session::Services::default(),
+            };
+            let made = match &private {
+                Err(error) => Err(format!(
+                    "the session's private directory could not be made: {error}"
+                )),
+                Ok(_) => crate::network::session::start(asked, lookup, &services),
+            };
+            match made {
                 Ok(started) => {
                     for (name, value) in &started.variables {
                         if !env.iter().any(|(each, _)| same_name(each, name)) {
@@ -960,7 +983,6 @@ impl Connection {
                 ));
             }
         }
-        let skills = private::Private::new("canoa-profile");
         Ok(Self {
             name: name.clone(),
             entry: entry.to_owned(),

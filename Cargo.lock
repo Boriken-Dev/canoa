@@ -891,6 +891,7 @@ dependencies = [
  "rpassword",
  "rustix",
  "rustls",
+ "rustls-native-certs",
  "serde",
  "serde-saphyr",
  "serde_json",

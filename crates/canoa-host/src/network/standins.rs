@@ -264,6 +264,8 @@ pub(crate) enum ClientAuth {
     Off,
     /// Asks, and refuses a client with none.
     Required,
+    /// Asks, and goes on with a client that has none.
+    Optional,
 }
 
 /// What the server answers: its body for a path, given whether the client sent a certificate.
@@ -291,16 +293,19 @@ impl TlsServer {
             .expect("versions");
         let builder = match auth {
             ClientAuth::Off => builder.with_no_client_auth(),
-            ClientAuth::Required => {
+            ClientAuth::Required | ClientAuth::Optional => {
                 let mut roots = RootCertStore::empty();
                 for root in client_roots {
                     roots.add(root.clone()).expect("root");
                 }
                 let verifier =
-                    WebPkiClientVerifier::builder_with_provider(Arc::new(roots), provider)
-                        .build()
-                        .expect("verifier");
-                builder.with_client_cert_verifier(verifier)
+                    WebPkiClientVerifier::builder_with_provider(Arc::new(roots), provider);
+                let verifier = if auth == ClientAuth::Optional {
+                    verifier.allow_unauthenticated()
+                } else {
+                    verifier
+                };
+                builder.with_client_cert_verifier(verifier.build().expect("verifier"))
             }
         };
         let config = Arc::new(

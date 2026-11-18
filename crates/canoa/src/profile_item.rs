@@ -195,6 +195,11 @@ pub struct NetworkEffect {
     pub user: Option<String>,
     /// The name of the host's environment variable that holds that user's password; the password itself is never in a profile.
     pub password_variable: Option<String>,
+    /// The destinations whose TLS the host's proxy for the session ends, so as to present the person's client certificate to them:
+    /// each is a host name (`example.com`), a name and everything under it (`*.example.com`) or an address. Only `system` and
+    /// `pac`, which run that proxy, take it; every destination not named stays a tunnel the program's own TLS runs through.
+    #[map(default)]
+    pub intercept: Vec<String>,
 }
 
 /// The ways [`NetworkEffect::mode`] says the session reaches the network.
@@ -217,6 +222,7 @@ impl NetworkEffect {
             bypass: Vec::new(),
             user: None,
             password_variable: None,
+            intercept: Vec::new(),
         }
     }
 
@@ -232,6 +238,9 @@ impl NetworkEffect {
         let needs = |what: &str, given: bool| {
             (!given).then(|| alloc::format!("the network mode {} needs {what}", self.mode))
         };
+        if let Some(why) = self.intercept_problem() {
+            return Some(why);
+        }
         match self.mode.as_str() {
             "proxy" | "pac" => needs(
                 "an address",
@@ -243,6 +252,37 @@ impl NetworkEffect {
             ),
             _ => None,
         }
+    }
+}
+
+impl NetworkEffect {
+    /// Why [`NetworkEffect::intercept`] cannot be used, or `None`.
+    fn intercept_problem(&self) -> Option<String> {
+        if self.intercept.is_empty() {
+            return None;
+        }
+        if !matches!(self.mode.as_str(), "system" | "pac") {
+            return Some(alloc::format!(
+                "a client certificate is carried by the host's own proxy, which the network mode {} does not run: use system or pac",
+                self.mode
+            ));
+        }
+        self.intercept.iter().find_map(|entry| {
+            let name = entry.strip_prefix("*.").unwrap_or(entry);
+            let plain = name.parse::<core::net::IpAddr>().is_ok()
+                || (!name.is_empty()
+                    && name.len() <= 253
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'))
+                    && !name.starts_with(['.', '-'])
+                    && !name.ends_with(['.', '-']));
+            (!plain).then(|| {
+                alloc::format!(
+                    "{entry:?} is not a host name, a *.name or an address: write the host alone, with no scheme, port or path"
+                )
+            })
+        })
     }
 }
 
@@ -393,5 +433,45 @@ mod tests {
         let mut other = ItemEffect::none();
         other.network = Some(NetworkEffect::new("tor"));
         assert!(other.problem().is_some());
+    }
+
+    #[test]
+    fn hosts_that_get_a_client_certificate_are_plain_hosts_and_need_the_proxy_the_host_runs() {
+        for mode in ["system", "pac"] {
+            let mut network = NetworkEffect::new(mode);
+            network.url = Some("proxy.pac".into());
+            network.intercept = alloc::vec![
+                "example.com".into(),
+                "*.corp.example".into(),
+                "10.0.0.7".into(),
+                "::1".into()
+            ];
+            assert_eq!(network.problem(), None, "{mode}");
+        }
+        for mode in ["none", "proxy", "command"] {
+            let mut network = NetworkEffect::new(mode);
+            network.url = Some("http://proxy.example:3128".into());
+            network.command = alloc::vec!["proxy".into()];
+            network.intercept = alloc::vec!["example.com".into()];
+            assert!(
+                network
+                    .problem()
+                    .is_some_and(|why| why.contains("system or pac")),
+                "{mode}"
+            );
+        }
+        for bad in [
+            "https://example.com",
+            "example.com/path",
+            "example.com:8443",
+            "",
+            "*.",
+            ".example.com",
+            "exa mple.com",
+        ] {
+            let mut network = NetworkEffect::new("system");
+            network.intercept = alloc::vec![bad.into()];
+            assert!(network.problem().is_some(), "{bad:?}");
+        }
     }
 }

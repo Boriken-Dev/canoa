@@ -6,14 +6,22 @@
 //! system's settings or the PAC script per destination, logs in to the proxy (Basic, Negotiate, NTLM) and carries it through a CONNECT
 //! tunnel. Hosts on the bypass list go direct. Only a program that has the session's secret may use it: the address handed to the
 //! session's programs carries a token as the proxy's password, since the proxy answers with the person's own logon session.
+//!
+//! A profile may name destinations that want a client certificate. For those alone the proxy ends the program's TLS with a
+//! certificate it signs for the destination, as an authority kept in the home does ([`super::session_ca`]), and makes its own TLS to
+//! the destination through the network, which verifies it as the operating system does and presents the client certificate the
+//! person's keystores or `[host.network]` choose. A program is told to trust that authority by the variables its session gets, and
+//! by nothing else; every other destination stays a tunnel the program's own TLS runs through.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
     reason = "sockets, threads and clocks are std's"
 )]
 
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -21,9 +29,12 @@ use std::time::{Duration, Instant};
 
 use canoa::network::{
     BypassRules, Connection, Dialect, Network, NetworkSettings, ProxyChoice, Secret,
+    SecureConnection,
 };
 use canoa::profile_item::NetworkEffect;
+use rustls::{ServerConfig, ServerConnection, StreamOwned};
 
+use super::session_ca::SessionCa;
 use crate::control::tunnel::{Upstream, carry};
 
 /// How long a client has to send its request's head.
@@ -36,6 +47,19 @@ const CONNECT_SECONDS: u64 = 20;
 const LISTEN_SECONDS: u64 = 10;
 /// The user name the proxy's address carries; the password is the token.
 const PROXY_USER: &str = "canoa";
+/// How long each end of a connection whose TLS is ended here waits for something to read before the other is looked at: such a
+/// stream cannot be read and written from two threads.
+const POLL: Duration = Duration::from_millis(5);
+
+/// What the host has for a session's network beyond what its profile says.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Services<'a> {
+    /// The host's home, where the authority a proxy signs with is kept; the authority lives only in this process without one.
+    pub(crate) home: Option<&'a Path>,
+    /// The session's private directory, where what its programs are given to trust is written; made by the caller, and only when
+    /// the profile names destinations to end TLS for.
+    pub(crate) private: Option<&'a Path>,
+}
 
 /// What a session's network is: the variables its programs are given, the network the host's requests for it use, and what keeps the
 /// proxy running until the session ends.
@@ -75,6 +99,7 @@ enum Keep {
 pub(crate) fn start(
     effect: &NetworkEffect,
     lookup: &dyn Fn(&str) -> Option<String>,
+    services: &Services<'_>,
 ) -> Result<SessionNetwork, String> {
     match effect.mode.as_str() {
         "none" => {
@@ -104,12 +129,17 @@ pub(crate) fn start(
             let url = effect.url.clone().unwrap_or_default();
             let network = Network::new(&settings(ProxyChoice::Pac(url), effect, lookup)?)
                 .map_err(|error| error.to_string())?;
-            middleman(Arc::new(network), effect, "chosen by the PAC script")
+            middleman(
+                Arc::new(network),
+                effect,
+                "chosen by the PAC script",
+                services,
+            )
         }
         "command" => program(effect),
         _ => {
             let network = Network::current();
-            middleman(network, effect, "following the system")
+            middleman(network, effect, "following the system", services)
         }
     }
 }
@@ -119,11 +149,23 @@ fn settings(
     effect: &NetworkEffect,
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Result<NetworkSettings, String> {
-    let mut settings = NetworkSettings::default();
+    settings_over(super::installed_settings(), proxy, effect, lookup)
+}
+
+/// `base` with the proxy, login and bypass list the profile names. What `[host.network]` says of the roots to trust and the client
+/// certificate to present is kept; the proxy and its login are the profile's alone, and the host's own proxy login is never given to
+/// another proxy.
+fn settings_over(
+    base: NetworkSettings,
+    proxy: ProxyChoice,
+    effect: &NetworkEffect,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Result<NetworkSettings, String> {
+    let mut settings = base;
     settings.proxy = proxy;
-    if !effect.bypass.is_empty() {
-        settings.no_proxy = Some(effect.bypass.clone());
-    }
+    settings.proxy_user = None;
+    settings.proxy_password = None;
+    settings.no_proxy = (!effect.bypass.is_empty()).then(|| effect.bypass.clone());
     if let Some(user) = &effect.user {
         settings.proxy_user = Some(user.clone());
         if let Some(name) = &effect.password_variable {
@@ -140,23 +182,136 @@ fn middleman(
     network: Arc<Network>,
     effect: &NetworkEffect,
     how: &str,
+    services: &Services<'_>,
 ) -> Result<SessionNetwork, String> {
     let bypass =
         BypassRules::from_entries(effect.bypass.iter().map(String::as_str), Dialect::NoProxy);
     let token =
         new_token().map_err(|error| format!("a token for the proxy could not be made: {error}"))?;
-    let proxy = Middleman::start(Arc::clone(&network), bypass, &token)
+    let (intercept, trust) = if effect.intercept.is_empty() {
+        (None, Vec::new())
+    } else {
+        let (intercept, trust) = authority(&effect.intercept, services)?;
+        (Some(intercept), trust)
+    };
+    let proxy = Middleman::start(Arc::clone(&network), bypass, &token, intercept)
         .map_err(|error| format!("the proxy could not listen: {error}"))?;
-    let variables = loopback_variables(
+    let mut variables = loopback_variables(
         &format!("http://{PROXY_USER}:{token}@{}", proxy.addr),
         &effect.bypass,
     );
+    variables.extend(trust);
+    let ends = if effect.intercept.is_empty() {
+        String::new()
+    } else {
+        format!(
+            ", which ends TLS for {} to present your client certificate to them (a program that pins the certificates it trusts will refuse the one it is given)",
+            effect.intercept.join(", ")
+        )
+    };
     Ok(SessionNetwork {
         variables,
         network,
-        description: format!("through a proxy on {} {how}", proxy.addr),
+        description: format!("through a proxy on {} {how}{ends}", proxy.addr),
         _keep: Keep::Proxy(proxy),
     })
+}
+
+/// What ends TLS for the hosts a profile names, and the variables that tell the session's programs to trust it.
+type Trusted = (Arc<Intercept>, Vec<(String, String)>);
+
+/// The files the session's programs trust the proxy's authority by, and the variables that name them: the authority alone for a
+/// program that adds to the roots it carries, the authority and the operating system's roots for one that takes its roots from a
+/// file. Nothing is added to any store; the key stays in the home.
+fn authority(hosts: &[String], services: &Services<'_>) -> Result<Trusted, String> {
+    let private = services.private.ok_or_else(|| {
+        "the session has no private directory to keep what its programs trust in".to_owned()
+    })?;
+    let ca = Arc::new(SessionCa::open(services.home)?);
+    let only = private.join("session-ca.pem");
+    let roots = private.join("session-roots.pem");
+    std::fs::write(&only, ca.certificate_pem())
+        .and_then(|()| std::fs::write(&roots, ca.with_system_roots()))
+        .map_err(|error| format!("what its programs trust could not be written: {error}"))?;
+    let (only, roots) = (
+        only.to_string_lossy().into_owned(),
+        roots.to_string_lossy().into_owned(),
+    );
+    let mut variables = vec![("NODE_EXTRA_CA_CERTS".to_owned(), only)];
+    for name in [
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "GIT_SSL_CAINFO",
+        "PIP_CERT",
+        "CARGO_HTTP_CAINFO",
+        "NPM_CONFIG_CAFILE",
+    ] {
+        variables.push((name.to_owned(), roots.clone()));
+    }
+    Ok((Arc::new(Intercept::new(hosts, ca)), variables))
+}
+
+/// The destinations whose TLS the proxy ends, and the certificates it answers them with.
+pub(crate) struct Intercept {
+    /// Lower case; `*.name` takes the name and everything under it.
+    hosts: Vec<String>,
+    ca: Arc<SessionCa>,
+    /// A certificate and key of this session for each destination, made when first asked.
+    configs: Mutex<HashMap<String, Arc<ServerConfig>>>,
+}
+
+impl Intercept {
+    pub(crate) fn new(hosts: &[String], ca: Arc<SessionCa>) -> Self {
+        Self {
+            hosts: hosts.iter().map(|host| host.to_ascii_lowercase()).collect(),
+            ca,
+            configs: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Whether the proxy ends TLS for `host`.
+    fn covers(&self, host: &str) -> bool {
+        let host = host.trim_end_matches('.').to_ascii_lowercase();
+        let address = host.parse::<core::net::IpAddr>().ok();
+        self.hosts
+            .iter()
+            .any(|entry| match entry.strip_prefix("*.") {
+                Some(suffix) => {
+                    host == suffix
+                        || host
+                            .strip_suffix(suffix)
+                            .is_some_and(|front| front.ends_with('.'))
+                }
+                None => match (address, entry.parse::<core::net::IpAddr>().ok()) {
+                    (Some(asked), Some(named)) => asked == named,
+                    _ => *entry == host,
+                },
+            })
+    }
+
+    /// What answers a program's TLS for `host`.
+    fn config(&self, host: &str) -> Result<Arc<ServerConfig>, String> {
+        let name = host.trim_end_matches('.').to_ascii_lowercase();
+        let mut held = self.configs.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(config) = held.get(&name) {
+            return Ok(Arc::clone(config));
+        }
+        let leaf = self.ca.leaf(&name)?;
+        let mut config =
+            ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+                .with_safe_default_protocol_versions()
+                .map_err(|error| error.to_string())?
+                .with_no_client_auth()
+                .with_single_cert(leaf.chain, leaf.key)
+                .map_err(|error| error.to_string())?;
+        // What the destination is asked is plain HTTP/1.1 inside a TLS the network makes with no ALPN, so that is all a program is
+        // offered.
+        config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        let config = Arc::new(config);
+        held.insert(name, Arc::clone(&config));
+        Ok(config)
+    }
 }
 
 /// What says no proxy to a program: `NO_PROXY=*` is read by every client that reads a proxy from its environment, and the host's
@@ -209,6 +364,7 @@ pub(crate) struct Middleman {
 struct Shared {
     network: Arc<Network>,
     bypass: BypassRules,
+    intercept: Option<Arc<Intercept>>,
     /// `Basic` and the base64 of `canoa:token`, which a request must carry.
     wanted: String,
 }
@@ -220,6 +376,7 @@ impl Middleman {
         network: Arc<Network>,
         bypass: BypassRules,
         token: &str,
+        intercept: Option<Arc<Intercept>>,
     ) -> io::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let addr = listener.local_addr()?;
@@ -227,6 +384,7 @@ impl Middleman {
         let shared = Arc::new(Shared {
             network,
             bypass,
+            intercept,
             wanted: format!(
                 "Basic {}",
                 data_encoding::BASE64.encode(format!("{PROXY_USER}:{token}").as_bytes())
@@ -348,6 +506,10 @@ fn handle(client: Arc<TcpStream>, shared: &Shared) {
             reply(&mut client, "400 Bad Request", "CONNECT names host:port");
             return;
         };
+        if let Some(intercept) = shared.intercept.as_ref().filter(|each| each.covers(&host)) {
+            ended_here(client, &rest, shared, intercept, (&host, port));
+            return;
+        }
         let upstream = match open(shared, &host, port, "https") {
             Ok(upstream) => upstream,
             Err(why) => {
@@ -422,6 +584,126 @@ fn handle(client: Arc<TcpStream>, shared: &Shared) {
     }
     let _ = client.set_read_timeout(None);
     carry(client.0, upstream);
+}
+
+/// A CONNECT to a destination whose TLS the proxy ends: the destination is reached first, with the TLS the network makes (so a
+/// destination that cannot be verified, or wants a certificate the person has none for, is the program's `502` and not a broken
+/// handshake), then the program's own TLS is answered with a certificate of this session's, and the bytes between are carried.
+fn ended_here(
+    mut client: Wire,
+    rest: &[u8],
+    shared: &Shared,
+    intercept: &Intercept,
+    (host, port): (&str, u16),
+) {
+    let shown = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_owned()
+    };
+    let config = match intercept.config(host) {
+        Ok(config) => config,
+        Err(why) => {
+            reply(&mut client, "502 Bad Gateway", &why);
+            return;
+        }
+    };
+    let upstream = match shared
+        .network
+        .secure_tunnel(&format!("https://{shown}:{port}"))
+    {
+        Ok(upstream) => upstream,
+        Err(error) => {
+            reply(
+                &mut client,
+                "502 Bad Gateway",
+                &format!("{host}:{port} could not be reached with its TLS ended here: {error}"),
+            );
+            return;
+        }
+    };
+    let Ok(connection) = ServerConnection::new(config) else {
+        return;
+    };
+    if client
+        .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+        .is_err()
+    {
+        return;
+    }
+    let mut program = StreamOwned::new(connection, client);
+    if !rest.is_empty() {
+        let mut bytes = io::Cursor::new(rest);
+        while usize::try_from(bytes.position()).is_ok_and(|read| read < rest.len()) {
+            if program.conn.read_tls(&mut bytes).is_err()
+                || program.conn.process_new_packets().is_err()
+            {
+                return;
+            }
+        }
+    }
+    let _ = program
+        .sock
+        .set_read_timeout(Some(Duration::from_secs(HEAD_SECONDS)));
+    while program.conn.is_handshaking() {
+        if program.conn.complete_io(&mut program.sock).is_err() {
+            return;
+        }
+    }
+    carry_decrypted(program, upstream);
+}
+
+/// Carries what the program says (its TLS ended here) to the destination and back, on one thread, since neither end's TLS can be read
+/// and written from two.
+fn carry_decrypted(
+    mut program: StreamOwned<ServerConnection, Wire>,
+    mut upstream: SecureConnection,
+) {
+    let _ = program.sock.set_read_timeout(Some(POLL));
+    let _ = upstream.socket().set_read_timeout(Some(POLL));
+    let _ = upstream.socket().set_write_timeout(None);
+    let idle = |error: &io::Error| {
+        matches!(
+            error.kind(),
+            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+        )
+    };
+    let mut buffer = vec![0u8; 16 * 1024];
+    loop {
+        match upstream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => {
+                if program
+                    .write_all(&buffer[..count])
+                    .and_then(|()| program.flush())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Err(error) if idle(&error) => {}
+            Err(_) => break,
+        }
+        match program.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => {
+                if upstream
+                    .write_all(&buffer[..count])
+                    .and_then(|()| upstream.flush())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Err(error) if idle(&error) => {}
+            Err(_) => break,
+        }
+    }
+    program.conn.send_close_notify();
+    let _ = program.flush();
+    let _ = program.sock.0.shutdown(Shutdown::Both);
+    upstream.close_notify();
+    let _ = upstream.socket().shutdown(Shutdown::Both);
 }
 
 /// Whether `a` and `b` are the same bytes, whatever the first difference.
@@ -585,3 +867,6 @@ fn program(effect: &NetworkEffect) -> Result<SessionNetwork, String> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod ended;
