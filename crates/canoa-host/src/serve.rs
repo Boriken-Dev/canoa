@@ -559,8 +559,6 @@ struct Shared {
     /// What gives a connection's sessions the store tools (search and inspect).
     store_tools: Arc<store_mcp::Hub>,
     kb_tools: Arc<kb_mcp::Hub>,
-    /// The host's home, where what a session's network keeps for it (the authority its proxy signs with) is kept; none without one.
-    home: Option<PathBuf>,
     /// What gives a connection's sessions the tools programs offer (a browser extension's), and takes their offers.
     client_tools: Arc<client_tools::Hub>,
     /// What `[host.control]` grants each key, and what every key holds beside it: the store tools are given only to a key that
@@ -1895,7 +1893,6 @@ impl Serving {
                     config.store.tools.unwrap_or(true),
                     delegate::BridgeCommand::new(&options.provider_program, &options.program_args),
                 ),
-                home: options.state_dir.clone(),
                 kb_tools: kb_mcp::Hub::new(
                     &config.kb,
                     options.state_dir.clone(),
@@ -2916,7 +2913,6 @@ fn give_agent_flow<C: Channel>(
                     ..Who::default()
                 },
                 host: hosted::host_variables(provider),
-                home: shared.home.as_deref(),
                 account: match &agent {
                     Agent::Harness(harness) => harness.account_environment(first, any_account),
                     Agent::Program { .. } => Vec::new(),

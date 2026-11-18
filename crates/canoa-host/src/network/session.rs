@@ -8,10 +8,11 @@
 //! session's programs carries a token as the proxy's password, since the proxy answers with the person's own logon session.
 //!
 //! A profile may name destinations that want a client certificate. For those alone the proxy ends the program's TLS with a
-//! certificate it signs for the destination, as an authority kept in the home does ([`super::session_ca`]), and makes its own TLS to
-//! the destination through the network, which verifies it as the operating system does and presents the client certificate the
-//! person's keystores or `[host.network]` choose. A program is told to trust that authority by the variables its session gets, and
-//! by nothing else; every other destination stays a tunnel the program's own TLS runs through.
+//! certificate it signs for the destination, as an authority made for the session alone does ([`super::session_ca`]: in memory,
+//! limited to those destinations, gone with the session), and makes its own TLS to the destination through the network, which
+//! verifies it as the operating system does and presents the client certificate the person's keystores or `[host.network]` choose.
+//! A program is told to trust that authority by the variables its session gets, and by nothing else; every other destination stays
+//! a tunnel the program's own TLS runs through.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -54,8 +55,6 @@ const POLL: Duration = Duration::from_millis(5);
 /// What the host has for a session's network beyond what its profile says.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Services<'a> {
-    /// The host's home, where the authority a proxy signs with is kept; the authority lives only in this process without one.
-    pub(crate) home: Option<&'a Path>,
     /// The session's private directory, where what its programs are given to trust is written; made by the caller, and only when
     /// the profile names destinations to end TLS for.
     pub(crate) private: Option<&'a Path>,
@@ -222,12 +221,12 @@ type Trusted = (Arc<Intercept>, Vec<(String, String)>);
 
 /// The files the session's programs trust the proxy's authority by, and the variables that name them: the authority alone for a
 /// program that adds to the roots it carries, the authority and the operating system's roots for one that takes its roots from a
-/// file. Nothing is added to any store; the key stays in the home.
+/// file. Nothing is added to any store; the authority's key is never written anywhere.
 fn authority(hosts: &[String], services: &Services<'_>) -> Result<Trusted, String> {
     let private = services.private.ok_or_else(|| {
         "the session has no private directory to keep what its programs trust in".to_owned()
     })?;
-    let ca = Arc::new(SessionCa::open(services.home)?);
+    let ca = Arc::new(SessionCa::new(hosts)?);
     let only = private.join("session-ca.pem");
     let roots = private.join("session-roots.pem");
     std::fs::write(&only, ca.certificate_pem())

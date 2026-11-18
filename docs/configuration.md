@@ -224,16 +224,19 @@ own. A CONNECT tunnel carries the TLS the program makes itself, so a proxy canno
 the proxy ends the program's TLS instead. It makes its own TLS to the host first, through the network: the server is verified as
 the operating system verifies it and the client certificate your keystores (or `[host.network] client_certificate`) choose is
 presented, and a host that cannot be verified, or that wants a certificate you have none for, is the program's `502` with the
-reason. It then answers the program's TLS with a certificate for that host signed by an authority the host keeps in its home
-(`network/session-ca/ca.pem`, one per home, readable by you alone, made again each year), a certificate of this session's own,
-and carries the bytes between. Every other host stays a tunnel, untouched.
+reason. It then answers the program's TLS with a certificate for that host signed by an authority made for this session when
+its proxy starts, and carries the bytes between. Every other host stays a tunnel, untouched.
 
 The session's programs are told to trust that authority, and nothing else is: it is never added to the operating system's store,
 your browser's or any other of your programs'. Its certificate, with the operating system's roots beside it where a program
 replaces its roots by a file, is written in the session's private directory, which goes with the session, and named by
 `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `PIP_CERT`, `CARGO_HTTP_CAINFO` and
-`NPM_CONFIG_CAFILE` (and, alone, by `NODE_EXTRA_CA_CERTS`, which adds to the roots Node carries). Its key is in no variable, no
-report and no file a program is given. A program that reads none of these, uses its own trust (Windows' own tools, a browser)
+`NPM_CONFIG_CAFILE` (and, alone, by `NODE_EXTRA_CA_CERTS`, which adds to the roots Node carries). The authority is the
+session's alone: its key exists only in the host's memory, is written to no file, and goes with the session, so two sessions never
+share one. Its certificate says it may vouch for the hosts the item names and no others (a critical X.509 name constraint, which
+every TLS library checks: `*.name` becomes the name and what is under it, an address stays that address), so a program that
+trusts it, or anyone who gets hold of the session's bundle files, cannot be shown a valid certificate for any other host. A host
+named as `name` is permitted with its subdomains too: a DNS constraint cannot be narrower. A program that reads none of these, uses its own trust (Windows' own tools, a browser)
 or pins the certificates it accepts fails for those hosts: nothing can be done about that here. A host both named here and on
 `bypass` is reached as the network chooses, not directly. What the session's report says of the proxy names the hosts it ends TLS
 for.

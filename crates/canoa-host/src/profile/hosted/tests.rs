@@ -2596,7 +2596,6 @@ fn an_overlay_reads_the_identity_variables_of_every_harness_and_the_agent_is_giv
                     ..Who::default()
                 },
                 host: Vec::new(),
-                home: None,
                 account: Vec::new(),
             },
         );
@@ -2620,7 +2619,6 @@ fn an_overlay_reads_the_identity_variables_of_every_harness_and_the_agent_is_giv
                     ..Who::default()
                 },
                 host: Vec::new(),
-                home: None,
                 account: Vec::new(),
             },
         );
@@ -2645,7 +2643,6 @@ fn the_sessions_access_is_in_its_environment_and_an_overlay_reads_it() {
             ..Who::default()
         },
         host: Vec::new(),
-        home: None,
         account: Vec::new(),
     };
     // Nothing in a layer above the built-in one: the standard access.
@@ -2700,7 +2697,6 @@ fn the_account_model_and_run_variables_are_set_only_when_they_have_a_value() {
                 ..Who::default()
             },
             host: Vec::new(),
-            home: None,
             account: Vec::new(),
         },
     );
@@ -2725,7 +2721,6 @@ fn the_account_model_and_run_variables_are_set_only_when_they_have_a_value() {
                 ..Who::default()
             },
             host: Vec::new(),
-            home: None,
             account: Vec::new(),
         },
     );
@@ -2761,7 +2756,6 @@ fn an_overlays_own_value_replaces_an_identity_variable_and_the_hosts_variables_a
                 ..Who::default()
             },
             host: vec![("CODEX_HOME".to_owned(), "/state".to_owned())],
-            home: None,
             account: Vec::new(),
         },
     );
@@ -2845,7 +2839,6 @@ fn access_connection(harness: Option<&'static str>, extra: &str) -> Connection {
                 ..Who::default()
             },
             host: Vec::new(),
-            home: None,
             account: Vec::new(),
         },
     )
@@ -3044,7 +3037,6 @@ fn a_layer_reads_the_variables_the_account_sets_before_the_hosts_own() {
                 ..Who::default()
             },
             host: vec![("CODEX_HOME".to_owned(), "/store".to_owned())],
-            home: None,
             account: vec![
                 ("CODEX_HOME".to_owned(), "/accounts/work/state".to_owned()),
                 (
@@ -3087,7 +3079,6 @@ fn a_layer_that_sets_what_the_account_sets_is_told_the_account_wins() {
                 ..Who::default()
             },
             host: Vec::new(),
-            home: None,
             account: vec![(
                 "ANTHROPIC_BASE_URL".to_owned(),
                 "https://gateway.example".to_owned(),

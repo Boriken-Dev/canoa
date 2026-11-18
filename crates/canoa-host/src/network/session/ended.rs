@@ -101,9 +101,17 @@ fn with_file(ca: &Ca, client: &Leaf, dir: &Dir) -> Arc<Network> {
     Arc::new(Network::new(&settings).expect("a network"))
 }
 
+fn named(hosts: &[&str]) -> Vec<String> {
+    hosts.iter().map(|host| (*host).to_owned()).collect()
+}
+
+/// A session's authority, limited to `hosts` as the proxy's own are.
+fn authority_for(hosts: &[&str]) -> Arc<SessionCa> {
+    Arc::new(SessionCa::new(&named(hosts)).expect("an authority"))
+}
+
 fn naming(hosts: &[&str], ca: &Arc<SessionCa>) -> Option<Arc<Intercept>> {
-    let hosts: Vec<String> = hosts.iter().map(|host| (*host).to_owned()).collect();
-    Some(Arc::new(Intercept::new(&hosts, Arc::clone(ca))))
+    Some(Arc::new(Intercept::new(&named(hosts), Arc::clone(ca))))
 }
 
 #[test]
@@ -111,7 +119,7 @@ fn a_destination_the_profile_names_gets_the_certificate_of_a_file_through_the_se
     let ca = Ca::new("Origin CA");
     let (origin, server, client) = insisting(&ca);
     let dir = Dir::new("ended-file");
-    let session_ca = Arc::new(SessionCa::open(None).expect("an authority"));
+    let session_ca = authority_for(&["localhost"]);
     let proxy = Middleman::start(
         with_file(&ca, &client, &dir),
         BypassRules::none(),
@@ -150,7 +158,7 @@ fn a_destination_the_profile_names_gets_the_keystores_certificate_the_origin_nam
     let tls = TlsBuilder::default()
         .trust(Trust::Roots(vec![ca.der()]))
         .client_certificates(ClientCertificates::Selector(Arc::new(selector)));
-    let session_ca = Arc::new(SessionCa::open(None).expect("an authority"));
+    let session_ca = authority_for(&["*.localhost", "other.example.test"]);
     let proxy = Middleman::start(
         Arc::new(Network::with(direct(), tls)),
         BypassRules::none(),
@@ -182,7 +190,7 @@ fn an_origin_that_wants_a_certificate_the_person_has_none_for_never_sees_one_nor
     settings.proxy = ProxyChoice::None;
     settings.ca_file = Some(roots);
     settings.client_certificate = ClientCertificate::None;
-    let session_ca = Arc::new(SessionCa::open(None).expect("an authority"));
+    let session_ca = authority_for(&["localhost"]);
     let proxy = Middleman::start(
         Arc::new(Network::new(&settings).expect("a network")),
         BypassRules::none(),
@@ -211,7 +219,7 @@ fn an_origin_the_networks_trust_does_not_vouch_for_is_never_reached_and_gets_no_
     // No `ca_file`: the operating system's verifier decides, and it has never heard of the stand-in's authority.
     let mut settings = NetworkSettings::default();
     settings.proxy = ProxyChoice::None;
-    let session_ca = Arc::new(SessionCa::open(None).expect("an authority"));
+    let session_ca = authority_for(&["localhost"]);
     let proxy = Middleman::start(
         Arc::new(Network::new(&settings).expect("a network")),
         BypassRules::none(),
@@ -250,7 +258,7 @@ fn a_destination_not_named_stays_a_tunnel_the_programs_own_tls_runs_through() {
     );
     let client = ca.issue_client("Alice Example");
     let dir = Dir::new("tunnel");
-    let session_ca = Arc::new(SessionCa::open(None).expect("an authority"));
+    let session_ca = authority_for(&["other.example.test", "*.corp.example"]);
     let proxy = Middleman::start(
         with_file(&ca, &client, &dir),
         BypassRules::none(),
@@ -274,14 +282,13 @@ fn a_destination_not_named_stays_a_tunnel_the_programs_own_tls_runs_through() {
 }
 
 #[test]
-fn two_sessions_of_one_home_show_a_program_different_certificates_for_one_destination() {
+fn two_sessions_naming_the_same_destination_have_authorities_and_certificates_of_their_own() {
     let ca = Ca::new("Origin CA");
     let (origin, _, client) = insisting(&ca);
     let dir = Dir::new("two");
-    let home = Dir::new("two-home");
-    let first = Arc::new(SessionCa::open(Some(&home.0)).expect("an authority"));
-    let second = Arc::new(SessionCa::open(Some(&home.0)).expect("the same one"));
-    assert_eq!(first.certificate_pem(), second.certificate_pem());
+    let first = authority_for(&["localhost"]);
+    let second = authority_for(&["localhost"]);
+    assert_ne!(first.certificate_pem(), second.certificate_pem());
     let seen: Vec<Vec<u8>> = [&first, &second]
         .into_iter()
         .map(|session_ca| {
@@ -302,15 +309,55 @@ fn two_sessions_of_one_home_show_a_program_different_certificates_for_one_destin
         })
         .collect();
     assert_ne!(seen[0], seen[1], "each session signs its own");
+    // What one session gave its programs to trust does not make the other's proxy believed.
+    let proxy = Middleman::start(
+        with_file(&ca, &client, &dir),
+        BypassRules::none(),
+        TOKEN,
+        naming(&["localhost"], &second),
+    )
+    .expect("starts");
+    let refused = program_gets(
+        proxy.addr,
+        ("localhost", origin.addr.port()),
+        first.certificate_pem(),
+    )
+    .expect_err("the other session's authority is not this one's");
+    assert!(refused.contains("TLS failed"), "{refused}");
+}
+
+#[test]
+fn a_program_that_trusts_a_sessions_authority_is_refused_a_certificate_for_a_destination_it_does_not_name()
+ {
+    // The authority is limited to another host than the one this proxy answers for, which is what a certificate signed with a
+    // leaked key would look like: the program trusts the authority and still refuses the certificate.
+    let ca = Ca::new("Origin CA");
+    let (origin, _, client) = insisting(&ca);
+    let dir = Dir::new("outside");
+    let session_ca = authority_for(&["other.example.test"]);
+    let proxy = Middleman::start(
+        with_file(&ca, &client, &dir),
+        BypassRules::none(),
+        TOKEN,
+        naming(&["localhost"], &session_ca),
+    )
+    .expect("starts");
+    let refused = program_gets(
+        proxy.addr,
+        ("localhost", origin.addr.port()),
+        session_ca.certificate_pem(),
+    )
+    .expect_err("a certificate the authority may not sign is refused");
+    assert!(refused.contains("TLS failed"), "{refused}");
 }
 
 #[test]
 fn the_hosts_a_profile_names_are_matched_as_names_and_addresses() {
-    let ca = Arc::new(SessionCa::open(None).expect("an authority"));
     let hosts: Vec<String> = ["Api.Example.com", "*.corp.example", "10.0.0.7", "::1"]
         .into_iter()
         .map(str::to_owned)
         .collect();
+    let ca = Arc::new(SessionCa::new(&hosts).expect("an authority"));
     let intercept = Intercept::new(&hosts, ca);
     for yes in [
         "api.example.com",
@@ -350,12 +397,10 @@ fn files_under(dir: &Path) -> Vec<String> {
 
 #[test]
 fn what_a_session_is_given_to_trust_holds_the_authoritys_certificate_and_never_its_key() {
-    let home = Dir::new("given-home");
     let private = Dir::new("given-private");
     let mut asked = NetworkEffect::new("system");
     asked.intercept = vec!["api.example.test".to_owned()];
     let services = Services {
-        home: Some(&home.0),
         private: Some(&private.0),
     };
     let session = start(&asked, &|_| None, &services).expect("starts");
@@ -396,37 +441,56 @@ fn what_a_session_is_given_to_trust_holds_the_authoritys_certificate_and_never_i
             "no key in what a program reads"
         );
     }
-    // The key is in the home and nowhere a program, a report or a variable reaches.
-    let kept = files_under(&home.0);
-    assert_eq!(kept.len(), 1, "{kept:?}");
-    assert!(kept[0].ends_with("ca.pem"), "{kept:?}");
-    let key = fs::read_to_string(&kept[0]).expect("reads");
-    let private_key = key
-        .split("-----BEGIN PRIVATE KEY-----")
-        .nth(1)
-        .and_then(|rest| rest.split("-----END").next())
-        .map(|body| body.split_whitespace().collect::<String>())
-        .expect("the key is kept");
-    assert!(!private_key.is_empty());
+    // The authority's key is made in memory and written nowhere: the session's directory holds the two bundles, and every block in
+    // them is a certificate.
+    let kept = files_under(&private.0);
+    assert_eq!(
+        kept.len(),
+        2,
+        "the session's directory holds the two bundles: {kept:?}"
+    );
+    for file in &kept {
+        let text = fs::read_to_string(file).expect("text");
+        let blocks = text.matches("-----BEGIN ").count();
+        assert_eq!(blocks, text.matches("-----BEGIN CERTIFICATE-----").count());
+        assert_eq!(
+            CertificateDer::pem_slice_iter(text.as_bytes())
+                .flatten()
+                .count(),
+            blocks,
+            "{file}: every block is a certificate"
+        );
+    }
     for (name, text) in &session.variables {
         assert!(!text.contains("PRIVATE KEY"), "{name}");
-        assert!(!text.contains(&private_key[..32]), "{name}");
     }
-    assert!(!session.description.contains(&private_key[..32]));
+    assert!(!session.description.contains("PRIVATE"));
     assert!(
         session.description.contains("api.example.test"),
         "the report says which hosts it ends TLS for: {}",
         session.description
     );
-    assert_eq!(
-        files_under(&private.0).len(),
-        2,
-        "the session's directory holds the two bundles"
-    );
-    assert!(
-        alone.contains("BEGIN CERTIFICATE") && key.starts_with(&alone),
-        "the home's file begins with the certificate a program was given"
-    );
+}
+
+#[test]
+fn two_sessions_that_name_one_host_are_given_different_authorities() {
+    let (first_dir, second_dir) = (Dir::new("given-one"), Dir::new("given-two"));
+    let mut asked = NetworkEffect::new("system");
+    asked.intercept = vec!["api.example.test".to_owned()];
+    let given = |dir: &Dir| {
+        let services = Services {
+            private: Some(&dir.0),
+        };
+        let session = start(&asked, &|_| None, &services).expect("starts");
+        let roots = session
+            .variables
+            .iter()
+            .find(|(name, _)| name == "NODE_EXTRA_CA_CERTS")
+            .map(|(_, path)| path.clone())
+            .expect("the authority alone");
+        fs::read_to_string(roots).expect("reads")
+    };
+    assert_ne!(given(&first_dir), given(&second_dir));
 }
 
 #[test]

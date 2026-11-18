@@ -75,7 +75,7 @@ impl ProfileItem for ProxyItem {
             "list",
         );
         certificate.help = Some(
-            "system and pac only. A host (example.com), a host and everything under it (*.example.com) or an address, one per line. For these alone the proxy ends the program's TLS with a certificate of this session's, signed by an authority kept in the host's home that the session's programs alone are told to trust, and makes its own TLS to the host, presenting the client certificate your keystores or [host.network] choose. A program that pins the certificates it trusts, or reads no CA file variable (Windows' own tools), fails for them. Empty ends no TLS."
+            "system and pac only. A host (example.com), a host and everything under it (*.example.com) or an address, one per line. For these alone the proxy ends the program's TLS with a certificate of this session's, signed by an authority made for this session in memory (never written to disk, limited to exactly these hosts, gone with the session) that the session's programs alone are told to trust, and makes its own TLS to the host, presenting the client certificate your keystores or [host.network] choose. A program that pins the certificates it trusts, or reads no CA file variable (Windows' own tools), fails for them. Empty ends no TLS."
                 .to_owned(),
         );
         info.fields = vec![mode, url, command, bypass, user, password, certificate];

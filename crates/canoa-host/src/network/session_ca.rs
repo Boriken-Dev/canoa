@@ -1,48 +1,41 @@
 //! The certificate authority a session's proxy signs with when its profile asks the proxy to end TLS for some destinations so as to
 //! present the person's client certificate to them.
 //!
-//! One authority is kept per home, in a directory that only this user can enter, and is made again once a year. Its certificate is
-//! handed to the programs of a session that asks for it, in a file the session's private directory holds; it is never added to the
-//! operating system's store or any other the person's own programs read. Its key stays in the home and in this process: it is in
-//! no variable, no report and no file a session's programs are given. Each session signs its own certificate for each destination,
-//! with a key of its own.
+//! An authority is made for each session, in memory, when its proxy starts, and is gone with the session: its key is never written
+//! anywhere. It is limited by its own certificate (a critical name constraint) to the destinations the profile names and no other,
+//! so a program that is given its certificate to trust, and anyone who gets hold of that certificate, can be shown a certificate for
+//! those destinations and for nothing else. The certificate is handed to the programs of the session in a file the session's private
+//! directory holds; it is never added to the operating system's store or any other the person's own programs read. Each destination
+//! gets a certificate signed by the session's authority, with a key of its own.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
-    reason = "files, clocks and the system's roots are std's"
+    reason = "clocks and the system's roots are std's"
 )]
 
 use core::net::IpAddr;
 use core::time::Duration;
-use std::fs;
-use std::io::Write as _;
-use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rcgen::{
-    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
-    Issuer, KeyPair, KeyUsagePurpose, SanType,
+    BasicConstraints, CertificateParams, CidrSubnet, DistinguishedName, DnType,
+    ExtendedKeyUsagePurpose, GeneralSubtree, IsCa, Issuer, KeyPair, KeyUsagePurpose,
+    NameConstraints, SanType,
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use time::OffsetDateTime;
 
-/// What the home keeps: the authority's certificate and, after it, its key.
-const FILE: &str = "ca.pem";
-/// The directory in the home that holds it.
-const DIRECTORY: [&str; 2] = ["network", "session-ca"];
-/// How long the authority is valid.
-const VALID: Duration = Duration::from_secs(2 * 365 * 24 * 3600);
-/// How old the kept authority may be before another is made.
-const RENEW_AFTER: Duration = Duration::from_secs(365 * 24 * 3600);
-/// How long a certificate for one destination is valid: far longer than a session, short of the authority's end.
-const LEAF_VALID: Duration = Duration::from_secs(90 * 24 * 3600);
-/// The key's block in the file.
-const KEY_BLOCK: &str = "-----BEGIN PRIVATE KEY-----";
+/// How long the authority, and so each certificate it signs, is valid: far longer than a session.
+const VALID: Duration = Duration::from_secs(365 * 24 * 3600);
+/// A name no one can reach (RFC 6761), allowed in a constraint that has to name some DNS name when the profile names none, so
+/// that the authority cannot vouch for any.
+const NO_NAME: &str = "canoa.invalid";
 
 /// The authority.
 pub(crate) struct SessionCa {
     issuer: Issuer<'static, KeyPair>,
     certificate_pem: String,
+    not_after: OffsetDateTime,
 }
 
 impl core::fmt::Debug for SessionCa {
@@ -73,84 +66,92 @@ fn seconds(duration: Duration) -> i64 {
     i64::try_from(duration.as_secs()).unwrap_or(i64::MAX)
 }
 
-/// What the authority is: a name, a window of validity that begins a day ago for a clock a little behind, and the right to sign
-/// certificates for destinations and nothing below them.
-fn authority() -> CertificateParams {
+/// The name constraint that limits an authority to `hosts` (a name, `*.name` for the name and what is under it, or an address, as a
+/// profile writes them): each name is permitted with everything under it (a DNS constraint cannot stop short of that), each address
+/// alone. A kind of name the profile names none of is excluded outright, since a constraint says nothing of a kind it does not
+/// mention.
+fn constraints(hosts: &[String]) -> NameConstraints {
+    let mut permitted = Vec::new();
+    let (mut names, mut v4, mut v6) = (false, false, false);
+    for host in hosts {
+        let host = host.trim_end_matches('.').to_ascii_lowercase();
+        let host = host.strip_prefix("*.").unwrap_or(&host);
+        match host.parse::<IpAddr>() {
+            Ok(address) => {
+                let prefix = if address.is_ipv4() { 32 } else { 128 };
+                permitted.push(GeneralSubtree::IpAddress(CidrSubnet::from_addr_prefix(
+                    address, prefix,
+                )));
+                if address.is_ipv4() {
+                    v4 = true;
+                } else {
+                    v6 = true;
+                }
+            }
+            Err(_) => {
+                permitted.push(GeneralSubtree::DnsName(host.to_owned()));
+                names = true;
+            }
+        }
+    }
+    if !names {
+        permitted.push(GeneralSubtree::DnsName(NO_NAME.to_owned()));
+    }
+    let mut excluded = Vec::new();
+    if !v4 {
+        excluded.push(GeneralSubtree::IpAddress(CidrSubnet::from_v4_prefix(
+            [0; 4], 0,
+        )));
+    }
+    if !v6 {
+        excluded.push(GeneralSubtree::IpAddress(CidrSubnet::from_v6_prefix(
+            [0; 16], 0,
+        )));
+    }
+    NameConstraints {
+        permitted_subtrees: permitted,
+        excluded_subtrees: excluded,
+    }
+}
+
+/// What the authority is: a name, a window of validity that begins a day ago for a clock a little behind, the right to sign
+/// certificates for destinations and nothing below them, and no right to vouch for any destination but `hosts`.
+fn authority(hosts: &[String]) -> CertificateParams {
     let mut params = CertificateParams::default();
     let mut name = DistinguishedName::new();
-    name.push(DnType::CommonName, "Canoa session proxy (this computer)");
+    name.push(DnType::CommonName, "Canoa session proxy (this session)");
     params.distinguished_name = name;
     params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
     params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+    params.name_constraints = Some(constraints(hosts));
     params.not_before = at(now() - 24 * 3600);
     params.not_after = at(now() + seconds(VALID));
     params
 }
 
 impl SessionCa {
-    /// The authority of `home`, made if there is none or the one there is a year old; one that lives only in this process when the
-    /// host has no home.
+    /// A new authority, limited to `hosts`, that exists only in this process.
     ///
     /// # Errors
     ///
-    /// What cannot be made or kept, in words for the report.
-    pub(crate) fn open(home: Option<&Path>) -> Result<Self, String> {
-        let Some(home) = home else {
-            return Self::generate().map(|(ca, _)| ca);
-        };
-        let directory = DIRECTORY
-            .iter()
-            .fold(home.to_path_buf(), |dir, part| dir.join(part));
-        crate::profile::hosted::private::keep(&directory).map_err(|error| {
-            format!(
-                "{} cannot be kept for this user alone: {error}",
-                directory.display()
-            )
-        })?;
-        let file = directory.join(FILE);
-        if let Some(kept) = Self::read(&file) {
-            return Ok(kept);
+    /// No host is named, or the key or certificate could not be made.
+    pub(crate) fn new(hosts: &[String]) -> Result<Self, String> {
+        if hosts.is_empty() {
+            return Err("an authority needs the hosts it is to vouch for".to_owned());
         }
-        let (ca, text) = Self::generate()?;
-        write_private(&file, text.as_bytes())
-            .map_err(|error| format!("{} cannot be written: {error}", file.display()))?;
-        Ok(ca)
-    }
-
-    /// The authority `file` holds, when it is whole and not yet due to be made again.
-    fn read(file: &Path) -> Option<Self> {
-        let young = fs::metadata(file)
-            .and_then(|meta| meta.modified())
-            .ok()
-            .and_then(|made| made.elapsed().ok())
-            .is_some_and(|age| age < RENEW_AFTER);
-        if !young {
-            return None;
-        }
-        let text = fs::read_to_string(file).ok()?;
-        let (certificate, key) = text.split_once(KEY_BLOCK)?;
-        let key = KeyPair::from_pem(&format!("{KEY_BLOCK}{key}")).ok()?;
-        Some(Self {
-            issuer: Issuer::new(authority(), key),
-            certificate_pem: certificate.to_owned(),
-        })
-    }
-
-    /// A new authority, and the text a home keeps it as.
-    fn generate() -> Result<(Self, String), String> {
         let key = KeyPair::generate().map_err(|error| error.to_string())?;
-        let certificate = authority()
+        let params = authority(hosts);
+        let not_after = params.not_after;
+        let certificate_pem = params
+            .clone()
             .self_signed(&key)
             .map_err(|error| error.to_string())?
             .pem();
-        let text = format!("{certificate}{}", key.serialize_pem());
-        Ok((
-            Self {
-                issuer: Issuer::new(authority(), key),
-                certificate_pem: certificate,
-            },
-            text,
-        ))
+        Ok(Self {
+            issuer: Issuer::new(params, key),
+            certificate_pem,
+            not_after,
+        })
     }
 
     /// The authority's certificate, which is all a program is given of it.
@@ -168,7 +169,8 @@ impl SessionCa {
         text
     }
 
-    /// A certificate for `host` (a name or an address) with a key made now.
+    /// A certificate for `host` (a name or an address) with a key made now. A host the authority is not limited to is signed all
+    /// the same, and refused by whoever checks the constraint.
     ///
     /// # Errors
     ///
@@ -198,7 +200,7 @@ impl SessionCa {
         params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
         params.use_authority_key_identifier_extension = true;
         params.not_before = at(now() - 24 * 3600);
-        params.not_after = at(now() + seconds(LEAF_VALID));
+        params.not_after = self.not_after;
         let key = KeyPair::generate().map_err(|error| error.to_string())?;
         let certificate = params
             .signed_by(&key, &self.issuer)
@@ -220,22 +222,6 @@ fn pem(label: &str, der: &[u8]) -> String {
     }
     text.push_str(&format!("-----END {label}-----\n"));
     text
-}
-
-/// Writes `bytes` to `file` so that no one else can read them at any moment: into a file of its own that only this user can open,
-/// then moved into place.
-fn write_private(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let staged = file.with_extension("new");
-    let _ = fs::remove_file(&staged);
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut out = options.open(&staged)?;
-    out.write_all(bytes)?;
-    out.sync_all()?;
-    drop(out);
-    fs::rename(&staged, file)
 }
 
 #[cfg(test)]

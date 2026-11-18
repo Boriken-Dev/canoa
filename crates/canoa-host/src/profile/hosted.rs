@@ -110,7 +110,7 @@ const APPROVE_WAIT: Duration = Duration::from_secs(120);
 
 mod cache;
 mod hooks;
-pub(crate) mod private;
+mod private;
 pub(crate) use hooks::forward as forward_hook;
 mod template;
 
@@ -502,8 +502,6 @@ pub(crate) struct Starting<'a> {
     pub(crate) who: Who<'a>,
     /// Variables the host sets for the session itself, which layers read and may set their own from.
     pub(crate) host: Vec<(String, String)>,
-    /// The host's home, where the authority a session's proxy signs with is kept; none for a host without one.
-    pub(crate) home: Option<&'a Path>,
     /// The variables the account the session runs on sets for the agent, with no credential among them: layers read them, and
     /// the provider applies them after the profile's own environment, so a layer that sets one of them is told it does not
     /// take effect.
@@ -886,10 +884,7 @@ impl Connection {
                 skills.ensure().map(Some)
             };
             let services = match &private {
-                Ok(dir) => crate::network::session::Services {
-                    home: starting_with.home,
-                    private: *dir,
-                },
+                Ok(dir) => crate::network::session::Services { private: *dir },
                 Err(_) => crate::network::session::Services::default(),
             };
             let made = match &private {
