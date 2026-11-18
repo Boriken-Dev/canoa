@@ -17,6 +17,9 @@ final class HostGrants extends ChangeNotifier {
   /// The grant that lists, adds, signs in to and removes accounts.
   static const accounts = 'accounts';
 
+  /// The grant that lists the secrets the host holds, shows one on request, forgets one and sets one.
+  static const secrets = 'secrets';
+
   /// The grant that lists, adds, tests and removes the host's mail accounts.
   static const mailSetup = 'mail.setup';
 
