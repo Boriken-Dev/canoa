@@ -76,9 +76,29 @@ pub mod daemon {      // feature `daemon`
     impl DaemonEngine { pub fn open(config: &DaemonConfig, home: &Path) -> Result<Self, EngineError>; }   // finds the service, checks it lists the model; loads nothing
 }
 pub mod sdk {         // feature `sdk`
-    #[non_exhaustive] pub struct SdkConfig { pub model: String, pub library: Option<PathBuf> }
+    #[non_exhaustive] pub struct SdkConfig { pub model: String, pub library: Option<PathBuf>, pub window: Option<SdkWindow> }
+    #[non_exhaustive] pub struct SdkWindow { pub tokens: u64, pub folder: PathBuf }   // SdkWindow::new(tokens, folder)
     pub struct SdkEngine;
-    impl SdkEngine { pub fn open(config: &SdkConfig) -> Result<Self, EngineError>; pub fn load(&self) -> Result<(), EngineError>; pub fn unload(&self) -> Result<(), EngineError>; }
+    impl SdkEngine {
+        pub fn open(config: &SdkConfig) -> Result<Self, EngineError>;   // with a window: makes the adjusted copy and registers it in the SDK's local catalog; the model must be downloaded
+        pub fn load(&self) -> Result<(), EngineError>; pub fn unload(&self) -> Result<(), EngineError>;
+        pub fn adjusted(&self) -> Option<&window::Adjusted>;
+    }
+}
+
+// A model's window, and Canoa's own folder that sets it. Plain files: no feature.
+pub mod window {
+    pub const CONFIG: &str = "genai_config.json";
+    #[non_exhaustive] pub struct Window { pub context_length: Option<u64>, pub max_length: Option<u64> }   // model.context_length, search.max_length
+    impl Window { pub fn limit(&self) -> Option<u64>; }                  // the most a window can be: context_length, else max_length
+    pub fn read(folder: &Path) -> Result<Window, WindowError>;
+    pub fn cached_folder(cache: &Path, id: &str) -> Option<PathBuf>;     // <cache>/<publisher>/<name>-<n>/v<n> of `name:n`
+    pub fn clamp(wanted: u64, limit: u64) -> Result<(u64, Option<String>), WindowError>;   // the window and the note that it was lowered
+    #[non_exhaustive] pub struct Adjusted { pub folder: PathBuf, pub window: u64, pub limit: u64, pub note: Option<String>, pub reused: bool }
+    pub fn adjust(source: &Path, base: &Path, id: &str, wanted: u64) -> Result<Adjusted, WindowError>;   // <base>/<folder_name(id)>: hard links + its own genai_config.json
+    pub fn registered_id(id: &str, window: u64) -> String;               // qwen3-1.7b-generic-gpu:2, 16384 -> canoa-qwen3-1.7b-generic-gpu-w16384:2
+    pub fn folder_name(id: &str) -> String;
+    #[non_exhaustive] pub enum WindowError { Read(String), Invalid(String), NotLinked(String), Write(String) }
 }
 
 // Foundry Local as a Store program.
@@ -107,7 +127,7 @@ pub mod account {
     pub const KIND: &str = "foundry-local";
     #[non_exhaustive] pub struct Route { pub kind: &'static str, pub credential: &'static str, pub address: Option<&'static str>, pub suffix: &'static str, pub fixed: &'static [(&'static str, &'static str)] }
     pub fn route(harness: &str) -> Option<Route>;                        // claude: anthropic-auth-token; codex: codex-api-key (+/v1); pi: pi-api-key (OPENAI_API_KEY)
-    #[non_exhaustive] pub struct Settings { pub model: String, pub endpoint: Option<String>, pub library: Option<String>, pub engine: EngineKind }
+    #[non_exhaustive] pub struct Settings { pub model: String, pub endpoint: Option<String>, pub library: Option<String>, pub engine: EngineKind, pub window: Option<u64> }   // `window` is no key of the account: the host fills it from its own configuration
     impl Settings { pub fn from_map(map: &Map<String, Value>) -> Result<Self, String>; }
     #[non_exhaustive] pub enum EngineKind { Service, Sdk }
     pub fn settings_schema() -> Value;                                   // model (required), endpoint, engine, library
@@ -125,6 +145,10 @@ pub mod account {
 - **Thinking** is off in the model unless the client asks for a high effort (`thinking.type` `enabled`, `reasoning.effort` or `reasoning_effort` high or more): the request carries `chat_template_kwargs.enable_thinking = false`, since a small model left to think can spend the whole allowance an agent asks for.
 - **Refused up front**, with the reason in the API's own error shape: tools offered to a model that cannot call them, an image to a model that cannot read it, `previous_response_id` (the gateway keeps no conversation).
 - **Streaming** is replayed: the model is called once and the events are written from its whole answer.
+
+## A window
+
+`window::adjust` never writes to the cached model: it reads its `genai_config.json`, caps the request at `model.context_length` (the model's own, never raised; the note says when a request was lowered), and makes `<base>/<folder_name(id)>` holding a hard link to every other file and its own `genai_config.json` whose `search.max_length` is the window. A folder already made for the same source and window is reused; one that is not Canoa's (no `canoa-window.json`) is left alone. The weights are never copied: a file over 16 MiB that cannot be linked (another drive) is `WindowError::NotLinked`, and smaller ones are copied. `SdkEngine::open` with a `window` registers the folder through `Catalog::register_model` in the SDK's local catalog under `registered_id`, with the original's task, modalities and tool-call markers, so Foundry Local's own cache and catalog are untouched. `DaemonEngine` cannot take a window: the Foundry Local service loads from its own cache.
 
 ## Gotchas
 

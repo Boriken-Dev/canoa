@@ -33,6 +33,8 @@ pub struct SdkConfig {
     /// The native library, a file or the directory that holds it; where the SDK looks (`FOUNDRY_LOCAL_LIB_DIR`, then beside the
     /// program) when `None`.
     pub library: Option<PathBuf>,
+    /// The window to run the model with, when it is not the one the model has.
+    pub window: Option<SdkWindow>,
 }
 
 impl SdkConfig {
@@ -42,12 +44,114 @@ impl SdkConfig {
         Self {
             model: model.into(),
             library: None,
+            window: None,
         }
     }
 }
 
+/// A window the person set for a model: how many tokens a prompt and its answer take together, and the folder of Canoa's own
+/// where the model's adjusted copy is made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SdkWindow {
+    /// The tokens asked for; the model's own context length caps it.
+    pub tokens: u64,
+    /// The folder that holds Canoa's adjusted copies, one folder for each model. It should be on the drive Foundry Local's cache
+    /// is on, since the copy links the weights instead of copying them.
+    pub folder: PathBuf,
+}
+
+impl SdkWindow {
+    /// A window of `tokens`, with its copies made under `folder`.
+    #[must_use]
+    pub fn new(tokens: u64, folder: impl Into<PathBuf>) -> Self {
+        Self {
+            tokens,
+            folder: folder.into(),
+        }
+    }
+}
+
+/// What the keys of a model's own catalog entry that a registered copy needs to behave like it say: the text ones.
+const COPIED_TEXT: &[&str] = &[
+    "type",
+    "publisher",
+    "license",
+    "license_description",
+    "model_provider",
+    "tool_call_start",
+    "tool_call_end",
+    "reasoning_start",
+    "reasoning_end",
+    "input_modalities",
+    "output_modalities",
+    "capabilities",
+];
+
+/// The numeric ones.
+const COPIED_NUMBERS: &[&str] = &[
+    "supports_tool_calling",
+    "supports_reasoning",
+    "supports_hybrid_reasoning",
+    "max_output_tokens",
+];
+
+/// The task a registered model needs when the catalog entry it copies names none.
+const DEFAULT_TASK: &str = "chat-completion";
+
 fn failed(error: impl core::fmt::Display) -> EngineError {
     EngineError::Failed(error.to_string())
+}
+
+/// Makes Canoa's adjusted copy of the downloaded `original` and registers it in the SDK's local catalog, which names the copy's
+/// folder and leaves Foundry Local's own cache as it is. The registered model carries what the catalog's entry says of the
+/// original (its task, its tool-call markers, what it can read), with the window as its context length.
+async fn register_window(
+    manager: &FoundryLocalManager,
+    original: &Model,
+    window: &SdkWindow,
+) -> Result<(Arc<Model>, crate::window::Adjusted), EngineError> {
+    let id = original.id().to_owned();
+    let source = original.path().await.map_err(|error| {
+        EngineError::Failed(format!(
+            "{id} is not downloaded, so its window cannot be set: {error}"
+        ))
+    })?;
+    let adjusted = crate::window::adjust(&source, &window.folder, &id, window.tokens)
+        .map_err(|error| EngineError::Refused(error.to_string()))?;
+    let catalog = manager.local_catalog().map_err(failed)?;
+    let mut info = catalog.create_model_info().map_err(failed)?;
+    let task = original
+        .get_string_property("task")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| DEFAULT_TASK.to_owned());
+    info.set_string_property("task", &task).map_err(failed)?;
+    for key in COPIED_TEXT {
+        if let Ok(Some(value)) = original.get_string_property(key) {
+            info.set_string_property(key, &value).map_err(failed)?;
+        }
+    }
+    for key in COPIED_NUMBERS {
+        if let Ok(value) = original.get_int_property(key, -1)
+            && value >= 0
+        {
+            info.set_int_property(key, value).map_err(failed)?;
+        }
+    }
+    info.set_int_property(
+        "context_length",
+        i64::try_from(adjusted.window).unwrap_or(i64::MAX),
+    )
+    .map_err(failed)?;
+    let registered = crate::window::registered_id(&id, adjusted.window);
+    // A registration of an earlier run of this process or of an earlier window is replaced.
+    let _ = catalog.unregister_model(&registered).await;
+    let model = catalog
+        .register_model(&adjusted.folder.to_string_lossy(), &registered, info)
+        .await
+        .map_err(failed)?;
+    Ok((model, adjusted))
 }
 
 /// A model run by the SDK, in this process.
@@ -56,6 +160,8 @@ pub struct SdkEngine {
     // Kept alive: every client and session of the SDK hangs off the manager.
     _manager: Arc<FoundryLocalManager>,
     model: Arc<Model>,
+    /// The adjusted copy the model runs from, when a window was set.
+    adjusted: Option<crate::window::Adjusted>,
     /// One request at a time: a model answers one, and a second session on it is not what the service was measured with.
     one_at_a_time: Mutex<()>,
 }
@@ -85,15 +191,29 @@ impl SdkEngine {
             sdk = sdk.library_path(library.to_string_lossy().into_owned());
         }
         let manager = FoundryLocalManager::create(sdk).map_err(failed)?;
-        let model = runtime
+        let mut model = runtime
             .block_on(manager.catalog().get_model_variant(&config.model))
             .map_err(failed)?;
+        let mut adjusted = None;
+        if let Some(window) = &config.window {
+            let (copy, made) = runtime.block_on(register_window(&manager, &model, window))?;
+            model = copy;
+            adjusted = Some(made);
+        }
         Ok(Self {
             runtime,
             _manager: manager,
             model,
+            adjusted,
             one_at_a_time: Mutex::new(()),
         })
+    }
+
+    /// The adjusted copy this engine runs, when a window was set: where it is, the window it has and the note when the window
+    /// is less than was asked for.
+    #[must_use]
+    pub fn adjusted(&self) -> Option<&crate::window::Adjusted> {
+        self.adjusted.as_ref()
     }
 
     /// Loads the model into this process. The gateway never calls it: it is for the one who set the engine up.

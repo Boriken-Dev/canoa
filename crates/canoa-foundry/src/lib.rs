@@ -24,6 +24,7 @@ pub mod responses;
 pub mod sdk;
 pub mod store;
 mod translate;
+pub mod window;
 
 pub use completion::{Completion, Finish, ToolCall, Usage};
 pub use engine::{Engine, EngineError, ModelInfo, running_endpoint};

@@ -70,6 +70,9 @@ pub struct Settings {
     pub library: Option<String>,
     /// What runs the model.
     pub engine: EngineKind,
+    /// The window, in tokens, the person set for this model: not a key of the account's table, which has no such key, but what the
+    /// host finds for [`Settings::model`] in its own configuration before it opens an engine. Only the SDK engine uses it.
+    pub window: Option<u64>,
 }
 
 /// What runs the model of an account.
@@ -111,6 +114,7 @@ impl Settings {
                 Some("sdk") => EngineKind::Sdk,
                 Some(_) => return Err("engine is service or sdk".to_string()),
             },
+            window: None,
         })
     }
 }
