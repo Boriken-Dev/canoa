@@ -57,6 +57,8 @@ void main() {
     expect(markIdOf('grok_store'), 'grok');
     expect(markIdOf('xai-api'), 'grok');
     expect(markIdOf('pi_store'), 'pi');
+    expect(markIdOf('opencode_store'), 'opencode');
+    expect(markIdOf('OpenCode'), 'opencode');
     expect(markIdOf('antigravity'), 'antigravity');
     expect(markIdOf('Claude'), 'claude');
     expect(markIdOf('foundry-local'), isNull);

@@ -1,9 +1,9 @@
 import '../sources/sources.dart';
 
 /// The `acp_harness` provider ids Canoa knows, which a source of the same name stands for.
-const _providerIds = {'claude', 'codex', 'grok', 'antigravity', 'pi'};
+const _providerIds = {'claude', 'codex', 'grok', 'antigravity', 'opencode', 'pi'};
 
-/// The harness a [source] stands for, for `${handler}`: its provider id (`claude`, `codex`, `grok`, `antigravity`, `pi`, or a
+/// The harness a [source] stands for, for `${handler}`: its provider id (`claude`, `codex`, `grok`, `antigravity`, `opencode`, `pi`, or a
 /// hosted entry's own `harness`), else its label.
 String handlerOf(AgentSource source) {
   final id = source.harness ?? source.label.toLowerCase();

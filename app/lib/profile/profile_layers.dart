@@ -14,7 +14,7 @@ import 'skill_copies.dart';
 const builtInProfile = Profile(access: ProfileAccess(sandbox: 'none', network: true, approvals: 'ask'));
 
 /// The AOS harness id of each of Canoa's agent presets, whose `[harness.<id>]` hints apply to it.
-const presetHarnesses = {'Claude': 'claude-code', 'Codex': 'codex', 'Grok': 'grok', 'Pi': 'pi'};
+const presetHarnesses = {'Claude': 'claude-code', 'Codex': 'codex', 'Grok': 'grok', 'OpenCode': 'opencode', 'Pi': 'pi'};
 
 /// Why a layer is not in the merge, or what to know about one that is.
 final class LayerNote {

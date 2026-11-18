@@ -16,7 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/app_fixture.dart';
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
-const _known = ['claude', 'codex', 'antigravity', 'grok', 'pi'];
+const _known = ['claude', 'codex', 'antigravity', 'grok', 'opencode', 'pi'];
 
 Widget _host(Widget child, {Color? ink}) => MaterialApp(
   home: Scaffold(body: Center(child: IconTheme(data: IconThemeData(color: ink), child: child))),
@@ -92,6 +92,7 @@ void main() {
       AgentSource.hosted('Antigravity', local: true),
       AgentSource.hosted('Pi', local: true),
       AgentSource.hosted('Grok', local: true),
+      AgentSource.hosted('OpenCode', local: true),
     ]) {
       await tester.pumpWidget(_host(SourceMark.of(source)));
       expect(find.byType(Icon), findsNothing, reason: source.label);
@@ -118,6 +119,7 @@ void main() {
     expect(await inks('codex', const Color(0xFFABCDEF)), {0xABCDEF});
     expect(await inks('claude', const Color(0xFF123456)), {0xD97757});
     expect(await inks('antigravity', const Color(0xFFABCDEF)), {0x3186FF});
+    expect(await inks('opencode', const Color(0xFFABCDEF)), {0xABCDEF});
     expect(await inks('pi', const Color(0xFFABCDEF)), {0xF09082, 0x4D9ABF, 0xF1BE58});
   });
 
