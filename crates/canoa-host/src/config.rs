@@ -1120,6 +1120,16 @@ pub struct Entry {
     /// (`shared_permission_window_seconds`); `None` (unset or `0`) logs nothing. The request stays open: nothing is answered
     /// for the people attached.
     pub shared_permission_window: Option<core::time::Duration>,
+    /// Whether a shared session's log of updates is kept in the host's home, so that it survives the host's restart and the
+    /// cursors clients hold stay valid (`shared_keep_log`, on by default). Off, a session is gone with the host, and a cursor
+    /// from before is refused when it comes back.
+    pub shared_keep_log: bool,
+    /// The updates a shared session keeps for replay, the oldest going first (`shared_log_entries`); `None` takes the
+    /// hub's default of 100000.
+    pub shared_log_entries: Option<usize>,
+    /// The serialized bytes of updates a shared session keeps for replay (`shared_log_bytes`); `None` takes the hub's default
+    /// of 64 MiB.
+    pub shared_log_bytes: Option<usize>,
     /// The shell a harness entry's command line is told to use (`shell = "git-bash"`): an id `shell/list` gives, or a program (an
     /// absolute path, or a name found on the `PATH`). `None` takes `[host] shell`. Each harness is told as its documentation
     /// allows (`shells::for_harness`), and one that takes no setting is left alone and the host's log says so.
@@ -1769,6 +1779,9 @@ struct RawAgent {
     shared: Option<bool>,
     shared_idle_seconds: Option<u64>,
     shared_permission_window_seconds: Option<u64>,
+    shared_keep_log: Option<bool>,
+    shared_log_entries: Option<usize>,
+    shared_log_bytes: Option<usize>,
     listen: Option<String>,
     transport: Option<String>,
     transport_library: Option<String>,
@@ -2042,6 +2055,18 @@ impl Config {
                     "shared_permission_window_seconds goes with shared = true",
                 ));
             }
+            for (set, key) in [
+                (agent.shared_keep_log.is_some(), "shared_keep_log"),
+                (agent.shared_log_entries.is_some(), "shared_log_entries"),
+                (agent.shared_log_bytes.is_some(), "shared_log_bytes"),
+            ] {
+                if set && !shared {
+                    return Err(invalid(&name, &format!("{key} goes with shared = true")));
+                }
+            }
+            let shared_keep_log = agent.shared_keep_log.unwrap_or(true);
+            let (shared_log_entries, shared_log_bytes) =
+                (agent.shared_log_entries, agent.shared_log_bytes);
             let shared_permission_window = agent
                 .shared_permission_window_seconds
                 .filter(|seconds| *seconds > 0)
@@ -2278,6 +2303,9 @@ impl Config {
             served.shared = shared;
             served.shared_idle = shared_idle;
             served.shared_permission_window = shared_permission_window;
+            served.shared_keep_log = shared_keep_log;
+            served.shared_log_entries = shared_log_entries;
+            served.shared_log_bytes = shared_log_bytes;
             served.shell = shell;
             entries.push(served);
         }
@@ -3828,6 +3856,9 @@ fn entry(name: String, kind: EntryKind, common: RawCommon) -> Result<Entry, Conf
         shared: false,
         shared_idle: None,
         shared_permission_window: None,
+        shared_keep_log: true,
+        shared_log_entries: None,
+        shared_log_bytes: None,
         shell: None,
     })
 }

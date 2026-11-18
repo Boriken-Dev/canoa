@@ -2136,6 +2136,43 @@ shared_permission_window_seconds = 5
 }
 
 #[test]
+fn a_shared_entrys_log_is_kept_unless_turned_off_and_its_bounds_need_shared() {
+    let config = parse(
+        "[host.agents.a]
+program = \"x\"
+shared = true
+[host.agents.b]
+program = \"x\"
+shared = true
+shared_keep_log = false
+shared_log_entries = 50
+shared_log_bytes = 4096
+",
+    )
+    .expect("parses");
+    let kept: Vec<_> = config
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.shared_keep_log,
+                entry.shared_log_entries,
+                entry.shared_log_bytes,
+            )
+        })
+        .collect();
+    assert_eq!(kept, [(true, None, None), (false, Some(50), Some(4096))]);
+    for key in [
+        "shared_keep_log = false",
+        "shared_log_entries = 5",
+        "shared_log_bytes = 5",
+    ] {
+        let text = format!("[host.agents.a]\nprogram = \"x\"\n{key}\n");
+        assert!(parse(&text).is_err(), "{key} without shared = true");
+    }
+}
+
+#[test]
 fn the_office_add_in_is_off_unless_the_web_table_asks_for_it() {
     let web = |text: &str| {
         parse(&format!("[host.web]\n{text}"))

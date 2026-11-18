@@ -22,11 +22,14 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::Instant;
 
-use coqui_acp_hub::{Action, Client, ClientId, Hub, HubError, Note, Output, Policy, Verdict};
+use coqui_acp_hub::{
+    Action, Client, ClientId, Cursor, Hub, HubError, LogSnapshot, Note, Output, Policy, Verdict,
+};
 use coqui_peer_webcrypto::PeerId;
 use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
 
+use super::kept::{Keeper, Kept};
 use super::{FIRST_MESSAGE, MAX_LINE, Served, Shared};
 use crate::control::Grant;
 use crate::local::{self, Link};
@@ -46,6 +49,12 @@ pub(super) struct Keep {
     pub(super) idle: Option<Duration>,
     /// How long a permission request may wait with nobody answering before the host logs it; `None` logs nothing.
     pub(super) permission_window: Option<Duration>,
+    /// Whether the session's log is kept in the home, so that it survives the host's restart.
+    pub(super) keep_log: bool,
+    /// The updates the hub keeps for replay, at most; `None` takes its default.
+    pub(super) log_entries: Option<usize>,
+    /// The serialized bytes the hub keeps for replay, at most; `None` takes its default.
+    pub(super) log_bytes: Option<usize>,
 }
 
 /// The shared sessions the host holds, across entries.
@@ -53,13 +62,16 @@ pub(super) struct Hosted {
     /// This host's own key, which the person's own link speaks as.
     owner: PeerId,
     sessions: Mutex<Vec<Arc<Session>>>,
+    /// Where the sessions' logs are kept; `None` for a host with no home.
+    kept: Option<Arc<Kept>>,
 }
 
 impl Hosted {
-    pub(super) fn new(owner: PeerId) -> Self {
+    pub(super) fn new(owner: PeerId, kept: Option<Arc<Kept>>) -> Self {
         Self {
             owner,
             sessions: Mutex::new(Vec::new()),
+            kept,
         }
     }
 
@@ -227,6 +239,10 @@ struct Boot {
     swallow: Vec<Value>,
     /// The `cwd` of the request that opens the session.
     cwd: Option<String>,
+    /// The `session/load` or `session/resume` as the client sent it, which a restored session's hub answers itself.
+    opening_message: Option<Value>,
+    /// What the host kept of the session the opening request names, from before its restart.
+    restored: Option<LogSnapshot>,
 }
 
 enum Phase {
@@ -247,6 +263,8 @@ struct State {
     title: Option<String>,
     /// What `initialize` answers once the agent has said it, with what the hub adds.
     initialize: Option<Value>,
+    /// The file the session's log is kept in, while it is kept.
+    keeper: Option<Keeper>,
 }
 
 /// One agent session, its agent and the clients attached.
@@ -260,6 +278,10 @@ pub(super) struct Session {
     started_unix_ms: u64,
     /// The driver's end of the link the agent flow serves.
     agent: Link,
+    /// Where the log is kept, for a session whose entry keeps it.
+    kept: Option<Arc<Kept>>,
+    /// The bounds of the hub's log, from the entry.
+    log_bounds: (Option<usize>, Option<usize>),
     access: Arc<dyn Policy>,
     state: Mutex<State>,
 }
@@ -392,6 +414,10 @@ impl Session {
                                 .pointer("/params/sessionId")
                                 .and_then(Value::as_str)
                                 .map(str::to_owned);
+                            boot.restored = named.as_deref().and_then(|named| {
+                                self.kept.as_ref()?.load(&self.entry, named, self.idle)
+                            });
+                            boot.opening_message = Some(message.clone());
                             boot.opening = Some((request.clone(), named));
                         }
                         _ => {}
@@ -457,6 +483,7 @@ impl Session {
             id: session_id,
             initialize,
             cwd,
+            keeper,
             ..
         } = state;
         let Phase::Boot(boot) = phase else { return };
@@ -472,6 +499,11 @@ impl Session {
             .then(|| message.get("id"))
             .flatten();
         let Some(answered) = answered else {
+            // What the agent replays while it loads a session the host kept the log of is in that log already.
+            let replay = message.get("method").and_then(Value::as_str) == Some("session/update");
+            if replay && boot.restored.is_some() && boot.opening.is_some() {
+                return;
+            }
             return to_creator(bytes);
         };
         let swallowed = boot.swallow.contains(answered);
@@ -501,22 +533,60 @@ impl Session {
             .get("sessionId")
             .and_then(Value::as_str)
             .map(str::to_owned)
-            .or(named)
+            .or_else(|| named.clone())
         else {
             boot.opening = None;
             return to_creator(bytes);
         };
-        // The answer reaches the client as the agent gave it; from here the hub speaks to it.
-        to_creator(bytes);
         let answer = boot
             .answer
             .take()
             .unwrap_or_else(|| json!({"protocolVersion": 1, "agentCapabilities": {}}));
-        let mut hub = Hub::builder(opened.clone())
-            .initialize_result(answer.clone())
-            .policy(Arc::clone(&self.access))
-            .permission_window_ms(self.permission_window_ms)
-            .build();
+        let make = || {
+            let mut builder = Hub::builder(opened.clone())
+                .initialize_result(answer.clone())
+                .policy(Arc::clone(&self.access))
+                .permission_window_ms(self.permission_window_ms);
+            if let Some(entries) = self.log_bounds.0 {
+                builder = builder.max_log_entries(entries);
+            }
+            if let Some(bytes) = self.log_bounds.1 {
+                builder = builder.max_log_bytes(bytes);
+            }
+            builder
+        };
+        // A session loaded by name goes on from the log the host kept of it, if it did; with none, its log starts past every
+        // cursor an earlier log of it can have issued, so that a client holding one is refused rather than replayed from.
+        let named_here = named.as_deref() == Some(opened.as_str());
+        let kept_log = boot.restored.take().filter(|_| named_here);
+        let mut restoring = kept_log.is_some();
+        let log = kept_log
+            .or_else(|| named_here.then(|| fresh_log(self.started_unix_ms.saturating_add(now))));
+        let mut hub = match log.map(|log| make().restore_log(log)) {
+            Some(Ok(builder)) => builder.build(),
+            Some(Err(error)) => {
+                restoring = false;
+                tracing::warn!(
+                    entry = self.entry,
+                    session = opened,
+                    "the log kept of a shared session could not be used, so it starts afresh: {error}"
+                );
+                make().build()
+            }
+            None => make().build(),
+        };
+        if restoring {
+            tracing::info!(
+                entry = self.entry,
+                session = opened,
+                head = %hub.head(),
+                updates = hub.log_len(),
+                "a shared session goes on from the log the host kept"
+            );
+        } else {
+            // The answer reaches the client as the agent gave it; from here the hub speaks to it.
+            to_creator(bytes);
+        }
         hub.poll(now);
         if let Err(error) = hub.connect(boot.who.clone()) {
             tracing::warn!(
@@ -526,10 +596,39 @@ impl Session {
             self.agent.close();
             return;
         }
-        let attach = json!({"jsonrpc": "2.0", "id": ATTACH_ID, "method": "session/resume",
-            "params": {"sessionId": opened}});
-        let outputs = hub.from_client(&creator, &attach).unwrap_or_default();
+        // A restored session's hub answers the client's own request, so its cursor is honoured; any other attaches the opener
+        // live and its answer is the agent's.
+        let attach = match (restoring, boot.opening_message.take()) {
+            (true, Some(mut message)) => {
+                message["id"] = json!(ATTACH_ID);
+                message
+            }
+            _ => json!({"jsonrpc": "2.0", "id": ATTACH_ID, "method": "session/resume",
+                "params": {"sessionId": opened}}),
+        };
+        let mut outputs = hub.from_client(&creator, &attach).unwrap_or_default();
+        if restoring {
+            for output in &mut outputs {
+                if let Output::ToClient { client, message } = output
+                    && *client == creator
+                    && message.get("id").and_then(Value::as_str) == Some(ATTACH_ID)
+                {
+                    *message = load_answer(message, answered, result);
+                }
+            }
+        }
         *initialize = Some(with_loading(answer));
+        *keeper = self.kept.as_ref().and_then(|kept| match kept.begin(&self.entry, &hub) {
+            Ok(keeper) => Some(keeper),
+            Err(error) => {
+                tracing::warn!(
+                    entry = self.entry,
+                    session = opened,
+                    "the log of a shared session could not be kept, so it will not survive a restart: {error}"
+                );
+                None
+            }
+        });
         *session_id = Some(opened.clone());
         *cwd = boot.cwd.clone();
         *phase = Phase::Live(Box::new(hub));
@@ -579,6 +678,9 @@ impl Session {
                 Output::Note(note) => self.say(&note),
                 _ => {}
             }
+        }
+        if let (Phase::Live(hub), Some(keeper)) = (&state.phase, &mut state.keeper) {
+            keeper.sync(hub);
         }
     }
 
@@ -666,8 +768,15 @@ impl Session {
     }
 
     /// The agent's end: the hub says so to whoever is attached, and what they are sent is the last of it.
-    fn finish(&self) {
+    fn finish(&self, host_stopping: bool) {
         let mut state = self.lock();
+        // A session the host's stopping interrupted is kept to go on with; one that ended on its own, or by a client's word or
+        // the idle rule, is over, and so is what was kept of it. What follows (the hub telling the clients) is not written.
+        if let Some(keeper) = state.keeper.take()
+            && !host_stopping
+        {
+            keeper.remove();
+        }
         if let Phase::Live(hub) = &mut state.phase {
             let outputs = hub.agent_closed();
             self.dispatch(&mut state, outputs);
@@ -689,7 +798,7 @@ impl Session {
                 Ok(None) | Err(_) => break,
             }
         }
-        self.finish();
+        self.finish(stopped.load(Ordering::SeqCst));
     }
 }
 
@@ -729,6 +838,38 @@ fn named_by(message: &Value) -> Option<String> {
         .collect();
     let title = title.trim();
     (!title.is_empty()).then(|| title.to_owned())
+}
+
+/// A log with nothing in it that starts after every cursor an earlier log of the session can have issued: the time in
+/// milliseconds, which no log reaches by counting one at a time.
+fn fresh_log(unix_ms: u64) -> LogSnapshot {
+    let head = unix_ms.to_string().parse::<Cursor>().unwrap_or_default();
+    LogSnapshot::new(head, Vec::new())
+}
+
+/// The answer to a `session/load` or `session/resume` the hub took in the agent's place: the agent's own result (its modes,
+/// models and options) with the hub's cursor, or the hub's refusal, under the client's request id.
+fn load_answer(hub: &Value, request: &Value, agent: &Value) -> Value {
+    if hub.get("error").is_some() {
+        let mut refusal = hub.clone();
+        refusal["id"] = request.clone();
+        return refusal;
+    }
+    let mut result = if agent.is_object() {
+        agent.clone()
+    } else {
+        json!({})
+    };
+    if let Some(own) = hub
+        .pointer("/result/_meta")
+        .and_then(|meta| meta.get(coqui_acp_hub::META_KEY))
+    {
+        if !result.get("_meta").is_some_and(Value::is_object) {
+            result["_meta"] = json!({});
+        }
+        result["_meta"][coqui_acp_hub::META_KEY] = own.clone();
+    }
+    json!({"jsonrpc": "2.0", "id": request, "result": result})
 }
 
 /// `initialize`'s answer as the hub gives it.
@@ -914,6 +1055,8 @@ fn open<C: Channel>(
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |since| u64::try_from(since.as_millis()).unwrap_or(0)),
         agent: driver,
+        kept: keep.keep_log.then(|| shared.hosted.kept.clone()).flatten(),
+        log_bounds: (keep.log_entries, keep.log_bytes),
         access,
         state: Mutex::new(State {
             phase: Phase::Boot(Box::new(Boot {
@@ -924,6 +1067,8 @@ fn open<C: Channel>(
                 opening: None,
                 swallow,
                 cwd: None,
+                opening_message: None,
+                restored: None,
             })),
             clients: BTreeMap::new(),
             next_generation: 0,
@@ -931,6 +1076,7 @@ fn open<C: Channel>(
             cwd: None,
             title: None,
             initialize: None,
+            keeper: None,
         }),
     });
     let (outbox, queue) = mailbox();

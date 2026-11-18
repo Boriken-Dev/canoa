@@ -16,6 +16,7 @@ use std::thread;
 
 use crate::portal_link::PortalSockets;
 mod door;
+mod kept;
 mod sessions;
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
@@ -1740,6 +1741,9 @@ impl Serving {
                 keep: entry.shared.then_some(sessions::Keep {
                     idle: entry.shared_idle,
                     permission_window: entry.shared_permission_window,
+                    keep_log: entry.shared_keep_log,
+                    log_entries: entry.shared_log_entries,
+                    log_bytes: entry.shared_log_bytes,
                 }),
             });
             match listener {
@@ -1811,7 +1815,22 @@ impl Serving {
         ));
         let stopped = Arc::new(AtomicBool::new(false));
         let trust = Arc::clone(&store);
-        let hosted = Arc::new(sessions::Hosted::new(method.peer_id()));
+        let kept = options
+            .state_dir
+            .as_ref()
+            .map(|dir| Arc::new(kept::Kept::new(dir.join("shared_sessions"))));
+        if let Some(kept) = &kept {
+            kept.sweep(
+                &config
+                    .entries
+                    .iter()
+                    .chain(sources.iter().map(|source| &source.entry))
+                    .filter(|entry| entry.shared && entry.shared_keep_log)
+                    .map(|entry| (entry.name.clone(), entry.shared_idle))
+                    .collect(),
+            );
+        }
+        let hosted = Arc::new(sessions::Hosted::new(method.peer_id(), kept));
         let office_dir = options.state_dir.as_ref().map(|dir| dir.join("office"));
         let serving = Self {
             shared: Arc::new(Shared {

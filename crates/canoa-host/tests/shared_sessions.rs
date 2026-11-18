@@ -460,3 +460,242 @@ fn an_extension_asked_for_before_attaching_is_refused_and_the_attach_still_goes(
     })
     .expect("A's link");
 }
+
+/// The entry of the restart tests: its agent answers `session/load`, replaying a line of history of its own.
+fn reopening_entry(extra: &str) -> String {
+    format!(
+        "[host.agents.shared]\nprogram = {}\nargs = [\"--reopens\"]\nshared = true\n{extra}\n",
+        quoted(&example("stdio_agent", false).to_string_lossy())
+    )
+}
+
+/// What a client was replayed, as (method, cursor, text) in the order it arrived.
+fn replayed_order(messages: &[Value]) -> Vec<(String, String, String)> {
+    messages
+        .iter()
+        .filter(|message| message["params"]["_meta"][META]["seq"].is_string())
+        .map(|message| {
+            (
+                message["method"].as_str().unwrap_or("").to_owned(),
+                seq(message),
+                message["params"]["update"]["content"]["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// The host, started again on the home `host` had.
+fn restarted(host: &mut Host, config: &str) -> Host {
+    let scratch = std::mem::replace(&mut host.scratch, support::Scratch::new());
+    Host::start_in(scratch, config, 1, &[])
+}
+
+fn logs_kept(host: &Host) -> usize {
+    std::fs::read_dir(host.home().join("shared_sessions"))
+        .map_or(0, |files| files.flatten().count())
+}
+
+fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
+    let until = Instant::now() + Duration::from_secs(30);
+    while !done() {
+        assert!(Instant::now() < until, "{what}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[test]
+fn a_session_goes_on_from_its_kept_log_after_the_host_restarts() {
+    let config = reopening_entry("");
+    let mut host = Host::start_with(&config, 1, &["--until-stdin-closes"], &[]);
+    let key = support::key();
+    host.pair(&key);
+    let dir = cwd(&host.scratch);
+    let url = host.url("shared").to_owned();
+    let (session, cursor, before) = with_link(&url, &key, host.peer, |a| {
+        let session = open_session(a, &dir);
+        assert_eq!(a.prompt(&session, "one").expect("a turn"), "echo: one");
+        let cursor = seq(a
+            .updates
+            .borrow()
+            .iter()
+            .rfind(|update| update["method"] == "session/update")
+            .expect("an update"));
+        assert_eq!(a.prompt(&session, "two").expect("a turn"), "echo: two");
+        assert_eq!(a.prompt(&session, "three").expect("a turn"), "echo: three");
+        // What a client holding that cursor is replayed, before the host stops.
+        let (_, replayed) = with_link(&url, &key, host.peer, |b| {
+            attach(b, &session, &dir, Some(&cursor))
+        })
+        .expect("a second link");
+        (session, cursor, replayed_order(&replayed))
+    })
+    .expect("a link");
+    let said: Vec<&str> = before
+        .iter()
+        .map(|(_, _, text)| text.as_str())
+        .filter(|text| !text.is_empty())
+        .collect();
+    assert_eq!(said, ["two", "echo: two", "three", "echo: three"]);
+    assert_eq!(logs_kept(&host), 1, "the session's log is on disk");
+
+    // The host stops, as its parent ending would make it, and starts again on the same home.
+    host.close_input();
+    assert!(
+        host.ended_within(Duration::from_secs(30)).is_some(),
+        "the host stops"
+    );
+    assert_eq!(logs_kept(&host), 1, "a host stopping leaves the log");
+    let host = restarted(&mut host, &config);
+    let url = host.url("shared").to_owned();
+
+    // The first client back holds a cursor the log cannot continue from: it is told so, and nothing is replayed.
+    with_link(&url, &key, host.peer, |rpc| {
+        rpc.initialize().expect("initialize is answered");
+        rpc.updates.borrow_mut().clear();
+        let refused = rpc
+            .request(
+                "session/load",
+                json!({"sessionId": session, "cwd": dir, "mcpServers": [],
+                    "_meta": {META: {"cursor": "99999999999"}}}),
+            )
+            .expect_err("a cursor from a log that is gone");
+        assert_eq!(refused["data"]["reason"], "cursor_ahead", "{refused}");
+        assert!(replayed_order(&rpc.updates.borrow()).is_empty());
+    })
+    .expect("a link");
+
+    // The one that kept its cursor is replayed the same updates in the same order, and the agent's own history, which the
+    // kept log already holds, does not reach it.
+    let after = with_link(&url, &key, host.peer, |rpc| {
+        let (answered, replayed) = attach(rpc, &session, &dir, Some(&cursor));
+        assert_eq!(answered["_meta"][META]["truncated"], false, "{answered}");
+        assert!(
+            !update_texts(&replayed, "agent_message_chunk")
+                .iter()
+                .any(|text| text.starts_with("history")),
+            "{replayed:?}"
+        );
+        assert_eq!(
+            answered["_meta"][META]["cursor"],
+            before.last().expect("an update").1,
+            "the head is where it was"
+        );
+        // And the session goes on from there.
+        assert_eq!(rpc.prompt(&session, "four").expect("a turn"), "echo: four");
+        let next = seq(rpc
+            .updates
+            .borrow()
+            .iter()
+            .rfind(|update| update["method"] == "session/update")
+            .expect("an update"));
+        (replayed_order(&replayed), next)
+    })
+    .expect("a link");
+    assert_eq!(after.0, before, "the same order, the same cursors");
+    let head: u64 = before
+        .last()
+        .expect("an update")
+        .1
+        .parse()
+        .expect("a number");
+    assert!(after.1.parse::<u64>().expect("a number") > head);
+}
+
+#[test]
+fn an_ended_session_leaves_no_log_and_a_crash_leaves_one_to_go_on_from() {
+    let config = reopening_entry("");
+    let mut host = Host::start(&config, 1);
+    let key = support::key();
+    host.pair(&key);
+    let dir = cwd(&host.scratch);
+    let url = host.url("shared").to_owned();
+    with_link(&url, &key, host.peer, |rpc| {
+        let session = open_session(rpc, &dir);
+        assert_eq!(rpc.prompt(&session, "one").expect("a turn"), "echo: one");
+        assert_eq!(logs_kept(&host), 1);
+        rpc.request("session/close", json!({"sessionId": session}))
+            .expect("the session closes");
+    })
+    .expect("a link");
+    wait_for("the ended session's log is removed", || {
+        logs_kept(&host) == 0
+    });
+
+    let (session, cursor) = with_link(&url, &key, host.peer, |rpc| {
+        let session = open_session(rpc, &dir);
+        assert_eq!(rpc.prompt(&session, "two").expect("a turn"), "echo: two");
+        let cursor = seq(rpc
+            .updates
+            .borrow()
+            .iter()
+            .rfind(|update| update["method"] == "session/update")
+            .expect("an update"));
+        assert_eq!(
+            rpc.prompt(&session, "three").expect("a turn"),
+            "echo: three"
+        );
+        (session, cursor)
+    })
+    .expect("a link");
+    host.kill();
+    assert_eq!(logs_kept(&host), 1, "a crash leaves the log");
+    let host = restarted(&mut host, &config);
+    with_link(host.url("shared"), &key, host.peer, |rpc| {
+        let (_, replayed) = attach(rpc, &session, &dir, Some(&cursor));
+        assert_eq!(update_texts(&replayed, "user_message_chunk"), ["three"]);
+        assert_eq!(
+            update_texts(&replayed, "agent_message_chunk"),
+            ["echo: three"]
+        );
+    })
+    .expect("a link");
+}
+
+#[test]
+fn without_a_kept_log_a_cursor_from_before_the_restart_is_refused_not_replayed_from() {
+    let config = reopening_entry("shared_keep_log = false");
+    let mut host = Host::start(&config, 1);
+    let key = support::key();
+    host.pair(&key);
+    let dir = cwd(&host.scratch);
+    let (session, cursor) = with_link(host.url("shared"), &key, host.peer, |rpc| {
+        let session = open_session(rpc, &dir);
+        assert_eq!(rpc.prompt(&session, "one").expect("a turn"), "echo: one");
+        let cursor = seq(rpc
+            .updates
+            .borrow()
+            .iter()
+            .rfind(|update| update["method"] == "session/update")
+            .expect("an update"));
+        (session, cursor)
+    })
+    .expect("a link");
+    assert_eq!(logs_kept(&host), 0, "nothing was written");
+    host.kill();
+    let host = restarted(&mut host, &config);
+    // The first client back is given the agent's own history, as it was before sessions were kept.
+    with_link(host.url("shared"), &key, host.peer, |rpc| {
+        let (_, replayed) = attach(rpc, &session, &dir, None);
+        assert_eq!(
+            update_texts(&replayed, "agent_message_chunk"),
+            ["history: the agent's own"]
+        );
+    })
+    .expect("a link");
+    // A cursor of the log that is gone is refused to the next one, whose new log started past it.
+    with_link(host.url("shared"), &key, host.peer, |rpc| {
+        rpc.initialize().expect("initialize is answered");
+        let refused = rpc
+            .request(
+                "session/load",
+                json!({"sessionId": session, "cwd": dir, "mcpServers": [],
+                    "_meta": {META: {"cursor": cursor}}}),
+            )
+            .expect_err("a cursor from a log that is gone");
+        assert_eq!(refused["data"]["reason"], "cursor_expired", "{refused}");
+    })
+    .expect("a link");
+}

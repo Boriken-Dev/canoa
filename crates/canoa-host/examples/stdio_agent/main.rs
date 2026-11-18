@@ -1,7 +1,7 @@
 //! A small ACP agent on its standard streams, the stdio entry the host's tests serve. It echoes prompts; a prompt starting
 //! `ask` first asks the client's permission and answers with the option chosen. It answers `session/new` with the
 //! parameters it received, and `_fixture/received` with every method it has seen, so a test can tell what reached it.
-//! `_fixture/pid` answers its process id. With `--agy FIXTURE` it plays Antigravity's usage surface (agy.rs). With `--scripted` it is the app's scripted coding agent instead (scripted.rs). With `CANOA_TEST_AGENT_STAYS` set it stays a minute after its input closes, as an
+//! `_fixture/pid` answers its process id. With `--reopens` it also answers `session/load` and `session/resume` of any session, the load first replaying one line of history, as an agent that keeps its sessions does. With `--agy FIXTURE` it plays Antigravity's usage surface (agy.rs). With `--scripted` it is the app's scripted coding agent instead (scripted.rs). With `CANOA_TEST_AGENT_STAYS` set it stays a minute after its input closes, as an
 //! agent that ignores its input would, so a test sees whether something else ends it.
 #![allow(
     clippy::std_instead_of_core,
@@ -31,6 +31,7 @@ fn main() {
         scripted::run(&args);
         return;
     }
+    let reopens = args.iter().any(|arg| arg == "--reopens");
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
     let mut send = |message: Value| {
@@ -71,7 +72,9 @@ fn main() {
         };
         let params = message.get("params").cloned().unwrap_or(Value::Null);
         let result = match method {
-            "initialize" => json!({"protocolVersion": 1, "agentCapabilities": {}}),
+            "initialize" => {
+                json!({"protocolVersion": 1, "agentCapabilities": if reopens { json!({"loadSession": true}) } else { json!({}) }})
+            }
             "session/new" => json!({"sessionId": "fixture-session", "received": params}),
             "session/prompt" => {
                 let text = params["prompt"]
@@ -97,6 +100,15 @@ fn main() {
                 }
                 send(chunk(&session, format!("echo: {text}")));
                 json!({"stopReason": "end_turn"})
+            }
+            "session/load" | "session/resume" if reopens => {
+                if method == "session/load" {
+                    send(chunk(
+                        &params["sessionId"],
+                        "history: the agent's own".to_owned(),
+                    ));
+                }
+                json!({})
             }
             "_fixture/received" => json!({"methods": seen}),
             "_fixture/pid" => json!({"pid": std::process::id()}),
