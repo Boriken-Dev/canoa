@@ -1,8 +1,9 @@
-// The app's WebSocket to a remote Canoa host follows the system's proxy and its login: the connection is carried by the host the
-// app runs (`network/tunnel`), which the stand-ins below reach as a computer on a network with a proxy would. The host is the real
-// one (`store_control`, an example of canoa-host): build it first, `cargo build -p canoa-host --bin canoa --examples`. The
-// stand-ins are a proxy that wants a login and a remote host with a certificate made for the test (OpenSSL's command line makes
-// it, nothing is committed); a test that needs them is skipped without them.
+// The app's WebSocket to a remote Canoa host follows the system: the connection is made by the host the app runs
+// (`network/tunnel`), through the system's proxy and its login, with the TLS made by the host (its trust, its client certificates),
+// which the stand-ins below reach as a computer on a network with a proxy would. The host is the real one (`store_control`, an
+// example of canoa-host): build it first, `cargo build -p canoa-host --bin canoa --examples`. The stand-ins are a proxy that wants a
+// login and a remote host with certificates made for the test by an authority only the host is told to trust (OpenSSL's command
+// line makes them, nothing is committed and nothing is added to this computer's trust); a test that needs them is skipped without.
 @TestOn('vm')
 @Timeout(Duration(minutes: 2))
 library;
@@ -114,8 +115,12 @@ final class _Proxy {
   Future<void> close() => _server.close();
 }
 
-/// A certificate for [_remote], made by OpenSSL's command line, and the server context that uses it.
-Future<({SecurityContext server, String certificate, Directory dir})?> _certificate() async {
+/// What OpenSSL's command line made for the test: a certificate authority, a certificate for [_remote] it signed (with its key), and
+/// a client certificate it signed, the chain and key of which are in one file. Nothing is committed and nothing is added to this
+/// computer's trust: the host is told to trust the authority, and the Dart VM is not.
+typedef _Certificates = ({String ca, String server, String serverKey, String client, Directory dir});
+
+Future<_Certificates?> _certificates() async {
   final openssl = ['openssl', 'C:/Program Files/Git/usr/bin/openssl.exe'].where((candidate) {
     try {
       return Process.runSync(candidate, ['version']).exitCode == 0;
@@ -125,44 +130,59 @@ Future<({SecurityContext server, String certificate, Directory dir})?> _certific
   }).firstOrNull;
   if (openssl == null) return null;
   final dir = await Directory.systemTemp.createTemp('canoa-dial');
-  final key = '${dir.path}/key.pem';
-  final certificate = '${dir.path}/cert.pem';
-  final made = await Process.run(
-    openssl,
-    [
-      'req',
-      '-x509',
-      '-newkey',
-      'rsa:2048',
-      '-nodes',
-      '-keyout',
-      key,
-      '-out',
-      certificate,
-      '-days',
-      '1',
-      '-subj',
-      '/CN=$_remote',
-      '-addext',
-      'subjectAltName=DNS:$_remote',
-    ],
-    environment: {'MSYS2_ARG_CONV_EXCL': '*'},
+  String at(String name) => '${dir.path}/$name'.replaceAll('\\', '/');
+  Future<bool> run(List<String> arguments) async {
+    final made = await Process.run(openssl, arguments, environment: {'MSYS2_ARG_CONV_EXCL': '*'});
+    return made.exitCode == 0;
+  }
+
+  await File(at('server.ext')).writeAsString('subjectAltName=DNS:$_remote\nextendedKeyUsage=serverAuth\n');
+  await File(at('client.ext')).writeAsString('extendedKeyUsage=clientAuth\n');
+  final made =
+      await run([
+        'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', at('ca.key'), '-out', at('ca.pem'), '-days', '1',
+        '-subj', '/CN=Canoa Test CA', '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign',
+      ]) &&
+      await run(['req', '-newkey', 'rsa:2048', '-nodes', '-keyout', at('server.key'), '-out', at('server.csr'), '-subj', '/CN=$_remote']) &&
+      await run([
+        'x509', '-req', '-in', at('server.csr'), '-CA', at('ca.pem'), '-CAkey', at('ca.key'), '-CAcreateserial', '-out', at('server.pem'),
+        '-days', '1', '-extfile', at('server.ext'),
+      ]) &&
+      await run(['req', '-newkey', 'rsa:2048', '-nodes', '-keyout', at('client.key'), '-out', at('client.csr'), '-subj', '/CN=Alice Example']) &&
+      await run([
+        'x509', '-req', '-in', at('client.csr'), '-CA', at('ca.pem'), '-CAkey', at('ca.key'), '-CAcreateserial', '-out', at('client-cert.pem'),
+        '-days', '1', '-extfile', at('client.ext'),
+      ]);
+  if (!made) return null;
+  // The host reads a chain and its unencrypted key from one file.
+  await File(at('client.pem')).writeAsString(
+    '${await File(at('client-cert.pem')).readAsString()}${await File(at('client.key')).readAsString()}',
   );
-  if (made.exitCode != 0) return null;
-  final server = SecurityContext()
-    ..useCertificateChain(certificate)
-    ..usePrivateKey(key);
-  return (server: server, certificate: certificate, dir: dir);
+  return (ca: at('ca.pem'), server: at('server.pem'), serverKey: at('server.key'), client: at('client.pem'), dir: dir);
 }
 
-/// A remote host that sends `hello` to whoever opens a WebSocket to it.
-Future<HttpServer> _origin({SecurityContext? tls}) async {
-  final server = tls == null
-      ? await HttpServer.bind(InternetAddress.loopbackIPv4, 0)
-      : await HttpServer.bindSecure(InternetAddress.loopbackIPv4, 0, tls);
+/// What a remote host sends to whoever opens a WebSocket to it: `hello`, then whether it was shown a client certificate.
+Future<HttpServer> _origin({_Certificates? tls, bool wantsClientCertificate = false}) async {
+  final HttpServer server;
+  if (tls == null) {
+    server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  } else {
+    // Only the test's authority is trusted here, for the client certificates it asks for; the Dart VM's own roots are not used.
+    final context = SecurityContext()
+      ..useCertificateChain(tls.server)
+      ..usePrivateKey(tls.serverKey)
+      ..setTrustedCertificates(tls.ca);
+    server = await HttpServer.bindSecure(
+      InternetAddress.loopbackIPv4,
+      0,
+      context,
+      requestClientCertificate: wantsClientCertificate,
+    );
+  }
   server.listen((request) async {
+    final shown = request.certificate?.subject;
     final socket = await WebSocketTransformer.upgrade(request);
-    socket.add('hello');
+    socket.add(wantsClientCertificate ? 'hello ${shown ?? 'nobody'}' : 'hello');
     socket.listen((_) {});
   });
   return server;
@@ -175,15 +195,24 @@ void main() {
     late Directory dir;
     late ControlProcess example;
     late HostControl control;
-    late _Proxy proxy;
-    late HttpServer origin;
-    late Directory certDir;
-    var tls = false;
+    _Proxy? proxy;
+    HttpServer? origin;
+    _Certificates? certificates;
 
-    /// The host with the system's proxy named by its environment: [login] is what it logs in with, and [bypass] the names that go
-    /// direct. A person's own proxy variables are replaced, so the run depends on nothing of this computer's.
-    Future<void> startHost({String password = _password, String bypass = 'unrelated.invalid'}) async {
-      final url = 'http://$_user:$password@127.0.0.1:${proxy.port}';
+    /// The remote host, and the proxy that reaches it.
+    Future<void> startRemote({bool wantsClientCertificate = false}) async {
+      final remote = await _origin(tls: certificates, wantsClientCertificate: wantsClientCertificate);
+      origin = remote;
+      proxy = await _Proxy.start(remote.port);
+    }
+
+    /// The host with the system's proxy named by its environment: [password] is what it logs in with, and [bypass] the names that
+    /// go direct. A person's own proxy variables are replaced, so the run depends on nothing of this computer's. [network] is the
+    /// text of its `[host.network]` table: the authority it trusts and the client certificate it presents, and none of that is
+    /// the Dart VM's.
+    Future<void> startHost({String password = _password, String bypass = 'unrelated.invalid', String network = ''}) async {
+      if (network.isNotEmpty) await File('${dir.path}/network.toml').writeAsString(network);
+      final url = 'http://$_user:$password@127.0.0.1:${proxy!.port}';
       final process = await Process.start(
         exampleBinary('store_control')!,
         [dir.path],
@@ -198,22 +227,23 @@ void main() {
       useHostDials(control);
     }
 
+    String trusting(_Certificates made, {bool client = false}) =>
+        '[host.network]\nca_file = "${made.ca}"\n${client ? 'client_certificate = "${made.client}"\n' : ''}';
+
+    Future<WebChannel> dial() => connectSystemChannel(
+      WebEndpoints(webSocket: Uri.parse('wss://$_remote:${origin!.port}/channel')),
+      timeout: const Duration(seconds: 30),
+    );
+
     setUp(() async {
       dir = await Directory.systemTemp.createTemp('canoa-dial-host');
-      final made = await _certificate();
-      tls = made != null;
-      if (made != null) {
-        certDir = made.dir;
-        SecurityContext.defaultContext.setTrustedCertificates(made.certificate);
-      }
-      origin = await _origin(tls: made?.server);
-      proxy = await _Proxy.start(origin.port);
+      certificates = await _certificates();
     });
 
     tearDown(() async {
       resetSystemDial();
-      await proxy.close();
-      await origin.close(force: true);
+      await proxy?.close();
+      await origin?.close(force: true);
       try {
         await example.process.stdin.close();
         await example.process.exitCode.timeout(
@@ -226,7 +256,7 @@ void main() {
       } on Object {
         // Never started.
       }
-      for (final each in [dir, if (tls) certDir]) {
+      for (final each in [dir, ?certificates?.dir]) {
         try {
           await each.delete(recursive: true);
         } on FileSystemException {
@@ -235,48 +265,78 @@ void main() {
       }
     });
 
-    test('a wss connection to a remote host goes through the system proxy, logged in, and the app talks TLS to the host itself', () async {
-      if (!tls) markTestSkipped('no OpenSSL command line to make the stand-in host\'s certificate');
-      if (!tls) return;
-      await startHost();
-      final channel = await connectSystemChannel(
-        WebEndpoints(webSocket: Uri.parse('wss://$_remote:${origin.port}/channel')),
-        timeout: const Duration(seconds: 30),
-      );
+    test('a wss connection to a remote host goes through the system proxy, logged in, to a server only the host\'s trust vouches for', () async {
+      final made = certificates;
+      if (made == null) markTestSkipped('no OpenSSL command line to make the stand-in host\'s certificates');
+      if (made == null) return;
+      await startRemote();
+      // The authority is in the host's `[host.network]` and nowhere in the Dart VM's trust: only the host makes the TLS.
+      await startHost(network: trusting(made));
+      final channel = await dial();
       expect(await channel.messages.first.timeout(const Duration(seconds: 10)), 'hello');
       await channel.close();
-      expect(proxy.allowed, [
-        'CONNECT $_remote:${origin.port} HTTP/1.1',
-      ], reason: 'the proxy saw the tunnel with the login: ${proxy.asked}');
+      expect(proxy!.allowed, [
+        'CONNECT $_remote:${origin!.port} HTTP/1.1',
+      ], reason: 'the proxy saw the tunnel with the login: ${proxy!.asked}');
+    });
+
+    test('a server whose authority the host does not trust is not connected to, whatever the Dart VM would say', () async {
+      final made = certificates;
+      if (made == null) markTestSkipped('no OpenSSL command line to make the stand-in host\'s certificates');
+      if (made == null) return;
+      await startRemote();
+      // The operating system's trust holds no authority of this test.
+      await startHost();
+      await expectLater(
+        dial(),
+        throwsA(isA<TransportUnavailable>().having((e) => e.toString(), 'message', contains('TLS'))),
+      );
+    });
+
+    test('a server that asks for a client certificate is shown the one the host\'s settings name', () async {
+      final made = certificates;
+      if (made == null) markTestSkipped('no OpenSSL command line to make the stand-in host\'s certificates');
+      if (made == null) return;
+      await startRemote(wantsClientCertificate: true);
+      await startHost(network: trusting(made, client: true));
+      final channel = await dial();
+      expect(await channel.messages.first.timeout(const Duration(seconds: 10)), contains('Alice Example'));
+      await channel.close();
+    });
+
+    test('a server that asks for a client certificate is shown none when the host\'s settings name none', () async {
+      final made = certificates;
+      if (made == null) markTestSkipped('no OpenSSL command line to make the stand-in host\'s certificates');
+      if (made == null) return;
+      await startRemote(wantsClientCertificate: true);
+      await startHost(network: '${trusting(made)}client_certificate = "none"\n');
+      final channel = await dial();
+      expect(await channel.messages.first.timeout(const Duration(seconds: 10)), 'hello nobody');
+      await channel.close();
     });
 
     test('a proxy that refuses the login leaves the dial failed, saying why, and nothing reaches the host', () async {
-      if (!tls) markTestSkipped('no OpenSSL command line to make the stand-in host\'s certificate');
-      if (!tls) return;
-      await startHost(password: 'wrong');
+      final made = certificates;
+      if (made == null) markTestSkipped('no OpenSSL command line to make the stand-in host\'s certificates');
+      if (made == null) return;
+      await startRemote();
+      await startHost(password: 'wrong', network: trusting(made));
       await expectLater(
-        connectSystemChannel(
-          WebEndpoints(webSocket: Uri.parse('wss://$_remote:${origin.port}/channel')),
-          timeout: const Duration(seconds: 30),
-        ),
+        dial(),
         throwsA(isA<TransportUnavailable>().having((e) => e.toString(), 'message', contains('proxy'))),
       );
-      expect(proxy.allowed, isEmpty);
+      expect(proxy!.allowed, isEmpty);
     });
 
-    test('a name the system sends direct is opened by the app itself, and the proxy is not asked', () async {
-      if (!tls) markTestSkipped('no OpenSSL command line to make the stand-in host\'s certificate');
-      if (!tls) return;
-      await startHost(bypass: _remote);
-      // The name resolves to nothing here: what shows is that the app tried the address itself.
-      await expectLater(
-        connectSystemChannel(
-          WebEndpoints(webSocket: Uri.parse('wss://$_remote:${origin.port}/channel')),
-          timeout: const Duration(seconds: 30),
-        ),
-        throwsA(isA<TransportUnavailable>()),
-      );
-      expect(proxy.asked, isEmpty);
+    test('a name the system sends direct is not asked of the proxy: the host opens it itself', () async {
+      final made = certificates;
+      if (made == null) markTestSkipped('no OpenSSL command line to make the stand-in host\'s certificates');
+      if (made == null) return;
+      await startRemote();
+      await startHost(bypass: _remote, network: trusting(made));
+      // The name resolves to nothing here: what shows is that the host tried the address itself.
+      await expectLater(dial(), throwsA(isA<TransportUnavailable>()));
+      expect(proxy!.asked, isEmpty);
     });
   });
 
