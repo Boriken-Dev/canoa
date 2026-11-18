@@ -21,6 +21,7 @@ mod kind;
 mod launcher;
 mod local;
 mod loopback;
+mod mail;
 pub mod native;
 mod network;
 pub mod options;
@@ -54,9 +55,10 @@ pub use accounts::ACCOUNT_META;
 pub use config::{
     AccountConfig, AccountStore, CACHE_LIFETIMES, Config, ConfigError, ControlConfig,
     DelegateConfig, ENTRIES, Entry, EntryKind, Extension, ExtensionCheck, HarnessOptions,
-    INSTALLED_DIR_VARIABLE, KbConfig, Layers, Listen, Loadout, NativeConfig, NetworkConfig, Origin,
-    Preset, ResolvedLoadout, Settings, StoreConfig, TransportListen, UnknownLoadout, UnknownPreset,
-    UsageSource, WebConfig, WebMode, cache_lifetime_name, cache_lifetime_named, merge_into,
+    INSTALLED_DIR_VARIABLE, KbConfig, Layers, Listen, Loadout, MailAccount, MailAuth, MailBackend,
+    MailConfig, NativeConfig, NetworkConfig, Origin, Preset, ResolvedLoadout, Settings,
+    StoreConfig, TransportListen, UnknownLoadout, UnknownPreset, UsageSource, WebConfig, WebMode,
+    cache_lifetime_name, cache_lifetime_named, merge_into,
 };
 /// The `_meta` key of `initialize` that asks a host for the delegation tools, and that a task's permission request carries
 /// with its task id, title and source.

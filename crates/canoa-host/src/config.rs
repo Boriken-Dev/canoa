@@ -65,6 +65,8 @@ pub struct Config {
     pub network: NetworkConfig,
     /// `[host.kb]`: the knowledge index tools and where their embeddings come from.
     pub kb: KbConfig,
+    /// `[host.mail]`: the mailboxes the `canoa-mail` tools reach.
+    pub mail: MailConfig,
     /// `[host.delegate]`: what an agent may hand to another one.
     pub delegate: DelegateConfig,
     /// `[host.control]`: the control channel's limits, and where a paired key may reach it from; `None` when the file has no
@@ -619,6 +621,63 @@ pub struct KbConfig {
     pub llm_candidates: Option<usize>,
     /// `llm_timeout_secs`: how long one ordering may take before the search answers without it (default 30).
     pub llm_timeout_secs: Option<u64>,
+}
+
+/// `[host.mail]`: the `canoa-mail` tools, which let an agent search, read, draft and organize the person's mail. Nothing is
+/// offered until an account is named; the tools then reach every session of a key that holds the `mail` grant.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct MailConfig {
+    /// `tools`: whether the host offers the mail tools at all (default true).
+    pub tools: Option<bool>,
+    /// `[host.mail.accounts.NAME]`, in the file's order.
+    pub accounts: IndexMap<String, MailAccount>,
+}
+
+/// What reaches a mailbox.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MailBackend {
+    /// Exchange Server's web services (EWS).
+    Ews,
+    /// Classic Outlook for Windows, through a PowerShell helper that drives its object model.
+    Outlook,
+}
+
+/// How an Exchange account signs in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MailAuth {
+    /// A user name and a password the environment holds.
+    Basic,
+    /// The person's Windows logon.
+    Windows,
+}
+
+/// One `[host.mail.accounts.NAME]`. It holds no password: `password_env` names the variable that does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct MailAccount {
+    /// What reaches the mailbox.
+    pub backend: MailBackend,
+    /// The mailbox's address, which Autodiscover asks about (`ews`).
+    pub email: Option<String>,
+    /// The EWS address; Autodiscover finds it from `email` when this is not given (`ews`).
+    pub server: Option<String>,
+    /// The Autodiscover address to ask instead of the two the address's domain suggests (`ews`).
+    pub autodiscover: Option<String>,
+    /// How an Exchange account signs in.
+    pub auth: MailAuth,
+    /// The account's user name for Basic (`ews`).
+    pub user: Option<String>,
+    /// The variable that holds the password for Basic (`ews`).
+    pub password_env: Option<String>,
+    /// The Outlook profile to log on to; the one Outlook is running with otherwise (`outlook`).
+    pub profile: Option<String>,
+    /// The program and arguments that run the Outlook helper, instead of Windows PowerShell with the helper script (`outlook`).
+    pub command: Option<Vec<String>>,
+    /// How long one call may take, in seconds (default 60).
+    pub timeout_secs: u64,
 }
 
 /// `[host.delegate]`: what an agent session may hand to another source, as tasks the host runs. Every limit is a setting with a
@@ -1498,6 +1557,7 @@ struct RawHost {
     network: Option<RawNetwork>,
     delegate: Option<RawDelegate>,
     kb: Option<RawKb>,
+    mail: Option<RawMail>,
 }
 
 /// `[host.network]`.
@@ -1662,6 +1722,167 @@ impl RawKb {
             llm_api_key_env: self.llm_api_key_env,
             llm_candidates: self.llm_candidates,
             llm_timeout_secs: self.llm_timeout_secs,
+        })
+    }
+}
+
+/// `[host.mail]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMail {
+    tools: Option<bool>,
+    #[serde(default)]
+    accounts: IndexMap<String, RawMailAccount>,
+}
+
+/// `[host.mail.accounts.NAME]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMailAccount {
+    backend: Option<String>,
+    email: Option<String>,
+    server: Option<String>,
+    autodiscover: Option<String>,
+    auth: Option<String>,
+    user: Option<String>,
+    password_env: Option<String>,
+    profile: Option<String>,
+    command: Option<Vec<String>>,
+    timeout_secs: Option<u64>,
+}
+
+/// Whether `address` is an http or https address a mailbox may be reached at: https anywhere, http only on this computer, since
+/// a password sent over plain http crosses the network in the clear.
+fn mail_address(address: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(address) else {
+        return false;
+    };
+    match (parsed.scheme(), parsed.host()) {
+        ("https", Some(_)) => true,
+        ("http", Some(url::Host::Domain(name))) => name.eq_ignore_ascii_case("localhost"),
+        ("http", Some(url::Host::Ipv4(ip))) => ip.is_loopback(),
+        ("http", Some(url::Host::Ipv6(ip))) => ip.is_loopback(),
+        _ => false,
+    }
+}
+
+impl RawMail {
+    fn into_config(self) -> Result<MailConfig, ConfigError> {
+        let mut accounts = IndexMap::new();
+        for (name, raw) in self.accounts {
+            let invalid = |what: &str| ConfigError::Invalid {
+                entry: None,
+                what: format!("[host.mail.accounts.{name}] {what}"),
+            };
+            if name.is_empty()
+                || name.len() > 32
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+            {
+                return Err(ConfigError::Invalid {
+                    entry: None,
+                    what: format!(
+                        "[host.mail.accounts.{name}] the name is 1 to 32 lower-case letters, digits, - and _"
+                    ),
+                });
+            }
+            let backend = match raw.backend.as_deref() {
+                Some("ews") => MailBackend::Ews,
+                Some("outlook") => MailBackend::Outlook,
+                _ => return Err(invalid("backend is ews or outlook")),
+            };
+            let timeout_secs = raw.timeout_secs.unwrap_or(60);
+            if !(1..=3600).contains(&timeout_secs) {
+                return Err(invalid("timeout_secs is 1 to 3600"));
+            }
+            let auth = match backend {
+                MailBackend::Outlook => {
+                    if raw.email.is_some()
+                        || raw.server.is_some()
+                        || raw.autodiscover.is_some()
+                        || raw.auth.is_some()
+                        || raw.user.is_some()
+                        || raw.password_env.is_some()
+                    {
+                        return Err(invalid(
+                            "outlook signs in as Outlook does: it takes profile and command, not email, server, autodiscover, auth, user or password_env",
+                        ));
+                    }
+                    if raw
+                        .command
+                        .as_ref()
+                        .is_some_and(|c| c.first().is_none_or(String::is_empty))
+                    {
+                        return Err(invalid("command names a program"));
+                    }
+                    MailAuth::Windows
+                }
+                MailBackend::Ews => {
+                    if raw.profile.is_some() || raw.command.is_some() {
+                        return Err(invalid("profile and command are for outlook"));
+                    }
+                    if raw.server.is_none() && raw.email.is_none() {
+                        return Err(invalid(
+                            "ews needs a server, or an email for Autodiscover to find it by",
+                        ));
+                    }
+                    for (key, address) in
+                        [("server", &raw.server), ("autodiscover", &raw.autodiscover)]
+                    {
+                        if address.as_deref().is_some_and(|a| !mail_address(a)) {
+                            return Err(invalid(&format!(
+                                "{key} is an https address (http only on this computer, since a password would cross the network in the clear)"
+                            )));
+                        }
+                    }
+                    let auth = match raw.auth.as_deref() {
+                        Some("basic") => MailAuth::Basic,
+                        Some("windows") => MailAuth::Windows,
+                        None if raw.user.is_some() => MailAuth::Basic,
+                        None => MailAuth::Windows,
+                        Some(_) => return Err(invalid("auth is basic or windows")),
+                    };
+                    match auth {
+                        MailAuth::Basic => {
+                            if raw.user.as_deref().is_none_or(str::is_empty)
+                                || raw.password_env.as_deref().is_none_or(str::is_empty)
+                            {
+                                return Err(invalid(
+                                    "basic needs a user and the password_env that names the variable holding the password",
+                                ));
+                            }
+                        }
+                        MailAuth::Windows => {
+                            if raw.user.is_some() || raw.password_env.is_some() {
+                                return Err(invalid(
+                                    "windows signs in as you: it takes no user or password_env",
+                                ));
+                            }
+                        }
+                    }
+                    auth
+                }
+            };
+            accounts.insert(
+                name,
+                MailAccount {
+                    backend,
+                    email: raw.email,
+                    server: raw.server,
+                    autodiscover: raw.autodiscover,
+                    auth,
+                    user: raw.user,
+                    password_env: raw.password_env,
+                    profile: raw.profile,
+                    command: raw.command,
+                    timeout_secs,
+                },
+            );
+        }
+        Ok(MailConfig {
+            tools: self.tools,
+            accounts,
         })
     }
 }
@@ -2000,6 +2221,11 @@ impl Config {
         let kb = host
             .kb
             .map(RawKb::into_config)
+            .transpose()?
+            .unwrap_or_default();
+        let mail = host
+            .mail
+            .map(RawMail::into_config)
             .transpose()?
             .unwrap_or_default();
         let delegate = host
@@ -2475,6 +2701,7 @@ impl Config {
             store,
             network,
             kb,
+            mail,
             delegate,
             skill_pins,
             extensions,
