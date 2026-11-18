@@ -1377,6 +1377,7 @@ canoa portal [--config FILE] [--site DIR] [--listen ADDRESS] [--socket PATH] [fa
 canoa check [--config FILE] [--format text|json]
 canoa office-launcher [--config FILE]      # holds the add-in's address while no host runs and starts one when the page asks (see "The add-in on this computer")
 canoa office-launcher (--install | --uninstall | --status) [--config FILE] [--format text|json]   # registers it to start at this user's sign-in (see "The add-in on this computer")
+canoa office-launcher --detach [--config FILE] [--format text|json]   # starts it again with no console, output to <home>/office/launcher.log, prints its pid and ends; the Windows Run value runs this
 canoa layers [--config FILE] [--format text|json]
 canoa id [--method noise|webcrypto [--force]] [--identity FILE]
 canoa peers [--format text|json]

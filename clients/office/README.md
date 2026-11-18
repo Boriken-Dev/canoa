@@ -262,7 +262,11 @@ as the host (`[host.web]` with `office` and `office_local`, the same `listen`, `
   entry and nothing else, and `--status` says whether it is registered, whether it is what `--install` would write now, and
   whether a launcher answers at the add-in's address (something answers there and no host holds the home, which is the only time
   the launcher holds it). `--install` refuses a canoa.cfg with no `[host.web]` that has `office` and `office_local`. On Windows
-  `canoa.exe` is a console program, so its window stays open for as long as the launcher runs.
+  `canoa.exe` is a console program, so the Run value adds `--detach`: the launcher then starts itself again with no console and
+  the first process ends, which leaves a window for a moment at sign-in and none after. The launcher's lines go to
+  `launcher.log` in the `office` folder of the home. Run `canoa office-launcher --detach` by hand for the same on any system; on Windows the launcher holds every
+  handle its starter held, so a program that reads the starter's output through a pipe waits until the launcher ends (send the
+  output to a file).
 
 - While a host holds the home it does nothing but look every half second. A host that starts takes the home before it binds, the
   launcher lets go of the address at its next look, and a host that finds the address held waits for it a few seconds, so neither
