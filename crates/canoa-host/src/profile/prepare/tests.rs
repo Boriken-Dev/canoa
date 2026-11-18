@@ -651,3 +651,33 @@ fn a_package_lock_makes_the_install_npm_ci() {
     assert_eq!(home.record("drifted"), None);
     assert!(home.packages("drifted").is_empty());
 }
+
+#[cfg(unix)]
+#[test]
+fn a_setup_sh_runs_under_sh_with_its_phase_and_the_overlays_variables() {
+    let scratch = Scratch::new("setup-sh");
+    let home = Home::new(scratch.overlays());
+    let plan = plan_for(
+        &scratch,
+        "shell",
+        &[
+            ("overlay.cfg", "name = \"shell\"\n"),
+            (
+                "setup.sh",
+                "printf '%s %s %s' \"$1\" \"$AOS_SETUP_PHASE\" \"$(basename \"$AOS_OVERLAY_ROOT\")\" > \"$AOS_OVERLAY_STATE/ran\"\n",
+            ),
+        ],
+    );
+    assert!(
+        plan.lines()[0].starts_with("setup: setup.sh under sh ("),
+        "{:?}",
+        plan.lines()
+    );
+    let finder = Finder::new(&|_| None, &[]);
+    let done = run(&plan, Change::Add, &home, &finder, &[]).expect("prepared");
+    assert_eq!(done.steps, ["empty-state", "setup", "record"]);
+    assert_eq!(
+        std::fs::read_to_string(home.state("shell").join("ran")).expect("setup wrote it"),
+        "install install shell"
+    );
+}
