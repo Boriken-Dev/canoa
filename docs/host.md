@@ -352,6 +352,13 @@ model = "qwen3-embedding-0.6b-generic-cpu:1"   # the exact id it loaded; require
 llm_endpoint = "http://127.0.0.1:60570"       # a chat model that puts the best passages first (the llm search mode); optional
 llm_model = "qwen2.5-1.5b-instruct-generic-cpu:4"   # the exact id it loaded; required with llm_endpoint
 
+# The person's mail as a source (`canoa-mail`): see "Mail as a source".
+# [host.mail.accounts.work]
+# backend = "ews"
+# server = "https://mail.example.com/EWS/Exchange.asmx"
+# user = "EXAMPLE\\ana"
+# password_env = "WORK_MAIL_PASSWORD"
+
 [host.agents.claude]
 harness = "claude"
 accounts = ["work", "personal"] # a session runs on the first unless its client names another
@@ -821,6 +828,53 @@ page, so check its sharing rules before pairing anyone else.
 - An `ANTHROPIC_API_KEY` in the host's environment takes precedence over Claude's subscription sign-in, so it changes who
   pays. The agent inherits the host's environment.
 - A turn in progress ends with its connection: each connection runs a fresh agent process.
+
+## Mail as a source
+
+With a mail account in canoa.cfg the host gives an agent the person's own mail as it gives it an overlay's knowledge: search it,
+read it, find what is related to a message, and draft into it. Gather what was said before writing a new message, or sort an
+inbox, from any session on this computer.
+
+```toml
+[host.mail]
+tools = true                             # false turns the tools off; they are offered only once an account is named
+
+[host.mail.accounts.work]                # a name of lower-case letters, digits, - and _
+backend = "ews"                          # Exchange Server's web services
+email = "ana@example.com"                # Autodiscover finds the server from this ...
+server = "https://mail.example.com/EWS/Exchange.asmx"   # ... or name it, and nothing is discovered
+user = "EXAMPLE\\ana"
+password_env = "WORK_MAIL_PASSWORD"      # the variable that holds the password; canoa.cfg holds none
+
+[host.mail.accounts.desktop]
+backend = "outlook"                      # classic Outlook for Windows, every account it holds, signed in as Outlook is
+# profile = "Work"                       # the Outlook profile to log on to; the one running otherwise
+```
+
+- **Who gets the tools.** A session of a connection whose key holds the **`mail`** grant: the application on this computer holds
+  it, a paired key only if `[host.control] grants` or `[host.native] control` lists `mail`, and a host run for a portal gives it to
+  no one. A task another agent handed out, and a session a web page started, never get it. Every session of such a connection gets
+  the `canoa-mail` server, whether or not its client asked, along with a built-in skill that says when to use it.
+- **What the agent can do.** `mail_list` names the accounts and their folders. `mail_search` filters by sender, recipient, subject,
+  dates, folder, attachments, unread and flagged, and by words (an Exchange account takes Exchange's own query syntax, so
+  `budget AND (Q3 OR Q4)` works). `mail_read` reads a message or its whole conversation. `mail_related` finds the conversation, the
+  same subject and the same people. `mail_draft` saves a new message or a reply in Drafts. Nothing in the host sends mail: there is
+  no tool that does, and the Exchange requests are all saved without sending.
+- **What it must ask.** `mail_move`, `mail_archive` and `mail_update` (read or unread, follow-up flag, categories) are put to the
+  person as a permission request showing the messages and the change, and nothing happens until they allow it. A session the
+  person put in a mode that asks for nothing is not asked, and says so in the conversation, as for any other tool.
+- **Mail is data.** A subject, a body and an attachment name were written by whoever sent the message. Every result says so, strips
+  what could hide or reorder text, and cuts long text; the skill tells the agent to weigh a message and never to obey it.
+- **Exchange Server (`ews`).** Requests go through the host's network settings (`[host.network]`) like every other fetch. `server`
+  or `email` is required; a plain `http` address is accepted only on this computer, since a password would cross the network in the
+  clear. Basic sign-in needs `user` and `password_env`. Signing in with the Windows logon (`auth = "windows"`, Negotiate) is
+  reserved: the account is refused with a message until the HTTP stack can sign in to a server that way. Exchange Online
+  turned EWS off for tenants from 1 October 2026 (it ends for all on 1 April 2027): an Exchange Online mailbox belongs to
+  classic Outlook (`outlook`), or to a Microsoft Graph account when one lands.
+- **Classic Outlook (`outlook`).** Windows only. The host runs Windows PowerShell with a helper script that drives Outlook's object
+  model (COM) and speaks JSON, so the host itself holds no `unsafe` for it. It reaches every account Outlook holds (Exchange, IMAP,
+  Gmail, a PST) as Outlook is signed in to them. Outlook may ask the person to allow programmatic access (an antivirus product or a
+  policy decides), and the call waits for the answer up to `timeout_secs` (default 60). `command` replaces the PowerShell command.
 
 ## Delegating a task to another agent
 
