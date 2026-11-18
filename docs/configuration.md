@@ -712,11 +712,11 @@ adds one.
 - **Skills.** Installed: the skills fetched, with the overlays that name each or that you chose it, source and pin; one
   you chose has a switch for new sessions, which adds or takes away its name in the starting loadout's `skills`. The host delivers
   such a skill from its record at each session, only when the record says you chose it and its files have the digest the
-  record names (and the pin in `[skill_pins]`, if any); otherwise it is left out and the session's report says why. Discover: the skills your catalogs list, the sources you read skills from (see [Skill sources](#skill-sources)), and a spec to paste (`<repository>@<ref>#<skill directory>`). A
+  record names (and the pin in `[skill_pins]`, if any); otherwise it is left out and the session's report says why. Installed also lists every skill an installed overlay provides, marked with the overlay and with no Remove of its own: it goes when the overlay does. Discover: the sources you read skills from (see [Skill sources](#skill-sources)) and a spec to paste; a skill an overlay's catalog names comes with its overlay and is not offered alone (`<repository>@<ref>#<skill directory>`). A
   skill is an [Agent Skills](https://agentskills.io/specification) directory: a `SKILL.md` with YAML front matter whose
   `name` is the directory's. It is fetched only on a yes, after its source and pin are shown, and checked against the
   pin before any file is read.
-- **MCPs.** Installed: the servers `[profile.mcp]` and your overlays define. Discover: the
+- **MCPs.** Installed: the servers `[profile.mcp]` and your overlays define; an overlay's is marked with the overlay and has no Remove of its own. Discover: the
   [MCP Registry](https://github.com/modelcontextprotocol/registry) (`registry.modelcontextprotocol.io`, `GET
   /v0.1/servers`), each server a `server.json`. Installing shows the registry's claims, the digest of the `server.json`,
   each way to run it (an npm, PyPI or OCI package, or a remote address) with the command or address Canoa would write,
@@ -817,10 +817,26 @@ Each source describes itself to the Store: its name, the types it serves (or all
 Store settings shows when you add a catalog to a type. Two come with Canoa. **`read`** reads what the type reads itself: a git source
 (overlays and extensions), `owner/repo`, a git URL or a folder (skills), a registry's address (MCP servers). **`command`** runs a
 program you name, as you and with your environment, each time the catalog is refreshed, and takes its standard output (or the file named
-by `file`, in the folder it ran in) as the catalog in the type's own format, read exactly as a fetched one is. It serves the overlays
-and extensions types, whose catalogs the host indexes. A program that fails, runs past its time, prints nothing or prints more than 4 MiB
-leaves the catalog as the last good run made it and shows why, with the end of what it wrote on its error stream. An extension adds
-sources by offering `catalog_source` providers in its library.
+by `file`, in the folder it ran in) as the catalog in the type's own format, read exactly as a fetched one is. It serves every type;
+a source an extension adds says in its description which types it serves (none listed means all), and Store settings offers it only
+under those. A program that fails, runs past its time, prints nothing or prints more than 4 MiB leaves an overlays or extensions catalog as
+the last good run made it, and shows why, with the end of what it wrote on its error stream; for Skills and MCP servers, which are read
+when you open the page, it shows the same reason and lists nothing. An extension adds sources by offering `catalog_source` providers in
+its library.
+
+What a source that is not `read` prints is the type's own format:
+
+| Type | Format of the text |
+| --- | --- |
+| `overlays` | an overlay catalog file (the AOS format), TOML or JSON |
+| `extensions` | an extensions catalog file (below) |
+| `skills` | a skills listing: JSON, `{"skills": [{"name", "description"?, "source", "path"?, "ref"?}]}`. `source` is where the skill is, written as a [skill source](#skill-sources) is (`owner/repo`, a git URL, a folder); `path` is the skill's folder from the repository's root when the source does not name it; `ref` pins a branch, tag or commit. Installing one reads the source it names, shows what was found and asks first, as for any skill source, and fetches it with none of your git settings, credentials or keys. An entry with no name or source, or a second of a name, is left out and counted; one whose name or source is not valid is listed with why it cannot be installed. At most 1024 are listed |
+| `mcps` | a page of the MCP Registry's list shape: JSON, `{"servers": [{"server": {...}, "_meta": {...}}], "metadata": {"nextCursor"}}`, each `server` a `server.json`. An item that names nothing or that the registry marks as not its latest version is left out, and a search narrows the rest by name, title and description. The servers are the source's claim, as any registry's are |
+
+`read` is also what the type reads itself, and the host reads it for every type the same way: the Skills type scans the repository or
+folder for `SKILL.md` as `npx skills` does, and the MCP servers type reads a registry's list endpoint (`<address>/v0.1/servers`) or a
+git file in that list shape. The MCP servers type always offers the official registry, `registry.modelcontextprotocol.io`, first under
+the label `official`: it cannot be removed or replaced, and no label of yours may take its name.
 
 Naming a source other than `read`, in a file a page writes through the host, takes the `hosting` grant: choosing one starts a program as
 you or code an extension supplied, so it is the same trust as naming a library.
@@ -828,7 +844,7 @@ you or code an extension supplied, so it is the same trust as naming a library.
 ### Skill sources
 
 Skills are looked for the way `npx skills add` looks, in their own list, `[store.skills.catalogs]`, a label of yours
-for each source written as that command takes it. In Store, Skills, Discover the sources are chips beside Catalogs; choosing one is what
+for each source written as that command takes it. In Store, Skills, Discover the sources are chips; choosing one is what
 fetches its repository (nothing is fetched by listing it), reads which skills it holds and lists them, and installing one asks first, with
 the commit that was read shown, and fetches exactly that commit.
 
