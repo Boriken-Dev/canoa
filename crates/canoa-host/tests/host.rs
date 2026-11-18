@@ -731,35 +731,22 @@ fn an_entry_beyond_loopback_is_served_and_said_as_configuration() {
 }
 
 #[test]
-fn a_harness_entry_that_acts_without_asking_is_said_as_configuration() {
+fn a_harness_entry_whose_settings_offer_fewer_modes_says_so_as_configuration() {
     let (_host, log) = Host::start_logged(
         Scratch::new(),
         concat!(
-            "[host.agents.Claude]\nharness = \"claude\"\npermission_mode = \"acceptEdits\"\n",
-            "[host.agents.Codex]\nharness = \"codex\"\nsandbox = \"danger-full-access\"\n",
+            "[host.agents.Claude]\nharness = \"claude\"\nsettings = { modes = [\"manual\", \"plan\"] }\n",
             "[host.agents.Careful]\nharness = \"codex\"\n",
         ),
-        3,
+        2,
         &[],
     );
-    let written = log_holding(
-        &log,
-        &[
-            "host.agents.Claude.permission_mode",
-            "host.agents.Codex.sandbox",
-        ],
-    );
-    for setting in [
-        "host.agents.Claude.permission_mode is acceptEdits",
-        "host.agents.Codex.sandbox is danger-full-access",
-    ] {
-        let line = line_saying(&written, setting);
-        assert!(line.contains("INFO"), "the file asked for it: {line}");
-        assert!(line.contains("non-default"), "{line}");
-    }
+    let written = log_holding(&log, &["host.agents.Claude.settings.modes"]);
+    let line = line_saying(&written, "host.agents.Claude.settings.modes is");
+    assert!(line.contains("INFO"), "the file asked for it: {line}");
     assert!(
-        !written.contains("host.agents.Careful.sandbox"),
-        "{written}"
+        !written.contains("host.agents.Careful.settings"),
+        "an entry with no settings says nothing of them: {written}"
     );
 }
 
