@@ -1,0 +1,31 @@
+{
+  "name": "canoa-sdk",
+  "version": "0.0.0-alpha.1",
+  "description": "Write a Canoa provider in JavaScript or TypeScript: one base class per kind",
+  "license": "MPL-2.0",
+  "author": "jose-pr",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Boriken-Dev/canoa.git",
+    "directory": "bindings/js/canoa-sdk"
+  },
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./types/index.d.ts",
+  "exports": {
+    ".": { "types": "./types/index.d.ts", "import": "./src/index.js" },
+    "./vendor": { "types": "./types/vendor.d.ts", "import": "./src/vendor.js" },
+    "./store": { "types": "./types/store.d.ts", "import": "./src/store.js" },
+    "./speech": { "types": "./types/speech.d.ts", "import": "./src/speech.js" },
+    "./forms": { "types": "./types/forms.d.ts", "import": "./src/forms.js" },
+    "./kinds": { "types": "./types/kinds.d.ts", "import": "./src/kinds.js" }
+  },
+  "files": ["src", "types", "README.md", "AGENTS.md"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "types": "tsc -p tsconfig.types.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "peerDependencies": { "guatiao": "*" }
+}
