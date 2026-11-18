@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::Instant;
 
-use coqui_syshttp::client::AgentBuilder;
+use coqui_syshttp::client::{AgentBuilder, OriginAgent};
 use coqui_syshttp::tls::{ClientCertificates, Identity, Selector, TlsBuilder, Trust};
 use coqui_syshttp::{
     BypassRules, Credentials, Dialect, Negotiate, Proxy, ProxyConnector, ProxySetting, Resolver,
@@ -24,7 +24,8 @@ use coqui_syshttp::{
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::pem::PemObject as _;
 
-pub use coqui_syshttp::{ChildEnvironment, Secret};
+pub use coqui_syshttp::client::OriginAgent as LoginAgent;
+pub use coqui_syshttp::{ChildEnvironment, OriginAuth, Secret};
 
 /// How long the variables made for a program stay as they are before the system is asked again.
 const CHILD_CACHE: Duration = Duration::from_secs(60);
@@ -288,6 +289,21 @@ impl Network {
             .connector(connector.build())
             .config(config)
             .build()?)
+    }
+
+    /// [`Network::agent`] that also answers a server's `401` as `auth` says (Basic, or Negotiate and NTLM with the logon
+    /// session), for the hosts `auth` names. A request to such a host goes through [`LoginAgent::run`]: a request made with the
+    /// inner agent's own methods is not answered.
+    ///
+    /// # Errors
+    ///
+    /// As [`Network::agent`].
+    pub fn login_agent(
+        &self,
+        config: ureq::config::Config,
+        auth: OriginAuth,
+    ) -> Result<LoginAgent, NetworkError> {
+        Ok(OriginAgent::new(self.agent(config)?, auth))
     }
 
     /// The proxy variables for a program started with an environment that names none: from this

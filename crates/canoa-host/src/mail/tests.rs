@@ -495,18 +495,116 @@ fn the_sign_in_is_basic_and_a_refusal_names_what_the_server_accepts() {
 }
 
 #[test]
-fn the_windows_sign_in_is_one_seam_that_says_it_is_not_there_yet() {
-    let (standin, _) = connected();
+fn a_server_offering_only_basic_is_left_at_its_401_and_the_error_says_so() {
+    let standin = Standin::start_basic_only(Mailbox::sample(), "EXAMPLE\\me", "s3cret");
     let ews = Ews::new(settings(Some(standin.server()), Auth::Windows), direct());
-    let before = standin.log().len();
-    let error = ews.folders().expect_err("not available");
-    assert!(matches!(error, MailError::Auth(_)));
-    assert!(error.to_string().contains("Windows logon"), "{error}");
-    assert_eq!(
-        standin.log().len(),
-        before,
-        "no request was sent that would fail with a 401"
+    let error = ews.folders().expect_err("the logon cannot answer Basic");
+    assert!(matches!(error, MailError::Auth(_)), "{error:?}");
+    let text = error.to_string();
+    assert!(
+        text.contains("401") && text.contains("it accepts Basic"),
+        "{text}"
     );
+    let log = standin.log();
+    assert_eq!(log.len(), 1, "one request, no credentials guessed");
+    assert_eq!(log[0].authorization, None);
+}
+
+#[cfg(windows)]
+mod windows_logon {
+    use data_encoding::BASE64;
+
+    use super::*;
+
+    fn token(authorization: &str) -> Vec<u8> {
+        let (_, token) = authorization.split_once(' ').expect("a scheme and a token");
+        BASE64.decode(token.as_bytes()).expect("base64")
+    }
+
+    #[test]
+    fn negotiate_signs_in_on_one_connection_and_the_search_that_follows_is_answered() {
+        let standin = Standin::start_security(Mailbox::sample(), "Negotiate", false);
+        let ews = Ews::new(settings(Some(standin.server()), Auth::Windows), direct());
+        assert_eq!(ews.folders().expect("signed in").len(), 7);
+
+        let log = standin.log();
+        assert_eq!(
+            log[0].authorization, None,
+            "the first request is a plain one"
+        );
+        assert!(log[0].body.contains("FindFolder"), "it carries the request");
+        let second = log[1].authorization.as_deref().expect("a token");
+        assert!(second.starts_with("Negotiate "), "{second}");
+        let bytes = token(second);
+        assert!(
+            bytes.first() == Some(&0x60) || bytes.starts_with(b"NTLMSSP\0"),
+            "a SPNEGO or NTLM token: {bytes:02x?}"
+        );
+        let legs: Vec<_> = log
+            .iter()
+            .take_while(|entry| entry.connection == log[0].connection)
+            .collect();
+        assert_eq!(legs.len(), log.len(), "every leg rode one connection");
+        assert_eq!(legs.last().unwrap().operation, "FindFolder");
+
+        let found = ews
+            .search(&Query {
+                limit: 50,
+                ..Query::default()
+            })
+            .expect("searches");
+        assert_eq!(found.items.len(), 7);
+        assert!(standin.operations().contains(&"FindItem".to_owned()));
+
+        let users = standin.users();
+        assert_eq!(users.len(), 2, "one sign-in per connection: {users:?}");
+        let account = std::env::var("USERNAME").expect("a user name");
+        assert!(
+            users[0].to_lowercase().ends_with(&account.to_lowercase()),
+            "{users:?} is not {account}"
+        );
+    }
+
+    #[test]
+    fn ntlm_opens_with_a_message_that_has_no_body_and_sends_the_request_with_the_last() {
+        let standin = Standin::start_security(Mailbox::sample(), "NTLM", false);
+        let ews = Ews::new(settings(Some(standin.server()), Auth::Windows), direct());
+        ews.folders().expect("signed in");
+
+        let log = standin.log();
+        assert_eq!(log.len(), 3, "three legs: {log:?}");
+        assert!(
+            log.iter()
+                .all(|entry| entry.connection == log[0].connection)
+        );
+        assert_eq!(log[0].authorization, None);
+        for entry in &log[1..] {
+            let header = entry.authorization.as_deref().expect("a message");
+            assert!(header.starts_with("NTLM "), "{header}");
+            assert!(token(header).starts_with(b"NTLMSSP\0"));
+        }
+        assert!(
+            log[1].body.is_empty(),
+            "the opening message carries no body"
+        );
+        assert!(!log[2].body.is_empty());
+        assert_eq!(log[0].body, log[2].body, "the request is sent again whole");
+        assert_eq!(log[2].operation, "FindFolder");
+    }
+
+    #[test]
+    fn a_server_that_refuses_the_logon_is_reported_with_the_scheme_it_offered() {
+        let standin = Standin::start_security(Mailbox::sample(), "Negotiate", true);
+        let ews = Ews::new(settings(Some(standin.server()), Auth::Windows), direct());
+        let error = ews.folders().expect_err("refused");
+        assert!(matches!(error, MailError::Auth(_)), "{error:?}");
+        let text = error.to_string();
+        assert!(
+            text.contains("401") && text.contains("it accepts Negotiate"),
+            "{text}"
+        );
+        assert!(standin.users().is_empty(), "no connection was signed in");
+    }
 }
 
 #[test]

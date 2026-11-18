@@ -1,5 +1,6 @@
 //! A stand-in Exchange on loopback for the mail tests: an in-memory mailbox behind the web-services operations the connector uses,
-//! with the sign-in a real server asks for. It answers the query language the connector writes and refuses what it does not know,
+//! with the sign-in a real server asks for (Basic, or a Negotiate or NTLM exchange the system's own security package completes
+//! on Windows, as IIS does: the connection is signed in once the exchange is done). It answers the query language the connector writes and refuses what it does not know,
 //! so a query the connector gets wrong fails here instead of matching everything. It records every request, and anything that would
 //! send mail.
 #![allow(
@@ -10,7 +11,7 @@
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -212,19 +213,54 @@ impl Mailbox {
 /// One request the stand-in served.
 #[derive(Clone, Debug)]
 pub(crate) struct Logged {
+    /// Which connection carried it, from 0.
+    pub(crate) connection: usize,
     pub(crate) path: String,
     pub(crate) operation: String,
     pub(crate) body: String,
     pub(crate) authorization: Option<String>,
 }
 
+/// What the stand-in asks a request to prove.
+#[derive(Default)]
+struct Demand {
+    /// A user and password sent as Basic.
+    basic: Option<(String, String)>,
+    /// Whether a refusal also offers Negotiate, which the stand-in then does not accept.
+    offer_negotiate: bool,
+    /// A Negotiate or NTLM exchange completed by the system's security package.
+    #[cfg(windows)]
+    security: Option<Security>,
+}
+
+/// A Negotiate or NTLM demand.
+#[cfg(windows)]
+struct Security {
+    /// The scheme word the stand-in offers and answers with.
+    scheme: &'static str,
+    /// Whether it refuses the logon after the exchange completes.
+    refuse: bool,
+}
+
 struct Shared {
     mailbox: Mutex<Mailbox>,
     log: Mutex<Vec<Logged>>,
     sent: Mutex<Vec<String>>,
-    login: Option<(String, String)>,
+    demand: Demand,
+    /// The accounts a security-package exchange authenticated.
+    users: Mutex<Vec<String>>,
+    connections: AtomicUsize,
     stop: AtomicBool,
     addr: SocketAddr,
+}
+
+/// What one connection has proved so far.
+struct Session {
+    connection: usize,
+    #[cfg(windows)]
+    package: Option<super::sspi_server::SspiServer>,
+    #[cfg(windows)]
+    signed_in: bool,
 }
 
 /// The running stand-in; it stops when dropped.
@@ -234,8 +270,44 @@ pub(crate) struct Standin {
 }
 
 impl Standin {
-    /// A server that asks for `login` (user and password) as Basic, or for nothing when it is `None`.
+    /// A server that asks for `login` (user and password) as Basic, or for nothing when it is `None`. A refusal offers Negotiate too.
     pub(crate) fn start(mailbox: Mailbox, login: Option<(&str, &str)>) -> Self {
+        Self::launch(
+            mailbox,
+            Demand {
+                basic: login.map(|(user, password)| (user.to_owned(), password.to_owned())),
+                offer_negotiate: true,
+                ..Demand::default()
+            },
+        )
+    }
+
+    /// A server whose refusal offers Basic and nothing else.
+    pub(crate) fn start_basic_only(mailbox: Mailbox, user: &str, password: &str) -> Self {
+        Self::launch(
+            mailbox,
+            Demand {
+                basic: Some((user.to_owned(), password.to_owned())),
+                ..Demand::default()
+            },
+        )
+    }
+
+    /// A server that signs a connection in with a Negotiate or NTLM exchange (`scheme` is the word it offers), run through the
+    /// system's security package. With `refuse` it completes the exchange and then refuses the logon, as a server does for an
+    /// account it does not know.
+    #[cfg(windows)]
+    pub(crate) fn start_security(mailbox: Mailbox, scheme: &'static str, refuse: bool) -> Self {
+        Self::launch(
+            mailbox,
+            Demand {
+                security: Some(Security { scheme, refuse }),
+                ..Demand::default()
+            },
+        )
+    }
+
+    fn launch(mailbox: Mailbox, demand: Demand) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         listener.set_nonblocking(true).expect("nonblocking");
         let addr = listener.local_addr().expect("addr");
@@ -243,7 +315,9 @@ impl Standin {
             mailbox: Mutex::new(mailbox),
             log: Mutex::new(Vec::new()),
             sent: Mutex::new(Vec::new()),
-            login: login.map(|(user, password)| (user.to_owned(), password.to_owned())),
+            demand,
+            users: Mutex::new(Vec::new()),
+            connections: AtomicUsize::new(0),
             stop: AtomicBool::new(false),
             addr,
         });
@@ -253,8 +327,9 @@ impl Standin {
                 match listener.accept() {
                     Ok((stream, _)) => {
                         let shared = Arc::clone(&serving);
+                        let connection = shared.connections.fetch_add(1, Ordering::SeqCst);
                         thread::spawn(move || {
-                            let _ = serve(&shared, stream);
+                            let _ = serve(&shared, stream, connection);
                         });
                     }
                     Err(_) => thread::sleep(Duration::from_millis(5)),
@@ -283,6 +358,12 @@ impl Standin {
         lock(&self.shared.log).clone()
     }
 
+    /// The accounts a security-package exchange authenticated, in order.
+    #[cfg(windows)]
+    pub(crate) fn users(&self) -> Vec<String> {
+        lock(&self.shared.users).clone()
+    }
+
     /// The operations served, in order.
     pub(crate) fn operations(&self) -> Vec<String> {
         self.log().into_iter().map(|l| l.operation).collect()
@@ -303,56 +384,192 @@ impl Drop for Standin {
     }
 }
 
-fn serve(shared: &Shared, mut stream: TcpStream) -> std::io::Result<()> {
+/// One request's head: where the body begins, how long it is, the path and the `Authorization` header.
+struct Head {
+    length: usize,
+    content_length: usize,
+    path: String,
+    authorization: Option<String>,
+}
+
+fn parse_head(data: &[u8]) -> Option<Head> {
+    let mut headers = [httparse::EMPTY_HEADER; 32];
+    let mut request = httparse::Request::new(&mut headers);
+    let Ok(httparse::Status::Complete(length)) = request.parse(data) else {
+        return None;
+    };
+    let header = |name: &str| {
+        request
+            .headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case(name))
+            .map(|h| String::from_utf8_lossy(h.value).into_owned())
+    };
+    Some(Head {
+        length,
+        content_length: header("content-length")
+            .and_then(|n| n.parse::<usize>().ok())
+            .unwrap_or(0),
+        path: request.path.unwrap_or("/").to_owned(),
+        authorization: header("authorization"),
+    })
+}
+
+/// Serves the requests of one connection. A security-package demand keeps the connection open, because the exchange signs the
+/// connection in; every other demand answers once and closes.
+fn serve(shared: &Shared, mut stream: TcpStream, connection: usize) -> std::io::Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let mut session = Session::new(shared, connection);
     let mut data = Vec::new();
     let mut chunk = [0_u8; 4096];
-    let (head_len, content_length, path, authorization) = loop {
-        let read = stream.read(&mut chunk)?;
-        if read == 0 {
+    loop {
+        let head = loop {
+            if let Some(head) = parse_head(&data) {
+                break head;
+            }
+            let read = stream.read(&mut chunk)?;
+            if read == 0 {
+                return Ok(());
+            }
+            data.extend_from_slice(&chunk[..read]);
+        };
+        let end = head.length + head.content_length;
+        while data.len() < end {
+            let read = stream.read(&mut chunk)?;
+            if read == 0 {
+                break;
+            }
+            data.extend_from_slice(&chunk[..read]);
+        }
+        let end = end.min(data.len());
+        let body = String::from_utf8_lossy(&data[head.length..end]).into_owned();
+        data.drain(..end);
+        let (status, answer, extra) =
+            respond(shared, &mut session, &head.path, &body, head.authorization);
+        let keep = keeps_alive(shared);
+        let connection_header = if keep { "keep-alive" } else { "close" };
+        let reply = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: text/xml; charset=utf-8\r\nContent-Length: {}\r\nConnection: {connection_header}\r\n{extra}\r\n",
+            answer.len()
+        );
+        stream.write_all(reply.as_bytes())?;
+        stream.write_all(answer.as_bytes())?;
+        if !keep {
             return Ok(());
         }
-        data.extend_from_slice(&chunk[..read]);
-        let mut headers = [httparse::EMPTY_HEADER; 32];
-        let mut request = httparse::Request::new(&mut headers);
-        if let Ok(httparse::Status::Complete(len)) = request.parse(&data) {
-            let header = |name: &str| {
-                request
-                    .headers
-                    .iter()
-                    .find(|h| h.name.eq_ignore_ascii_case(name))
-                    .map(|h| String::from_utf8_lossy(h.value).into_owned())
-            };
-            break (
-                len,
-                header("content-length")
-                    .and_then(|n| n.parse::<usize>().ok())
-                    .unwrap_or(0),
-                request.path.unwrap_or("/").to_owned(),
-                header("authorization"),
-            );
-        }
-    };
-    while data.len() < head_len + content_length {
-        let read = stream.read(&mut chunk)?;
-        if read == 0 {
-            break;
-        }
-        data.extend_from_slice(&chunk[..read]);
     }
-    let body = String::from_utf8_lossy(&data[head_len..]).into_owned();
-    let (status, answer, extra) = respond(shared, &path, &body, authorization);
-    let head = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: text/xml; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n",
-        answer.len()
+}
+
+fn keeps_alive(shared: &Shared) -> bool {
+    #[cfg(windows)]
+    if shared.demand.security.is_some() {
+        return true;
+    }
+    let _ = shared;
+    false
+}
+
+impl Session {
+    fn new(shared: &Shared, connection: usize) -> Self {
+        let _ = shared;
+        Self {
+            connection,
+            #[cfg(windows)]
+            package: shared
+                .demand
+                .security
+                .as_ref()
+                .map(|_| super::sspi_server::SspiServer::new()),
+            #[cfg(windows)]
+            signed_in: false,
+        }
+    }
+}
+
+/// What a request has to prove before it is served: `Ok` carries the headers to add to the answer, `Err` the whole refusal.
+type Gate = Result<String, (&'static str, String, String)>;
+
+fn refusal(offered: &[String]) -> Gate {
+    let headers: String = offered
+        .iter()
+        .map(|scheme| format!("WWW-Authenticate: {scheme}\r\n"))
+        .collect();
+    Err(("401 Unauthorized", String::new(), headers))
+}
+
+fn gate(shared: &Shared, session: &mut Session, authorization: Option<&str>) -> Gate {
+    #[cfg(windows)]
+    if let Some(security) = &shared.demand.security {
+        return security_gate(shared, security, session, authorization);
+    }
+    let _ = session;
+    let Some((user, password)) = &shared.demand.basic else {
+        return Ok(String::new());
+    };
+    let expected = format!(
+        "Basic {}",
+        BASE64.encode(format!("{user}:{password}").as_bytes())
     );
-    stream.write_all(head.as_bytes())?;
-    stream.write_all(answer.as_bytes())
+    if authorization == Some(expected.as_str()) {
+        return Ok(String::new());
+    }
+    let mut offered = Vec::new();
+    if shared.demand.offer_negotiate {
+        offered.push("Negotiate".to_owned());
+    }
+    offered.push("Basic realm=\"standin\"".to_owned());
+    refusal(&offered)
+}
+
+/// A Negotiate or NTLM exchange: each leg is handed to the system's security package, and the connection is signed in when it
+/// completes.
+#[cfg(windows)]
+fn security_gate(
+    shared: &Shared,
+    security: &Security,
+    session: &mut Session,
+    authorization: Option<&str>,
+) -> Gate {
+    let word = security.scheme;
+    if session.signed_in {
+        return Ok(String::new());
+    }
+    let token = authorization
+        .and_then(|value| value.split_once(' '))
+        .filter(|(scheme, _)| {
+            [word, "Negotiate", "NTLM"]
+                .iter()
+                .any(|known| scheme.eq_ignore_ascii_case(known))
+        })
+        .and_then(|(_, token)| BASE64.decode(token.as_bytes()).ok());
+    let (Some(token), Some(package)) = (token, session.package.as_mut()) else {
+        return refusal(&[word.to_owned()]);
+    };
+    match package.accept(&token) {
+        Ok(accepted) if accepted.complete => {
+            if security.refuse {
+                return refusal(&[word.to_owned()]);
+            }
+            session.signed_in = true;
+            lock(&shared.users).push(package.user.clone().unwrap_or_default());
+            Ok(if accepted.token.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "WWW-Authenticate: {word} {}\r\n",
+                    BASE64.encode(&accepted.token)
+                )
+            })
+        }
+        Ok(accepted) => refusal(&[format!("{word} {}", BASE64.encode(&accepted.token))]),
+        Err(_) => refusal(&[word.to_owned()]),
+    }
 }
 
 fn respond(
     shared: &Shared,
+    session: &mut Session,
     path: &str,
     body: &str,
     authorization: Option<String>,
@@ -371,25 +588,26 @@ fn respond(
         })
         .unwrap_or_else(|| "?".to_owned());
     lock(&shared.log).push(Logged {
+        connection: session.connection,
         path: path.to_owned(),
         operation: operation.clone(),
         body: body.to_owned(),
         authorization: authorization.clone(),
     });
-    if let Some((user, password)) = &shared.login {
-        let expected = format!(
-            "Basic {}",
-            BASE64.encode(format!("{user}:{password}").as_bytes())
-        );
-        if authorization.as_deref() != Some(expected.as_str()) {
-            return (
-                "401 Unauthorized",
-                String::new(),
-                "WWW-Authenticate: Negotiate\r\nWWW-Authenticate: Basic realm=\"standin\"\r\n"
-                    .to_owned(),
-            );
-        }
-    }
+    let signed_in = match gate(shared, session, authorization.as_deref()) {
+        Ok(headers) => headers,
+        Err(refused) => return refused,
+    };
+    let (status, text, headers) = serve_operation(shared, path, &operation, tree);
+    (status, text, format!("{signed_in}{headers}"))
+}
+
+fn serve_operation(
+    shared: &Shared,
+    path: &str,
+    operation: &str,
+    tree: Option<Element>,
+) -> (&'static str, String, String) {
     let Some(tree) = tree else {
         return ("400 Bad Request", String::new(), String::new());
     };
@@ -408,7 +626,7 @@ fn respond(
         .cloned()
         .unwrap_or_default();
     let mut mailbox = lock(&shared.mailbox);
-    let result = match operation.as_str() {
+    let result = match operation {
         "FindFolder" => Ok(find_folder(&mailbox)),
         "FindItem" => find_item(&mailbox, &op),
         "GetItem" => Ok(get_item(&mailbox, &op)),

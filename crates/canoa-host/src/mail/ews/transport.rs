@@ -2,7 +2,7 @@
 //! other fetch the host makes, so the system's proxy and certificate verifier apply.
 //!
 //! There are two sign-ins. Basic sends the account's user name and password on every request. Windows is the person's own
-//! logon (Negotiate: Kerberos, then NTLM); the one place it is made is [`Transport::post_negotiate`].
+//! logon (Negotiate: Kerberos, then NTLM), answered to the server's `401` by coqui-syshttp's origin login.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -10,15 +10,21 @@
 )]
 
 use core::time::Duration;
+use std::io::ErrorKind;
 use std::sync::Arc;
 
-use canoa::network::{Network, Secret};
+use canoa::network::{Network, OriginAuth, Secret};
 use data_encoding::BASE64;
+use ureq::http::Request;
+use url::Url;
 
 use crate::mail::model::MailError;
 
 /// The most bytes read from one answer: a page of a message list or one message with its body.
 const MAX_ANSWER: u64 = 64 * 1024 * 1024;
+
+const CONTENT_TYPE: &str = "text/xml; charset=utf-8";
+const ACCEPT: &str = "text/xml, application/xml";
 
 /// How the account signs in.
 #[derive(Clone, Debug)]
@@ -86,42 +92,65 @@ impl Transport {
         }
     }
 
-    /// The seam for signing in with the person's Windows logon (Negotiate, Kerberos then NTLM) to the server itself. The HTTP
-    /// stack signs in to a proxy that way; to a server it does not yet, so this says so rather than sending a request that would
-    /// fail with a 401. Whatever signs in here answers as [`Transport::send`] does, once the exchange of challenges is done on
-    /// one connection.
-    #[allow(
-        clippy::unused_self,
-        reason = "the signed-in exchange will use the transport"
-    )]
-    fn post_negotiate(&self, _url: &str, _body: &str) -> Result<Reply, MailError> {
-        Err(MailError::Auth(
-            "signing in to the server with the Windows logon is not available in this build: give the account a user and \
-             password_env (Basic), or use the Outlook backend, which signs in as Outlook does"
-                .to_owned(),
-        ))
+    /// Signs in with the person's Windows logon (Negotiate, Kerberos then NTLM) when the server answers `401`, through the one
+    /// client that answers a server's challenge: every leg of an NTLM exchange rides one connection, and the body goes with the
+    /// last. A server that offers no scheme the logon can answer is left at its `401`, which [`Transport::post`] reports with
+    /// the schemes it offered.
+    fn post_negotiate(&self, url: &str, body: &str) -> Result<Reply, MailError> {
+        let host = Url::parse(url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_owned))
+            .ok_or_else(|| MailError::Unreachable(format!("{url} is not a server address")))?;
+        let policy = OriginAuth::builder()
+            .negotiate([host])
+            .build()
+            .map_err(|error| login_failed(&error))?;
+        let client = self
+            .network
+            .login_agent(self.config(), policy)
+            .map_err(|error| {
+                MailError::Unreachable(format!("the network is not usable: {error}"))
+            })?;
+        let request = Request::post(url)
+            .header("content-type", CONTENT_TYPE)
+            .header("accept", ACCEPT)
+            .body(body.as_bytes().to_vec())
+            .map_err(|error| MailError::Unreachable(format!("{url}: {error}")))?;
+        let response = client.run(request).map_err(|error| match error {
+            ureq::Error::Io(ref io) if io.kind() == ErrorKind::PermissionDenied => login_failed(io),
+            other => MailError::Unreachable(format!("{url}: {other}")),
+        })?;
+        Self::reply(url, response)
+    }
+
+    fn config(&self) -> ureq::config::Config {
+        ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(self.timeout))
+            .build()
     }
 
     /// One POST, with `authorization` as the header when there is one.
     fn send(&self, url: &str, body: &str, authorization: Option<&str>) -> Result<Reply, MailError> {
-        let config = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(self.timeout))
-            .build();
-        let agent = self.network.agent(config).map_err(|error| {
+        let agent = self.network.agent(self.config()).map_err(|error| {
             MailError::Unreachable(format!("the network is not usable: {error}"))
         })?;
         let mut request = agent
             .post(url)
-            .header("content-type", "text/xml; charset=utf-8")
-            .header("accept", "text/xml, application/xml");
+            .header("content-type", CONTENT_TYPE)
+            .header("accept", ACCEPT);
         if let Some(value) = authorization {
             request = request.header("authorization", value);
         }
         let response = request
             .send(body)
             .map_err(|error| MailError::Unreachable(format!("{url}: {error}")))?;
+        Self::reply(url, response)
+    }
+
+    /// What the server answered: the status, the schemes a refusal offered and the body.
+    fn reply(url: &str, response: ureq::http::Response<ureq::Body>) -> Result<Reply, MailError> {
         let status = response.status().as_u16();
         let schemes: Vec<String> = response
             .headers()
@@ -143,4 +172,10 @@ impl Transport {
             body: text,
         })
     }
+}
+
+fn login_failed(error: &dyn core::fmt::Display) -> MailError {
+    MailError::Auth(format!(
+        "signing in to the server with the Windows logon failed: {error}"
+    ))
 }

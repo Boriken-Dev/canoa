@@ -2,9 +2,9 @@
 //! message, drafted into and organized, from any session. `[host.mail.accounts.NAME]` names each mailbox and the backend that
 //! reaches it:
 //!
-//! - `ews`: Exchange Server's web services ([`ews`]), signed in with a user name and a password: the one the host's account
-//!   store holds (`canoa mail add` puts it there) or the one a variable names. The server is named or found by Autodiscover. Signing in with the Windows logon is one function ([`ews`]'s transport) that is not
-//!   filled in yet.
+//! - `ews`: Exchange Server's web services ([`ews`]), signed in with a user name and a password (the one the host's account
+//!   store holds, which `canoa mail add` puts there, or the one a variable names) or with the person's Windows logon
+//!   (Negotiate). The server is named or found by Autodiscover.
 //! - `graph`: Exchange Online through Microsoft Graph ([`graph`]), with a token taken silently from the person's Windows sign-in
 //!   for an app registration the account names; Exchange Online has no web services after 2027-04-01.
 //! - `outlook`: classic Outlook for Windows, through a helper that drives its object model ([`outlook`]); it covers every account
@@ -27,6 +27,12 @@ pub(crate) mod related;
 pub(crate) mod tools;
 pub(crate) mod xml;
 
+#[cfg(all(test, windows))]
+#[allow(
+    unsafe_code,
+    reason = "the stand-in server runs the system's security package, which has no safe binding"
+)]
+mod sspi_server;
 #[cfg(test)]
 mod commands_tests;
 #[cfg(test)]
