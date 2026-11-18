@@ -24,7 +24,7 @@
   "files": ["src", "types", "README.md", "AGENTS.md"],
   "engines": { "node": ">=22" },
   "scripts": {
-    "types": "tsc -p tsconfig.types.json",
+    "types": "tsc -p tsconfig.types.json && node --input-type=module -e \"import { copyFileSync } from 'node:fs'; copyFileSync('src/kinds.d.ts', 'types/kinds.d.ts')\"",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "peerDependencies": { "guatiao": "*" }
