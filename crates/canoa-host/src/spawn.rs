@@ -844,7 +844,7 @@ mod tests {
             ("coqui-acp-pi/gate.rs", "icacls"),
             ("coqui-acp-harness/antigravity/ports.rs", "netstat"),
         ];
-        const CRATES: [&str; 15] = [
+        const CRATES: [&str; 16] = [
             "coqui-acp",
             "coqui-acp-secrets",
             "coqui-acp-harness",
@@ -859,6 +859,7 @@ mod tests {
             "canoa-claude",
             "canoa-codex",
             "canoa-grok",
+            "canoa-opencode",
             "canoa-pi",
         ];
         fn scan(
@@ -1002,7 +1003,7 @@ mod tests {
         // only through the host's tools.
         let base = Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut roots = vec![base.join("src"), base.join("../canoa/src/store")];
-        for vendor in ["antigravity", "claude", "codex", "grok", "pi"] {
+        for vendor in ["antigravity", "claude", "codex", "grok", "opencode", "pi"] {
             roots.push(base.join(format!("../canoa-{vendor}/src")));
         }
         let mut found = Vec::new();

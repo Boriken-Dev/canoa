@@ -31,6 +31,7 @@ const PRESETS: &[Preset] = &[
     canoa_codex::PRESET,
     canoa_antigravity::PRESET,
     canoa_grok::PRESET,
+    canoa_opencode::PRESET,
     canoa_pi::PRESET,
 ];
 
@@ -425,6 +426,28 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn opencode_is_started_as_opencode_acp() {
+        let sources = sources_in(
+            &nothing_found(),
+            &|program, _| Some(PathBuf::from(format!("/opt/bin/{program}"))),
+            &|_| None,
+        );
+        let source = sources
+            .iter()
+            .find(|source| source.entry.name == "OpenCode")
+            .expect("OpenCode");
+        match &source.entry.kind {
+            crate::EntryKind::Agent { program, args, .. } => {
+                assert_eq!(program.to_string_lossy(), "/opt/bin/opencode");
+                assert_eq!(args.len(), 1);
+                assert_eq!(args[0], "acp");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(source.entry.local);
     }
 
     #[test]

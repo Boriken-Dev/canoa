@@ -33,7 +33,7 @@
 | --- | --- |
 | `crates/canoa/` | Rust registry and authorization model |
 | `crates/canoa-host/` | `canoa-host`: the `canoa` program, which serves the agents and providers canoa.cfg names to paired keys (loopback by default, or a pipe or socket), the web app, and `canoa portal` |
-| `crates/canoa-{claude,codex,grok,pi,antigravity}/` | One agent each: its source preset and Store recipe (and its coqui-acp provider where it has one) |
+| `crates/canoa-{claude,codex,grok,pi,antigravity,opencode}/` | One agent each: its source preset and Store recipe (and its coqui-acp provider where it has one) |
 | `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI |
 | `crates/canoa-launch/` | The portable `CanoaUI.exe` launcher and `canoa-pack` |
 | `app/native/` | The app's own plugin: builds `canoa-ffi` with the desktop runner |

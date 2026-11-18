@@ -14,6 +14,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | [`crates/canoa-grok/AGENTS.md`](crates/canoa-grok/AGENTS.md) | `canoa-grok`: Grok's source preset and Store recipe |
 | [`crates/canoa-pi/AGENTS.md`](crates/canoa-pi/AGENTS.md) | `canoa-pi`: Pi's provider re-export, source preset and Store recipe |
 | [`crates/canoa-antigravity/AGENTS.md`](crates/canoa-antigravity/AGENTS.md) | `canoa-antigravity`: Antigravity's source preset and Store recipe |
+| [`crates/canoa-opencode/AGENTS.md`](crates/canoa-opencode/AGENTS.md) | `canoa-opencode`: OpenCode's source preset and Store recipe |
 
 ## Layout
 

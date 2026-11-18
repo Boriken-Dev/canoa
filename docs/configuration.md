@@ -93,7 +93,7 @@ A conversation's name is what the agent reports, else the first line of the firs
 | `${home}` | the home folder |
 | `${session}` | Canoa's own id for the session, a UUID made with the draft before any agent runs and kept in the session list beside the id the agent reports |
 | `${date}`, `${time}`, `${datetime}` | local time when the session's draft was made, so the folder shown is the folder made: `2026-11-11`, `153005`, `2026-11-11T153005` |
-| `${handler}` | the harness's `acp_harness` provider id, the same for a hosted and a preset source: `claude`, `codex`, `grok`, `antigravity`, `pi` or a hosted entry's own `harness`; else the source's label |
+| `${handler}` | the harness's `acp_harness` provider id, the same for a hosted and a preset source: `claude`, `codex`, `grok`, `antigravity`, `opencode`, `pi` or a hosted entry's own `harness`; else the source's label |
 | `${source}` | the source's label |
 | `${host}` | this computer's name |
 | `${fqdn}` | a webpage's host name; empty on the desktop |
@@ -102,7 +102,7 @@ Only the template places separators (`/` or `\`, either spelling): every value e
 
 A session started from a webpage works in `<Documents>/Canoa/scratch/<site>/<session>` on the machine its agent runs on: one folder for the site, one for each session. The page names the site, not a path: its `session/new` carries `{"site": "<host name>"}` under `_meta["dev.boriken.canoa/site"]` and no folder (the app sends `/`, which the host replaces), and `canoa`, which serves the agent, resolves the folder itself, makes it (private to the user on Unix) and starts the agent there. The folder does not follow `[sessions] workspace`. The host's Documents folder is `XDG_DOCUMENTS_DIR` when the host's environment sets it, on any system, else the one `${documents}` names above. The site is the page's host name in lower case with an international name as punycode, no port, path or credentials, and the host takes it only as written: a name that is not a plain name fails the session with `-32602` and nothing is made. Refused: `..`, a separator, a colon (so a drive letter), a first label Windows reserves for a device (`con`, `nul`, `com1` and the rest, with or without an extension), an IPv6 address, a label that is empty, over 63 characters or has anything but letters, digits and inner hyphens, a name over 253 characters, an upper-case letter or a non-ASCII one; the app shows no panel for a page with such a name. The host's answer to `session/new` carries the same key with `site`, `id` and `folder`, and the session list records them. The extension's panel for the page in front lists that site's earlier sessions, newest first, with **Resume** and **New session**. **Resume** opens the session again, through the browser's provider (which has to hold the agent's grant), with `session/load` or `session/resume` naming the site and the recorded folder; the host takes that folder only when it is one session's own under that site's scratch folder, and makes it again if it is gone. An entry with `working_roots` refuses a site session whose folder is outside them. The host makes no other folder for a page.
 
-A source is a program with its arguments and what else it needs: the host's own sources (Claude Code and Codex through the host's translators, Antigravity as `agy acp`, Grok as `grok agent stdio`, Pi; served by `canoa serve --local-sources` to the app that runs it, with no address, and replaced by an entry of the same name in `[host.agents]`), the commands under `[agents.NAME]` (served by the host as its own sources: adding or removing one restarts the host, which ends the sessions open on it), and the agent entries the `canoa` this app runs is serving, as `canoa serve` lists them: an entry added to `[host.agents]`, a `harness` entry naming any provider included, is a source once the host serves it, with no change to the app (the app does not read the entry, and a draft kept on a hosted source gets it back when the host serves it). Settings → Sources lists them with where each program was found (on PATH, else where its installer puts it: `%LOCALAPPDATA%\agy\bin` for `agy` on Windows, `~/.grok/bin` for `grok`), hides a preset, and adds or removes a command. A source whose programs are not on PATH stays listed and says which it found and which it did not; sending to it says so instead of starting.
+A source is a program with its arguments and what else it needs: the host's own sources (Claude Code and Codex through the host's translators, Antigravity as `agy acp`, Grok as `grok agent stdio`, OpenCode as `opencode acp`, Pi; served by `canoa serve --local-sources` to the app that runs it, with no address, and replaced by an entry of the same name in `[host.agents]`), the commands under `[agents.NAME]` (served by the host as its own sources: adding or removing one restarts the host, which ends the sessions open on it), and the agent entries the `canoa` this app runs is serving, as `canoa serve` lists them: an entry added to `[host.agents]`, a `harness` entry naming any provider included, is a source once the host serves it, with no change to the app (the app does not read the entry, and a draft kept on a hosted source gets it back when the host serves it). Settings → Sources lists them with where each program was found (on PATH, else where its installer puts it: `%LOCALAPPDATA%\agy\bin` for `agy` on Windows, `~/.grok/bin` for `grok`), hides a preset, and adds or removes a command. A source whose programs are not on PATH stays listed and says which it found and which it did not; sending to it says so instead of starting.
 
 The first message starts it: the worktree is made, the profile is prepared (its dialog shown only when it has more than a model, effort or mode to approve), the agent started or the host reached, `session/new` sent with the folder, the profile and its MCP servers, the model, effort and mode chosen set, and then the message sent with what goes with it. A start that fails says why, takes back the worktree it made, and leaves the message to send again. Until then the session is kept in `drafts/` beside canoa.cfg, with what is written in it and what goes with it, and comes back after a restart; closing it leaves nothing there or in the session list. The session list notes it once it has started.
 
@@ -314,7 +314,22 @@ started as its entry says: Canoa passes it no access setting.
 | `approvals = "edits"` | not supported: its agent mode has no accept-edits setting | not supported |
 | `approvals = "never"` | always-approve for each session (`_meta` `yoloMode`) | `--dangerously-skip-permissions` |
 
-A variable one of your layers already sets for the program (an `env` entry named `GROK_SANDBOX`) keeps its value, and the
+OpenCode has no sandbox and takes the access as one variable, `OPENCODE_PERMISSION`, a JSON object of tool to `allow`, `ask` or
+`deny` (a tool set to `deny` is not offered to the model at all):
+
+| Access | OpenCode |
+| --- | --- |
+| `sandbox = "none"` | no sandbox |
+| `sandbox = "workspace"` | not supported: its `external_directory` rule asks about paths outside the session's folder, unless `approvals` is `never` |
+| `sandbox = "read-only"` | `edit` set to `deny`, which takes its edit and write tools away; its commands are not restricted |
+| `network = false` | not supported: it has no network setting |
+| `approvals = "ask"` | `edit` and `bash` set to `ask` (OpenCode's own default allows both) |
+| `approvals = "edits"` | `edit` `allow`, `bash` `ask` |
+| `approvals = "never"` | everything `allow`, so nothing asks, a path outside the folder and a `.env` file included |
+
+The variable wins over the `permission` of OpenCode's own `opencode.json` for the session.
+
+A variable one of your layers already sets for the program (an `env` entry named `GROK_SANDBOX` or `OPENCODE_PERMISSION`) keeps its value, and the
 session's Profile line says the access did not set it.
 
 With nothing set, every agent starts with the standard access, whatever the configuration of its own command line says: no

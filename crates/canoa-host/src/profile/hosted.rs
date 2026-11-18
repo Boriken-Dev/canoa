@@ -484,7 +484,7 @@ pub(crate) struct Connection {
     delegation: Vec<(Layer, Option<aos::Document>)>,
     /// What every layer reads before it applies: the identity variables and the host's own for the session.
     session: Session,
-    /// The program the host starts and gives the access as variables and arguments (Grok, Antigravity); the others take it in
+    /// The program the host starts and gives the access as variables and arguments (Grok, Antigravity, OpenCode); the others take it in
     /// the session request.
     launched_as: Option<Target>,
     /// The arguments the access adds to that program's command line, which `canoa launch` appends.
@@ -781,7 +781,12 @@ impl Connection {
             .who
             .harness
             .and_then(Target::from_harness)
-            .filter(|target| matches!(target, Target::Grok | Target::Antigravity));
+            .filter(|target| {
+                matches!(
+                    target,
+                    Target::Grok | Target::Antigravity | Target::OpenCode
+                )
+            });
         let mut launch_args = Vec::new();
         if let Some(target) = launched_as {
             let words = effective.access.resolved().translate(target);
@@ -1505,7 +1510,7 @@ fn harness_of(reported: Option<&str>, entry: &str) -> Option<&'static str> {
 }
 
 /// The AOS harness id of a session's agent for the identity variables: the id of the provider an entry runs in this process,
-/// else of an entry named as Canoa's presets are. Grok is named here though no AOS overlay has hints for it.
+/// else of an entry named as Canoa's presets are. Grok and OpenCode are named here though no AOS overlay has hints for them.
 pub(crate) fn harness_identity(provider: Option<&str>, entry: &str) -> Option<&'static str> {
     match provider {
         Some("claude") => Some("claude-code"),
@@ -1513,6 +1518,7 @@ pub(crate) fn harness_identity(provider: Option<&str>, entry: &str) -> Option<&'
         Some("pi") => Some("pi"),
         _ => harness_of(None, entry).or(match entry {
             "Grok" => Some("grok"),
+            "OpenCode" => Some("opencode"),
             _ => None,
         }),
     }

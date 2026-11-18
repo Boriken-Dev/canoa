@@ -16,22 +16,31 @@ use support::{cwd, example};
 
 #[test]
 fn the_hosts_own_sources_run_over_a_link_and_say_what_they_miss() {
-    // A `grok` that is the scripted agent, on a PATH of its own; the rest are not installed.
+    // A `grok` and an `opencode` that are the scripted agent, on a PATH of their own; the rest are not installed.
     let bin = support::Scratch::new();
-    let name = format!("grok{}", std::env::consts::EXE_SUFFIX);
-    std::fs::copy(example("stdio_agent", false), bin.0.join(&name)).expect("copied");
+    for program in ["grok", "opencode"] {
+        let name = format!("{program}{}", std::env::consts::EXE_SUFFIX);
+        std::fs::copy(example("stdio_agent", false), bin.0.join(&name)).expect("copied");
+    }
     let path = std::env::join_paths([bin.0.clone()]).expect("a path");
     // SAFETY: the only test in this process, set before any thread of the host starts.
     unsafe { std::env::set_var("PATH", &path) };
 
     let host = Hosted::start_with("", &["--local-sources"]);
     let names = host.local.entries();
-    assert_eq!(names, ["Claude", "Codex", "Antigravity", "Grok", "Pi"]);
+    assert_eq!(
+        names,
+        ["Claude", "Codex", "Antigravity", "Grok", "OpenCode", "Pi"]
+    );
 
     let grok = host.line_of("Grok").expect("printed");
     assert_eq!(grok["local"], true);
     assert_eq!(grok["missing"], json!([]));
     assert!(grok.get("url").is_none(), "no address: {grok}");
+    let opencode = host.line_of("OpenCode").expect("printed");
+    assert_eq!(opencode["local"], true);
+    assert_eq!(opencode["missing"], json!([]));
+    assert!(opencode.get("url").is_none(), "no address: {opencode}");
     let claude = host.line_of("Claude").expect("printed");
     assert_eq!(claude["missing"], json!(["claude"]));
     assert_eq!(claude["harness"], "claude");
@@ -41,6 +50,19 @@ fn the_hosts_own_sources_run_over_a_link_and_say_what_they_miss() {
     );
 
     let link = host.local.open("Grok").expect("a link");
+    let session = open_session(&link, &cwd(&host.scratch));
+    let (answer, updates) = ask(
+        &link,
+        3,
+        "session/prompt",
+        json!({"sessionId": session, "prompt": [{"type": "text", "text": "hello"}]}),
+    )
+    .expect("the turn is answered");
+    assert_eq!(answer["stopReason"], "end_turn");
+    assert_eq!(said(&updates), "echo: hello");
+    drop(link);
+
+    let link = host.local.open("OpenCode").expect("a link");
     let session = open_session(&link, &cwd(&host.scratch));
     let (answer, updates) = ask(
         &link,

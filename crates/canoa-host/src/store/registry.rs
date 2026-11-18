@@ -17,12 +17,13 @@ use super::shell_stores::{GitBashStore, PowerShellStore};
 use super::whisper::WhisperStore;
 
 /// The provider ids of the built-in agent stores, in the order the app lists them; the runtimes are `runtimes::RUNTIMES`.
-pub const BUILT_IN: [&str; 5] = [
+pub const BUILT_IN: [&str; 6] = [
     "claude_store",
     "codex_store",
     "grok_store",
     "agy_store",
     "pi_store",
+    "opencode_store",
 ];
 
 store_provider!(
@@ -45,6 +46,10 @@ store_provider!(
     /// The Pi store.
     PiStore, canoa_pi::PiRecipe, "pi_store"
 );
+store_provider!(
+    /// The OpenCode store.
+    OpenCodeStore, canoa_opencode::OpenCodeRecipe, "opencode_store"
+);
 
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-built-in-stores",
@@ -55,6 +60,7 @@ coqui_acp_api::guatiao::local_providers!(
         GrokStore,
         AgyStore,
         PiStore,
+        OpenCodeStore,
         NodeStore,
         PythonStore,
         FoundryStore,

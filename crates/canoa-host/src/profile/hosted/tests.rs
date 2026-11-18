@@ -2561,7 +2561,14 @@ fn an_overlays_variables_that_change_how_programs_run_apply_for_every_harness() 
         assert_eq!(env_value(&connection, name), Some(value), "{name}");
     }
     // The same environment goes to every harness's session: the report names each variable as applied.
-    for harness in ["claude-code", "codex", "pi", "antigravity", "grok"] {
+    for harness in [
+        "claude-code",
+        "codex",
+        "pi",
+        "antigravity",
+        "grok",
+        "opencode",
+    ] {
         let parts = parts_for(&connection, Some(harness), &claude(), &lookup);
         for name in ["NODE_OPTIONS", "LD_PRELOAD", "HTTPS_PROXY"] {
             assert_eq!(
@@ -2602,20 +2609,30 @@ fn an_overlay_reads_the_identity_variables_of_every_harness_and_the_agent_is_giv
         assert_eq!(env_value(&connection, "AGENTS_HOST"), Some("canoa"));
         assert_eq!(env_value(&connection, "AGENTS_PROFILE"), Some("main"));
     }
-    // Pi has no vendor of its own, so none is set.
-    let connection = session_connection(
-        "[env]\nWHO = \"${AGENTS_HARNESS}\"\n",
-        Starting {
-            who: Who {
-                harness: Some("pi"),
-                ..Who::default()
+    // Pi and OpenCode have no vendor of their own, so none is set.
+    for harness in ["pi", "opencode"] {
+        let connection = session_connection(
+            "[env]\nWHO = \"${AGENTS_HARNESS}\"\n",
+            Starting {
+                who: Who {
+                    harness: Some(harness),
+                    ..Who::default()
+                },
+                host: Vec::new(),
+                account: Vec::new(),
             },
-            host: Vec::new(),
-            account: Vec::new(),
-        },
-    );
-    assert_eq!(env_value(&connection, "WHO"), Some("pi"));
-    assert_eq!(env_value(&connection, "AGENTS_VENDOR"), None);
+        );
+        assert_eq!(env_value(&connection, "WHO"), Some(harness));
+        assert_eq!(env_value(&connection, "AGENTS_VENDOR"), None);
+        assert_eq!(env_value(&connection, "AGENT"), Some(harness));
+    }
+}
+
+#[test]
+fn a_source_named_opencode_is_the_opencode_harness() {
+    assert_eq!(harness_identity(None, "OpenCode"), Some("opencode"));
+    assert_eq!(harness_identity(None, "Grok"), Some("grok"));
+    assert_eq!(harness_identity(None, "Elsewhere"), None);
 }
 
 #[test]
@@ -2876,6 +2893,54 @@ fn grok_is_started_with_the_access_as_its_sandbox_variable_and_always_approve() 
     let parts = parts_for(&edits, Some("grok"), &Takes::default(), &lookup);
     assert!(parts.agent_meta.is_empty());
     let each = access_item(&parts, "access.approvals").expect("reported");
+    assert_eq!(each["state"], "not supported", "{each}");
+}
+
+#[test]
+fn opencode_is_started_with_the_access_as_its_permission_variable() {
+    let permission = |connection: &Connection| {
+        let (env, args) = launched_with(connection);
+        assert!(args.is_empty(), "OpenCode takes no argument for it");
+        env.get("OPENCODE_PERMISSION").cloned()
+    };
+    let standard = access_connection(Some("opencode"), "");
+    assert_eq!(
+        permission(&standard).as_deref(),
+        Some(r#"{"edit":"ask","bash":"ask"}"#)
+    );
+    let parts = parts_for(&standard, Some("opencode"), &Takes::default(), &lookup);
+    assert!(parts.agent_meta.is_empty());
+    assert!(access_item(&parts, "access.sandbox").is_none());
+
+    let never = access_connection(Some("opencode"), "access = { approvals = \"never\" }\n");
+    let allowed: Value = serde_json::from_str(&permission(&never).expect("set")).expect("JSON");
+    assert_eq!(allowed["bash"], "allow");
+    assert_eq!(allowed["external_directory"], "allow");
+    let parts = parts_for(&never, Some("opencode"), &Takes::default(), &lookup);
+    let each = access_item(&parts, "access.approvals").expect("reported");
+    assert_eq!(each["state"], "applied", "{each}");
+
+    let read_only = access_connection(
+        Some("opencode"),
+        "access = { sandbox = \"read-only\", approvals = \"never\" }\n",
+    );
+    assert_eq!(
+        permission(&read_only).as_deref(),
+        Some(r#"{"edit":"deny"}"#)
+    );
+    let parts = parts_for(&read_only, Some("opencode"), &Takes::default(), &lookup);
+    let sandbox = access_item(&parts, "access.sandbox").expect("reported");
+    assert_eq!(sandbox["state"], "applied", "{sandbox}");
+    let approvals = access_item(&parts, "access.approvals").expect("reported");
+    assert_eq!(approvals["state"], "not supported", "{approvals}");
+
+    let workspace = access_connection(Some("opencode"), "access = { sandbox = \"workspace\" }\n");
+    let parts = parts_for(&workspace, Some("opencode"), &Takes::default(), &lookup);
+    let each = access_item(&parts, "access.sandbox").expect("reported");
+    assert_eq!(each["state"], "not supported", "{each}");
+    let closed = access_connection(Some("opencode"), "access = { network = false }\n");
+    let parts = parts_for(&closed, Some("opencode"), &Takes::default(), &lookup);
+    let each = access_item(&parts, "access.network").expect("reported");
     assert_eq!(each["state"], "not supported", "{each}");
 }
 

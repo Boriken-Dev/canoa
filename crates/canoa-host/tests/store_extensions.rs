@@ -1,4 +1,4 @@
-//! The five built-in stores, run through the contract suite on worlds that serve each publisher's documents in the shape
+//! The six built-in stores, run through the contract suite on worlds that serve each publisher's documents in the shape
 //! the publisher serves them, with a stand-in program for the bytes.
 #![allow(
     clippy::std_instead_of_core,
@@ -12,7 +12,9 @@ use std::sync::Arc;
 
 use canoa::store::{Action, InstallTools, PlanRequest, Platform, ProgramStore, StoreSettings};
 use canoa_host::store::contract::{Fixture, Variant, World, WorldTransport, run, standin_bytes};
-use canoa_host::store::registry::{AgyStore, ClaudeStore, CodexStore, GrokStore, PiStore};
+use canoa_host::store::registry::{
+    AgyStore, ClaudeStore, CodexStore, GrokStore, OpenCodeStore, PiStore,
+};
 use canoa_host::store::tools::LocalTools;
 use canoa_pi as pi;
 use coqui_acp_api::guatiao::Status;
@@ -493,6 +495,161 @@ fn the_pi_store_passes_every_check() {
 
 // --- Plumbing ----------------------------------------------------------------------------------
 
+// --- OpenCode ----------------------------------------------------------------------------------
+
+struct OpenCodeFixture(PathBuf);
+
+impl OpenCodeFixture {
+    const API: &'static str = "https://api.github.com/repos/anomalyco/opencode/releases";
+    const DOWNLOADS: &'static str = "https://github.com/anomalyco/opencode/releases/download";
+
+    /// The archive the publisher names for `platform`, and whether it is a zip.
+    fn asset(platform: &Platform) -> (String, bool) {
+        let os = if platform.os == "windows" {
+            "windows"
+        } else {
+            "linux"
+        };
+        let arch = if platform.arch == "aarch64" {
+            "arm64"
+        } else {
+            "x64"
+        };
+        let zipped = platform.os == "windows";
+        (
+            format!(
+                "opencode-{os}-{arch}.{}",
+                if zipped { "zip" } else { "tar.gz" }
+            ),
+            zipped,
+        )
+    }
+
+    /// A world that serves `versions` for every platform the store is measured on, the newest as GitHub's latest release.
+    fn world_of(&self, variant: Variant, versions: &[&str]) -> World {
+        let mut world = World::new();
+        let newest = versions.last().copied().expect("a version");
+        for version in versions {
+            let exit = if *version == newest {
+                exit_of(variant)
+            } else {
+                0
+            };
+            let mut assets = Vec::new();
+            for os in ["windows", "linux"] {
+                for arch in ["x86_64", "aarch64"] {
+                    let platform = Platform::new(os, arch);
+                    let (name, zipped) = Self::asset(&platform);
+                    let exe =
+                        standin_bytes(&self.0, version, exit, Some("OPENCODE_DISABLE_AUTOUPDATE"));
+                    let file = if zipped { "opencode.exe" } else { "opencode" };
+                    let good = if zipped {
+                        zip(&[(file, exe, 0o755)])
+                    } else {
+                        tar_gz(&[(file, exe, 0o755)])
+                    };
+                    let (served, digested) = if *version == newest {
+                        tamper(variant, good)
+                    } else {
+                        (good.clone(), good)
+                    };
+                    assets.push(serde_json::json!({
+                        "name": name,
+                        "size": served.len(),
+                        "digest": format!("sha256:{}", sha256(&digested)),
+                    }));
+                    world.put(format!("{}/v{version}/{name}", Self::DOWNLOADS), served);
+                }
+            }
+            let document = serde_json::json!({"tag_name": format!("v{version}"), "assets": assets})
+                .to_string()
+                .into_bytes();
+            world.put(format!("{}/tags/v{version}", Self::API), document.clone());
+            if *version == newest {
+                world.put(format!("{}/latest", Self::API), document);
+            }
+        }
+        finish(&mut world, variant);
+        world
+    }
+}
+
+impl Fixture for OpenCodeFixture {
+    fn older(&self) -> String {
+        "1.0.0".into()
+    }
+    fn newer(&self) -> String {
+        "2.0.0".into()
+    }
+    fn platform(&self) -> Platform {
+        host()
+    }
+    fn auto_update_var(&self) -> Option<String> {
+        Some("OPENCODE_DISABLE_AUTOUPDATE".into())
+    }
+
+    fn world(&self, variant: Variant) -> World {
+        self.world_of(variant, &["1.0.0", "2.0.0"])
+    }
+}
+
+#[test]
+fn the_opencode_store_passes_every_check() {
+    suite(
+        &OpenCodeFixture(standin()),
+        Arc::new(Direct::<OpenCodeStore>::new()),
+    );
+}
+
+#[test]
+fn the_opencode_store_plans_the_archive_and_digest_the_release_lists_for_each_platform() {
+    let fixture = OpenCodeFixture(standin());
+    let store = OpenCodeStore::default_instance();
+    let info = store.describe().expect("info");
+    assert!(!info.platforms.is_empty());
+    let tools = || {
+        let transport = WorldTransport::new(fixture.world_of(Variant::Normal, &["1.0.0", "2.0.0"]));
+        LocalTools::new(transport, info.endpoints.clone()).into_object()
+    };
+    for platform in info.platforms.clone() {
+        let (name, _) = OpenCodeFixture::asset(&platform);
+        let plan = store
+            .plan(PlanRequest::new(Action::Install, platform.clone()), tools())
+            .unwrap_or_else(|error| panic!("{platform:?}: {}", error.message()));
+        assert_eq!(plan.version.as_deref(), Some("2.0.0"), "{platform:?}");
+        let [download] = plan.downloads.as_slice() else {
+            panic!("{platform:?}: {:?}", plan.downloads);
+        };
+        assert_eq!(
+            download.url,
+            format!("{}/v2.0.0/{name}", OpenCodeFixture::DOWNLOADS),
+            "{platform:?}"
+        );
+        assert!(
+            matches!(&download.check, canoa::store::Check::Sha256 { value } if value.len() == 64),
+            "{platform:?}: {:?}",
+            download.check
+        );
+        assert!(
+            plan.notices
+                .iter()
+                .all(|notice| !notice.starts_with("Not verified")),
+            "{platform:?}: {:?}",
+            plan.notices
+        );
+    }
+    // A version a person names is read from its own tag.
+    let mut request = PlanRequest::new(Action::Install, host());
+    request.version = Some("1.0.0".to_owned());
+    let plan = store.plan(request, tools()).expect("a named version");
+    assert_eq!(plan.version.as_deref(), Some("1.0.0"));
+    // A release that lists no archive for the platform is refused with the reason.
+    let mut request = PlanRequest::new(Action::Install, Platform::new("freebsd", "x86_64"));
+    request.version = None;
+    let error = store.plan(request, tools()).expect_err("unsupported");
+    assert_eq!(error.status, Status::GUATIAO_ERR_UNSUPPORTED);
+}
+
 /// A built-in store used directly, as the host holds it.
 struct Direct<S>(S);
 
@@ -515,6 +672,7 @@ direct!(CodexStore);
 direct!(GrokStore);
 direct!(AgyStore);
 direct!(PiStore);
+direct!(OpenCodeStore);
 
 impl<S: DefaultInstance> Direct<S> {
     fn new() -> Self {

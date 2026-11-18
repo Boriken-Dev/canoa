@@ -780,7 +780,7 @@ struct ServeArgs {
     /// The lowest user id a host run for a portal may have; root, `nobody` and the system ranges never may.
     #[arg(long, value_name = "UID", default_value_t = 1000, requires = "portal")]
     portal_min_uid: u32,
-    /// Serve the host's own sources too (Claude, Codex, Antigravity, Grok, Pi), to this process only: they have no address,
+    /// Serve the host's own sources too (Claude, Codex, Antigravity, Grok, OpenCode, Pi), to this process only: they have no address,
     /// and each line says what a source is missing.
     #[arg(long)]
     local_sources: bool,
