@@ -456,8 +456,7 @@ on the host's `PATH`, and the agent is given the program's absolute path.
 The agent's own program is always the one on the host's `PATH` (and in the Store's runtimes): a folder a profile or an
 overlay puts first on the `PATH` of the agent's processes never decides which program the agent is, on any system.
 
-Canoa does not apply yet, and **Settings → Profiles** lists as "not applied by Canoa yet": env scripts (`env.<ext>`,
-`env_scripts`), `mcp.skills`, an MCP server's `timeout` and its working directory (it runs in the session's), other
+Canoa does not apply yet, and **Settings → Profiles** lists as "not applied by Canoa yet": `mcp.skills`, an MCP server's `timeout` and its working directory (it runs in the session's), other
 harnesses' hints. Each line names its overlay. An overlay's own `bin/` goes first on `PATH`, and its `lib/python/` and
 `lib/node/` on `PYTHONPATH` and `NODE_PATH`, ahead of the host's own entries, for the agent and the programs it starts.
 A `paths` entry that leaves the overlay's folder is refused, and a `paths` entry may set only those three of the variables
@@ -865,7 +864,7 @@ its default.
   source and the pin it claims. **Fetch and show what it would do** fetches the overlay, installing nothing, and shows
   what the overlay itself says (its name, description, `[about]` and icon, from its own files), the commit and tree
   digest, and what it would do as Settings → Profiles would apply it: its environment, skills, MCP servers and context,
-  what Canoa does not apply (setup, env scripts, dependencies, commands, the `bin`/`lib` defaults), each setup and
+  what Canoa does not apply (setup, dependencies, commands, the `bin`/`lib` defaults), each setup and
   whether it says it needs the network, the overlays it requires, what none of your layers shares, and its non-default settings.
   A tag or a summary is never taken as evidence of any of it.
 - **A catalog's pin** is checked against the tree fetched: one that does not match is shown as a refusal and the

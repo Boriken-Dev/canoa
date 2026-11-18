@@ -256,6 +256,14 @@ command = "/usr/local/bin/lint-mcp"
   the person's protected list (`[permissions] protected`), which still goes to them; a deny beats an ask and an ask beats
   an allow. A command is not read for the paths it touches, so allowing a command call can mean writes to protected paths. An overlay whose hooks fail closed is not used while they are off. The report lists each hook as
   `applied`, `not supported` or `off`; `crates/canoa-host/AGENTS.md`, "Overlay hooks", has what fires on which event.
+- **An overlay's env scripts** (`env.<ext>` and `env_scripts`) are off by the same rule: they run only while
+  `allow_hooks` names the overlay's tree digest (the allowance of its hooks covers both), once when a connection starts,
+  never when the person is asked, and the overlay is otherwise applied. A script runs as its `interpreter` says (found on
+  the host's `PATH`, never through a shell), from a copy of the files the digest covered, with the environment the overlays
+  before it left, and is stopped at its `timeout` (60 seconds unless the overlay says; 0 for none). Its output, JSON
+  objects on standard output, is applied unsubstituted over the layers before it; a script that fails, times out or prints
+  anything else applies nothing, is reported with the end of its standard error, and the session still starts. The report
+  lists each script as `applied`, `refused` or `off`.
 - **A skill an overlay names from elsewhere** is delivered only from the copy the app fetched (`overlays/.skills/`), at
   its record's digest, the overlay's pin and any pin a top-level `[skill_pins]` table in canoa.cfg gives its name
   (`review = "sha256:…"`). It never takes a name another overlay's skill holds; one kept out, one not fetched and one
