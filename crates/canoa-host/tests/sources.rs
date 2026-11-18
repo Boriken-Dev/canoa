@@ -40,6 +40,8 @@ fn the_hosts_own_sources_run_over_a_link_and_say_what_they_miss() {
     let opencode = host.line_of("OpenCode").expect("printed");
     assert_eq!(opencode["local"], true);
     assert_eq!(opencode["missing"], json!([]));
+    // It runs as the built-in `opencode` harness, whose provider starts the program and takes accounts.
+    assert_eq!(opencode["harness"], "opencode");
     assert!(opencode.get("url").is_none(), "no address: {opencode}");
     let claude = host.line_of("Claude").expect("printed");
     assert_eq!(claude["missing"], json!(["claude"]));

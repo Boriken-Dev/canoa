@@ -6,7 +6,7 @@
 pub struct SourcePreset {
     /// The source's name, as a client lists it.
     pub name: &'static str,
-    /// `claude`, `codex` or `pi` for a built-in harness; `None` for a program, which `program` and `args` run.
+    /// `claude`, `codex`, `pi` or `opencode` for a built-in harness; `None` for a program, which `program` and `args` run.
     pub harness: Option<&'static str>,
     /// The program's file name, looked for on `PATH` and in `search`.
     pub program: &'static str,

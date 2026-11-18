@@ -202,6 +202,54 @@ fn the_catalog_names_the_kinds_and_the_ways_to_sign_in() {
 }
 
 #[test]
+fn opencodes_kinds_and_its_one_sign_in_are_listed_and_its_source_can_be_offered_accounts() {
+    let host = host();
+    let link = host.local.open("@control").expect("a link");
+    let catalog =
+        plain_call(&link, 1, "accounts/catalog", json!({"harness": "opencode"})).expect("catalog");
+    let kinds: Vec<&str> = catalog["kinds"]
+        .as_array()
+        .expect("kinds")
+        .iter()
+        .filter_map(|kind| kind["id"].as_str())
+        .collect();
+    for kind in ["opencode-login", "opencode-provider-key"] {
+        assert!(kinds.contains(&kind), "{kind} in {kinds:?}");
+    }
+    let methods: Vec<&str> = catalog["logins"]
+        .as_array()
+        .expect("logins")
+        .iter()
+        .filter_map(|method| method["id"].as_str())
+        .collect();
+    assert_eq!(methods, ["api-key"]);
+    let key = &catalog["logins"][0];
+    assert_eq!(key["produces"], "opencode-provider-key");
+    assert!(
+        key["inputs"]["properties"]["variable"]["enum"]
+            .as_array()
+            .is_some_and(|variables| variables.iter().any(|name| name == "OPENAI_API_KEY")),
+        "{key}"
+    );
+    // The source is an entry that runs the provider, so an account can be offered to it.
+    let entries = plain_call(&link, 2, "accounts/entries", json!({})).expect("entries");
+    let opencode = entries["entries"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .find(|entry| entry["name"] == "OpenCode")
+        .expect("OpenCode is listed");
+    assert_eq!(opencode["harness"], "opencode");
+    assert!(
+        opencode["accepts"]
+            .as_array()
+            .is_some_and(|accepted| accepted.iter().any(|standard| standard == "openai-api")),
+        "{opencode}"
+    );
+    host.stop();
+}
+
+#[test]
 fn an_account_is_added_by_a_key_asked_sealed_and_the_key_is_kept_nowhere_in_the_clear() {
     let host = host();
     let link = host.local.open("@control").expect("a link");
@@ -414,8 +462,12 @@ fn an_entry_is_offered_the_accounts_the_person_picks_and_the_host_says_it_must_s
         .collect();
     assert_eq!(
         names,
-        [("Claude", "claude"), ("Codex", "codex")],
-        "the entry canoa.cfg has, then the built-in source it has not named"
+        [
+            ("Claude", "claude"),
+            ("Codex", "codex"),
+            ("OpenCode", "opencode")
+        ],
+        "the entry canoa.cfg has, then the built-in sources it has not named"
     );
     assert_eq!(entries["entries"][0]["accounts"], json!([]));
 

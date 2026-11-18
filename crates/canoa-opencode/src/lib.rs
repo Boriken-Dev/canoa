@@ -34,7 +34,7 @@ const ASSET_HOSTS: [&str; 2] = [
 
 /// How the host starts OpenCode when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("OpenCode", "opencode")
-    .args(&["acp"])
+    .harness("opencode")
     .search(&["~/.opencode/bin"]);
 
 /// OpenCode.

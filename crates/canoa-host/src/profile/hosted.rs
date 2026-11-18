@@ -1516,6 +1516,7 @@ pub(crate) fn harness_identity(provider: Option<&str>, entry: &str) -> Option<&'
         Some("claude") => Some("claude-code"),
         Some("codex") => Some("codex"),
         Some("pi") => Some("pi"),
+        Some("opencode") => Some("opencode"),
         _ => harness_of(None, entry).or(match entry {
             "Grok" => Some("grok"),
             "OpenCode" => Some("opencode"),

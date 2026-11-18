@@ -26,13 +26,14 @@ use coqui_acp_api::{
     AccountCatalog, AccountKindInfo, AccountProvider, AcpHarness, CacheLifetime, Environment,
     HarnessNotice, ProcessSpawner, StartRequest,
 };
+use coqui_acp_harness::stdio::{OpenCodeAccounts, OpenCodeProvider};
 
 use crate::accounts::matching::Runs;
 use crate::accounts::{ACCOUNT_META, Accounts, Held, Watcher};
 use crate::config::{AccountConfig, Origin, Settings, cache_lifetime_named};
 use crate::provider::{ProviderError, map_of, open};
 
-// What `Registry::register_local` takes: the three built-in harness providers and their account providers, linked into this binary.
+// What `Registry::register_local` takes: the four built-in harness providers and their account providers, linked into this binary.
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-built-in",
     version = env!("CARGO_PKG_VERSION"),
@@ -42,7 +43,9 @@ coqui_acp_api::guatiao::local_providers!(
         CodexProvider,
         CodexAccounts,
         PiProvider,
-        PiAccounts
+        PiAccounts,
+        OpenCodeProvider,
+        OpenCodeAccounts
     ]
 );
 

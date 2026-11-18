@@ -429,7 +429,7 @@ mod tests {
     }
 
     #[test]
-    fn opencode_is_started_as_opencode_acp() {
+    fn opencode_is_the_built_in_opencode_harness_on_the_program_found() {
         let sources = sources_in(
             &nothing_found(),
             &|program, _| Some(PathBuf::from(format!("/opt/bin/{program}"))),
@@ -440,10 +440,18 @@ mod tests {
             .find(|source| source.entry.name == "OpenCode")
             .expect("OpenCode");
         match &source.entry.kind {
-            crate::EntryKind::Agent { program, args, .. } => {
-                assert_eq!(program.to_string_lossy(), "/opt/bin/opencode");
-                assert_eq!(args.len(), 1);
-                assert_eq!(args[0], "acp");
+            crate::EntryKind::Harness {
+                harness,
+                executable,
+                ..
+            } => {
+                assert_eq!(harness, "opencode");
+                assert!(
+                    executable.as_ref().is_some_and(
+                        |executable| Path::new(executable).ends_with("opt/bin/opencode")
+                    ),
+                    "{executable:?}"
+                );
             }
             other => panic!("{other:?}"),
         }

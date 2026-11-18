@@ -2508,13 +2508,13 @@ impl Config {
                     if built_in && origin.is_some() {
                         return Err(invalid(
                             &name,
-                            "claude, codex and pi are built in: library and source load an outside provider under its own id",
+                            "claude, codex, pi and opencode are built in: library and source load an outside provider under its own id",
                         ));
                     }
                     if origin.is_none() && !built_in {
                         return Err(invalid(
                             &name,
-                            "harness is claude, codex, pi, or the id of an outside provider that library or source loads",
+                            "harness is claude, codex, pi, opencode, or the id of an outside provider that library or source loads",
                         ));
                     }
                     let settings = agent
@@ -2922,7 +2922,7 @@ fn invalid(name: &str, what: &str) -> ConfigError {
 }
 
 /// The harnesses the host carries: providers of `acp_harness` registered in this process.
-pub const BUILT_IN_HARNESSES: &[&str] = &["claude", "codex", "pi"];
+pub const BUILT_IN_HARNESSES: &[&str] = &["claude", "codex", "pi", "opencode"];
 
 /// The keys that say where an outside provider's code is.
 struct OriginKeys<'a> {

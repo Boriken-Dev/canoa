@@ -3236,6 +3236,19 @@ pub(crate) fn harness_settings(
     if !BUILT_IN_HARNESSES.contains(&harness) {
         return Settings::new(map);
     }
+    if harness == "opencode" {
+        // OpenCode runs through the stdio provider, which takes the program and the limits of a connection and none of the
+        // access, mode or setting-source keys of the three harnesses that translate for their agent.
+        if let Some(executable) = executable {
+            map.insert(
+                "executable".to_owned(),
+                serde_json::Value::String(executable.to_string_lossy().into_owned()),
+            );
+        }
+        map.entry("max_requests".to_owned())
+            .or_insert_with(|| serde_json::Value::from(HARNESS_MAX_REQUESTS));
+        return Settings::new(map);
+    }
     if let Some(executable) = executable {
         map.insert(
             "executable".to_owned(),
@@ -3723,6 +3736,44 @@ mod tests {
         };
         assert_eq!(limit("a"), serde_json::json!(HARNESS_MAX_REQUESTS));
         assert_eq!(limit("b"), serde_json::json!(8));
+    }
+
+    #[test]
+    fn opencodes_settings_are_its_program_and_its_limits_and_none_of_the_access_keys() {
+        let config = Config::from_str_in(
+            "[host.agents.o]
+harness = \"opencode\"
+executable = \"opencode\"
+settings = { replay_max_bytes = 4096 }
+",
+            std::path::Path::new("/canoa"),
+        )
+        .expect("parses");
+        let entry = config.entry("o").expect("there");
+        let EntryKind::Harness {
+            harness,
+            executable,
+            options,
+            settings,
+            ..
+        } = &entry.kind
+        else {
+            panic!("a harness");
+        };
+        let map = harness_settings(
+            entry,
+            harness,
+            executable.as_ref(),
+            options,
+            settings.as_ref(),
+        );
+        let map = map.as_map();
+        assert_eq!(map["executable"], serde_json::json!("opencode"));
+        assert_eq!(map["max_requests"], serde_json::json!(HARNESS_MAX_REQUESTS));
+        assert_eq!(map["replay_max_bytes"], serde_json::json!(4096));
+        for key in ["access", "allow_client_access", "allow_bypass", "modes"] {
+            assert!(!map.contains_key(key), "{key} reached the stdio provider");
+        }
     }
 
     #[test]

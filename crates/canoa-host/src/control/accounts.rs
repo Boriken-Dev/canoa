@@ -51,7 +51,11 @@ impl core::fmt::Debug for Accounts {
 
 /// A harness the host serves as a source of its own when canoa.cfg has no entry of that name: an entry that offers accounts
 /// takes the name, and the source with it.
-const BUILT_IN_SOURCES: [(&str, &str); 2] = [("Claude", "claude"), ("Codex", "codex")];
+const BUILT_IN_SOURCES: [(&str, &str); 3] = [
+    ("Claude", "claude"),
+    ("Codex", "codex"),
+    ("OpenCode", "opencode"),
+];
 
 /// The entries that run a built-in provider: those canoa.cfg has, then the built-in sources it has not named. A built-in source
 /// reaches only this computer's own application, except on the host of a portal, whose sockets only the person's browser reaches.
