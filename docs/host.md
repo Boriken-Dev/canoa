@@ -846,6 +846,12 @@ server = "https://mail.example.com/EWS/Exchange.asmx"   # ... or name it, and no
 user = "EXAMPLE\\ana"
 password_env = "WORK_MAIL_PASSWORD"      # the variable that holds the password; canoa.cfg holds none
 
+[host.mail.accounts.cloud]
+backend = "graph"                        # Exchange Online through Microsoft Graph, signed in with the Windows account
+client_id = "11111111-2222-3333-4444-555555555555"   # your app registration in Entra ID (required)
+# tenant = "example.com"                 # the registration's tenant; "organizations" otherwise
+# email = "ana@example.com"              # which Windows account to ask, when it holds several
+
 [host.mail.accounts.desktop]
 backend = "outlook"                      # classic Outlook for Windows, every account it holds, signed in as Outlook is
 # profile = "Work"                       # the Outlook profile to log on to; the one running otherwise
@@ -870,7 +876,19 @@ backend = "outlook"                      # classic Outlook for Windows, every ac
   clear. Basic sign-in needs `user` and `password_env`. Signing in with the Windows logon (`auth = "windows"`, Negotiate) is
   reserved: the account is refused with a message until the HTTP stack can sign in to a server that way. Exchange Online
   turned EWS off for tenants from 1 October 2026 (it ends for all on 1 April 2027): an Exchange Online mailbox belongs to
-  classic Outlook (`outlook`), or to a Microsoft Graph account when one lands.
+  Microsoft Graph (`graph`) or to classic Outlook (`outlook`).
+- **Exchange Online through Microsoft Graph (`graph`).** `client_id` is required: the application (client) id of an app
+  registration of your own in Entra ID, registered as a public client with the delegated permission `Mail.ReadWrite` (the host
+  asks for that and nothing else, so the registration cannot send mail) allowed for you or by an administrator. The host never
+  uses a Microsoft application's id. It takes the token silently from the Windows (or Office) sign-in for that registration, through
+  the Web Account Manager, by Windows PowerShell with a helper script that speaks JSON (so the host itself holds no `unsafe` for
+  it), and sends it as a bearer token over the host's network settings. `tenant` (default `organizations`) names the registration's
+  tenant, `email` says which Windows account to ask when it holds several, `server` replaces Graph's address
+  (`https://graph.microsoft.com/v1.0`; plain `http` only on this computer), and `command` replaces the PowerShell command. When
+  Windows would have to ask you to sign in or to allow the app, the account says so and names the two ways out: register the
+  app, or use `outlook`. A search with words, a sender, a recipient or a subject goes to Graph's `$search` (KQL, newest first; Graph
+  gives no count for it, and the unread and flag filters are applied to what it returns); any other search is a `$filter` with a
+  count. Graph is not asked to send anything: drafts are saved and a reply is created, never posted.
 - **Classic Outlook (`outlook`).** Windows only. The host runs Windows PowerShell with a helper script that drives Outlook's object
   model (COM) and speaks JSON, so the host itself holds no `unsafe` for it. It reaches every account Outlook holds (Exchange, IMAP,
   Gmail, a PST) as Outlook is signed in to them. Outlook may ask the person to allow programmatic access (an antivirus product or a
