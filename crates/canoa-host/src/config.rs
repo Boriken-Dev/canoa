@@ -607,6 +607,9 @@ pub struct NetworkConfig {
     /// `endpoints`: URLs the programs the host starts will use, added to the built-in list a PAC script is asked about to give them
     /// their proxy variables.
     pub endpoints: Vec<String>,
+    /// `proxy_idle_seconds`: how long the proxy the host runs for sessions that use `system` or `pac` is kept after its last session
+    /// ends, for the next session that asks for the same one (default 0: it ends with its last session).
+    pub proxy_idle_seconds: Option<u64>,
 }
 
 impl NetworkConfig {
@@ -1650,6 +1653,7 @@ struct RawNetwork {
     git_tls: Option<String>,
     #[serde(default)]
     endpoints: Vec<String>,
+    proxy_idle_seconds: Option<u64>,
 }
 
 /// `[host.network]`, its paths made absolute from canoa.cfg's directory. Errors name a key, never a value.
@@ -1711,6 +1715,7 @@ fn network_of(raw: RawNetwork, directory: &Path) -> Result<NetworkConfig, Config
         ca_file: raw.ca_file.map(|file| path(file, "ca_file")).transpose()?,
         git_tls,
         endpoints: raw.endpoints,
+        proxy_idle_seconds: raw.proxy_idle_seconds,
     })
 }
 

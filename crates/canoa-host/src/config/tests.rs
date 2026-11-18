@@ -2414,6 +2414,7 @@ fn with_no_network_table_the_host_follows_the_system_in_everything() {
     );
     assert_eq!(none.network.git_tls, canoa::network::GitTls::System);
     assert!(none.network.no_proxy.is_none());
+    assert_eq!(none.network.proxy_idle_seconds, None);
     let settings = none.network.settings().expect("settings");
     assert_eq!(settings.proxy, canoa::network::ProxyChoice::System);
 }
@@ -2423,7 +2424,7 @@ fn the_network_table_overrides_each_part_and_every_part_is_explicit() {
     let config = parse(
         "[host.network]\nproxy = \"http://gateway.corp:3128\"\nproxy_user = \"alice\"\nproxy_password_env = \"CANOA_TEST_NO_SUCH_VARIABLE\"\n\
          no_proxy = \"a.example, *.corp\\n10.0.0.0/8\"\nnegotiate = false\nclient_certificate = \"me.pem\"\nca_file = \"roots.pem\"\n\
-         git_tls = \"git\"\nendpoints = [\"https://tools.example/\"]\n",
+         git_tls = \"git\"\nendpoints = [\"https://tools.example/\"]\nproxy_idle_seconds = 90\n",
     )
     .expect("parses");
     let network = &config.network;
@@ -2453,6 +2454,7 @@ fn the_network_table_overrides_each_part_and_every_part_is_explicit() {
     );
     assert_eq!(network.git_tls, canoa::network::GitTls::Git);
     assert_eq!(network.endpoints, ["https://tools.example/"]);
+    assert_eq!(network.proxy_idle_seconds, Some(90));
     // The password is read when the network is made, from the variable the file names, never from the file.
     assert!(network.settings().is_err());
 }

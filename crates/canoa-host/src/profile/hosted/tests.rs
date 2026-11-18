@@ -3501,8 +3501,10 @@ fn the_proxy_item_ends_tls_for_the_hosts_it_names_and_the_authoritys_key_is_not_
             crate::profile::items::ItemCatalog::from_registries(Vec::new()),
         )
     };
-    let named =
-        offer_for("client_certificate_hosts = [\"api.example.test\", \"*.corp.example\"]\n");
+    let named = offer_for(concat!(
+        "client_certificate_hosts = [{ pattern = \"api.example.test\" },",
+        " { pattern = \"(db|cache)[.]corp[.]example\", identity = \"system\" }]\n"
+    ));
     let (connection, report) = item_report(&named, None);
     let bundle = var(&connection, "SSL_CERT_FILE")
         .expect("a bundle")
@@ -3518,7 +3520,7 @@ fn the_proxy_item_ends_tls_for_the_hosts_it_names_and_the_authoritys_key_is_not_
         .as_str()
         .expect("text");
     assert!(
-        how.contains("api.example.test") && how.contains("*.corp.example"),
+        how.contains("api.example.test") && how.contains("(db|cache)[.]corp[.]example"),
         "{how}"
     );
     assert!(
@@ -3526,7 +3528,9 @@ fn the_proxy_item_ends_tls_for_the_hosts_it_names_and_the_authoritys_key_is_not_
         "no key in the report"
     );
     // With no proxy of the host's own to end TLS in, the profile is told so and nothing is ended.
-    let wrong = offer_for("mode = \"none\"\nclient_certificate_hosts = [\"api.example.test\"]\n");
+    let wrong = offer_for(
+        "mode = \"none\"\nclient_certificate_hosts = [{ pattern = \"api.example.test\" }]\n",
+    );
     let (connection, report) = item_report(&wrong, None);
     assert_eq!(var(&connection, "SSL_CERT_FILE"), None);
     assert_eq!(

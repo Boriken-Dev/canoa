@@ -5,12 +5,14 @@
 //! its keystores, with the person's `[host.network]` overriding any of it. The programs the host starts (agents, runtimes, git)
 //! get the proxy as `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` when their environment names none.
 
+use core::sync::atomic::{AtomicU64, Ordering};
+use core::time::Duration;
 use std::sync::{PoisonError, RwLock};
 
 use canoa::network::{Network, NetworkSettings};
 
+pub(crate) mod proxy_ca;
 pub(crate) mod session;
-pub(crate) mod session_ca;
 #[cfg(test)]
 pub(crate) mod standins;
 #[cfg(test)]
@@ -51,7 +53,16 @@ pub(crate) fn install(config: &NetworkConfig) -> Result<(), ConfigError> {
     })?;
     Network::install(network);
     *INSTALLED.write().unwrap_or_else(PoisonError::into_inner) = Some(settings);
+    GENERATION.fetch_add(1, Ordering::SeqCst);
+    session::registry().set_idle(Duration::from_secs(config.proxy_idle_seconds.unwrap_or(0)));
     Ok(())
+}
+
+/// How many times [`install`] has made a network: a proxy a session shares is one made from the same installation.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn installed_generation() -> u64 {
+    GENERATION.load(Ordering::SeqCst)
 }
 
 /// What [`install`] last made the process's network from.

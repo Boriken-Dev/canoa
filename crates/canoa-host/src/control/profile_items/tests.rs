@@ -104,3 +104,21 @@ fn the_list_is_read_with_the_grant_that_reads_the_configuration() {
         "{listed}"
     );
 }
+
+#[test]
+fn the_proxy_item_asks_for_each_pattern_of_hosts_with_the_certificate_to_present_as_a_pick_from_the_hosts_list()
+ {
+    let answer = of(&ItemCatalog::built_in());
+    let proxy = row(&answer, "proxy");
+    let hosts = &proxy["schema"]["properties"]["client_certificate_hosts"];
+    assert_eq!(hosts["type"], "array", "{hosts}");
+    let entry = &hosts["items"];
+    let members = &entry["properties"];
+    assert_eq!(members["pattern"]["type"], "string", "{entry}");
+    assert_eq!(members["identity"]["default"], "system", "{entry}");
+    assert_eq!(entry["required"], serde_json::json!(["pattern"]), "{entry}");
+    // The form is the ordinary intake one: the list's entries have a form of their own, whose identity member says which widget a
+    // renderer draws (a pick from `network/client_certificates`).
+    let hints = &proxy["form"]["fields"]["client_certificate_hosts"]["form"]["fields"];
+    assert_eq!(hints["identity"]["widget"], "client_certificate", "{proxy}");
+}

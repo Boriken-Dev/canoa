@@ -1,30 +1,32 @@
 //! How one session's programs reach the network, as a profile's network item says: the proxy variables they are given and the
 //! network the host's own requests for the session use.
 //!
-//! `system` and `pac` run a proxy for the session alone on the loopback address. A program that understands only a plain proxy then
-//! behaves as the system does: each connection it asks for is sent through [`canoa::network::Network`], which chooses the route by the
-//! system's settings or the PAC script per destination, logs in to the proxy (Basic, Negotiate, NTLM) and carries it through a CONNECT
-//! tunnel. Hosts on the bypass list go direct. Only a program that has the session's secret may use it: the address handed to the
-//! session's programs carries a token as the proxy's password, since the proxy answers with the person's own logon session.
+//! `system` and `pac` run a proxy on the loopback address. A program that understands only a plain proxy then behaves as the system
+//! does: each connection it asks for is sent through [`canoa::network::Network`], which chooses the route by the system's settings or
+//! the PAC script per destination, logs in to the proxy (Basic, Negotiate, NTLM) and carries it through a CONNECT tunnel. Hosts on
+//! the bypass list go direct. Only a program that has the proxy's secret may use it: the address handed to the session's programs
+//! carries a token as the proxy's password, since the proxy answers with the person's own logon session. Sessions whose proxy items
+//! make the same settings share one proxy and its secret; it starts with the first and ends with the last (or after the idle time
+//! the host is set to keep it).
 //!
-//! A profile may name destinations that want a client certificate. For those alone the proxy ends the program's TLS with a
-//! certificate it signs for the destination, as an authority made for the session alone does ([`super::session_ca`]: in memory,
-//! limited to those destinations, gone with the session), and makes its own TLS to the destination through the network, which
-//! verifies it as the operating system does and presents the client certificate the person's keystores or `[host.network]` choose.
-//! A program is told to trust that authority by the variables its session gets, and by nothing else; every other destination stays
-//! a tunnel the program's own TLS runs through.
+//! A profile may name destinations that want a client certificate: patterns (a host, `*.name`, an address, or a regular expression)
+//! each with the certificate to present. For a destination one of them matches, the proxy ends the program's TLS with a certificate
+//! it signs for the destination, as the process's authority does ([`super::proxy_ca`]: in memory, made on demand and kept), and
+//! makes its own TLS to the destination through the network, which verifies it as the operating system does and presents the
+//! certificate the pattern names (by default the one the person's keystores or `[host.network]` choose). A program is told to trust
+//! that authority by the variables its session gets, and by nothing else; every other destination stays a tunnel the program's own
+//! TLS runs through.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
     reason = "sockets, threads and clocks are std's"
 )]
 
-use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -32,10 +34,10 @@ use canoa::network::{
     BypassRules, Connection, Dialect, Network, NetworkSettings, ProxyChoice, Secret,
     SecureConnection,
 };
-use canoa::profile_item::NetworkEffect;
+use canoa::profile_item::{ClientCertificateHost, HostPattern, NetworkEffect};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
 
-use super::session_ca::SessionCa;
+use super::proxy_ca::ProxyCa;
 use crate::control::tunnel::{Upstream, carry};
 
 /// How long a client has to send its request's head.
@@ -85,7 +87,7 @@ impl core::fmt::Debug for SessionNetwork {
 #[allow(dead_code, reason = "held for its Drop, never read")]
 enum Keep {
     Nothing,
-    Proxy(Middleman),
+    Proxy(Lease),
     Program(Child),
 }
 
@@ -126,20 +128,28 @@ pub(crate) fn start(
         }
         "pac" => {
             let url = effect.url.clone().unwrap_or_default();
-            let network = Network::new(&settings(ProxyChoice::Pac(url), effect, lookup)?)
-                .map_err(|error| error.to_string())?;
             middleman(
-                Arc::new(network),
+                registry(),
                 effect,
+                lookup,
                 "chosen by the PAC script",
                 services,
+                || {
+                    Network::new(&settings(ProxyChoice::Pac(url), effect, lookup)?)
+                        .map(Arc::new)
+                        .map_err(|error| error.to_string())
+                },
             )
         }
         "command" => program(effect),
-        _ => {
-            let network = Network::current();
-            middleman(network, effect, "following the system", services)
-        }
+        _ => middleman(
+            registry(),
+            effect,
+            lookup,
+            "following the system",
+            services,
+            || Ok(Network::current()),
+        ),
     }
 }
 
@@ -177,56 +187,277 @@ fn settings_over(
     Ok(settings)
 }
 
-fn middleman(
+/// What identifies a proxy that can be shared: every setting that decides what it does. Two sessions whose proxy items make equal keys
+/// are given the same proxy.
+#[derive(Clone, PartialEq, Eq)]
+struct ProxyKey {
+    mode: String,
+    url: Option<String>,
+    bypass: Vec<String>,
+    user: Option<String>,
+    /// The proxy login's password as the host's environment holds it, which a session's own proxy would be started with.
+    password: Option<String>,
+    /// Each destination pattern and the certificate it presents, as the item says them.
+    rules: Vec<(String, String)>,
+    /// Which installation of `[host.network]` the proxy's network keeps the roots and certificate of.
+    installed: u64,
+}
+
+impl ProxyKey {
+    fn of(effect: &NetworkEffect, lookup: &dyn Fn(&str) -> Option<String>) -> Result<Self, String> {
+        let login = effect.mode == "pac";
+        let password = match (&effect.user, &effect.password_variable) {
+            (Some(_), Some(name)) if login => Some(lookup(name).ok_or_else(|| {
+                format!("{name}, the variable the proxy's password is read from, is not set")
+            })?),
+            _ => None,
+        };
+        Ok(Self {
+            mode: effect.mode.clone(),
+            url: effect.url.clone(),
+            bypass: effect.bypass.clone(),
+            user: effect.user.clone().filter(|_| login),
+            password,
+            rules: effect
+                .intercept
+                .iter()
+                .map(|entry| {
+                    (
+                        entry.pattern.trim().to_owned(),
+                        entry
+                            .thumbprint()
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| canoa::profile_item::SYSTEM_IDENTITY.to_owned()),
+                    )
+                })
+                .collect(),
+            installed: super::installed_generation(),
+        })
+    }
+}
+
+/// A proxy that is running for one or more sessions.
+struct Running {
+    proxy: Middleman,
+    /// What a program must give it, as the proxy's password.
+    token: String,
     network: Arc<Network>,
+    intercept: Option<Arc<Intercept>>,
+}
+
+/// A session's hold on a running proxy: the proxy ends when the last hold on it is let go, or once it has been idle as long as
+/// the registry says.
+struct Lease {
+    running: Arc<Running>,
+    key: ProxyKey,
+    registry: Arc<Registry>,
+}
+
+struct Entry {
+    key: ProxyKey,
+    running: Arc<Running>,
+    users: usize,
+    /// Changes at every hold taken or let go, so a timer that was set before knows it is out of date.
+    epoch: u64,
+}
+
+/// The proxies running, one for each distinct settings.
+pub(crate) struct Registry {
+    entries: Mutex<Vec<Entry>>,
+    /// How many seconds a proxy no session uses is kept for the next session that asks for it.
+    idle_seconds: AtomicU64,
+}
+
+impl Registry {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            entries: Mutex::new(Vec::new()),
+            idle_seconds: AtomicU64::new(0),
+        })
+    }
+
+    /// How long a proxy no session uses any more is kept for the next session that asks for it; none ends it with its last session.
+    pub(crate) fn set_idle(&self, idle: Duration) {
+        self.idle_seconds.store(idle.as_secs(), Ordering::SeqCst);
+    }
+
+    fn entries(&self) -> std::sync::MutexGuard<'_, Vec<Entry>> {
+        self.entries.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn held(self: &Arc<Self>, entry: &mut Entry) -> Lease {
+        entry.users += 1;
+        entry.epoch += 1;
+        Lease {
+            running: Arc::clone(&entry.running),
+            key: entry.key.clone(),
+            registry: Arc::clone(self),
+        }
+    }
+
+    /// A hold on the proxy `key` names, made by `make` when none is running.
+    fn acquire(
+        self: &Arc<Self>,
+        key: ProxyKey,
+        make: impl FnOnce() -> Result<Running, String>,
+    ) -> Result<Lease, String> {
+        if let Some(entry) = self.entries().iter_mut().find(|entry| entry.key == key) {
+            return Ok(self.held(entry));
+        }
+        let made = Arc::new(make()?);
+        let mut entries = self.entries();
+        // A session with the same settings may have made one meanwhile: it is the one to share, and this one ends.
+        let lease = if let Some(entry) = entries.iter_mut().find(|entry| entry.key == key) {
+            self.held(entry)
+        } else {
+            entries.push(Entry {
+                key: key.clone(),
+                running: Arc::clone(&made),
+                users: 1,
+                epoch: 0,
+            });
+            Lease {
+                running: made,
+                key,
+                registry: Arc::clone(self),
+            }
+        };
+        drop(entries);
+        Ok(lease)
+    }
+
+    /// How many proxies are running.
+    #[cfg(test)]
+    pub(crate) fn running(&self) -> usize {
+        self.entries().len()
+    }
+
+    fn release(self: &Arc<Self>, key: &ProxyKey) {
+        let idle = Duration::from_secs(self.idle_seconds.load(Ordering::SeqCst));
+        let mut ended = None;
+        let mut timer = None;
+        {
+            let mut entries = self.entries();
+            if let Some(at) = entries.iter().position(|entry| entry.key == *key) {
+                let entry = &mut entries[at];
+                entry.users = entry.users.saturating_sub(1);
+                entry.epoch += 1;
+                if entry.users == 0 {
+                    if idle.is_zero() {
+                        ended = Some(entries.remove(at).running);
+                    } else {
+                        timer = Some(entry.epoch);
+                    }
+                }
+            }
+        }
+        // The proxy's own threads are joined here, with no lock held.
+        drop(ended);
+        if let Some(epoch) = timer {
+            let (registry, key) = (Arc::clone(self), key.clone());
+            let _ = thread::Builder::new()
+                .name("session-proxy-idle".to_owned())
+                .spawn(move || {
+                    thread::sleep(idle);
+                    registry.end_if_idle(&key, epoch);
+                });
+        }
+    }
+
+    fn end_if_idle(&self, key: &ProxyKey, epoch: u64) {
+        let ended = {
+            let mut entries = self.entries();
+            entries
+                .iter()
+                .position(|entry| entry.key == *key && entry.users == 0 && entry.epoch == epoch)
+                .map(|at| entries.remove(at).running)
+        };
+        drop(ended);
+    }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        self.registry.release(&self.key);
+    }
+}
+
+/// The registry the host's sessions share.
+pub(crate) fn registry() -> &'static Arc<Registry> {
+    static REGISTRY: OnceLock<Arc<Registry>> = OnceLock::new();
+    REGISTRY.get_or_init(Registry::new)
+}
+
+/// A session's network through a proxy the host runs: the one already running for the same settings, or a new one.
+fn middleman(
+    registry: &Arc<Registry>,
     effect: &NetworkEffect,
+    lookup: &dyn Fn(&str) -> Option<String>,
     how: &str,
     services: &Services<'_>,
+    network: impl FnOnce() -> Result<Arc<Network>, String>,
 ) -> Result<SessionNetwork, String> {
-    let bypass =
-        BypassRules::from_entries(effect.bypass.iter().map(String::as_str), Dialect::NoProxy);
-    let token =
-        new_token().map_err(|error| format!("a token for the proxy could not be made: {error}"))?;
-    let (intercept, trust) = if effect.intercept.is_empty() {
-        (None, Vec::new())
+    let key = ProxyKey::of(effect, lookup)?;
+    // What its programs are given to trust is written first, so a session that cannot have it is refused before a proxy is made.
+    let intercept = if effect.intercept.is_empty() {
+        None
     } else {
-        let (intercept, trust) = authority(&effect.intercept, services)?;
-        (Some(intercept), trust)
+        Some(Arc::new(Intercept::for_entries(&effect.intercept)?))
     };
-    let proxy = Middleman::start(Arc::clone(&network), bypass, &token, intercept)
-        .map_err(|error| format!("the proxy could not listen: {error}"))?;
+    let private = if intercept.is_some() {
+        Some(services.private.ok_or_else(|| {
+            "the session has no private directory to keep what its programs trust in".to_owned()
+        })?)
+    } else {
+        None
+    };
+    let lease = registry.acquire(key, || {
+        let network = network()?;
+        let token = new_token()
+            .map_err(|error| format!("a token for the proxy could not be made: {error}"))?;
+        let bypass =
+            BypassRules::from_entries(effect.bypass.iter().map(String::as_str), Dialect::NoProxy);
+        let kept = intercept.clone();
+        let proxy = Middleman::start(Arc::clone(&network), bypass, &token, intercept)
+            .map_err(|error| format!("the proxy could not listen: {error}"))?;
+        Ok(Running {
+            intercept: kept,
+            proxy,
+            token,
+            network,
+        })
+    })?;
+    let running = &lease.running;
     let mut variables = loopback_variables(
-        &format!("http://{PROXY_USER}:{token}@{}", proxy.addr),
+        &format!(
+            "http://{PROXY_USER}:{}@{}",
+            running.token, running.proxy.addr
+        ),
         &effect.bypass,
     );
-    variables.extend(trust);
-    let ends = if effect.intercept.is_empty() {
-        String::new()
-    } else {
-        format!(
-            ", which ends TLS for {} to present your client certificate to them (a program that pins the certificates it trusts will refuse the one it is given)",
-            effect.intercept.join(", ")
-        )
+    let ends = match (&running.intercept, private) {
+        (Some(intercept), Some(private)) => {
+            variables.extend(trust_files(&intercept.ca, private)?);
+            format!(
+                ", which ends TLS for {} to present a client certificate to them (a program that pins the certificates it trusts will refuse the one it is given)",
+                intercept.describe()
+            )
+        }
+        _ => String::new(),
     };
     Ok(SessionNetwork {
         variables,
-        network,
-        description: format!("through a proxy on {} {how}{ends}", proxy.addr),
-        _keep: Keep::Proxy(proxy),
+        network: Arc::clone(&running.network),
+        description: format!("through a proxy on {} {how}{ends}", running.proxy.addr),
+        _keep: Keep::Proxy(lease),
     })
 }
-
-/// What ends TLS for the hosts a profile names, and the variables that tell the session's programs to trust it.
-type Trusted = (Arc<Intercept>, Vec<(String, String)>);
 
 /// The files the session's programs trust the proxy's authority by, and the variables that name them: the authority alone for a
 /// program that adds to the roots it carries, the authority and the operating system's roots for one that takes its roots from a
 /// file. Nothing is added to any store; the authority's key is never written anywhere.
-fn authority(hosts: &[String], services: &Services<'_>) -> Result<Trusted, String> {
-    let private = services.private.ok_or_else(|| {
-        "the session has no private directory to keep what its programs trust in".to_owned()
-    })?;
-    let ca = Arc::new(SessionCa::new(hosts)?);
+fn trust_files(ca: &ProxyCa, private: &Path) -> Result<Vec<(String, String)>, String> {
     let only = private.join("session-ca.pem");
     let roots = private.join("session-roots.pem");
     std::fs::write(&only, ca.certificate_pem())
@@ -248,68 +479,87 @@ fn authority(hosts: &[String], services: &Services<'_>) -> Result<Trusted, Strin
     ] {
         variables.push((name.to_owned(), roots.clone()));
     }
-    Ok((Arc::new(Intercept::new(hosts, ca)), variables))
+    Ok(variables)
 }
 
-/// The destinations whose TLS the proxy ends, and the certificates it answers them with.
+/// One destination pattern and the certificate its destinations are given.
+struct Rule {
+    pattern: HostPattern,
+    text: String,
+    /// The thumbprint (lower-case hex) of the certificate to present; `None` presents the keystores' own choice.
+    thumbprint: Option<String>,
+}
+
+/// The destinations whose TLS the proxy ends, which certificate each is given, and the authority that answers the program's TLS.
 pub(crate) struct Intercept {
-    /// Lower case; `*.name` takes the name and everything under it.
-    hosts: Vec<String>,
-    ca: Arc<SessionCa>,
-    /// A certificate and key of this session for each destination, made when first asked.
-    configs: Mutex<HashMap<String, Arc<ServerConfig>>>,
+    /// In the order the profile gives them: the first that matches a destination decides.
+    rules: Vec<Rule>,
+    ca: Arc<ProxyCa>,
 }
 
 impl Intercept {
-    pub(crate) fn new(hosts: &[String], ca: Arc<SessionCa>) -> Self {
-        Self {
-            hosts: hosts.iter().map(|host| host.to_ascii_lowercase()).collect(),
-            ca,
-            configs: Mutex::new(HashMap::new()),
-        }
+    /// The destinations `entries` name, answered by `ca`.
+    ///
+    /// # Errors
+    ///
+    /// An entry's pattern or certificate cannot be read.
+    pub(crate) fn new(entries: &[ClientCertificateHost], ca: Arc<ProxyCa>) -> Result<Self, String> {
+        let rules = entries
+            .iter()
+            .map(|entry| {
+                Ok(Rule {
+                    pattern: entry.compile()?,
+                    text: entry.pattern.trim().to_owned(),
+                    thumbprint: entry.thumbprint()?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(Self { rules, ca })
     }
 
-    /// Whether the proxy ends TLS for `host`.
-    fn covers(&self, host: &str) -> bool {
-        let host = host.trim_end_matches('.').to_ascii_lowercase();
-        let address = host.parse::<core::net::IpAddr>().ok();
-        self.hosts
+    /// The destinations `entries` name, answered by this process's authority for them: one limited to exactly those when every
+    /// pattern is a plain host, a `*.name` or an address, else the one that is limited to none.
+    ///
+    /// # Errors
+    ///
+    /// An entry's pattern or certificate cannot be read, or the authority cannot be made.
+    pub(crate) fn for_entries(entries: &[ClientCertificateHost]) -> Result<Self, String> {
+        let plain = entries
             .iter()
-            .any(|entry| match entry.strip_prefix("*.") {
-                Some(suffix) => {
-                    host == suffix
-                        || host
-                            .strip_suffix(suffix)
-                            .is_some_and(|front| front.ends_with('.'))
+            .map(|entry| entry.compile().map(|pattern| pattern.is_plain()))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .all(|plain| plain);
+        let hosts: Vec<String> = entries
+            .iter()
+            .map(|entry| entry.pattern.trim().to_owned())
+            .collect();
+        let ca = ProxyCa::shared(plain.then_some(hosts.as_slice()))?;
+        Self::new(entries, ca)
+    }
+
+    /// The rule that decides what `host` is given, or `None` when the proxy leaves its TLS alone.
+    fn rule_for(&self, host: &str) -> Option<&Rule> {
+        self.rules.iter().find(|rule| rule.pattern.matches(host))
+    }
+
+    /// What the report says of the destinations: each pattern and, where it names one, the certificate.
+    fn describe(&self) -> String {
+        self.rules
+            .iter()
+            .map(|rule| match &rule.thumbprint {
+                Some(thumbprint) => {
+                    format!("{} (certificate {})", rule.text, &thumbprint[..12])
                 }
-                None => match (address, entry.parse::<core::net::IpAddr>().ok()) {
-                    (Some(asked), Some(named)) => asked == named,
-                    _ => *entry == host,
-                },
+                None => rule.text.clone(),
             })
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// What answers a program's TLS for `host`.
     fn config(&self, host: &str) -> Result<Arc<ServerConfig>, String> {
-        let name = host.trim_end_matches('.').to_ascii_lowercase();
-        let mut held = self.configs.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(config) = held.get(&name) {
-            return Ok(Arc::clone(config));
-        }
-        let leaf = self.ca.leaf(&name)?;
-        let mut config =
-            ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-                .with_safe_default_protocol_versions()
-                .map_err(|error| error.to_string())?
-                .with_no_client_auth()
-                .with_single_cert(leaf.chain, leaf.key)
-                .map_err(|error| error.to_string())?;
-        // What the destination is asked is plain HTTP/1.1 inside a TLS the network makes with no ALPN, so that is all a program is
-        // offered.
-        config.alpn_protocols = vec![b"http/1.1".to_vec()];
-        let config = Arc::new(config);
-        held.insert(name, Arc::clone(&config));
-        Ok(config)
+        self.ca.answer(host)
     }
 }
 
@@ -352,7 +602,7 @@ fn new_token() -> Result<String, getrandom::Error> {
     Ok(text)
 }
 
-/// The proxy the host runs for one session.
+/// A proxy the host runs.
 pub(crate) struct Middleman {
     pub(crate) addr: SocketAddr,
     stop: Arc<AtomicBool>,
@@ -505,8 +755,12 @@ fn handle(client: Arc<TcpStream>, shared: &Shared) {
             reply(&mut client, "400 Bad Request", "CONNECT names host:port");
             return;
         };
-        if let Some(intercept) = shared.intercept.as_ref().filter(|each| each.covers(&host)) {
-            ended_here(client, &rest, shared, intercept, (&host, port));
+        if let Some((intercept, rule)) = shared
+            .intercept
+            .as_ref()
+            .and_then(|each| each.rule_for(&host).map(|rule| (each, rule)))
+        {
+            ended_here(client, &rest, shared, (intercept, rule), (&host, port));
             return;
         }
         let upstream = match open(shared, &host, port, "https") {
@@ -592,7 +846,7 @@ fn ended_here(
     mut client: Wire,
     rest: &[u8],
     shared: &Shared,
-    intercept: &Intercept,
+    (intercept, rule): (&Intercept, &Rule),
     (host, port): (&str, u16),
 ) {
     let shown = if host.contains(':') {
@@ -607,10 +861,10 @@ fn ended_here(
             return;
         }
     };
-    let upstream = match shared
-        .network
-        .secure_tunnel(&format!("https://{shown}:{port}"))
-    {
+    let upstream = match shared.network.secure_tunnel_as(
+        &format!("https://{shown}:{port}"),
+        rule.thumbprint.as_deref(),
+    ) {
         Ok(upstream) => upstream,
         Err(error) => {
             reply(

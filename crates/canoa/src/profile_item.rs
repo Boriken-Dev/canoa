@@ -14,7 +14,7 @@ use alloc::vec::Vec;
 
 use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_api::guatiao::{FromValue, Schema, Status, ToValue, Value};
-use guatiao_intake::Screen;
+use guatiao_intake::{Form, Screen};
 
 /// The name of the `profile_item` kind.
 pub const KIND: &str = "profile_item";
@@ -202,11 +202,192 @@ pub struct NetworkEffect {
     pub user: Option<String>,
     /// The name of the host's environment variable that holds that user's password; the password itself is never in a profile.
     pub password_variable: Option<String>,
-    /// The destinations whose TLS the host's proxy for the session ends, so as to present the person's client certificate to them:
-    /// each is a host name (`example.com`), a name and everything under it (`*.example.com`) or an address. Only `system` and
-    /// `pac`, which run that proxy, take it; every destination not named stays a tunnel the program's own TLS runs through.
+    /// The destinations whose TLS the host's proxy for the session ends, so as to present a client certificate to them, in order:
+    /// the first entry whose pattern matches a destination says which certificate it gets. Only `system` and `pac`, which run that
+    /// proxy, take it; every destination no entry matches stays a tunnel the program's own TLS runs through.
     #[map(default)]
-    pub intercept: Vec<String>,
+    pub intercept: Vec<ClientCertificateHost>,
+}
+
+/// What [`ClientCertificateHost::identity`] says when the keystores' own choice is wanted.
+pub const SYSTEM_IDENTITY: &str = "system";
+
+fn system_identity() -> String {
+    String::from(SYSTEM_IDENTITY)
+}
+
+/// One destination pattern of a proxy, and the client certificate presented to the destinations it matches.
+#[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct ClientCertificateHost {
+    /// A host name (`api.example.com`), a name and everything under it (`*.example.com`), an address, or any other regular
+    /// expression, matched whole and without regard to case against the destination as the program names it (a name, or an
+    /// address): `.*` matches every destination, `(api|auth)[.]example[.]com` two.
+    #[schema(title = "Hosts")]
+    #[form(placeholder = ".*")]
+    pub pattern: String,
+    /// `system` presents what the operating system's keystores choose by the authorities the server names, as a browser would; or
+    /// the thumbprint (SHA-256, in hex) of one certificate the host lists as available.
+    #[map(default = system_identity())]
+    #[schema(title = "Certificate")]
+    #[form(widget = "client_certificate")]
+    pub identity: String,
+}
+
+impl ClientCertificateHost {
+    /// The entry for `pattern`, presenting the keystores' own choice.
+    #[must_use]
+    pub fn new(pattern: impl Into<String>) -> Self {
+        Self {
+            pattern: pattern.into(),
+            identity: system_identity(),
+        }
+    }
+
+    /// The entry for `pattern`, presenting the certificate with `thumbprint`.
+    #[must_use]
+    pub fn presenting(pattern: impl Into<String>, thumbprint: impl Into<String>) -> Self {
+        Self {
+            pattern: pattern.into(),
+            identity: thumbprint.into(),
+        }
+    }
+
+    /// The thumbprint, normalized to lower-case hex, of the certificate this entry presents; `None` for `system`.
+    ///
+    /// # Errors
+    ///
+    /// The identity is neither `system` nor a SHA-256 thumbprint.
+    pub fn thumbprint(&self) -> Result<Option<String>, String> {
+        let text = self.identity.trim();
+        if text.is_empty() || text.eq_ignore_ascii_case(SYSTEM_IDENTITY) {
+            return Ok(None);
+        }
+        let hex: String = text
+            .chars()
+            .filter(|c| !matches!(c, ':' | ' ' | '-'))
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        if hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            Ok(Some(hex))
+        } else {
+            Err(alloc::format!(
+                "{text:?} is neither system nor the SHA-256 thumbprint of a certificate (64 hex digits)"
+            ))
+        }
+    }
+
+    /// The pattern, compiled.
+    ///
+    /// # Errors
+    ///
+    /// The pattern is none of a host name, a `*.name`, an address and a regular expression.
+    pub fn compile(&self) -> Result<HostPattern, String> {
+        HostPattern::parse(&self.pattern)
+    }
+}
+
+/// A destination pattern, compiled: a plain host, `*.name` or address, which is matched as written, or a regular expression.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum HostPattern {
+    /// This host name alone, lower case.
+    Name(String),
+    /// This name and everything under it, lower case, from `*.name`.
+    Under(String),
+    /// This address alone.
+    Address(core::net::IpAddr),
+    /// What the regular expression matches, whole and without regard to case.
+    Expression(regex::Regex),
+}
+
+impl HostPattern {
+    /// The longest pattern read, so a pattern cannot make a regular expression whose compiling a session's setup would pay for.
+    pub const MAX_LEN: usize = 1024;
+
+    /// Reads `text`: a host name, `*.name` or an address as such, anything else as a regular expression.
+    ///
+    /// # Errors
+    ///
+    /// `text` is empty, too long, or no regular expression.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(String::from("a host pattern is empty"));
+        }
+        if text.len() > Self::MAX_LEN {
+            return Err(alloc::format!(
+                "a host pattern is at most {} characters",
+                Self::MAX_LEN
+            ));
+        }
+        let (under, name) = text
+            .strip_prefix("*.")
+            .map_or((false, text), |name| (true, name));
+        let name = name.trim_end_matches('.');
+        if let Ok(address) = name.parse::<core::net::IpAddr>() {
+            return Ok(Self::Address(address));
+        }
+        let plain = !name.is_empty()
+            && name.len() <= 253
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'))
+            && !name.starts_with(['.', '-'])
+            && !name.ends_with('-')
+            && !name.contains("..");
+        if plain {
+            let name = name.to_ascii_lowercase();
+            return Ok(if under {
+                Self::Under(name)
+            } else {
+                Self::Name(name)
+            });
+        }
+        regex::RegexBuilder::new(&alloc::format!("^(?:{text})$"))
+            .case_insensitive(true)
+            .size_limit(1 << 20)
+            .build()
+            .map(Self::Expression)
+            .map_err(|error| {
+                alloc::format!(
+                    "{text:?} is no host name, *.name or address, and no regular expression: {error}"
+                )
+            })
+    }
+
+    /// Whether this is no regular expression: a host, a `*.name` or an address, which a name constraint can say.
+    #[must_use]
+    pub fn is_plain(&self) -> bool {
+        !matches!(self, Self::Expression(_))
+    }
+
+    /// Whether `host`, a destination as the program names it (a name or an address, a v6 one with or without brackets), matches.
+    #[must_use]
+    pub fn matches(&self, host: &str) -> bool {
+        let host = host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .trim_end_matches('.')
+            .to_ascii_lowercase();
+        let address = host.parse::<core::net::IpAddr>().ok();
+        match self {
+            Self::Name(name) => *name == host,
+            Self::Under(name) => {
+                host == *name
+                    || host
+                        .strip_suffix(name.as_str())
+                        .is_some_and(|front| front.ends_with('.'))
+            }
+            Self::Address(wanted) => address == Some(*wanted),
+            Self::Expression(expression) => {
+                expression.is_match(&host)
+                    || address
+                        .is_some_and(|address| expression.is_match(&alloc::format!("{address}")))
+            }
+        }
+    }
 }
 
 /// The ways [`NetworkEffect::mode`] says the session reaches the network.
@@ -274,22 +455,9 @@ impl NetworkEffect {
                 self.mode
             ));
         }
-        self.intercept.iter().find_map(|entry| {
-            let name = entry.strip_prefix("*.").unwrap_or(entry);
-            let plain = name.parse::<core::net::IpAddr>().is_ok()
-                || (!name.is_empty()
-                    && name.len() <= 253
-                    && name
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'))
-                    && !name.starts_with(['.', '-'])
-                    && !name.ends_with(['.', '-']));
-            (!plain).then(|| {
-                alloc::format!(
-                    "{entry:?} is not a host name, a *.name or an address: write the host alone, with no scheme, port or path"
-                )
-            })
-        })
+        self.intercept
+            .iter()
+            .find_map(|entry| entry.compile().err().or_else(|| entry.thumbprint().err()))
     }
 }
 
@@ -464,15 +632,18 @@ mod tests {
     }
 
     #[test]
-    fn hosts_that_get_a_client_certificate_are_plain_hosts_and_need_the_proxy_the_host_runs() {
+    fn hosts_that_get_a_client_certificate_are_patterns_and_need_the_proxy_the_host_runs() {
         for mode in ["system", "pac"] {
             let mut network = NetworkEffect::new(mode);
             network.url = Some("proxy.pac".into());
             network.intercept = alloc::vec![
-                "example.com".into(),
-                "*.corp.example".into(),
-                "10.0.0.7".into(),
-                "::1".into()
+                ClientCertificateHost::new("example.com"),
+                ClientCertificateHost::new("*.corp.example"),
+                ClientCertificateHost::new("10.0.0.7"),
+                ClientCertificateHost::new("::1"),
+                ClientCertificateHost::new("(api|auth)[.]example[.]com"),
+                ClientCertificateHost::new(".*"),
+                ClientCertificateHost::presenting("mtls[.].*", "AB:".repeat(31) + "AB"),
             ];
             assert_eq!(network.problem(), None, "{mode}");
         }
@@ -480,7 +651,7 @@ mod tests {
             let mut network = NetworkEffect::new(mode);
             network.url = Some("http://proxy.example:3128".into());
             network.command = alloc::vec!["proxy".into()];
-            network.intercept = alloc::vec!["example.com".into()];
+            network.intercept = alloc::vec![ClientCertificateHost::new("example.com")];
             assert!(
                 network
                     .problem()
@@ -488,18 +659,107 @@ mod tests {
                 "{mode}"
             );
         }
-        for bad in [
-            "https://example.com",
-            "example.com/path",
-            "example.com:8443",
-            "",
-            "*.",
-            ".example.com",
-            "exa mple.com",
-        ] {
+        for bad in ["", "(", "[a-", "*", "*.", "a{2,1}"] {
             let mut network = NetworkEffect::new("system");
-            network.intercept = alloc::vec![bad.into()];
+            network.intercept = alloc::vec![ClientCertificateHost::new(bad)];
             assert!(network.problem().is_some(), "{bad:?}");
         }
+        for bad in ["me", "abcd", &"zz".repeat(32)] {
+            let mut network = NetworkEffect::new("system");
+            network.intercept = alloc::vec![ClientCertificateHost::presenting(".*", bad)];
+            assert!(
+                network
+                    .problem()
+                    .is_some_and(|why| why.contains("thumbprint")),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_pattern_is_a_plain_host_a_star_name_an_address_or_a_regular_expression_matched_whole() {
+        let matches = |pattern: &str, host: &str| {
+            HostPattern::parse(pattern)
+                .expect("a pattern")
+                .matches(host)
+        };
+        for (pattern, plain) in [
+            ("Api.Example.com", true),
+            ("*.corp.example", true),
+            ("10.0.0.7", true),
+            ("::1", true),
+            (".*", false),
+            ("(api|auth)[.]example[.]com", false),
+            ("mtls[.].*", false),
+        ] {
+            assert_eq!(
+                HostPattern::parse(pattern).expect("a pattern").is_plain(),
+                plain,
+                "{pattern}"
+            );
+        }
+        for (pattern, yes, no) in [
+            (
+                "Api.Example.com",
+                &["api.example.com", "API.EXAMPLE.COM."][..],
+                &[
+                    "xapi.example.com",
+                    "api.example.com.evil.test",
+                    "apiXexample.com",
+                ][..],
+            ),
+            (
+                "*.corp.example",
+                &["corp.example", "a.b.corp.example"][..],
+                &["evilcorp.example", "corp.example.evil.test"][..],
+            ),
+            (
+                "10.0.0.7",
+                &["10.0.0.7"][..],
+                &["10.0.0.70", "localhost"][..],
+            ),
+            (
+                "::1",
+                &["::1", "0:0:0:0:0:0:0:1", "[::1]"][..],
+                &["127.0.0.1"][..],
+            ),
+            (
+                "(api|auth)[.]example[.]com",
+                &["api.example.com", "AUTH.example.com"][..],
+                &["x.api.example.com", "api.example.com.evil.test"][..],
+            ),
+            (
+                "10[.]0[.]0[.][0-9]+",
+                &["10.0.0.7", "10.0.0.123"][..],
+                &["10.0.1.7", "x10.0.0.7"][..],
+            ),
+            (
+                ".*",
+                &["anything.test", "10.1.2.3", "::1", "localhost"][..],
+                &[][..],
+            ),
+        ] {
+            for host in yes {
+                assert!(matches(pattern, host), "{pattern} matches {host}");
+            }
+            for host in no {
+                assert!(!matches(pattern, host), "{pattern} does not match {host}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_identity_is_the_keystores_choice_or_a_thumbprint_in_any_common_spelling() {
+        assert_eq!(ClientCertificateHost::new(".*").thumbprint(), Ok(None));
+        assert_eq!(
+            ClientCertificateHost::presenting(".*", " SYSTEM ").thumbprint(),
+            Ok(None)
+        );
+        let colons = "AB:CD:".repeat(15) + "AB:CD";
+        let wanted = "abcd".repeat(16);
+        assert_eq!(
+            ClientCertificateHost::presenting(".*", colons).thumbprint(),
+            Ok(Some(wanted))
+        );
     }
 }

@@ -3,7 +3,8 @@
 //! treats them as it treats any item an extension adds.
 
 use canoa::profile_item::{
-    ApplyRequest, ItemEffect, ItemInfo, NetworkEffect, ProfileItem, Variable, bad_value_error,
+    ApplyRequest, ClientCertificateHost, ItemEffect, ItemInfo, NetworkEffect, ProfileItem,
+    Variable, bad_value_error,
 };
 use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
@@ -32,6 +33,37 @@ fn words(values: &serde_json::Map<String, Value>, name: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// The entries of the list `name`, each an object with a `pattern` and an optional `identity`.
+fn entries(
+    values: &serde_json::Map<String, Value>,
+    name: &str,
+) -> Result<Vec<ClientCertificateHost>, ProviderError> {
+    let Some(list) = values.get(name).filter(|value| !value.is_null()) else {
+        return Ok(Vec::new());
+    };
+    let wrong = || {
+        bad_value_error(format!(
+            "each entry of {name} has a pattern and a certificate"
+        ))
+    };
+    list.as_array()
+        .ok_or_else(wrong)?
+        .iter()
+        .map(|entry| {
+            let entry = entry.as_object().ok_or_else(wrong)?;
+            let pattern = entry
+                .get("pattern")
+                .and_then(Value::as_str)
+                .ok_or_else(wrong)?;
+            let identity = match entry.get("identity") {
+                None | Some(Value::Null) => canoa::profile_item::SYSTEM_IDENTITY,
+                Some(value) => value.as_str().ok_or_else(wrong)?,
+            };
+            Ok(ClientCertificateHost::presenting(pattern, identity))
+        })
+        .collect()
 }
 
 /// How the session's programs reach the network.
@@ -79,10 +111,11 @@ pub struct ProxyValues {
     /// The name of an environment variable of the host that holds the proxy user's password; the password is never kept in the profile.
     #[schema(title = "Variable holding the password")]
     pub password_variable: Option<String>,
-    /// system and pac only. A host (example.com), a host and everything under it (*.example.com) or an address, one per line. For these alone the proxy ends the program's TLS with a certificate of this session's, signed by an authority made for this session in memory (never written to disk, limited to exactly these hosts, gone with the session) that the session's programs alone are told to trust, and makes its own TLS to the host, presenting the client certificate your keystores or [host.network] choose. A program that pins the certificates it trusts, or reads no CA file variable (Windows' own tools), fails for them. Empty ends no TLS.
+    /// system and pac only. Each entry is a pattern for hosts (a host name, *.name for a name and what is under it, an address, or any regular expression matched against the whole host: .* is every host) and the certificate to present to them: system (what your keystores choose by the authorities the server names, as a browser would) or one of the certificates this computer lists. The first entry that matches a host decides. For these hosts alone the proxy ends the program's TLS with a certificate made on demand by an authority this host process makes in memory (never written to disk; limited to exactly these hosts when every pattern is a plain host, *.name or address) that the session's programs alone are told to trust, and makes its own TLS to the host, presenting the certificate. A program that pins the certificates it trusts, or reads no CA file variable (Windows' own tools), fails for them. Empty ends no TLS.
     #[map(default)]
-    #[schema(title = "Hosts that get your client certificate")]
-    pub client_certificate_hosts: Vec<String>,
+    #[schema(title = "Hosts that get a client certificate")]
+    #[form(form = ClientCertificateHost)]
+    pub client_certificate_hosts: Vec<ClientCertificateHost>,
 }
 
 /// How the session's programs reach the network.
@@ -109,12 +142,17 @@ impl ProfileItem for ProxyItem {
         network.bypass = words(&values, "bypass");
         network.user = text(&values, "user");
         network.password_variable = text(&values, "password_variable");
-        network.intercept = words(&values, "client_certificate_hosts");
+        network.intercept = entries(&values, "client_certificate_hosts")?;
         if let Some(problem) = network.problem() {
             return Err(bad_value_error(problem));
         }
         let mut effect = ItemEffect::none();
-        let ended = network.intercept.join(", ");
+        let ended = network
+            .intercept
+            .iter()
+            .map(|entry| entry.pattern.trim())
+            .collect::<Vec<_>>()
+            .join(", ");
         effect.network = Some(network);
         effect.notes.push(
             match mode.as_str() {
