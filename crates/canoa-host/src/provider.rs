@@ -283,7 +283,7 @@ pub(crate) fn open(registry: &mut Registry, origin: &Origin) -> Result<(), Provi
                 crate::config::ImportSearch::Path => ImportSearch::Path,
                 _ => ImportSearch::Library,
             });
-            let config = map_of(settings).map_err(ProviderError::Source)?;
+            let config = map_of(&with_kinds(settings)).map_err(ProviderError::Source)?;
             registry
                 .add_source_file(file, &config)
                 .map_err(|error| ProviderError::Source(error.to_string()))?;
@@ -297,6 +297,28 @@ pub(crate) fn open(registry: &mut Registry, origin: &Origin) -> Result<(), Provi
         }
     }
     Ok(())
+}
+
+/// `settings` with the descriptions of the kinds a script library may serve added to the source's `kinds`: a source of a language with
+/// no compiled tables builds each provider's table from them. A `kinds` the entry wrote that is not a list is left for the source to
+/// refuse; a document that cannot be written is logged, and the source starts without it.
+fn with_kinds(settings: &Settings) -> Settings {
+    let mut map = settings.as_map().clone();
+    let path = match crate::descriptions::file() {
+        Ok(path) => path.to_string_lossy().into_owned(),
+        Err(why) => {
+            tracing::warn!("the kinds' descriptions are not given to the source: {why}");
+            return settings.clone();
+        }
+    };
+    match map.get_mut("kinds") {
+        None => {
+            map.insert("kinds".to_owned(), serde_json::json!([path]));
+        }
+        Some(serde_json::Value::Array(list)) => list.push(serde_json::Value::String(path)),
+        Some(_) => {}
+    }
+    Settings::new(map)
 }
 
 fn load(options: &ProviderOptions) -> Result<(Registry, Arc<dyn AgentProvider>), ProviderError> {

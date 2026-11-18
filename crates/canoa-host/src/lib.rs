@@ -11,6 +11,7 @@ mod client_tools;
 pub mod config;
 pub mod control;
 mod delegate;
+mod descriptions;
 mod format;
 mod forms;
 mod gateway;
