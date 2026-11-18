@@ -1564,7 +1564,7 @@ dependencies = [
 [[package]]
 name = "coqui-syshttp"
 version = "0.1.0"
-source = "git+https://github.com/Boriken-Dev/coqui-syshttp?rev=acc6139051e79f847d9bf505b3de9f7c8159eb69#acc6139051e79f847d9bf505b3de9f7c8159eb69"
+source = "git+https://github.com/Boriken-Dev/coqui-syshttp?rev=5d1e1e3bad78b30f4edf7c4c22478a5bdfe481bd#5d1e1e3bad78b30f4edf7c4c22478a5bdfe481bd"
 dependencies = [
  "base64 0.22.1",
  "boa_engine",
@@ -1572,6 +1572,7 @@ dependencies = [
  "cryptoki",
  "gethostname",
  "http",
+ "if-addrs",
  "libgssapi",
  "percent-encoding",
  "rustls",
