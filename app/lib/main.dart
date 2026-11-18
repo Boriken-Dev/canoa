@@ -824,7 +824,8 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     if (!mounted) return changed;
     setState(() => config = changed);
-    _reader.setVoiceMode(changed.voice.speak.readReplies);
+    // Voice mode turned on in a pop-out window is already on, and follows that window's conversation: only a change is applied.
+    if (_reader.voiceMode != changed.voice.speak.readReplies) _reader.setVoiceMode(changed.voice.speak.readReplies);
     store.embedLimit = changed.embedLimit;
     store.queueDelivery = changed.sessions.queueDelivery;
     if (_checked) unawaited(_checkSources());
@@ -999,7 +1000,7 @@ class _CanoaAppState extends State<CanoaApp> {
   final ValueNotifier<SessionGrouping> _grouping = ValueNotifier(SessionGrouping.status);
 
   /// The conversations shown in a window of their own.
-  late final PopoutHub _popout = PopoutHub(store, widget.popoutWindows ?? popout_platform.createPopoutWindows());
+  late final PopoutHub _popout = PopoutHub(store, widget.popoutWindows ?? popout_platform.createPopoutWindows(), reader: _reader, onVoiceMode: _voiceModeChanged);
 
   /// This state sits above the app's Navigator, so its dialogs open in the Navigator's context.
   final _navigator = GlobalKey<NavigatorState>();
@@ -3672,7 +3673,8 @@ class _ConversationState extends State<_Conversation> {
   /// Voice mode hears the conversation shown as it grows, and reads what is new.
   void _followReplies() {
     final reader = widget.kit.reader, session = widget.store.selected;
-    if (reader == null || !reader.voiceMode || session == null || session.isDraft) return;
+    // A child's conversation shown in its place follows itself (child_thread.dart), and the parent's is not read meanwhile.
+    if (reader == null || !reader.voiceMode || session == null || session.isDraft || session.openChild != null) return;
     followReplies(reader, session.id, session.messages, working: session.status == SessionStatus.working);
   }
 
@@ -3994,6 +3996,7 @@ class _ConversationState extends State<_Conversation> {
             renderers: widget.kit.reader == null
                 ? delegationRenderers.merge(widget.renderers)
                 : delegationRenderers.merge(replyRenderers(widget.kit.reader!)).merge(widget.renderers),
+            reader: widget.kit.reader,
             narrow: widget.narrow,
           ),
         )

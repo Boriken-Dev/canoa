@@ -4,6 +4,7 @@ import 'dart:collection';
 import 'package:flutter/foundation.dart';
 
 import 'pcm_player.dart';
+import 'reply_speaker.dart';
 import 'speakable.dart';
 import 'speech_backend.dart' show SpeechFailure;
 import 'speech_output.dart';
@@ -21,7 +22,7 @@ typedef ReplyText = ({String key, String text, bool complete});
 ///
 /// Reading stops at once when [stop] is called, and nothing that was not yet spoken is spoken later. A provider that fails stops the
 /// reading and [error] says why: the text is never handed to another provider.
-final class ReplyReader extends ChangeNotifier {
+final class ReplyReader extends ChangeNotifier implements ReplySpeaker {
   ReplyReader({required this.voice, this.player, this.whyNone, this.offered});
 
   /// The voice to read with, at the moment a reading starts; null when there is none, which [whyNone] says in words.
@@ -36,6 +37,7 @@ final class ReplyReader extends ChangeNotifier {
   /// Whether this app or page can read aloud at all; false leaves the play buttons out. Always, when null.
   final bool Function()? offered;
 
+  @override
   bool get available => offered?.call() ?? true;
 
   // The sentences waiting, in the order they are read, and the one being read.
@@ -56,19 +58,25 @@ final class ReplyReader extends ChangeNotifier {
   final _heard = <String>{};
   final _muted = <String>{};
   String? _session;
+  String? _pinned;
 
   /// The reply being read now, by the key it was given; null when nothing is read.
+  @override
   String? get reading => _current?.key ?? (_queue.isEmpty ? null : _queue.first.key);
 
   /// Whether anything is being read or waits to be.
+  @override
   bool get busy => _working || _queue.isNotEmpty;
 
   /// Whether the reply [key] is being read or waits to be.
+  @override
   bool isReading(String key) => _current?.key == key || _queue.any((each) => each.key == key);
 
   /// Why the last reading failed, in words, and the key of the reply it was for; null for a reply that voice mode was reading. Kept
   /// until [clearError].
+  @override
   String? get error => _error;
+  @override
   String? get errorKey => _errorKey;
 
   @override
@@ -84,6 +92,7 @@ final class ReplyReader extends ChangeNotifier {
     super.dispose();
   }
 
+  @override
   void clearError() {
     if (_error == null) return;
     _error = null;
@@ -91,12 +100,21 @@ final class ReplyReader extends ChangeNotifier {
   }
 
   /// Whether voice mode is on: each reply is read as it arrives.
+  @override
   bool get voiceMode => _voiceMode;
 
-  /// Turns voice mode on or off. Turning it on reads no earlier reply; turning it off stops what is being read.
-  void setVoiceMode(bool on) {
-    if (_voiceMode == on) return;
+  /// The conversation voice mode follows when the person turned it on in that conversation's own window, else null: it then follows
+  /// whichever conversation the main window shows.
+  String? get pinned => _pinned;
+
+  /// Turns voice mode on or off. Turning it on reads no earlier reply; turning it off stops what is being read. With [session], it
+  /// follows that conversation alone, whatever the main window shows, until it is turned off or turned on without one.
+  @override
+  void setVoiceMode(bool on, {String? session}) {
+    final pin = on ? session : null;
+    if (_voiceMode == on && _pinned == pin) return;
     _voiceMode = on;
+    _pinned = pin;
     _followed.clear();
     _heard.clear();
     _muted.clear();
@@ -105,11 +123,24 @@ final class ReplyReader extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Follows the main window's conversation again when [session] was the one voice mode was pinned to.
+  void release(String session) {
+    if (_pinned != session) return;
+    _pinned = null;
+    _followed.clear();
+    _heard.clear();
+    _muted.clear();
+    _session = null;
+    notifyListeners();
+  }
+
   /// Gets the audio output ready from inside the press that will lead to speech, which a browser needs.
+  @override
   void unlock() => player?.unlock();
 
   /// Reads the reply [key], whose text is [markdown], from its start; reading the one that is being read stops it. Whatever else was
   /// being read stops first.
+  @override
   Future<void> toggle(String key, String markdown) async {
     if (isReading(key)) {
       stop();
@@ -126,6 +157,7 @@ final class ReplyReader extends ChangeNotifier {
   }
 
   /// Ends every reading at once and drops what had not been said; in voice mode the reply being followed is not read any more.
+  @override
   void stop() {
     _generation++;
     final dropping = [?_current, ..._queue];
@@ -148,7 +180,7 @@ final class ReplyReader extends ChangeNotifier {
   /// reply that is new since voice mode was turned on is read, a sentence at a time, as its text grows; the replies already there
   /// are not.
   void observe(String session, List<ReplyText> replies) {
-    if (!_voiceMode) return;
+    if (!_voiceMode || (_pinned != null && _pinned != session)) return;
     if (_session != session) {
       // A conversation that was not followed: what it already says is not read.
       _session = session;

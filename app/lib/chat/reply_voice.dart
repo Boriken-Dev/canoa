@@ -5,13 +5,14 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 import 'package:flutter/material.dart';
 
 import '../voice/reply_reader.dart';
+import '../voice/reply_speaker.dart';
 import 'dictation.dart';
 
 /// The key of a reply, which does not change while it streams: when its first words arrived.
 String replyKey(DateTime at) => '${at.microsecondsSinceEpoch}';
 
 /// The registry entry that draws an agent's reply with Play beside Copy. Anything else is left to the chat's own drawing.
-ChatRenderers replyRenderers(ReplyReader reader) => ChatRenderers(
+ChatRenderers replyRenderers(ReplySpeaker reader) => ChatRenderers(
   entry: [
     (context, entry) => entry.role == MessageRole.agent && reader.available ? ReplyMessage(entry: entry, reader: reader) : null,
   ],
@@ -22,7 +23,7 @@ class ReplyMessage extends StatelessWidget {
   const ReplyMessage({super.key, required this.entry, required this.reader});
 
   final ChatEntryData entry;
-  final ReplyReader reader;
+  final ReplySpeaker reader;
 
   @override
   Widget build(BuildContext context) {
@@ -41,7 +42,7 @@ class ReplyMessage extends StatelessWidget {
 class PlayReplyButton extends StatefulWidget {
   const PlayReplyButton({super.key, required this.reader, required this.replyKey, required this.text});
 
-  final ReplyReader reader;
+  final ReplySpeaker reader;
   final String replyKey;
   final String text;
 
@@ -117,7 +118,7 @@ void followReplies(ReplyReader reader, String session, List<ChatMessage> message
 class VoiceModeButton extends StatefulWidget {
   const VoiceModeButton({super.key, required this.reader, required this.controller, this.dictation, required this.onChanged});
 
-  final ReplyReader reader;
+  final ReplySpeaker reader;
 
   /// The message being written; what is typed in it stops the reading.
   final TextEditingController controller;

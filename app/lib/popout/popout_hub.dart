@@ -3,26 +3,46 @@ import 'dart:async';
 import 'package:coqui_acp_chat/experimental.dart' show ChatSessionShare;
 import 'package:flutter/foundation.dart';
 
+import '../chat/reply_voice.dart' show followReplies;
 import '../extension/tab_shares.dart' show sessionKeyOf;
 import '../session_store.dart';
+import '../voice/reply_reader.dart';
 import 'popout_window.dart';
+import 'read_aloud.dart';
 import 'shared_chat.dart';
 
 export 'popout_window.dart';
 
 final class _Popped {
-  _Popped(this.share, this.window);
+  _Popped(this.share, this.window, [this.reading]);
   final ChatSessionShare share;
   final PopoutWindow window;
+
+  /// Answers the window's read-aloud, when the app can read aloud.
+  final ReadAloudBridge? reading;
 }
 
 /// The conversations of a store that are open in a window of their own, which is a view of the main window's conversation: the
 /// conversation, its turn and what the agent waits on stay where they are. A window closed or docked back leaves the
 /// conversation as it was.
 class PopoutHub extends ChangeNotifier {
-  PopoutHub(this.store, this.windows, {this.look = 'canoa', this.density = 'normal', this.shareInterval = const Duration(milliseconds: 80)}) {
+  PopoutHub(
+    this.store,
+    this.windows, {
+    this.look = 'canoa',
+    this.density = 'normal',
+    this.shareInterval = const Duration(milliseconds: 80),
+    this.reader,
+    this.onVoiceMode,
+  }) {
     store.addListener(_storeChanged);
   }
+
+  /// Reads replies aloud for the windows, which play no sound of their own; null where the app cannot.
+  final ReplyReader? reader;
+
+  /// Told when a window turns voice mode on or off, to keep the choice.
+  final ValueChanged<bool>? onVoiceMode;
 
   final SessionStore store;
   final PopoutWindows windows;
@@ -56,8 +76,13 @@ class PopoutHub extends ChangeNotifier {
       return;
     }
     final share = ChatSessionShare(CanoaSharedChat(store, session), minInterval: shareInterval);
-    final popped = _popped[session.id] = _Popped(share, window);
-    share.serve(window.link);
+    final reading = reader == null ? null : ReadAloudLink(window.link);
+    final bridge = reader == null || reading == null
+        ? null
+        : ReadAloudBridge(reader: reader!, link: reading, session: session.id, onVoiceMode: onVoiceMode ?? (_) {});
+    final popped = _popped[session.id] = _Popped(share, window, bridge);
+    share.serve(reading ?? window.link);
+    bridge?.start();
     // The window's own dock back button detaches its view, which leaves nothing to show there.
     unawaited(share.events.firstWhere((event) => !event.attached, orElse: () => throw StateError('closed')).then((_) => _end(session.id), onError: (_) {}));
     unawaited(window.closed.then((_) => _end(session.id, popped: popped)));
@@ -75,6 +100,7 @@ class PopoutHub extends ChangeNotifier {
     final held = _popped[id];
     if (held == null || (popped != null && !identical(held, popped))) return;
     _popped.remove(id);
+    held.reading?.close();
     notifyListeners();
     await held.share.close();
     await held.window.close();
@@ -85,6 +111,12 @@ class PopoutHub extends ChangeNotifier {
     final here = {for (final session in store.sessions) session.id};
     for (final id in [..._popped.keys]) {
       if (!here.contains(id)) unawaited(_end(id));
+    }
+    // Voice mode turned on in a window reads that window's conversation as it grows, whichever one the main window shows.
+    final pinned = reader?.pinned;
+    if (reader != null && pinned != null && _popped.containsKey(pinned)) {
+      final session = store.sessions.where((each) => each.id == pinned).firstOrNull;
+      if (session != null) followReplies(reader!, session.id, session.messages, working: session.status == SessionStatus.working);
     }
   }
 

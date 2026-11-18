@@ -5,14 +5,19 @@ import 'package:coqui_acp_chat/experimental.dart' show ChatSessionView;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'package:flutter/material.dart';
 
+import '../chat/reply_voice.dart' show VoiceModeButton;
 import '../chat/session_views.dart' show appName;
 import '../theme/look.dart';
+import '../voice/reply_speaker.dart';
 
 /// A conversation in a window of its own: the transcript, what the agent waits on, and a composer, drawn over a
 /// [ChatSessionView] of the conversation the main window holds. It keeps nothing of the conversation itself; what the person does
 /// here is asked of the main window, and what comes of it, or of an answer given there, arrives as the next state.
 class PopoutChat extends StatefulWidget {
-  const PopoutChat({super.key, required this.view, this.onDock, this.banner, this.renderers = chat.ChatRenderers.none});
+  const PopoutChat({super.key, required this.view, this.onDock, this.banner, this.renderers = chat.ChatRenderers.none, this.speaker});
+
+  /// Reads replies aloud through the main window; null for none, which leaves voice mode's switch out.
+  final ReplySpeaker? speaker;
 
   /// A line under the header, from the platform the window runs in; null for none.
   final Widget? banner;
@@ -40,6 +45,8 @@ class _PopoutChatState extends State<PopoutChat> {
   void initState() {
     super.initState();
     _session.addListener(_changed);
+    // Whether anything can be read aloud is told by the main window after the transcript was first drawn.
+    widget.speaker?.addListener(_changed);
     _events = _session.events.listen(_event);
     unawaited(widget.view.done.then((_) => _changed()));
   }
@@ -47,6 +54,7 @@ class _PopoutChatState extends State<PopoutChat> {
   @override
   void dispose() {
     _session.removeListener(_changed);
+    widget.speaker?.removeListener(_changed);
     unawaited(_events?.cancel());
     _input.dispose();
     _focus.dispose();
@@ -109,6 +117,11 @@ class _PopoutChatState extends State<PopoutChat> {
                       maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
                 ]),
               ),
+              if (widget.speaker case final speaker?)
+                ListenableBuilder(
+                  listenable: speaker,
+                  builder: (context, _) => speaker.available ? VoiceModeButton(reader: speaker, controller: _input, onChanged: (_) {}) : const SizedBox.shrink(),
+                ),
               IconButton(
                 key: const Key('dock-back'),
                 tooltip: 'Bring back to the main window',

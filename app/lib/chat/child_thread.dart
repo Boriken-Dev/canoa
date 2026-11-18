@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 import '../session_store.dart';
 import '../sources/source_icons.dart';
 import '../theme/look.dart';
+import '../voice/reply_reader.dart';
 import 'delegation_row.dart';
 import 'delegation_view.dart';
+import 'reply_voice.dart' show followReplies;
 import 'session_views.dart';
 
 /// What a child said, built from the updates the host sent, through the same model the conversation's own agent's updates go
@@ -30,6 +32,9 @@ final class ChildThread {
   }
 
   List<ChatEntryData> get entries => [for (final message in _session.messages) ModelEntry(message)];
+
+  /// What the child has said, in order, for voice mode to follow.
+  List<pkg.ChatMessage> get messages => _session.messages;
   Map<String, pkg.TerminalView> get terminals => _session.terminals;
   List<pkg.PlanEntry> get plan => _session.plan;
 }
@@ -180,13 +185,16 @@ class ChildThreadBody extends StatelessWidget {
 /// Stop, and the way back to the conversation that handed it out. There is no composer: the person cannot write to it.
 class ChildThreadView extends StatefulWidget {
   const ChildThreadView({
-    super.key, required this.store, required this.session, required this.task, this.renderers = ChatRenderers.none, this.narrow = false,
+    super.key, required this.store, required this.session, required this.task, this.renderers = ChatRenderers.none, this.reader, this.narrow = false,
   });
 
   final SessionStore store;
   final ChatSession session;
   final DelegateTask task;
   final ChatRenderers renderers;
+
+  /// Reads the child's replies aloud as they arrive while voice mode is on; null where nothing can be read aloud.
+  final ReplyReader? reader;
   final bool narrow;
 
   @override
@@ -197,9 +205,38 @@ class _ChildThreadViewState extends State<ChildThreadView> {
   late ChildThread _thread = ChildThread(widget.task);
 
   @override
+  void initState() {
+    super.initState();
+    widget.store.addListener(_follow);
+    // What the child already said is not read when it is opened; what comes after is.
+    _follow();
+  }
+
+  @override
+  void dispose() {
+    widget.store.removeListener(_follow);
+    super.dispose();
+  }
+
+  /// Voice mode hears the child's conversation as it grows, as it does the one the person started, and reads what is new.
+  void _follow() {
+    final reader = widget.reader;
+    if (reader == null || !reader.voiceMode) return;
+    _thread.sync(widget.task);
+    followReplies(reader, 'child:${widget.task.id}', _thread.messages, working: !widget.task.phase.ended);
+  }
+
+  @override
   void didUpdateWidget(ChildThreadView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.task.id != widget.task.id) _thread = ChildThread(widget.task);
+    if (oldWidget.store != widget.store) {
+      oldWidget.store.removeListener(_follow);
+      widget.store.addListener(_follow);
+    }
+    if (oldWidget.task.id != widget.task.id) {
+      _thread = ChildThread(widget.task);
+      _follow();
+    }
   }
 
   @override
