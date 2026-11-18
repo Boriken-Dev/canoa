@@ -12,18 +12,23 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 use core::time::Duration;
+use std::io::{self, Read, Write};
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::Instant;
 
 use coqui_syshttp::client::{AgentBuilder, OriginAgent};
-use coqui_syshttp::tls::{ClientCertificates, Identity, Selector, Tls, TlsBuilder, Trust};
+use coqui_syshttp::tls::{
+    CertificateInfo, ClientCertificates, Identity, Selector, Tls, TlsBuilder, Trust,
+};
 use coqui_syshttp::{
     BypassRules, Credentials, Dialect, Negotiate, Proxy, ProxyConnector, ProxySetting, Resolver,
     Route,
 };
-use rustls::pki_types::CertificateDer;
 use rustls::pki_types::pem::PemObject as _;
+use rustls::pki_types::{CertificateDer, ServerName};
+use rustls::{ClientConnection, StreamOwned};
 
 pub use coqui_syshttp::client::OriginAgent as LoginAgent;
 pub use coqui_syshttp::{ChildEnvironment, Connection, OriginAuth, Secret};
@@ -121,6 +126,68 @@ impl core::error::Error for NetworkError {}
 impl From<coqui_syshttp::Error> for NetworkError {
     fn from(error: coqui_syshttp::Error) -> Self {
         Self(error.to_string())
+    }
+}
+
+/// Who a server proved to be when [`Network::secure_tunnel`] verified it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ServerIdentity {
+    /// The name the certificate was verified for: the host of the URL.
+    pub name: String,
+    /// The subject of the server's certificate (RFC 4514), when it can be read.
+    pub subject: Option<String>,
+    /// The SHA-256 of the server's certificate as lower-case hex, when it can be read.
+    pub sha256: Option<String>,
+}
+
+/// A connection to a server over which TLS has been made and the server verified by this network's trust, and the client
+/// certificate it asked for answered from this network's keystores. It reads and writes the bytes inside the TLS.
+pub struct SecureConnection {
+    stream: Box<StreamOwned<ClientConnection, Connection>>,
+    server: ServerIdentity,
+}
+
+impl SecureConnection {
+    /// Who the server proved to be.
+    pub fn server(&self) -> &ServerIdentity {
+        &self.server
+    }
+
+    /// The TCP socket underneath, for timeouts and shutdown.
+    pub fn socket(&self) -> &TcpStream {
+        self.stream.sock.socket()
+    }
+
+    /// Tells the server this side is done, so it can tell a close from a cut connection.
+    pub fn close_notify(&mut self) {
+        self.stream.conn.send_close_notify();
+        let _ = self.stream.flush();
+    }
+}
+
+impl fmt::Debug for SecureConnection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SecureConnection")
+            .field("server", &self.server)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Read for SecureConnection {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.stream.read(buffer)
+    }
+}
+
+impl Write for SecureConnection {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.stream.write(buffer)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.flush()
     }
 }
 
@@ -307,6 +374,58 @@ impl Network {
         Ok(Some(connector.connect_url(&self.resolver, url)?))
     }
 
+    /// A connection to the host and port of `url` as [`tunnel`](Self::tunnel) reaches it (through the proxy this network
+    /// chooses, logged in, or straight to it when none applies), with TLS to the server made here: the server is verified for the
+    /// URL's host by this network's trust (the operating system's, or exactly `ca_file`), and a client certificate it asks for is
+    /// answered from the keystores (or `client_certificate`), as [`agent`](Self::agent) does. The connection reads and writes
+    /// the bytes inside the TLS.
+    ///
+    /// # Errors
+    ///
+    /// The address has no usable host, the proxy cannot be asked or reached or refuses the login, the server cannot be reached,
+    /// or the handshake fails (an untrusted or mismatched certificate, a server that wants a certificate this network cannot
+    /// give).
+    pub fn secure_tunnel(&self, url: &str) -> Result<SecureConnection, NetworkError> {
+        let uri: ureq::http::Uri = url
+            .parse()
+            .map_err(|_| NetworkError::new("the address cannot be read"))?;
+        let host = uri
+            .host()
+            .map(|host| {
+                host.trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .to_owned()
+            })
+            .filter(|host| !host.is_empty())
+            .ok_or_else(|| NetworkError::new("the address names no host"))?;
+        let name = ServerName::try_from(host.clone())
+            .map_err(|_| NetworkError::new("the address names no valid server name"))?;
+        let tls = self.tls.clone().build()?;
+        let connector = self.connector(&tls)?;
+        let connection = connector.connect_url(&self.resolver, url)?;
+        let config = tls.client_config(&host)?;
+        let session = ClientConnection::new(config, name)
+            .map_err(|error| NetworkError::new(alloc::format!("TLS to {host}: {error}")))?;
+        let mut stream = Box::new(StreamOwned::new(session, connection));
+        // Finish the handshake here, so a certificate that is not trusted is reported as that.
+        while stream.conn.is_handshaking() {
+            stream
+                .conn
+                .complete_io(&mut stream.sock)
+                .map_err(|error| NetworkError::new(alloc::format!("TLS to {host}: {error}")))?;
+        }
+        let certificate = stream
+            .conn
+            .peer_certificates()
+            .and_then(|chain| CertificateInfo::from_chain(chain).ok());
+        let server = ServerIdentity {
+            name: host,
+            subject: certificate.as_ref().map(|info| info.subject().to_owned()),
+            sha256: certificate.as_ref().map(|info| hex(info.fingerprint())),
+        };
+        Ok(SecureConnection { stream, server })
+    }
+
     fn connector(&self, tls: &Tls) -> Result<ProxyConnector, NetworkError> {
         let mut connector = ProxyConnector::builder();
         if self.negotiate && coqui_syshttp::auth::negotiate_available() {
@@ -376,6 +495,14 @@ impl Network {
             .map(|environment| environment.pairs())
             .unwrap_or_default()
     }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use core::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut text, byte| {
+        let _ = write!(text, "{byte:02x}");
+        text
+    })
 }
 
 fn read_roots(path: &Path) -> Result<Vec<CertificateDer<'static>>, NetworkError> {

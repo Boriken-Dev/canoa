@@ -19,9 +19,10 @@ pub struct NetworkSettings { pub proxy: ProxyChoice, pub proxy_user: Option<Stri
 pub enum ProxyChoice { System, None, Proxy(String), Pac(String) }                      // default System
 pub enum ClientCertificate { System, None, File(PathBuf) }                              // default System; File is a PEM chain and its unencrypted key
 pub enum GitTls { System, Git }                                                         // default System
-pub use coqui_syshttp::{ChildEnvironment, OriginAuth, Secret};
+pub use coqui_syshttp::{ChildEnvironment, Connection, OriginAuth, Secret};
 pub use coqui_syshttp::client::OriginAgent as LoginAgent;
-pub use coqui_syshttp::{ChildEnvironment, Connection, Secret};
+pub struct ServerIdentity { pub name: String, pub subject: Option<String>, pub sha256: Option<String> }   // non_exhaustive, Clone, Debug, Eq: what a verified server proved to be (subject RFC 4514; sha256 of its certificate, lower-case hex)
+pub struct SecureConnection;                                                                            // Read + Write over the TLS; server() -> &ServerIdentity; socket() -> &TcpStream; close_notify()
 impl Network {
     pub fn new(&NetworkSettings) -> Result<Network, NetworkError>;   // a proxy that cannot be read, an unreadable or empty ca_file or client certificate
     pub fn with(Resolver, TlsBuilder) -> Network;                    // the caller's own resolver and TLS, for a test
@@ -31,6 +32,7 @@ impl Network {
     pub fn agent(&self, ureq::config::Config) -> Result<ureq::Agent, NetworkError>;
     pub fn login_agent(&self, ureq::config::Config, OriginAuth) -> Result<LoginAgent, NetworkError>;   // `agent`, and `LoginAgent::run(http::Request<bytes>)` answers a server's 401
     pub fn tunnel(&self, url: &str) -> Result<Option<Connection>, NetworkError>;   // a TCP connection to the url's host and port through the proxy chosen for it, logged in; None when it goes direct; no TLS is made to the server
+    pub fn secure_tunnel(&self, url: &str) -> Result<SecureConnection, NetworkError>;   // `tunnel`'s connection, or a direct one when no proxy applies, then TLS to the url's host made here: verified by this network's trust (the system's, or exactly `ca_file`), a requested client certificate answered from its keystores (or `client_certificate`); a handshake that fails is the error
     pub fn child_variables(&self, endpoints: &[String]) -> Vec<(String, String)>;   // cached for a minute; the person's `endpoints` are added
     pub fn variables_for(&self, urls: &[String]) -> Vec<(String, String)>;
     pub fn resolver(&self) -> &Resolver;  pub fn git_tls(&self) -> GitTls;
