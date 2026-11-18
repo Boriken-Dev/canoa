@@ -115,7 +115,6 @@ String _resolvePath(String root, String relative, bool windows) {
   return '${root.replaceFirst(RegExp(r'[/\\]+$'), '')}$separator${relative.replaceAll('/', separator)}';
 }
 
-const _defaultScripts = ['.py', '.js', '.mjs', '.cjs', '.ps1', '.bash', '.sh'];
 
 /// Makes the layer of an AOS overlay from its [tree]: its root variable, environment, skills, MCP servers, context, and
 /// the hints for [harness]. The overlay's own `bin/` and `lib/` go first on `PATH`, `PYTHONPATH` and `NODE_PATH`, as the
@@ -320,17 +319,8 @@ Layer overlayLayer({
     }
   }
 
-  bool on(String key) => !(manifest['defaults'] is Map && (manifest['defaults']! as Map)[key] == false);
-  // Setup, dependencies and the commands `scripts` expose are the host's to prepare and report when a session starts.
-  if (on('env_scripts')) {
-    for (final extension in _defaultScripts) {
-      if (files.contains('env$extension')) notApplied.add('env_scripts: env$extension');
-    }
-  }
-  for (final entry in (manifest['env_scripts'] is List ? manifest['env_scripts']! as List : const [])) {
-    final line = 'env_scripts: ${entry is Map ? entry['path'] ?? '' : ''}';
-    if (!notApplied.contains(line)) notApplied.add(line);
-  }
+  // Setup, dependencies and the commands `scripts` expose are the host's to prepare and report when a session starts, and
+  // so are the env scripts, which run where the environment is built.
 
   final about = <String, String>{};
   if (manifest['about'] case final Map<String, Object> table) {

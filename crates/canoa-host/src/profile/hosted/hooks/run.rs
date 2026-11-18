@@ -17,6 +17,8 @@ use crate::spawn::{Child, Command, Stdio};
 const POLL: Duration = Duration::from_millis(5);
 /// How long a pipe held open past the hook's end is waited for.
 const GRACE: Duration = Duration::from_millis(500);
+/// The last bytes of standard error kept, for the person's own report.
+const ERROR_TAIL: usize = 2048;
 
 /// What to run.
 pub(super) struct Job<'a> {
@@ -42,6 +44,8 @@ pub(super) struct Outcome {
     pub(super) started: bool,
     /// What it wrote to standard output, up to one byte past the bound.
     pub(super) stdout: Vec<u8>,
+    /// The last bytes it wrote to standard error: for the person's report and log, never for the agent.
+    pub(super) stderr: Vec<u8>,
     /// Its exit status; `-1` when it was stopped or has none.
     pub(super) exit: i32,
     /// Whether it was stopped for taking too long.
@@ -58,6 +62,7 @@ impl Outcome {
         Self {
             started: false,
             stdout: Vec::new(),
+            stderr: Vec::new(),
             exit: -1,
             timed_out: false,
             unreadable: false,
@@ -117,6 +122,8 @@ pub(super) fn run(job: &Job<'_>) -> Outcome {
     let over = Arc::new(AtomicBool::new(false));
     let closed = Arc::new(AtomicBool::new(false));
     let out = Arc::new(Mutex::new(Vec::new()));
+    let errors = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let errors_closed = Arc::new(AtomicBool::new(false));
     // Threads of their own that nothing waits on past a deadline: a process the hook started can hold a pipe open after the
     // hook has ended, and must not hold the relay with it.
     let input = job.input.to_vec();
@@ -143,10 +150,21 @@ pub(super) fn run(job: &Job<'_>) -> Outcome {
         });
     }
     {
-        // Standard error never reaches the agent: it is read to its end so the process never waits on it.
+        // Standard error never reaches the agent: it is read to its end so the process never waits on it, and its last bytes
+        // are kept for the person.
+        let (errors, errors_closed) = (Arc::clone(&errors), Arc::clone(&errors_closed));
         std::thread::spawn(move || {
             let mut buffer = [0_u8; 8192];
-            while stderr.read(&mut buffer).is_ok_and(|read| read > 0) {}
+            while let Ok(read) = stderr.read(&mut buffer) {
+                if read == 0 {
+                    break;
+                }
+                let mut kept = errors.lock().unwrap_or_else(PoisonError::into_inner);
+                kept.extend_from_slice(&buffer[..read]);
+                let excess = kept.len().saturating_sub(ERROR_TAIL);
+                kept.drain(..excess);
+            }
+            errors_closed.store(true, Ordering::SeqCst);
         });
     }
     let until = started + job.timeout;
@@ -180,7 +198,9 @@ pub(super) fn run(job: &Job<'_>) -> Outcome {
     // What the process wrote is read to its end when the pipe closes; a process it left holding the pipe gets a short grace, no
     // more.
     let grace = Instant::now() + GRACE;
-    while !closed.load(Ordering::SeqCst) && Instant::now() < grace {
+    while !(closed.load(Ordering::SeqCst) && errors_closed.load(Ordering::SeqCst))
+        && Instant::now() < grace
+    {
         std::thread::sleep(POLL);
     }
     let take = |buffer: &Mutex<Vec<u8>>| {
@@ -192,6 +212,7 @@ pub(super) fn run(job: &Job<'_>) -> Outcome {
     Outcome {
         started: true,
         stdout: take(&out),
+        stderr: take(&errors),
         exit: exit.unwrap_or(-1),
         timed_out,
         unreadable,

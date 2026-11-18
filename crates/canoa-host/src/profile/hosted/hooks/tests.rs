@@ -7,15 +7,15 @@ use crate::config::Config;
 use crate::profile::hosted::{Connection, offer};
 
 #[path = "../../../../tests/hooked/script.rs"]
-mod script;
+pub(super) mod script;
 
 use script::Arm;
 
 /// A directory of the test's own, removed afterwards.
-struct Temp(PathBuf);
+pub(super) struct Temp(pub(super) PathBuf);
 
 impl Temp {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "canoa-hooks-test-{}-{}",
@@ -27,7 +27,7 @@ impl Temp {
         Self(dir)
     }
 
-    fn log(&self) -> PathBuf {
+    pub(super) fn log(&self) -> PathBuf {
         self.0.join("hook.log")
     }
 
@@ -37,7 +37,7 @@ impl Temp {
     }
 
     /// Installs overlay `name` with `extra` files besides its hook script, and returns its digest.
-    fn install_as(
+    pub(super) fn install_as(
         &self,
         name: &str,
         manifest: &str,
@@ -73,7 +73,7 @@ impl Drop for Temp {
     }
 }
 
-fn real(name: &str) -> Option<String> {
+pub(super) fn real(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
@@ -91,7 +91,7 @@ fn connect(
 }
 
 /// A connection whose profile lists `names` and allows the hooks of each `(overlay, digest)` of `allow`.
-fn connect_overlays(
+pub(super) fn connect_overlays(
     temp: &Temp,
     names: &[&str],
     allow: &[(&str, &str)],
@@ -133,7 +133,7 @@ fn connect_overlays(
     Connection::prepare(&offer, 0, "a", lookup)
 }
 
-fn prompt(connection: &Connection, text: &str) -> aos::FiredEvent {
+pub(super) fn prompt(connection: &Connection, text: &str) -> aos::FiredEvent {
     prompt_after(connection, text, 0)
 }
 
@@ -191,7 +191,7 @@ fn causes(fired: &aos::FiredEvent) -> Vec<String> {
         .collect()
 }
 
-fn env_of<'a>(connection: &'a Connection, name: &str) -> Option<&'a str> {
+pub(super) fn env_of<'a>(connection: &'a Connection, name: &str) -> Option<&'a str> {
     connection
         .env()
         .iter()
@@ -543,7 +543,7 @@ fn context_past_the_sessions_bound_counts_utf8_bytes_is_left_whole_and_is_report
 }
 
 /// What the script logged of the variable it was asked about, one entry per run.
-fn probed(temp: &Temp) -> Vec<String> {
+pub(super) fn probed(temp: &Temp) -> Vec<String> {
     std::fs::read_to_string(temp.log())
         .unwrap_or_default()
         .lines()
@@ -1033,6 +1033,7 @@ fn outcome(unreadable: bool, timed_out: bool) -> run::Outcome {
     run::Outcome {
         started: true,
         stdout: Vec::new(),
+        stderr: Vec::new(),
         exit: -1,
         timed_out,
         unreadable,

@@ -9,6 +9,7 @@ mod events;
 mod forward;
 mod native;
 mod run;
+mod scripts;
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
@@ -67,6 +68,13 @@ fn programs_of(interpreter: &str) -> &'static [&'static str] {
 
 /// The arguments that run `script` as `interpreter` does, the event last: a list, never a shell's parsing.
 fn arguments(interpreter: &str, script: &Path, event: HookEvent) -> Vec<OsString> {
+    let mut args = launch(interpreter, script);
+    args.push(event.as_str().into());
+    args
+}
+
+/// The arguments that start `script` under `interpreter`, before its own.
+fn launch(interpreter: &str, script: &Path) -> Vec<OsString> {
     let mut args: Vec<OsString> = match interpreter {
         "python" => vec!["-B".into()],
         "powershell" => [
@@ -82,7 +90,6 @@ fn arguments(interpreter: &str, script: &Path, event: HookEvent) -> Vec<OsString
         _ => Vec::new(),
     };
     args.push(script.as_os_str().to_owned());
-    args.push(event.as_str().into());
     args
 }
 
@@ -146,6 +153,8 @@ pub(super) struct Hooks {
     refusals: allow::Refusals,
     /// Each overlay's manifest and facts, in composition order: what a hook's environment is made from.
     active: Vec<(Document, Facts)>,
+    /// What each env script that ran set, in run order: part of the finished stack a hook runs in.
+    script_sets: Vec<aos::EnvSet>,
     /// The manifests by normalized identity, which the order of hooks is taken from.
     manifests: BTreeMap<String, Document>,
     /// Where the copies of the overlays' files are made, removed with the connection.
@@ -233,7 +242,8 @@ impl Hooks {
             interpreters,
             base,
             refusals: allow::Refusals::new(host.protected.as_deref()),
-            active: active_facts(layers, lookup)
+            script_sets: Vec::new(),
+            active: active_facts(layers, lookup, Some(&have))
                 .into_iter()
                 .map(|(manifest, facts)| (manifest.clone(), facts))
                 .collect(),
@@ -568,13 +578,19 @@ impl Hooks {
                 }
             }
         }
+        let earlier: Vec<aos::EnvSet> = self
+            .script_sets
+            .iter()
+            .chain(&turn.earlier)
+            .cloned()
+            .collect();
         let made = aos::hook_environment(
             event,
             &active,
             &base,
             turn.pre_env,
             Some(identity),
-            &turn.earlier,
+            &earlier,
         )
         .ok()?;
         Some(made.values().to_vec())
@@ -894,5 +910,7 @@ pub(super) fn names(value: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
+mod env_script_tests;
 #[cfg(test)]
 mod tests;

@@ -1220,19 +1220,26 @@ impl Effective {
         &self,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<Vec<(String, Secret)>, ProfileError> {
-        self.environment_with(&lookup, &BTreeMap::new(), &[])
-            .map(|resolved| resolved.env)
+        self.environment_with(
+            &lookup,
+            &BTreeMap::new(),
+            &overlay::ScriptRuns::default(),
+            &[],
+        )
+        .map(|resolved| resolved.env)
     }
 
-    /// As [`Effective::environment`], with the runs of the overlays' `pre-env` hooks (by identity) applied where the specification
-    /// puts them, and what those hooks reported.
+    /// As [`Effective::environment`], with the runs of the overlays' `pre-env` hooks (by identity) and the output of their env
+    /// scripts applied where the specification puts them, and what those hooks reported. `exported` names the variables the
+    /// hooks and scripts set, besides those an overlay declares.
     pub(crate) fn environment_with(
         &self,
         lookup: &dyn Fn(&str) -> Option<String>,
         pre_env: &BTreeMap<String, coqui_aos::HookRun>,
+        scripts: &overlay::ScriptRuns,
         exported: &[String],
     ) -> Result<Resolved, ProfileError> {
-        let built = overlay::build(&self.aos, lookup, pre_env)?;
+        let built = overlay::build(&self.aos, lookup, pre_env, scripts)?;
         let mut out = Vec::new();
         for (name, value) in &self.env {
             let from_overlay = value.layer.kind == LayerKind::Overlay
@@ -1254,7 +1261,7 @@ impl Effective {
             )?;
             out.push((name.clone(), secret));
         }
-        // Variables a `pre-env` hook set, besides those an overlay declares.
+        // Variables a `pre-env` hook or an env script set, besides those an overlay declares.
         for name in exported {
             if out.iter().any(|(each, _)| each == name) {
                 continue;

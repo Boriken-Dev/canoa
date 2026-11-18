@@ -21,7 +21,7 @@ use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 
 use super::needs;
-use super::overlay::{self, Built, build_each, resolve_path};
+use super::overlay::{self, Built, ScriptRuns, build_each, resolve_path};
 use super::{
     AosLayer, Change, Context, Effective, EnvValue, Layer, LayerId, LayerKind, McpServer,
     OverlayInput, Scalar, Secret, Session, Skill, Sourced, Who, merge, overlay_layer, resolve,
@@ -459,6 +459,8 @@ pub(crate) struct Connection {
     hooks: Hooks,
     /// The `pre-env` runs the environment was built with: the same for every environment built after.
     pre_env: PreEnv,
+    /// What the overlays' env scripts gave, which every environment built after applies as it was.
+    scripts: ScriptRuns,
     /// What was left out before any harness is known: overlays, and entries that read a variable not shared.
     notes: Vec<Item>,
     env: Vec<(String, Secret)>,
@@ -710,11 +712,29 @@ impl Connection {
         let directory = host.directory.clone();
         let harness = harness_of(None, entry).unwrap_or("canoa");
         let pre_env = hooks.pre_env(&overlays, harness, &directory);
+        // The env scripts run here too, once, with what the session adds to this process's environment.
+        let added: Vec<(String, String)> = session
+            .identity()
+            .iter()
+            .chain(&starting_with.account)
+            .chain(&starting_with.host)
+            .cloned()
+            .collect();
+        let scripts = hooks.env_scripts(&overlays, &added, &pre_env.runs);
+        let mut exported = pre_env.exported.clone();
+        exported.extend(
+            scripts
+                .exported
+                .iter()
+                .filter(|name| !pre_env.exported.contains(name))
+                .cloned(),
+        );
         let resolved = effective
-            .environment_with(lookup, &pre_env.runs, &pre_env.exported)
+            .environment_with(lookup, &pre_env.runs, &scripts.runs, &exported)
             .map_err(|error| error.to_string())?;
         notes.extend(resolved.hook_reports.iter().map(hooks::report_item));
         notes.extend(pre_env.reported.iter().cloned());
+        notes.extend(scripts.items.iter().cloned());
         // What each overlay needs of this computer, what preparing it made, and the commands it exposes: once per overlay,
         // against the `PATH` the session starts from and the Store's runtimes.
         let finder = needs::Finder::new(lookup, &crate::sources::runtime_dirs());
@@ -815,7 +835,7 @@ impl Connection {
                         format!("env_scripts.{subject}"),
                         &report.layer,
                         State::Off,
-                        "env-script-not-allowed: its env scripts do not run until canoa.cfg names the overlay's digest for its hooks; the rest of the overlay still applies",
+                        "env-script-not-allowed: its env scripts are off until canoa.cfg names the overlay's digest, which allows its hooks and env scripts; the rest of the overlay still applies",
                     ));
                 }
             }
@@ -837,6 +857,7 @@ impl Connection {
             chosen,
             hooks,
             pre_env,
+            scripts: scripts.runs,
             notes,
             env,
             env_items,
@@ -1814,8 +1835,9 @@ fn environments_after(
     effective: &Effective,
     lookup: &dyn Fn(&str) -> Option<String>,
     pre_env: &BTreeMap<String, aos::HookRun>,
+    scripts: &ScriptRuns,
 ) -> BTreeMap<String, Result<Built, String>> {
-    build_each(&effective.aos, lookup, pre_env)
+    build_each(&effective.aos, lookup, pre_env, scripts)
         .into_iter()
         .zip(&effective.aos)
         .map(|(built, layer)| {
@@ -2289,7 +2311,12 @@ fn parts_with(
         }
     }
 
-    let after = environments_after(&effective, lookup, &connection.pre_env.runs);
+    let after = environments_after(
+        &effective,
+        lookup,
+        &connection.pre_env.runs,
+        &connection.scripts,
+    );
     let mut servers = Vec::new();
     let mut approvable = Vec::new();
     let mut names = Vec::new();

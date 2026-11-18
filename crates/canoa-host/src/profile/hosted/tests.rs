@@ -2184,7 +2184,14 @@ fn an_overlays_bin_and_lib_reach_the_environment_every_harness_is_started_with()
 fn each_line_not_applied_names_its_overlay_and_is_said_once() {
     let temp = temp_with_skill();
     for name in ["alpha", "beta"] {
-        install_files(&temp, name, &[("env.sh", "true\n"), ("CONTEXT.md", "x\n")]);
+        install_files(
+            &temp,
+            name,
+            &[
+                ("overlay.cfg", "[harness.codex]\nmodel = \"gpt-5\"\n"),
+                ("CONTEXT.md", "x\n"),
+            ],
+        );
     }
     let config = config_with("overlays = [\"alpha\", \"beta\"]\n");
     let offer = offer_of(&temp, &config);
@@ -2192,7 +2199,7 @@ fn each_line_not_applied_names_its_overlay_and_is_said_once() {
     let parts = parts_for(&connection, None, &Takes::default(), &lookup);
     let summary = parts.report["summary"].as_str().expect("summary");
     for name in ["alpha", "beta"] {
-        let line = format!("{name}: env_scripts: env.sh (not supported)");
+        let line = format!("{name}: harness.codex: hints for another harness (not supported)");
         assert_eq!(summary.matches(&line).count(), 1, "{summary}");
     }
     // An overlay the person's list names twice says each thing once.
@@ -2203,7 +2210,7 @@ fn each_line_not_applied_names_its_overlay_and_is_said_once() {
     let summary = parts.report["summary"].as_str().expect("summary");
     assert_eq!(
         summary
-            .matches("alpha: env_scripts: env.sh (not supported)")
+            .matches("alpha: harness.codex: hints for another harness (not supported)")
             .count(),
         1,
         "{summary}"
@@ -2211,7 +2218,10 @@ fn each_line_not_applied_names_its_overlay_and_is_said_once() {
     let items = parts.report["items"].as_array().expect("items");
     let setups = items
         .iter()
-        .filter(|item| item["key"] == "env_scripts: env.sh" && item["layer"] == "overlay:alpha")
+        .filter(|item| {
+            item["key"] == "harness.codex: hints for another harness"
+                && item["layer"] == "overlay:alpha"
+        })
         .count();
     assert_eq!(setups, 1, "{}", parts.report);
 }

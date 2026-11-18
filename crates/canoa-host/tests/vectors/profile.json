@@ -2169,8 +2169,7 @@
             "not_applied": [
               "harness.claude-code.permissions: the harness's own setting",
               "harness.claude-code.skills: delivery by routing line",
-              "harness.codex: hints for another harness",
-              "env_scripts: env.py"
+              "harness.codex: hints for another harness"
             ],
             "non_defaults": []
           }

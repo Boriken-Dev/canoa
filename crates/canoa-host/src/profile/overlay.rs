@@ -207,11 +207,9 @@ fn entries(value: Option<&Value>) -> Vec<(&String, &Value)> {
         .unwrap_or_default()
 }
 
-const DEFAULT_SCRIPTS: [&str; 7] = [".py", ".js", ".mjs", ".cjs", ".ps1", ".bash", ".sh"];
-
 /// Makes the layer of an AOS overlay: its root variable, environment, skills, MCP servers, context, and the hints for
 /// `input.harness`. The overlay's own `bin/` and `lib/` go first on `PATH`, `PYTHONPATH` and `NODE_PATH`, as the
-/// specification's defaults and `paths` say; what Canoa does not run is reported: env scripts. What it needs of the computer
+/// specification's defaults and `paths` say. What it needs of the computer
 /// (`runtime`), its dependencies, setup and commands are the host's to check and report when a session starts. Reads nothing
 /// but `input.tree`.
 ///
@@ -500,33 +498,8 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         }
     }
 
-    let on = |key: &str| {
-        manifest
-            .get("defaults")
-            .and_then(|defaults| defaults.get(key))
-            != Some(&Value::Bool(false))
-    };
-    // Setup, dependencies and the commands `scripts` expose are the host's to prepare and report when a session starts.
-    if on("env_scripts") {
-        for extension in DEFAULT_SCRIPTS {
-            let path = format!("env{extension}");
-            if files.contains(&path) {
-                not_applied.push(format!("env_scripts: {path}"));
-            }
-        }
-    }
-    for entry in manifest
-        .get("env_scripts")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let path = entry.get("path").and_then(Value::as_str).unwrap_or("");
-        if !not_applied.contains(&format!("env_scripts: {path}")) {
-            not_applied.push(format!("env_scripts: {path}"));
-        }
-    }
-
+    // Setup, dependencies and the commands `scripts` expose are the host's to prepare and report when a session starts, and so
+    // are the env scripts, which run where the environment is built.
     let mut layer = Layer::new(
         LayerId::new(LayerKind::Overlay, input.identity),
         Some(PathBuf::from(input.root)),
@@ -911,10 +884,12 @@ fn names_of(layer: &AosLayer) -> BTreeSet<String> {
 }
 
 /// What each overlay's facts are to the specification's functions: its root, the digest canoa.cfg allowed its hooks and
-/// env scripts at, its files, and the variables its text names, each granted.
+/// env scripts at, its files, the interpreters the host can run (`interpreters`; none is every one the specification names)
+/// and the variables its text names, each granted.
 pub(crate) fn active_facts<'a>(
     layers: &'a [AosLayer],
     lookup: &dyn Fn(&str) -> Option<String>,
+    interpreters: Option<&[String]>,
 ) -> Vec<(&'a Map<String, Value>, Facts)> {
     layers
         .iter()
@@ -932,6 +907,7 @@ pub(crate) fn active_facts<'a>(
             facts.gate_env_scripts = true;
             facts.digest = Some(layer.digest.clone());
             facts.allowed.clone_from(&layer.allowed);
+            facts.interpreters = interpreters.map(<[String]>::to_vec);
             facts.packages.clone_from(&layer.packages);
             facts.state.clone_from(&layer.state);
             facts.grants.insert("env".to_owned(), names.clone());
@@ -945,13 +921,25 @@ pub(crate) fn active_facts<'a>(
         .collect()
 }
 
+/// What the overlays' env scripts gave when the connection ran them, by overlay and place among its scripts. An environment
+/// built again from these takes each script's output as it was, so a script runs once however many environments are built.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ScriptRuns {
+    /// The interpreters the host had when they ran, which decide which default script an overlay has; none is every one.
+    pub(crate) interpreters: Option<Vec<String>>,
+    /// What each gave: its standard output, or why it gave none.
+    pub(crate) results: BTreeMap<(String, usize), aos::ScriptResult>,
+}
+
 /// Builds the AOS overlays' environment after each overlay in turn, lowest first, over this process's environment as
 /// `lookup` reads it. A placeholder reads what the overlays set and any variable of this process. Only the variables an
-/// overlay's text names are read from the process.
+/// overlay's text names are read from the process. The env scripts that ran (`scripts`) apply where the order of
+/// application puts them.
 pub(crate) fn build_each(
     layers: &[AosLayer],
     lookup: &dyn Fn(&str) -> Option<String>,
     pre_env: &BTreeMap<String, aos::HookRun>,
+    scripts: &ScriptRuns,
 ) -> Vec<Result<Built, ProfileError>> {
     let windows = layers.first().is_some_and(|first| first.os == "windows");
     let named: BTreeSet<String> = layers.iter().flat_map(names_of).collect();
@@ -965,24 +953,34 @@ pub(crate) fn build_each(
             base.insert(name, value);
         }
     }
-    let active = active_facts(layers, lookup);
+    let active = active_facts(layers, lookup, scripts.interpreters.as_deref());
+    // A script the connection did not run gives nothing.
+    let replay = |call: &aos::ScriptCall<'_>| -> aos::ScriptResult {
+        scripts
+            .results
+            .get(&(call.identity.to_owned(), call.index))
+            .cloned()
+            .unwrap_or(Err(aos::ScriptFailure::NotRun))
+    };
     (0..layers.len())
         .map(|last| {
-            let composed = aos::composed_environment(
+            let composed = aos::composed_environment_running(
                 &active[..=last],
                 process.clone(),
                 pre_env,
                 &mut Vec::new(),
+                &mut |call| replay(call),
             );
             match composed.env {
                 Ok(env) => Ok(Built {
                     env,
                     base: base.clone(),
-                    traced: aos::composed_environment(
+                    traced: aos::composed_environment_running(
                         &active[..=last],
                         marked.clone(),
                         pre_env,
                         &mut Vec::new(),
+                        &mut |call| replay(call),
                     )
                     .env
                     .ok(),
@@ -1002,8 +1000,9 @@ pub(crate) fn build(
     layers: &[AosLayer],
     lookup: &dyn Fn(&str) -> Option<String>,
     pre_env: &BTreeMap<String, aos::HookRun>,
+    scripts: &ScriptRuns,
 ) -> Result<Built, ProfileError> {
-    match build_each(layers, lookup, pre_env).pop() {
+    match build_each(layers, lookup, pre_env, scripts).pop() {
         Some(built) => built,
         None => Ok(Built {
             env: Environment::new(Vec::new(), cfg!(windows)),
