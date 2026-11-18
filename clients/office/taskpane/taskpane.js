@@ -5,6 +5,7 @@
 // Behind a portal the frame needs a session of its own: the site's cookie is not sent from inside Office's page, and the dialog
 // that signs in shares no cookies with this frame. The dialog sends a string, this page hands it to the host, and the answer sets
 // the frame's cookie. A host with no sign-in answers `GET /office/session` with its own page, and the chat is shown as it is.
+import { keyOf, offerStart, whatAnswers } from './launch.js';
 import {
   appAddress,
   handoffFrom,
@@ -20,6 +21,9 @@ const frame = document.getElementById('canoa');
 const status = document.getElementById('status');
 const signIn = document.getElementById('signin');
 const origin = window.location.origin;
+/** The secret of this home, when the manifest rendered for it carries one. */
+const key = keyOf(window.location.search);
+const startButton = document.getElementById('start');
 
 /** The relation the frame shows now (null for none, undefined before the first). */
 let shown;
@@ -56,7 +60,7 @@ function show(relation) {
     loaded = true;
     listening = false;
     frame.hidden = false;
-    frame.src = appAddress(origin, relation, client);
+    frame.src = appAddress(origin, relation, client, key);
     return;
   }
   tell(relation);
@@ -148,19 +152,43 @@ const indexAtLoad = hostIndex().then((index) => {
   return index;
 });
 
+/** What the bar says while no Canoa answers: with the launcher at this address there is a button; without it, what starts one. */
+function showDown(answering) {
+  startButton.hidden = answering !== 'launcher';
+  say(
+    answering === 'launcher'
+      ? 'Canoa is not running on this computer.'
+      : 'Canoa is not running on this computer. Start the Canoa app, or run "canoa serve --web": this pane reconnects.',
+  );
+}
+
 /**
- * On the host's own computer there is nothing to sign in to and nothing to pair: the pane says when that Canoa stops answering
- * and loads the chat again when it does. A page cannot start a program, so it says what starts one.
+ * On the host's own computer there is nothing to sign in to and nothing to pair: the pane says when that Canoa stops answering and
+ * loads the chat again when it does. A page cannot start a program; when the small launcher holds this address in its place, the
+ * pane offers a button that asks it to.
  */
 function watchHost() {
   let down = false;
+  let shownAs;
+  startButton.addEventListener('click', async () => {
+    startButton.disabled = true;
+    say('Starting Canoa');
+    const result = await offerStart({ key });
+    say(result.said);
+    startButton.disabled = false;
+  });
   setInterval(async () => {
-    const answered = (await hostIndex()) !== null;
-    if (!answered && !down) {
-      down = true;
-      say('Canoa is not running on this computer. Start the Canoa app, or run "canoa serve --web": this pane reconnects.');
-    } else if (answered && down) {
+    const answering = await whatAnswers();
+    if (answering !== 'host') {
+      if (!down || shownAs !== answering) {
+        down = true;
+        shownAs = answering;
+        showDown(answering);
+      }
+    } else if (down) {
       down = false;
+      shownAs = undefined;
+      startButton.hidden = true;
       loaded = false;
       shown = undefined;
       listening = false;

@@ -1,4 +1,4 @@
-// Renders an add-in manifest for one origin: `node render.mjs outlook|documents --origin https://HOST [--hosts A,B] [--out FILE]`.
+// Renders an add-in manifest for one origin: `node render.mjs outlook|documents --origin https://HOST [--hosts A,B] [--secret HEX | --secret-file FILE] [--out FILE]`.
 // The origin is the person's own Canoa host, so a manifest is made for it and not kept in the repository.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -39,6 +39,19 @@ export function checkOrigin(origin) {
   return url.origin;
 }
 
+/**
+ * The query that carries the home's secret in the pane's address, or nothing. The secret is exactly 64 hexadecimal digits, which
+ * need no escaping anywhere in the manifest.
+ * @param {string|undefined} secret
+ * @returns {string}
+ */
+export function keyQuery(secret) {
+  if (secret === undefined) return '';
+  const key = String(secret).trim();
+  if (!/^[0-9a-fA-F]{64}$/.test(key)) throw new Error('the secret is 64 hexadecimal digits: the contents of the secret file in the home of the host');
+  return `?office_key=${key.toLowerCase()}`;
+}
+
 /** `text` safe inside an XML attribute or element. */
 function escapeXml(text) {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
@@ -47,13 +60,15 @@ function escapeXml(text) {
 /**
  * The manifest of `kind` for `origin`.
  * @param {'outlook'|'documents'} kind
- * @param {{origin: string, hosts?: string[], template?: string}} options  `hosts`: which of `Document`, `Workbook` and
- *   `Presentation` a documents manifest names, all three by default; `template` is for tests.
+ * @param {{origin: string, hosts?: string[], secret?: string, template?: string}} options  `hosts`: which of `Document`, `Workbook`
+ *   and `Presentation` a documents manifest names, all three by default; `secret`: the 64 hexadecimal digits the host keeps in its home
+ *   when `[host.web] office_secret` is on, which the pane's address then carries; `template` is for tests.
  * @returns {string}
  */
 export function render(kind, options) {
   if (!Object.hasOwn(IDS, kind)) throw new Error(`unknown manifest: ${kind} (outlook or documents)`);
   const origin = checkOrigin(options.origin);
+  const key = keyQuery(options.secret);
   const template = options.template ?? readFileSync(join(here, kind, 'manifest.xml.in'), 'utf8');
   let hostsXml = '';
   if (kind === 'documents') {
@@ -64,6 +79,7 @@ export function render(kind, options) {
     hostsXml = [...new Set(hosts)].map((host) => `    <Host Name="${host}"/>`).join('\n');
   }
   return template
+    .replaceAll('{{KEY}}', key)
     .replaceAll('{{ORIGIN}}', escapeXml(origin))
     .replaceAll('{{ID}}', IDS[kind])
     .replaceAll('{{VERSION}}', VERSION)
@@ -77,19 +93,28 @@ export function parseArguments(argv) {
   for (let at = 0; at < rest.length; at += 2) {
     const name = rest[at];
     const value = rest[at + 1];
-    if (!['--origin', '--hosts', '--out'].includes(name) || value === undefined) throw new Error(`unexpected argument: ${name}`);
+    if (!['--origin', '--hosts', '--out', '--secret', '--secret-file'].includes(name) || value === undefined) throw new Error(`unexpected argument: ${name}`);
     options[name.slice(2)] = value;
   }
-  return { kind, origin: options.origin, hosts: options.hosts?.split(',').filter(Boolean), out: options.out };
+  if (options.secret !== undefined && options['secret-file'] !== undefined) throw new Error('give --secret or --secret-file, not both');
+  return {
+    kind,
+    origin: options.origin,
+    hosts: options.hosts?.split(',').filter(Boolean),
+    out: options.out,
+    secret: options.secret,
+    secretFile: options['secret-file'],
+  };
 }
 
 function main() {
-  const usage = 'usage: node render.mjs outlook|documents --origin https://HOST [--hosts Document,Workbook,Presentation] [--out FILE]';
+  const usage = 'usage: node render.mjs outlook|documents --origin https://HOST [--hosts Document,Workbook,Presentation] [--secret HEX | --secret-file FILE] [--out FILE]';
   let parsed;
   try {
     parsed = parseArguments(process.argv.slice(2));
     if (!parsed.origin) throw new Error('--origin is required');
-    const manifest = render(parsed.kind, { origin: parsed.origin, hosts: parsed.hosts });
+    const secret = parsed.secretFile === undefined ? parsed.secret : readFileSync(parsed.secretFile, 'utf8');
+    const manifest = render(parsed.kind, { origin: parsed.origin, hosts: parsed.hosts, secret });
     if (parsed.out) writeFileSync(parsed.out, manifest);
     else process.stdout.write(manifest);
   } catch (error) {

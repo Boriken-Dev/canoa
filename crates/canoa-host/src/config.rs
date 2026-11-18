@@ -824,6 +824,10 @@ pub struct WebConfig {
     /// reached at a loopback name and its own origin, asks `POST /office/admit` and gets what `[host.native] control` gives a
     /// browser key. Only with `office`, and only with a loopback `listen`: behind a proxy every request looks local.
     pub office_local: bool,
+    /// With `office_local`, the add-in's requests from the page (admitting its key, starting a host) carry a secret kept in
+    /// the home, which the manifest rendered for this computer holds, so that another account on a shared computer cannot make
+    /// them. Off by default: the computer is the person's own.
+    pub office_secret: bool,
 }
 
 /// Whether the browser showing the web app is at the computer that serves it (the host starts an editor or file manager
@@ -863,6 +867,7 @@ impl WebConfig {
             office: false,
             office_frames: Vec::new(),
             office_local: false,
+            office_secret: false,
         }
     }
 }
@@ -1718,6 +1723,7 @@ struct RawWeb {
     #[serde(default)]
     office_frames: Vec<String>,
     office_local: Option<bool>,
+    office_secret: Option<bool>,
     max_connections: Option<usize>,
     max_connections_per_address: Option<usize>,
     connection_seconds: Option<u64>,
@@ -3899,6 +3905,10 @@ fn web_of(raw: RawWeb, directory: &Path, entries: &[Entry]) -> Result<WebConfig,
         return Err(refused(
             "office_local needs a loopback listen address: behind another address or a proxy every request looks local",
         ));
+    }
+    web.office_secret = raw.office_secret.unwrap_or(false);
+    if web.office_secret && !web.office_local {
+        return Err(refused("office_secret needs office_local = true"));
     }
     web.mode = match raw.mode.as_deref() {
         None => None,

@@ -4,6 +4,10 @@ import 'package:http/http.dart' as http;
 
 import '../auth/browser_peer.dart';
 
+/// The address parameter a manifest rendered for a host that keeps a secret carries it in, and the header it travels in.
+const officeKeyParameter = 'office_key';
+const officeKeyHeader = 'x-canoa-office-key';
+
 /// The host could not accept this page's key.
 final class AdmissionFailed implements Exception {
   const AdmissionFailed(this.message);
@@ -36,6 +40,13 @@ final class LocalAdmission {
   final Future<String> Function(PeerMethod method) _localPeer;
   Future<void>? _admitting;
 
+  /// The home's secret when the page was opened with one (`?office_key=`, as the pane gives it): only the 64 hexadecimal digits the
+  /// host makes are sent on.
+  Map<String, String> get _secretHeader {
+    final key = base.queryParameters[officeKeyParameter];
+    return key != null && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(key) ? {officeKeyHeader: key.toLowerCase()} : const {};
+  }
+
   /// Asks the host to accept this key, which has connected and been turned away.
   Future<void> admit(PeerMethod method) => _admitting ??= _admit(method).whenComplete(() => _admitting = null);
 
@@ -43,7 +54,10 @@ final class LocalAdmission {
     final peer = await _localPeer(method);
     final http.Response response;
     try {
-      response = await _client.post(base.resolve(path).replace(queryParameters: {'peer': peer}));
+      response = await _client.post(
+        base.resolve(path).replace(queryParameters: {'peer': peer}),
+        headers: _secretHeader,
+      );
     } on Object catch (error) {
       throw AdmissionFailed('the host did not answer: $error');
     }

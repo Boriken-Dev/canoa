@@ -63,6 +63,23 @@ void main() {
     expect(asked.single.queryParameters, {'peer': 'sha256:own-noise'});
   });
 
+  test('a page opened with the secret of the home sends it with the request, and one without sends no header', () async {
+    final secret = 'ab12' * 16;
+    final headers = <Map<String, String>>[];
+    final client = MockClient((request) async {
+      headers.add(request.headers);
+      return http.Response('{}', 200);
+    });
+    LocalAdmission at(Uri base) =>
+        LocalAdmission(base: base, path: '/office/admit', client: client, localPeer: (method) async => 'sha256:own-${method.id}');
+    await at(Uri.parse('https://localhost:7800/office/app/?mode=chat&office_key=${secret.toUpperCase()}')).admit(PeerMethod.noise);
+    await at(_base).admit(PeerMethod.noise);
+    await at(Uri.parse('https://localhost:7800/office/app/?office_key=nothing')).admit(PeerMethod.noise);
+    expect(headers[0]['x-canoa-office-key'], secret);
+    expect(headers[1].containsKey('x-canoa-office-key'), isFalse);
+    expect(headers[2].containsKey('x-canoa-office-key'), isFalse, reason: 'only the shape the host makes is sent on');
+  });
+
   test('a connect that works asks for nothing', () async {
     final client = MockClient((request) async => fail('asked ${request.url}'));
     expect(await _admission(client).connect(PeerMethod.noise, () async => 1), 1);

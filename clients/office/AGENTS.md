@@ -14,6 +14,9 @@ serves them under `/office/` when `[host.web] office = true`. [`README.md`](READ
   test in `crates/canoa-host/src/web/tests.rs` saying what it relaxes and that every other route keeps its headers.
 - Inline script is refused by the policy: scripts are files of this origin. Office.js is loaded from `<head>` at the address in
   `office.rs` (`JS_ORIGIN`); a page that loads it from another address fails under the policy.
+- `launch.js` is pure like `relation.js` (`fetch` and the clock are arguments), so `npm test` covers it.
+- The pane's address carries the home's secret as `office_key` when the manifest does (`render.mjs --secret-file`); `launch.js` reads it and sends it as `x-canoa-office-key`, `appAddress` passes it to the app, and `app/lib/served/local_admission.dart` sends it with its request.
+- `launch.html` is not a page of the pane: the launcher (`canoa office-launcher`) answers `taskpane.html` with it when no host runs.
 - `render.mjs` keeps one add-in id per manifest kind (`IDS`): changing one makes Office treat the add-in as a new one.
 - Manifest comments must not hold two hyphens in a row (XML); the render tests check it.
 - `sideload.ps1` writes only the one value under `HKCU\Software\Microsoft\Office\16.0\WEF\Developer`; its tests pass `-Key` a
@@ -24,6 +27,8 @@ serves them under `/office/` when `[host.web] office = true`. [`README.md`](READ
 
 ```sh
 cd clients/office && npm test          # node --test, no dependencies
+cargo test -p canoa-host --lib -- launcher web::local     # the launcher and the secret
+cargo test -p canoa-host --test office_local     # a real host: the secret, a restart
 cargo test -p canoa-host --lib -- web:: office     # the routes' policies
 cargo test -p canoa-host --features portal --lib -- portal::tests::office     # the portal's side (Unix only)
 cargo test -p canoa-host --test web                # a real host: HTTPS, and the page's key accepted with no pairing

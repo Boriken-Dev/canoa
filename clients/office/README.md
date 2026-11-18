@@ -13,11 +13,11 @@ Nothing here is published to a marketplace. You render a manifest for your own h
 | --- | --- |
 | `outlook/manifest.xml.in` | The Outlook manifest (`MailApp`): a Canoa button on a message being read or written, pinnable, `ReadItem` permission, Mailbox 1.5 |
 | `documents/manifest.xml.in` | The Word, Excel and PowerPoint manifest (`TaskPaneApp`), `ReadDocument` permission |
-| `render.mjs` | Fills a manifest in for your origin: `node render.mjs outlook --origin https://canoa.example --out outlook.xml` (`documents` takes `--hosts Document,Workbook,Presentation`, all three by default) |
-| `taskpane/` | The pages the host serves: `taskpane.html` and `taskpane.js` (read the open item through Office.js, frame the chat, carry the sign-in), `relation.js` (the relation of an item and the messages the pane and the app exchange, with no Office.js in it), `dialog.html` and `dialog.js` (the Office dialog that carries a sign-in result back as a string) |
+| `render.mjs` | Fills a manifest in for your origin: `node render.mjs outlook --origin https://canoa.example --out outlook.xml` (`documents` takes `--hosts Document,Workbook,Presentation`, all three by default; `--secret-file <home>/office/secret` puts the home's secret in the pane's address) |
+| `taskpane/` | The pages the host serves: `taskpane.html` and `taskpane.js` (read the open item through Office.js, frame the chat, carry the sign-in), `relation.js` (the relation of an item and the messages the pane and the app exchange, with no Office.js in it), `dialog.html` and `dialog.js` (the Office dialog that carries a sign-in result back as a string), `launch.js`, `launch.html` and `launch-page.js` (starting a host that is not running, and the secret) |
 | `sideload.ps1` | Registers or removes a rendered manifest for Word, Excel and PowerPoint on Windows (`add`, `remove`, `status`; `-Key` names another registry key, which is how its test runs) |
 | `e2e/local.mjs` | A real Chromium against a host with `office_local` over HTTPS: the pages load under the policy and the page's key is accepted with no pairing |
-| `test/` | `npm test` runs `node --test` over `relation.js`, `render.mjs` and `sideload.ps1` (the last on a scratch registry key, skipped without PowerShell on Windows) |
+| `test/` | `npm test` runs `node --test` over `relation.js`, `launch.js`, `render.mjs` and `sideload.ps1` (the last on a scratch registry key, skipped without PowerShell on Windows) |
 
 The pages are compiled into `canoa-host` and answered under `/office/` only when the configuration says so; the manifests are not
 served by it. The app they frame is the web app the host already serves, under `/office/app/`. Both the standalone host
@@ -204,8 +204,8 @@ with one, so the steps serve HTTPS with a certificate the web view trusts, which
    trial's canoa.cfg and home, and, if you will not use it again, `npx office-addin-dev-certs uninstall`. Office keeps a cache of
    an add-in's files: Microsoft's "Clear the Office cache" page says how.
 
-A page cannot start a program, and a pane whose server is not running has no page to say anything, so the pane cannot offer to start
-Canoa the way the browser extension does (its native messaging host can). It names what starts it once it has loaded.
+If Canoa stops while the pane is open, the pane says so and loads the chat again when it answers. A page cannot start a program,
+so starting Canoa from the pane is the job of the small launcher below, not of the page.
 
 ### Who can reach a loopback origin
 
@@ -220,13 +220,60 @@ and its own settings are not measured here.
 | A page that points its own name at this computer (DNS rebinding) | The `Host` of the request must be a loopback name, and the web server turns away any other. |
 | Another computer | The listener is loopback, and `office_local` is refused on any other address. A proxy on this computer in front of a loopback listener would make every request look local: the proxied request carries the public name in `Host` and the browser's `Origin`, which fail the checks, but do not set `office_local` behind a proxy. |
 | A program of yours on this computer | Nothing, and nothing is meant to: it can read the host's home and trust store directly, and it can send any header. |
-| Another account on this computer | Nothing. It can connect to the loopback port, connect with a key of its own, and send the headers the page sends, and so get that key accepted and run an agent as you. That is the one case where a shared computer should leave `office_local` off. A secret the manifest carries (read from the home, which other accounts cannot read) would close it; it is not built. |
+| Another account on this computer | Nothing by default. It can connect to the loopback port, connect with a key of its own, and send the headers the page sends, and so get that key accepted and run an agent as you. With `office_secret = true` (below) it also needs the secret in your home, which it cannot read. |
 | A program that listens on the port while Canoa is stopped | Office loads `https://localhost:7800`, and a program without the certificate's key cannot answer it. The key is a file in your own profile. |
 
 Microsoft documents that WebView2 keeps its own browser data in a user data folder per host application ("Manage user data
 folders"), and Chromium partitions storage by top-level site and an "ancestor bit" for a cross-site frame (Privacy Sandbox,
 "Storage partitioning"): the pane and the app it frames are one origin, so they are one partition, and the key stays between
 launches. Whether Office keeps its web view's data between launches is not stated in what was read.
+
+## The secret, for a computer more than one account uses
+
+Off by default: the computer is yours, and nothing here asks you to prove it. On a computer another account can also log in to,
+add `office_secret = true` beside `office_local`. The host then makes `<home>/office/secret` (64 random hexadecimal digits, mode
+`0600` where the system has modes, in your profile elsewhere) and refuses `POST /office/admit` and the launcher's
+`POST /office/launch` unless the request carries it in the `X-Canoa-Office-Key` header. The pane learns it from its own address:
+render the manifest with it,
+
+```sh
+node clients/office/render.mjs documents --origin https://localhost:7800 --secret-file <home>/office/secret --out <manifest.xml>
+```
+
+which makes the pane's address `https://localhost:7800/office/taskpane.html?office_key=<secret>`, and sideload that manifest again.
+The pane passes it to the app in the frame's address and to its own requests; a page that is not given one (a manifest rendered
+without it) is refused with a message that says so. Keys the host admitted before the secret was turned on are not held again: the
+page asks again, with it. The secret is in the manifest, a file you can read: do not share the manifest.
+
+## Starting Canoa from the pane
+
+Office loads the pane's first page from the address in the manifest, and a pane whose server is not running has no page to say
+anything: Office shows its own error. So the offer to start Canoa has to be served by something that holds that address while Canoa
+does not. That is `canoa office-launcher`, a small program you leave running (at login, with the system's own means: a Startup
+shortcut or a Run entry on Windows, a user unit elsewhere; this repository registers nothing for you). It reads the same canoa.cfg
+as the host (`[host.web]` with `office` and `office_local`, the same `listen`, `cert` and `key`).
+
+- While a host holds the home it does nothing but look every half second. A host that starts takes the home before it binds, the
+  launcher lets go of the address at its next look, and a host that finds the address held waits for it a few seconds, so neither
+  has to be started first.
+- With no host it takes the address after a few looks that found none (a host restarting is not met) and answers the pane's page
+  with one that says Canoa is not running and has a **Start Canoa** button, and `/canoa.json` with `{"launcher": "/office/launch"}`.
+  Nothing else of the host is served.
+- The button posts `/office/launch`; the launcher lets go of the address and starts the host the home recorded with `canoa native
+  install` (the same program and arguments the browser extension's relay starts), else this program with `serve`, detached from the
+  launcher. The page then waits for the host to answer and loads the pane.
+- A pane already open when Canoa stops shows the same button, as soon as the launcher holds the address.
+
+A `canoa:` link handler would not do: it is reached from a page that has loaded, and the case that matters is the pane that could
+not. A launcher that stops (logout) leaves a running host alone.
+
+## Restarts
+
+The host keeps the keys it admitted in `<home>/office/admitted.json` (their ids only, which the trust store already holds). After a
+restart a key the trust store still accepts is held as the page's key again at once, with the control grants it had, so the chat
+reconnects with no reload and no new request. `canoa revoke` takes the key out of the trust store and so out of what is held at the
+next start. The pane, for its part, looks at the host every five seconds and loads the chat again when it answers after being away,
+and the pane loads the chat again by itself.
 
 ## How the relation is made
 
@@ -272,6 +319,8 @@ A host that does not serve a portal never goes through this.
 None of this has run in an Office client. Microsoft's pages describe the behaviours; these points they do not settle, and
 the code does not guess them:
 
+0. The launcher: that Office loads the pane's address again after the launcher has answered it, and that a pane opened while the
+   launcher holds the address shows its page at all.
 1. Which origins frame a task pane in each client. The list in the host is a start (Outlook on the web's own addresses and
    two wildcards); check the browser console's blocked-frame report in each client and add with `office_frames`.
 2. Whether Office.js needs anything beyond its one origin under this policy (`script-src` and `connect-src` name it alone);

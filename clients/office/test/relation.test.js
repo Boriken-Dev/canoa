@@ -176,3 +176,10 @@ test('the dialog\'s string goes on only when it is URL-safe base64 of the length
     assert.equal(handoffFrom(other), null, String(other).slice(0, 20));
   }
 });
+
+test('the secret, when the pane has one, goes to the app in its address and nowhere else', () => {
+  const key = 'cd34'.repeat(16);
+  const address = new URL(appAddress('https://localhost:7800', null, 'word', key));
+  assert.equal(address.searchParams.get('office_key'), key);
+  assert.ok(!new URL(appAddress('https://localhost:7800', null, 'word')).search.includes('office_key'));
+});

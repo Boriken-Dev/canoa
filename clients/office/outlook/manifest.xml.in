@@ -28,13 +28,13 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="{{ORIGIN}}/office/taskpane.html"/>
+        <SourceLocation DefaultValue="{{ORIGIN}}/office/taskpane.html{{KEY}}"/>
         <RequestedHeight>250</RequestedHeight>
       </DesktopSettings>
     </Form>
     <Form xsi:type="ItemEdit">
       <DesktopSettings>
-        <SourceLocation DefaultValue="{{ORIGIN}}/office/taskpane.html"/>
+        <SourceLocation DefaultValue="{{ORIGIN}}/office/taskpane.html{{KEY}}"/>
       </DesktopSettings>
     </Form>
   </FormSettings>
@@ -109,7 +109,7 @@
         <bt:Image id="Icon80" DefaultValue="{{ORIGIN}}/office/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="PaneUrl" DefaultValue="{{ORIGIN}}/office/taskpane.html"/>
+        <bt:Url id="PaneUrl" DefaultValue="{{ORIGIN}}/office/taskpane.html{{KEY}}"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="Canoa"/>
@@ -187,7 +187,7 @@
           <bt:Image id="Icon80" DefaultValue="{{ORIGIN}}/office/icon-80.png"/>
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="PaneUrl" DefaultValue="{{ORIGIN}}/office/taskpane.html"/>
+          <bt:Url id="PaneUrl" DefaultValue="{{ORIGIN}}/office/taskpane.html{{KEY}}"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="GroupLabel" DefaultValue="Canoa"/>

@@ -19,7 +19,7 @@
 {{HOSTS}}
   </Hosts>
   <DefaultSettings>
-    <SourceLocation DefaultValue="{{ORIGIN}}/office/taskpane.html"/>
+    <SourceLocation DefaultValue="{{ORIGIN}}/office/taskpane.html{{KEY}}"/>
   </DefaultSettings>
   <!-- Read document: the address of the open document, which is what a session is tied to. Nothing is written to it. -->
   <Permissions>ReadDocument</Permissions>

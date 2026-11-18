@@ -20,7 +20,9 @@ use std::time::{Instant, SystemTime};
 use crate::config::{WebConfig, WebMode, WebTls};
 use crate::serve::{Admission, Gate, Listening, NotAdmitted, Serving};
 
+mod local;
 mod office;
+pub(crate) use local::{LAUNCH_PATH, Launcher, Secret};
 pub(crate) use office::{ICON_FILE, Office, Route, frame_source};
 
 /// Where the site is served when canoa.cfg does not say: loopback, port 7800.
@@ -39,6 +41,9 @@ const CHUNK: usize = 4096;
 const ACCEPT_REST: Duration = Duration::from_millis(50);
 /// How often an idle listener looks up to see whether [`WebStopper::stop`] was called.
 const STOP_POLL: Duration = Duration::from_millis(25);
+/// How often, and how many times, a host with the add-in on this computer tries an address another program holds before it fails.
+const ADDRESS_WAIT: Duration = Duration::from_millis(250);
+const ADDRESS_WAITS: u32 = 20;
 
 /// The site built in by the `web` feature: each file's path under the site, its bytes and its entity tag, by path.
 #[cfg(feature = "web")]
@@ -238,6 +243,8 @@ pub enum WebError {
     Connect,
     /// An `office_frames` source is not `https://` and a host (which may start with `*.`), with an optional port.
     OfficeFrame,
+    /// The add-in's secret could not be read or made: there is no home to keep it in (`None`), or the file failed.
+    Secret(Option<io::Error>),
     /// The certificate or key could not be used.
     Tls {
         /// The file, or the certificate's when the two do not go together.
@@ -272,6 +279,12 @@ impl fmt::Display for WebError {
             Self::OfficeFrame => f.write_str(
                 "a [host.web] office_frames source is not https and a host (a leading *. is allowed), with an optional port",
             ),
+            Self::Secret(None) => f.write_str(
+                "[host.web] office_secret needs a home to keep the secret in, and this host has none",
+            ),
+            Self::Secret(Some(error)) => {
+                write!(f, "the add-in's secret could not be read or made: {error}")
+            }
             Self::Tls { file, why } => write!(f, "TLS from {}: {why}", file.display()),
             Self::Listen { address, source } => {
                 write!(f, "the web app could not listen on {address}: {source}")
@@ -284,6 +297,7 @@ impl core::error::Error for WebError {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             Self::Listen { source, .. } => Some(source),
+            Self::Secret(Some(error)) => Some(error),
             _ => None,
         }
     }
@@ -297,6 +311,8 @@ enum Site {
     /// The site built in.
     #[cfg(feature = "web")]
     BuiltIn,
+    /// No site: a server that only offers to start a host answers the add-in's pages and nothing else.
+    Nothing,
 }
 
 /// What every connection shares.
@@ -310,10 +326,25 @@ struct Shared {
     office: Option<Office>,
     /// What accepts the key of the page this server serves, when `[host.web] office_local` asks for it.
     admission: Option<Admission>,
+    /// Whether the add-in's page on this computer is served: a request from it may be answered. With a launcher alone there is no
+    /// admission, and the same checks apply.
+    local: bool,
+    /// The home's secret, when `[host.web] office_secret` asks for a request to carry it.
+    secret: Option<Secret>,
+    /// Set for a server that is only the offer to start a host, which answers nothing else.
+    launcher: Option<Launcher>,
     /// The list at [`HOST_INDEX`] as a page reached over loopback reads it, and as any other page does.
     index: [Vec<u8>; 2],
     /// Set by [`WebStopper::stop`]: the listener ends, and each connection after the answer it is sending.
     stopped: Arc<AtomicBool>,
+}
+
+/// What a server on the person's own computer is given besides admitting a page's key: the home's secret and, for a server that is
+/// only the offer to start a host, the launcher.
+#[derive(Default)]
+pub(crate) struct Extras {
+    pub(crate) secret: Option<Secret>,
+    pub(crate) launcher: Option<Launcher>,
 }
 
 /// The web app bound to its address, not yet taking connections.
@@ -352,8 +383,46 @@ impl WebServer {
             .filter(|listening| !listening.local)
             .cloned()
             .collect();
-        let admission = (web.office && web.office_local).then(|| serving.admission());
-        Self::bind_admitting(web, &peer, serving.method().name(), &listed, admission)
+        let local = web.office && web.office_local;
+        let admission = local.then(|| serving.admission(web.office_secret));
+        let mut extras = Extras::default();
+        if local && web.office_secret {
+            let dir = serving.office_dir().ok_or(WebError::Secret(None))?;
+            extras.secret =
+                Some(Secret::load(&dir).map_err(|error| WebError::Secret(Some(error)))?);
+        }
+        Self::bind_with(
+            web,
+            &peer,
+            serving.method().name(),
+            &listed,
+            admission,
+            extras,
+        )
+    }
+
+    /// A server that only offers to start a host: `/office/taskpane.html` is the page that says none runs and asks `launcher` to
+    /// start one, and `/canoa.json` says so. It serves no site and lists no entry.
+    ///
+    /// # Errors
+    ///
+    /// As [`WebServer::bind`], bar the site.
+    pub(crate) fn bind_launcher(
+        web: &WebConfig,
+        secret: Option<Secret>,
+        launcher: Launcher,
+    ) -> Result<Self, WebError> {
+        Self::bind_with(
+            web,
+            "",
+            "",
+            &[],
+            None,
+            Extras {
+                secret,
+                launcher: Some(launcher),
+            },
+        )
     }
 
     /// As [`WebServer::bind`], listing `entries` under the host id `peer`, which proves by `method`, and admitting no page.
@@ -368,12 +437,25 @@ impl WebServer {
     }
 
     /// [`WebServer::bind_listing`] with `admission`, which lets the page this server serves ask for its own key to be accepted.
+    #[cfg(test)]
     pub(crate) fn bind_admitting(
         web: &WebConfig,
         peer: &str,
         method: &str,
         entries: &[Listening],
         admission: Option<Admission>,
+    ) -> Result<Self, WebError> {
+        Self::bind_with(web, peer, method, entries, admission, Extras::default())
+    }
+
+    /// [`WebServer::bind_admitting`] with what else a server on the person's own computer is given.
+    pub(crate) fn bind_with(
+        web: &WebConfig,
+        peer: &str,
+        method: &str,
+        entries: &[Listening],
+        admission: Option<Admission>,
+        extras: Extras,
     ) -> Result<Self, WebError> {
         // A page cannot reach a pipe, so it is neither offered one nor allowed to connect to one.
         let entries: Vec<Listening> = entries
@@ -389,6 +471,7 @@ impl WebServer {
             return Err(WebError::Limit(setting));
         }
         let site = match &web.dir {
+            _ if extras.launcher.is_some() => Site::Nothing,
             Some(dir) => Site::Dir(site_root(dir, &web.keep_out)?),
             #[cfg(feature = "web")]
             None => Site::BuiltIn,
@@ -432,10 +515,33 @@ impl WebServer {
                 "non-default: host.web.office_local accepts the key of the page this server serves, when it asks from this computer at its own origin"
             );
         }
-        let listener = TcpListener::bind(web.listen).map_err(|source| WebError::Listen {
-            address: web.listen,
-            source,
-        })?;
+        if extras.secret.is_some() {
+            tracing::info!(
+                "non-default: host.web.office_secret asks the add-in's page on this computer for the home's secret"
+            );
+        }
+        // A host with the add-in on this computer may start while the launcher still holds the address, which it lets go of within
+        // a moment: waiting for it is how the host that was asked for starts at all.
+        let mut waited = 0;
+        let listener = loop {
+            match TcpListener::bind(web.listen) {
+                Ok(listener) => break listener,
+                Err(error)
+                    if error.kind() == io::ErrorKind::AddrInUse
+                        && admission.is_some()
+                        && waited < ADDRESS_WAITS =>
+                {
+                    waited += 1;
+                    std::thread::sleep(ADDRESS_WAIT);
+                }
+                Err(source) => {
+                    return Err(WebError::Listen {
+                        address: web.listen,
+                        source,
+                    });
+                }
+            }
+        };
         let bound = listener.local_addr().map_err(|source| WebError::Listen {
             address: web.listen,
             source,
@@ -445,6 +551,8 @@ impl WebServer {
             .map(|entry| entry.url.as_str())
             .chain(web.connect.iter().map(String::as_str))
             .collect();
+        let local = admission.is_some() || extras.launcher.is_some();
+        let stopped = Arc::new(AtomicBool::new(false));
         Ok(Self {
             listener,
             bound,
@@ -468,7 +576,10 @@ impl WebServer {
                     )
                 }),
                 admission,
-                stopped: Arc::new(AtomicBool::new(false)),
+                local,
+                secret: extras.secret,
+                launcher: extras.launcher,
+                stopped,
             }),
         })
     }
@@ -1218,6 +1329,7 @@ const fn reason(status: u16) -> &'static str {
         421 => "Misdirected Request",
         431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "Error",
     }
 }
@@ -1229,12 +1341,17 @@ fn answer(
     from: Option<IpAddr>,
 ) -> (Answer, bool) {
     let head = request.method == Some("HEAD");
+    let asked_path = request
+        .path
+        .and_then(|target| target.split(['?', '#']).next());
     let admitting = request.method == Some("POST")
         && shared.admission.is_some()
-        && request
-            .path
-            .is_some_and(|target| target.split(['?', '#']).next() == Some(ADMIT_PATH));
-    if !head && !admitting && request.method != Some("GET") {
+        && asked_path == Some(ADMIT_PATH);
+    let launching = request.method == Some("POST")
+        && shared.launcher.is_some()
+        && asked_path == Some(LAUNCH_PATH);
+    let posting = admitting || launching;
+    if !head && !posting && request.method != Some("GET") {
         let mut refused = Answer::refusal(405);
         refused.headers.push(("Allow", "GET, HEAD".to_owned()));
         return (refused, false);
@@ -1257,6 +1374,12 @@ fn answer(
     }
     if admitting {
         return (admit(shared, request, target, from), false);
+    }
+    if launching {
+        return (launch(shared, request, from), false);
+    }
+    if shared.launcher.is_some() {
+        return launcher_page(shared, target, head);
     }
     // The add-in's app page is at `/office/app/`, and the app asks for `canoa.json` beside the page it was loaded from.
     let asked = target.split(['?', '#']).next();
@@ -1382,23 +1505,11 @@ fn admit(
         ),
         keep: false,
     };
-    let (Some(admission), Some(host)) = (&shared.admission, header(request, "host")) else {
+    let Some(admission) = &shared.admission else {
         return reply(403, "not here");
     };
-    let scheme = if shared.tls.is_some() {
-        "https"
-    } else {
-        "http"
-    };
-    let own = format!("{scheme}://{host}");
-    let same_origin = header(request, "origin")
-        .is_some_and(|origin| origin.eq_ignore_ascii_case(&own))
-        && header(request, "sec-fetch-site").is_none_or(|site| site == "same-origin");
-    if !loopback_host(host) || !from.is_some_and(|address| address.is_loopback()) || !same_origin {
-        return reply(
-            403,
-            "only the page this host serves, on this computer, may ask",
-        );
+    if let Err((status, said)) = own_page(shared, request, from) {
+        return reply(status, said);
     }
     let peer = target
         .split_once('?')
@@ -1422,6 +1533,112 @@ fn admit(
         Err(NotAdmitted::NotLocal) => reply(403, "this key did not connect from this computer"),
         Err(NotAdmitted::Store) => reply(500, "the trust store could not be used"),
     }
+}
+
+/// Whether the request is from the page this server serves, on this computer: from a loopback address, naming this computer by a
+/// loopback name, from a page of this very origin (`Origin` is the scheme and `Host` of the request, and `Sec-Fetch-Site`, when
+/// the browser sends it, says `same-origin`) and, when the home keeps a secret for the add-in, carrying it. The refusal is a status
+/// and what it says.
+fn own_page(
+    shared: &Shared,
+    request: &httparse::Request<'_, '_>,
+    from: Option<IpAddr>,
+) -> Result<(), (u16, &'static str)> {
+    let Some(host) = header(request, "host").filter(|_| shared.local) else {
+        return Err((403, "not here"));
+    };
+    let scheme = if shared.tls.is_some() {
+        "https"
+    } else {
+        "http"
+    };
+    let own = format!("{scheme}://{host}");
+    let same_origin = header(request, "origin")
+        .is_some_and(|origin| origin.eq_ignore_ascii_case(&own))
+        && header(request, "sec-fetch-site").is_none_or(|site| site == "same-origin");
+    if !loopback_host(host) || !from.is_some_and(|address| address.is_loopback()) || !same_origin {
+        return Err((
+            403,
+            "only the page this host serves, on this computer, may ask",
+        ));
+    }
+    if let Some(secret) = &shared.secret
+        && !secret.permits(header(request, local::KEY_HEADER))
+    {
+        return Err((
+            403,
+            "this add-in's secret is needed: render its manifest again for this home",
+        ));
+    }
+    Ok(())
+}
+
+/// A JSON answer that no cache keeps.
+fn json_answer(status: u16, body: &serde_json::Value, keep: bool) -> Answer {
+    Answer {
+        status,
+        headers: vec![
+            ("Content-Type", "application/json".to_owned()),
+            ("Cache-Control", "no-store".to_owned()),
+        ],
+        body: Body::Owned(body.to_string().into_bytes()),
+        keep,
+    }
+}
+
+/// The answer to `POST /office/launch` on a server that only offers to start a host.
+fn launch(shared: &Shared, request: &httparse::Request<'_, '_>, from: Option<IpAddr>) -> Answer {
+    if let Err((status, said)) = own_page(shared, request, from) {
+        return json_answer(status, &serde_json::json!({ "said": said }), false);
+    }
+    let started = shared.launcher.as_ref().is_some_and(Launcher::ask);
+    if started {
+        json_answer(200, &serde_json::json!({ "starting": true }), false)
+    } else {
+        json_answer(
+            503,
+            &serde_json::json!({ "said": "nothing is waiting to start a host" }),
+            false,
+        )
+    }
+}
+
+/// What a server that only offers to start a host answers a `GET`: the add-in's page as the offer, its script and the icon, and
+/// `/canoa.json` saying where to ask. Anything else is not here.
+fn launcher_page(shared: &Shared, target: &str, head: bool) -> (Answer, bool) {
+    let asked = target.split(['?', '#']).next();
+    if asked == Some(HOST_INDEX) || asked == Some(office::APP_INDEX) {
+        let body = serde_json::json!({ "launcher": LAUNCH_PATH });
+        return (json_answer(200, &body, true), head);
+    }
+    let Some(office) = &shared.office else {
+        return (Answer::refusal(404), head);
+    };
+    let Some(segments) = segments(target) else {
+        return (Answer::refusal(404), head);
+    };
+    let route = match Office::route(&segments) {
+        Some(Route::Page(page)) if page.name() == "taskpane.html" => Office::launch_page(),
+        Some(route @ Route::Page(_)) => route,
+        _ => return (Answer::refusal(404), head),
+    };
+    let Route::Page(page) = &route else {
+        return (Answer::refusal(404), head);
+    };
+    let mut headers = vec![
+        ("Content-Type", content_type(page.name()).to_owned()),
+        ("Cache-Control", "no-store".to_owned()),
+    ];
+    headers.extend(office.headers(&route));
+    (
+        Answer {
+            status: 200,
+            headers,
+            body: Body::Owned(page.body()),
+            keep: true,
+        },
+        head,
+    )
 }
 
 /// The headers a file's answer carries: its type, its caching, its tag and, when the file has one, when it changed.
@@ -1543,6 +1760,7 @@ pub(crate) enum Lookup {
 
 fn lookup(site: &Site, segments: &[String]) -> Lookup {
     match site {
+        Site::Nothing => Lookup::Missing,
         Site::Dir(root) => lookup_dir(root, segments),
         #[cfg(feature = "web")]
         Site::BuiltIn => {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { IDS, checkOrigin, parseArguments, render } from '../render.mjs';
+import { IDS, checkOrigin, keyQuery, parseArguments, render } from '../render.mjs';
 
 /** Whether `xml`'s tags open and close in order: no parser is needed to catch a template edit that breaks the nesting. */
 function balanced(xml) {
@@ -72,7 +72,10 @@ test('an origin cannot break out of an attribute', () => {
 
 test('the command line reads a kind and its options', () => {
   const parsed = parseArguments(['documents', '--origin', origin, '--hosts', 'Document,Workbook', '--out', 'm.xml']);
-  assert.deepEqual(parsed, { kind: 'documents', origin, hosts: ['Document', 'Workbook'], out: 'm.xml' });
+  assert.deepEqual(parsed, { kind: 'documents', origin, hosts: ['Document', 'Workbook'], out: 'm.xml', secret: undefined, secretFile: undefined });
+  assert.equal(parseArguments(['outlook', '--origin', origin, '--secret', 'ab']).secret, 'ab');
+  assert.equal(parseArguments(['outlook', '--origin', origin, '--secret-file', 's.txt']).secretFile, 's.txt');
+  assert.throws(() => parseArguments(['outlook', '--secret', 'a', '--secret-file', 'b']), /not both/);
   assert.throws(() => parseArguments(['outlook', '--origin']), /unexpected argument/);
   assert.throws(() => parseArguments(['outlook', '--nope', 'x']), /unexpected argument/);
 });
@@ -93,4 +96,28 @@ test('a manifest for the Canoa on this computer names the loopback origin with i
   assert.ok(!xml.includes('Presentation'));
   assert.equal(checkOrigin('https://localhost:7800/'), 'https://localhost:7800');
   assert.throws(() => checkOrigin('http://localhost:7800'), /https/);
+});
+
+const secret = 'ab12'.repeat(16);
+
+test('without a secret no address carries one, and with it every address of the pane does', () => {
+  for (const kind of ['outlook', 'documents']) {
+    const plain = render(kind, { origin });
+    assert.ok(!plain.includes('office_key') && !plain.includes('{{'), kind);
+    const keyed = render(kind, { origin, secret });
+    const panes = [...keyed.matchAll(/="([^"]*taskpane\.html[^"]*)"/g)].map((m) => m[1]);
+    assert.ok(panes.length > 0, kind);
+    for (const pane of panes) assert.equal(pane, `${origin}/office/taskpane.html?office_key=${secret}`, kind);
+    assert.equal(keyed.split(secret).length - 1, panes.length, 'the secret is in the pane addresses and nowhere else');
+  }
+});
+
+test('only the secret the host makes is carried: 64 hexadecimal digits, case and a trailing newline ignored', () => {
+  assert.equal(keyQuery(undefined), '');
+  assert.equal(keyQuery(`${secret.toUpperCase()}
+`), `?office_key=${secret}`);
+  for (const bad of ['', 'abc', `${secret}0`, 'g'.repeat(64), `${secret}"/><Evil`, `${secret}&x=1`]) {
+    assert.throws(() => keyQuery(bad), /64 hexadecimal/, JSON.stringify(bad));
+    assert.throws(() => render('outlook', { origin, secret: bad }), /64 hexadecimal/);
+  }
 });

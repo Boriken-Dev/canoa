@@ -569,7 +569,13 @@ portal serves the same pages with `office = true` in its own settings, and signs
 inside Office trusts (HTTPS is what Microsoft recommends for every add-in, and Office on the web needs it). The task pane then needs no
 sign-in and no pairing: its page asks the host that served it to accept its key, which the host does for a request from this computer,
 at a loopback name, from the page's own origin, for a key that has connected once. What it can do is what the browser extension's key
-can do (`[host.native] control`). Do not set it behind a proxy.
+can do (`[host.native] control`), and the keys it was given are kept, so a restart of the host needs no new request. Do not set it
+behind a proxy.
+
+Two more things belong to the same setting. **A secret**, for a computer other accounts use: `office_secret = true` makes the
+host keep one in its home and refuse the page's requests that do not carry it; the manifest is rendered with it. **Starting Canoa
+from the pane:** `canoa office-launcher`, a small program you leave running, holds the pane's address while no Canoa runs and shows a
+page with **Start Canoa**, which starts it. `clients/office/README.md` in the repository says how to set each up.
 
 The API header lists every setting.
 

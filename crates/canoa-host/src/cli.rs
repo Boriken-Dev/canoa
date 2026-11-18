@@ -132,6 +132,10 @@ enum Command {
     Serve(Box<ServeArgs>),
     /// Check canoa.cfg's [host] table and print its entries, serving nothing.
     Check(ConfigArgs),
+    /// Stay resident and hold the Office add-in's address while no Canoa runs, so that a task pane opened then finds a
+    /// page that offers to start Canoa. It lets go of the address as soon as a host holds the home, and starts the host
+    /// `native install` recorded (else `serve`) when the page asks. Needs [host.web] with office and office_local.
+    OfficeLauncher(ConfigArgs),
     /// Print the canoa.cfg files in the order they are read, lowest layer first, and the one that is written.
     Layers(ConfigArgs),
     /// Print this host's peer id, which a client pins.
@@ -1530,6 +1534,35 @@ fn layers(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
     }
 }
 
+/// `canoa office-launcher`.
+fn office_launcher(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
+    let config = load(args, front)?;
+    let web = config
+        .web
+        .clone()
+        .filter(|web| web.office && web.office_local)
+        .ok_or_else(|| {
+            Failed::usage(
+                "canoa.cfg has no [host.web] with office = true and office_local = true: there is no add-in address to hold",
+            )
+        })?;
+    let home = home_of(front)?;
+    let program = front
+        .program()
+        .map_err(|error| Failed::run(format!("this program cannot find itself: {error}")))?;
+    let launch = crate::launcher::launch_of(&home, &program, args.config.as_deref());
+    crate::launcher::run(
+        &web,
+        &home.dir().join("office"),
+        &|| crate::launcher::host_runs(&home),
+        &|| launch.start(&home),
+        &|line| front.say(line),
+        &|| false,
+        &crate::launcher::Pace::default(),
+    )
+    .map_err(Failed::run)
+}
+
 fn check(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
     let config = load(args, front)?;
     for entry in &config.entries {
@@ -1640,6 +1673,7 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         Command::Portal(args) => portal(&args, front),
         Command::Serve(args) => serve(&args, front),
         Command::Check(args) => check(&args, front),
+        Command::OfficeLauncher(args) => office_launcher(&args, front),
         Command::Layers(args) => layers(&args, front),
         Command::Options(args) => options(&args, front),
         Command::Id {

@@ -2189,6 +2189,31 @@ fn the_add_in_admits_its_own_page_only_when_asked_and_only_on_loopback() {
 }
 
 #[test]
+fn the_add_ins_secret_is_off_unless_asked_and_needs_the_page_to_be_admitted() {
+    let web = |text: &str| parse(&format!("[host.web]\n{text}"));
+    let on = web("office = true\noffice_local = true\n")
+        .unwrap()
+        .web
+        .unwrap();
+    assert!(
+        !on.office_secret,
+        "off by default: the computer is the person's own"
+    );
+    let asked = web("office = true\noffice_local = true\noffice_secret = true\n")
+        .unwrap()
+        .web
+        .unwrap();
+    assert!(asked.office_secret);
+    for text in [
+        "office_secret = true\n",
+        "office = true\noffice_secret = true\n",
+        "office = true\noffice_local = true\noffice_secret = \"yes\"\n",
+    ] {
+        assert!(web(text).is_err(), "{text}");
+    }
+}
+
+#[test]
 fn a_control_channel_with_no_key_is_fine_when_the_add_in_page_is_admitted() {
     let channel = "[host.control]\nlisten = \"127.0.0.1:0\"\n";
     assert!(

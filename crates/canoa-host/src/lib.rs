@@ -18,6 +18,7 @@ pub mod home;
 mod inproc;
 mod kb_mcp;
 mod kind;
+mod launcher;
 mod local;
 mod loopback;
 pub mod native;

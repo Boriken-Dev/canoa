@@ -133,12 +133,14 @@ export function sameRelation(a, b) {
  * @param {string} origin
  * @param {{kind: string, key: string, label?: string}|null} relation
  * @param {string} [client]
+ * @param {string} [key]  the home's secret, when the manifest carries one: the app sends it with its request to be admitted
  * @returns {string}
  */
-export function appAddress(origin, relation, client) {
+export function appAddress(origin, relation, client, key) {
   const address = new URL(APP_PATH, origin);
   address.searchParams.set('mode', 'chat');
   if (client) address.searchParams.set('client', client);
+  if (key) address.searchParams.set('office_key', key);
   if (relation) {
     address.searchParams.set('relation', `${relation.kind}:${relation.key}`);
     if (relation.label) address.searchParams.set('label', relation.label);

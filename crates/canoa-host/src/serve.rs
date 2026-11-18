@@ -560,6 +560,8 @@ struct Shared {
     /// control channel besides its own grants: what `[host.native] control` gives a browser key.
     admitted: Arc<Mutex<BTreeSet<PeerId>>>,
     page_grants: BTreeSet<control::Grant>,
+    /// Where the add-in on this computer keeps what it needs between runs (its secret, the keys it admitted); none without a home.
+    office_dir: Option<PathBuf>,
     /// The sessions kept for more than one connection.
     hosted: Arc<sessions::Hosted>,
 }
@@ -611,6 +613,8 @@ pub(crate) enum NotAdmitted {
 pub(crate) struct Admission {
     store: Arc<TrustStore>,
     admitted: Arc<Mutex<BTreeSet<PeerId>>>,
+    /// The file the admitted keys are kept in, and whether a secret was asked for when they were admitted.
+    record: Option<(PathBuf, bool)>,
 }
 
 impl Admission {
@@ -619,7 +623,18 @@ impl Admission {
         store: Arc<TrustStore>,
         admitted: Arc<Mutex<BTreeSet<PeerId>>>,
     ) -> Self {
-        Self { store, admitted }
+        Self {
+            store,
+            admitted,
+            record: None,
+        }
+    }
+
+    /// Keeps the keys it admits in `file`, so that a host that starts again holds them as it did. `secret` is whether a request
+    /// has to carry the add-in's secret: keys admitted without one are not held again once it is asked for.
+    pub(crate) fn remembering(mut self, file: PathBuf, secret: bool) -> Self {
+        self.record = Some((file, secret));
+        self
     }
 
     /// Accepts the waiting key `id` when it connected from this computer, and holds it as a page's key for this run; a key
@@ -642,13 +657,54 @@ impl Admission {
             }
             store.accept(id).map_err(|_| NotAdmitted::Store)?;
         }
-        self.admitted
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(*id);
+        let all: Vec<String> = {
+            let mut admitted = self.admitted.lock().unwrap_or_else(PoisonError::into_inner);
+            admitted.insert(*id);
+            admitted.iter().map(ToString::to_string).collect()
+        };
         tracing::info!(%id, "the page this host serves was admitted: its key is accepted");
+        if let Some((file, secret)) = &self.record
+            && let Err(error) = write_admitted(file, *secret, &all)
+        {
+            // The key is held for this run; after a restart the page asks again.
+            tracing::warn!("the admitted keys could not be kept: {error}");
+        }
         Ok(())
     }
+}
+
+/// Keeps `keys` in `file`, replacing what it held.
+fn write_admitted(file: &std::path::Path, secret: bool, keys: &[String]) -> std::io::Result<()> {
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let text = serde_json::json!({ "secret": secret, "keys": keys }).to_string();
+    let part = file.with_extension("json.part");
+    std::fs::write(&part, text)?;
+    std::fs::rename(&part, file)
+}
+
+/// The keys `file` holds that the add-in's page may still hold: those the trust store still accepts (a key taken away with `revoke`
+/// is not held again), and, when a request now has to carry the secret, only those admitted when it had to. A file that is not
+/// there or cannot be read holds none.
+fn read_admitted(file: &std::path::Path, secret: bool, store: &TrustStore) -> BTreeSet<PeerId> {
+    let Ok(text) = std::fs::read_to_string(file) else {
+        return BTreeSet::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return BTreeSet::new();
+    };
+    if secret && value["secret"] != serde_json::Value::Bool(true) {
+        return BTreeSet::new();
+    }
+    value["keys"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .filter_map(|key| key.parse::<PeerId>().ok())
+        .filter(|key| store.is_accepted(key))
+        .collect()
 }
 
 /// Every agent process running, so stopping the host can end them: on Unix nothing else does when the host goes.
@@ -1756,6 +1812,7 @@ impl Serving {
         let stopped = Arc::new(AtomicBool::new(false));
         let trust = Arc::clone(&store);
         let hosted = Arc::new(sessions::Hosted::new(method.peer_id()));
+        let office_dir = options.state_dir.as_ref().map(|dir| dir.join("office"));
         let serving = Self {
             shared: Arc::new(Shared {
                 history: Arc::clone(&recorded),
@@ -1785,8 +1842,14 @@ impl Serving {
                         .filter(|grant| *grant != control::Grant::Discover)
                         .collect()
                 }),
-                admitted: Arc::new(Mutex::new(BTreeSet::new())),
+                admitted: Arc::new(Mutex::new(match (&office_dir, &config.web) {
+                    (Some(dir), Some(web)) if web.office && web.office_local => {
+                        read_admitted(&dir.join("admitted.json"), web.office_secret, &store)
+                    }
+                    _ => BTreeSet::new(),
+                })),
                 page_grants: config.native.control.clone(),
+                office_dir: office_dir.clone(),
                 method,
                 store,
                 registry,
@@ -2191,11 +2254,21 @@ impl Serving {
 
     /// What lets the host's own web server admit the key of the page it serves (`[host.web] office_local`).
     #[must_use]
-    pub(crate) fn admission(&self) -> Admission {
-        Admission::new(
+    pub(crate) fn admission(&self, secret: bool) -> Admission {
+        let admission = Admission::new(
             Arc::clone(&self.shared.store),
             Arc::clone(&self.shared.admitted),
-        )
+        );
+        match &self.shared.office_dir {
+            Some(dir) => admission.remembering(dir.join("admitted.json"), secret),
+            None => admission,
+        }
+    }
+
+    /// Where the add-in on this computer keeps its secret, in the host's home; `None` for a host with no home.
+    #[must_use]
+    pub(crate) fn office_dir(&self) -> Option<PathBuf> {
+        self.shared.office_dir.clone()
     }
 
     /// A way into every entry from inside this process, which outlives [`Serving::run`] taking `self`.
@@ -3426,6 +3499,56 @@ fn home_from_environment() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_admitted_keys_that_are_kept_are_those_the_store_still_accepts_and_the_secret_asked_for_since_is_respected()
+     {
+        use coqui_peer_webcrypto::KeyMaterial;
+        let dir = std::env::temp_dir().join(format!("canoa-admitted-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("trust")).expect("a folder");
+        let store = TrustStore::open(&dir.join("trust")).expect("a store");
+        let key = |tag: u8| KeyMaterial::new("noise", "PUBLIC KEY", vec![tag; 32]).expect("a key");
+        let (kept, taken_away) = (key(1), key(2));
+        store.accept_key(&kept).expect("accepted");
+        let file = dir.join("office").join("admitted.json");
+        let keys = vec![
+            kept.id().to_string(),
+            taken_away.id().to_string(),
+            "not an id".to_owned(),
+        ];
+
+        assert!(
+            read_admitted(&file, false, &store).is_empty(),
+            "no file holds none"
+        );
+        write_admitted(&file, false, &keys).expect("written");
+        assert_eq!(
+            read_admitted(&file, false, &store),
+            BTreeSet::from([kept.id()]),
+            "a key the trust store no longer accepts, and a line that is no key, are not held again"
+        );
+        assert!(
+            read_admitted(&file, true, &store).is_empty(),
+            "keys admitted when no secret was asked for are not held once one is"
+        );
+        write_admitted(&file, true, &keys).expect("written");
+        assert_eq!(
+            read_admitted(&file, true, &store),
+            BTreeSet::from([kept.id()])
+        );
+        assert_eq!(
+            read_admitted(&file, false, &store),
+            BTreeSet::from([kept.id()]),
+            "a secret asked for then is more than is asked for now"
+        );
+        std::fs::write(&file, "{ not json").expect("written");
+        assert!(
+            read_admitted(&file, false, &store).is_empty(),
+            "a file that cannot be read holds none"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_tasks_connection_cannot_open_the_control_channel_and_this_process_can() {

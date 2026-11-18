@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Canoa</title>
+    <!-- Shown by the launcher in place of the task pane while no Canoa runs. Office.js is loaded so the pane starts as any other. -->
+    <script src="https://officeapis.public.onecdn.static.microsoft/1/office.js"></script>
+    <style>
+      html, body { height: 100%; margin: 0; background: #101820; color: #e6eef2; font: 14px system-ui, sans-serif; }
+      main { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+      button { font: inherit; color: inherit; background: #24394a; border: 1px solid #3a5469; border-radius: 4px; padding: 6px 12px; cursor: pointer; align-self: flex-start; }
+      button:disabled { opacity: 0.6; cursor: default; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p id="status" role="status">Canoa is not running on this computer.</p>
+      <button id="start" type="button">Start Canoa</button>
+    </main>
+    <script type="module" src="launch-page.js"></script>
+  </body>
+</html>

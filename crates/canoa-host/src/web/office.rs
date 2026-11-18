@@ -12,8 +12,9 @@
 //! | `/office/app/canoa.json` | the host's list of entries, as `/canoa.json` answers it, for the app page that asks for it beside itself |
 //! | `/office/icon-N.png` | `Cross-Origin-Resource-Policy: cross-origin`, since Office draws it from its own origin |
 //!
-//! `taskpane.js`, `relation.js` and `dialog.js` are scripts of this origin and are answered with the usual headers. Every other
-//! path under `/office/` is the site's, as before.
+//! `taskpane.js`, `relation.js`, `dialog.js`, `launch.js` and `launch-page.js` are scripts of this origin and
+//! are answered with the usual headers. `launch.html` is the page a server that only offers to start a host shows in place of
+//! `taskpane.html`. Every other path under `/office/` is the site's, as before.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -87,6 +88,21 @@ const PAGES: &[Page] = &[
     Page {
         name: "dialog.js",
         body: include_str!("../../../../clients/office/taskpane/dialog.js"),
+        kind: Kind::Script,
+    },
+    Page {
+        name: "launch.html",
+        body: include_str!("../../../../clients/office/taskpane/launch.html"),
+        kind: Kind::Pane,
+    },
+    Page {
+        name: "launch.js",
+        body: include_str!("../../../../clients/office/taskpane/launch.js"),
+        kind: Kind::Script,
+    },
+    Page {
+        name: "launch-page.js",
+        body: include_str!("../../../../clients/office/taskpane/launch-page.js"),
         kind: Kind::Script,
     },
 ];
@@ -180,6 +196,14 @@ impl Office {
             .iter()
             .find(|page| page.name == second)
             .map(Route::Page)
+    }
+
+    /// The page that offers to start a host, which a server with no host answers in place of the task pane.
+    pub(crate) fn launch_page() -> Route {
+        PAGES
+            .iter()
+            .find(|page| page.name == "launch.html")
+            .map_or(Route::App, Route::Page)
     }
 
     /// The headers a route's answer carries in place of the usual ones. A header with an empty value is not sent.
