@@ -1,0 +1,78 @@
+//! A stand-in extension: a library of its own that offers one item, as an extension of canoa.cfg would.
+
+use canoa::form::Field;
+use canoa::profile_item::{
+    ApplyRequest, ItemEffect, ItemInfo, ProfileItem, Setting, Variable, bad_value_error,
+};
+use coqui_acp_api::guatiao::Provider;
+use coqui_acp_api::guatiao::library::{ProviderError, Registry};
+use serde_json::Value;
+
+use super::{ItemCatalog, values_of};
+
+/// Where the session runs: sets `REGION`, and for the fast tier the model.
+#[derive(Default, Debug, Provider)]
+#[provider(ProfileItem, id = "region_item", crate = ::coqui_acp_api::guatiao)]
+pub(crate) struct RegionItem;
+
+impl ProfileItem for RegionItem {
+    fn describe(&self) -> Result<ItemInfo, ProviderError> {
+        let mut info = ItemInfo::new("region", "Region");
+        info.help = Some("Where the session runs.".to_owned());
+        info.harnesses = vec!["claude-code".to_owned()];
+        let mut tier = Field::choice("tier", "Tier", ["standard", "fast"]);
+        tier.default = Some("standard".to_owned());
+        info.fields = vec![
+            Field::new("name", "Name", "text").required(),
+            Field::new("hosts", "Hosts", "list"),
+            tier,
+        ];
+        Ok(info)
+    }
+
+    fn apply(&self, request: ApplyRequest) -> Result<ItemEffect, ProviderError> {
+        let values = values_of(&request)?;
+        let name = values
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad_value_error("a region has a name"))?;
+        let mut effect = ItemEffect::none();
+        effect.env.push(Variable::new("REGION", name));
+        if let Some(Value::Array(hosts)) = values.get("hosts") {
+            let hosts: Vec<&str> = hosts.iter().filter_map(Value::as_str).collect();
+            effect
+                .env
+                .push(Variable::new("REGION_HOSTS", hosts.join(",")));
+        }
+        if values.get("tier").and_then(Value::as_str) == Some("fast") {
+            effect.settings.push(Setting::new("model", "fast-model"));
+        }
+        effect.notes.push("puts the session in a region".to_owned());
+        Ok(effect)
+    }
+}
+
+mod library {
+    use super::RegionItem;
+
+    coqui_acp_api::guatiao::local_providers!(
+        id = "regions",
+        version = "1.0.0",
+        providers = [RegionItem]
+    );
+}
+
+/// The registry of the stand-in extension.
+pub(crate) fn registry() -> Registry {
+    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let loading = registry
+        .register_local("regions", library::library)
+        .expect("registers");
+    assert!(loading.loaded().is_some(), "the stand-in is accepted");
+    registry
+}
+
+/// The built-in and bundled items and the stand-in extension's.
+pub(crate) fn with_extension() -> ItemCatalog {
+    ItemCatalog::from_registries(vec![("regions".to_owned(), registry())])
+}

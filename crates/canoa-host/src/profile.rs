@@ -1533,6 +1533,7 @@ fn position(text: &str, offset: usize) -> (usize, usize) {
 
 mod commands;
 pub(crate) mod hosted;
+pub(crate) mod items;
 mod launch;
 mod needs;
 #[cfg(test)]
@@ -1543,6 +1544,7 @@ mod session;
 
 pub(crate) use hosted::forward_hook;
 pub use hosted::{APPROVE_META, APPROVE_METHOD, OVERLAYS_META, PRESET_META, PROFILE_META};
+pub use items::ItemSet;
 pub use launch::launch;
 #[cfg(unix)]
 pub(crate) use launch::{found_on_own_path, sets_path};

@@ -20,6 +20,7 @@ use coqui_transport::{Channel, Failure};
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 
+use super::items;
 use super::needs;
 use super::overlay::{self, Built, ScriptRuns, build_each, resolve_path};
 use super::{
@@ -487,7 +488,7 @@ pub(crate) struct Connection {
     /// The program the host starts and gives the access as variables and arguments (Grok, Antigravity, OpenCode); the others take it in
     /// the session request.
     launched_as: Option<Target>,
-    /// The arguments the access adds to that program's command line, which `canoa launch` appends.
+    /// The arguments the access and the profile's items add to that program's command line, which `canoa launch` appends.
     launch_args: Vec<String>,
 }
 
@@ -598,8 +599,24 @@ impl Connection {
         // default applies.
         let mut loadout = loadout;
         let mut preset_decides = false;
+        // What the profile holds is applied through the items this host offers: the session's own settings are the layer it makes,
+        // and what the other items ask for is applied below.
+        let mut applied: Vec<items::Applied> = Vec::new();
         if let Some((asked, held)) = preset {
-            narrowed.session = Some(held.session_layer());
+            applied = listed
+                .items
+                .catalog()
+                .apply_all(&held.item_values(), starting_with.who.harness);
+            let (layer, refused) = items::session_layer(&applied);
+            narrowed.session = Some(layer);
+            for (key, why) in refused {
+                notes.push(Item::new(
+                    format!("items.{key}"),
+                    LayerId::new(LayerKind::Session, ""),
+                    State::Unsupported,
+                    why,
+                ));
+            }
             preset_decides = held.loadout.is_some();
             if loadout.is_none()
                 && let Some(named) = held.loadout.as_deref()
@@ -763,6 +780,25 @@ impl Connection {
                 env.push((name, Secret(state.clone())));
             }
         }
+        // What the profile's items give the session's programs. A variable the profile's own environment already sets keeps its
+        // value, and the report says so.
+        let mut item_env: Vec<(String, String)> = Vec::new();
+        for (id, variable) in items::variables_of(&applied) {
+            if env.iter().any(|(each, _)| same_name(each, &variable.name)) {
+                notes.push(Item::new(
+                    format!("items.{id}.env.{}", variable.name),
+                    LayerId::new(LayerKind::Session, ""),
+                    State::Unsupported,
+                    format!(
+                        "{} is already set for the session, so its value stays",
+                        variable.name
+                    ),
+                ));
+            } else {
+                env.push((variable.name.clone(), Secret(variable.value.clone())));
+                item_env.push((variable.name.clone(), variable.value.clone()));
+            }
+        }
         // The identity variables come first, so a layer's own value for one replaces them.
         for (name, value) in session.identity().iter().rev() {
             if !env.iter().any(|(each, _)| each.eq_ignore_ascii_case(name)) {
@@ -770,6 +806,7 @@ impl Connection {
             }
         }
         hooks.add_to_environment(session.identity().iter().cloned());
+        hooks.add_to_environment(item_env);
         // The person's own layers' variables are part of the session's environment, which hooks run in; an overlay's reach
         // them through the stack.
         hooks.add_to_environment(effective.env.iter().filter_map(|(name, value)| {
@@ -816,6 +853,36 @@ impl Connection {
                     env.push((name.to_owned(), Secret(value.to_owned())));
                 }
             }
+        }
+        for item in &applied {
+            if let items::Outcome::Done(effect) = &item.outcome {
+                launch_args.extend(effect.args.iter().cloned());
+            }
+        }
+        if items::network_of(&applied).is_some() {
+            notes.push(Item::new(
+                "items.network",
+                LayerId::new(LayerKind::Session, ""),
+                State::Unsupported,
+                "an item asks how the session's programs reach the network, which this host does not apply",
+            ));
+        }
+        for item in &applied {
+            let layer = LayerId::new(LayerKind::Session, "");
+            notes.push(match &item.outcome {
+                items::Outcome::Done(_) => Item::new(
+                    format!("items.{}", item.id),
+                    &layer,
+                    State::Applied,
+                    item.how(),
+                ),
+                items::Outcome::Not(why) => Item::new(
+                    format!("items.{}", item.id),
+                    &layer,
+                    State::Unsupported,
+                    why.clone(),
+                ),
+            });
         }
         let mut env_items = Vec::new();
         for (key, value) in &effective.env {

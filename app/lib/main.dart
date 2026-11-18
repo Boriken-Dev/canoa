@@ -17,6 +17,7 @@ import 'desktop/host_tool.dart';
 import 'sources/control_choices.dart';
 import 'sources/source_choices.dart';
 import 'providers/provider_catalog.dart';
+import 'profile/profile_items.dart';
 import 'sources/source_icons.dart' show sourceProvider;
 import 'extension/composer_extension.dart';
 import 'extension/local_host.dart';
@@ -1625,6 +1626,7 @@ class _CanoaAppState extends State<CanoaApp> {
   Future<void> _hostCameBack() async {
     unawaited(_loadLooks());
     unawaited(_loadProviders());
+    unawaited(_loadProfileItems());
     await _grants?.refresh();
     if (!mounted) return;
     if (_grants?.may(HostGrants.accounts) ?? false) unawaited(_accountsHeld?.refresh());
@@ -2819,6 +2821,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (widget.host?.listening.isNotEmpty ?? false) {
       if (!vendorLooks.answered) unawaited(_loadLooks());
       if (!providerCatalog.answered) unawaited(_loadProviders());
+      if (!profileItems.answered) unawaited(_loadProfileItems());
       unawaited(_grants?.refresh());
       unawaited(_accounts?.refresh());
       unawaited(_running?.refresh());
@@ -2934,6 +2937,7 @@ class _CanoaAppState extends State<CanoaApp> {
     scheduleMicrotask(() {
       unawaited(_loadLooks());
       unawaited(_loadProviders());
+      unawaited(_loadProfileItems());
       unawaited(_grants?.refresh());
       unawaited(_accounts?.refresh());
       _running?.keepFresh();
@@ -3303,6 +3307,18 @@ class _CanoaAppState extends State<CanoaApp> {
       providerCatalog.adopt(await client.call('providers/list', const {}));
     } on Object catch (error) {
       providerCatalog.failed(error is ControlFailed ? error.message : error is StateError ? error.message : 'no link');
+    }
+  }
+
+  /// Asks the host which items a profile may set: the editor draws a form for each from what its provider says of it.
+  Future<void> _loadProfileItems() async {
+    final control = _control;
+    if (control == null) return;
+    try {
+      final client = await control.ready(wait: false);
+      profileItems.adopt(await client.call('profile_items/list', const {}));
+    } on Object catch (error) {
+      profileItems.failed(error is ControlFailed ? error.message : error is StateError ? error.message : 'no link');
     }
   }
 

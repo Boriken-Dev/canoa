@@ -484,6 +484,8 @@ struct Refresh {
     profiles: IndexMap<String, HostProfile>,
     launcher: OsString,
     before: Vec<OsString>,
+    /// The profile items the host offers, opened once when it started.
+    items: crate::profile::ItemSet,
     /// The offer the last readable file gave.
     current: Mutex<Option<Arc<Offer>>>,
 }
@@ -494,7 +496,13 @@ impl Refresh {
         let mut current = self.current.lock().unwrap_or_else(PoisonError::into_inner);
         match Config::load_layers(&self.layers) {
             Ok(config) => {
-                let local = config.local_profiles.for_agent(&self.entry);
+                let local = config
+                    .local_profiles
+                    .for_agent(&self.entry)
+                    .map(|mut each| {
+                        each.items = self.items.clone();
+                        each
+                    });
                 *current = hosted::offer(
                     &self.names,
                     &self.profiles,
@@ -795,6 +803,7 @@ fn refresh_of(
     names: &[String],
     config: &Config,
     options: &ServeOptions,
+    items: &crate::profile::ItemSet,
 ) -> Option<Refresh> {
     let layers = options
         .layers
@@ -802,7 +811,13 @@ fn refresh_of(
         .filter(|_| entry.local || entry.own_profile)?;
     let launcher = options.provider_program.as_os_str().to_owned();
     let before = options.program_args.clone();
-    let local = config.local_profiles.for_agent(&entry.name);
+    let local = config
+        .local_profiles
+        .for_agent(&entry.name)
+        .map(|mut each| {
+            each.items = items.clone();
+            each
+        });
     Some(Refresh {
         layers,
         entry: entry.name.clone(),
@@ -817,6 +832,7 @@ fn refresh_of(
         )),
         launcher,
         before,
+        items: items.clone(),
     })
 }
 
@@ -1361,6 +1377,8 @@ impl Serving {
             }
             None => config,
         };
+        // The items a profile may set: the ones this host carries and those its entries' and extensions' libraries add.
+        let items = crate::profile::ItemSet::of(config);
         let mut sources = if options.local_sources {
             sources::entries(config)
         } else {
@@ -1486,7 +1504,11 @@ impl Serving {
             // any other entry on an address, with its `[host.profiles]`.
             let local_profile = (entry.local || entry.own_profile)
                 .then(|| config.local_profiles.for_agent(&entry.name))
-                .flatten();
+                .flatten()
+                .map(|mut each| {
+                    each.items = items.clone();
+                    each
+                });
             let (kind, run) = match &entry.kind {
                 EntryKind::Agent {
                     program,
@@ -1529,7 +1551,7 @@ impl Serving {
                             options.provider_program.as_os_str().to_owned(),
                             options.program_args.clone(),
                         ),
-                        refresh: refresh_of(entry, profiles, config, options).map(Box::new),
+                        refresh: refresh_of(entry, profiles, config, options, &items).map(Box::new),
                         worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
                     },
                 ),
@@ -1704,7 +1726,8 @@ impl Serving {
                                 options.provider_program.as_os_str().to_owned(),
                                 options.program_args.clone(),
                             ),
-                            refresh: refresh_of(entry, profiles, config, options).map(Box::new),
+                            refresh: refresh_of(entry, profiles, config, options, &items)
+                                .map(Box::new),
                             worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
                         },
                     )

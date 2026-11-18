@@ -164,6 +164,31 @@ access = { sandbox = "none", network = true, approvals = "ask" }
 context = "Answer briefly."
 ```
 
+### Profile items
+
+What a profile may set is not a list in Canoa: each thing is an **item**, a provider of the `profile_item` kind that says its name, the
+harnesses it is for and the form it asks for, and that turns the values you gave it into what a session gets (environment
+variables, arguments for a program the host starts, values of the session's own settings, the network its programs use). The model,
+effort, mode, starting instructions and access are items Canoa carries, kept in a profile under their own keys; an extension of
+canoa.cfg's `[host.extensions]` (or a library or source an agent entry loads) adds more the same way. Settings → Profiles draws a form
+for each item the host lists (`profile_items/list`; the access, which the editor had no row for, is one), and a profile keeps what
+you entered for an item under `items`:
+
+```toml
+[profiles."Behind the gateway"]
+model = "opus"
+
+[profiles."Behind the gateway".items.region]    # an item an extension adds: its fields are the extension's
+name = "north"
+hosts = ["a.example", "b.example"]
+```
+
+A session applies each item its profile holds when it starts, and a started session's profile report lists each (`items.ID`) and
+what it became, by the names of the variables and settings and never their values. A variable the profile's own `[profile.env]`
+already sets keeps that value, and the report says so. An item for a harness other than the session's, an item whose values do not
+fit its form, and an item no provider offers any more (its extension was removed) are not applied and say why; the profile keeps the
+values, and putting the extension back applies them again.
+
 A later layer wins per key. Environment variables, skills and MCP servers merge by name: a later layer's entry replaces a
 lower one's whole and keeps its place, and `remove = true` takes it out. `unset = ["model"]` takes back a lower layer's
 `model`, `effort`, `mode` or `context`. **Settings → Profiles** shows the effective profile of each agent, every value

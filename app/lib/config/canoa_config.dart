@@ -1844,7 +1844,17 @@ const presetNameRule = 'A profile is named with 1 to 64 letters, digits, spaces,
 /// One `[profiles.NAME]`: the values a new session starts with, chosen by name in its footer. It is the session's layer: above the
 /// person's `[profile]` and the agent's entry. The account and the permission mode's rules are never part of one.
 final class Preset {
-  const Preset({this.source, this.model, this.effort, this.mode, this.context, this.cacheLifetime, this.loadout, this.access = const ProfileAccess()});
+  const Preset({
+    this.source,
+    this.model,
+    this.effort,
+    this.mode,
+    this.context,
+    this.cacheLifetime,
+    this.loadout,
+    this.access = const ProfileAccess(),
+    this.items = const {},
+  });
 
   /// The label of the source it runs on; a session keeps its own when this is null.
   final String? source;
@@ -1862,7 +1872,12 @@ final class Preset {
   /// The access it runs the agent with, part by part.
   final ProfileAccess access;
 
-  static const _keys = {'source', 'model', 'effort', 'mode', 'access', 'context', 'cache_lifetime', 'loadout'};
+  /// What it holds for each item a provider adds (a proxy, an identity, whatever an extension offers), by item id: the values the
+  /// person gave the item's form, by field name. The host applies them when a session starts; an item no provider offers any more
+  /// keeps its values here and is not applied.
+  final Map<String, Map<String, Object?>> items;
+
+  static const _keys = {'source', 'model', 'effort', 'mode', 'access', 'context', 'cache_lifetime', 'loadout', 'items'};
   static const _lifetimes = {'default', 'off', 'short', 'long'};
 
   /// The preset [name] as canoa.cfg has it. Throws [FormatException] for a key it does not have, a value that is not text or a name
@@ -1871,9 +1886,9 @@ final class Preset {
     for (final MapEntry(:key, :value) in table.entries) {
       if (!_keys.contains(key)) {
         throw FormatException('canoa.cfg: profiles.$name.$key is not a profile setting: source, model, effort, mode, access, context, '
-            'cache_lifetime and loadout are');
+            'cache_lifetime, loadout and items are');
       }
-      if (key == 'access') continue;
+      if (key == 'access' || key == 'items') continue;
       if (value is! String) throw FormatException('canoa.cfg: profiles.$name.$key is not text');
       if (value.isEmpty || value.contains('\u0000')) throw FormatException('canoa.cfg: profiles.$name.$key is empty or holds a NUL');
     }
@@ -1896,7 +1911,20 @@ final class Preset {
     } on ProfileException catch (error) {
       throw FormatException('canoa.cfg: profiles.$name: $error');
     }
+    final items = <String, Map<String, Object?>>{};
+    final rawItems = table['items'];
+    if (rawItems != null) {
+      if (rawItems is! Map) throw FormatException('canoa.cfg: profiles.$name.items is a table');
+      for (final MapEntry(:key, :value) in rawItems.entries) {
+        if (!RegExp(r'^[a-z0-9_]{1,32}$').hasMatch('$key')) {
+          throw FormatException('canoa.cfg: profiles.$name.items.$key is not an item\'s id');
+        }
+        if (value is! Map) throw FormatException('canoa.cfg: profiles.$name.items.$key is a table');
+        items['$key'] = {for (final MapEntry(:key, :value) in value.entries) '$key': value};
+      }
+    }
     return Preset(
+      items: items,
       source: table['source'] as String?,
       model: own.model,
       effort: own.effort,
@@ -1918,8 +1946,10 @@ final class Preset {
     String? cacheLifetime,
     String? loadout,
     ProfileAccess? access,
+    Map<String, Map<String, Object?>>? items,
     Set<String> clear = const {},
   }) => Preset(
+    items: clear.contains('items') ? const {} : items ?? this.items,
     source: clear.contains('source') ? null : source ?? this.source,
     model: clear.contains('model') ? null : model ?? this.model,
     effort: clear.contains('effort') ? null : effort ?? this.effort,
@@ -1953,6 +1983,7 @@ final class Preset {
         'network': ?access.network,
         'approvals': ?access.approvals,
       },
+    if (items.isNotEmpty) 'items': {for (final MapEntry(:key, :value) in items.entries) key: value},
   };
 
   @override
@@ -1967,11 +1998,26 @@ final class Preset {
       other.loadout == loadout &&
       other.access.sandbox == access.sandbox &&
       other.access.network == access.network &&
-      other.access.approvals == access.approvals;
+      other.access.approvals == access.approvals &&
+      _sameItems(other.items, items);
+
+  static bool _sameItems(Map<String, Map<String, Object?>> a, Map<String, Map<String, Object?>> b) {
+    if (a.length != b.length) return false;
+    for (final MapEntry(:key, :value) in a.entries) {
+      final other = b[key];
+      if (other == null || value.length != other.length) return false;
+      for (final MapEntry(key: field, value: held) in value.entries) {
+        if (!other.containsKey(field) || '${other[field]}' != '$held') return false;
+      }
+    }
+    return true;
+  }
 
   @override
-  int get hashCode =>
-      Object.hash(source, model, effort, mode, context, cacheLifetime, loadout, access.sandbox, access.network, access.approvals);
+  int get hashCode => Object.hash(
+    source, model, effort, mode, context, cacheLifetime, loadout, access.sandbox, access.network, access.approvals,
+    Object.hashAll([for (final MapEntry(:key, :value) in items.entries) Object.hash(key, Object.hashAll([for (final e in value.entries) Object.hash(e.key, '${e.value}')]))]),
+  );
 }
 
 /// What a session starts with once its loadout is resolved, as the host resolves it when the session starts.

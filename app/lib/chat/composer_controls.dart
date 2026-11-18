@@ -497,7 +497,8 @@ class PresetChooser extends StatelessWidget {
 
   /// What the draft holds as a profile, keeping the starting instructions of [from] and, for a profile that names no source, none.
   Preset _current(Preset? from) {
-    final made = store.presetOf(session, context: from?.context);
+    // What the footer cannot show (the access and the items a provider adds) stays as the profile has it.
+    final made = store.presetOf(session, context: from?.context).copyWith(access: from?.access, items: from?.items);
     return from != null && from.source == null ? made.copyWith(clear: const {'source'}) : made;
   }
 

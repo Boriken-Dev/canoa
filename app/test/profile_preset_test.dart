@@ -6,6 +6,7 @@ import 'dart:io' show Directory;
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/profile/profile_home_io.dart' show IoProfileHome;
+import 'package:canoa/profile/profile.dart' show ProfileAccess;
 import 'package:canoa/profile/profiles_panel.dart';
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
@@ -112,6 +113,28 @@ void main() {
     expect(saved.context, _deep.context, reason: 'the starting instructions are not the footer\'s to change');
     expect(saved.source, 'Claude');
     expect(_pill(tester, 'profile-pill'), 'Deep review', reason: 'now it is as the saved profile makes it');
+    await finish(tester);
+  });
+
+  testWidgets('Save changes keeps what the footer cannot show: the profile\'s access and the items a provider adds', (tester) async {
+    final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
+    const held = Preset(
+      source: 'Claude',
+      model: 'opus',
+      effort: 'high',
+      access: ProfileAccess(sandbox: 'read-only', network: false),
+      items: {'region': {'name': 'north'}},
+    );
+    final written = await pumpApp(tester, _store(), profileHome: _home(), config: _config({'Deep review': held}), linked: agent.openLink);
+    await _draft(tester, 'Claude');
+    await _menuItem(tester, 'profile-choice Deep review');
+    await pick(tester, 'option-effort', 'Low');
+    await _menuItem(tester, 'profile-save-changes');
+    final saved = written.last.presets['Deep review']!;
+    expect(saved.effort, 'low');
+    expect(saved.access.sandbox, 'read-only');
+    expect(saved.access.network, false);
+    expect(saved.items, {'region': {'name': 'north'}});
     await finish(tester);
   });
 

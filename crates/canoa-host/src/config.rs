@@ -196,25 +196,64 @@ pub struct Preset {
     pub loadout: Option<String>,
     /// The access it runs the agent with (`access = { sandbox, network, approvals }`), part by part.
     pub access: crate::profile::AccessSetting,
+    /// What it holds for each item a provider adds (`[profiles.NAME.items.ID]`), by item id: the values of the item's form, by field
+    /// name. Whether a provider offers the item, and whether the values fit its form, is known when a session starts; a profile
+    /// keeps the values of an item nothing offers.
+    pub items: IndexMap<String, serde_json::Map<String, serde_json::Value>>,
 }
 
 impl Preset {
-    /// This preset as the session's layer: its model, effort, mode, access and starting instructions.
+    /// What this profile holds for every item, by item id: the session's own settings (the model, effort, mode, starting
+    /// instructions and access) as the items that carry them take them, then the items providers add.
+    #[must_use]
+    pub fn item_values(&self) -> IndexMap<String, serde_json::Map<String, serde_json::Value>> {
+        use serde_json::{Map, Value};
+        let mut out = IndexMap::new();
+        for (id, value) in [
+            ("model", &self.model),
+            ("effort", &self.effort),
+            ("mode", &self.mode),
+            ("context", &self.context),
+        ] {
+            if let Some(text) = value {
+                let mut values = Map::new();
+                values.insert(id.to_owned(), Value::String(text.clone()));
+                out.insert(id.to_owned(), values);
+            }
+        }
+        if !self.access.is_empty() {
+            let mut values = Map::new();
+            if let Some(sandbox) = self.access.sandbox {
+                values.insert("sandbox".to_owned(), Value::String(sandbox.id().to_owned()));
+            }
+            if let Some(network) = self.access.network {
+                values.insert("network".to_owned(), Value::Bool(network));
+            }
+            if let Some(approvals) = self.access.approvals {
+                values.insert(
+                    "approvals".to_owned(),
+                    Value::String(approvals.id().to_owned()),
+                );
+            }
+            out.insert("access".to_owned(), values);
+        }
+        for (id, values) in &self.items {
+            out.insert(id.clone(), values.clone());
+        }
+        out
+    }
+
+    /// This preset as the session's layer: the settings its model, effort, mode, access and starting-instructions items make, as
+    /// the items Canoa carries apply them. The items a provider adds are applied when a session starts.
     #[must_use]
     pub fn session_layer(&self) -> Profile {
-        let mut profile = Profile {
-            model: self.model.clone(),
-            effort: self.effort.clone(),
-            mode: self.mode.clone(),
-            access: self.access,
-            ..Profile::default()
-        };
-        if let Some(text) = &self.context {
-            profile
-                .contexts
-                .push(crate::profile::Context::Text(text.clone()));
-        }
-        profile
+        let own: IndexMap<_, _> = self
+            .item_values()
+            .into_iter()
+            .filter(|(id, _)| crate::profile::items::SETTING_IDS.contains(&id.as_str()))
+            .collect();
+        let applied = crate::profile::items::ItemCatalog::built_in().apply_all(&own, None);
+        crate::profile::items::session_layer(&applied).0
     }
 }
 
@@ -386,6 +425,7 @@ impl LocalProfiles {
             default_loadout: self.default_loadout.clone(),
             client_loadouts: self.client_loadouts.clone(),
             presets: self.presets.clone(),
+            items: crate::profile::ItemSet::default(),
             session: None,
             protected: self.protected.clone(),
         })
@@ -1020,6 +1060,8 @@ pub struct HostProfile {
     pub client_loadouts: BTreeMap<String, String>,
     /// `[profiles.NAME]`, which a connection resolves once when it starts.
     pub presets: IndexMap<String, Preset>,
+    /// The profile items this host offers, which a session's profile is applied through.
+    pub items: crate::profile::ItemSet,
     /// The session's layer, above the agent's: the preset the connection named, once resolved.
     pub session: Option<Profile>,
     /// `[permissions] protected`: the places a hook's allow never answers for, in gitignore syntax; none leaves it to the
@@ -3244,6 +3286,7 @@ fn profile_of(
         default_loadout: None,
         client_loadouts: BTreeMap::new(),
         presets: IndexMap::new(),
+        items: crate::profile::ItemSet::default(),
         session: None,
         protected: None,
     })
@@ -3454,6 +3497,35 @@ fn presets_of(
         let mut scalars = toml::Table::new();
         for (key, value) in table {
             let refused = |what: &str| invalid(format!("profiles.{name}.{key} {what}"));
+            if key == "items" {
+                let toml::Value::Table(items) = value else {
+                    return Err(refused("is not a table of items"));
+                };
+                for (id, values) in items {
+                    let word = !id.is_empty()
+                        && id.len() <= 32
+                        && id.bytes().all(|byte| {
+                            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+                        });
+                    if !word || crate::profile::items::SETTING_IDS.contains(&id.as_str()) {
+                        return Err(invalid(format!(
+                            "profiles.{name}.items.{id} is not the id of an item a provider adds"
+                        )));
+                    }
+                    let toml::Value::Table(_) = values else {
+                        return Err(invalid(format!(
+                            "profiles.{name}.items.{id} is not a table"
+                        )));
+                    };
+                    let Ok(serde_json::Value::Object(values)) = serde_json::to_value(values) else {
+                        return Err(invalid(format!(
+                            "profiles.{name}.items.{id} cannot be read"
+                        )));
+                    };
+                    preset.items.insert(id.clone(), values);
+                }
+                continue;
+            }
             if key == "access" {
                 let mut only = toml::Table::new();
                 only.insert(key.clone(), value.clone());
@@ -3488,7 +3560,7 @@ fn presets_of(
                 }
                 _ => {
                     return Err(refused(
-                        "is not a profile setting: source, model, effort, mode, access, context, cache_lifetime and loadout are",
+                        "is not a profile setting: source, model, effort, mode, access, context, cache_lifetime, loadout and items are",
                     ));
                 }
             }

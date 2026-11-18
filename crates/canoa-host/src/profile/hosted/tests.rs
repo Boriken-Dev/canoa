@@ -3193,3 +3193,207 @@ fn a_file_with_no_default_profile_still_lets_a_session_name_it() {
     let (_, report) = preset_report(&offer, Some("default"));
     assert_eq!(item(&report, "model")["value"], "mine", "{report}");
 }
+
+/// The person's own layer for agent `a` from `text`, offered with the items of `catalog`.
+fn offer_with_items(temp: &Temp, text: &str, catalog: crate::profile::items::ItemCatalog) -> Offer {
+    let config = Config::from_str_in(&format!("[agents.a]\nprogram = \"agent\"\n{text}"), &temp.0)
+        .expect("parses");
+    let mut local = config.local_profiles.for_agent("a").expect("a profile");
+    local.items = crate::profile::ItemSet::with(catalog);
+    Arc::into_inner(
+        offer(
+            &[],
+            &IndexMap::new(),
+            Some(&local),
+            "launcher".into(),
+            Vec::new(),
+        )
+        .expect("an offer"),
+    )
+    .expect("one owner")
+}
+
+/// A session of `offer` on Claude Code that names `preset`, and the report it starts with.
+fn item_report(offer: &Offer, preset: Option<&str>) -> (Connection, Value) {
+    let connection = Connection::prepare_with(
+        offer,
+        0,
+        "a",
+        &lookup,
+        Choices {
+            preset,
+            ..Choices::default()
+        },
+        Starting {
+            who: crate::profile::session::Who {
+                harness: Some("claude-code"),
+                ..Default::default()
+            },
+            ..Starting::default()
+        },
+    )
+    .expect("prepared");
+    let report = parts_for(&connection, Some("claude-code"), &claude(), &lookup).report;
+    (connection, report)
+}
+
+fn var<'a>(connection: &'a Connection, name: &str) -> Option<&'a str> {
+    connection
+        .env()
+        .iter()
+        .find(|(each, _)| each == name)
+        .map(|(_, value)| value.expose())
+}
+
+const REGIONS: &str = "[profile]\nmodel = \"mine\"\n\
+    [profiles.north]\nmodel = \"big\"\n\
+    [profiles.north.items.region]\nname = \"north\"\nhosts = [\"a.example\", \"b.example\"]\ntier = \"fast\"\n";
+
+#[test]
+fn an_item_an_extension_adds_changes_the_session_as_its_provider_says() {
+    let temp = temp_with_skill();
+    let offer = offer_with_items(
+        &temp,
+        REGIONS,
+        crate::profile::items::standin::with_extension(),
+    );
+    let (connection, report) = item_report(&offer, Some("north"));
+    assert_eq!(var(&connection, "REGION"), Some("north"));
+    assert_eq!(
+        var(&connection, "REGION_HOSTS"),
+        Some("a.example,b.example")
+    );
+    assert_eq!(
+        item(&report, "items.region")["state"],
+        "applied",
+        "{report}"
+    );
+    assert_eq!(
+        item(&report, "items.region")["layer"],
+        "session",
+        "{report}"
+    );
+    let how = item(&report, "items.region")["how"].as_str().expect("text");
+    assert!(how.contains("REGION"), "{how}");
+    assert!(
+        !how.contains("a.example"),
+        "no value is in the report: {how}"
+    );
+    // The provider's setting is the session's own: it came after the profile's own model.
+    assert_eq!(item(&report, "model")["value"], "fast-model", "{report}");
+    assert_eq!(item(&report, "model")["layer"], "session", "{report}");
+    // A profile that does not set the item gives the session none of it.
+    let (other, report) = item_report(&offer, None);
+    assert_eq!(var(&other, "REGION"), None);
+    assert!(
+        report["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .all(|each| each["key"] != "items.region"),
+        "{report}"
+    );
+}
+
+#[test]
+fn the_default_profiles_items_apply_to_a_session_that_names_none() {
+    let temp = temp_with_skill();
+    let offer = offer_with_items(
+        &temp,
+        "[profiles.default.items.region]\nname = \"south\"\n",
+        crate::profile::items::standin::with_extension(),
+    );
+    let (connection, report) = item_report(&offer, None);
+    assert_eq!(var(&connection, "REGION"), Some("south"));
+    assert_eq!(
+        item(&report, "items.region")["state"],
+        "applied",
+        "{report}"
+    );
+}
+
+#[test]
+fn an_item_for_another_harness_is_not_applied_and_says_so() {
+    let temp = temp_with_skill();
+    let offer = offer_with_items(
+        &temp,
+        REGIONS,
+        crate::profile::items::standin::with_extension(),
+    );
+    // `preset_report` starts a session that knows no harness.
+    let (connection, report) = preset_report(&offer, Some("north"));
+    assert_eq!(var(&connection, "REGION"), None);
+    assert_eq!(
+        item(&report, "items.region")["state"],
+        "not supported",
+        "{report}"
+    );
+    assert!(
+        item(&report, "items.region")["how"]
+            .as_str()
+            .expect("text")
+            .contains("claude-code only"),
+        "{report}"
+    );
+}
+
+#[test]
+fn an_extension_taken_away_leaves_the_profile_its_values_and_the_session_without_them() {
+    let temp = temp_with_skill();
+    // With the extension.
+    let with = offer_with_items(
+        &temp,
+        REGIONS,
+        crate::profile::items::standin::with_extension(),
+    );
+    assert_eq!(
+        var(&item_report(&with, Some("north")).0, "REGION"),
+        Some("north")
+    );
+    // Without it, on the same file.
+    let without = offer_with_items(
+        &temp,
+        REGIONS,
+        crate::profile::items::ItemCatalog::from_registries(Vec::new()),
+    );
+    let (connection, report) = item_report(&without, Some("north"));
+    assert_eq!(var(&connection, "REGION"), None);
+    let line = item(&report, "items.region");
+    assert_eq!(line["state"], "not supported", "{report}");
+    assert!(
+        line["how"]
+            .as_str()
+            .expect("text")
+            .contains("kept and not applied"),
+        "{line}"
+    );
+    assert!(
+        without.profiles[0].1.presets["north"]
+            .items
+            .contains_key("region"),
+        "the profile still holds its values"
+    );
+    // The rest of the profile applies as it did.
+    assert_eq!(item(&report, "model")["value"], "big", "{report}");
+}
+
+#[test]
+fn a_variable_the_profiles_own_environment_sets_keeps_its_value() {
+    let temp = temp_with_skill();
+    let offer = offer_with_items(
+        &temp,
+        &format!("{REGIONS}[profile.env.REGION]\nvalue = \"mine\"\n"),
+        crate::profile::items::standin::with_extension(),
+    );
+    let (connection, report) = item_report(&offer, Some("north"));
+    assert_eq!(var(&connection, "REGION"), Some("mine"));
+    assert_eq!(
+        var(&connection, "REGION_HOSTS"),
+        Some("a.example,b.example")
+    );
+    assert_eq!(
+        item(&report, "items.region.env.REGION")["state"],
+        "not supported",
+        "{report}"
+    );
+}

@@ -1,0 +1,97 @@
+use serde_json::Value;
+
+use super::of;
+use crate::profile::items::ItemCatalog;
+use crate::profile::items::standin::with_extension;
+
+fn row<'a>(answer: &'a Value, id: &str) -> &'a Value {
+    answer["items"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .find(|each| each["id"] == id)
+        .unwrap_or_else(|| panic!("no item {id}: {answer}"))
+}
+
+#[test]
+fn the_list_is_what_the_loaded_providers_say_of_their_items() {
+    let answer = of(&with_extension());
+    let ids: Vec<&str> = answer["items"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|each| each["id"].as_str().expect("text"))
+        .collect();
+    assert_eq!(
+        ids,
+        ["access", "context", "effort", "mode", "model", "region"]
+    );
+    let region = row(&answer, "region");
+    assert_eq!(region["origin"], "regions");
+    assert_eq!(region["stored"], "item");
+    assert_eq!(region["harnesses"], serde_json::json!(["claude-code"]));
+    let fields = region["fields"].as_array().expect("fields");
+    assert_eq!(fields[0]["name"], "name");
+    assert_eq!(fields[0]["required"], true);
+    assert_eq!(fields[2]["shape"], "choice");
+    assert_eq!(fields[2]["default"], "standard");
+    assert_eq!(
+        fields[2]["choices"],
+        serde_json::json!(["standard", "fast"])
+    );
+    let access = row(&answer, "access");
+    assert_eq!(access["stored"], "setting");
+    assert_eq!(access["origin"], "built-in");
+}
+
+#[test]
+fn an_extension_taken_away_takes_its_item_from_the_list() {
+    let without = of(&ItemCatalog::built_in());
+    assert!(
+        without["items"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .all(|each| each["id"] != "region")
+    );
+    assert!(
+        of(&with_extension())["items"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .any(|each| each["id"] == "region")
+    );
+}
+
+#[test]
+fn the_list_is_read_with_the_grant_that_reads_the_configuration() {
+    use crate::control::{
+        Caller, Control, DEFAULT_MAX_RECORD_BYTES, DEFAULT_MAX_RECORDS, DENIED, Grant,
+    };
+    let control = Control::open(
+        None,
+        DEFAULT_MAX_RECORDS,
+        DEFAULT_MAX_RECORD_BYTES,
+        Vec::new(),
+    )
+    .expect("opens");
+    let ask = |grants: &[Grant]| {
+        let caller = Caller::Peer {
+            id: "sha256:aa".to_owned(),
+            grants: grants.iter().copied().collect(),
+        };
+        let line = serde_json::to_vec(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "profile_items/list", "params": {}}))
+            .expect("encodes");
+        serde_json::from_slice::<Value>(&control.handle(&caller, &line).expect("answered"))
+            .expect("JSON")
+    };
+    let refused = ask(&[Grant::StoreRead]);
+    assert_eq!(refused["error"]["code"], DENIED, "{refused}");
+    let listed = ask(&[Grant::ConfigRead]);
+    assert!(
+        listed["result"]["items"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|each| each["id"] == "model")),
+        "{listed}"
+    );
+}

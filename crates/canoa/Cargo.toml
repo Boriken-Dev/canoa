@@ -25,6 +25,10 @@ alloc_instead_of_core = "warn"
 store = ["dep:coqui-acp-api", "dep:serde_json"]
 # The `agent_vendor` kind: who an agent's vendor is and how it is shown.
 vendor = ["dep:coqui-acp-api"]
+# The fields of a form a provider describes, shared by every kind whose provider asks the person for something.
+form = ["dep:coqui-acp-api", "dep:serde_json"]
+# The `profile_item` kind: one thing a profile may set, and what it does to a session.
+profile-item = ["form"]
 # The `speech_provider` kind: audio streamed in, text and front matter out.
 speech = ["dep:guatiao", "dep:coqui-acp-api"]
 # The two providers that ship with it: a program the person names, and a speech-to-text HTTP endpoint the person names.

@@ -897,6 +897,9 @@ impl Control {
                 Some("looks/list") => allow(caller, Grant::ConfigRead)
                     .and_then(|()| self.loaded_config())
                     .map(|config| looks::list(&config)),
+                Some("profile_items/list") => allow(caller, Grant::ConfigRead)
+                    .and_then(|()| self.loaded_config())
+                    .map(|config| profile_items::list(&config)),
                 Some("providers/list") => allow(caller, Grant::ConfigRead)
                     .and_then(|()| self.loaded_config())
                     .map(|config| providers::list(&config)),
@@ -1660,6 +1663,7 @@ mod looks_tests;
 pub(crate) mod mail_setup;
 #[cfg(test)]
 mod mail_setup_tests;
+pub(crate) mod profile_items;
 pub(crate) mod providers;
 #[cfg(test)]
 mod providers_tests;
