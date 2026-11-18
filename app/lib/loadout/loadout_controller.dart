@@ -19,6 +19,7 @@ import '../profile/skill_copies.dart';
 import '../store/contents_reader.dart';
 import '../store/contents_storage.dart';
 import '../store/contents_store.dart';
+import '../store/overlay_needs.dart';
 import '../store/overlay_page.dart' show SaveConfig;
 import '../store/skill_sources.dart';
 import '../store/skills.dart';
@@ -74,6 +75,7 @@ class LoadoutController extends ChangeNotifier {
     this.registry = officialRegistry,
     this.fetch,
     this.findProgram,
+    this.overlayNeeds,
     this.index,
     ContentsStorage? contentsStorage,
     ContentsReader? contentsReader,
@@ -98,6 +100,12 @@ class LoadoutController extends ChangeNotifier {
   final String registry;
   final RegistryFetch? fetch;
   final FindProgram? findProgram;
+
+  /// Asks the host what an installed overlay needs of this computer; none where the app has no host.
+  final OverlayNeeds? overlayNeeds;
+
+  /// What each installed overlay needs and whether this computer has it, by overlay name, as of the last refresh.
+  Map<String, List<NeedLine>> needs = const {};
 
   /// What every entry of the catalogs provides, read ahead whenever the catalogs are read; none without a host to read them.
   ContentsStore? contents;
@@ -187,13 +195,24 @@ class LoadoutController extends ChangeNotifier {
           iconLimits: config.store.iconLimits,
           skillPins: config.skillPins,
         );
+        needs = await _readNeeds();
       } on Object catch (error) {
         skills = const {};
         layers = null;
+        needs = const {};
         problem = 'The host could not be asked for the skills and layers here: $error';
       }
     }
     notifyListeners();
+  }
+
+  /// What each installed overlay that made a layer needs, asked of the host all at once.
+  Future<Map<String, List<NeedLine>>> _readNeeds() async {
+    final ask = overlayNeeds;
+    if (ask == null) return const {};
+    final names = [for (final name in config.overlays.keys) if (layerOf(name) != null) name];
+    final found = await Future.wait([for (final name in names) ask(name)]);
+    return {for (var i = 0; i < names.length; i++) names[i]: found[i]};
   }
 
   /// Saves [changed], and gives the configuration now in the file, or null when it was not saved.

@@ -6,6 +6,7 @@ library;
 import 'dart:convert';
 
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/store/overlay_needs.dart';
 import 'package:canoa/store/store_section.dart';
 import 'package:canoa/loadout/mcp_registry.dart' show RegistryRefusal;
 import 'package:canoa/loadout/loadout_controller.dart' show knownCatalogs;
@@ -72,7 +73,7 @@ void main() {
 
   Future<void> open(WidgetTester tester, {String text = withCatalog, Size size = const Size(1280, 2000),
       List<String> agents = const ['Claude', 'Codex'], Future<String?> Function(String)? findProgram,
-      Future<String> Function(Uri)? fetch}) async {
+      Future<String> Function(Uri)? fetch, OverlayNeeds? overlayNeeds}) async {
     await tester.binding.setSurfaceSize(size);
     addTearDown(() => tester.binding.setSurfaceSize(null));
     config = CanoaConfig.parse(text);
@@ -89,6 +90,7 @@ void main() {
         },
         fetchRegistry: fetch ?? (uri) async => registryAnswer,
         findProgram: findProgram ?? (program) async => '/usr/bin/$program',
+        overlayNeeds: overlayNeeds,
       ),
     ));
     await tester.pumpAndSettle();
@@ -155,6 +157,42 @@ void main() {
     expect(find.text('Off for new sessions'), findsOneWidget);
     await tapKey(tester, 'overlay-default-review');
     expect(saved.last.loadouts['Default']!.overlays, ['review']);
+  });
+
+  testWidgets('an installed overlay says what it needs and this computer lacks, with the Store runtime that installs it', (tester) async {
+    await open(tester, overlayNeeds: (name) async => name == 'review'
+        ? const [
+            NeedLine(
+              key: 'runtime.python',
+              met: false,
+              how: "Python 3.11 or later is needed and is not on the PATH; the Store's Python installs it",
+              offer: 'python_store',
+            ),
+            NeedLine(key: 'runtime.commands: git', met: true, how: 'found /usr/bin/git'),
+            NeedLine(key: 'runtime.commands: canoa-absent', met: false, how: 'canoa-absent is needed and is not on the PATH'),
+          ]
+        : const []);
+    await installReview(tester);
+    await tapKey(tester, 'overlays-installed');
+    final card = find.byKey(const Key('overlay-installed-review'));
+    expect(find.descendant(of: card, matching: find.textContaining('Needs python: Python 3.11 or later is needed')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.textContaining('Needs commands: canoa-absent: canoa-absent is needed')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('Found on this computer: commands: git')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.byKey(const Key('overlay-needs-install-review-python_store'))), findsOneWidget,
+        reason: 'only the program a Store runtime provides is offered');
+    expect(find.byKey(const Key('overlay-needs-install-review-null')), findsNothing);
+    // Not applied by Canoa no longer lists what the host checks.
+    expect(find.descendant(of: card, matching: find.textContaining('runtime')), findsNothing);
+  });
+
+  testWidgets('an overlay whose needs are all met, or that the host cannot ask about, offers nothing to install', (tester) async {
+    await open(tester, overlayNeeds: (name) async => const [NeedLine(key: 'runtime.node', met: true, how: 'found /usr/bin/node')]);
+    await installReview(tester);
+    await tapKey(tester, 'overlays-installed');
+    final card = find.byKey(const Key('overlay-installed-review'));
+    expect(find.descendant(of: card, matching: find.text('Found on this computer: node')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.textContaining('Needs ')), findsNothing);
+    expect(find.descendant(of: card, matching: find.text('Install from the Store')), findsNothing);
   });
 
   testWidgets('removing what the store installed takes its entry and its default with it', (tester) async {

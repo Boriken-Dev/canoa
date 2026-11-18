@@ -48,9 +48,12 @@ enum ItemState {
 /// One part of a profile ([key] such as `context`, `skills.review`, `mcp.github`, `env.TOKEN`, `model`), its [layer],
 /// what became of it, and [how]: the channel it went through, or why it did not.
 final class ProfileItem {
-  const ProfileItem(this.key, this.layer, this.state, this.how);
+  const ProfileItem(this.key, this.layer, this.state, this.how, {this.offer});
   final String key, layer, how;
   final ItemState state;
+
+  /// The Store runtime (a provider id such as `python_store`) that installs the program this part needs and the host lacks.
+  final String? offer;
 
   @override
   String toString() => '$key ($layer): ${state.label}, $how';
@@ -98,7 +101,7 @@ HostProfile? hostProfileOf(Object? meta, {required String fallback}) {
     final key = each['key'], layer = each['layer'], state = each['state'], how = each['how'];
     if (key is! String || layer is! String || state is! String || how is! String) continue;
     final known = ItemState.values.where((candidate) => candidate.label == state).firstOrNull ?? ItemState.refused;
-    parsed.add(ProfileItem(key, layer, known, how));
+    parsed.add(ProfileItem(key, layer, known, how, offer: each['offer'] is String ? each['offer'] as String : null));
     if (each['value'] case final String value when const {'model', 'effort', 'mode'}.contains(key)) values[key] = value;
   }
   final harness = meta['harness'], loadout = meta['loadout'];

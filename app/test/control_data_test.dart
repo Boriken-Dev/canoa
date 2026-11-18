@@ -10,6 +10,7 @@ import 'package:canoa/desktop/host_control.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/loadout/mcp_registry.dart';
 import 'package:canoa/store/control_data.dart';
+import 'package:canoa/store/overlay_needs.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final class _Host implements HostLink {
@@ -62,6 +63,23 @@ void main() {
     expect(host.asked.first.$2['names'], ['npx']);
     final broken = controlFindProgram(_over(_Host((_, _) => 'error:no')));
     expect(await broken('npx'), isNull);
+  });
+
+  test('what an overlay needs is the host\'s answer, with the Store runtime a missing program is offered from', () async {
+    final host = _Host((method, params) => {
+          'items': [
+            {'key': 'runtime.python', 'state': 'off', 'how': 'Python 3.11 or later is needed', 'offer': 'python_store'},
+            {'key': 'runtime.commands: git', 'state': 'applied', 'how': 'found /usr/bin/git'},
+            {'key': 3, 'state': 'off', 'how': 'not a line'},
+          ],
+        });
+    final lines = await controlOverlayNeeds(_over(host))('review');
+    expect(host.asked.single.$1, 'overlay/needs');
+    expect(host.asked.single.$2['name'], 'review');
+    expect([for (final line in lines) (line.key, line.met, line.offer)],
+        [('runtime.python', false, 'python_store'), ('runtime.commands: git', true, null)]);
+    // A host that refuses, or cannot be reached, says nothing, which is no need.
+    expect(await controlOverlayNeeds(_over(_Host((_, _) => 'error:no')))('review'), isEmpty);
   });
 
   test('the document kept for a catalog is the host\'s, and a host without one gives none', () async {

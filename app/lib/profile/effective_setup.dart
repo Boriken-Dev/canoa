@@ -6,6 +6,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
+import '../store/overlay_needs.dart';
 import 'profile.dart';
 import 'profile_home.dart';
 import 'profile_layers.dart';
@@ -23,6 +24,8 @@ class EffectiveSetup extends StatefulWidget {
     this.profile,
     this.offered = const {},
     this.unsupported = const {},
+    this.overlayNeeds,
+    this.onInstallRuntime,
   });
 
   final CanoaConfig config;
@@ -44,6 +47,12 @@ class EffectiveSetup extends StatefulWidget {
   /// Values the profile asks for that the agent cannot take, by key, with why.
   final Map<String, String> unsupported;
 
+  /// Asks the host what an installed overlay needs of this computer; none where the app has no host.
+  final OverlayNeeds? overlayNeeds;
+
+  /// Shows the Store's Runtimes, for a program an overlay needs and this computer lacks.
+  final void Function()? onInstallRuntime;
+
   @override
   State<EffectiveSetup> createState() => _EffectiveSetupState();
 }
@@ -51,6 +60,9 @@ class EffectiveSetup extends StatefulWidget {
 class _EffectiveSetupState extends State<EffectiveSetup> {
   ProfileLayers? _layers;
   String? _problem;
+
+  /// What each overlay of the setup needs of this computer, by name.
+  Map<String, List<NeedLine>> _needs = const {};
 
   @override
   void initState() {
@@ -79,6 +91,11 @@ class _EffectiveSetupState extends State<EffectiveSetup> {
       return;
     }
     if (mounted) setState(() => _layers = found);
+    final ask = widget.overlayNeeds;
+    if (ask == null) return;
+    final names = [for (final layer in found.layers) if (layer.id.kind == LayerKind.overlay) layer.id.name];
+    final lines = await Future.wait([for (final name in names) ask(name)]);
+    if (mounted) setState(() => _needs = {for (var i = 0; i < names.length; i++) names[i]: lines[i]});
   }
 
   /// The choices the agent cannot take: what the profile asked and the agent lacks, then each effective value the agent lists
@@ -121,6 +138,23 @@ class _EffectiveSetupState extends State<EffectiveSetup> {
           EffectiveTable(effective: found.effective),
         for (final note in found?.notes ?? const <LayerNote>[])
           Text(visible('${note.layer}: ${note.text}'), style: theme.textTheme.bodySmall),
+        for (final MapEntry(key: overlay, value: lines) in _needs.entries)
+          for (final line in lines)
+            if (!line.met)
+              Text(
+                visible('overlay:$overlay: needs ${line.key.replaceFirst('runtime.', '')}: ${line.how}'),
+                key: Key('effective-needs-$overlay-${line.key}'),
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+              ),
+        if (widget.onInstallRuntime != null && _needs.values.any((lines) => lines.any((line) => !line.met && line.offer != null)))
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              key: const Key('effective-needs-install'),
+              onPressed: widget.onInstallRuntime,
+              child: const Text('Install from the Store'),
+            ),
+          ),
         if (refused.isNotEmpty) ...[
           const SizedBox(height: 8),
           Text('Not taken', style: theme.textTheme.titleSmall),

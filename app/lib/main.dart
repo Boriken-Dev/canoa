@@ -108,6 +108,8 @@ import 'profile/profile_home.dart' show ProfileHome;
 import 'served/control_overlays.dart' show ControlOverlayManager;
 import 'served/control_profile_home.dart' show ControlProfileHome;
 import 'store/control_data.dart';
+import 'store/overlay_needs.dart';
+import 'store/store_runtimes.dart' show runtimesTypeId;
 import 'profile/profile_home_platform.dart';
 import 'acp/usage_wire.dart' show ProfileApprover, noApproval;
 import 'profile/approval_dialog.dart';
@@ -974,6 +976,7 @@ class _CanoaAppState extends State<CanoaApp> {
     // The host reads registries and looks programs up, for a page and the desktop alike.
     fetchRegistry: _control == null ? null : controlRegistryFetch(_control),
     findProgram: _control == null ? null : controlFindProgram(_control),
+    overlayNeeds: _control == null ? null : controlOverlayNeeds(_control),
     index: ControlStoreIndex.over(_control)?.catalogs,
   );
 
@@ -2443,6 +2446,11 @@ class _CanoaAppState extends State<CanoaApp> {
             'mode': [for (final entry in modeEntries(modeOptionIn(options))) entry.value],
           },
           unsupported: session.presetUnsupported,
+          overlayNeeds: _control == null ? null : controlOverlayNeeds(_control),
+          onInstallRuntime: () {
+            Navigator.of(above).pop();
+            unawaited(_showLoadout().then((_) => _storeSelection.select(runtimesTypeId)));
+          },
         ),
       ),
     ));

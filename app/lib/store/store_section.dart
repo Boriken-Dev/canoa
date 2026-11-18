@@ -12,6 +12,7 @@ import '../shell/layout_controls.dart';
 import '../shell/shell.dart' show ShellScope;
 import 'overlay_page.dart' show SaveConfig, shownTags;
 import 'programs.dart';
+import 'overlay_needs.dart';
 import 'programs_view.dart';
 import 'store_catalogs.dart';
 import 'store_extension.dart';
@@ -38,6 +39,7 @@ class StoreSection extends StatefulWidget {
     this.programs,
     this.fetchRegistry,
     this.findProgram,
+    this.overlayNeeds,
     this.registry = officialRegistry,
     this.embedded = false,
     this.index,
@@ -67,6 +69,9 @@ class StoreSection extends StatefulWidget {
   /// Reads a registry's answer; null where the app reads no registry.
   final RegistryFetch? fetchRegistry;
   final FindProgram? findProgram;
+
+  /// Asks the host what an installed overlay needs of this computer; none where the app has no host.
+  final OverlayNeeds? overlayNeeds;
   final String registry;
 
   /// The host's catalog index; none where the app has no host, which leaves the catalogs empty.
@@ -103,6 +108,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     registry: widget.registry,
     fetch: widget.fetchRegistry,
     findProgram: widget.findProgram,
+    overlayNeeds: widget.overlayNeeds,
     index: widget.index,
     contentsStorage: widget.contentsStorage,
     contentsReader: widget.contentsReader,
@@ -229,6 +235,14 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
         available: _discoverCount(id),
       ),
   ]);
+
+  /// Shows the type [id], as the index does when it is chosen there; a type this section does not list is left alone.
+  void _showType(String id) {
+    if (!types.contains(id)) return;
+    selection?.select(id);
+    final index = _indexOf(id);
+    if (tabs.index != index) tabs.index = index;
+  }
 
   /// The type chosen in the index is the one shown.
   void _selectionChanged() {
@@ -409,7 +423,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
                 for (final each in types)
                   switch (_builtin(each)) {
                     StoreType.agents => AgentsBody(programs: widget.programs!, view: viewOf(each)),
-                    StoreType.overlays => OverlaysBody(controller: controller, view: viewOf(each)),
+                    StoreType.overlays => OverlaysBody(controller: controller, view: viewOf(each), showType: _showType),
                     StoreType.skills => SkillsBody(controller: controller, view: viewOf(each)),
                     StoreType.mcps => McpsBody(controller: controller, view: viewOf(each)),
                     null => ExtensionBody(type: _extension(each)!, view: viewOf(each), config: controller.config),

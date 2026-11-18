@@ -9,20 +9,25 @@ import '../loadout/overlay_options.dart';
 import '../profile/profile.dart';
 import '../profile/profiles_panel.dart' show OverlayIcon, OverlayUpdateDialog, visible;
 import '../selectable.dart';
+import 'overlay_needs.dart' show NeedLine;
 import 'overlay_page.dart' show OverlayPage, oneLine;
 import 'store.dart';
 import 'store_banner.dart';
 import 'store_cards.dart';
 import 'store_catalogs.dart';
 import 'store_icon.dart';
+import 'store_runtimes.dart' show runtimesTypeId;
 import 'store_view.dart';
 
 /// The Overlays type: the overlays canoa.cfg names, and the overlays the catalogs list.
 class OverlaysBody extends StatefulWidget {
-  const OverlaysBody({super.key, required this.controller, required this.view});
+  const OverlaysBody({super.key, required this.controller, required this.view, this.showType});
 
   final LoadoutController controller;
   final StoreView view;
+
+  /// Shows another type of the Store by its id, for an overlay that needs a runtime the Runtimes type installs.
+  final void Function(String id)? showType;
 
   @override
   State<OverlaysBody> createState() => _OverlaysBodyState();
@@ -116,6 +121,8 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
     ];
     final options = aosLayer == null ? const <DeclaredOption>[] : declaredOptions(aosLayer.manifest);
     final notApplied = report?.notApplied ?? const <String>[];
+    final needs = c.needs[name] ?? const <NeedLine>[];
+    final unmet = [for (final line in needs) if (!line.met) line];
     final left = layer == null ? c.leftOutBecause(name) : null;
     final fromStore = record?.catalog != null;
     final on = c.isDefaultOn(name);
@@ -130,6 +137,8 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
         if (left != null) 'Left out: $left',
         if (applies.isNotEmpty) 'Applies: ${applies.join(' · ')}',
         if (left == null && layer != null && applies.isEmpty) 'Applies nothing of its own',
+        if (needs.any((line) => line.met)) 'Found on this computer: ${[for (final line in needs) if (line.met) line.key.replaceFirst('runtime.', '')].join(', ')}',
+        for (final line in unmet) 'Needs ${line.key.replaceFirst('runtime.', '')}: ${line.how}',
         if (notApplied.isNotEmpty) 'Not applied by Canoa yet: ${notApplied.join(', ')}',
       ],
       provenance: provenance,
@@ -176,6 +185,12 @@ class _OverlaysBodyState extends State<OverlaysBody> with AutomaticKeepAliveClie
             ),
           ),
         Wrap(spacing: 8, children: [
+          for (final offer in {for (final line in unmet) ?line.offer})
+            TextButton(
+              key: Key('overlay-needs-install-$name-$offer'),
+              onPressed: widget.showType == null ? null : () => widget.showType!(runtimesTypeId),
+              child: const Text('Install from the Store'),
+            ),
           if (source is GitOverlay && c.home != null)
             TextButton(
               key: Key('overlay-update-$name'),
