@@ -421,9 +421,15 @@ problem in `[about]`, store metadata, never does. Canoa applies:
 - `requires`, among the overlays `[overlays]` names: a missing one is noted and the overlay applies without it, and
   overlays in a cycle are left out.
 
+What an overlay needs of the computer it runs on (`runtime`: the operating systems it supports, a Python or Node.js of a
+minimum version, commands, and the interpreters its scripts name) is checked when a session starts, against the `PATH` the
+session starts from and then the Store's runtimes. A satisfied need counts as applied; a missing one is listed as `off`
+with why and the Store runtime that installs it (Runtimes: Python, Node.js, Git Bash, PowerShell), and an installed
+overlay's card in the Store and **Effective setup** show it with **Install from the Store**. Nothing is installed without
+you, and an overlay that needs a program the computer lacks still applies.
+
 Canoa does not apply yet, and **Settings → Profiles** lists as "not applied by Canoa yet": env scripts (`env.<ext>`,
-`env_scripts`), `setup`, dependencies (`lib/python/requirements.txt`, `lib/node/package.json`, `runtime`), `runtime`
-probes, `scripts`, `mcp.skills`, an MCP server's `timeout` and its working directory (it runs in the session's), other
+`env_scripts`), `setup`, dependencies (`lib/python/requirements.txt`, `lib/node/package.json`), `scripts`, `mcp.skills`, an MCP server's `timeout` and its working directory (it runs in the session's), other
 harnesses' hints. Each line names its overlay. An overlay's own `bin/` goes first on `PATH`, and its `lib/python/` and
 `lib/node/` on `PYTHONPATH` and `NODE_PATH`, ahead of the host's own entries, for the agent and the programs it starts.
 A `paths` entry that leaves the overlay's folder is refused, and a `paths` entry may set only those three of the variables
