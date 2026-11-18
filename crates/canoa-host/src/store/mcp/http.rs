@@ -41,6 +41,15 @@ impl Service for Served {
         let Some(hub) = self.hub.upgrade() else {
             return Answer::Unavailable;
         };
+        if let Some(extra) = &access.extra {
+            return loopback::rpc(
+                extra.server(),
+                message,
+                || extra.list(),
+                |name, arguments| Ok(extra.call(access, name, arguments)),
+            )
+            .map_or(Answer::Accepted, Answer::Json);
+        }
         loopback::rpc(SERVER_NAME, message, tools::list, |name, arguments| {
             let backend = hub.backend().ok_or("the store is not ready")?;
             Ok(tools::call(&*backend, access, name, arguments))

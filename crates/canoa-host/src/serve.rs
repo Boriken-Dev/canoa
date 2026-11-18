@@ -1855,10 +1855,13 @@ impl Serving {
                     .as_ref()
                     .map(|settings| settings.grants.clone())
                     .unwrap_or_default(),
+                // A portal's users share its accounts' configuration, so none of them is given the host's mail.
                 control_everyone: portal_of(options).is_some().then(|| {
                     control::Grant::all()
                         .into_iter()
-                        .filter(|grant| *grant != control::Grant::Discover)
+                        .filter(|grant| {
+                            !matches!(grant, control::Grant::Discover | control::Grant::Mail)
+                        })
                         .collect()
                 }),
                 admitted: Arc::new(Mutex::new(match (&office_dir, &config.web) {
@@ -2065,6 +2068,14 @@ impl Serving {
             .serve_with(Arc::new(control::ToolsBackend(Arc::clone(
                 &serving.shared.control,
             ))));
+        if config.mail.tools != Some(false) && !config.mail.accounts.is_empty() {
+            serving
+                .shared
+                .store_tools
+                .serve_extra(Arc::new(crate::mail::tools::MailTools::new(
+                    crate::mail::Mailboxes::from_config(&config.mail),
+                )));
+        }
         serving.door = serving.open_door(config, options);
         serving.attach_delegation(config, dialer, usage_log.clone());
 
@@ -2846,8 +2857,22 @@ fn give_agent_flow<C: Channel>(
     };
     // A session that was given the store tools is told when to use them, by a skill that goes with it.
     let connection = connection.map(|connection| {
-        if store.is_some() && store_mcp::asked_in(first) {
+        if store.as_ref().is_some_and(|link| link.serves_store()) && store_mcp::asked_in(first) {
             connection.with_skill(store_mcp::SKILL_NAME, store_mcp::skill_files())
+        } else {
+            connection
+        }
+    });
+    // The mail tools, for a connection whose key holds the `mail` grant and a host that has an account.
+    let connection = connection.map(|connection| {
+        if store
+            .as_ref()
+            .is_some_and(|link| link.offers(crate::mail::tools::SERVER_NAME))
+        {
+            connection.with_skill(
+                crate::mail::tools::SKILL_NAME,
+                crate::mail::tools::skill_files(),
+            )
         } else {
             connection
         }

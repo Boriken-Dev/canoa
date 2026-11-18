@@ -148,12 +148,16 @@ pub enum Grant {
     /// Opening `@tools` to offer a program's tools (a browser extension's, an Office add-in's) to the sessions of this host. What
     /// such a provider answers goes to an agent as its tools' own results, so it is as much as access to the agent's context.
     ToolsProvide,
+    /// The sessions of a connection whose key holds it are given the `canoa-mail` tools: search, read, draft and organize the
+    /// mail of the accounts `[host.mail]` names. The mail is the person's own and what an agent reads of it enters its context, so
+    /// a key gets it only when canoa.cfg says so; the application in this process holds it. Not a control method.
+    Mail,
 }
 
 impl Grant {
     /// Every grant: what a user's own browser holds on a host run for a portal.
     #[must_use]
-    pub fn all() -> [Self; 24] {
+    pub fn all() -> [Self; 25] {
         [
             Self::LedgerRead,
             Self::LedgerWrite,
@@ -179,6 +183,7 @@ impl Grant {
             Self::State,
             Self::Hosting,
             Self::ToolsProvide,
+            Self::Mail,
         ]
     }
 
@@ -210,6 +215,7 @@ impl Grant {
             Self::State => "state",
             Self::Hosting => "hosting",
             Self::ToolsProvide => "tools.provide",
+            Self::Mail => "mail",
         }
     }
 

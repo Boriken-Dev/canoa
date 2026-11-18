@@ -48,7 +48,7 @@ pub(crate) struct Card {
 
 /// A session that was given the tools.
 pub(super) struct Held {
-    pub(super) digest: [u8; 32],
+    pub(super) digests: Vec<[u8; 32]>,
     /// The modes the agent listed when the session opened: a mode outside them is never taken.
     pub(super) modes: Modes,
     /// Whether the person put the session in a mode that asks for nothing. Only the client's own `session/set_mode` or

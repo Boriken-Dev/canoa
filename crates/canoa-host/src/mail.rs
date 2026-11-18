@@ -19,6 +19,7 @@
 mod ews;
 pub(crate) mod model;
 pub(crate) mod related;
+pub(crate) mod tools;
 pub(crate) mod xml;
 
 #[cfg(test)]

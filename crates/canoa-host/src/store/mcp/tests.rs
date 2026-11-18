@@ -36,7 +36,7 @@ fn index() -> Value {
     ]})
 }
 
-struct Fake {
+pub(super) struct Fake {
     asked: Mutex<Vec<(BTreeSet<Grant>, bool)>>,
     planned: Mutex<Vec<(String, String)>>,
     /// What the host did about changes, in order: `prepare:SESSION`, `commit:SESSION` and `discard:SESSION`.
@@ -53,7 +53,7 @@ struct Fake {
 }
 
 impl Fake {
-    fn new() -> Arc<Self> {
+    pub(super) fn new() -> Arc<Self> {
         Arc::new(Self {
             asked: Mutex::new(Vec::new()),
             planned: Mutex::new(Vec::new()),
@@ -151,7 +151,7 @@ impl Backend for Fake {
     }
 }
 
-fn bridge() -> BridgeCommand {
+pub(super) fn bridge() -> BridgeCommand {
     BridgeCommand {
         program: "canoa".to_owned(),
         args: vec!["mcp-bridge".to_owned()],
@@ -168,7 +168,7 @@ fn readers() -> BTreeSet<Grant> {
     [Grant::OverlayRead, Grant::StorePrograms, Grant::StoreRead].into()
 }
 
-fn initialize(meta: bool) -> Vec<u8> {
+pub(super) fn initialize(meta: bool) -> Vec<u8> {
     let mut message = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}});
     if meta {
         message["params"]["_meta"] = json!({ META: true });
@@ -176,25 +176,25 @@ fn initialize(meta: bool) -> Vec<u8> {
     serde_json::to_vec(&message).expect("json")
 }
 
-fn session_new(id: u64) -> Vec<u8> {
+pub(super) fn session_new(id: u64) -> Vec<u8> {
     serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "method": "session/new",
         "params": {"cwd": "/work", "mcpServers": []}}))
     .expect("json")
 }
 
-fn answer(id: u64, result: &Value) -> Vec<u8> {
+pub(super) fn answer(id: u64, result: &Value) -> Vec<u8> {
     serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "result": result})).expect("json")
 }
 
 /// A link that has seen a client ask and an agent answer `initialize` with `capabilities`.
-fn opened(link: &Arc<Link>, meta: bool, capabilities: &Value) {
+pub(super) fn opened(link: &Arc<Link>, meta: bool, capabilities: &Value) {
     let first = initialize(meta);
     link.peek(&first);
     let _ = link.client_said(first);
     link.agent_said(&answer(1, capabilities));
 }
 
-fn servers(message: &[u8]) -> Vec<Value> {
+pub(super) fn servers(message: &[u8]) -> Vec<Value> {
     let value: Value = serde_json::from_slice(message).expect("json");
     value["params"]["mcpServers"]
         .as_array()
@@ -202,11 +202,11 @@ fn servers(message: &[u8]) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-fn http_capabilities() -> Value {
+pub(super) fn http_capabilities() -> Value {
     json!({"protocolVersion": 1, "agentCapabilities": {"mcpCapabilities": {"http": true}}})
 }
 
-fn post(url: &str, headers: &[(&str, &str)], body: &str) -> (u16, String) {
+pub(super) fn post(url: &str, headers: &[(&str, &str)], body: &str) -> (u16, String) {
     let rest = url.strip_prefix("http://").expect("an http address");
     let (authority, path) = rest.split_once('/').expect("a path");
     let mut sent = format!("POST /{path} HTTP/1.1\r\n");
@@ -250,7 +250,7 @@ fn given(message: &[u8]) -> (String, String) {
     )
 }
 
-fn call(url: &str, token: &str, name: &str, arguments: &Value) -> Value {
+pub(super) fn call(url: &str, token: &str, name: &str, arguments: &Value) -> Value {
     let body = json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": name, "arguments": arguments}});
     let (status, text) = post(
         url,
@@ -262,12 +262,12 @@ fn call(url: &str, token: &str, name: &str, arguments: &Value) -> Value {
     reply["result"].clone()
 }
 
-fn said(result: &Value) -> Value {
+pub(super) fn said(result: &Value) -> Value {
     assert_eq!(result["isError"], false, "{result}");
     serde_json::from_str(result["content"][0]["text"].as_str().expect("text")).expect("json")
 }
 
-fn failed(result: &Value) -> String {
+pub(super) fn failed(result: &Value) -> String {
     assert_eq!(result["isError"], true, "{result}");
     result["content"][0]["text"]
         .as_str()
@@ -818,7 +818,7 @@ fn writers() -> BTreeSet<Grant> {
     .into()
 }
 
-fn mode_list() -> Value {
+pub(super) fn mode_list() -> Value {
     json!({"currentModeId": "default", "availableModes": [{"id": "default"}, {"id": "bypassPermissions"}]})
 }
 
@@ -857,7 +857,7 @@ fn install_call(url: &str, token: &str) -> JoinHandle<Value> {
 }
 
 /// The next question the host put to the client.
-fn question(link: &Arc<Link>) -> Value {
+pub(super) fn question(link: &Arc<Link>) -> Value {
     let until = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         if let Some(message) = link.drain().into_iter().next() {
@@ -868,7 +868,7 @@ fn question(link: &Arc<Link>) -> Value {
     }
 }
 
-fn person_answers(link: &Arc<Link>, asked: &Value, option: &str) -> bool {
+pub(super) fn person_answers(link: &Arc<Link>, asked: &Value, option: &str) -> bool {
     let reply = json!({"jsonrpc": "2.0", "id": asked["id"], "result": {"outcome": {"outcome": "selected", "optionId": option}}});
     link.taken_from_client(reply.to_string().as_bytes())
 }

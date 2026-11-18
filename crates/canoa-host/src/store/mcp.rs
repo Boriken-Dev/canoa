@@ -93,6 +93,20 @@ pub(crate) trait Backend: Send + Sync {
     fn discard(&self, session: &str, prepared: &Prepared);
 }
 
+/// Another server a connection's sessions are given beside `canoa-store`: its own tools, answered the way the store's are, with the
+/// same way to ask the person about a change. It is given to every session of a key it is offered to, whether or not the client
+/// asked for the store tools.
+pub(crate) trait Extra: Send + Sync {
+    /// The name of the MCP server the host adds to a session.
+    fn server(&self) -> &'static str;
+    /// Whether a connection whose key holds `grants` is given the server.
+    fn offered(&self, grants: &BTreeSet<Grant>) -> bool;
+    /// The tools and their input, as `tools/list` answers.
+    fn list(&self) -> Value;
+    /// Runs the tool `name` and answers as `tools/call` does.
+    fn call(&self, access: &Access, name: &str, args: &Value) -> Value;
+}
+
 /// What is installed on the host, by name.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Installed {
@@ -113,6 +127,8 @@ pub(crate) struct Access {
     pub(crate) cancel: Arc<AtomicBool>,
     /// Changes of this session that ended with nothing to show the person.
     unshown: AtomicUsize,
+    /// The server this bearer opens when it is not the store's.
+    extra: Option<Arc<dyn Extra>>,
 }
 
 impl Access {
@@ -188,6 +204,7 @@ impl Tokens {
 pub(crate) struct Hub {
     enabled: bool,
     backend: OnceLock<Arc<dyn Backend>>,
+    extras: Mutex<Vec<Arc<dyn Extra>>>,
     /// What runs the stdio bridge, for an agent that takes no HTTP MCP server.
     bridge: BridgeCommand,
     tokens: Arc<Tokens>,
@@ -199,6 +216,7 @@ impl Hub {
         Arc::new(Self {
             enabled,
             backend: OnceLock::new(),
+            extras: Mutex::new(Vec::new()),
             bridge,
             tokens: Arc::new(Tokens::default()),
             server: Mutex::new(None),
@@ -208,6 +226,11 @@ impl Hub {
     /// Says what answers the tools. Once.
     pub(crate) fn serve_with(&self, backend: Arc<dyn Backend>) {
         let _ = self.backend.set(backend);
+    }
+
+    /// Adds a server to give every connection it is offered to.
+    pub(crate) fn serve_extra(&self, extra: Arc<dyn Extra>) {
+        lock(&self.extras).push(extra);
     }
 
     fn backend(&self) -> Option<Arc<dyn Backend>> {
@@ -232,7 +255,13 @@ impl Hub {
         grants: Option<&BTreeSet<Grant>>,
     ) -> Option<Arc<Link>> {
         let grants = grants?;
-        if !self.enabled || self.backend.get().is_none() {
+        let extras: Vec<Arc<dyn Extra>> = lock(&self.extras)
+            .iter()
+            .filter(|extra| extra.offered(grants))
+            .cloned()
+            .collect();
+        let store = self.enabled && self.backend.get().is_some();
+        if !store && extras.is_empty() {
             return None;
         }
         let kept: BTreeSet<Grant> = grants
@@ -250,12 +279,16 @@ impl Hub {
                 )
             })
             .collect();
-        if !kept.contains(&Grant::OverlayRead) && !kept.contains(&Grant::StorePrograms) {
+        let store =
+            store && (kept.contains(&Grant::OverlayRead) || kept.contains(&Grant::StorePrograms));
+        if !store && extras.is_empty() {
             return None;
         }
         Some(Arc::new(Link {
             hub: Arc::clone(self),
             grants: kept,
+            store,
+            extras,
             state: Mutex::new(State::default()),
             questions: Questions::default(),
             closed: AtomicBool::new(false),
@@ -288,7 +321,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 enum Pending {
     Initialize,
     Open {
-        digest: [u8; 32],
+        digests: Vec<[u8; 32]>,
         /// The session the request names, for a load or a resume; a new session is named by the agent's answer.
         known: Option<String>,
     },
@@ -320,6 +353,9 @@ struct State {
 pub(crate) struct Link {
     hub: Arc<Hub>,
     grants: BTreeSet<Grant>,
+    /// Whether the connection is given the store's own tools (when the client asks for them).
+    store: bool,
+    extras: Vec<Arc<dyn Extra>>,
     state: Mutex<State>,
     questions: Questions,
     closed: AtomicBool,
@@ -328,6 +364,16 @@ pub(crate) struct Link {
 impl Link {
     fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
+    }
+
+    /// Whether the connection's key may use the store's own tools.
+    pub(crate) fn serves_store(&self) -> bool {
+        self.store
+    }
+
+    /// Whether the connection is given the extra server `name`.
+    pub(crate) fn offers(&self, name: &str) -> bool {
+        self.extras.iter().any(|extra| extra.server() == name)
     }
 
     /// What the host added to the stream to the client.
@@ -489,7 +535,8 @@ impl Link {
         message
     }
 
-    /// Adds the host's MCP server, with a bearer of its own, to a session request. Whether the request was changed.
+    /// Adds the host's MCP servers, each with a bearer of its own, to a session request: the store's when the client asked for
+    /// it and the connection's key may use it, and every extra server offered to the key. Whether the request was changed.
     fn open(self: &Arc<Self>, value: &mut Value, method: &str, id: String) -> bool {
         let known = (method != "session/new")
             .then(|| value.pointer("/params/sessionId").and_then(Value::as_str))
@@ -499,42 +546,59 @@ impl Link {
             let state = lock(&self.state);
             (state.asked, state.http, state.stdio, state.digests.len())
         };
-        if !asked || self.is_closed() || count >= MAX_SESSIONS || !(http || stdio > 0) {
+        let mut wanted: Vec<(&'static str, Option<Arc<dyn Extra>>)> = Vec::new();
+        if self.store && asked {
+            wanted.push((SERVER_NAME, None));
+        }
+        wanted.extend(
+            self.extras
+                .iter()
+                .map(|extra| (extra.server(), Some(Arc::clone(extra)))),
+        );
+        if wanted.is_empty()
+            || self.is_closed()
+            || count + wanted.len() > MAX_SESSIONS
+            || !(http || stdio > 0)
+        {
             return false;
         }
         let Some(url) = self.hub.url() else {
             return false;
         };
-        let mut secret = [0_u8; 32];
-        if getrandom::fill(&mut secret).is_err() {
-            return false;
-        }
-        let token: String = secret.iter().map(|byte| format!("{byte:02x}")).collect();
-        let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-        let entry = if http {
-            json!({
-                "type": "http",
-                "name": SERVER_NAME,
-                "url": url,
-                "headers": [{"name": "Authorization", "value": format!("Bearer {token}")}],
-            })
-        } else {
-            // The same stdio bridge the delegation tools use, with the address and bearer in its environment. Version 1
-            // writes a stdio server with no `type`; version 2 names it.
-            let mut entry = json!({
-                "name": SERVER_NAME,
-                "command": self.hub.bridge.program,
-                "args": self.hub.bridge.args,
-                "env": [
-                    {"name": crate::delegate::bridge::URL_VAR, "value": url},
-                    {"name": crate::delegate::bridge::TOKEN_VAR, "value": token},
-                ],
-            });
-            if stdio >= 2 {
-                entry["type"] = json!("stdio");
+        let mut made = Vec::new();
+        for (server, extra) in wanted {
+            let mut secret = [0_u8; 32];
+            if getrandom::fill(&mut secret).is_err() {
+                return false;
             }
-            entry
-        };
+            let token: String = secret.iter().map(|byte| format!("{byte:02x}")).collect();
+            let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
+            let entry = if http {
+                json!({
+                    "type": "http",
+                    "name": server,
+                    "url": url,
+                    "headers": [{"name": "Authorization", "value": format!("Bearer {token}")}],
+                })
+            } else {
+                // The same stdio bridge the delegation tools use, with the address and bearer in its environment. Version 1
+                // writes a stdio server with no `type`; version 2 names it.
+                let mut entry = json!({
+                    "name": server,
+                    "command": self.hub.bridge.program,
+                    "args": self.hub.bridge.args,
+                    "env": [
+                        {"name": crate::delegate::bridge::URL_VAR, "value": url},
+                        {"name": crate::delegate::bridge::TOKEN_VAR, "value": token},
+                    ],
+                });
+                if stdio >= 2 {
+                    entry["type"] = json!("stdio");
+                }
+                entry
+            };
+            made.push((server, extra, digest, entry));
+        }
         let Some(servers) = value
             .get_mut("params")
             .and_then(Value::as_object_mut)
@@ -543,21 +607,26 @@ impl Link {
         else {
             return false;
         };
-        servers.retain(|server| server.get("name").and_then(Value::as_str) != Some(SERVER_NAME));
-        servers.push(entry);
-        // A load or a resume names its session; a new one is named by the agent's answer.
-        let access = Arc::new(Access {
-            grants: self.grants.clone(),
-            calls: AtomicUsize::new(0),
-            session: Mutex::new(known.clone()),
-            link: Arc::downgrade(self),
-            changing: Mutex::new(()),
-            cancel: Arc::new(AtomicBool::new(false)),
-            unshown: AtomicUsize::new(0),
-        });
-        self.hub.tokens.add(digest, access);
-        lock(&self.state).digests.push(digest);
-        self.remember(id, Pending::Open { digest, known });
+        let mut digests = Vec::new();
+        for (server, extra, digest, entry) in made {
+            servers.retain(|have| have.get("name").and_then(Value::as_str) != Some(server));
+            servers.push(entry);
+            // A load or a resume names its session; a new one is named by the agent's answer.
+            let access = Arc::new(Access {
+                grants: self.grants.clone(),
+                calls: AtomicUsize::new(0),
+                session: Mutex::new(known.clone()),
+                link: Arc::downgrade(self),
+                changing: Mutex::new(()),
+                cancel: Arc::new(AtomicBool::new(false)),
+                unshown: AtomicUsize::new(0),
+                extra,
+            });
+            self.hub.tokens.add(digest, access);
+            digests.push(digest);
+        }
+        lock(&self.state).digests.extend(digests.iter().copied());
+        self.remember(id, Pending::Open { digests, known });
         tracing::debug!("a session was given the store tools");
         true
     }
@@ -602,7 +671,7 @@ impl Link {
                 let stdio = version < 2 || takes(result.pointer("/capabilities/session/mcp/stdio"));
                 state.stdio = if stdio { version } else { 0 };
             }
-            (Some(Pending::Open { digest, known, .. }), Some(result)) => {
+            (Some(Pending::Open { digests, known, .. }), Some(result)) => {
                 let named = known.or_else(|| {
                     result
                         .get("sessionId")
@@ -610,12 +679,14 @@ impl Link {
                         .map(str::to_owned)
                 });
                 match named {
-                    Some(named) => self.bind(digest, &named, modes_of(result)),
-                    None => self.revoke(&digest),
+                    Some(named) => self.bind(&digests, &named, modes_of(result)),
+                    None => digests.iter().for_each(|digest| self.revoke(digest)),
                 }
             }
             // A session the agent did not open has no use for its bearer.
-            (Some(Pending::Open { digest, .. }), None) => self.revoke(&digest),
+            (Some(Pending::Open { digests, .. }), None) => {
+                digests.iter().for_each(|digest| self.revoke(digest));
+            }
             (Some(Pending::Mode { session, mode }), Some(_)) => {
                 if let Some(held) = self.held(&session) {
                     held.bypass.store(
@@ -688,16 +759,22 @@ impl Link {
     }
 
     /// The session the agent has named is given its bearer's name. A session named twice keeps the newer bearer only.
-    fn bind(&self, digest: [u8; 32], session: &str, modes: Modes) {
+    fn bind(&self, digests: &[[u8; 32]], session: &str, modes: Modes) {
         self.end(session);
-        let Some(access) = self.hub.tokens.find(&digest) else {
+        let mut bound = Vec::new();
+        for digest in digests {
+            if let Some(access) = self.hub.tokens.find(digest) {
+                *lock(&access.session) = Some(session.to_owned());
+                bound.push(*digest);
+            }
+        }
+        if bound.is_empty() {
             return;
-        };
-        *lock(&access.session) = Some(session.to_owned());
+        }
         lock(&self.state).sessions.insert(
             session.to_owned(),
             Arc::new(Held {
-                digest,
+                digests: bound,
                 modes,
                 bypass: AtomicBool::new(false),
             }),
@@ -708,7 +785,7 @@ impl Link {
     fn end(&self, session: &str) {
         let held = lock(&self.state).sessions.remove(session);
         if let Some(held) = held {
-            self.revoke(&held.digest);
+            held.digests.iter().for_each(|digest| self.revoke(digest));
         }
     }
 }
@@ -838,5 +915,7 @@ impl<C: Channel + ?Sized> Channel for StoreLayer<'_, C> {
     }
 }
 
+#[cfg(test)]
+mod extra_tests;
 #[cfg(test)]
 mod tests;
