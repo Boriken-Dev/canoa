@@ -42,6 +42,9 @@ impl Drop for Dir {
     }
 }
 
+/// The model and the window each engine was opened with.
+type Seen = Arc<Mutex<Vec<(String, Option<u64>)>>>;
+
 struct Local;
 
 impl Engine for Local {
@@ -498,4 +501,68 @@ fn the_catalog_the_app_reads_is_the_one_the_host_writes() {
             .replace("\r\n", "\n"),
         text
     );
+}
+
+#[test]
+fn a_models_window_in_canoa_cfg_reaches_the_engine_opened_for_it_and_a_model_without_one_gets_none()
+{
+    let dir = Dir::new();
+    let file = dir.0.join("canoa.cfg");
+    std::fs::write(
+        &file,
+        "[foundry.windows]\n\"local-model\" = 16384\n\"other\" = 999\n",
+    )
+    .expect("a canoa.cfg");
+    let seen: Seen = Arc::default();
+    let gateways = Gateways::in_home(Some(&dir.0));
+    gateways.windows_from(file.clone());
+    let record = Arc::clone(&seen);
+    gateways.engines(Arc::new(move |settings| {
+        record
+            .lock()
+            .expect("lock")
+            .push((settings.model.clone(), settings.window));
+        Ok(Arc::new(Local) as Arc<dyn Engine>)
+    }));
+    let table = |model: &str| {
+        let mut map = serde_json::Map::new();
+        map.insert("model".to_owned(), json!(model));
+        Foundry::from_map(&map).expect("settings")
+    };
+    let _first = gateways
+        .ticket("a", &table("local-model"))
+        .expect("a gateway");
+    let _second = gateways.ticket("b", &table("plain")).expect("a gateway");
+    assert_eq!(
+        *seen.lock().expect("lock"),
+        [
+            ("local-model".to_owned(), Some(16384)),
+            ("plain".to_owned(), None)
+        ]
+    );
+    // Changing the file changes what the next gateway is given, with no restart.
+    std::fs::write(&file, "[foundry.windows]\n\"plain\" = 2048\n").expect("rewritten");
+    let _third = gateways.ticket("c", &table("plain")).expect("a gateway");
+    assert_eq!(
+        seen.lock().expect("lock").last(),
+        Some(&("plain".to_owned(), Some(2048)))
+    );
+}
+
+#[test]
+fn a_host_with_no_canoa_cfg_gives_every_model_its_own_window() {
+    let dir = Dir::new();
+    let seen: Arc<Mutex<Vec<Option<u64>>>> = Arc::default();
+    let gateways = Gateways::in_home(Some(&dir.0));
+    let record = Arc::clone(&seen);
+    gateways.engines(Arc::new(move |settings| {
+        record.lock().expect("lock").push(settings.window);
+        Ok(Arc::new(Local) as Arc<dyn Engine>)
+    }));
+    let mut map = serde_json::Map::new();
+    map.insert("model".to_owned(), json!("local-model"));
+    let _held = gateways
+        .ticket("a", &Foundry::from_map(&map).expect("settings"))
+        .expect("a gateway");
+    assert_eq!(*seen.lock().expect("lock"), [None]);
 }

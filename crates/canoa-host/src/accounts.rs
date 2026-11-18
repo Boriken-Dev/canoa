@@ -289,7 +289,7 @@ impl Accounts {
         note: Option<String>,
     ) -> Result<Arc<Self>, StoreError> {
         private::create_root(&dir).map_err(|error| io_error(&dir, &error))?;
-        let gateway_log = dir.parent().map(|home| home.join(foundry::GATEWAY_LOG));
+        let gateways = foundry::Gateways::in_home(dir.parent());
         let accounts = Arc::new(Self {
             dir,
             store,
@@ -297,10 +297,15 @@ impl Accounts {
             sources: AtomicU64::new(1),
             writing: Mutex::new(()),
             note,
-            gateways: foundry::Gateways::logging_to(gateway_log),
+            gateways,
         });
         accounts.sweep();
         Ok(accounts)
+    }
+
+    /// Has the gateways of Foundry Local accounts read each model's window from the canoa.cfg at `file`.
+    pub(crate) fn windows_from(&self, file: PathBuf) {
+        self.gateways.windows_from(file);
     }
 
     /// The gateways of Foundry Local accounts.

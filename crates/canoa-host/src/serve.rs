@@ -1431,6 +1431,9 @@ impl Serving {
             &config.mail,
             accounts.clone(),
         ));
+        if let (Some(accounts), Some(file)) = (&accounts, &options.config_file) {
+            accounts.windows_from(file.clone());
+        }
         // The spend the agents report, kept in the home; a host with no home keeps none.
         let usage_log = options.state_dir.as_ref().map(|home| {
             Arc::new(crate::usage_log::UsageLog::open(

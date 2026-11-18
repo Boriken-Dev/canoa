@@ -9,6 +9,7 @@
     reason = "processes and files are std's"
 )]
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -16,8 +17,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use canoa_foundry::models::{self, Listing, ModelAction};
+use canoa_foundry::window;
 use serde_json::{Value, json};
 
+use super::files::Files;
 use super::{REFUSED, bad, text_param};
 use crate::spawn::{Command, Stdio};
 
@@ -128,7 +131,30 @@ fn rows_of(done: &Done) -> Option<Vec<models::Row>> {
         .map(|answer| models::rows(&answer))
 }
 
-fn model_json(model: &models::Model) -> Value {
+/// Where Foundry Local keeps the models it downloads, under the person's home.
+fn cache_of(home: &Path) -> PathBuf {
+    home.join(".foundry").join("cache").join("models")
+}
+
+/// The window a downloaded model has (its own `genai_config.json`'s) and the one the person chose for it; null for the numbers of a
+/// model that is not downloaded, or whose folder is not where Foundry Local keeps them.
+fn window_json(
+    model: &models::Model,
+    home: Option<&Path>,
+    chosen: &BTreeMap<String, u64>,
+) -> Value {
+    let own = home
+        .filter(|_| model.cached)
+        .and_then(|home| window::cached_folder(&cache_of(home), &model.row.id))
+        .and_then(|folder| window::read(&folder).ok());
+    json!({
+        "context_length": own.and_then(|own| own.context_length),
+        "max_length": own.and_then(|own| own.max_length),
+        "chosen": chosen.get(&model.row.id),
+    })
+}
+
+fn model_json(model: &models::Model, home: Option<&Path>, chosen: &BTreeMap<String, u64>) -> Value {
     json!({
         "id": model.row.id,
         "alias": model.row.alias,
@@ -138,14 +164,16 @@ fn model_json(model: &models::Model) -> Value {
         "description": models::describe(&model.row),
         "cached": model.cached,
         "loaded": model.loaded,
+        "window": window_json(model, home, chosen),
     })
 }
 
 /// `foundry/models` -> `{"installed", "program"?, "models": [{id, alias?, task?, device?, size_mb?, description, cached,
-/// loaded}]}`: the catalog's variants with what is downloaded and what is in memory marked, loaded first. Without Foundry Local
-/// it is `{"installed": false, "models": []}`.
-pub(super) fn models(program: Option<PathBuf>) -> Outcome {
-    models_with(program, &[], std::env::home_dir().as_deref())
+/// loaded, window: {context_length, max_length, chosen}}]}`: the catalog's variants with what is downloaded and what is in memory
+/// marked, loaded first; each one's window is what its own configuration says (null for a model not downloaded) and what the
+/// person chose in canoa.cfg's `[foundry.windows]`. Without Foundry Local it is `{"installed": false, "models": []}`.
+pub(super) fn models(program: Option<PathBuf>, windows: &BTreeMap<String, u64>) -> Outcome {
+    models_with(program, &[], std::env::home_dir().as_deref(), windows)
 }
 
 /// `home` is where the service's `.foundry/daemon.json` is: with no service running nothing is in memory, and listing what is
@@ -154,6 +182,7 @@ fn models_with(
     program: Option<PathBuf>,
     env: &[(OsString, OsString)],
     home: Option<&Path>,
+    windows: &BTreeMap<String, u64>,
 ) -> Outcome {
     let Some(program) = program else {
         return Ok(json!({"installed": false, "models": []}));
@@ -192,7 +221,10 @@ fn models_with(
     Ok(json!({
         "installed": true,
         "program": program.display().to_string(),
-        "models": found.iter().map(model_json).collect::<Vec<_>>(),
+        "models": found
+            .iter()
+            .map(|model| model_json(model, home, windows))
+            .collect::<Vec<_>>(),
     }))
 }
 
@@ -237,6 +269,50 @@ fn act_with(
         ModelAction::Unload => None,
     };
     Ok(json!({"ok": true, "model": model, "action": word, "note": note}))
+}
+
+/// `foundry/window` `{"model", "window"}` -> `{"ok": true, "model", "window", "note"?, "applies"}`: keeps `window` tokens as the
+/// window Foundry Local's model `model` is run with (`[foundry.windows]` in canoa.cfg), or takes the setting away when `window` is
+/// null. A window above the model's own context length is lowered to it, and the answer says so. The setting is used when the
+/// model is run by the SDK engine, which makes Canoa's own copy of the model's folder; the Foundry Local service runs the model
+/// as it is cached, whatever is set here.
+pub(super) fn window(params: &Value, files: &Files) -> Outcome {
+    window_with(params, files, std::env::home_dir().as_deref())
+}
+
+fn window_with(params: &Value, files: &Files, home: Option<&Path>) -> Outcome {
+    let model = text_param(params, "model")?.ok_or_else(|| bad("model is needed"))?;
+    if !models::valid_model(model) {
+        return Err(bad("a model is 1 to 128 letters, digits and . _ - : + /"));
+    }
+    let wanted = match params.get("window") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(value.as_u64().filter(|tokens| *tokens > 0).ok_or_else(|| {
+            bad("window is a whole number of tokens, at least 1, or null to remove the setting")
+        })?),
+    };
+    let mut kept = wanted;
+    let mut note = None;
+    if let Some(tokens) = wanted {
+        let limit = home
+            .and_then(|home| window::cached_folder(&cache_of(home), model))
+            .and_then(|folder| window::read(&folder).ok())
+            .and_then(|own| own.limit());
+        if let Some(limit) = limit {
+            let (lowered, said) =
+                window::clamp(tokens, limit).map_err(|why| bad(&why.to_string()))?;
+            kept = Some(lowered);
+            note = said;
+        }
+    }
+    files.set_foundry_window(model, kept)?;
+    Ok(json!({
+        "ok": true,
+        "model": model,
+        "window": kept,
+        "note": note,
+        "applies": "Used when the model is run by the SDK engine, from the next time its gateway starts; the Foundry Local service runs the model as it is cached.",
+    }))
 }
 
 #[cfg(test)]
@@ -316,7 +392,7 @@ mod tests {
 
     #[test]
     fn without_foundry_local_nothing_is_listed_and_nothing_can_be_moved() {
-        let listed = models(None).expect("an answer");
+        let listed = models(None, &BTreeMap::new()).expect("an answer");
         assert_eq!(listed, json!({"installed": false, "models": []}));
         let refused = act(&json!({"model": "m", "action": "load"}), None).expect_err("refused");
         assert_eq!(refused.0, REFUSED);
@@ -330,7 +406,8 @@ mod tests {
         let home = dir.join("home");
         std::fs::create_dir_all(home.join(".foundry")).expect("a home");
         let id = "qwen3-14b-generic-gpu:2";
-        let listed = models_with(program.clone(), &env, Some(&home)).expect("listed");
+        let listed =
+            models_with(program.clone(), &env, Some(&home), &BTreeMap::new()).expect("listed");
         assert_eq!(listed["installed"], true);
         assert_eq!(marks(&listed).len(), 3);
         assert!(
@@ -364,7 +441,8 @@ mod tests {
         )
         .expect("downloaded");
         assert_eq!(done["ok"], true);
-        let listed = models_with(program.clone(), &env, Some(&home)).expect("listed");
+        let listed =
+            models_with(program.clone(), &env, Some(&home), &BTreeMap::new()).expect("listed");
         assert!(marks(&listed).contains(&(id.to_owned(), true, false)));
 
         let done = act_with(
@@ -380,7 +458,8 @@ mod tests {
                 .is_some_and(|n| n.contains("server stop")),
             "{done}"
         );
-        let listed = models_with(program.clone(), &env, Some(&home)).expect("listed");
+        let listed =
+            models_with(program.clone(), &env, Some(&home), &BTreeMap::new()).expect("listed");
         assert!(
             marks(&listed).contains(&(id.to_owned(), true, false)),
             "with no service running nothing is asked to be in memory"
@@ -390,7 +469,8 @@ mod tests {
             r#"{"web_urls": ["http://127.0.0.1:60570"]}"#,
         )
         .expect("a daemon file");
-        let listed = models_with(program.clone(), &env, Some(&home)).expect("listed");
+        let listed =
+            models_with(program.clone(), &env, Some(&home), &BTreeMap::new()).expect("listed");
         assert_eq!(
             marks(&listed)[0],
             (id.to_owned(), true, true),
@@ -404,7 +484,7 @@ mod tests {
             None,
         )
         .expect("unloaded");
-        let listed = models_with(program, &env, Some(&home)).expect("listed");
+        let listed = models_with(program, &env, Some(&home), &BTreeMap::new()).expect("listed");
         assert!(marks(&listed).contains(&(id.to_owned(), true, false)));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -430,7 +510,8 @@ mod tests {
     fn a_failing_catalog_is_shown_in_the_programs_words_without_its_escapes() {
         let (dir, mut env) = state("fail");
         env.push((OsString::from("FOUNDRY_STANDIN_FAIL"), OsString::from("1")));
-        let refused = models_with(Some(standin()), &env, None).expect_err("refused");
+        let refused =
+            models_with(Some(standin()), &env, None, &BTreeMap::new()).expect_err("refused");
         assert_eq!(refused.0, REFUSED);
         assert_eq!(
             refused.1,
@@ -462,5 +543,182 @@ mod tests {
         assert_eq!(refused.0, REFUSED);
         assert!(refused.1.contains("was ended"), "{}", refused.1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn cached_model(home: &Path, id: &str, context: u64, max: u64) {
+        let (name, version) = id.rsplit_once(':').expect("a variant id");
+        let folder = cache_of(home)
+            .join("Microsoft")
+            .join(format!("{name}-{version}"))
+            .join(format!("v{version}"));
+        std::fs::create_dir_all(&folder).expect("a model folder");
+        std::fs::write(
+            folder.join("genai_config.json"),
+            format!(
+                "{{\"model\": {{\"context_length\": {context}}}, \"search\": {{\"max_length\": {max}}}}}"
+            ),
+        )
+        .expect("a configuration");
+    }
+
+    fn files_in(dir: &Path) -> Files {
+        Files::new(
+            Some(dir.to_path_buf()),
+            Vec::new(),
+            Some(dir.join("canoa.cfg")),
+            None,
+            super::super::UploadLimits::default(),
+        )
+    }
+
+    #[test]
+    fn a_downloaded_model_lists_its_own_window_and_the_one_chosen() {
+        let (dir, env) = state("windows");
+        let program = Some(standin());
+        let home = dir.join("home");
+        std::fs::create_dir_all(home.join(".foundry")).expect("a home");
+        let id = "qwen3-14b-generic-gpu:2";
+        cached_model(&home, id, 40960, 8192);
+        let chosen = BTreeMap::from([(id.to_owned(), 16384_u64)]);
+
+        // Not downloaded as far as the program says: no numbers, but the person's choice is still shown.
+        let listed = models_with(program.clone(), &env, Some(&home), &chosen).expect("listed");
+        let row = |listed: &Value| {
+            listed["models"]
+                .as_array()
+                .and_then(|all| all.iter().find(|m| m["id"] == id))
+                .expect("the model")
+                .clone()
+        };
+        assert_eq!(
+            row(&listed)["window"],
+            json!({"context_length": null, "max_length": null, "chosen": 16384})
+        );
+
+        act_with(
+            &json!({"model": id, "action": "download"}),
+            program.clone(),
+            &env,
+            None,
+        )
+        .expect("downloaded");
+        let listed = models_with(program, &env, Some(&home), &chosen).expect("listed");
+        assert_eq!(
+            row(&listed)["window"],
+            json!({"context_length": 40960, "max_length": 8192, "chosen": 16384})
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_window_is_kept_in_canoa_cfg_per_model_capped_at_the_models_own_and_taken_away_with_null() {
+        let (dir, _) = state("keep");
+        let home = dir.join("home");
+        let id = "qwen3-14b-generic-gpu:2";
+        cached_model(&home, id, 40960, 8192);
+        let files = files_in(&dir);
+
+        let kept =
+            window_with(&json!({"model": id, "window": 16384}), &files, Some(&home)).expect("kept");
+        assert_eq!(
+            (kept["window"].clone(), kept["note"].clone()),
+            (json!(16384), Value::Null)
+        );
+        assert_eq!(files.foundry_windows().get(id), Some(&16384));
+        let text = std::fs::read_to_string(dir.join("canoa.cfg")).expect("written");
+        assert!(text.contains("windows") && text.contains("16384"), "{text}");
+
+        let capped = window_with(
+            &json!({"model": id, "window": 100_000}),
+            &files,
+            Some(&home),
+        )
+        .expect("kept");
+        assert_eq!(
+            capped["window"], 40960,
+            "the model's own context length is the most"
+        );
+        assert!(
+            capped["note"]
+                .as_str()
+                .is_some_and(|n| n.contains("100000")),
+            "{capped}"
+        );
+        assert_eq!(files.foundry_windows().get(id), Some(&40960));
+
+        // A model that is not downloaded has no limit to check against, so the number is kept as given.
+        window_with(
+            &json!({"model": "other:1", "window": 5000}),
+            &files,
+            Some(&home),
+        )
+        .expect("kept");
+        assert_eq!(files.foundry_windows().len(), 2);
+
+        let removed = window_with(&json!({"model": id, "window": null}), &files, Some(&home))
+            .expect("removed");
+        assert_eq!(removed["window"], Value::Null);
+        assert_eq!(
+            files.foundry_windows(),
+            BTreeMap::from([("other:1".to_owned(), 5000)])
+        );
+        window_with(
+            &json!({"model": "other:1", "window": null}),
+            &files,
+            Some(&home),
+        )
+        .expect("removed");
+        assert!(files.foundry_windows().is_empty());
+        let text = std::fs::read_to_string(dir.join("canoa.cfg")).expect("read");
+        assert!(
+            !text.contains("foundry"),
+            "an empty table is not left behind: {text}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_window_that_is_not_a_number_of_tokens_or_a_name_that_is_not_a_model_is_refused() {
+        let (dir, _) = state("badwindow");
+        let files = files_in(&dir);
+        for params in [
+            json!({"model": "m", "window": 0}),
+            json!({"model": "m", "window": -4}),
+            json!({"model": "m", "window": "big"}),
+            json!({"model": "m", "window": 1.5}),
+            json!({"model": "--help", "window": 4096}),
+            json!({"window": 4096}),
+        ] {
+            let refused = window_with(&params, &files, None).expect_err("refused");
+            assert_eq!(refused.0, super::super::BAD_PARAMS, "{params}");
+        }
+        assert!(files.foundry_windows().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_key_that_may_only_read_the_store_cannot_set_a_window() {
+        use super::super::{
+            Caller, Control, DEFAULT_MAX_RECORD_BYTES, DEFAULT_MAX_RECORDS, DENIED, Grant,
+        };
+        let control = Control::open(
+            None,
+            DEFAULT_MAX_RECORDS,
+            DEFAULT_MAX_RECORD_BYTES,
+            Vec::new(),
+        )
+        .expect("opens");
+        let caller = Caller::Peer {
+            id: "sha256:aa".to_owned(),
+            grants: [Grant::StoreRead].into_iter().collect(),
+        };
+        let line = serde_json::to_vec(
+            &json!({"jsonrpc": "2.0", "id": 1, "method": "foundry/window", "params": {"model": "m", "window": 4096}}),
+        )
+        .expect("encodes");
+        let answer: Value =
+            serde_json::from_slice(&control.handle(&caller, &line).expect("answered"))
+                .expect("JSON");
+        assert_eq!(answer["error"]["code"], DENIED, "{answer}");
     }
 }

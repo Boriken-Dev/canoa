@@ -6,6 +6,7 @@
     reason = "files and locks are std's"
 )]
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read as _, Write as _};
 use std::path::{Component, Path, PathBuf};
@@ -518,6 +519,45 @@ impl Files {
         let current = self.hidden_section(section)?.unwrap_or(Value::Null);
         let next = change(current).map_err(|why| (REFUSED, why))?;
         self.write_section(section, &next).map(|_| ())
+    }
+
+    /// The window each Foundry Local model is set to in this host's canoa.cfg, by variant id (`[foundry.windows]`); empty when the
+    /// host has no canoa.cfg or the table is not there.
+    pub(crate) fn foundry_windows(&self) -> BTreeMap<String, u64> {
+        self.config
+            .as_deref()
+            .map(foundry_windows_in)
+            .unwrap_or_default()
+    }
+
+    /// Sets the window of Foundry Local model `model` to `window` tokens, or takes the setting away with `None`, in `[foundry.windows]`.
+    pub(crate) fn set_foundry_window(
+        &self,
+        model: &str,
+        window: Option<u64>,
+    ) -> Result<(), (i32, String)> {
+        self.hidden_update(FOUNDRY, |current| {
+            let mut windows = windows_of(Some(&current));
+            match window {
+                Some(tokens) => {
+                    windows.insert(model.to_owned(), tokens);
+                }
+                None => {
+                    windows.remove(model);
+                }
+            }
+            let mut section = current.as_object().cloned().unwrap_or_default();
+            if windows.is_empty() {
+                section.remove("windows");
+            } else {
+                section.insert("windows".to_owned(), json!(windows));
+            }
+            Ok(if section.is_empty() {
+                Value::Null
+            } else {
+                Value::Object(section)
+            })
+        })
     }
 
     fn config_set_held(&self, params: &Value, guarded: bool) -> Outcome {
@@ -1049,6 +1089,42 @@ fn text_of(path: &Path) -> String {
 /// `path` without the `\\?\` prefix Windows' resolution adds: a drive's path as `C:\work`, a share's as `\\server\share`.
 fn plain(path: PathBuf) -> PathBuf {
     crate::share::plain(&path).into_owned()
+}
+
+/// The table of canoa.cfg that holds Foundry Local's per-model settings: `windows` maps a model variant's id to the window, in
+/// tokens, its runs are given.
+pub(crate) const FOUNDRY: &str = "foundry";
+
+/// The windows a `[foundry]` table names: each value a whole number of tokens of at least 1; anything else is left out.
+pub(crate) fn windows_of(section: Option<&Value>) -> BTreeMap<String, u64> {
+    section
+        .and_then(|section| section.get("windows"))
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(model, tokens)| {
+            tokens
+                .as_u64()
+                .filter(|tokens| *tokens > 0)
+                .map(|tokens| (model.clone(), tokens))
+        })
+        .collect()
+}
+
+/// The windows of the canoa.cfg at `path`; none when the file is missing or cannot be read, which leaves each model its own.
+pub(crate) fn foundry_windows_in(path: &Path) -> BTreeMap<String, u64> {
+    let Ok((text, _)) = read_cfg(path) else {
+        return BTreeMap::new();
+    };
+    let Ok(table) = parse(path, &text) else {
+        return BTreeMap::new();
+    };
+    windows_of(
+        table
+            .get(FOUNDRY)
+            .and_then(|value| serde_json::to_value(value).ok())
+            .as_ref(),
+    )
 }
 
 /// canoa.cfg's text, and whether the file is there; empty when it is not.

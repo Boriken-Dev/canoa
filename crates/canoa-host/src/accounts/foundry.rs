@@ -31,11 +31,23 @@ use crate::provider::map_of;
 pub(crate) type Engines =
     Arc<dyn Fn(&Foundry) -> Result<Arc<dyn Engine>, String> + Send + Sync + 'static>;
 
-/// The engine an account's settings ask for: the service the person runs, or the SDK in this process.
-pub(crate) fn default_engine(settings: &Foundry) -> Result<Arc<dyn Engine>, String> {
+/// The engine an account's settings ask for: the service the person runs, or the SDK in this process. `copies` is the folder
+/// the SDK engine makes a model's adjusted copy in when the person set it a window.
+pub(crate) fn default_engine(
+    settings: &Foundry,
+    copies: Option<&Path>,
+) -> Result<Arc<dyn Engine>, String> {
     match settings.engine {
-        EngineKind::Service => service_engine(settings),
-        EngineKind::Sdk => sdk_engine(settings),
+        EngineKind::Service => {
+            if let Some(tokens) = settings.window {
+                tracing::info!(
+                    "{} has a window of {tokens} tokens, which only the sdk engine uses: the service runs the model as Foundry Local cached it",
+                    settings.model
+                );
+            }
+            service_engine(settings)
+        }
+        EngineKind::Sdk => sdk_engine(settings, copies),
         _ => Err("this build does not know that engine".to_owned()),
     }
 }
@@ -51,17 +63,36 @@ fn service_engine(settings: &Foundry) -> Result<Arc<dyn Engine>, String> {
 }
 
 #[cfg(feature = "foundry")]
-fn sdk_engine(settings: &Foundry) -> Result<Arc<dyn Engine>, String> {
-    use canoa_foundry::sdk::{SdkConfig, SdkEngine};
+fn sdk_engine(settings: &Foundry, copies: Option<&Path>) -> Result<Arc<dyn Engine>, String> {
+    use canoa_foundry::sdk::{SdkConfig, SdkEngine, SdkWindow};
     let mut config = SdkConfig::new(settings.model.clone());
     config.library = settings.library.as_ref().map(std::path::PathBuf::from);
-    SdkEngine::open(&config)
-        .map(|engine| Arc::new(engine) as Arc<dyn Engine>)
-        .map_err(|error| error.to_string())
+    if let Some(tokens) = settings.window {
+        let folder = copies.ok_or_else(|| {
+            format!(
+                "{} has a window of {tokens} tokens, and this host has no folder of its own to keep the adjusted model in",
+                settings.model
+            )
+        })?;
+        config.window = Some(SdkWindow::new(tokens, folder));
+    }
+    let engine = SdkEngine::open(&config).map_err(|error| error.to_string())?;
+    if let Some(made) = engine.adjusted() {
+        tracing::info!(
+            "{} runs with a window of {} tokens from {}",
+            settings.model,
+            made.window,
+            made.folder.display()
+        );
+        if let Some(note) = &made.note {
+            tracing::warn!("{}: {note}", settings.model);
+        }
+    }
+    Ok(Arc::new(engine) as Arc<dyn Engine>)
 }
 
 #[cfg(not(feature = "foundry"))]
-fn sdk_engine(_: &Foundry) -> Result<Arc<dyn Engine>, String> {
+fn sdk_engine(_: &Foundry, _: Option<&Path>) -> Result<Arc<dyn Engine>, String> {
     Err("this build of canoa runs models through the service only: the sdk engine needs it built with the foundry feature".to_owned())
 }
 
@@ -71,6 +102,10 @@ pub(crate) struct Gateways {
     engines: OnceLock<Engines>,
     /// The file each gateway records its requests in.
     log: Option<PathBuf>,
+    /// The folder the SDK engine keeps the adjusted copies of models in, one folder for each model.
+    copies: Option<PathBuf>,
+    /// The canoa.cfg whose `[foundry.windows]` says each model's window, read each time a gateway starts.
+    config: OnceLock<PathBuf>,
     up: Mutex<BTreeMap<String, Weak<Running>>>,
 }
 
@@ -83,13 +118,22 @@ impl core::fmt::Debug for Gateways {
 /// The file in the host's home that the gateways record their requests in.
 pub(crate) const GATEWAY_LOG: &str = "foundry-gateway.log";
 
+/// The folder in the host's home that holds the adjusted copies of models.
+pub(crate) const WINDOW_COPIES: &str = "foundry-windows";
+
 impl Gateways {
-    /// Gateways that record their requests in `log`.
-    pub(crate) fn logging_to(log: Option<PathBuf>) -> Self {
+    /// Gateways that keep their log and the adjusted copies of models in the host's `home`.
+    pub(crate) fn in_home(home: Option<&Path>) -> Self {
         Self {
-            log,
+            log: home.map(|home| home.join(GATEWAY_LOG)),
+            copies: home.map(|home| home.join(WINDOW_COPIES)),
             ..Self::default()
         }
+    }
+
+    /// Reads each model's window from the `[foundry.windows]` of the canoa.cfg at `file` whenever a gateway starts, once.
+    pub(crate) fn windows_from(&self, file: PathBuf) {
+        let _ = self.config.set(file);
     }
 
     /// Chooses what opens engines, once; a host that never does opens what each account's settings ask for.
@@ -104,12 +148,17 @@ impl Gateways {
         let running = match up.get(id).and_then(Weak::upgrade) {
             Some(running) => running,
             None => {
-                let engines = self
-                    .engines
-                    .get()
-                    .cloned()
-                    .unwrap_or_else(|| Arc::new(default_engine));
-                let engine = engines(settings)?;
+                let copies = self.copies.clone();
+                let engines = self.engines.get().cloned().unwrap_or_else(|| {
+                    Arc::new(move |settings: &Foundry| default_engine(settings, copies.as_deref()))
+                });
+                let mut settings = settings.clone();
+                settings.window = self.config.get().and_then(|file| {
+                    crate::control::foundry_windows_in(file)
+                        .get(&settings.model)
+                        .copied()
+                });
+                let engine = engines(&settings)?;
                 let running = Running::start(engine, self.log.clone())
                     .map_err(|error| format!("the gateway could not listen: {error}"))?;
                 up.insert(id.to_owned(), Arc::downgrade(&running));
