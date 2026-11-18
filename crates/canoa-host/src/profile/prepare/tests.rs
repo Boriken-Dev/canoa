@@ -419,3 +419,235 @@ fn an_overlay_with_nothing_to_prepare_runs_nothing_and_records_nothing() {
     assert_eq!(home.record("plain"), None);
     assert!(!scratch.overlays().join(".state").exists());
 }
+
+macro_rules! node_or_return {
+    () => {
+        match super::super::npm_registry::node() {
+            Some(node) => node,
+            None => {
+                eprintln!("NOT RUN: set CANOA_TEST_NODE to a Node.js with npm beside it");
+                return;
+            }
+        }
+    };
+}
+
+/// What `node` prints when it runs `script` with `NODE_PATH` set to `path`.
+fn node_prints(node: &Path, path: &Path, script: &str) -> String {
+    let out = std::process::Command::new(node)
+        .args(["-e", script])
+        .env("NODE_PATH", path)
+        .output()
+        .expect("node starts");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+#[test]
+fn node_dependencies_install_into_a_node_modules_of_the_overlays_own() {
+    use super::super::npm_registry::{Registry, finder_for as node_finder, npm_env};
+    let node = node_or_return!();
+    let scratch = Scratch::new("npm");
+    let registry = Registry::start(
+        &node,
+        &scratch.0.join("registry"),
+        &[("canoa-test-pkg", "1.0.0")],
+    );
+    let plan = plan_for(
+        &scratch,
+        "needy",
+        &[
+            ("overlay.cfg", "name = \"needy\"\n"),
+            (
+                "lib/node/package.json",
+                "{\"dependencies\": {\"canoa-test-pkg\": \"1.0.0\"}}\n",
+            ),
+        ],
+    );
+    assert!(
+        plan.lines()[0].contains("npm install, not pinned"),
+        "{:?}",
+        plan.lines()
+    );
+    let home = Home::new(scratch.overlays());
+    let env = npm_env(&node, &scratch.0.join("npm"), Some(&registry.url()));
+
+    let done = run(&plan, Change::Add, &home, &node_finder(&node), &env).expect("prepared");
+    assert_eq!(done.steps, ["empty-state", "deps:node", "record"]);
+    let modules = PathBuf::from(&home.packages("needy")["node"]);
+    assert!(modules.ends_with("node_modules"), "{modules:?}");
+    assert!(
+        modules
+            .join("canoa-test-pkg")
+            .join("package.json")
+            .is_file(),
+        "{modules:?}"
+    );
+    assert_eq!(
+        home.record("needy").map(|record| record.digest),
+        Some(plan.digest.clone())
+    );
+    // The packages are beside the overlay, never inside it, so its digest is as it was.
+    assert!(!plan.root.join("node_modules").exists());
+    assert!(!plan.root.join("lib/node/node_modules").exists());
+    let again = aos::tree_digest(&StdFs, &plan.root, &Settings::default()).expect("digest");
+    assert_eq!(again.digest.to_string(), plan.digest);
+    assert!(
+        !scratch
+            .overlays()
+            .join(".environments/needy/node.next")
+            .exists()
+    );
+    // Node resolves the package from the folder a session puts on `NODE_PATH`.
+    assert_eq!(
+        node_prints(
+            &node,
+            &modules,
+            "console.log(require('canoa-test-pkg').version)"
+        ),
+        "1.0.0"
+    );
+}
+
+#[test]
+fn a_node_package_the_registry_lacks_fails_the_step_with_npms_output_and_leaves_what_was_there() {
+    use super::super::npm_registry::{Registry, finder_for as node_finder, npm_env};
+    let node = node_or_return!();
+    let scratch = Scratch::new("npm-absent");
+    let registry = Registry::start(
+        &node,
+        &scratch.0.join("registry"),
+        &[("canoa-test-pkg", "1.0.0")],
+    );
+    let home = Home::new(scratch.overlays());
+    let env = npm_env(&node, &scratch.0.join("npm"), Some(&registry.url()));
+    let good = plan_for(
+        &scratch,
+        "needy",
+        &[
+            ("overlay.cfg", "name = \"needy\"\n"),
+            (
+                "lib/node/package.json",
+                "{\"dependencies\": {\"canoa-test-pkg\": \"1.0.0\"}}\n",
+            ),
+        ],
+    );
+    run(&good, Change::Add, &home, &node_finder(&node), &env).expect("prepared");
+    let before = home.packages("needy");
+    let recorded = home.record("needy").expect("recorded");
+
+    let worse = plan_for(
+        &scratch,
+        "needy",
+        &[(
+            "lib/node/package.json",
+            "{\"dependencies\": {\"canoa-test-pkg\": \"1.0.0\", \"canoa-test-absent\": \"9.9.9\"}}\n",
+        )],
+    );
+    let failure = run(&worse, Change::Sync, &home, &node_finder(&node), &env).expect_err("fails");
+    assert_eq!(failure.step, "dependencies (node)");
+    assert!(failure.what.contains("E404"), "{}", failure.what);
+    assert!(
+        failure.what.contains("canoa-test-absent"),
+        "{}",
+        failure.what
+    );
+    assert_eq!(home.record("needy"), Some(recorded));
+    assert_eq!(home.packages("needy"), before);
+    assert!(
+        PathBuf::from(&before["node"])
+            .join("canoa-test-pkg")
+            .is_dir()
+    );
+    assert!(
+        !scratch
+            .overlays()
+            .join(".environments/needy/node.next")
+            .exists()
+    );
+
+    // On a first install a failure leaves no environment at all.
+    let first = plan_for(
+        &scratch,
+        "fresh",
+        &[
+            ("overlay.cfg", "name = \"fresh\"\n"),
+            (
+                "lib/node/package.json",
+                "{\"dependencies\": {\"canoa-test-absent\": \"9.9.9\"}}\n",
+            ),
+        ],
+    );
+    let failure = run(&first, Change::Add, &home, &node_finder(&node), &env).expect_err("fails");
+    assert_eq!(failure.step, "dependencies (node)");
+    assert_eq!(home.record("fresh"), None);
+    assert!(home.packages("fresh").is_empty());
+}
+
+#[test]
+fn a_package_lock_makes_the_install_npm_ci() {
+    use super::super::npm_registry::{Registry, finder_for as node_finder, npm_env};
+    let node = node_or_return!();
+    let scratch = Scratch::new("npm-ci");
+    let registry = Registry::start(
+        &node,
+        &scratch.0.join("registry"),
+        &[("canoa-test-pkg", "1.0.0"), ("canoa-test-pkg", "2.0.0")],
+    );
+    let home = Home::new(scratch.overlays());
+    let env = npm_env(&node, &scratch.0.join("npm"), Some(&registry.url()));
+    let lock = format!(
+        r#"{{"lockfileVersion": 3, "requires": true, "packages": {{"": {{"dependencies": {{"canoa-test-pkg": "1.0.0"}}}}, "node_modules/canoa-test-pkg": {{"version": "1.0.0", "resolved": "{}"}}}}}}"#,
+        registry.tarball("canoa-test-pkg", "1.0.0")
+    );
+    let pinned = plan_for(
+        &scratch,
+        "pinned",
+        &[
+            ("overlay.cfg", "name = \"pinned\"\n"),
+            (
+                "lib/node/package.json",
+                "{\"dependencies\": {\"canoa-test-pkg\": \"1.0.0\"}}\n",
+            ),
+            ("lib/node/package-lock.json", &lock),
+        ],
+    );
+    assert!(
+        pinned.lines()[0].contains("npm ci into an environment of its own"),
+        "{:?}",
+        pinned.lines()
+    );
+    run(&pinned, Change::Add, &home, &node_finder(&node), &env).expect("prepared");
+    let modules = PathBuf::from(&home.packages("pinned")["node"]);
+    assert_eq!(
+        node_prints(
+            &node,
+            &modules,
+            "console.log(require('canoa-test-pkg').version)"
+        ),
+        "1.0.0"
+    );
+
+    // `npm install` would take the 2.0.0 package.json asks for and rewrite the lock; `npm ci` refuses a lock that disagrees.
+    let drifted = plan_for(
+        &scratch,
+        "drifted",
+        &[
+            ("overlay.cfg", "name = \"drifted\"\n"),
+            (
+                "lib/node/package.json",
+                "{\"dependencies\": {\"canoa-test-pkg\": \"2.0.0\"}}\n",
+            ),
+            ("lib/node/package-lock.json", &lock),
+        ],
+    );
+    let failure = run(&drifted, Change::Add, &home, &node_finder(&node), &env).expect_err("fails");
+    assert_eq!(failure.step, "dependencies (node)");
+    assert!(failure.what.contains("npm ci"), "{}", failure.what);
+    assert_eq!(home.record("drifted"), None);
+    assert!(home.packages("drifted").is_empty());
+}

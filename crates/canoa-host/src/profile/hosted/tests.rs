@@ -3022,3 +3022,63 @@ fn a_layer_that_sets_what_the_account_sets_is_told_the_account_wins() {
     let token = access_item(&parts, "env.TOKEN").expect("reported");
     assert_eq!(token["state"], "applied", "{token}");
 }
+
+#[test]
+fn what_a_real_npm_installed_is_on_a_sessions_node_path_after_the_overlays_lib_node() {
+    use crate::profile::npm_registry::{Registry, finder_for, node, npm_env};
+    let Some(node) = node() else {
+        eprintln!("NOT RUN: set CANOA_TEST_NODE to a Node.js with npm beside it");
+        return;
+    };
+    let temp = temp_with_skill();
+    install_files(
+        &temp,
+        "needy",
+        &[
+            ("overlay.cfg", "name = \"needy\"\n"),
+            (
+                "lib/node/package.json",
+                "{\"dependencies\": {\"canoa-test-pkg\": \"1.0.0\"}}\n",
+            ),
+        ],
+    );
+    let digest = digest_of(&temp, "overlays/needy");
+    let root = temp.0.join("overlays/needy");
+    let plan = prepare::Plan::of("needy", &root, aos::current_os(), &digest).expect("a plan");
+    let registry = Registry::start(
+        &node,
+        &temp.0.join("registry"),
+        &[("canoa-test-pkg", "1.0.0")],
+    );
+    let env = npm_env(&node, &temp.0.join("npm"), Some(&registry.url()));
+    let home = prepare::Home::new(temp.0.join("overlays"));
+    prepare::run(&plan, aos::Change::Add, &home, &finder_for(&node), &env).expect("prepared");
+
+    let offer = offer_of(&temp, &config_with("overlays = [\"needy\"]\n"));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let path = env_value(&connection, "NODE_PATH")
+        .expect("NODE_PATH")
+        .to_owned();
+    let sep = if cfg!(windows) { ';' } else { ':' };
+    let (head, tail) = path.split_once(sep).expect("two folders");
+    assert!(
+        head.ends_with("lib/node") || head.ends_with("lib\\node"),
+        "{path}"
+    );
+    assert!(
+        same_file_name(Path::new(tail), Path::new(&home.packages("needy")["node"])),
+        "{path}"
+    );
+    // The program a session runs finds the package by that path.
+    let printed = std::process::Command::new(&node)
+        .args(["-e", "console.log(require('canoa-test-pkg').version)"])
+        .env("NODE_PATH", &path)
+        .output()
+        .expect("node starts");
+    assert_eq!(
+        String::from_utf8_lossy(&printed.stdout).trim(),
+        "1.0.0",
+        "{}",
+        String::from_utf8_lossy(&printed.stderr)
+    );
+}

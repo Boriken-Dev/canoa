@@ -60,6 +60,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 CANOA_TEST_PYTHON=python3 cargo test -p canoa-host --test python_source   # a Python with its shared library; ignored without
+CANOA_TEST_PYTHON=python3 CANOA_TEST_NODE=node cargo test -p canoa-host --lib profile   # real pip and npm against a folder of wheels and a loopback registry; each is skipped (and says so) without its variable
 (cd app && flutter analyze && flutter test)
 (cd app && flutter test integration_test/desktop_test.dart -d windows)   # or -d linux; needs CANOA_TEST_HOST
 # the chat's connection code against the real host

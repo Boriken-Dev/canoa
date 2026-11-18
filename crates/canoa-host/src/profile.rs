@@ -1528,6 +1528,8 @@ mod commands;
 pub(crate) mod hosted;
 mod launch;
 mod needs;
+#[cfg(test)]
+mod npm_registry;
 mod overlay;
 pub(crate) mod prepare;
 mod session;
