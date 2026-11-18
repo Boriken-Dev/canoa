@@ -371,5 +371,14 @@ fn contents_of(
     if !has_manifest {
         contents["manifest"] = Value::String(generated_manifest(name, &skills));
     }
+    // What installing it would run, for the person to read before saying yes.
+    if has_manifest
+        && let Ok(plan) = crate::profile::prepare::Plan::from_tree(name, os, digest, tree)
+    {
+        let lines = plan.lines();
+        if !lines.is_empty() {
+            contents["prepares"] = json!(lines);
+        }
+    }
     Ok(contents)
 }

@@ -1524,10 +1524,12 @@ fn position(text: &str, offset: usize) -> (usize, usize) {
     (line, column)
 }
 
+mod commands;
 pub(crate) mod hosted;
 mod launch;
 mod needs;
 mod overlay;
+pub(crate) mod prepare;
 mod session;
 
 pub(crate) use hosted::forward_hook;

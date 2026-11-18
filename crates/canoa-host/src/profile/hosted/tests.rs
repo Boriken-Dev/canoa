@@ -2088,11 +2088,7 @@ fn an_overlays_bin_and_lib_reach_the_environment_every_harness_is_started_with()
 fn each_line_not_applied_names_its_overlay_and_is_said_once() {
     let temp = temp_with_skill();
     for name in ["alpha", "beta"] {
-        install_files(
-            &temp,
-            name,
-            &[("setup.sh", "true\n"), ("CONTEXT.md", "x\n")],
-        );
+        install_files(&temp, name, &[("env.sh", "true\n"), ("CONTEXT.md", "x\n")]);
     }
     let config = config_with("overlays = [\"alpha\", \"beta\"]\n");
     let offer = offer_of(&temp, &config);
@@ -2100,7 +2096,7 @@ fn each_line_not_applied_names_its_overlay_and_is_said_once() {
     let parts = parts_for(&connection, None, &Takes::default(), &lookup);
     let summary = parts.report["summary"].as_str().expect("summary");
     for name in ["alpha", "beta"] {
-        let line = format!("{name}: setup: setup.sh (not supported)");
+        let line = format!("{name}: env_scripts: env.sh (not supported)");
         assert_eq!(summary.matches(&line).count(), 1, "{summary}");
     }
     // An overlay the person's list names twice says each thing once.
@@ -2111,7 +2107,7 @@ fn each_line_not_applied_names_its_overlay_and_is_said_once() {
     let summary = parts.report["summary"].as_str().expect("summary");
     assert_eq!(
         summary
-            .matches("alpha: setup: setup.sh (not supported)")
+            .matches("alpha: env_scripts: env.sh (not supported)")
             .count(),
         1,
         "{summary}"
@@ -2119,7 +2115,7 @@ fn each_line_not_applied_names_its_overlay_and_is_said_once() {
     let items = parts.report["items"].as_array().expect("items");
     let setups = items
         .iter()
-        .filter(|item| item["key"] == "setup: setup.sh" && item["layer"] == "overlay:alpha")
+        .filter(|item| item["key"] == "env_scripts: env.sh" && item["layer"] == "overlay:alpha")
         .count();
     assert_eq!(setups, 1, "{}", parts.report);
 }
@@ -2208,6 +2204,215 @@ fn an_overlay_that_needs_nothing_reports_no_runtime_line() {
             .all(|item| !item["key"].as_str().unwrap_or("").starts_with("runtime")),
         "{}",
         parts.report
+    );
+}
+
+/// Marks the overlay `name` as prepared at `digest` by hand: its record, its state directory and a packages folder for Python.
+fn prepared_by_hand(temp: &Temp, name: &str, digest: &str) -> PathBuf {
+    let packages = temp
+        .0
+        .join("overlays/.environments")
+        .join(name)
+        .join("python")
+        .join(if cfg!(windows) {
+            "Lib/site-packages"
+        } else {
+            "lib/python3.12/site-packages"
+        });
+    std::fs::create_dir_all(&packages).expect("packages");
+    std::fs::create_dir_all(temp.0.join("overlays/.state").join(name)).expect("state");
+    prepare::Home::new(temp.0.join("overlays"))
+        .write_record(name, &aos::SetupRecord::new(digest, aos::Phase::Install))
+        .expect("recorded");
+    packages
+}
+
+#[test]
+fn what_preparing_made_reaches_the_session_only_for_the_version_it_was_made_for() {
+    let temp = temp_with_skill();
+    install_files(
+        &temp,
+        "needy",
+        &[
+            ("overlay.cfg", "name = \"needy\"\n"),
+            ("lib/python/requirements.txt", "canoa-test-pkg==1.0\n"),
+            ("setup.py", "pass\n"),
+        ],
+    );
+    let digest = digest_of(&temp, "overlays/needy");
+    let offer = offer_of(&temp, &config_with("overlays = [\"needy\"]\n"));
+    let report =
+        |connection: &Connection| parts_for(connection, None, &Takes::default(), &lookup).report;
+
+    // Not prepared: both are reported off with what to do, and only the overlay's own `lib/python` is on the path.
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let before = report(&connection);
+    for key in [
+        "dependencies: lib/python/requirements.txt",
+        "setup: setup.py",
+    ] {
+        let each = item(&before, key);
+        assert_eq!(each["state"], "off", "{key}: {before}");
+        assert_eq!(each["layer"], "overlay:needy");
+        assert!(
+            each["how"]
+                .as_str()
+                .expect("how")
+                .contains("install or sync the overlay")
+        );
+    }
+    let own = env_value(&connection, "PYTHONPATH")
+        .expect("PYTHONPATH")
+        .to_owned();
+    assert!(
+        own.ends_with("lib/python") || own.ends_with("lib\\python"),
+        "{own}"
+    );
+    assert!(env_value(&connection, &aos::state_variable("needy")).is_none());
+
+    // Prepared at this digest: applied, the packages go after `lib/python`, and the state directory is told.
+    let packages = prepared_by_hand(&temp, "needy", &digest);
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let after = report(&connection);
+    for key in [
+        "dependencies: lib/python/requirements.txt",
+        "setup: setup.py",
+    ] {
+        assert_eq!(item(&after, key)["state"], "applied", "{key}: {after}");
+    }
+    assert!(
+        item(&after, "setup: setup.py")["how"]
+            .as_str()
+            .expect("how")
+            .contains("ran as install"),
+        "{after}"
+    );
+    let path = env_value(&connection, "PYTHONPATH")
+        .expect("PYTHONPATH")
+        .to_owned();
+    let sep = if cfg!(windows) { ';' } else { ':' };
+    assert_eq!(path, format!("{own}{sep}{}", packages.display()));
+    assert!(
+        env_value(&connection, &aos::state_variable("needy"))
+            .is_some_and(|state| state.ends_with("needy")),
+        "the state directory is `NAME_OVERLAY_STATE`"
+    );
+
+    // A preparation of another version counts for nothing.
+    prepared_by_hand(&temp, "needy", &format!("sha256:{}", "0".repeat(64)));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let stale = report(&connection);
+    assert_eq!(item(&stale, "setup: setup.py")["state"], "off", "{stale}");
+    assert_eq!(env_value(&connection, "PYTHONPATH"), Some(own.as_str()));
+}
+
+#[test]
+fn the_commands_an_overlay_exposes_are_launchers_on_the_agents_path_and_two_of_one_name_are_not_exposed()
+ {
+    let temp = temp_with_skill();
+    temp.write(&format!("bin/{}", program("python")), "");
+    #[cfg(unix)]
+    std::fs::set_permissions(
+        temp.0.join("bin").join(program("python")),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .expect("executable");
+    install_files(
+        &temp,
+        "tools",
+        &[
+            (
+                "overlay.cfg",
+                "[scripts]\nhello = \"bin/hello.py\"\nlint = { path = \"bin/lint.sh\", interpreter = \"bash\" }\nold = false\n",
+            ),
+            ("bin/hello.py", "print('hi')\n"),
+            ("bin/lint.sh", "true\n"),
+        ],
+    );
+    let offer = offer_of(&temp, &config_with("overlays = [\"tools\"]\n"));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let report = parts_for(&connection, None, &Takes::default(), &lookup).report;
+    let hello = item(&report, "scripts.hello");
+    assert_eq!(hello["state"], "applied", "{report}");
+    assert!(
+        hello["how"]
+            .as_str()
+            .expect("how")
+            .contains("bin/hello.py under python"),
+        "{hello}"
+    );
+    // `bash` is on neither the test's path nor, unless this computer's Store has Git Bash, the Store's runtimes.
+    let store_has_bash = crate::sources::runtime_dirs()
+        .iter()
+        .any(|dir| dir.join("bash.exe").exists() || dir.join("bash").exists());
+    if !store_has_bash {
+        let lint = item(&report, "scripts.lint");
+        assert_eq!(lint["state"], "off", "{report}");
+        assert!(
+            lint["how"]
+                .as_str()
+                .expect("how")
+                .contains("is not on the PATH"),
+            "{lint}"
+        );
+    }
+    assert!(
+        report["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .all(|each| each["key"] != "scripts.old")
+    );
+    // The launcher is in the folder that is first on the agent's `PATH`, ahead of the host's own.
+    let commands = temp.0.join("overlays/.environments/tools/commands");
+    let launcher = commands.join(if cfg!(windows) { "hello.cmd" } else { "hello" });
+    let text = std::fs::read_to_string(&launcher).expect("a launcher");
+    assert!(
+        text.contains("hello.py") && text.contains("python"),
+        "{text}"
+    );
+    assert!(
+        store_has_bash || !commands.join("lint").exists() && !commands.join("lint.cmd").exists()
+    );
+    let path = env_value(&connection, "PATH").expect("PATH").to_owned();
+    let first = std::env::split_paths(&path).next().expect("a folder");
+    assert_eq!(first, commands);
+    assert!(path.contains("bin"), "the host's own folders stay: {path}");
+
+    // Two overlays exposing a name that differs only by case: neither is exposed.
+    install_files(
+        &temp,
+        "others",
+        &[
+            ("overlay.cfg", "[scripts]\nHello = \"bin/hello.py\"\n"),
+            ("bin/hello.py", "print('hello')\n"),
+        ],
+    );
+    let offer = offer_of(&temp, &config_with("overlays = [\"tools\", \"others\"]\n"));
+    let connection = Connection::prepare(&offer, 0, "a", &lookup).expect("prepared");
+    let report = parts_for(&connection, None, &Takes::default(), &lookup).report;
+    for (key, layer) in [
+        ("scripts.hello", "overlay:tools"),
+        ("scripts.Hello", "overlay:others"),
+    ] {
+        let each = item(&report, key);
+        assert_eq!(each["state"], "refused", "{report}");
+        assert_eq!(each["layer"], layer);
+        assert!(
+            each["how"]
+                .as_str()
+                .expect("how")
+                .contains("more than one overlay"),
+            "{each}"
+        );
+    }
+    // Launchers made for the last session stay on disk; only a folder `PATH` names counts, and none is named.
+    let path = env_value(&connection, "PATH")
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        std::env::split_paths(&path).all(|dir| dir != commands),
+        "{path}"
     );
 }
 

@@ -2170,11 +2170,7 @@
               "harness.claude-code.permissions: the harness's own setting",
               "harness.claude-code.skills: delivery by routing line",
               "harness.codex: hints for another harness",
-              "env_scripts: env.py",
-              "setup: setup.sh",
-              "setup: setup/install.sh",
-              "dependencies: lib/python/requirements.txt",
-              "scripts.check"
+              "env_scripts: env.py"
             ],
             "non_defaults": []
           }

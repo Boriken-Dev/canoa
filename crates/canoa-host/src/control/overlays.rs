@@ -24,6 +24,7 @@ use coqui_aos::{
 use serde_json::{Value, json};
 
 use super::{Caller, REFUSED, bad, text_param};
+use crate::profile::prepare;
 use crate::profile::{OverlaySource, full_commit_id};
 
 mod contents;
@@ -343,6 +344,41 @@ impl Overlays {
         let lines = crate::profile::of_installed(root, name, coqui_aos::current_os(), &finder)
             .map_err(|why| refused(format!("{name}: {why}")))?;
         Ok(json!({"items": lines.iter().map(crate::profile::NeedLine::json).collect::<Vec<_>>()}))
+    }
+
+    /// `overlay/prepare` `{"name"}` -> `{"phase": "install"|"sync"|null, "steps": [..]}`: prepares the installed overlay as the
+    /// specification's phases say: its dependencies are installed into an environment of its own (made beside the overlays, never in
+    /// one), then its setup runs, and the preparation is recorded for the digest installed. The first preparation of a name is
+    /// `install`, every later one `sync`. A step that fails ends it (`-32002` with the step and the end of what it printed) and
+    /// leaves the record and the environment as they were. It starts programs, so a key needs `store.programs` as well as
+    /// `overlay.write`; the app asks the person first, listing what `store/read_ahead` and `overlay/needs` say will run.
+    pub(crate) fn prepare(&self, params: &Value) -> Outcome {
+        let name = checked_name(text_param(params, "name")?.ok_or_else(|| bad("name is needed"))?)?;
+        let root = self.root()?;
+        let gate = self.gate(name);
+        let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
+        let digest = record_of(root, name)
+            .and_then(|record| Some(record.get("digest")?.as_str()?.to_owned()))
+            .ok_or_else(|| {
+                refused(format!(
+                    "{name}: it is not installed, or its record holds no digest"
+                ))
+            })?;
+        let plan = prepare::Plan::of(name, &root.join(name), coqui_aos::current_os(), &digest)
+            .map_err(|why| refused(format!("{name}: {why}")))?;
+        let home = prepare::Home::new(root);
+        let finder = crate::profile::Finder::new(
+            &|variable| std::env::var(variable).ok(),
+            &crate::sources::runtime_dirs(),
+        );
+        let change = if home.record(name).is_some() {
+            coqui_aos::Change::Sync
+        } else {
+            coqui_aos::Change::Add
+        };
+        let done = prepare::run(&plan, change, &home, &finder, &[])
+            .map_err(|failure| refused(format!("{name}: {failure}")))?;
+        Ok(json!({"phase": done.phase.map(coqui_aos::Phase::name), "steps": done.steps}))
     }
 
     /// `overlay/check` `{"name", "source", "pin"?, "catalog"?}`: fetches `source` into the cache for `name` and says what installing it
@@ -672,6 +708,22 @@ impl Overlays {
         let root = self.root()?;
         let gate = self.gate(name);
         let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
+        // What was prepared is undone as the specification says: setup runs once more as `remove`, then its environments, state
+        // directory and record go, whether it succeeded or not.
+        let home = prepare::Home::new(root);
+        if home.record(name).is_some()
+            && let Some(digest) = record_of(root, name)
+                .and_then(|record| Some(record.get("digest")?.as_str()?.to_owned()))
+            && let Ok(plan) =
+                prepare::Plan::of(name, &root.join(name), coqui_aos::current_os(), &digest)
+        {
+            let finder = crate::profile::Finder::new(
+                &|variable| std::env::var(variable).ok(),
+                &crate::sources::runtime_dirs(),
+            );
+            let _ = prepare::run(&plan, coqui_aos::Change::Remove, &home, &finder, &[]);
+        }
+        prepare::delete(&home, name);
         for dir in [root.join(name), self.cache(name)?] {
             if dir.exists() {
                 fs::remove_dir_all(&dir).map_err(|error| {

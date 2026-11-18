@@ -199,3 +199,34 @@ fn the_stores_commands_are_the_ones_its_recipes_list() {
         }
     }
 }
+
+#[test]
+fn the_program_that_runs_a_script_is_found_like_any_other_and_is_never_a_batch_file() {
+    let root = temp("interpreters");
+    let (old, new) = (root.join("v3.8.1"), root.join("v3.12.4"));
+    for dir in [&old, &new] {
+        std::fs::create_dir_all(dir).expect("a folder");
+        program(dir, "python");
+        program(dir, "python3");
+    }
+    let found = program_for(&finder(&[&new]), "python", Some("3.11")).expect("new enough");
+    assert_eq!(found.parent(), Some(new.as_path()));
+    let older = program_for(&finder(&[&old]), "python", Some("3.11")).expect_err("too old");
+    assert!(
+        older.contains("3.8.1") && older.contains("3.11 or later"),
+        "{older}"
+    );
+    let absent = program_for(&finder(&[&root]), "python", None).expect_err("none");
+    assert_eq!(absent, "python is not on the PATH");
+    // Nothing is run to ask a version nobody needs.
+    assert!(program_for(&finder(&[&old]), "python", None).is_ok());
+    #[cfg(windows)]
+    {
+        let batch = root.join("batch");
+        std::fs::create_dir_all(&batch).expect("a folder");
+        std::fs::write(batch.join("sh.cmd"), "@echo off\r\n").expect("a batch file");
+        let refused = program_for(&finder(&[&batch]), "sh", None).expect_err("a batch file");
+        assert!(refused.contains("batch file"), "{refused}");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}

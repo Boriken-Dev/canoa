@@ -889,6 +889,9 @@ impl Control {
                 Some("overlay/needs") => allow(caller, Grant::OverlayRead)
                     .and_then(|()| allow(caller, Grant::StorePrograms))
                     .and_then(|()| self.overlays.needs(&params)),
+                Some("overlay/prepare") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| allow(caller, Grant::StorePrograms))
+                    .and_then(|()| self.overlays.prepare(&params)),
                 Some("overlay/read") => allow(caller, Grant::OverlayRead)
                     .and_then(|()| self.overlays.read(caller, &params)),
                 Some("catalog/read") => allow(caller, Grant::OverlayRead)

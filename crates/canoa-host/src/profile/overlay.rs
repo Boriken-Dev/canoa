@@ -45,6 +45,11 @@ pub struct AosLayer {
     pub elsewhere: Vec<aos::SkillEntry>,
     /// The digest canoa.cfg allows its hooks and env scripts at, when it names one.
     pub allowed: Option<String>,
+    /// Each runtime's packages folder (`python`, `node`) when the overlay was prepared at this digest: what goes on `PYTHONPATH`
+    /// and `NODE_PATH` after its own `lib/`.
+    pub packages: BTreeMap<String, String>,
+    /// The overlay's state directory, once it was prepared at this digest.
+    pub state: Option<String>,
 }
 
 /// What Canoa needs to make a layer of an AOS overlay.
@@ -206,8 +211,9 @@ const DEFAULT_SCRIPTS: [&str; 7] = [".py", ".js", ".mjs", ".cjs", ".ps1", ".bash
 
 /// Makes the layer of an AOS overlay: its root variable, environment, skills, MCP servers, context, and the hints for
 /// `input.harness`. The overlay's own `bin/` and `lib/` go first on `PATH`, `PYTHONPATH` and `NODE_PATH`, as the
-/// specification's defaults and `paths` say; what Canoa does not run is reported: env scripts, setup, dependencies and
-/// commands. What it needs of the computer (`runtime`) is checked when a session starts. Reads nothing but `input.tree`.
+/// specification's defaults and `paths` say; what Canoa does not run is reported: env scripts. What it needs of the computer
+/// (`runtime`), its dependencies, setup and commands are the host's to check and report when a session starts. Reads nothing
+/// but `input.tree`.
 ///
 /// # Errors
 ///
@@ -500,37 +506,24 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
             .and_then(|defaults| defaults.get(key))
             != Some(&Value::Bool(false))
     };
-    for (field, stem) in [("env_scripts", "env"), ("setup", "setup")] {
-        if on(field) {
-            for extension in DEFAULT_SCRIPTS {
-                let path = format!("{stem}{extension}");
-                if files.contains(&path) {
-                    not_applied.push(format!("{field}: {path}"));
-                }
-            }
-        }
-        for entry in manifest
-            .get(field)
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let path = entry.get("path").and_then(Value::as_str).unwrap_or("");
-            if !not_applied.contains(&format!("{field}: {path}")) {
-                not_applied.push(format!("{field}: {path}"));
+    // Setup, dependencies and the commands `scripts` expose are the host's to prepare and report when a session starts.
+    if on("env_scripts") {
+        for extension in DEFAULT_SCRIPTS {
+            let path = format!("env{extension}");
+            if files.contains(&path) {
+                not_applied.push(format!("env_scripts: {path}"));
             }
         }
     }
-    if on("deps") {
-        for path in ["lib/python/requirements.txt", "lib/node/package.json"] {
-            if files.contains(path) {
-                not_applied.push(format!("dependencies: {path}"));
-            }
-        }
-    }
-    for (name, target) in entries(manifest.get("scripts")) {
-        if *target != Value::Bool(false) {
-            not_applied.push(format!("scripts.{name}"));
+    for entry in manifest
+        .get("env_scripts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let path = entry.get("path").and_then(Value::as_str).unwrap_or("");
+        if !not_applied.contains(&format!("env_scripts: {path}")) {
+            not_applied.push(format!("env_scripts: {path}"));
         }
     }
 
@@ -551,6 +544,8 @@ pub fn overlay_layer(input: &OverlayInput<'_>) -> Result<Layer, OverlayRefusal> 
         not_applied,
         elsewhere,
         allowed: None,
+        packages: BTreeMap::new(),
+        state: None,
     }));
     Ok(layer)
 }
@@ -677,9 +672,21 @@ fn probe(overlay: &Probed<'_>) -> Result<aos::Effective, aos::Error> {
     aos::effective(manifest, &facts)
 }
 
-/// What an overlay needs of the computer it runs on: its `runtime`, and the interpreters and commands the rest of its manifest
-/// names. None when its environment cannot be built, since no session would start with it.
-pub(crate) fn required(aos: &AosLayer) -> Option<super::needs::Required> {
+/// What the specification's functions say an overlay needs and has to prepare, on its OS.
+pub(crate) struct Inspected {
+    /// What it needs of the computer it runs on.
+    pub(crate) required: super::needs::Required,
+    /// The dependency files it installs.
+    pub(crate) dependencies: Vec<aos::Dependency>,
+    /// The setup it runs, if any.
+    pub(crate) setup: Option<aos::SetupRun>,
+    /// The commands its `scripts` expose.
+    pub(crate) commands: Vec<super::commands::Declared>,
+}
+
+/// What an overlay needs of the computer it runs on (its `runtime`, and the interpreters and commands the rest of its manifest
+/// names), and what preparing it runs. None when its environment cannot be built, since no session would start with it.
+pub(crate) fn inspect(aos: &AosLayer) -> Option<Inspected> {
     let found = probe(&Probed {
         manifest: &aos.manifest,
         files: &aos.files,
@@ -709,7 +716,7 @@ pub(crate) fn required(aos: &AosLayer) -> Option<super::needs::Required> {
             .filter_map(|each| each.as_str().map(str::to_owned))
             .collect()
     });
-    Some(super::needs::Required {
+    let required = super::needs::Required {
         other_os,
         python: (found.python.is_some() || asks("python")).then(|| version(&found.python)),
         node: (found.node.is_some() || asks("node")).then(|| version(&found.node)),
@@ -721,6 +728,12 @@ pub(crate) fn required(aos: &AosLayer) -> Option<super::needs::Required> {
             .cloned()
             .collect(),
         commands: found.needs.commands.clone(),
+    };
+    Some(Inspected {
+        required,
+        dependencies: found.dependencies.clone(),
+        setup: found.setup.clone(),
+        commands: super::commands::declared(&aos.manifest, &aos.os),
     })
 }
 
@@ -894,6 +907,8 @@ pub(crate) fn active_facts<'a>(
             facts.gate_env_scripts = true;
             facts.digest = Some(layer.digest.clone());
             facts.allowed.clone_from(&layer.allowed);
+            facts.packages.clone_from(&layer.packages);
+            facts.state.clone_from(&layer.state);
             facts.grants.insert("env".to_owned(), names.clone());
             facts.host_env = host_env.clone();
             let paths = OverlayTree::from_paths(layer.files.iter().cloned());

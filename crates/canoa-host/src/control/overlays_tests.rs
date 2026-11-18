@@ -839,6 +839,20 @@ fn a_batch_of_entries_is_read_here_and_one_that_cannot_be_read_is_noted_against_
         got["a"]["contents"]["requirements"],
         json!(["overlay lint", "python: lib/python/requirements.txt"])
     );
+    // What installing it would run is listed for the person to read first.
+    let prepares = got["a"]["contents"]["prepares"]
+        .as_array()
+        .expect("prepares");
+    assert_eq!(prepares.len(), 1, "{answer}");
+    assert!(
+        prepares[0]
+            .as_str()
+            .expect("a line")
+            .starts_with("dependencies: lib/python/requirements.txt (pip install, not pinned"),
+        "{}",
+        prepares[0]
+    );
+    assert!(got["b"]["contents"].get("prepares").is_none(), "{answer}");
     assert!(
         got["a"]["contents"]["digest"]
             .as_str()
@@ -1125,6 +1139,81 @@ fn a_commit_id_pins_that_commit_whatever_branch_carries_its_name_and_a_short_id_
     );
     let short = at(&pinned[..7]);
     assert!(short["error"].is_object(), "{short}");
+    let _ = fs::remove_dir_all(s.tmp);
+}
+
+#[test]
+fn preparing_needs_both_grants_an_installed_overlay_and_removing_it_takes_what_was_prepared_away() {
+    let s = setup(None, OverlayLimits::default());
+    let folder = s.overlays.join("plain");
+    fs::create_dir_all(&folder).expect("folder");
+    fs::write(folder.join("overlay.cfg"), "name = \"plain\"\n").expect("manifest");
+    let digest =
+        coqui_aos::tree_digest(&coqui_aos::StdFs, &folder, &coqui_aos::Settings::default())
+            .expect("digest")
+            .digest
+            .to_string();
+    fs::write(
+        s.overlays.join("plain.json"),
+        json!({"source": "x", "commit": "y", "digest": digest, "files": {}}).to_string(),
+    )
+    .expect("record");
+
+    // An overlay with nothing to install and no setup has nothing to prepare, and records nothing.
+    let nothing = ask(
+        &s.control,
+        &Caller::Owner,
+        "overlay/prepare",
+        json!({"name": "plain"}),
+    );
+    assert_eq!(
+        nothing["result"],
+        json!({"phase": null, "steps": []}),
+        "{nothing}"
+    );
+    assert!(!s.overlays.join(".prepared").exists());
+    let missing = ask(
+        &s.control,
+        &Caller::Owner,
+        "overlay/prepare",
+        json!({"name": "nowhere"}),
+    );
+    assert_eq!(missing["error"]["code"], REFUSED, "{missing}");
+
+    // Writing overlays is not enough to start programs, nor is starting them enough to write overlays.
+    let writer = key("sha256:aa", &[Grant::OverlayRead, Grant::OverlayWrite]);
+    let starter = key("sha256:bb", &[Grant::OverlayRead, Grant::StorePrograms]);
+    for who in [&writer, &starter] {
+        let denied = ask(&s.control, who, "overlay/prepare", json!({"name": "plain"}));
+        assert_eq!(denied["error"]["code"], DENIED, "{denied}");
+    }
+
+    // What was prepared goes with the overlay: its environment, its state directory and its record.
+    let environment = s.overlays.join(".environments/plain/python");
+    fs::create_dir_all(&environment).expect("environment");
+    fs::create_dir_all(s.overlays.join(".state/plain")).expect("state");
+    fs::create_dir_all(s.overlays.join(".prepared")).expect("record folder");
+    fs::write(
+        s.overlays.join(".prepared/plain.json"),
+        json!({"digest": digest, "phase": "install"}).to_string(),
+    )
+    .expect("prepared");
+    let removed = ask(
+        &s.control,
+        &Caller::Owner,
+        "overlay/remove",
+        json!({"name": "plain"}),
+    );
+    assert_eq!(removed["result"], json!({"removed": true}), "{removed}");
+    for left in [
+        ".environments/plain",
+        ".state/plain",
+        ".prepared/plain.json",
+        "plain",
+        "plain.json",
+    ] {
+        assert!(!s.overlays.join(left).exists(), "{left} was left");
+    }
     let _ = fs::remove_dir_all(s.tmp);
 }
 

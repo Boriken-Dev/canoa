@@ -53,6 +53,8 @@ pub(crate) struct Line {
     pub(crate) how: String,
     /// The Store runtime (a provider id) that installs it, when it is missing and one provides it.
     pub(crate) offer: Option<&'static str>,
+    /// What preparing the overlay would run for it, for a line that preparing makes true.
+    pub(crate) runs: Option<String>,
 }
 
 impl Line {
@@ -65,6 +67,9 @@ impl Line {
         });
         if let Some(offer) = self.offer {
             out["offer"] = serde_json::json!(offer);
+        }
+        if let Some(runs) = &self.runs {
+            out["runs"] = serde_json::json!(runs);
         }
         out
     }
@@ -251,6 +256,50 @@ fn locate(finder: &Finder, interpreter: &str, minimum: Option<&str>) -> Located 
     }
 }
 
+/// The program that runs `interpreter`'s scripts, found as [`check`] finds it: one of at least `minimum` when it is given. Never a
+/// batch file, which `cmd.exe` would read the arguments of again.
+///
+/// # Errors
+///
+/// Why none was found, in words for the person.
+pub(crate) fn program_for(
+    finder: &Finder,
+    interpreter: &str,
+    minimum: Option<&str>,
+) -> Result<PathBuf, String> {
+    match locate(finder, interpreter, minimum) {
+        Located::Found(program, _) | Located::Older(program, _) | Located::Unknown(program)
+            if is_batch(&program) =>
+        {
+            Err(format!(
+                "{} is a batch file, which is not run as {interpreter}",
+                program.display()
+            ))
+        }
+        Located::Found(program, _) => Ok(program),
+        Located::Older(program, version) => Err(format!(
+            "{} is {version}, and {} or later is needed",
+            program.display(),
+            minimum.unwrap_or("a newer version")
+        )),
+        Located::Unknown(program) => Err(format!(
+            "{} did not say its version, and {} or later is needed",
+            program.display(),
+            minimum.unwrap_or("a newer version")
+        )),
+        Located::Absent => Err(format!("{interpreter} is not on the PATH")),
+    }
+}
+
+fn is_batch(program: &Path) -> bool {
+    program
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+        })
+}
+
 enum Located {
     Found(PathBuf, Option<String>),
     Older(PathBuf, String),
@@ -264,6 +313,11 @@ fn offer_for(interpreter: &str) -> Option<(&'static str, &'static str)> {
         .into_iter()
         .find_map(runtime_for)
         .map(|id| (id, store_title(id)))
+}
+
+/// The Store runtime (a provider id) that provides `interpreter`, when one does.
+pub(crate) fn offer_id(interpreter: &str) -> Option<&'static str> {
+    offer_for(interpreter).map(|(id, _)| id)
 }
 
 fn store_title(id: &str) -> &'static str {
@@ -337,6 +391,7 @@ fn line_for(
         met,
         how,
         offer: if met { None } else { offer.map(|(id, _)| id) },
+        runs: None,
     }
 }
 
@@ -370,12 +425,26 @@ pub(crate) fn of_installed(
     let root = root.to_string_lossy().into_owned();
     let layer = super::overlay_layer(&super::OverlayInput::new(identity, &root, os, &tree))
         .map_err(|refusal| refusal.to_string())?;
-    let required = layer
+    let aos = layer
         .aos
         .as_deref()
-        .and_then(super::overlay::required)
         .ok_or_else(|| "its manifest cannot be applied".to_owned())?;
-    Ok(check(&required, finder, os))
+    let inspected =
+        super::overlay::inspect(aos).ok_or_else(|| "its manifest cannot be applied".to_owned())?;
+    let mut lines = check(&inspected.required, finder, os);
+    lines.extend(super::prepare::lines_for(
+        &super::prepare::Home::new(store),
+        identity,
+        &aos.digest,
+        &inspected.dependencies,
+        inspected.setup.as_ref(),
+    ));
+    lines.extend(
+        super::commands::check(Path::new(&root), &inspected.commands, finder)
+            .into_iter()
+            .map(|(command, result)| super::commands::line(&command, result)),
+    );
+    Ok(lines)
 }
 
 /// Whether this computer has each thing `required` lists, in order: operating system, Python, Node.js, other interpreters,
@@ -388,6 +457,7 @@ pub(crate) fn check(required: &Required, finder: &Finder, os: &str) -> Vec<Line>
             met: false,
             how: format!("it names {}; this computer is {os}", listed.join(", ")),
             offer: None,
+            runs: None,
         });
     }
     for (key, asked, interpreter) in [

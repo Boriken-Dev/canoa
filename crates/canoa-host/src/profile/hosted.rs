@@ -23,9 +23,11 @@ use serde_json::{Map, Value, json};
 use super::needs;
 use super::overlay::{self, Built, build_each, resolve_path};
 use super::{
-    Change, Context, Effective, EnvValue, Layer, LayerId, LayerKind, McpServer, OverlayInput,
-    Scalar, Secret, Session, Skill, Sourced, Who, merge, overlay_layer, resolve, starting,
+    AosLayer, Change, Context, Effective, EnvValue, Layer, LayerId, LayerKind, McpServer,
+    OverlayInput, Scalar, Secret, Session, Skill, Sourced, Who, merge, overlay_layer, resolve,
+    starting,
 };
+use super::{commands, prepare};
 use crate::config::HostProfile;
 use crate::scope::{Scope, Verdict};
 use crate::usage_splice::{Client, Splice};
@@ -713,7 +715,25 @@ impl Connection {
             .map_err(|error| error.to_string())?;
         notes.extend(resolved.hook_reports.iter().map(hooks::report_item));
         notes.extend(pre_env.reported.iter().cloned());
+        // What each overlay needs of this computer, what preparing it made, and the commands it exposes: once per overlay,
+        // against the `PATH` the session starts from and the Store's runtimes.
+        let finder = needs::Finder::new(lookup, &crate::sources::runtime_dirs());
+        let command_dirs = overlay_items(
+            &effective.aos,
+            &prepare::Home::new(host.directory.join("overlays")),
+            &finder,
+            &mut notes,
+        );
         let mut env = resolved.env;
+        put_first_on_path(&mut env, &command_dirs, lookup);
+        // An overlay prepared for this version tells its processes where its state directory is.
+        for aos in &effective.aos {
+            let Some(state) = &aos.state else { continue };
+            let name = aos::state_variable(&aos.identity);
+            if !env.iter().any(|(each, _)| each.eq_ignore_ascii_case(&name)) {
+                env.push((name, Secret(state.clone())));
+            }
+        }
         // The identity variables come first, so a layer's own value for one replaces them.
         for (name, value) in session.identity().iter().rev() {
             if !env.iter().any(|(each, _)| each.eq_ignore_ascii_case(name)) {
@@ -806,27 +826,6 @@ impl Connection {
                     State::Unsupported,
                     "Canoa does not apply it",
                 ));
-            }
-        }
-        // What each overlay needs of this computer is checked once per overlay, against the `PATH` the session starts from and
-        // the Store's runtimes.
-        let finder = needs::Finder::new(lookup, &crate::sources::runtime_dirs());
-        let mut checked = BTreeSet::new();
-        for aos in &effective.aos {
-            let Some(required) = overlay::required(aos).filter(|_| checked.insert(&aos.identity))
-            else {
-                continue;
-            };
-            for line in needs::check(&required, &finder, &aos.os) {
-                let state = if line.met { State::Applied } else { State::Off };
-                let mut item = Item::new(
-                    line.key,
-                    LayerId::new(LayerKind::Overlay, aos.identity.clone()),
-                    state,
-                    line.how,
-                );
-                item.offer = line.offer.map(str::to_owned);
-                notes.push(item);
             }
         }
         let skills = private::Private::new("canoa-profile");
@@ -1019,6 +1018,114 @@ fn read_overlays(host: &HostProfile, notes: &mut Vec<Item>) -> Vec<ReadOverlay> 
     out
 }
 
+/// What each of `layers` needs of this computer, what preparing it made, and the commands it exposes, as report lines in `notes`;
+/// and the folders of the launchers made, which go on the agent's `PATH`. Each overlay is reported once.
+fn overlay_items(
+    layers: &[AosLayer],
+    home: &prepare::Home,
+    finder: &needs::Finder,
+    notes: &mut Vec<Item>,
+) -> Vec<PathBuf> {
+    let mut seen = BTreeSet::new();
+    let mut inspected = Vec::new();
+    for aos in layers {
+        if !seen.insert(aos.identity.clone()) {
+            continue;
+        }
+        let Some(each) = overlay::inspect(aos) else {
+            continue;
+        };
+        let layer = LayerId::new(LayerKind::Overlay, aos.identity.clone());
+        let mut lines = needs::check(&each.required, finder, &aos.os);
+        lines.extend(prepare::lines_for(
+            home,
+            &aos.identity,
+            &aos.digest,
+            &each.dependencies,
+            each.setup.as_ref(),
+        ));
+        for line in lines {
+            let state = if line.met { State::Applied } else { State::Off };
+            let mut item = Item::new(line.key, &layer, state, line.how);
+            item.offer = line.offer.map(str::to_owned);
+            notes.push(item);
+        }
+        inspected.push((aos, each.commands));
+    }
+    // Two commands that differ only in the case of ASCII letters are exposed by neither.
+    let named: Vec<(String, Vec<commands::Declared>)> = inspected
+        .iter()
+        .map(|(aos, commands)| (aos.identity.clone(), commands.clone()))
+        .collect();
+    let clashes = commands::collisions(&named);
+    let mut dirs = Vec::new();
+    for (aos, declared) in inspected {
+        let layer = LayerId::new(LayerKind::Overlay, aos.identity.clone());
+        let (clashing, free): (Vec<_>, Vec<_>) = declared
+            .into_iter()
+            .partition(|command| clashes.contains_key(&command.name.to_ascii_lowercase()));
+        for command in clashing {
+            let who = &clashes[&command.name.to_ascii_lowercase()];
+            notes.push(Item::new(
+                format!("scripts.{}", command.name),
+                &layer,
+                State::Refused,
+                format!(
+                    "the command is exposed by more than one overlay ({}): none of them is",
+                    who.join(", ")
+                ),
+            ));
+        }
+        if free.is_empty() {
+            continue;
+        }
+        let dir = home.commands(&aos.identity);
+        let results = commands::expose(&dir, Path::new(&aos.root), &free, finder, cfg!(windows));
+        let mut any = false;
+        for (command, result) in results {
+            any |= result.is_ok();
+            let line = commands::line(&command, result.map(|_| ()));
+            let state = if line.met { State::Applied } else { State::Off };
+            let mut item = Item::new(line.key, &layer, state, line.how);
+            item.offer = line.offer.map(str::to_owned);
+            notes.push(item);
+        }
+        if any {
+            dirs.push(dir);
+        }
+    }
+    dirs
+}
+
+/// Puts `dirs` first on the `PATH` in `env`, which is the host's own (`lookup`) when `env` sets none: the commands overlays expose
+/// are found by the agent's processes, and never decide which program the agent is.
+fn put_first_on_path(
+    env: &mut Vec<(String, Secret)>,
+    dirs: &[PathBuf],
+    lookup: &dyn Fn(&str) -> Option<String>,
+) {
+    if dirs.is_empty() {
+        return;
+    }
+    let held = env
+        .iter()
+        .position(|(name, _)| name.eq_ignore_ascii_case("PATH"));
+    let current = held
+        .map(|at| env[at].1.expose().to_owned())
+        .or_else(|| lookup("PATH"))
+        .unwrap_or_default();
+    let Ok(joined) =
+        std::env::join_paths(dirs.iter().cloned().chain(std::env::split_paths(&current)))
+    else {
+        return;
+    };
+    let value = Secret(joined.to_string_lossy().into_owned());
+    match held {
+        Some(at) => env[at].1 = value,
+        None => env.push(("PATH".to_owned(), value)),
+    }
+}
+
 /// The skills the session's loadout names, as the app recorded them, checked again here. What fails is
 /// reported and left out.
 fn read_chosen(host: &HostProfile, notes: &mut Vec<Item>) -> Chosen {
@@ -1203,6 +1310,16 @@ fn layers_of(
                 let key = aos::normalize_name(&overlay.identity);
                 if let Some(aos) = layer.aos.as_mut() {
                     aos.allowed = host.allow_hooks.get(&overlay.identity).cloned();
+                    let home = prepare::Home::new(host.directory.join("overlays"));
+                    // What preparing made counts only for the version it was made for.
+                    if home
+                        .record(&overlay.identity)
+                        .is_some_and(|record| record.digest.eq_ignore_ascii_case(&aos.digest))
+                    {
+                        aos.packages = home.packages(&overlay.identity);
+                        let state = home.state(&overlay.identity);
+                        aos.state = state.is_dir().then(|| state.to_string_lossy().into_owned());
+                    }
                 }
                 if let Some(aos) = &layer.aos {
                     manifests.insert(key.clone(), aos.manifest.clone());
