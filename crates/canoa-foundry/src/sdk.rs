@@ -177,15 +177,26 @@ pub struct SdkEngine {
     one_at_a_time: Mutex<()>,
     /// Whether [`SdkEngine::load`] loaded the model and it is still loaded.
     loaded: AtomicBool,
+    /// The id the adjusted copy is registered under in the SDK's local catalog, which is kept in the models folder.
+    registered: Option<String>,
 }
 
-/// What goes with the engine is the model it loaded. The SDK's native manager stays for the life of the process: releasing it
-/// ends the process with a fail-fast on the machine this was measured on (Windows ARM64, the WebGPU provider), so a handle on it
-/// is kept, and the next engine opened here finds it again.
+/// What goes with the engine is the model it loaded and the registration it made. The SDK's native manager stays for the life of
+/// the process: releasing it ends the process with a fail-fast on the machine this was measured on (Windows ARM64, the WebGPU
+/// provider), so a handle on it is kept, and the next engine opened here finds it again.
 impl Drop for SdkEngine {
     fn drop(&mut self) {
         if self.loaded.swap(false, Ordering::SeqCst) {
             let _ = self.runtime.block_on(self.model.unload());
+        }
+        // The local catalog is a file in the models folder, which Foundry Local's own is: what this engine added is taken out.
+        if let Some(id) = self.registered.take() {
+            let manager = Arc::clone(&self.manager);
+            self.runtime.block_on(async move {
+                if let Ok(catalog) = manager.local_catalog() {
+                    let _ = catalog.unregister_model(&id).await;
+                }
+            });
         }
         core::mem::forget(Arc::clone(&self.manager));
         core::mem::forget(Arc::clone(&self.model));
@@ -228,8 +239,10 @@ impl SdkEngine {
             .block_on(manager.catalog().get_model_variant(&config.model))
             .map_err(failed)?;
         let mut adjusted = None;
+        let mut registered = None;
         if let Some(window) = &config.window {
             let (copy, made) = runtime.block_on(register_window(&manager, &model, window))?;
+            registered = Some(crate::window::registered_id(&config.model, made.window));
             model = copy;
             adjusted = Some(made);
         }
@@ -240,6 +253,7 @@ impl SdkEngine {
             adjusted,
             one_at_a_time: Mutex::new(()),
             loaded: AtomicBool::new(false),
+            registered,
         })
     }
 
@@ -427,5 +441,38 @@ mod live_models {
                 .expect("answers");
             assert!(answer["choices"][0]["message"]["content"].is_string());
         }
+    }
+
+    /// Needs the native library (`CANOA_FOUNDRY_LIBRARY`) and the model downloaded. Loads nothing: the registration is the
+    /// engine's for as long as it lives, and then it is taken out of the local catalog's file in the models folder.
+    #[test]
+    #[ignore = "needs Foundry Local's native library and the model downloaded"]
+    fn a_registered_window_copy_is_in_the_local_catalog_while_the_engine_lives_and_not_after() {
+        let model = std::env::var("CANOA_FOUNDRY_MODEL")
+            .unwrap_or_else(|_| "qwen3-1.7b-generic-gpu:2".to_owned());
+        let catalog = std::env::home_dir()
+            .expect("a home")
+            .join(".foundry/cache/models/foundry.local.modelinfo.json");
+        let copies =
+            std::env::temp_dir().join(format!("canoa-foundry-copies-{}", std::process::id()));
+        let mut config = SdkConfig::new(model.clone());
+        config.library = std::env::var_os("CANOA_FOUNDRY_LIBRARY").map(PathBuf::from);
+        let window = std::env::var("CANOA_FOUNDRY_WINDOW")
+            .ok()
+            .and_then(|tokens| tokens.parse().ok())
+            .unwrap_or(8192);
+        config.window = Some(SdkWindow::new(window, &copies));
+        let id = crate::window::registered_id(&model, window);
+        let name = id.rsplit_once(':').map_or(id.as_str(), |(name, _)| name);
+        let engine = SdkEngine::open(&config).expect("opens");
+        let listed = std::fs::read_to_string(&catalog).unwrap_or_default();
+        assert!(
+            listed.contains(name),
+            "registered while the engine lives: {listed}"
+        );
+        drop(engine);
+        let listed = std::fs::read_to_string(&catalog).unwrap_or_default();
+        assert!(!listed.contains(name), "taken out when it goes: {listed}");
+        let _ = std::fs::remove_dir_all(&copies);
     }
 }
