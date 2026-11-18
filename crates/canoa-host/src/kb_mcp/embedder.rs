@@ -1,6 +1,7 @@
 //! The embeddings endpoint the person names (`[host.kb] embeddings`): an OpenAI-compatible `/v1/embeddings`, reached through
 //! [`Network`] like every other fetch, so a server beyond the system's proxy is found as it would be from a browser.
 
+use alloc::sync::Arc;
 use core::time::Duration;
 
 use canoa::network::Network;
@@ -18,6 +19,8 @@ pub(crate) struct NetworkEmbedder {
     url: String,
     model: String,
     bearer: Option<String>,
+    /// The network a session's requests go through; the process's when none.
+    network: Option<Arc<Network>>,
 }
 
 impl NetworkEmbedder {
@@ -34,7 +37,14 @@ impl NetworkEmbedder {
             url,
             model: model.into(),
             bearer: None,
+            network: None,
         }
+    }
+
+    /// The same endpoint reached through `network`, as one session's profile chose it; the process's when `None`.
+    pub(crate) fn on(mut self, network: Option<Arc<Network>>) -> Self {
+        self.network = network;
+        self
     }
 
     /// Sends `token` as the request's bearer, for an endpoint that asks for a key.
@@ -58,7 +68,10 @@ impl Embedder for NetworkEmbedder {
             .max_redirects(0)
             .timeout_global(Some(TIMEOUT))
             .build();
-        let agent = Network::current()
+        let agent = self
+            .network
+            .clone()
+            .unwrap_or_else(Network::current)
             .agent(config)
             .map_err(|error| self.failed(error))?;
         let body = json!({"model": self.model, "input": inputs}).to_string();

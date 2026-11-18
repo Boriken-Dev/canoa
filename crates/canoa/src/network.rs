@@ -357,8 +357,8 @@ impl Network {
     ///
     /// # Errors
     ///
-    /// The proxy cannot be asked or reached, refuses the login, or is a kind that cannot carry a
-    /// tunnel (SOCKS).
+    /// The proxy cannot be asked or reached, or refuses the login. A SOCKS proxy is spoken to directly and carries the connection as
+    /// an HTTP proxy's CONNECT does.
     pub fn tunnel(&self, url: &str) -> Result<Option<Connection>, NetworkError> {
         if matches!(
             self.resolver.lookup(url)?.first(),

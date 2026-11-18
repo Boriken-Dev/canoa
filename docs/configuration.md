@@ -206,7 +206,9 @@ extension back applies them again.
   direct, so a program that only knows a plain proxy behaves as the system does. The programs' address carries a secret of the
   session as the proxy's password, since the proxy answers with your own logon session: another process on this computer that
   lacks it is refused. The proxy ends with the session.
-- `none`: the programs are given no proxy variable, and what they inherit from you is theirs.
+- `none`: the programs are given `NO_PROXY=*` and no proxy: the host adds no system proxy to them, and a proxy variable they
+  inherit from you is overridden by it for a program that reads `NO_PROXY`. The host's own requests for the session (the
+  knowledge tools' search by meaning and by a model) go direct too.
 - `proxy`: the proxy at `url`, `[scheme://][user[:password]@]host[:port]`, given to the programs as it is; `user` and
   `password_variable` (the name of a variable of the host that holds the password) log in to it.
 - `pac`: as `system`, choosing the route by the PAC script at `url` (an address, or a file), with `user` and `password_variable`

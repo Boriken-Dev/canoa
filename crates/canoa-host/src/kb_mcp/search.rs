@@ -1,5 +1,7 @@
 //! `kb_search` for the host: coqui-aos's index search by words and meaning, and the `llm` mode over it.
 
+use std::sync::Arc;
+
 use coqui_aos::index::{Index, IndexSearch};
 use coqui_aos::{
     KnowledgeOverlay, Passage, SearchAnswer, SearchBackend, SearchFailure, SearchMode,
@@ -35,7 +37,9 @@ impl Backend<'_> {
             .map_err(|error| SearchFailure::unavailable(error.to_string()))?;
         let mut search = IndexSearch::new().index(&overlay.identity, index);
         if let Some(embedder) = &self.0.builder.embedder {
-            search = search.embedder(Box::new(embedder.clone()));
+            search = search.embedder(Box::new(
+                embedder.clone().on(Some(Arc::clone(&self.0.network))),
+            ));
         }
         Ok((search, ready.note.clone()))
     }
@@ -65,7 +69,7 @@ impl Backend<'_> {
         passages.truncate(ranker.candidates.max(request.top));
         let texts: Vec<String> = passages.iter().map(passage_text).collect();
         let by = first.as_str();
-        match ranker.order(&request.query, &texts) {
+        match ranker.order(&self.0.network, &request.query, &texts) {
             Ok(order) if !order.is_empty() => {
                 let mut placed = vec![false; passages.len()];
                 let mut ordered: Vec<Passage> = Vec::with_capacity(passages.len());

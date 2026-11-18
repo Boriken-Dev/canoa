@@ -559,6 +559,7 @@ class _CanoaAppState extends State<CanoaApp> {
         if (error is ControlFailed) throw error;
       });
       await served.files.awaitHost();
+      unawaited(_loadProfileItems(wait: true));
       messenger?.showSnackBar(const SnackBar(content: Text('The host restarted.')));
       return true;
     } on ControlFailed catch (error) {
@@ -601,6 +602,7 @@ class _CanoaAppState extends State<CanoaApp> {
     if (host == null || path == null) return false;
     if (_openOnHost() > 0 && !await _confirmRestart()) return false;
     await host.apply(configPath: path);
+    unawaited(_loadProfileItems(wait: true));
     return true;
   }
 
@@ -1835,7 +1837,14 @@ class _CanoaAppState extends State<CanoaApp> {
 
   void _extensionsChanged() {
     if (mounted) setState(() {});
+    final held = _extensionsHeld;
+    if (held != null) {
+      _itemsRefresh.extensionsAre(held.addedBy.entries.map((each) => '${each.key}:${each.value.join(',')}').join(';'));
+    }
   }
+
+  /// Asks for the profile items again when the extensions the host has loaded change.
+  late final _itemsRefresh = ProfileItemsRefresh(_loadProfileItems);
 
   /// The host reads which program a source runs when it starts: after one was installed, updated or removed it starts again, so the
   /// source runs the new one. The person is asked first when sessions are open on it.
@@ -3311,11 +3320,11 @@ class _CanoaAppState extends State<CanoaApp> {
   }
 
   /// Asks the host which items a profile may set: the editor draws a form for each from what its provider says of it.
-  Future<void> _loadProfileItems() async {
+  Future<void> _loadProfileItems({bool wait = false}) async {
     final control = _control;
     if (control == null) return;
     try {
-      final client = await control.ready(wait: false);
+      final client = await control.ready(wait: wait);
       profileItems.adopt(await client.call('profile_items/list', const {}));
     } on Object catch (error) {
       profileItems.failed(error is ControlFailed ? error.message : error is StateError ? error.message : 'no link');

@@ -492,7 +492,7 @@ pub(crate) struct Connection {
     launch_args: Vec<String>,
     /// How its programs reach the network, when an item of the profile says: the proxy the host runs for the session stops with
     /// the connection.
-    _session_network: Option<crate::network::session::SessionNetwork>,
+    session_network: Option<crate::network::session::SessionNetwork>,
 }
 
 /// What the host knows of the session its connection's environment is made for.
@@ -996,7 +996,7 @@ impl Connection {
             session: session.clone(),
             launched_as,
             launch_args,
-            _session_network: session_network,
+            session_network,
         })
     }
 
@@ -1073,6 +1073,13 @@ impl Connection {
     /// When a directory is already there (it is never taken, whoever made it) or cannot be made private.
     pub(crate) fn private(&self) -> std::io::Result<&Path> {
         self.skills.ensure()
+    }
+
+    /// The network the host's own requests for this connection's sessions use, when an item of the profile chose one.
+    pub(crate) fn network(&self) -> Option<alloc::sync::Arc<canoa::network::Network>> {
+        self.session_network
+            .as_ref()
+            .map(|session| alloc::sync::Arc::clone(&session.network))
     }
 
     /// The profile's environment, resolved: what the agent's process is given.

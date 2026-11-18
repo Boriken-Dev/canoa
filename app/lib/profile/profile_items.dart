@@ -3,6 +3,8 @@
 /// it applies to and the form it asks for.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 /// One field of an item's form.
@@ -125,6 +127,23 @@ final class ProfileItemCatalog extends ChangeNotifier {
     _problem = why;
     _answered = true;
     notifyListeners();
+  }
+}
+
+/// Asks the host for its items again when the extensions it has loaded are not the ones the last answer was made under, so an item
+/// an extension adds or takes away shows without a reload of the app.
+final class ProfileItemsRefresh {
+  ProfileItemsRefresh(this._ask);
+
+  final Future<void> Function() _ask;
+  String? _under;
+
+  /// [signature] is what the extensions the host reports amount to. The first one only notes what the answer was made under; each
+  /// later one that differs asks again.
+  void extensionsAre(String signature) {
+    final before = _under;
+    _under = signature;
+    if (before != null && before != signature) unawaited(_ask());
   }
 }
 

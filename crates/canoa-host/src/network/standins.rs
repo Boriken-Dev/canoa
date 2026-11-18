@@ -387,3 +387,117 @@ fn answer(
     tls.conn.send_close_notify();
     let _ = tls.flush();
 }
+
+/// A loopback SOCKS5 server that wants no login. It records the `host:port` each client asks for, and carries each connection it
+/// accepts to `origin` whatever it was asked for, as [`StandInProxy`] does.
+pub(crate) struct StandInSocks {
+    pub(crate) addr: SocketAddr,
+    asked: Arc<Mutex<Vec<String>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl StandInSocks {
+    pub(crate) fn start(origin: SocketAddr) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (asked_in, stop_in) = (Arc::clone(&asked), Arc::clone(&stop));
+        let thread = thread::spawn(move || {
+            for stream in listener.incoming() {
+                if stop_in.load(Ordering::SeqCst) {
+                    break;
+                }
+                let Ok(stream) = stream else { continue };
+                let asked = Arc::clone(&asked_in);
+                thread::spawn(move || socks(stream, origin, &asked));
+            }
+        });
+        Self {
+            addr,
+            asked,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    /// The `host:port` each client asked to be connected to.
+    pub(crate) fn asked(&self) -> Vec<String> {
+        self.asked.lock().expect("lock").clone()
+    }
+}
+
+impl Drop for StandInSocks {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        let _ = TcpStream::connect(self.addr);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn socks(mut client: TcpStream, origin: SocketAddr, asked: &Mutex<Vec<String>>) {
+    client.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    let mut greeting = [0u8; 2];
+    if client.read_exact(&mut greeting).is_err() || greeting[0] != 5 {
+        return;
+    }
+    let mut methods = vec![0u8; usize::from(greeting[1])];
+    if client.read_exact(&mut methods).is_err() || !methods.contains(&0) {
+        let _ = client.write_all(&[5, 0xff]);
+        return;
+    }
+    if client.write_all(&[5, 0]).is_err() {
+        return;
+    }
+    let mut head = [0u8; 4];
+    if client.read_exact(&mut head).is_err() || head[0] != 5 || head[1] != 1 {
+        return;
+    }
+    let host = match head[3] {
+        1 => {
+            let mut octets = [0u8; 4];
+            if client.read_exact(&mut octets).is_err() {
+                return;
+            }
+            std::net::Ipv4Addr::from(octets).to_string()
+        }
+        3 => {
+            let mut length = [0u8; 1];
+            if client.read_exact(&mut length).is_err() {
+                return;
+            }
+            let mut name = vec![0u8; usize::from(length[0])];
+            if client.read_exact(&mut name).is_err() {
+                return;
+            }
+            String::from_utf8_lossy(&name).into_owned()
+        }
+        4 => {
+            let mut octets = [0u8; 16];
+            if client.read_exact(&mut octets).is_err() {
+                return;
+            }
+            std::net::Ipv6Addr::from(octets).to_string()
+        }
+        _ => return,
+    };
+    let mut port = [0u8; 2];
+    if client.read_exact(&mut port).is_err() {
+        return;
+    }
+    asked
+        .lock()
+        .expect("lock")
+        .push(format!("{host}:{}", u16::from_be_bytes(port)));
+    let Ok(upstream) = TcpStream::connect(origin) else {
+        let _ = client.write_all(&[5, 5, 0, 1, 0, 0, 0, 0, 0, 0]);
+        return;
+    };
+    if client.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).is_err() {
+        return;
+    }
+    pipe(client, upstream);
+}

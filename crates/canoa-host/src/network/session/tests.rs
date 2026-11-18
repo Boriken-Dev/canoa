@@ -18,7 +18,10 @@ use canoa::network::{BypassRules, Dialect, Network};
 use canoa::profile_item::NetworkEffect;
 
 use super::{Middleman, start};
-use crate::network::tests::{Dir, PASSWORD, USER, through, world};
+use crate::network::standins::StandInSocks;
+use crate::network::tests::{
+    Dir, PASSWORD, USER, environment_of, printing_environment, proxied, through, world,
+};
 
 const TOKEN: &str = "0123456789abcdef";
 
@@ -293,9 +296,31 @@ fn the_system_mode_gives_the_programs_a_loopback_proxy_with_the_secret_and_keeps
 }
 
 #[test]
-fn the_none_mode_gives_the_programs_no_proxy_variable() {
+fn the_none_mode_says_no_proxy_for_anything_and_the_hosts_own_starter_adds_none() {
     let session = start(&effect("none"), &no_environment).expect("starts");
-    assert!(session.variables.is_empty());
+    let names: Vec<&str> = session
+        .variables
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
+    assert_eq!(names, ["NO_PROXY", "no_proxy"]);
+    assert!(session.variables.iter().all(|(_, value)| value == "*"));
+    // A program the host starts with them, whatever the host's own network says, is given no proxy of the system's.
+    let dir = Dir::new("session-none");
+    let mut command = printing_environment();
+    command.envs(session.variables.iter().cloned());
+    command.network(proxied(&dir.0));
+    let seen = environment_of(&mut command);
+    assert!(
+        !seen.to_ascii_lowercase().contains("_proxy=http"),
+        "a proxy was added: {seen}"
+    );
+    assert!(
+        seen.lines()
+            .any(|line| line.eq_ignore_ascii_case("NO_PROXY=*")),
+        "{seen}"
+    );
+    assert!(!seen.contains("carol"), "{seen}");
 }
 
 #[test]
@@ -435,6 +460,86 @@ fn the_command_mode_starts_the_program_where_it_is_told_to_listen_and_stops_it_w
     asked.command = vec!["/no/such/program".to_owned()];
     let why = start(&asked, &no_environment).expect_err("refused");
     assert!(why.contains("could not start"), "{why}");
+}
+
+#[test]
+fn the_command_mode_sends_the_hosts_own_requests_for_the_session_through_the_program_too() {
+    let exe = std::env::current_exe().expect("this program");
+    let mut asked = effect("command");
+    asked.command = vec![
+        exe.to_string_lossy().into_owned(),
+        "--exact".to_owned(),
+        "network::session::tests::stand_in_proxy_program".to_owned(),
+        "{listen}".to_owned(),
+    ];
+    let session = start(&asked, &no_environment).expect("starts and listens");
+    let routes = session
+        .network
+        .resolver()
+        .lookup("https://api.example.test/")
+        .expect("a route");
+    let shown = format!("{routes:?}");
+    let listen = session
+        .variables
+        .iter()
+        .find(|(name, _)| name == "HTTP_PROXY")
+        .map(|(_, value)| value.trim_start_matches("http://").to_owned())
+        .expect("a proxy");
+    assert!(
+        shown.contains("Proxy") && shown.contains(&listen),
+        "{shown}"
+    );
+}
+
+#[test]
+fn a_socks_upstream_carries_what_a_program_asks_the_session_proxy_for() {
+    let world = world("session-socks", &["downloads.example.test"], b"x");
+    let (origin, thread) = echo();
+    let socks = StandInSocks::start(origin);
+    let dir = Dir::new("session-socks-script");
+    let script = dir.0.join("proxy.pac");
+    fs::write(
+        &script,
+        format!(
+            "function FindProxyForURL(url, host) {{ if (host == 'reached-by-socks.example.test') return 'SOCKS5 {}'; return 'DIRECT'; }}",
+            socks.addr
+        ),
+    )
+    .expect("writes");
+    let mut asked = effect("pac");
+    asked.url = Some(script.to_string_lossy().into_owned());
+    let session = start(&asked, &no_environment).expect("starts");
+    let url = session
+        .variables
+        .iter()
+        .find(|(name, _)| name == "HTTPS_PROXY")
+        .map(|(_, value)| value.clone())
+        .expect("a proxy");
+    let address = url
+        .rsplit_once('@')
+        .and_then(|(_, address)| address.parse::<SocketAddr>().ok())
+        .expect("an address");
+    let token = url
+        .trim_start_matches("http://canoa:")
+        .split('@')
+        .next()
+        .expect("a token")
+        .to_owned();
+    let (mut stream, head) = ask(
+        address,
+        &connect("reached-by-socks.example.test:443", Some(&basic(&token))),
+    );
+    assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    stream.write_all(b"ping").expect("writes");
+    let mut back = [0u8; 4];
+    stream
+        .read_exact(&mut back)
+        .expect("echoed by the origin behind the SOCKS server");
+    assert_eq!(&back, b"ping");
+    assert_eq!(socks.asked(), ["reached-by-socks.example.test:443"]);
+    assert!(world.proxy.seen().is_empty(), "no HTTP proxy was asked");
+    closes(&mut stream);
+    let _ = thread.join();
 }
 
 #[test]

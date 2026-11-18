@@ -26,6 +26,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use canoa::network::Network;
 use coqui_aos::index::Settings;
 use coqui_aos::{CallerFacts, KnowledgeOverlay, KnowledgeSettings};
 use coqui_transport::{Channel, Failure};
@@ -134,6 +135,10 @@ pub(crate) struct Access {
     caller: CallerFacts,
     builder: Arc<Builder>,
     library: Arc<Library>,
+    /// The network the connection's profile chose, which the requests made for its searches go through: its query's embedding and
+    /// the model that orders passages. An index is made once for every connection that applies the overlay, so the documents'
+    /// embeddings are asked through the process's network.
+    network: Arc<Network>,
     calls: AtomicUsize,
 }
 
@@ -259,11 +264,12 @@ impl Hub {
 
     /// The knowledge tools of one connection that applies `sources`, or `None` when they are off, there is no state to keep
     /// indexes in, or no overlay has knowledge. `asked` is whether the client's `initialize` asked for them; `caller` is who
-    /// its templates see.
+    /// its templates see. `network` is the one its profile chose for the requests made for it; the process's when `None`.
     pub(crate) fn for_connection(
         self: &Arc<Self>,
         sources: Vec<Source>,
         caller: &Caller,
+        network: Option<Arc<Network>>,
         asked: bool,
     ) -> Option<Arc<Link>> {
         let builder = self.builder.as_ref().filter(|_| self.enabled && asked)?;
@@ -278,6 +284,7 @@ impl Hub {
                 caller: caller.facts(),
                 builder: Arc::clone(builder),
                 library: Arc::clone(&self.library),
+                network: network.unwrap_or_else(Network::current),
                 calls: AtomicUsize::new(0),
             }),
             state: Mutex::new(State::default()),

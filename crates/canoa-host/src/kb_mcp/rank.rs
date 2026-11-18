@@ -61,36 +61,39 @@ impl Ranker {
 
     /// The numbers of `passages` (from 0) in the order the model gives, best first, each at most once. May be shorter than
     /// `passages`: what the model left out is not in it.
-    pub(crate) fn order(&self, query: &str, passages: &[String]) -> Result<Vec<usize>, String> {
+    pub(crate) fn order(
+        &self,
+        network: &Network,
+        query: &str,
+        passages: &[String],
+    ) -> Result<Vec<usize>, String> {
         let shown: Vec<String> = passages
             .iter()
             .map(|text| text.chars().take(PASSAGE_CHARS).collect())
             .collect();
         if !self.no_rank.load(Ordering::Relaxed) {
-            match self.by_rank(query, &shown) {
+            match self.by_rank(network, query, &shown) {
                 Ok(order) => return Ok(order),
                 Err(Asked::Absent) => self.no_rank.store(true, Ordering::Relaxed),
                 Err(Asked::Failed) => {}
             }
         }
-        self.by_chat(query, &shown)
+        self.by_chat(network, query, &shown)
     }
 
-    fn agent(&self) -> Result<ureq::Agent, String> {
+    fn agent(&self, network: &Network) -> Result<ureq::Agent, String> {
         let config = ureq::Agent::config_builder()
             .max_redirects(0)
             .http_status_as_error(false)
             .timeout_global(Some(self.timeout))
             .build();
-        Network::current()
-            .agent(config)
-            .map_err(|error| error.to_string())
+        network.agent(config).map_err(|error| error.to_string())
     }
 
-    fn post(&self, path: &str, body: &Value) -> Result<(u16, String), String> {
+    fn post(&self, network: &Network, path: &str, body: &Value) -> Result<(u16, String), String> {
         let url = format!("{}/v1/{path}", self.root);
         let mut request = self
-            .agent()?
+            .agent(network)?
             .post(&url)
             .header("content-type", "application/json");
         if let Some(token) = &self.bearer {
@@ -109,9 +112,16 @@ impl Ranker {
         Ok((status, text))
     }
 
-    fn by_rank(&self, query: &str, shown: &[String]) -> Result<Vec<usize>, Asked> {
+    fn by_rank(
+        &self,
+        network: &Network,
+        query: &str,
+        shown: &[String],
+    ) -> Result<Vec<usize>, Asked> {
         let body = json!({"model": self.model, "query": query, "answers": shown});
-        let (status, text) = self.post("rank", &body).map_err(|_| Asked::Failed)?;
+        let (status, text) = self
+            .post(network, "rank", &body)
+            .map_err(|_| Asked::Failed)?;
         if matches!(status, 400 | 404 | 405 | 422) {
             return Err(Asked::Absent);
         }
@@ -122,7 +132,12 @@ impl Ranker {
         ranked(&value, shown.len()).ok_or(Asked::Failed)
     }
 
-    fn by_chat(&self, query: &str, shown: &[String]) -> Result<Vec<usize>, String> {
+    fn by_chat(
+        &self,
+        network: &Network,
+        query: &str,
+        shown: &[String],
+    ) -> Result<Vec<usize>, String> {
         let mut prompt = format!("Query: {query}\n\nPassages:\n");
         for (number, text) in shown.iter().enumerate() {
             prompt.push_str(&format!("[{}] {}\n", number + 1, text.replace('\n', " ")));
@@ -138,7 +153,7 @@ impl Ranker {
             "max_tokens": 96,
             "stream": false,
         });
-        let (status, text) = self.post("chat/completions", &body)?;
+        let (status, text) = self.post(network, "chat/completions", &body)?;
         if status != 200 {
             return Err(format!("the server answered {status}"));
         }

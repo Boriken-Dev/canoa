@@ -2952,6 +2952,7 @@ fn give_agent_flow<C: Channel>(
         shared.kb_tools.for_connection(
             connection.kb_sources(),
             &connection.kb_caller(),
+            connection.network(),
             kb_mcp::asked_in(first),
         )
     });

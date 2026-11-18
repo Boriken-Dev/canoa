@@ -192,7 +192,7 @@ fn failed(result: &Value) -> String {
 /// A session of a connection that applies `sources`: its URL and bearer.
 fn session(hub: &Arc<Hub>, sources: Vec<Source>) -> (Arc<Link>, String, String) {
     let link = hub
-        .for_connection(sources, &Caller::default(), true)
+        .for_connection(sources, &Caller::default(), None, true)
         .expect("a link");
     opened(&link, &http_capabilities());
     let (url, token) = given(&link.client_said(session_new(2)));
@@ -205,29 +205,29 @@ fn the_tools_are_given_only_to_a_connection_that_asked_and_can_keep_indexes() {
     let config = KbConfig::default();
     assert!(
         hub_in(&scratch.0, &config)
-            .for_connection(vec![team("sha256:aa")], &Caller::default(), true)
+            .for_connection(vec![team("sha256:aa")], &Caller::default(), None, true)
             .is_some()
     );
     assert!(
         hub_in(&scratch.0, &config)
-            .for_connection(vec![team("sha256:aa")], &Caller::default(), false)
+            .for_connection(vec![team("sha256:aa")], &Caller::default(), None, false)
             .is_none()
     );
     assert!(
         hub_in(&scratch.0, &config)
-            .for_connection(Vec::new(), &Caller::default(), true)
+            .for_connection(Vec::new(), &Caller::default(), None, true)
             .is_none()
     );
     assert!(
         Hub::new(&config, None, bridge())
-            .for_connection(vec![team("sha256:aa")], &Caller::default(), true)
+            .for_connection(vec![team("sha256:aa")], &Caller::default(), None, true)
             .is_none()
     );
     let mut off = KbConfig::default();
     off.tools = Some(false);
     assert!(
         hub_in(&scratch.0, &off)
-            .for_connection(vec![team("sha256:aa")], &Caller::default(), true)
+            .for_connection(vec![team("sha256:aa")], &Caller::default(), None, true)
             .is_none()
     );
 
@@ -241,7 +241,7 @@ fn a_session_request_gets_the_server_over_http_or_over_the_stdio_bridge() {
     let scratch = Scratch::new();
     let hub = hub_in(&scratch.0, &KbConfig::default());
     let link = hub
-        .for_connection(vec![team("sha256:aa")], &Caller::default(), true)
+        .for_connection(vec![team("sha256:aa")], &Caller::default(), None, true)
         .unwrap();
     // Before the agent has said what it takes, nothing is added.
     let _ = link.client_said(initialize(true));
@@ -254,7 +254,7 @@ fn a_session_request_gets_the_server_over_http_or_over_the_stdio_bridge() {
     assert_eq!(hub.tokens.len(), 1);
 
     let other = hub
-        .for_connection(vec![team("sha256:aa")], &Caller::default(), true)
+        .for_connection(vec![team("sha256:aa")], &Caller::default(), None, true)
         .unwrap();
     let _ = other.client_said(initialize(true));
     other.agent_said(&answer(1, &json!({"protocolVersion": 1})));
@@ -536,7 +536,7 @@ fn a_template_is_rendered_with_who_the_connection_is_and_what_the_call_gives() {
         ],
     };
     let link = hub
-        .for_connection(vec![source], &caller, true)
+        .for_connection(vec![source], &caller, None, true)
         .expect("a link");
     opened(&link, &http_capabilities());
     let (url, token) = given(&link.client_said(session_new(2)));
@@ -1025,4 +1025,77 @@ fn the_configuration_names_an_embeddings_server_a_model_or_none() {
     assert_eq!(choice.get("plain"), Some(&false));
     assert_eq!(choice.get("none"), None);
     assert!(raw("[overlays.team]\nkb = \"sometimes\"\n").is_err());
+}
+
+/// The stand-in proxy that wants a login and carries each tunnel it allows to `origin` (a [`Stub`]), and the network whose only way
+/// out it is: a name no resolver knows is reachable through it alone.
+fn behind_proxy(origin: &Stub) -> (crate::network::standins::StandInProxy, Arc<Network>) {
+    let address = origin
+        .address
+        .trim_start_matches("http://")
+        .parse()
+        .expect("an address");
+    let proxy = crate::network::standins::StandInProxy::start("alice", "s3cret", Some(address));
+    let mut settings = canoa::network::NetworkSettings::default();
+    settings.proxy = canoa::network::ProxyChoice::Proxy(format!("http://{}", proxy.addr));
+    settings.proxy_user = Some("alice".to_owned());
+    settings.proxy_password = Some(canoa::network::Secret::new("s3cret"));
+    (proxy, Arc::new(Network::new(&settings).expect("a network")))
+}
+
+#[test]
+fn the_model_that_orders_passages_is_reached_through_the_network_the_connections_profile_chose() {
+    let scratch = Scratch::new();
+    let model = Stub::start(Box::new(|path, _| {
+        if path == "/v1/chat/completions" {
+            (
+                200,
+                json!({"choices": [{"message": {"content": "[2, 1]"}}]}),
+            )
+        } else {
+            (404, json!({"error": "no such endpoint"}))
+        }
+    }));
+    // The model is at a name that exists nowhere else: a request that reached it by any other way would fail.
+    let (proxy, network) = behind_proxy(&model);
+    let hub = hub_in(&scratch.0, &with_llm("http://kb-model.example.test:8080"));
+    let link = hub
+        .for_connection(
+            vec![team("sha256:aa")],
+            &Caller::default(),
+            Some(network),
+            true,
+        )
+        .expect("a link");
+    opened(&link, &http_capabilities());
+    let (url, token) = given(&link.client_said(session_new(2)));
+    let by_model = searched(&url, &token, "cargo", "llm");
+    assert_eq!(by_model["mode"], "llm", "{by_model}");
+    // The rank endpoint is tried first and the chat one after it: each is a tunnel through the proxy, with its login.
+    let tunnels = proxy.allowed("alice", "s3cret");
+    assert!(
+        !tunnels.is_empty() && tunnels.iter().all(|to| to == "kb-model.example.test:8080"),
+        "{tunnels:?}"
+    );
+    // A connection whose profile chose no network reaches the model as the process does, which cannot find that name.
+    let (_other, url, token) = session(&hub, vec![team("sha256:aa")]);
+    let without = searched(&url, &token, "cargo", "llm");
+    assert_eq!(without["error"]["class"], "mode-unavailable", "{without}");
+}
+
+#[test]
+fn a_query_is_embedded_through_the_network_the_connections_profile_chose() {
+    let (origin, embedded) = embeddings_stub();
+    let (proxy, network) = behind_proxy(&origin);
+    let through =
+        embedder::NetworkEmbedder::new("http://embeddings.example.test:9", "m").on(Some(network));
+    let vectors = coqui_aos::index::Embedder::embed(&through, &["cargo".to_owned()])
+        .expect("embedded through the proxy");
+    assert_eq!(vectors.len(), 1);
+    assert_eq!(embedded.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        proxy.allowed("alice", "s3cret"),
+        ["embeddings.example.test:9"]
+    );
+    assert_eq!(origin.paths(), ["/v1/embeddings"]);
 }

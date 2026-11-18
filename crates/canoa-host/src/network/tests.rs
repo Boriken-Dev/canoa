@@ -283,12 +283,12 @@ fn a_fetch_presents_the_keystores_certificate_the_server_names_a_ca_for() {
 }
 
 /// What a program started with `command` says its environment is.
-fn environment_of(command: &mut Command) -> String {
+pub(crate) fn environment_of(command: &mut Command) -> String {
     let output = command.output().expect("runs");
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
-fn printing_environment() -> Command {
+pub(crate) fn printing_environment() -> Command {
     let mut command = if cfg!(windows) {
         let mut command = Command::new("cmd");
         command.args(["/c", "set"]);
@@ -309,7 +309,7 @@ fn printing_environment() -> Command {
     command
 }
 
-fn proxied(dir: &Path) -> Arc<Network> {
+pub(crate) fn proxied(dir: &Path) -> Arc<Network> {
     let _ = dir;
     let mut settings = NetworkSettings::default();
     settings.proxy = ProxyChoice::Proxy("http://carol:pw@127.0.0.1:9".to_owned());
@@ -332,6 +332,22 @@ fn a_program_started_with_no_proxy_of_its_own_is_given_the_network_s() {
     assert!(
         seen.lines()
             .any(|line| line == "NO_PROXY=localhost,127.0.0.1,::1"),
+        "{seen}"
+    );
+}
+
+#[test]
+fn a_program_whose_environment_says_no_proxy_for_everything_is_given_no_proxy() {
+    let dir = Dir::new("children-direct");
+    let mut command = printing_environment();
+    command.env("NO_PROXY", "*");
+    command.network(proxied(&dir.0));
+    let seen = environment_of(&mut command);
+    assert!(!seen.to_ascii_lowercase().contains("_proxy=http"), "{seen}");
+    assert!(!seen.contains("carol"), "{seen}");
+    assert!(
+        seen.lines()
+            .any(|line| line.eq_ignore_ascii_case("NO_PROXY=*")),
         "{seen}"
     );
 }

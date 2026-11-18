@@ -42,9 +42,8 @@ const PROXY_USER: &str = "canoa";
 pub(crate) struct SessionNetwork {
     /// The proxy variables of the session's programs, which a variable the profile's own environment names does not replace.
     pub(crate) variables: Vec<(String, String)>,
-    /// The network the host's own requests for this session are to use. No request of the host's is made for one session alone yet,
-    /// so only a test reads it.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The network the host's own requests for this session are to use: the knowledge tools' embeddings and ordering requests are
+    /// the ones the host makes for a session alone.
     pub(crate) network: Arc<Network>,
     /// What the report says it is, with no secret in it.
     pub(crate) description: String,
@@ -82,9 +81,9 @@ pub(crate) fn start(
             let network = Network::new(&settings(ProxyChoice::None, effect, lookup)?)
                 .map_err(|error| error.to_string())?;
             Ok(SessionNetwork {
-                variables: Vec::new(),
+                variables: direct_variables(),
                 network: Arc::new(network),
-                description: "no proxy".to_owned(),
+                description: "with no proxy".to_owned(),
                 _keep: Keep::Nothing,
             })
         }
@@ -158,6 +157,15 @@ fn middleman(
         description: format!("through a proxy on {} {how}", proxy.addr),
         _keep: Keep::Proxy(proxy),
     })
+}
+
+/// What says no proxy to a program: `NO_PROXY=*` is read by every client that reads a proxy from its environment, and the host's
+/// own process starter reads it as the person's word that no system proxy is to be added.
+fn direct_variables() -> Vec<(String, String)> {
+    vec![
+        ("NO_PROXY".to_owned(), "*".to_owned()),
+        ("no_proxy".to_owned(), "*".to_owned()),
+    ]
 }
 
 /// The proxy variables for the proxy at `url`, and the hosts that never go through one: this computer, and the bypass list.
@@ -560,9 +568,16 @@ fn program(effect: &NetworkEffect) -> Result<SessionNetwork, String> {
         thread::sleep(Duration::from_millis(50));
     }
     let url = format!("http://{listen}");
+    // The host's own requests for the session go through the program too, as its programs' do.
+    let mut settings = NetworkSettings::default();
+    settings.proxy = ProxyChoice::Proxy(url.clone());
+    if !effect.bypass.is_empty() {
+        settings.no_proxy = Some(effect.bypass.clone());
+    }
+    let network = Network::new(&settings).map_err(|error| error.to_string())?;
     Ok(SessionNetwork {
         variables: loopback_variables(&url, &effect.bypass),
-        network: Network::current(),
+        network: Arc::new(network),
         description: format!("through {program}, listening on {listen}"),
         _keep: Keep::Program(child),
     })

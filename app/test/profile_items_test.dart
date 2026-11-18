@@ -165,6 +165,30 @@ void main() {
     expect(find.byKey(const Key('item-gone-region')), findsNothing);
   });
 
+  test('the items are asked for again when the extensions the host reports change, and only then', () async {
+    final catalog = ProfileItemCatalog();
+    var asked = 0;
+    var extension = true;
+    final refresh = ProfileItemsRefresh(() async {
+      asked++;
+      catalog.adopt(_listed(extension: extension));
+    });
+    refresh.extensionsAre('regions:Region');
+    refresh.extensionsAre('regions:Region');
+    await Future<void>.delayed(Duration.zero);
+    expect(asked, 0, reason: 'the first answer only says what the items were made under, and an unchanged one asks nothing');
+    extension = false;
+    refresh.extensionsAre('');
+    await Future<void>.delayed(Duration.zero);
+    expect(asked, 1);
+    expect(catalog.byId('region'), isNull, reason: 'the item of the extension that went is gone');
+    extension = true;
+    refresh.extensionsAre('regions:Region');
+    await Future<void>.delayed(Duration.zero);
+    expect(asked, 2);
+    expect(catalog.byId('region'), isNotNull, reason: 'and one an extension added shows');
+  });
+
   test('a profile with items is read from canoa.cfg and written back as it was', () {
     final config = CanoaConfig.parse(
       '[profiles.Deep]\nmodel = "opus"\n[profiles.Deep.items.region]\nname = "north"\nhosts = ["a.example"]\n',

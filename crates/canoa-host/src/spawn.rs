@@ -311,7 +311,8 @@ impl Command {
     }
 
     /// Gives the process the system's proxy as `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` when the environment it starts with names no
-    /// proxy: the person's own variables, or a caller's, are never replaced, and a name already set is left as it is. A variable
+    /// proxy and does not say `NO_PROXY=*`: the person's own variables, or a caller's, are never replaced, and a name already set is
+    /// left as it is. A variable
     /// the person left empty is no proxy: it does not stop the host's, and where names are case-sensitive it is removed from the
     /// process rather than left to be read ahead of the host's.
     fn put_proxy_variables(&mut self) {
@@ -334,6 +335,13 @@ impl Command {
             .iter()
             .any(|name| has(self, name))
         {
+            return;
+        }
+        // `NO_PROXY=*` in the environment it was given says no proxy for anything: adding the system's would contradict it.
+        if matches!(
+            self.env.iter().rev().find(|(key, _)| named(key, "no_proxy")),
+            Some((_, Some(value))) if value == "*"
+        ) {
             return;
         }
         let network = self
