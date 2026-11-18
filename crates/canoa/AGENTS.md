@@ -268,7 +268,7 @@ pub struct SourcePreset { pub name: &'static str, pub harness: Option<&'static s
     pub usage: Option<&'static str>, pub managed: Option<&'static str> }
 impl SourcePreset {
     pub const fn new(name: &'static str, program: &'static str) -> Self;   // no harness, no arguments, nothing else
-    pub const fn harness(self, harness: &'static str) -> Self;             // `claude`, `codex` or `pi`: run in process
+    pub const fn harness(self, harness: &'static str) -> Self;             // `claude`, `codex`, `pi` or `opencode`: run in process
     pub const fn args(self, args: &'static [&'static str]) -> Self;
     pub const fn requires(self, requires: &'static [&'static str]) -> Self; // other programs it needs, offered only when found
     pub const fn search(self, search: &'static [&'static str]) -> Self;     // `~` is the home directory, `%NAME%` an environment variable

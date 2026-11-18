@@ -8,14 +8,14 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No C
 
 ```rust
 pub const PRESET: SourcePreset;
-// = SourcePreset::new("OpenCode", "opencode").args(&["acp"]).search(&["~/.opencode/bin"])
+// = SourcePreset::new("OpenCode", "opencode").harness("opencode").search(&["~/.opencode/bin"])
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OpenCodeRecipe;
 impl canoa::store::recipe::Recipe for OpenCodeRecipe { /* every required method */ }
 ```
 
-- `PRESET`: how the host starts OpenCode when `canoa.cfg` does not name it: runs `opencode acp`, searched for in `~/.opencode/bin`.
+- `PRESET`: how the host starts OpenCode when `canoa.cfg` does not name it: as the built-in `opencode` harness (coqui-acp's provider runs `opencode acp` in the host's process and takes accounts), the program searched for in `~/.opencode/bin`.
 - `OpenCodeRecipe`: OpenCode's Store recipe: the release's archive for the platform (`opencode-<windows|linux>-<x64|arm64>`, a `.zip` on Windows and a `.tar.gz` on Linux, each holding the one program) from the publisher's GitHub releases, checked against the SHA-256 the release lists for that file. With no version it takes GitHub's newest release; a version a person names is read from its own tag (`v<version>`). No channels. A release that lists no archive or no digest for the platform is refused.
 
 Each item is public at this one path. `OpenCodeRecipe` is not a Store provider: `canoa-host` wraps it in its engine as the guatiao provider `opencode_store`.
