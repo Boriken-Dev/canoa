@@ -371,6 +371,8 @@ pub(crate) struct Control {
     fetch: fetch::Fetch,
     /// The connections the app makes to a remote host, carried through this host's network.
     tunnel: tunnel::Tunnel,
+    /// The client certificates a profile's proxy item may name.
+    client_certificates: client_certificates::ClientCertificates,
     /// The catalogs and programs, indexed for `store/index`.
     index: Arc<crate::store::index::StoreIndex>,
     /// Where an extension a catalog lists is kept, and how it is fetched.
@@ -486,6 +488,7 @@ impl Control {
             registry: Registry::default(),
             fetch: fetch::Fetch::default(),
             tunnel: tunnel::Tunnel::default(),
+            client_certificates: client_certificates::ClientCertificates::default(),
             index: Arc::new(crate::store::index::StoreIndex::default()),
             extensions: extension_install::ExtensionInstall::default(),
             restart: Arc::new(AtomicBool::new(false)),
@@ -591,6 +594,17 @@ impl Control {
     #[must_use]
     pub(crate) fn with_tunnel(mut self, tunnel: tunnel::Tunnel) -> Self {
         self.tunnel = tunnel;
+        self
+    }
+
+    /// Lists `network/client_certificates` from `certificates`' network instead of the process's.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_client_certificates(
+        mut self,
+        certificates: client_certificates::ClientCertificates,
+    ) -> Self {
+        self.client_certificates = certificates;
         self
     }
 
@@ -1009,6 +1023,9 @@ impl Control {
                 }
                 Some("network/tunnel") => {
                     owner_only_network(caller).and_then(|()| self.tunnel.run(&params))
+                }
+                Some("network/client_certificates") => {
+                    allow(caller, Grant::ConfigWrite).map(|()| self.client_certificates.list())
                 }
                 Some("host/which") => allow(caller, Grant::StoreRead)
                     .and_then(|()| registry::which(&params, &crate::sources::runtime_dirs())),
@@ -1728,6 +1745,9 @@ mod usage_read;
 mod workspace_tests;
 pub(crate) use index::ToolsBackend;
 mod account_move;
+mod client_certificates;
+#[cfg(test)]
+mod client_certificates_tests;
 mod fetch;
 #[cfg(test)]
 mod fetch_tests;
