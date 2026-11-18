@@ -239,6 +239,76 @@ fn a_message_is_read_in_full() {
 }
 
 #[test]
+fn a_message_is_found_by_its_internet_message_id_in_any_folder() {
+    let (standin, ews) = connected();
+    assert_eq!(
+        ews.find_by_message_id("<AAMk/4+x=@example.test>")
+            .expect("searches"),
+        Some("AAMk/4+x=".to_owned())
+    );
+    let archived = ews
+        .find_by_message_id("<AAMk/6+x=@example.test>")
+        .expect("searches");
+    assert_eq!(
+        archived.as_deref(),
+        Some("AAMk/6+x="),
+        "the Archive folder is searched too"
+    );
+    assert_eq!(
+        ews.read(archived.as_deref().unwrap())
+            .expect("reads")
+            .summary
+            .subject,
+        "Invoice 4471"
+    );
+    assert_eq!(
+        ews.find_by_message_id("<nobody@example.test>")
+            .expect("searches"),
+        None
+    );
+    // The server compares the id whole: the same words without the brackets are another id.
+    assert_eq!(
+        ews.find_by_message_id("AAMk/4+x=@example.test")
+            .expect("searches"),
+        None
+    );
+
+    let sent = standin
+        .log()
+        .into_iter()
+        .rev()
+        .find(|logged| logged.operation == "FindItem")
+        .expect("a FindItem");
+    assert!(
+        sent.body.contains("message:InternetMessageId") && sent.body.contains("IsEqualTo"),
+        "{}",
+        sent.body
+    );
+    assert!(
+        sent.body.contains("Traversal=\"Deep\"") && sent.body.contains("msgfolderroot"),
+        "the whole mailbox is searched: {}",
+        sent.body
+    );
+
+    // A value that holds quotes and markup stays inside its attribute and matches nothing.
+    let odd = ews
+        .find_by_message_id("<a\"/><t:Constant Value=\"x@example.test>")
+        .expect("searches");
+    assert_eq!(odd, None);
+    let sent = standin
+        .log()
+        .into_iter()
+        .rev()
+        .find(|logged| logged.operation == "FindItem")
+        .expect("a FindItem");
+    assert!(
+        sent.body.contains("&quot;/&gt;&lt;t:Constant"),
+        "{}",
+        sent.body
+    );
+}
+
+#[test]
 fn related_mail_is_the_conversation_then_the_subject_then_the_people() {
     let (_standin, ews) = connected();
     let message = ews.read("AAMk/1+x=").expect("reads");

@@ -395,6 +395,19 @@ impl Backend for Graph {
         Ok(message(&value))
     }
 
+    fn find_by_message_id(&self, message_id: &str) -> Result<Option<String>, MailError> {
+        let filter = format!("internetMessageId eq {}", quote(message_id));
+        let found = self.get(&self.url(&format!(
+            "/me/messages?$select=id&$top=1&$filter={}",
+            encode(&filter)
+        )))?;
+        Ok(found["value"]
+            .as_array()
+            .and_then(|list| list.first())
+            .and_then(|message| message["id"].as_str())
+            .map(str::to_owned))
+    }
+
     fn summaries(&self, ids: &[String]) -> Result<Vec<Summary>, MailError> {
         ids.iter()
             .map(|id| {

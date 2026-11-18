@@ -26,9 +26,11 @@ class SAttachment {
 }
 
 class SAccessor {
+    # The Internet message id of the message this belongs to; a draft has none until it is sent.
+    [string]$MessageId = ''
     [string] GetProperty([string]$tag) {
         if ($tag -like '*370E001E') { return 'application/pdf' }
-        if ($tag -like '*1035001E') { return '<standin@example.test>' }
+        if ($tag -like '*1035001E') { return $this.MessageId }
         throw 'no such property'
     }
 }
@@ -187,6 +189,10 @@ function Test-StandinFilter($m, [string]$filter) {
             if (-not $prop) { throw ('the stand-in cannot read ' + $mt.Groups[1].Value) }
             '(' + $prop + " -like '*" + $mt.Groups[2].Value + "*')"
         })
+        $e = [regex]::Replace($e, '"http://schemas.microsoft.com/mapi/proptag/0x1035001E" = ''((?:[^'']|'''')*)''', {
+            param($mt)
+            '($m.PropertyAccessor.GetProperty(''http://schemas.microsoft.com/mapi/proptag/0x1035001E'') -ceq ''' + $mt.Groups[1].Value + ''')'
+        })
         $e = $e -replace '"urn:schemas:httpmail:hasattachment" = (\d)', '([int]($m.Attachments.Count -gt 0) -eq $1)'
         $e = $e -replace '"urn:schemas:httpmail:read" = (\d)', '([int](-not $m.UnRead) -eq $1)'
         $e = $e -replace '"http://schemas.microsoft.com/mapi/proptag/0x10900003" = 2', '($m.FlagStatus -eq 2)'
@@ -264,6 +270,7 @@ function New-OutlookApplication {
     foreach ($row in $rows) {
         $m = New-Object SMail
         $m.EntryID = [string]$row.id
+        $m.PropertyAccessor.MessageId = '<' + $m.EntryID + '@example.test>'
         $m.ConversationID = [string]$row.conversation
         $m.Subject = [string]$row.subject
         $m.SenderName = [string]$row.from_name

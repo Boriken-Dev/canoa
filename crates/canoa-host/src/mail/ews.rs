@@ -191,6 +191,12 @@ impl Backend for Ews {
             .ok_or_else(|| MailError::Bad(format!("no message has the id {id}")))
     }
 
+    fn find_by_message_id(&self, message_id: &str) -> Result<Option<String>, MailError> {
+        let body = self.call(&request::find_by_message_id(message_id))?;
+        let (items, _, _) = parse::items(&body);
+        Ok(items.into_iter().next().map(|item| item.id))
+    }
+
     fn summaries(&self, ids: &[String]) -> Result<Vec<Summary>, MailError> {
         let body = self.call(&request::get_items(ids, false))?;
         let found: Vec<Summary> = parse::got(&body)

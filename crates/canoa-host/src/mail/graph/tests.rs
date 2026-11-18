@@ -423,6 +423,46 @@ fn a_conversation_is_found_by_its_id_and_ordered_oldest_first() {
 }
 
 #[test]
+fn a_message_is_found_by_its_internet_message_id_across_the_mailbox() {
+    let (standin, graph) = connected();
+    assert_eq!(
+        graph
+            .find_by_message_id("<AAMk/6+x=@example.test>")
+            .expect("searches"),
+        Some("AAMk/6+x=".to_owned())
+    );
+    let sent = standin.log().into_iter().next_back().unwrap();
+    assert_eq!(sent.path, "/me/messages");
+    assert_eq!(
+        sent.param("$filter").as_deref(),
+        Some("internetMessageId eq '<AAMk/6+x=@example.test>'")
+    );
+    assert_eq!(
+        graph
+            .find_by_message_id("<nobody@example.test>")
+            .expect("searches"),
+        None
+    );
+    // A quote in the id is doubled, so it cannot end the string it is in.
+    assert_eq!(
+        graph
+            .find_by_message_id("<a' or isRead eq false or 'b@example.test>")
+            .expect("searches"),
+        None
+    );
+    assert_eq!(
+        standin
+            .log()
+            .into_iter()
+            .next_back()
+            .unwrap()
+            .param("$filter")
+            .as_deref(),
+        Some("internetMessageId eq '<a'' or isRead eq false or ''b@example.test>'")
+    );
+}
+
+#[test]
 fn related_mail_is_the_conversation_then_the_subject_then_the_people() {
     let (_standin, graph) = connected();
     let message = graph.read("AAMk/1+x=").expect("reads");

@@ -595,8 +595,10 @@ portal serves the same pages with `office = true` in its own settings, and signs
 inside Office trusts (HTTPS is what Microsoft recommends for every add-in, and Office on the web needs it). The task pane then needs no
 sign-in and no pairing: its page asks the host that served it to accept its key, which the host does for a request from this computer,
 at a loopback name, from the page's own origin, for a key that has connected once. What it can do is what the browser extension's key
-can do (`[host.native] control`), and the keys it was given are kept, so a restart of the host needs no new request. Do not set it
-behind a proxy.
+can do (`[host.native] control`), and the keys it was given are kept, so a restart of the host needs no new request. The page's key
+also holds the `mail` grant when `[host.mail]` names an account (and its `tools` are not turned off), so the pane's chat can search,
+read and draft the mail you set up there without a step of its own; `office_secret` is what keeps another account on a shared
+computer from being admitted. Do not set it behind a proxy.
 
 Three more things belong to the same setting. **The pane's tools:** while the pane is open in Outlook, Word or Excel, every session
 of this Canoa can use that application's tools (`canoa-outlook`, `canoa-word`, `canoa-excel`: the open item, the document, the
@@ -880,12 +882,13 @@ backend = "outlook"                      # classic Outlook for Windows, every ac
 ```
 
 - **Who gets the tools.** A session of a connection whose key holds the **`mail`** grant: the application on this computer holds
-  it, a paired key only if `[host.control] grants` or `[host.native] control` lists `mail`, and a host run for a portal gives it to
+  it, a paired key only if `[host.control] grants` or `[host.native] control` lists `mail`, the Office add-in's pane on this
+  computer (see `office_local`) whenever a mail account is named and the tools are on, and a host run for a portal gives it to
   no one. A task another agent handed out, and a session a web page started, never get it. Every session of such a connection gets
   the `canoa-mail` server, whether or not its client asked, along with a built-in skill that says when to use it.
 - **What the agent can do.** `mail_list` names the accounts and their folders. `mail_search` filters by sender, recipient, subject,
   dates, folder, attachments, unread and flagged, and by words (an Exchange account takes Exchange's own query syntax, so
-  `budget AND (Q3 OR Q4)` works). `mail_read` reads a message or its whole conversation. `mail_related` finds the conversation, the
+  `budget AND (Q3 OR Q4)` works). `mail_read` reads a message or its whole conversation, and takes the message by its Internet message id when a mail program is showing it (the Outlook add-in knows that id, not the tools' own). `mail_related` finds the conversation, the
   same subject and the same people. `mail_draft` saves a new message or a reply in Drafts. Nothing in the host sends mail: there is
   no tool that does, and the Exchange requests are all saved without sending.
 - **What it must ask.** `mail_move`, `mail_archive` and `mail_update` (read or unread, follow-up flag, categories) are put to the

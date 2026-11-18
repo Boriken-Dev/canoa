@@ -107,6 +107,9 @@ impl Runner for Recording {
                 json!([{"id": "F|S", "name": "Inbox", "path": "me/Inbox", "total": 3, "unread": 1}]),
             ),
             Some("summaries") => Ok(json!([])),
+            Some("find_by_message_id") => Ok(
+                json!({"id": if request["message_id"] == "<one@example.test>" { "E1|S" } else { "" }}),
+            ),
             Some("change" | "draft") => Ok(json!(true)),
             _ => Err(MailError::Backend("Outlook said: no".to_owned())),
         }
@@ -178,6 +181,61 @@ fn the_requests_carry_the_query_and_the_profile_and_one_item_is_a_list_of_one() 
     );
     // A summaries call that returns fewer messages than asked is an error, not a shorter list.
     assert!(outlook.summaries(&["E1|S".to_owned()]).is_err());
+}
+
+#[test]
+fn a_message_id_is_asked_for_by_name_and_an_empty_answer_is_no_message() {
+    let runner = Arc::new(Recording::default());
+    let outlook = Outlook::new(
+        Arc::clone(&runner) as Arc<dyn Runner>,
+        Some("Work".to_owned()),
+    );
+    assert_eq!(
+        outlook
+            .find_by_message_id("<one@example.test>")
+            .expect("asks"),
+        Some("E1|S".to_owned())
+    );
+    assert_eq!(
+        outlook
+            .find_by_message_id("<two@example.test>")
+            .expect("asks"),
+        None
+    );
+    let asked = runner.asked.lock().unwrap().clone();
+    assert_eq!(
+        asked[0],
+        json!({"op": "find_by_message_id", "message_id": "<one@example.test>", "profile": "Work"})
+    );
+}
+
+#[test]
+fn the_helper_finds_a_message_by_its_internet_message_id_in_the_standins_mailbox() {
+    need_powershell!();
+    let dir = Dir::new("message-id");
+    let outlook = outlook_over_standin(&dir.state());
+    let found = outlook
+        .find_by_message_id("<M6@example.test>")
+        .expect("finds")
+        .expect("the archived invoice");
+    assert_eq!(found, "M6|STORE1");
+    assert_eq!(
+        outlook.read(&found).expect("reads").summary.subject,
+        "Invoice 4471"
+    );
+    assert_eq!(
+        outlook
+            .find_by_message_id("<nobody@example.test>")
+            .expect("finds"),
+        None
+    );
+    // A quote in the id is doubled for the query, so it cannot end the text it is in.
+    assert_eq!(
+        outlook
+            .find_by_message_id("<a' OR 'b@example.test>")
+            .expect("finds"),
+        None
+    );
 }
 
 #[test]
@@ -305,10 +363,7 @@ fn the_helper_reads_a_message_lists_folders_and_relates_mail_by_conversation() {
         message.attachments[0].content_type.as_deref(),
         Some("application/pdf")
     );
-    assert_eq!(
-        message.message_id.as_deref(),
-        Some("<standin@example.test>")
-    );
+    assert_eq!(message.message_id.as_deref(), Some("<M1@example.test>"));
     let error = outlook.read("nope").expect_err("missing");
     assert!(error.to_string().contains("Outlook said"), "{error}");
 

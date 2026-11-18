@@ -327,8 +327,19 @@ impl Backend for Outlook {
                     content_type: attachment["content_type"].as_str().map(str::to_owned),
                 })
                 .collect(),
-            message_id: result["message_id"].as_str().map(str::to_owned),
+            message_id: result["message_id"]
+                .as_str()
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned),
         })
+    }
+
+    fn find_by_message_id(&self, message_id: &str) -> Result<Option<String>, MailError> {
+        let result = self.ask(&json!({"op": "find_by_message_id", "message_id": message_id}))?;
+        Ok(result["id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned))
     }
 
     fn summaries(&self, ids: &[String]) -> Result<Vec<Summary>, MailError> {

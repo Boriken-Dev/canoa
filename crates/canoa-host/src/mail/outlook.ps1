@@ -195,6 +195,17 @@ function Search-Mail($ns, $q) {
     return @{ items = $page; total = $total; more = (([int]$q.offset + $page.Count) -lt $total) }
 }
 
+# The message whose Internet message id (PR_INTERNET_MESSAGE_ID) is $messageId, in any mail folder of any store.
+function Find-ByMessageId($ns, [string]$messageId) {
+    $dasl = '@SQL="http://schemas.microsoft.com/mapi/proptag/0x1035001E" = ''' + (Escape-Dasl $messageId) + ''''
+    foreach ($entry in (Get-AllFolders $ns)) {
+        foreach ($item in $entry.folder.Items.Restrict($dasl)) {
+            return @{ id = (Get-ItemId $item) }
+        }
+    }
+    return @{ id = '' }
+}
+
 function Get-Message($item) {
     $summary = Get-Summary $item
     $body = ''
@@ -294,6 +305,7 @@ function Invoke-CanoaMail([string]$encoded) {
             }
             'search' { Search-Mail $ns $request }
             'read' { Get-Message (Get-MailItem $ns ([string]$request.id)) }
+            'find_by_message_id' { Find-ByMessageId $ns ([string]$request.message_id) }
             'summaries' { @(@($request.ids) | ForEach-Object { Get-Summary (Get-MailItem $ns ([string]$_)) }) }
             'thread' { Get-Thread $ns (Get-MailItem $ns ([string]$request.id)) }
             'draft' { New-Draft $app $ns $request }

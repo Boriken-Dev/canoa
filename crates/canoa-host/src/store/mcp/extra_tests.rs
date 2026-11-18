@@ -314,6 +314,175 @@ fn related_mail_says_why_each_message_is_related() {
 }
 
 #[test]
+fn a_message_a_mail_program_is_showing_is_read_and_related_by_its_internet_message_id() {
+    let (_standin, hub) = world();
+    let (link, url, token) = session(&hub);
+    let by_id = http_call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"message_id": "<AAMk/1+x=@example.test>"}),
+    );
+    assert_eq!(by_id["subject"], "Budget 2027 kickoff");
+    assert_eq!(
+        by_id["id"], "work:AAMk/1+x=",
+        "the answer carries the id every other tool takes"
+    );
+    // A client that drops the angle brackets finds it too.
+    let bare = http_call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"message_id": "AAMk/1+x=@example.test"}),
+    );
+    assert_eq!(bare["id"], "work:AAMk/1+x=");
+    let related = http_call(
+        &url,
+        &token,
+        "mail_related",
+        &json!({"message_id": "<AAMk/1+x=@example.test>"}),
+    );
+    assert_eq!(related["to"]["id"], "work:AAMk/1+x=");
+    assert!(
+        related["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == "work:AAMk/3+x=" && row["related_by"][0] == "conversation"),
+        "{related}"
+    );
+    let thread = http_call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"message_id": "<AAMk/2+x=@example.test>", "thread": true}),
+    );
+    assert_eq!(thread["thread"].as_array().unwrap().len(), 3);
+
+    // The server's own item id names a message too.
+    let by_item = http_call(&url, &token, "mail_read", &json!({"item_id": "AAMk/5+x="}));
+    assert_eq!(by_item["subject"], "Lunch on Thursday?");
+
+    let missing = failed(&call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"message_id": "<nobody@example.test>"}),
+    ));
+    assert!(missing.contains("no account holds a message"), "{missing}");
+    let missing = failed(&call(
+        &url,
+        &token,
+        "mail_related",
+        &json!({"item_id": "AAMk/nope"}),
+    ));
+    assert!(
+        missing.contains("not every account could be searched"),
+        "{missing}"
+    );
+    let none = failed(&call(&url, &token, "mail_read", &json!({})));
+    assert!(none.contains("name the message"), "{none}");
+    let two = failed(&call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"id": "work:AAMk/1+x=", "message_id": "<AAMk/1+x=@example.test>"}),
+    ));
+    assert!(
+        two.contains("one of `id`, `message_id` and `item_id`"),
+        "{two}"
+    );
+    let odd = failed(&call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"message_id": "<>"}),
+    ));
+    assert!(odd.contains("Internet message id"), "{odd}");
+    let unknown = failed(&call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"message_id": "<AAMk/1+x=@example.test>", "account": "home"}),
+    ));
+    assert!(
+        unknown.contains("no mail account is named home"),
+        "{unknown}"
+    );
+    assert!(link.drain().is_empty(), "reads ask nobody");
+}
+
+#[test]
+fn an_internet_message_id_is_searched_in_every_account_in_order_and_account_narrows_it() {
+    let mut without = Mailbox::sample();
+    without.mail.retain(|mail| mail.id != "AAMk/1+x=");
+    let first = Standin::start(without, None);
+    let second = Standin::start(Mailbox::sample(), None);
+    let make = |standin: &Standin| -> Arc<dyn MailBackend> {
+        Arc::new(crate::mail::ews_for_tests(standin, "x"))
+    };
+    let hub = Hub::new(true, bridge());
+    hub.serve_extra(Arc::new(MailTools::new(Mailboxes::with(vec![
+        ("work", "ews", make(&first)),
+        ("home", "ews", make(&second)),
+    ]))));
+    let (_link, url, token) = session(&hub);
+    let found = http_call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"message_id": "<AAMk/1+x=@example.test>"}),
+    );
+    assert_eq!(
+        found["id"], "home:AAMk/1+x=",
+        "the account that holds it answers, whichever it is"
+    );
+    let both = http_call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"message_id": "<AAMk/2+x=@example.test>"}),
+    );
+    assert_eq!(
+        both["id"], "work:AAMk/2+x=",
+        "the first account in the file's order"
+    );
+    let narrowed = http_call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"message_id": "<AAMk/2+x=@example.test>", "account": "home"}),
+    );
+    assert_eq!(narrowed["id"], "home:AAMk/2+x=");
+    let none = failed(&call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"message_id": "<AAMk/1+x=@example.test>", "account": "work"}),
+    ));
+    assert!(none.contains("no account holds a message"), "{none}");
+    // One account that is down does not hide a message the other holds.
+    drop(first);
+    let still = http_call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"message_id": "<AAMk/1+x=@example.test>"}),
+    );
+    assert_eq!(still["id"], "home:AAMk/1+x=");
+    let down = failed(&call(
+        &url,
+        &token,
+        "mail_read",
+        &json!({"message_id": "<nobody@example.test>"}),
+    ));
+    assert!(
+        down.contains("not every account could be searched") && down.contains("work:"),
+        "{down}"
+    );
+}
+
+#[test]
 fn a_draft_is_saved_in_drafts_and_the_answer_and_the_mailbox_say_nothing_was_sent() {
     let (standin, hub) = world();
     let (link, url, token) = session(&hub);

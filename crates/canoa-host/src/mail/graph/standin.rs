@@ -524,6 +524,9 @@ fn odata(mail: &Mail, filter: &str) -> Result<bool, String> {
                 }
             }
             ["conversationId", "eq", value] => mail.conversation == unquote(value)?,
+            ["internetMessageId", "eq", value] => {
+                format!("<{}@example.test>", mail.id) == unquote(value)?
+            }
             _ => return Err(format!("cannot read the filter clause {clause}")),
         };
         if !ok {

@@ -1231,6 +1231,18 @@ fn tool_args(before: &[OsString], name: &str, spec: &crate::tool::ToolSpec) -> V
     args
 }
 
+/// What a page this host's own web server admitted holds besides what its key was given: what `[host.native] control` gives a
+/// browser key, and the `mail` grant when `[host.mail]` names an account and has its tools on. The person opened the pane on this
+/// computer and put the account there for the agents they use, so the pane's chat has the mail tools without a pairing step; a
+/// host that is shared with other accounts asks `office_secret`, which keeps their pages from being admitted.
+fn page_grants(config: &Config) -> BTreeSet<control::Grant> {
+    let mut grants = config.native.control.clone();
+    if config.mail.tools != Some(false) && !config.mail.accounts.is_empty() {
+        grants.insert(control::Grant::Mail);
+    }
+    grants
+}
+
 fn portal_of(options: &ServeOptions) -> Option<&PortalSockets> {
     options.portal.as_ref()
 }
@@ -1893,7 +1905,7 @@ impl Serving {
                     }
                     _ => BTreeSet::new(),
                 })),
-                page_grants: config.native.control.clone(),
+                page_grants: page_grants(config),
                 office_dir: office_dir.clone(),
                 method,
                 store,
@@ -3630,6 +3642,40 @@ mod tests {
             "a file that cannot be read holds none"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_admitted_page_is_given_the_mail_tools_only_when_a_mail_account_is_there_and_its_tools_are_on()
+     {
+        use crate::store::mcp::Extra as _;
+        let grants = |text: &str| {
+            let config = Config::from_str_in(text, std::path::Path::new("/canoa")).expect("parses");
+            let tools = crate::mail::tools::MailTools::new(crate::mail::Mailboxes::from_config(
+                &config.mail,
+            ));
+            let given = page_grants(&config);
+            let offered = tools.offered(&given);
+            (given, offered)
+        };
+        let account = "[host.mail.accounts.desktop]\nbackend = \"outlook\"\n";
+        let (given, offered) = grants(account);
+        assert!(given.contains(&control::Grant::Mail) && offered);
+        assert!(
+            config_default().is_subset(&given),
+            "what a browser key holds, it still holds"
+        );
+        let (given, offered) = grants("");
+        assert!(!given.contains(&control::Grant::Mail) && !offered);
+        let (given, offered) = grants(&format!("[host.mail]\ntools = false\n{account}"));
+        assert!(!given.contains(&control::Grant::Mail) && !offered);
+        let (given, _) = grants(&format!(
+            "[host.native]\ncontrol = [\"ledger.read\"]\n{account}"
+        ));
+        assert!(given.contains(&control::Grant::Mail));
+    }
+
+    fn config_default() -> BTreeSet<control::Grant> {
+        crate::config::NativeConfig::default_control()
     }
 
     #[test]

@@ -143,6 +143,19 @@ pub(super) fn find_items(scope: &FolderRef, deep: bool, query: &Query) -> String
     )
 }
 
+/// A search of the whole mailbox for the message with this Internet message id: a restriction on `message:InternetMessageId`,
+/// which the query language has no word for.
+pub(super) fn find_by_message_id(message_id: &str) -> String {
+    format!(
+        "<m:FindItem Traversal=\"Deep\"><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape></m:ItemShape>\
+         <m:IndexedPageItemView MaxEntriesReturned=\"1\" Offset=\"0\" BasePoint=\"Beginning\"/>\
+         <m:Restriction><t:IsEqualTo><t:FieldURI FieldURI=\"message:InternetMessageId\"/>\
+         <t:FieldURIOrConstant><t:Constant Value=\"{}\"/></t:FieldURIOrConstant></t:IsEqualTo></m:Restriction>\
+         <m:ParentFolderIds><t:DistinguishedFolderId Id=\"msgfolderroot\"/></m:ParentFolderIds></m:FindItem>",
+        escape(message_id)
+    )
+}
+
 pub(super) fn get_items(ids: &[String], full: bool) -> String {
     let shape = if full {
         format!(

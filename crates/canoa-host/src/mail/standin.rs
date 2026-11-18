@@ -815,9 +815,9 @@ fn item_xml(mail: &Mail, full: bool) -> String {
     );
     if full {
         out.push_str(&format!(
-            "<t:Body BodyType=\"Text\">{}</t:Body><t:InternetMessageId>&lt;{}@example.test&gt;</t:InternetMessageId>",
+            "<t:Body BodyType=\"Text\">{}</t:Body><t:InternetMessageId>{}</t:InternetMessageId>",
             escape(&mail.body),
-            escape(&mail.id)
+            escape(&internet_message_id(mail))
         ));
         if mail.attachments {
             out.push_str(
@@ -896,13 +896,45 @@ fn unquote(text: &str) -> Result<String, String> {
         .ok_or_else(|| format!("the term {text} is not quoted"))
 }
 
+/// The Internet message id every message of the stand-in carries, which `GetItem` also gives.
+fn internet_message_id(mail: &Mail) -> String {
+    format!("<{}@example.test>", mail.id)
+}
+
+/// The Internet message id a `Restriction` asks for. It is the only restriction the connector writes, so any other is refused.
+fn restriction(op: &Element) -> Result<Option<String>, (String, String)> {
+    let Some(restriction) = op.child("Restriction") else {
+        return Ok(None);
+    };
+    let invalid = |why: &str| ("ErrorInvalidRestriction".to_owned(), why.to_owned());
+    let equal = restriction
+        .child("IsEqualTo")
+        .ok_or_else(|| invalid("only IsEqualTo is served"))?;
+    if equal.child("FieldURI").and_then(|f| f.attr("FieldURI")) != Some("message:InternetMessageId")
+    {
+        return Err(invalid("only message:InternetMessageId is served"));
+    }
+    equal
+        .path("FieldURIOrConstant/Constant")
+        .and_then(|constant| constant.attr("Value"))
+        .map(|value| Some(value.to_owned()))
+        .ok_or_else(|| invalid("no constant to compare with"))
+}
+
 fn find_item(mailbox: &Mailbox, op: &Element) -> Result<String, (String, String)> {
     let deep = op.attr("Traversal") == Some("Deep");
     let folders = scope(mailbox, op, deep)?;
     let query = op.text_at("QueryString").map(str::to_owned);
+    let wanted_id = restriction(op)?;
     let mut found: Vec<&Mail> = Vec::new();
     for mail in &mailbox.mail {
         if !folders.contains(&mail.folder) {
+            continue;
+        }
+        if wanted_id
+            .as_deref()
+            .is_some_and(|wanted| internet_message_id(mail) != wanted)
+        {
             continue;
         }
         if let Some(query) = &query

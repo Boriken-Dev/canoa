@@ -200,6 +200,11 @@ pub(crate) trait Backend: Send + Sync + fmt::Debug {
 
     fn read(&self, id: &str) -> Result<Message, MailError>;
 
+    /// The backend's id of the message whose Internet message id (`<abc@example.com>`, as the message's own header holds it) is
+    /// `message_id`, looked for in the whole mailbox; `None` when no message has it. The comparison is the server's, so it does
+    /// not depend on how a client writes the angle brackets: callers try both forms.
+    fn find_by_message_id(&self, message_id: &str) -> Result<Option<String>, MailError>;
+
     /// The messages `ids` name as a list shows them, in that order. The default reads each.
     fn summaries(&self, ids: &[String]) -> Result<Vec<Summary>, MailError> {
         ids.iter()
