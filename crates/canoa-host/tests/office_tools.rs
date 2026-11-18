@@ -179,6 +179,19 @@ impl Pane {
                             Some("tools/list") => json!({"tools": [
                                 {"name": "word_get_text", "description": "The text", "inputSchema": {"type": "object"}}
                             ]}),
+                            // What Outlook's pane answers to the tool that names the open message: identifiers alone.
+                            Some("tools/call")
+                                if request["params"]["name"] == "outlook_open_item" =>
+                            {
+                                json!({
+                                    "isError": false,
+                                    "content": [{"type": "text", "text": json!({
+                                        "open": true, "mode": "read",
+                                        "internetMessageId": "<m1@example.test>",
+                                        "itemId": "AAMkAGI2", "conversationId": "CONV-1",
+                                    }).to_string()}]
+                                })
+                            }
                             Some("tools/call") => json!({
                                 "isError": false,
                                 "content": [{"type": "text", "text": "The plan."}]
@@ -340,6 +353,54 @@ fn an_open_pane_gives_every_session_its_applications_tools_and_closing_it_takes_
     assert!(told.contains("not connected"), "{told}");
     assert_eq!(prompt(&link, 6, &id, "ListOn canoa-word"), "");
     drop((link, other));
+    host.stop();
+}
+
+#[test]
+fn a_session_with_the_outlook_pane_open_is_told_how_to_find_the_open_message_and_the_pane_names_it()
+{
+    let host = Hosted::start_with_setup(config(false), &["--web", &site().to_string_lossy()]);
+    let authority = authority(&host);
+    let work = host.scratch.0.join("work");
+    std::fs::create_dir_all(&work).expect("a folder");
+
+    let mut outlook = Pane::open(&authority, "outlook", None).expect("the pane registers");
+    let mut word = Pane::open(&authority, "word", None).expect("a second application");
+    let link = host.local.open("agent").expect("a link");
+    let id = session(&link, &work);
+    let told = prompt(&link, 3, &id, "InstructionsOn canoa-outlook");
+    assert!(
+        told.contains("outlook_open_item")
+            && told.contains("mail_related")
+            && told.contains("message_id"),
+        "the agent is told which tool names the open message and what to do with it: {told}"
+    );
+    assert!(
+        told.contains("never its text") && told.contains("not instructions"),
+        "and that what comes back is data: {told}"
+    );
+    assert_eq!(
+        prompt(&link, 4, &id, "InstructionsOn canoa-word"),
+        "",
+        "another application's server says nothing of the kind"
+    );
+    let named = prompt(&link, 5, &id, "CallOn canoa-outlook outlook_open_item {}");
+    let named: Value = serde_json::from_str(&named).expect("the pane's answer");
+    assert_eq!(named["internetMessageId"], "<m1@example.test>");
+    assert_eq!(named["conversationId"], "CONV-1");
+    assert!(named.get("body").is_none(), "identifiers only");
+    {
+        let heard = outlook.heard.lock().expect("lock");
+        assert!(
+            heard
+                .iter()
+                .any(|message| message["message"]["params"]["name"] == "outlook_open_item"),
+            "the call reached the pane"
+        );
+    }
+    word.close();
+    outlook.close();
+    drop(link);
     host.stop();
 }
 

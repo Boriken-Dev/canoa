@@ -27,6 +27,7 @@
 //! whether it ended. `--marker=PATH` appends the process id
 //! to PATH each time the agent starts, so a test can tell whether one did.
 //!
+//! `InstructionsOn SERVER` says the instructions the named server gave when asked to initialize, empty for none.
 //! `Dirs` says the `additionalDirectories` its session was opened with.
 //! `Meta` says the `_meta` its session request and that prompt carried, as it received them.
 //!
@@ -712,6 +713,22 @@ impl Shared {
                     Err(said) => said,
                 }
             }
+            "InstructionsOn" => match self.server_request(
+                session,
+                rest.trim(),
+                "initialize",
+                &json!({"protocolVersion": "2025-06-18"}),
+            ) {
+                Ok(answer) if answer.get("error").is_some() => format!(
+                    "rpc error: {}",
+                    answer["error"]["message"].as_str().unwrap_or("")
+                ),
+                Ok(answer) => answer["result"]["instructions"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_owned(),
+                Err(said) => said,
+            },
             "ListOn" => match self.server_request(session, rest.trim(), "tools/list", &json!({})) {
                 Ok(answer) if answer.get("error").is_some() => format!(
                     "rpc error: {}",

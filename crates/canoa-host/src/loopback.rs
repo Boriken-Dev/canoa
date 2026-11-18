@@ -536,16 +536,30 @@ pub(crate) fn error(id: &Value, code: i64, message: &str) -> Value {
 /// The result of `initialize` for a server of tools called `server`: the newest protocol version both speak, and whether the
 /// server says its tool list may change.
 pub(crate) fn initialize(server: &str, params: &Value, list_changed: bool) -> Value {
+    initialize_with(server, params, list_changed, None)
+}
+
+/// [`initialize`], with the `instructions` an agent may put in front of its model for this server.
+pub(crate) fn initialize_with(
+    server: &str,
+    params: &Value,
+    list_changed: bool,
+    instructions: Option<&str>,
+) -> Value {
     let asked = params.get("protocolVersion").and_then(Value::as_str);
     let version = VERSIONS
         .iter()
         .find(|version| Some(**version) == asked)
         .unwrap_or(&VERSIONS[0]);
-    json!({
+    let mut result = json!({
         "protocolVersion": version,
         "capabilities": {"tools": {"listChanged": list_changed}},
         "serverInfo": {"name": server, "version": env!("CARGO_PKG_VERSION")},
-    })
+    });
+    if let Some(instructions) = instructions {
+        result["instructions"] = json!(instructions);
+    }
+    result
 }
 
 /// The answer to one JSON-RPC message of the client's for a server of tools, called `server`: its tools as `list` gives them, a

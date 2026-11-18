@@ -376,6 +376,68 @@ test('Outlook: the open message is read, its attachment fetched, and a reply is 
   await pane.stop();
 });
 
+test('Outlook: the open message is named by identifiers alone, and its body is never read to do it', async () => {
+  const done = (value) => (callback) => callback({ status: 'succeeded', value });
+  const office = (item) => ({
+    AsyncResultStatus: { Succeeded: 'succeeded', Failed: 'failed' },
+    CoercionType: { Text: 'text' },
+    context: { mailbox: { item } },
+  });
+  const reading = {
+    subject: 'Quarterly numbers',
+    conversationId: 'CONV-1',
+    internetMessageId: '<m1@example.com>',
+    itemId: 'AAMkAGI2',
+    body: { getAsync: () => assert.fail('the body is not read to say which message is open') },
+    attachments: [{ id: 'att1', name: 'q3.xlsx' }],
+  };
+  const { host, pane } = setup({ app: 'outlook', tools: outlookTools(office(reading)), relation: async () => null });
+  void pane.start();
+  await until(() => host.opened.length === 1, 'registered');
+  host.open();
+  host.request(1, 'tools/list');
+  const listed = (await host.answerTo(1)).result.tools.map((tool) => tool.name);
+  assert.equal(listed[0], 'outlook_open_item', 'the tool that names the message is offered first');
+  host.request(2, 'tools/call', { name: 'outlook_open_item', arguments: {} });
+  const said = JSON.parse((await host.answerTo(2)).result.content[0].text);
+  assert.deepEqual(
+    { ...said, item: undefined },
+    { open: true, mode: 'read', internetMessageId: '<m1@example.com>', itemId: 'AAMkAGI2', conversationId: 'CONV-1', item: undefined },
+  );
+  assert.deepEqual(Object.keys(said).sort(), ['conversationId', 'internetMessageId', 'item', 'itemId', 'mode', 'open']);
+  assert.ok(!JSON.stringify(said).includes('Please'), 'no text of the message');
+  await pane.stop();
+
+  // A message being written has no Internet message id and no item id until it is saved.
+  const writing = {
+    subject: { getAsync: (callback) => done('Re: numbers')(callback) },
+    conversationId: 'CONV-2',
+    body: { getAsync: () => assert.fail('the body is not read') },
+  };
+  const second = setup({ app: 'outlook', tools: outlookTools(office(writing)), relation: async () => null });
+  void second.pane.start();
+  await until(() => second.host.opened.length === 1, 'registered');
+  second.host.open();
+  second.host.request(1, 'tools/call', { name: 'outlook_open_item', arguments: {} });
+  const composing = JSON.parse((await second.host.answerTo(1)).result.content[0].text);
+  assert.equal(composing.mode, 'compose');
+  assert.equal(composing.internetMessageId, null);
+  assert.equal(composing.itemId, null);
+  assert.equal(composing.conversationId, 'CONV-2');
+  await second.pane.stop();
+
+  // An identifier longer than a header line can hold is cut, so a message cannot make the answer large.
+  const long = { ...reading, internetMessageId: `<${'a'.repeat(5000)}@example.com>` };
+  const third = setup({ app: 'outlook', tools: outlookTools(office(long)), relation: async () => null });
+  void third.pane.start();
+  await until(() => third.host.opened.length === 1, 'registered');
+  third.host.open();
+  third.host.request(1, 'tools/call', { name: 'outlook_open_item', arguments: {} });
+  const cut = JSON.parse((await third.host.answerTo(1)).result.content[0].text);
+  assert.equal(cut.internetMessageId.length, 998);
+  await third.pane.stop();
+});
+
 test('Outlook: with nothing open the tools say so', async () => {
   const office = { AsyncResultStatus: { Succeeded: 'succeeded' }, CoercionType: { Text: 'text' }, context: { mailbox: { item: null } } };
   const { host, pane } = setup({ app: 'outlook', tools: outlookTools(office), relation: async () => null });

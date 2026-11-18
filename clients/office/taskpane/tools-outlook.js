@@ -1,4 +1,4 @@
-// The tools of the open Outlook item, through Office.js. `office` is Office.js's `Office` object, passed in so a test can give a
+// The tools of the open Outlook item, through Office.js. `outlook_open_item` is the one that names it, by identifiers alone. `office` is Office.js's `Office` object, passed in so a test can give a
 // stand-in. Office.js can read the item that is open and the attachments it lists; it cannot search the mailbox, and it exposes
 // the conversation as an id only, so there is no tool for other messages of the thread.
 //
@@ -6,6 +6,8 @@
 // here sends anything.
 
 const MAX_BODY = 200_000;
+/** The longest identifier passed on: an Internet message id is at most 998 characters in a header, and the others are shorter. */
+const MAX_ID = 998;
 const MAX_ATTACHMENT = 3 * 1024 * 1024;
 
 /** Office.js's callback style as a promise: `call(done)` where `done` receives an AsyncResult. */
@@ -24,6 +26,9 @@ async function property(office, value) {
   return value;
 }
 
+/** An identifier as text, or null when Outlook has none (a message being written has no Internet message id, and no item id until saved). */
+const identifier = (value) => (typeof value === 'string' && value.trim() !== '' ? value.trim().slice(0, MAX_ID) : null);
+
 const person = (value) => (value ? { name: value.displayName ?? '', address: value.emailAddress ?? '' } : null);
 const people = (value) => (Array.isArray(value) ? value.map(person) : []);
 
@@ -37,6 +42,22 @@ export function outlookTools(office) {
   const composing = (open) => typeof open.subject?.getAsync === 'function';
 
   return [
+    {
+      name: 'outlook_open_item',
+      description:
+        'Which message is open in Outlook now, by identifiers only and never its text: its Internet message id (give it as message_id to mail_related or mail_read of the canoa-mail tools, which then find the same message in the person\'s mail and the mail related to it), its Exchange item id and its conversation id. A message being written has none yet. outlook_get_item reads the message.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      async run() {
+        const open = item();
+        return {
+          open: true,
+          mode: composing(open) ? 'compose' : 'read',
+          internetMessageId: identifier(open.internetMessageId),
+          itemId: identifier(open.itemId),
+          conversationId: identifier(open.conversationId),
+        };
+      },
+    },
     {
       name: 'outlook_get_item',
       description:

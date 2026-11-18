@@ -373,6 +373,51 @@ fn a_provider_hears_a_stream_open_forwards_what_the_agent_asks_and_answers_it() 
 }
 
 #[test]
+fn a_server_says_how_to_use_it_only_where_the_host_has_words_for_it_and_never_in_a_providers() {
+    let hub = hub();
+    let (outlook, thread_outlook) = connect(&hub, "o", providing());
+    register(&outlook, "outlook");
+    let (browser, thread_browser) = connect(&hub, "b", providing());
+    register(&browser, "browser");
+    let link = ready(&hub);
+    let _ = link.client_said(session_new(2));
+    let asked = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}});
+    let mut said: std::collections::BTreeMap<String, Option<String>> =
+        std::collections::BTreeMap::new();
+    let accesses: Vec<_> = lock(&hub.tokens.0).values().cloned().collect();
+    for access in &accesses {
+        let answer = hub.answer(access, &asked).expect("answered");
+        said.insert(
+            access.provider.clone(),
+            answer["result"]["instructions"].as_str().map(str::to_owned),
+        );
+        assert_eq!(
+            answer["result"]["capabilities"]["tools"]["listChanged"],
+            true
+        );
+    }
+    let outlook_says = said["outlook"]
+        .as_deref()
+        .expect("instructions for Outlook");
+    for word in [
+        "outlook_open_item",
+        "mail_related",
+        "message_id",
+        "never its text",
+    ] {
+        assert!(outlook_says.contains(word), "{word}: {outlook_says}");
+    }
+    assert_eq!(
+        said["browser"], None,
+        "nothing is said of a provider the host has no words for"
+    );
+    link.close();
+    drop((outlook, browser));
+    thread_outlook.join().expect("ends");
+    thread_browser.join().expect("ends");
+}
+
+#[test]
 fn no_connected_provider_gives_an_empty_list_and_a_call_says_why() {
     let hub = hub();
     let (provider, thread) = connect(&hub, "k", providing());

@@ -305,12 +305,15 @@ time, until the host answers or says it has forgotten the session.
 
 | Application | Reads | Asked in the pane first |
 | --- | --- | --- |
-| Outlook (`ReadItem`) | `outlook_get_item`: subject, sender, recipients, dates, body as text, attachment names, conversation id. `outlook_get_attachment` | `outlook_draft_reply`: opens Outlook's reply form with the text; nothing is sent |
+| Outlook (`ReadItem`) | `outlook_open_item`: which message is open, by identifiers alone (Internet message id, Exchange item id, conversation id), never its text. `outlook_get_item`: subject, sender, recipients, dates, body as text, attachment names, conversation id. `outlook_get_attachment` | `outlook_draft_reply`: opens Outlook's reply form with the text; nothing is sent |
 | Word (`ReadWriteDocument`) | `word_get_text`, `word_get_selection`, `word_list_comments` | `word_insert_text`, `word_replace_selection`, `word_add_comment` |
 | Excel (`ReadWriteDocument`) | `excel_get_selection`, `excel_list_tables`, `excel_get_table`, `excel_read_range` | `excel_write_range` (must fit its range) |
 
 Office.js gives a pane the open item and nothing of the rest of the mailbox, and the conversation as an id only, so there are no
-tools to search mail or list a thread's other messages. A read answers at once, and says which item it came from (the same kind and
+tools here to search mail or list a thread's other messages: with a mail account in `[host.mail]` the host's `canoa-mail` tools do
+that, and `outlook_open_item` is how they start from the open message (its Internet message id is `message_id` of `mail_related`).
+The host tells every session that has the Outlook server so when it starts, in its own words; the identifiers come back as data
+when the agent asks, so a header a sender wrote never reaches the model as an instruction. A read answers at once, and says which item it came from (the same kind and
 hashed key the app relates sessions by). A write shows a bar in the pane naming the agent, where it runs (the host's word, a claim)
 and what it would do, with **Allow** and **Don't allow**; with no answer in two minutes it is refused, and so is one whose open item
 changed while the person was asked. Each call is asked on its own; what the person allowed once is not remembered.
