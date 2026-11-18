@@ -15,13 +15,18 @@ use super::Secret;
 /// The key the first line holds, with the line's version.
 const LAUNCH_KEY: &str = "canoa_host_launch";
 
-/// The first line `launch` reads: `{"canoa_host_launch": 1, "env": [[NAME, VALUE], ...]}`, with no line break.
-pub(crate) fn launch_line(env: &[(String, Secret)]) -> Vec<u8> {
+/// The first line `launch` reads: `{"canoa_host_launch": 1, "env": [[NAME, VALUE], ...], "args": [ARG, ...]}`, with no line
+/// break; `args` is left out when empty.
+pub(crate) fn launch_line(env: &[(String, Secret)], args: &[String]) -> Vec<u8> {
     let pairs: Vec<Value> = env
         .iter()
         .map(|(name, value)| json!([name, value.expose()]))
         .collect();
-    serde_json::to_vec(&json!({ LAUNCH_KEY: 1, "env": pairs })).unwrap_or_default()
+    let mut line = json!({ LAUNCH_KEY: 1, "env": pairs });
+    if !args.is_empty() {
+        line["args"] = json!(args);
+    }
+    serde_json::to_vec(&line).unwrap_or_default()
 }
 
 /// `program` as this process finds it, when the environment the program is about to be given sets `PATH`: a bare name is
@@ -41,12 +46,12 @@ pub(crate) fn sets_path<'a>(mut names: impl Iterator<Item = &'a OsStr>) -> bool 
     names.any(|name| name.eq_ignore_ascii_case("PATH"))
 }
 
-/// Reads one line of at most `max` bytes from standard input, `{"canoa_host_launch": 1, "env": [[NAME, VALUE], ...]}`,
-/// then runs `program` with `args` and those variables added to this process's environment. Everything after the line
-/// goes to the program's standard input; its standard output and error are this process's. When the program ends, this
-/// process exits with its status (1 for one ended by a signal), so this returns only what went wrong first:
-/// [`io::ErrorKind::InvalidData`] for a first line that is not one of that form, longer than `max` or not ended; what the
-/// operating system says when the program cannot start.
+/// Reads one line of at most `max` bytes from standard input, `{"canoa_host_launch": 1, "env": [[NAME, VALUE], ...], "args":
+/// [ARG, ...]}` (`args` is optional), then runs `program` with `args` and the line's `args` after them, and the line's
+/// variables added to this process's environment. Everything after the line goes to the program's standard input; its
+/// standard output and error are this process's. When the program ends, this process exits with its status (1 for one ended
+/// by a signal), so this returns only what went wrong first: [`io::ErrorKind::InvalidData`] for a first line that is not
+/// one of that form, longer than `max` or not ended; what the operating system says when the program cannot start.
 pub fn launch(program: &OsStr, args: &[OsString], max: usize) -> io::Error {
     match start(program, args, max) {
         Ok(never) => match never {},
@@ -86,6 +91,12 @@ fn start(program: &OsStr, args: &[OsString], max: usize) -> io::Result<core::con
             _ => return Err(wrong()),
         }
     }
+    let mut more: Vec<OsString> = Vec::new();
+    if let Some(given) = value.get("args") {
+        for arg in given.as_array().ok_or_else(wrong)? {
+            more.push(OsString::from(arg.as_str().ok_or_else(wrong)?));
+        }
+    }
     let program = if sets_path(env.iter().map(|(name, _)| OsStr::new(name))) {
         found_on_own_path(
             program,
@@ -97,6 +108,7 @@ fn start(program: &OsStr, args: &[OsString], max: usize) -> io::Result<core::con
     };
     let mut child = Command::new(program)
         .args(args)
+        .args(more)
         .envs(env)
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())

@@ -2372,3 +2372,182 @@ fn a_profile_naming_share_env_is_refused() {
     let text = config_with("share_env = [\"HOST_SECRET\"]\n");
     assert!(Config::from_str_in(&text, &temp.0).is_err());
 }
+
+/// The environment and arguments `canoa launch` is given for `connection`.
+fn launched_with(connection: &Connection) -> (BTreeMap<String, String>, Vec<String>) {
+    let line: Value = serde_json::from_slice(&connection.launch_line()).expect("a line");
+    let env = line["env"]
+        .as_array()
+        .expect("env")
+        .iter()
+        .map(|pair| {
+            (
+                pair[0].as_str().expect("name").to_owned(),
+                pair[1].as_str().expect("value").to_owned(),
+            )
+        })
+        .collect();
+    let args = line["args"]
+        .as_array()
+        .map(|args| {
+            args.iter()
+                .map(|arg| arg.as_str().expect("text").to_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    (env, args)
+}
+
+fn access_connection(harness: Option<&'static str>, extra: &str) -> Connection {
+    let temp = temp_with_skill();
+    let offer = offer_of(&temp, &config_with(extra));
+    Connection::prepare_with(
+        &offer,
+        0,
+        "a",
+        &lookup,
+        Choices::default(),
+        Starting {
+            who: Who {
+                harness,
+                ..Who::default()
+            },
+            host: Vec::new(),
+        },
+    )
+    .expect("prepared")
+}
+
+fn access_item(parts: &Parts, key: &str) -> Option<Value> {
+    parts.report["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|item| item["key"] == key)
+        .cloned()
+}
+
+#[test]
+fn grok_is_started_with_the_access_as_its_sandbox_variable_and_always_approve() {
+    let standard = access_connection(Some("grok"), "");
+    let (env, args) = launched_with(&standard);
+    assert_eq!(env.get("GROK_SANDBOX").map(String::as_str), Some("off"));
+    assert!(args.is_empty());
+    let parts = parts_for(&standard, Some("grok"), &Takes::default(), &lookup);
+    assert!(parts.agent_meta.is_empty());
+    assert!(access_item(&parts, "access.sandbox").is_none());
+
+    let connection = access_connection(
+        Some("grok"),
+        "access = { sandbox = \"workspace\", approvals = \"never\" }\n",
+    );
+    let (env, args) = launched_with(&connection);
+    assert_eq!(
+        env.get("GROK_SANDBOX").map(String::as_str),
+        Some("workspace")
+    );
+    assert!(args.is_empty(), "Grok's options go before its mode word");
+    let parts = parts_for(&connection, Some("grok"), &Takes::default(), &lookup);
+    assert_eq!(parts.agent_meta.get("yoloMode"), Some(&Value::Bool(true)));
+    for key in ["access.sandbox", "access.approvals"] {
+        let each = access_item(&parts, key).expect(key);
+        assert_eq!(each["state"], "applied", "{key}: {each}");
+    }
+    // The session request carries it in `_meta`, beside the access.
+    let mut params = Map::new();
+    add_parts(&mut params, &parts).expect("added");
+    assert_eq!(params["_meta"]["yoloMode"], true, "{params:?}");
+    assert_eq!(
+        params["_meta"][coqui_acp_harness::ACCESS_META]["sandbox"],
+        "workspace"
+    );
+
+    let edits = access_connection(Some("grok"), "access = { approvals = \"edits\" }\n");
+    let parts = parts_for(&edits, Some("grok"), &Takes::default(), &lookup);
+    assert!(parts.agent_meta.is_empty());
+    let each = access_item(&parts, "access.approvals").expect("reported");
+    assert_eq!(each["state"], "not supported", "{each}");
+}
+
+#[test]
+fn antigravity_is_started_with_the_access_as_arguments() {
+    let standard = access_connection(Some("antigravity"), "");
+    let (env, args) = launched_with(&standard);
+    assert!(args.is_empty() && !env.contains_key("GROK_SANDBOX"));
+    for (access, expected) in [
+        ("{ sandbox = \"workspace\" }", vec!["--sandbox"]),
+        (
+            "{ sandbox = \"read-only\", approvals = \"never\" }",
+            vec!["--sandbox", "--dangerously-skip-permissions"],
+        ),
+        (
+            "{ approvals = \"never\" }",
+            vec!["--dangerously-skip-permissions"],
+        ),
+    ] {
+        let connection = access_connection(Some("antigravity"), &format!("access = {access}\n"));
+        let (env, args) = launched_with(&connection);
+        assert_eq!(args, expected, "{access}");
+        assert!(!env.contains_key("GROK_SANDBOX"), "{access}");
+        let parts = parts_for(&connection, Some("antigravity"), &Takes::default(), &lookup);
+        assert!(parts.agent_meta.is_empty());
+        for key in ["access.sandbox", "access.approvals"] {
+            if let Some(each) = access_item(&parts, key) {
+                assert_eq!(each["state"], "applied", "{access}: {each}");
+            }
+        }
+    }
+    let closed = access_connection(Some("antigravity"), "access = { network = false }\n");
+    let parts = parts_for(&closed, Some("antigravity"), &Takes::default(), &lookup);
+    let each = access_item(&parts, "access.network").expect("reported");
+    assert_eq!(each["state"], "not supported", "{each}");
+}
+
+#[test]
+fn only_a_program_the_host_started_with_the_access_says_it_applied_it() {
+    // Claude Code, Codex and Pi take the access in the session's request, so the launch line carries none of it.
+    for harness in ["claude-code", "codex", "pi"] {
+        let connection = access_connection(
+            Some(harness),
+            "access = { sandbox = \"workspace\", approvals = \"never\" }\n",
+        );
+        let (env, args) = launched_with(&connection);
+        assert!(
+            args.is_empty() && !env.contains_key("GROK_SANDBOX"),
+            "{harness}"
+        );
+    }
+    // An agent that is only reported as Antigravity, from an entry that is not, was started as its entry says.
+    let unknown = access_connection(None, "access = { sandbox = \"workspace\" }\n");
+    let (_, args) = launched_with(&unknown);
+    assert!(args.is_empty());
+    let parts = parts_with(
+        &unknown,
+        Some("antigravity"),
+        Some("Antigravity ACP Server"),
+        &Takes::default(),
+        &lookup,
+    );
+    let each = access_item(&parts, "access.sandbox").expect("reported");
+    assert_eq!(each["state"], "not supported", "{each}");
+    assert!(
+        each["how"]
+            .as_str()
+            .expect("how")
+            .contains("started as its entry says"),
+        "{each}"
+    );
+}
+
+#[test]
+fn a_variable_a_layer_sets_is_kept_and_the_report_says_the_access_did_not_set_it() {
+    let connection = access_connection(
+        Some("grok"),
+        "access = { sandbox = \"read-only\" }\n[host.profiles.main.env.GROK_SANDBOX]\nvalue = \"strict\"\n",
+    );
+    let (env, _) = launched_with(&connection);
+    assert_eq!(env.get("GROK_SANDBOX").map(String::as_str), Some("strict"));
+    let parts = parts_for(&connection, Some("grok"), &Takes::default(), &lookup);
+    let each = access_item(&parts, "access.env.GROK_SANDBOX").expect("reported");
+    assert_eq!(each["state"], "not supported", "{each}");
+}

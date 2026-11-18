@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
+use coqui_acp_harness::Target;
 use coqui_aos::{self as aos, Limit, OverlayTree, Settings, StdFs};
 use coqui_transport::{Channel, Failure};
 use indexmap::IndexMap;
@@ -472,6 +473,11 @@ pub(crate) struct Connection {
     delegation: Vec<(Layer, Option<aos::Document>)>,
     /// What every layer reads before it applies: the identity variables and the host's own for the session.
     session: Session,
+    /// The program the host starts and gives the access as variables and arguments (Grok, Antigravity); the others take it in
+    /// the session request.
+    launched_as: Option<Target>,
+    /// The arguments the access adds to that program's command line, which `canoa launch` appends.
+    launch_args: Vec<String>,
 }
 
 /// What the host knows of the session its connection's environment is made for.
@@ -710,6 +716,34 @@ impl Connection {
                 .filter(|_| !from_overlay)?;
             Some((name.clone(), secret.expose().to_owned()))
         }));
+        // A program the host starts itself is given the access as its own variables and arguments; Claude, Codex and Pi take
+        // it in each session's request. A variable a layer already sets keeps its value, and the report says so.
+        let launched_as = starting_with
+            .who
+            .harness
+            .and_then(Target::from_harness)
+            .filter(|target| matches!(target, Target::Grok | Target::Antigravity));
+        let mut launch_args = Vec::new();
+        if let Some(target) = launched_as {
+            let words = effective.access.resolved().translate(target);
+            launch_args = words.args().into_iter().map(str::to_owned).collect();
+            for (name, value) in words.env() {
+                if env.iter().any(|(each, _)| each.eq_ignore_ascii_case(name)) {
+                    let layer = effective.env.get(name).map_or_else(
+                        || LayerId::new(LayerKind::User, ""),
+                        |held| held.layer.clone(),
+                    );
+                    notes.push(Item::new(
+                        format!("access.env.{name}"),
+                        &layer,
+                        State::Unsupported,
+                        format!("{name} is set by this layer, so the access does not set it"),
+                    ));
+                } else {
+                    env.push((name.to_owned(), Secret(value.to_owned())));
+                }
+            }
+        }
         let mut env_items = Vec::new();
         for (key, value) in &effective.env {
             if env.iter().any(|(name, _)| name == key) {
@@ -781,6 +815,8 @@ impl Connection {
                 })
                 .collect(),
             session: session.clone(),
+            launched_as,
+            launch_args,
         })
     }
 
@@ -866,7 +902,7 @@ impl Connection {
 
     /// The line `canoa launch` reads first.
     pub(crate) fn launch_line(&self) -> Vec<u8> {
-        super::launch::launch_line(&self.env)
+        super::launch::launch_line(&self.env, &self.launch_args)
     }
 }
 
@@ -1439,6 +1475,8 @@ struct Parts {
     meta: Option<Value>,
     /// The access the session is run with, for the request's `_meta` under [`coqui_acp_harness::ACCESS_META`].
     access: Value,
+    /// What the access adds to a session request's `_meta` for a program the host started with it (Grok's `yoloMode`).
+    agent_meta: Map<String, Value>,
     report: Value,
     /// Servers the configuration does not allow and the person may, each ready to be added to one session.
     approvable: Vec<Approvable>,
@@ -2164,7 +2202,7 @@ fn parts_with(
     items.extend(access_items(
         &effective.access,
         access,
-        access_kind(reported, harness),
+        access_target(reported, connection.launched_as),
     ));
 
     items.extend(connection.hooks.items(&BTreeSet::new(), harness));
@@ -2213,6 +2251,10 @@ fn parts_with(
         directories,
         meta,
         access: access.to_json(),
+        agent_meta: connection
+            .launched_as
+            .and_then(|target| access.translate(target).json())
+            .unwrap_or_default(),
         approvable,
         report: json!({
             "name": connection.name,
@@ -2225,27 +2267,37 @@ fn parts_with(
     }
 }
 
-/// Which command line decides what the access can do: the translators this host runs, by the name they report, and the
-/// agents it knows by their own.
-fn access_kind(reported: Option<&str>, harness: Option<&str>) -> Option<&'static str> {
-    match (reported, harness) {
-        (Some("coqui-acp-claude"), _) => Some("claude"),
-        (Some("coqui-acp-codex"), _) => Some("codex"),
-        (Some("coqui-acp-pi"), _) => Some("pi"),
-        (_, Some("antigravity")) => Some("antigravity"),
-        _ => None,
+/// Which table of words says what became of the access: the translators this host runs, by the name they report, and the
+/// program the host started with the access (`launched`). An agent that is neither was started as its entry says.
+fn access_target(reported: Option<&str>, launched: Option<Target>) -> Option<Target> {
+    match reported {
+        Some("coqui-acp-claude") => Some(Target::Claude),
+        Some("coqui-acp-codex") => Some(Target::Codex),
+        Some("coqui-acp-pi") => Some(Target::Pi),
+        _ => launched,
     }
 }
 
 /// What became of each part of the access a layer above the built-in one set, as `Item`s: the words it was turned into, or why
-/// the harness cannot express it. A part nothing above the built-in layer set is the standard access, which says nothing.
+/// the harness cannot express it, from the table `coqui_acp_harness::Access::translate` is. A part nothing above the built-in
+/// layer set is the standard access, which says nothing.
 fn access_items(
     effective: &super::EffectiveAccess,
     access: coqui_acp_harness::Access,
-    kind: Option<&str>,
+    target: Option<Target>,
 ) -> Vec<Item> {
-    use coqui_acp_harness::{Approvals, Sandbox};
+    use coqui_acp_harness::{Part, Sandbox};
     let own = |layer: &LayerId| layer.kind != LayerKind::BuiltIn;
+    let translation = target.map(|target| access.translate(target));
+    // An agent no table covers is started as its entry says; its own settings decide.
+    let not_passed = |own_applies: Option<&str>| match own_applies {
+        Some(what) => format!(
+            "this agent is started as its entry says: Canoa passes it no access setting, so its own {what} applies"
+        ),
+        None => {
+            "this agent is started as its entry says: Canoa passes it no access setting".to_owned()
+        }
+    };
     let mut items = Vec::new();
     let mut add = |key: &str, layer: &LayerId, value: String, how: Result<String, String>| {
         if !own(layer) {
@@ -2259,89 +2311,37 @@ fn access_items(
         item.value = Some(value);
         items.push(item);
     };
-    let read_only = access.sandbox == Sandbox::ReadOnly;
+    let said = |part: Option<&Part>, otherwise: String| match part {
+        Some(part) => part.said.map(str::to_owned).map_err(str::to_owned),
+        None => Err(otherwise),
+    };
     if let Some(sandbox) = &effective.sandbox {
-        let how = match (kind, access.sandbox) {
-            (Some("codex"), sandbox) => Ok(format!(
-                "Codex's sandbox {}",
-                match sandbox {
-                    Sandbox::Workspace => "workspace-write",
-                    Sandbox::ReadOnly => "read-only",
-                    _ => "danger-full-access",
-                }
-            )),
-            (Some("claude"), Sandbox::Unrestricted) => Ok("Claude Code's own sandbox stays off".to_owned()),
-            (Some("claude"), Sandbox::Workspace) => {
-                Ok("Claude Code's sandbox, on, with no retry outside it (--settings)".to_owned())
-            }
-            (Some("claude"), _) => Ok(
-                "the plan permission mode: Claude Code's sandbox has no switch that forbids every write".to_owned(),
-            ),
-            (Some("pi"), Sandbox::Unrestricted) => Ok("Pi has no sandbox".to_owned()),
-            (Some("pi"), Sandbox::ReadOnly) => Ok("the Plan mode of Pi's permission gate".to_owned()),
-            (Some("pi"), _) => Err("Pi has no sandbox: its permission gate asks about paths outside the session's directories in every mode but Bypass".to_owned()),
-            (_, Sandbox::Unrestricted) => Err("this agent is started as its entry says: Canoa passes it no access setting, so its own sandbox applies".to_owned()),
-            (Some("antigravity"), _) => Err("`agy acp --sandbox` restricts its terminal, and a session's access cannot add arguments to the agent's command line".to_owned()),
-            _ => Err("this agent is started as its entry says: Canoa passes it no access setting".to_owned()),
-        };
+        let otherwise = not_passed((access.sandbox == Sandbox::Unrestricted).then_some("sandbox"));
         add(
             "sandbox",
             &sandbox.layer,
             access.sandbox.id().to_owned(),
-            how,
+            said(translation.as_ref().map(|each| &each.sandbox), otherwise),
         );
     }
     if let Some(network) = &effective.network {
-        let how = match (kind, access.network, access.sandbox) {
-            (Some("codex"), true, Sandbox::ReadOnly) => Err("Codex's read-only sandbox has no network".to_owned()),
-            (Some("codex"), false, Sandbox::Unrestricted) => Err("Codex's danger-full-access has no network setting: use the workspace sandbox".to_owned()),
-            (Some("codex"), _, Sandbox::Workspace) => Ok("Codex's sandbox_workspace_write.network_access".to_owned()),
-            (Some("codex"), _, _) => Ok("the sandbox's own: it is open with no sandbox and closed when read-only".to_owned()),
-            (Some("claude"), true, _) => Ok("Claude Code's sandbox leaves the network to its permission asks".to_owned()),
-            (Some("claude"), false, _) => Ok("Claude Code's sandbox network proxy with no allowed host and no asking (--settings); its WebFetch and MCP tools are not covered".to_owned()),
-            (Some("pi"), true, _) => Ok("Pi has no network setting; it is on".to_owned()),
-            (Some("pi"), false, _) => Err("Pi has no network setting".to_owned()),
-            (_, true, _) => Err("this agent is started as its entry says: Canoa passes it no access setting, so its own network setting applies".to_owned()),
-            _ => Err("this agent is started as its entry says: Canoa passes it no access setting".to_owned()),
-        };
-        add("network", &network.layer, access.network.to_string(), how);
+        let otherwise = not_passed(access.network.then_some("network setting"));
+        add(
+            "network",
+            &network.layer,
+            access.network.to_string(),
+            said(translation.as_ref().map(|each| &each.network), otherwise),
+        );
     }
     if let Some(approvals) = &effective.approvals {
-        let how = match (kind, access.approvals) {
-            (Some("claude"), _) if read_only => Err("the plan permission mode asks nothing: it changes nothing".to_owned()),
-            (Some("codex"), approvals) => Ok(format!(
-                "Codex's approval policy {}",
-                match approvals {
-                    Approvals::Edits => "on-request",
-                    Approvals::Never => "never",
-                    _ => "untrusted",
-                }
-            )),
-            (Some("claude"), approvals) => Ok(format!(
-                "Claude Code's permission mode {}",
-                match approvals {
-                    Approvals::Edits => "acceptEdits",
-                    Approvals::Never => "bypassPermissions",
-                    _ => "default",
-                }
-            )),
-            (Some("pi"), approvals) if !read_only => Ok(format!(
-                "the {} mode of Pi's permission gate",
-                match approvals {
-                    Approvals::Edits => "Accept edits",
-                    Approvals::Never => "Bypass",
-                    _ => "Manual",
-                }
-            )),
-            (Some("pi"), _) => Err("the Plan mode asks nothing: it changes nothing".to_owned()),
-            (Some("antigravity"), _) => Err("`agy acp --dangerously-skip-permissions` and its modes exist, and a session's access cannot add arguments to the agent's command line".to_owned()),
-            _ => Err("this agent is started as its entry says: Canoa passes it no access setting".to_owned()),
-        };
         add(
             "approvals",
             &approvals.layer,
             access.approvals.id().to_owned(),
-            how,
+            said(
+                translation.as_ref().map(|each| &each.approvals),
+                not_passed(None),
+            ),
         );
     }
     items
@@ -2399,6 +2399,9 @@ fn add_parts(params: &mut Map<String, Value>, parts: &Parts) -> Result<(), Strin
         *held = json!({});
     }
     held[coqui_acp_harness::ACCESS_META] = parts.access.clone();
+    for (key, value) in &parts.agent_meta {
+        held[key] = value.clone();
+    }
     Ok(())
 }
 

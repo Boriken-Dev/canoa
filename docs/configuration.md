@@ -288,9 +288,9 @@ access = { sandbox = "workspace", network = false, approvals = "edits" }   # any
 
 The names follow what the three command lines share: a sandbox that is off, one that keeps writes to the folder, one that
 writes nothing; a network on or off; and the three steps from asking about everything to asking about nothing. Each
-harness's own words are in the table below, and a part a harness has no way to say is listed as not supported in the
-session's **Profile** line, with why. An agent that is not run by one of these providers (Grok, Antigravity, a command you
-add) is started as its entry says: Canoa passes it no access setting.
+harness's own words are in the tables below, and a part a harness has no way to say is
+listed as not supported in the session's **Profile** line, with why. An agent that is none of these (a command you add) is
+started as its entry says: Canoa passes it no access setting.
 
 | Access | Claude Code | Codex | Pi |
 | --- | --- | --- | --- |
@@ -301,6 +301,19 @@ add) is started as its entry says: Canoa passes it no access setting.
 | `approvals = "ask"` | permission mode `default` | approval policy `untrusted` | the gate's Manual mode |
 | `approvals = "edits"` | `acceptEdits` | `on-request` | Accept edits |
 | `approvals = "never"` | `bypassPermissions` | `never` | Bypass |
+
+| Access | Grok | Antigravity |
+| --- | --- | --- |
+| `sandbox = "none"` | `GROK_SANDBOX=off` in its environment | `agy acp` without `--sandbox` |
+| `sandbox = "workspace"` | `GROK_SANDBOX=workspace` | `agy acp --sandbox`, which restricts its terminal |
+| `sandbox = "read-only"` | `GROK_SANDBOX=read-only` | `--sandbox` too; Antigravity does not say its restrictions forbid every write |
+| `network = false` | its `read-only` profile blocks its commands' network (on Linux, by its documentation); its other built-in profiles have no network switch, so not supported | not supported: it has no network setting |
+| `approvals = "ask"` | its default, which asks | its default, which asks |
+| `approvals = "edits"` | not supported: its agent mode has no accept-edits setting | not supported |
+| `approvals = "never"` | always-approve for each session (`_meta` `yoloMode`) | `--dangerously-skip-permissions` |
+
+A variable one of your layers already sets for the program (an `env` entry named `GROK_SANDBOX`) keeps its value, and the
+session's Profile line says the access did not set it.
 
 With nothing set, every agent starts with the standard access, whatever the configuration of its own command line says: no
 sandbox, the network on, everything asked. Every mode the agent has is offered in the mode control, Bypass included, and any

@@ -25,3 +25,4 @@ Each item is public at this one path. `AgyRecipe` is not a Store provider: `cano
 - The recipe only describes: where the publisher serves the program, how a download is checked and how its version is read. It never runs a publisher's installer and changes nothing outside the version's folder; the host's engine downloads, checks, places and reads the version back.
 - A recipe fetches only through the `InstallTools` it is handed, so a download is bounded and checked by the host, and starts no process of its own (a test in `canoa-host` scans this crate for `std::process::Command`).
 - The preset's name is what a client lists; a name `canoa.cfg` already uses is left to the config. Its program is `AgyRecipe`'s first name, which a test keeps true.
+- The host starts the program with the profile's access: `--sandbox` for a workspace or read-only sandbox and `--dangerously-skip-permissions` for `approvals = "never"`, appended after the preset's arguments by `canoa launch`.

@@ -394,3 +394,52 @@ fn own_profile_needs_peers() {
     );
     assert!(parsed.is_err(), "{parsed:?}");
 }
+
+/// An entry named as a preset is, with `profile`'s access, started as the preset's program with the access in its own words.
+fn open_named(entry: &str, program_args: &str, access: &str) -> Value {
+    let agent = quoted(&example("profile_agent", false).to_string_lossy());
+    let config = format!(
+        "[host.agents.{entry}]\nprogram = {agent}\nargs = {program_args}\nprofiles = [\"main\"]\n\
+         [host.profiles.main]\naccess = {access}\n"
+    );
+    let host = Host::start(&config, 1);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    with_link(host.url(entry), &client, host.peer, |rpc| {
+        rpc.initialize().expect("initialize is answered");
+        rpc.request("session/new", json!({"cwd": dir, "mcpServers": []}))
+            .expect("a session opens")
+    })
+    .expect("a paired key is served")
+}
+
+#[test]
+fn grok_and_antigravity_start_with_the_access_in_their_own_words() {
+    let grok = open_named(
+        "Grok",
+        "[\"agent\", \"stdio\"]",
+        "{ sandbox = \"workspace\", approvals = \"never\" }",
+    );
+    assert_eq!(grok["argv"], json!(["agent", "stdio"]), "{grok}");
+    assert_eq!(grok["grok_sandbox"], "workspace", "{grok}");
+    assert_eq!(grok["meta_value"]["yoloMode"], true, "{grok}");
+
+    let standard = open_named("Grok", "[\"agent\", \"stdio\"]", "{}");
+    assert_eq!(standard["grok_sandbox"], "off", "{standard}");
+    assert!(
+        standard["meta_value"].get("yoloMode").is_none(),
+        "{standard}"
+    );
+
+    let agy = open_named(
+        "Antigravity",
+        "[\"acp\"]",
+        "{ sandbox = \"read-only\", approvals = \"never\" }",
+    );
+    assert_eq!(
+        agy["argv"],
+        json!(["acp", "--sandbox", "--dangerously-skip-permissions"]),
+        "{agy}"
+    );
+}

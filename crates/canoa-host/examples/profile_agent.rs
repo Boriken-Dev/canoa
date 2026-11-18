@@ -1,7 +1,7 @@
 //! A scripted ACP agent on its standard streams for the host's profile tests. It says it takes a system prompt and more
 //! directories; `session/new` starts each stdio MCP server it is given, calls that server's `probe` tool, and answers with
 //! the system prompt's text, each tool's answer, the SHA-256 of `TOKEN` in its own environment, the directories and
-//! whether `_meta` came. It never answers a variable's value.
+//! whether `_meta` came, its own arguments and `GROK_SANDBOX`. It never answers another variable's value.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -133,6 +133,9 @@ fn main() {
                     "token_sha256": std::env::var("TOKEN").ok().map(|token| sha256(&token)),
                     "additionalDirectories": params["additionalDirectories"],
                     "meta": params.get("_meta").is_some(),
+                    "meta_value": params.get("_meta").cloned().unwrap_or(Value::Null),
+                    "argv": std::env::args().skip(1).collect::<Vec<_>>(),
+                    "grok_sandbox": std::env::var("GROK_SANDBOX").ok(),
                 })
             }
             "session/prompt" => {
