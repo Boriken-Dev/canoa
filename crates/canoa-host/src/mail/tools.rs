@@ -582,7 +582,7 @@ impl MailTools {
     fn searched(&self, account: Option<&str>) -> Vec<String> {
         match account {
             Some(name) => vec![name.to_owned()],
-            None => self.boxes.names().into_iter().map(str::to_owned).collect(),
+            None => self.boxes.names(),
         }
     }
 

@@ -3652,6 +3652,7 @@ mod tests {
             let config = Config::from_str_in(text, std::path::Path::new("/canoa")).expect("parses");
             let tools = crate::mail::tools::MailTools::new(crate::mail::Mailboxes::from_config(
                 &config.mail,
+                None,
             ));
             let given = page_grants(&config);
             let offered = tools.offered(&given);
