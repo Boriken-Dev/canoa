@@ -175,7 +175,9 @@ impl Overlays {
         }
     }
 
-    /// This host, whose git runs inherit `vars` as well as this process's environment.
+    /// This host, whose git runs inherit `vars` as well as this process's environment; a variable with an empty value is one the
+    /// person has not set, so it is taken out of the run's environment whatever this process's holds. (Left set and empty, a lower-case
+    /// proxy variable would shadow the upper-case one the host adds, where names are case-sensitive.)
     #[cfg(test)]
     pub(crate) fn with_person_env(mut self, vars: &[(&str, OsString)]) -> Self {
         self.person = vars
@@ -205,7 +207,7 @@ impl Overlays {
     fn inherited(&self, name: &str) -> Option<OsString> {
         #[cfg(test)]
         if let Some((_, value)) = self.person.iter().find(|(key, _)| key == name) {
-            return Some(value.clone());
+            return (!value.is_empty()).then(|| value.clone());
         }
         std::env::var_os(name)
     }
@@ -1402,7 +1404,13 @@ impl Overlays {
         };
         let mut command = Command::new(git);
         #[cfg(test)]
-        command.envs(self.person.iter().map(|(name, value)| (name, value)));
+        for (name, value) in &self.person {
+            if value.is_empty() {
+                command.env_remove(name);
+            } else {
+                command.env(name, value);
+            }
+        }
         if isolated.is_some() {
             command.env_clear();
             for name in KEPT_VARIABLES {
