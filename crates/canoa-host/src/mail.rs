@@ -18,6 +18,7 @@
 
 mod ews;
 pub(crate) mod model;
+mod outlook;
 pub(crate) mod related;
 pub(crate) mod tools;
 pub(crate) mod xml;
@@ -34,6 +35,7 @@ use canoa::network::{Network, Secret};
 
 use self::ews::{Auth, Ews, EwsSettings};
 use self::model::{Backend, MailError};
+use self::outlook::Outlook;
 use crate::config::{MailAccount, MailAuth, MailBackend, MailConfig};
 
 /// A mailbox: its name, and the backend, made the first time it is asked for so that a password set after the host started, or a
@@ -218,8 +220,10 @@ fn backend_of(account: &MailAccount) -> Result<Arc<dyn Backend>, MailError> {
                 Network::current(),
             )))
         }
-        MailBackend::Outlook => Err(MailError::Bad(
-            "the Outlook backend is not in this build".to_owned(),
-        )),
+        MailBackend::Outlook => Ok(Arc::new(Outlook::powershell(
+            account.command.clone(),
+            account.profile.clone(),
+            timeout,
+        ))),
     }
 }
