@@ -448,7 +448,12 @@ on the `PATH` of the agent's processes (never before the agent's own program, wh
 launcher runs the script under its interpreter, found on the host's own `PATH` (Python, Node.js, `sh`, `bash`, PowerShell 7),
 with the arguments it was given, in the caller's directory and environment, with no time limit, and ends with the script's
 status; on Windows it is a `.cmd` file, so `cmd.exe` reads its arguments before the script does. Two commands whose names
-differ only by the case of ASCII letters, in one overlay or two, are exposed by neither, and the report says so.
+differ only by the case of ASCII letters, in one overlay or two, are exposed by neither, and the report says so. An MCP
+server whose `command` has no separator is looked for in the overlay's own `bin/` (and its other `PATH` additions) as well as
+on the host's `PATH`, and the agent is given the program's absolute path.
+
+The agent's own program is always the one on the host's `PATH` (and in the Store's runtimes): a folder a profile or an
+overlay puts first on the `PATH` of the agent's processes never decides which program the agent is, on any system.
 
 Canoa does not apply yet, and **Settings → Profiles** lists as "not applied by Canoa yet": env scripts (`env.<ext>`,
 `env_scripts`), `mcp.skills`, an MCP server's `timeout` and its working directory (it runs in the session's), other
