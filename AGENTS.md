@@ -80,6 +80,9 @@ cargo build -p canoa-ffi --lib
 (cd clients/office && npm test)
 # the built web app in a real browser: no service worker, every request to its own origin, symbols, emoji and CJK drawn from the fonts `build.py` copies in
 (cd clients/browser/chromium && CANOA_E2E_BROWSER=<Edge> CANOA_E2E_HOST=<canoa> CANOA_E2E_AGENT=<stdio_agent> CANOA_E2E_WEB=../../../app/build/web [CANOA_E2E_SHOT=<png>] node e2e/web_fonts.mjs)
+# a real voice's audio (Piper's `--output_raw`, 22050 Hz) played by the web app's own Web Audio player in a real browser; CANOA_E2E_TELL_RATE=44100 is the control that must fail
+(cd app && dart compile js -O1 -o <dir>/page.js tool/voice_page.dart)
+(cd clients/browser/chromium && CANOA_E2E_BROWSER=<Edge> CANOA_E2E_PAGE=<dir> CANOA_E2E_PCM=<voice.pcm> node e2e/voice_pcm.mjs)
 mkdocs build --strict
 ```
 
