@@ -14,6 +14,7 @@ use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_NATIVE, MANAGER_UNKNOWN, Platform,
     StoreInfo, Updatable,
 };
+use canoa::vendor::{AgentVendor, ModeTitle, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
 use canoa::store::recipe::{
@@ -26,9 +27,67 @@ const MANIFESTS: &str =
 
 /// How the host starts Antigravity when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Antigravity", "agy")
+    .agent("antigravity")
     .args(&["acp"])
     .search(&["%LOCALAPPDATA%/agy/bin"])
     .usage("antigravity");
+
+/// Antigravity's mark: SVG paths in the vendor's own colours, or in the text's where it has none of its own.
+pub const MARK: &str = include_str!("../mark.svg");
+
+/// Who Antigravity is, as the host and the application show it: its name, mark, vendor, credential standards and the names it reports.
+#[derive(Default, Debug, Clone, Copy, coqui_acp_api::guatiao::Provider)]
+#[provider(AgentVendor, id = "antigravity_vendor", crate = ::coqui_acp_api::guatiao)]
+pub struct AgyVendor;
+
+impl AgentVendor for AgyVendor {
+    fn describe(&self) -> Result<VendorInfo, ProviderError> {
+        let mut info = VendorInfo::new("antigravity", "Antigravity");
+        info.program = Some("Antigravity".to_owned());
+        info.vendor = Some("google".to_owned());
+        info.aos = Some("antigravity".to_owned());
+        info.model_variable = None;
+        info.standards = vec![
+            StandardTitle::new("antigravity", "Antigravity"),
+            StandardTitle::new("gemini-api", "Gemini API"),
+        ];
+        info.names = vec!["Antigravity ACP Server".to_owned()];
+        info.modes = vec![
+            ModeTitle::new("default", "Manual"),
+            ModeTitle::new("accept-edits", "Accept edits"),
+            ModeTitle::new("plan", "Plan"),
+        ];
+        info.mark = Some(MARK.to_owned());
+        info.look = None;
+        Ok(info)
+    }
+}
+
+/// Gemini CLI has no crate of its own: Google's agents are described here, so a program that reports itself as `gemini-cli` is
+/// still known by its vendor, its registry id and its model variable.
+#[derive(Default, Debug, Clone, Copy, coqui_acp_api::guatiao::Provider)]
+#[provider(AgentVendor, id = "gemini_vendor", crate = ::coqui_acp_api::guatiao)]
+pub struct GeminiVendor;
+
+impl AgentVendor for GeminiVendor {
+    fn describe(&self) -> Result<VendorInfo, ProviderError> {
+        let mut info = VendorInfo::new("gemini", "Gemini");
+        info.program = Some("Gemini CLI".to_owned());
+        info.vendor = Some("google".to_owned());
+        info.aos = Some("gemini-cli".to_owned());
+        info.model_variable = Some("GEMINI_MODEL".to_owned());
+        info.names = vec!["gemini-cli".to_owned()];
+        Ok(info)
+    }
+}
+
+// What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is
+// read, so a bundled agent and an outside one are offered and chosen alike.
+coqui_acp_api::guatiao::local_providers!(
+    id = "canoa-antigravity",
+    version = env!("CARGO_PKG_VERSION"),
+    providers = [AgyVendor, GeminiVendor]
+);
 
 /// Antigravity.
 #[derive(Debug, Default, Clone, Copy)]

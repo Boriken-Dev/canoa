@@ -37,8 +37,8 @@ use crate::accounts::{Accounts, Gated, Held};
 use crate::child::{self, Running};
 use crate::client_tools::{self, ToolsLayer, ToolsPeek};
 use crate::config::{
-    BUILT_IN_HARNESSES, Config, Entry, EntryKind, HarnessOptions, HostProfile, ImportSearch,
-    Layers, Listen, Origin, Settings, UsageSource,
+    Config, Entry, EntryKind, HarnessOptions, HostProfile, ImportSearch, Layers, Listen, Origin,
+    Settings, UsageSource,
 };
 use crate::control;
 use crate::delegate::{self, Delegating, Delegation, Peek, Principal};
@@ -3233,7 +3233,7 @@ pub(crate) fn harness_settings(
     own: Option<&Settings>,
 ) -> Settings {
     let mut map = own.map(|own| own.as_map().clone()).unwrap_or_default();
-    if !BUILT_IN_HARNESSES.contains(&harness) {
+    if !crate::config::is_built_in_harness(harness) {
         return Settings::new(map);
     }
     if harness == "opencode" {
@@ -3254,7 +3254,7 @@ pub(crate) fn harness_settings(
             "executable".to_owned(),
             serde_json::Value::String(executable.to_string_lossy().into_owned()),
         );
-    } else if matches!(harness, "claude" | "codex")
+    } else if crate::bundled::runs_managed_by_own_name(harness)
         && !map.contains_key("executable")
         && let Some((path, _)) = sources::managed_program(harness)
     {

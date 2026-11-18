@@ -14,6 +14,7 @@ use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_NATIVE, MANAGER_UNKNOWN, MANAGER_WINGET,
     Platform, StoreInfo, Updatable,
 };
+use canoa::vendor::{AgentVendor, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
 use canoa::store::recipe::{
@@ -25,8 +26,44 @@ const BASE: &str = "https://x.ai/cli";
 
 /// How the host starts Grok when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Grok", "grok")
+    .agent("grok")
     .args(&["agent", "stdio"])
     .search(&["~/.grok/bin"]);
+
+/// Grok's mark: SVG paths in the vendor's own colours, or in the text's where it has none of its own.
+pub const MARK: &str = include_str!("../mark.svg");
+
+/// Who Grok is, as the host and the application show it: its name, mark, vendor, credential standards and the names it reports.
+#[derive(Default, Debug, Clone, Copy, coqui_acp_api::guatiao::Provider)]
+#[provider(AgentVendor, id = "grok_vendor", crate = ::coqui_acp_api::guatiao)]
+pub struct GrokVendor;
+
+impl AgentVendor for GrokVendor {
+    fn describe(&self) -> Result<VendorInfo, ProviderError> {
+        let mut info = VendorInfo::new("grok", "Grok");
+        info.program = Some("Grok".to_owned());
+        info.vendor = Some("xai".to_owned());
+        info.aos = Some("grok".to_owned());
+        info.model_variable = None;
+        info.standards = vec![
+            StandardTitle::new("grok", "Grok"),
+            StandardTitle::new("xai-api", "xAI API"),
+        ];
+        info.markers = vec!["grokShell".to_owned()];
+        info.modes = vec![];
+        info.mark = Some(MARK.to_owned());
+        info.look = None;
+        Ok(info)
+    }
+}
+
+// What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is
+// read, so a bundled agent and an outside one are offered and chosen alike.
+coqui_acp_api::guatiao::local_providers!(
+    id = "canoa-grok",
+    version = env!("CARGO_PKG_VERSION"),
+    providers = [GrokVendor]
+);
 
 /// Grok.
 #[derive(Debug, Default, Clone, Copy)]

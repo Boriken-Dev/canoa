@@ -733,6 +733,16 @@ impl Control {
         choices::call(self.accounts().ok()?, caller, &params).ok()
     }
 
+    /// canoa.cfg as the host serves it, for what the loaded agents say of themselves; a host that keeps no accounts has none, and
+    /// then only the bundled agents are loaded.
+    fn loaded_config(&self) -> Result<crate::config::Config, (i32, String)> {
+        match &self.accounts {
+            Some(accounts) => accounts.config(),
+            None => crate::config::Config::from_str_in("", std::path::Path::new("."))
+                .map_err(|error| (REFUSED, error.to_string())),
+        }
+    }
+
     fn accounts(&self) -> Result<&accounts::Accounts, (i32, String)> {
         self.accounts
             .as_ref()
@@ -884,7 +894,12 @@ impl Control {
                 Some("config/set") if names_host(&params) => {
                     allow(caller, Grant::Hosting).and_then(|()| self.files.host_set(&params, true))
                 }
-                Some("looks/list") => allow(caller, Grant::ConfigRead).and_then(|()| looks::list()),
+                Some("looks/list") => allow(caller, Grant::ConfigRead)
+                    .and_then(|()| self.loaded_config())
+                    .map(|config| looks::list(&config)),
+                Some("providers/list") => allow(caller, Grant::ConfigRead)
+                    .and_then(|()| self.loaded_config())
+                    .map(|config| providers::list(&config)),
                 Some("config/set") => allow(caller, Grant::ConfigWrite).and_then(|()| {
                     self.files
                         .config_set(&params, caller.may(Grant::ConfigWriteSessions))
@@ -1645,6 +1660,9 @@ mod looks_tests;
 pub(crate) mod mail_setup;
 #[cfg(test)]
 mod mail_setup_tests;
+pub(crate) mod providers;
+#[cfg(test)]
+mod providers_tests;
 mod say;
 #[cfg(test)]
 mod say_tests;

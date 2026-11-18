@@ -16,6 +16,9 @@ pub mod speech;
 #[cfg(feature = "store")]
 #[cfg_attr(docsrs, doc(cfg(feature = "store")))]
 pub mod store;
+#[cfg(feature = "vendor")]
+#[cfg_attr(docsrs, doc(cfg(feature = "vendor")))]
+pub mod vendor;
 use alloc::collections::{BTreeMap, BTreeSet};
 use core::borrow::Borrow;
 use core::fmt;

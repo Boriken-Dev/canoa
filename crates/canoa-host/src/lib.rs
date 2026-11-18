@@ -4,6 +4,7 @@
 extern crate alloc;
 
 mod accounts;
+mod bundled;
 mod child;
 pub mod cli;
 mod client_tools;
@@ -48,6 +49,7 @@ pub mod tool;
 mod transport;
 mod usage_log;
 mod usage_splice;
+mod vendors;
 pub mod web;
 mod worktree;
 

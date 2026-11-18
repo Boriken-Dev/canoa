@@ -18,6 +18,7 @@ use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
     MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
 };
+use canoa::vendor::{AgentVendor, ModeTitle, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
 use canoa::store::recipe::{
@@ -33,7 +34,53 @@ const LATEST: &str = "https://releases.openai.com/codex/channels/latest";
 pub const LOOK: &str = include_str!("../looks/chatgpt.json");
 
 /// How the host starts Codex when `canoa.cfg` does not name it.
-pub const PRESET: SourcePreset = SourcePreset::new("Codex", "codex").harness("codex");
+pub const PRESET: SourcePreset = SourcePreset::new("Codex", "codex")
+    .agent("codex")
+    .harness("codex");
+
+/// Codex's mark: SVG paths in the vendor's own colours, or in the text's where it has none of its own.
+pub const MARK: &str = include_str!("../mark.svg");
+
+/// Who Codex is, as the host and the application show it: its name, mark, vendor, credential standards and the names it reports.
+#[derive(Default, Debug, Clone, Copy, coqui_acp_api::guatiao::Provider)]
+#[provider(AgentVendor, id = "codex_vendor", crate = ::coqui_acp_api::guatiao)]
+pub struct CodexVendor;
+
+impl AgentVendor for CodexVendor {
+    fn describe(&self) -> Result<VendorInfo, ProviderError> {
+        let mut info = VendorInfo::new("codex", "Codex");
+        info.program = Some("Codex".to_owned());
+        info.vendor = Some("openai".to_owned());
+        info.aos = Some("codex".to_owned());
+        info.model_variable = Some("OPENAI_MODEL".to_owned());
+        info.standards = vec![
+            StandardTitle::new("codex", "Codex"),
+            StandardTitle::new("openai-api", "OpenAI API"),
+        ];
+        info.names = vec![
+            "coqui-acp-codex".to_owned(),
+            "@agentclientprotocol/codex-acp".to_owned(),
+        ];
+        info.modes = vec![
+            ModeTitle::new("manual", "Manual"),
+            ModeTitle::new("accept_edits", "Accept edits"),
+            ModeTitle::new("auto", "Auto"),
+            ModeTitle::new("plan", "Plan"),
+            ModeTitle::new("bypass", "Bypass"),
+        ];
+        info.mark = Some(MARK.to_owned());
+        info.look = Some(LOOK.to_owned());
+        Ok(info)
+    }
+}
+
+// What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is
+// read, so a bundled agent and an outside one are offered and chosen alike.
+coqui_acp_api::guatiao::local_providers!(
+    id = "canoa-codex",
+    version = env!("CARGO_PKG_VERSION"),
+    providers = [acp::CodexProvider, acp::CodexAccounts, CodexVendor]
+);
 
 /// Codex.
 #[derive(Debug, Default, Clone, Copy)]

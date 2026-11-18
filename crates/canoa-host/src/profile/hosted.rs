@@ -1487,48 +1487,35 @@ fn same_name(name: &str, other: &str) -> bool {
     name == other || cfg!(windows) && name.eq_ignore_ascii_case(other)
 }
 
-/// The AOS harness id of what an agent reports as its name, else of an entry named as Canoa's presets are.
+/// The AOS harness id of what an agent reports as its name, else of an entry named as a loaded agent is. A translator of Canoa's own
+/// (`coqui-acp-...`) that no description names says what it takes itself, so the entry's name does not decide for it.
 fn harness_of(reported: Option<&str>, entry: &str) -> Option<&'static str> {
-    match reported {
-        Some("coqui-acp-claude" | "@agentclientprotocol/claude-agent-acp") => Some("claude-code"),
-        Some("coqui-acp-codex" | "@agentclientprotocol/codex-acp") => Some("codex"),
-        Some("gemini-cli") => Some("gemini-cli"),
-        Some("pi-acp") => Some("pi"),
-        // Pi's own translator says what it takes, as Claude's and Codex's do, so the entry's name does not decide.
-        Some("coqui-acp-pi") => None,
-        Some("OpenCode") => Some("opencode"),
-        Some("Antigravity ACP Server") => Some("antigravity"),
-        _ => match entry {
-            "Claude" => Some("claude-code"),
-            "Codex" => Some("codex"),
-            "Gemini" => Some("gemini-cli"),
-            "Pi" => Some("pi"),
-            "Antigravity" => Some("antigravity"),
-            _ => None,
-        },
+    if let Some(name) = reported {
+        if let Some(known) = crate::vendors::by_name(name) {
+            return known.aos;
+        }
+        if name.starts_with("coqui-acp-") {
+            return None;
+        }
     }
+    crate::vendors::by_title(entry).and_then(|known| known.aos)
 }
 
 /// The AOS harness id of a session's agent for the identity variables: the id of the provider an entry runs in this process,
-/// else of an entry named as Canoa's presets are. Grok and OpenCode are named here though no AOS overlay has hints for them.
+/// else of an entry named as a loaded agent is.
 pub(crate) fn harness_identity(provider: Option<&str>, entry: &str) -> Option<&'static str> {
-    match provider {
-        Some("claude") => Some("claude-code"),
-        Some("codex") => Some("codex"),
-        Some("pi") => Some("pi"),
-        Some("opencode") => Some("opencode"),
-        _ => harness_of(None, entry).or(match entry {
-            "Grok" => Some("grok"),
-            "OpenCode" => Some("opencode"),
-            _ => None,
-        }),
-    }
+    provider
+        .and_then(crate::vendors::by_agent)
+        .and_then(|known| known.aos)
+        .or_else(|| harness_of(None, entry))
 }
 
 /// The version of the program the Store installed for the provider an entry runs in this process.
 pub(crate) fn harness_version(provider: Option<&str>) -> Option<String> {
     match provider {
-        Some(program @ ("claude" | "codex")) => crate::sources::managed_version(program),
+        Some(program) if crate::bundled::runs_managed_by_own_name(program) => {
+            crate::sources::managed_version(program)
+        }
         _ => None,
     }
 }

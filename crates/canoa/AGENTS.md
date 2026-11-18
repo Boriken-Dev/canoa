@@ -2,11 +2,32 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-Four Cargo features: `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
+Five Cargo features (the fifth, `vendor`, is the `agent_vendor` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
 The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`) and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
 
 No `unsafe` code (`#![forbid(unsafe_code)]`).
+
+## `canoa::vendor` (feature `vendor`)
+
+The `agent_vendor` kind: who an agent is and how Canoa shows it. A harness provider and an account provider say what they do; a provider of this kind says what the person calls the agent, its vendor, mark, credential standards and names, so the host and the application hold no list of agents.
+
+```rust
+pub const KIND: &str = "agent_vendor";
+pub const MAX_DOCUMENT_TEXT: usize = 65536;                                    // the most characters a mark or a look may take
+#[non_exhaustive] pub struct VendorInfo { pub agent: String, pub title: String, pub program: Option<String>, pub vendor: Option<String>,
+    pub aos: Option<String>, pub model_variable: Option<String>, pub standards: Vec<StandardTitle>, pub names: Vec<String>,
+    pub markers: Vec<String>, pub modes: Vec<ModeTitle>, pub mark: Option<String>, pub look: Option<String> }   // ToValue, FromValue, Schema, Clone, Debug, Eq
+VendorInfo::new(agent, title); .problem() -> Option<String>                      // why the description cannot be used
+#[non_exhaustive] pub struct StandardTitle { pub id: String, pub title: String }  // StandardTitle::new(id, title)
+#[non_exhaustive] pub struct ModeTitle { pub id: String, pub title: String }      // ModeTitle::new(id, title)
+#[guatiao::kind(name = "agent_vendor")] pub trait AgentVendor: Send + Sync { fn describe(&self) -> Result<VendorInfo, ProviderError>; }
+```
+
+- `agent`: 1 to 64 lower-case letters, digits, `-` and `_`: the id of the agent's `acp_harness` provider when it has one (`claude`), else its source's name in lower case. Every other provider and source of the agent names it this way.
+- `title` is the name for people (`Claude`), `program` the program's (`Claude Code`; absent: the title). `vendor` stamps a session (`AGENTS_VENDOR`, `anthropic`); `aos` is the id in the standard registry of harnesses (`claude-code`); `model_variable` is where the running model is read from (`ANTHROPIC_MODEL`). Each may be absent.
+- `standards` are the credential standards that are the vendor's own, each with its name. `names` are the `agentInfo.name` values the agent reports; `markers` are the `initialize` `_meta` keys that are `true` for an agent that reports no name. `modes` are the modes it is known to offer before it has run.
+- `mark` is SVG text: a square `viewBox` and `path` elements with a `d` and an optional `#RRGGBB` `fill` (on the path or the root); a path with none, or `currentColor`, takes the text's colour. `look` is a JSON document with an `id`, a `label`, the agent's `vendor` (its `agent` id) and, for `light` and `dark`, colour tokens, as `looks/list` serves it. Both are at most `MAX_DOCUMENT_TEXT` characters.
 
 ## `canoa::network` (feature `network`)
 
@@ -263,12 +284,14 @@ A recipe fetches only through the `InstallTools` it is handed and starts no proc
 `#[non_exhaustive]`, `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`. How the host starts one coding agent it knows about when canoa.cfg does not name it. Not behind a feature.
 
 ```rust
-pub struct SourcePreset { pub name: &'static str, pub harness: Option<&'static str>, pub program: &'static str,
+pub struct SourcePreset { pub name: &'static str, pub agent: &'static str, pub harness: Option<&'static str>, pub program: &'static str,
     pub args: &'static [&'static str], pub requires: &'static [&'static str], pub search: &'static [&'static str],
     pub usage: Option<&'static str>, pub managed: Option<&'static str> }
 impl SourcePreset {
     pub const fn new(name: &'static str, program: &'static str) -> Self;   // no harness, no arguments, nothing else
-    pub const fn harness(self, harness: &'static str) -> Self;             // `claude`, `codex`, `pi` or `opencode`: run in process
+    pub const fn harness(self, harness: &'static str) -> Self;             // the id of an `acp_harness` provider the host runs in process
+    pub const fn agent(self, agent: &'static str) -> Self;                // the agent it starts goes by this id (its `agent_vendor` description's `agent`); the name in lower case when unset
+    pub fn agent_id(&self) -> String;                                      // `agent`, else the name in lower case
     pub const fn args(self, args: &'static [&'static str]) -> Self;
     pub const fn requires(self, requires: &'static [&'static str]) -> Self; // other programs it needs, offered only when found
     pub const fn search(self, search: &'static [&'static str]) -> Self;     // `~` is the home directory, `%NAME%` an environment variable

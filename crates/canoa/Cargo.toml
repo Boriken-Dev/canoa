@@ -23,6 +23,8 @@ alloc_instead_of_core = "warn"
 [features]
 # The `program_store` kind: how a program is found, checked for updates and installed into a folder the host owns.
 store = ["dep:coqui-acp-api", "dep:serde_json"]
+# The `agent_vendor` kind: who an agent's vendor is and how it is shown.
+vendor = ["dep:coqui-acp-api"]
 # The `speech_provider` kind: audio streamed in, text and front matter out.
 speech = ["dep:guatiao", "dep:coqui-acp-api"]
 # The two providers that ship with it: a program the person names, and a speech-to-text HTTP endpoint the person names.

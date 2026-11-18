@@ -14,7 +14,7 @@ exclude = [".*", "*.local.*"]
 publish = false
 
 [dependencies]
-canoa = { workspace = true, features = ["store"] }
+canoa = { workspace = true, features = ["store", "vendor"] }
 coqui-acp-api.workspace = true
 
 [lints.rust]

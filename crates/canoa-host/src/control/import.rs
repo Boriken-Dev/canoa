@@ -79,6 +79,11 @@ impl Harness {
     }
 }
 
+/// Whether the host can bring in the sessions harness `harness`'s own program kept on this computer.
+pub(crate) fn imports(harness: &str) -> bool {
+    Harness::named(harness).is_some()
+}
+
 /// One session found in a harness's folder.
 struct Found {
     id: String,

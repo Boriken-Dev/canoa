@@ -43,7 +43,7 @@ pub(crate) struct Stores {
 
 /// Checks the bytes of an extension the Store installed against the digest it recorded, before any of it is loaded, so a file that
 /// changed since is not run. An extension named by hand has no digest to check.
-pub(super) fn verify_extension(extension: &crate::config::Extension) -> Result<(), String> {
+pub(crate) fn verify_extension(extension: &crate::config::Extension) -> Result<(), String> {
     use sha2::Digest as _;
 
     use crate::config::{ExtensionCheck, Origin};

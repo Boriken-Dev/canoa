@@ -2504,17 +2504,23 @@ impl Config {
                             import_search: agent.import_search.as_deref(),
                         },
                     )?;
-                    let built_in = BUILT_IN_HARNESSES.contains(&harness.as_str());
+                    let built_in = is_built_in_harness(&harness);
                     if built_in && origin.is_some() {
                         return Err(invalid(
                             &name,
-                            "claude, codex, pi and opencode are built in: library and source load an outside provider under its own id",
+                            &format!(
+                                "{} are built in: library and source load an outside provider under its own id",
+                                built_in_harnesses().collect::<Vec<_>>().join(", ")
+                            ),
                         ));
                     }
                     if origin.is_none() && !built_in {
                         return Err(invalid(
                             &name,
-                            "harness is claude, codex, pi, opencode, or the id of an outside provider that library or source loads",
+                            &format!(
+                                "harness is {}, or the id of an outside provider that library or source loads",
+                                built_in_harnesses().collect::<Vec<_>>().join(", ")
+                            ),
                         ));
                     }
                     let settings = agent
@@ -2921,8 +2927,16 @@ fn invalid(name: &str, what: &str) -> ConfigError {
     }
 }
 
-/// The harnesses the host carries: providers of `acp_harness` registered in this process.
-pub const BUILT_IN_HARNESSES: &[&str] = &["claude", "codex", "pi", "opencode"];
+/// The harnesses the host carries: providers of `acp_harness` its bundled agents register in this process.
+pub fn built_in_harnesses() -> impl Iterator<Item = &'static str> {
+    crate::bundled::harnesses()
+}
+
+/// Whether the host itself carries the harness provider `id`.
+#[must_use]
+pub fn is_built_in_harness(id: &str) -> bool {
+    crate::bundled::is_harness(id)
+}
 
 /// The keys that say where an outside provider's code is.
 struct OriginKeys<'a> {

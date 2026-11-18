@@ -17,6 +17,7 @@ use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
     MANAGER_UNKNOWN, MANAGER_WINGET, Platform, Serves, StoreInfo, Updatable,
 };
+use canoa::vendor::{AgentVendor, ModeTitle, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
 use canoa::store::recipe::{
@@ -31,7 +32,53 @@ const BASE: &str = "https://downloads.claude.ai/claude-code-releases";
 pub const LOOK: &str = include_str!("../looks/claude.json");
 
 /// How the host starts Claude Code when `canoa.cfg` does not name it.
-pub const PRESET: SourcePreset = SourcePreset::new("Claude", "claude").harness("claude");
+pub const PRESET: SourcePreset = SourcePreset::new("Claude", "claude")
+    .agent("claude")
+    .harness("claude");
+
+/// Claude Code's mark: SVG paths in the vendor's own colours, or in the text's where it has none of its own.
+pub const MARK: &str = include_str!("../mark.svg");
+
+/// Who Claude Code is, as the host and the application show it: its name, mark, vendor, credential standards and the names it reports.
+#[derive(Default, Debug, Clone, Copy, coqui_acp_api::guatiao::Provider)]
+#[provider(AgentVendor, id = "claude_vendor", crate = ::coqui_acp_api::guatiao)]
+pub struct ClaudeVendor;
+
+impl AgentVendor for ClaudeVendor {
+    fn describe(&self) -> Result<VendorInfo, ProviderError> {
+        let mut info = VendorInfo::new("claude", "Claude");
+        info.program = Some("Claude Code".to_owned());
+        info.vendor = Some("anthropic".to_owned());
+        info.aos = Some("claude-code".to_owned());
+        info.model_variable = Some("ANTHROPIC_MODEL".to_owned());
+        info.standards = vec![
+            StandardTitle::new("claude-code", "Claude Code"),
+            StandardTitle::new("anthropic-api", "Anthropic API"),
+        ];
+        info.names = vec![
+            "coqui-acp-claude".to_owned(),
+            "@agentclientprotocol/claude-agent-acp".to_owned(),
+        ];
+        info.modes = vec![
+            ModeTitle::new("manual", "Manual"),
+            ModeTitle::new("accept_edits", "Accept edits"),
+            ModeTitle::new("auto", "Auto"),
+            ModeTitle::new("plan", "Plan"),
+            ModeTitle::new("bypass", "Bypass"),
+        ];
+        info.mark = Some(MARK.to_owned());
+        info.look = Some(LOOK.to_owned());
+        Ok(info)
+    }
+}
+
+// What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is
+// read, so a bundled agent and an outside one are offered and chosen alike.
+coqui_acp_api::guatiao::local_providers!(
+    id = "canoa-claude",
+    version = env!("CARGO_PKG_VERSION"),
+    providers = [acp::ClaudeProvider, acp::ClaudeAccounts, ClaudeVendor]
+);
 
 /// Claude Code.
 #[derive(Debug, Default, Clone, Copy)]

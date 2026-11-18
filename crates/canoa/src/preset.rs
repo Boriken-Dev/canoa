@@ -6,7 +6,9 @@
 pub struct SourcePreset {
     /// The source's name, as a client lists it.
     pub name: &'static str,
-    /// `claude`, `codex`, `pi` or `opencode` for a built-in harness; `None` for a program, which `program` and `args` run.
+    /// The id of the agent it starts, as its `agent_vendor` description names it (`claude`): empty for the lower-case name.
+    pub agent: &'static str,
+    /// The id of an `acp_harness` provider for a harness; `None` for a program, which `program` and `args` run.
     pub harness: Option<&'static str>,
     /// The program's file name, looked for on `PATH` and in `search`.
     pub program: &'static str,
@@ -24,11 +26,22 @@ pub struct SourcePreset {
 }
 
 impl SourcePreset {
+    /// The id of the agent the source starts: [`agent`](Self::agent), else the source's name in lower case.
+    #[must_use]
+    pub fn agent_id(&self) -> alloc::string::String {
+        if self.agent.is_empty() {
+            self.name.to_lowercase()
+        } else {
+            self.agent.to_owned()
+        }
+    }
+
     /// A source called `name` that runs `program` with no arguments.
     #[must_use]
     pub const fn new(name: &'static str, program: &'static str) -> Self {
         Self {
             name,
+            agent: "",
             harness: None,
             program,
             args: &[],
@@ -37,6 +50,13 @@ impl SourcePreset {
             usage: None,
             managed: None,
         }
+    }
+
+    /// The agent it starts goes by `agent`, when that is not its name in lower case.
+    #[must_use]
+    pub const fn agent(mut self, agent: &'static str) -> Self {
+        self.agent = agent;
+        self
     }
 
     /// Run in process as the built-in harness `harness`.

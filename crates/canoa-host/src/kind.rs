@@ -1,7 +1,7 @@
 //! The host's end of the `acp_harness` kind: the providers an entry can offer by id, the instance an entry configures, and
-//! the request a connection starts with. `claude`, `codex` and `pi` are compiled into this binary and registered in this process;
-//! an outside provider is loaded from the library or source an entry names, into a registry of its own, so one entry never
-//! resolves an id that only another entry's file offers. Both are chosen and started the same way.
+//! the request a connection starts with. The bundled agents' libraries are registered in this process (`bundled`); an outside
+//! provider is loaded from the library or source an entry names, into a registry of its own, so one entry never resolves an id
+//! that only another entry's file offers. Both are chosen and started the same way.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -14,9 +14,6 @@ use alloc::vec::Vec;
 use core::fmt;
 use std::path::Path;
 
-use canoa_claude::acp::{ClaudeAccounts, ClaudeProvider};
-use canoa_codex::acp::{CodexAccounts, CodexProvider};
-use canoa_pi::acp::{PiAccounts, PiProvider};
 use coqui_acp_api::guatiao::Value;
 use coqui_acp_api::guatiao::library::Object;
 use coqui_acp_api::guatiao::library::Registry;
@@ -26,28 +23,11 @@ use coqui_acp_api::{
     AccountCatalog, AccountKindInfo, AccountProvider, AcpHarness, CacheLifetime, Environment,
     HarnessNotice, ProcessSpawner, StartRequest,
 };
-use coqui_acp_harness::stdio::{OpenCodeAccounts, OpenCodeProvider};
 
 use crate::accounts::matching::Runs;
 use crate::accounts::{ACCOUNT_META, Accounts, Held, Watcher};
 use crate::config::{AccountConfig, Origin, Settings, cache_lifetime_named};
 use crate::provider::{ProviderError, map_of, open};
-
-// What `Registry::register_local` takes: the four built-in harness providers and their account providers, linked into this binary.
-coqui_acp_api::guatiao::local_providers!(
-    id = "canoa-built-in",
-    version = env!("CARGO_PKG_VERSION"),
-    providers = [
-        ClaudeProvider,
-        ClaudeAccounts,
-        CodexProvider,
-        CodexAccounts,
-        PiProvider,
-        PiAccounts,
-        OpenCodeProvider,
-        OpenCodeAccounts
-    ]
-);
 
 /// The `_meta` key of a client's `initialize` that says how long its session's prompt cache should live: an object
 /// `{"lifetime": "default" | "short" | "long", "chosen": bool}`. `chosen` (true when absent) says the person chose it for
@@ -58,7 +38,7 @@ pub const CACHE_META: &str = "dev.boriken.canoa/cache_lifetime";
 /// The setting through which a profiled connection lets a client's plugin reach the harness: Claude Code's provider has it.
 const CLIENT_PLUGINS: &str = "allow_client_plugins";
 
-/// A registry holding what one entry can choose from: the built-in providers when the entry has no origin, and only what
+/// A registry holding what one entry can choose from: the bundled agents' providers when the entry has no origin, and only what
 /// its origin loads when it has one, so an id is resolved from that entry's own file and no other.
 ///
 /// # Errors
@@ -67,17 +47,12 @@ const CLIENT_PLUGINS: &str = "allow_client_plugins";
 pub(crate) fn registry(origin: Option<&Origin>) -> Result<Registry, ProviderError> {
     let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
     match origin {
-        Some(origin) => open(&mut registry, origin)?,
-        None => {
-            let loading = registry
-                .register_local("canoa", library)
-                .map_err(|error| ProviderError::Load(error.to_string()))?;
-            if loading.loaded().is_none() {
-                return Err(ProviderError::Load(
-                    "the built-in harness providers were not accepted".to_owned(),
-                ));
-            }
+        Some(origin) => {
+            open(&mut registry, origin)?;
+            crate::vendors::note(&registry);
         }
+        None => crate::bundled::register(&mut registry, crate::bundled::ALL)
+            .map_err(ProviderError::Load)?,
     }
     Ok(registry)
 }
@@ -632,7 +607,7 @@ fn honoured(harness: &dyn AcpHarness, lifetime: CacheLifetime) -> CacheLifetime 
 
 /// An instance of provider `id`, from the entry's `settings`, which the provider checks against its schema; and where the
 /// settings depart from the schema's defaults.
-fn instance(
+pub(crate) fn instance(
     registry: &Registry,
     id: &str,
     settings: &Settings,
@@ -697,7 +672,7 @@ fn account_side(
     Ok((provider, listing))
 }
 
-fn account_provider(
+pub(crate) fn account_provider(
     registry: &Registry,
     harness: &str,
     settings: &Settings,

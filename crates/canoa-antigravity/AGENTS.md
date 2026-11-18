@@ -20,6 +20,16 @@ impl canoa::store::recipe::Recipe for AgyRecipe { /* every required method */ }
 
 Each item is public at this one path. `AgyRecipe` is not a Store provider: `canoa-host` wraps it in its engine as the guatiao provider `agy_store`.
 
+## Description and library
+
+```rust
+pub const MARK: &str;                 // the contents of mark.svg: the vendor's mark as SVG paths
+pub struct AgyVendor;                  // an `agent_vendor` provider (id `antigravity_vendor`): title, program, vendor, registry id, model variable, credential standards, reported names, modes, mark
+pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, for `Registry::register_local`: the vendor description of Antigravity and of Gemini CLI (`GeminiVendor`: Google's other agent has no crate of its own), no harness provider
+```
+
+The host lists the crate in `bundled.rs` and nowhere else names the agent: its name, mark and standards reach the host and the application through `providers/list`, as an outside library's would. `PRESET` names the agent it starts (`.agent("antigravity")`).
+
 ## Gotchas
 
 - The recipe only describes: where the publisher serves the program, how a download is checked and how its version is read. It never runs a publisher's installer and changes nothing outside the version's folder; the host's engine downloads, checks, places and reads the version back.

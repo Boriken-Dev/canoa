@@ -25,6 +25,16 @@ pub use coqui_acp_pi as acp;   // the provider crate, whole: `acp::PiProvider` i
 
 Each item is public at this one path. `PiRecipe` is not a Store provider: `canoa-host` wraps it in its engine as the guatiao provider `pi_store`.
 
+## Description and library
+
+```rust
+pub const MARK: &str;                 // the contents of mark.svg: the vendor's mark as SVG paths
+pub struct PiVendor;                  // an `agent_vendor` provider (id `pi_vendor`): title, program, vendor, registry id, model variable, credential standards, reported names, modes, mark
+pub fn library(host: Host) -> Option<LibraryParts>;   // what the crate offers, for `Registry::register_local`: `acp::PiProvider`, `acp::PiAccounts` and the vendor description
+```
+
+The host lists the crate in `bundled.rs` and nowhere else names the agent: its name, mark and standards reach the host and the application through `providers/list`, as an outside library's would. `PRESET` names the agent it starts (`.agent("pi")`).
+
 ## Gotchas
 
 - The recipe only describes: where the publisher serves the program, how a download is checked and how its version is read. It never runs a publisher's installer and changes nothing outside the version's folder; the host's engine downloads, checks, places and reads the version back.

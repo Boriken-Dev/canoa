@@ -26,19 +26,15 @@ pub(crate) struct ManagedPi {
     pub(crate) script: PathBuf,
 }
 
-const PRESETS: &[Preset] = &[
-    canoa_claude::PRESET,
-    canoa_codex::PRESET,
-    canoa_antigravity::PRESET,
-    canoa_grok::PRESET,
-    canoa_opencode::PRESET,
-    canoa_pi::PRESET,
-];
+/// The presets of the bundled agents, in the order they are offered.
+fn presets() -> impl Iterator<Item = &'static Preset> {
+    crate::bundled::ALL.iter().map(|bundle| &bundle.preset)
+}
 
 /// The names of the sources, in the order they are offered.
 #[cfg(test)]
 pub(crate) fn names() -> Vec<&'static str> {
-    PRESETS.iter().map(|preset| preset.name).collect()
+    presets().map(|preset| preset.name).collect()
 }
 
 /// The sources this host serves besides `config`'s entries: every preset whose name `config` leaves free, found or not, so a
@@ -206,8 +202,7 @@ fn sources_in(
             }
         })
         .collect();
-    let mut sources: Vec<Source> = PRESETS
-        .iter()
+    let mut sources: Vec<Source> = presets()
         .filter(|preset| {
             let taken = config.entries.iter().any(|entry| entry.name == preset.name);
             if taken {

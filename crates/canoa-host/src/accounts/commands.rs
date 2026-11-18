@@ -21,7 +21,7 @@ use coqui_acp_api::{AccountKindInfo, LoginAnswer, LoginForm, LoginMethodInfo, Op
 use super::login::{self, Interaction};
 use super::{Accounts, Refusal, check_settings};
 use crate::cli::{Failed, Format, Front};
-use crate::config::{AccountConfig, BUILT_IN_HARNESSES, Config, EntryKind, Settings, check_name};
+use crate::config::{AccountConfig, Config, EntryKind, Settings, check_name, is_built_in_harness};
 use crate::home::Home;
 use crate::{kind, serve};
 
@@ -271,7 +271,7 @@ pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harne
             ),
             account_settings.clone().unwrap_or_default(),
         ),
-        _ if BUILT_IN_HARNESSES.contains(&harness) => {
+        _ if is_built_in_harness(harness) => {
             (None, installed_program(harness), Settings::default())
         }
         _ => {
@@ -293,7 +293,7 @@ pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harne
 
 /// The settings of a built-in provider no entry configures: the program the Store installed, when it installed one.
 fn installed_program(harness: &str) -> Settings {
-    let managed = matches!(harness, "claude" | "codex")
+    let managed = crate::bundled::runs_managed_by_own_name(harness)
         .then(|| crate::sources::managed_program(harness))
         .flatten();
     match managed {

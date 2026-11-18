@@ -15,27 +15,6 @@ use core::fmt;
 use super::Layer;
 use super::Scalar;
 
-/// The harness ids and vendors dotagents' registry uses, by the id Canoa names a harness with. A harness with no vendor of
-/// its own (Pi is multi-provider) has none, and then no `AGENTS_VENDOR`. Grok and OpenCode are not in dotagents' registry
-/// yet: their ids are the names their own programs go by.
-const HARNESSES: [(&str, &str); 7] = [
-    ("claude-code", "anthropic"),
-    ("codex", "openai"),
-    ("gemini-cli", "google"),
-    ("antigravity", "google"),
-    ("pi", ""),
-    ("grok", "xai"),
-    ("opencode", ""),
-];
-
-/// The vendor-native variable a harness's running model is read from, in dotagents' registry.
-const MODEL_VARIABLES: [(&str, &str); 4] = [
-    ("claude-code", "ANTHROPIC_MODEL"),
-    ("codex", "OPENAI_MODEL"),
-    ("gemini-cli", "GEMINI_MODEL"),
-    ("pi", "PI_MODEL"),
-];
-
 /// What identifies a session, as far as the host knows it when the environment is made. Each is set only when it has a
 /// value.
 #[derive(Clone, Copy, Debug, Default)]
@@ -74,30 +53,15 @@ pub(crate) fn account_words(
     provides: &[String],
     harness: Option<&str>,
 ) -> (Option<&'static str>, Option<&'static str>) {
-    let provider_of = |name: &str| match name {
-        "claude-code" | "anthropic-api" | "claude" | "anthropic" => Some("anthropic"),
-        "codex" | "openai-api" | "openai" => Some("openai"),
-        "grok" | "xai-api" | "xai" => Some("xai"),
-        "gemini-api" | "antigravity" | "gemini-cli" | "google" => Some("google"),
-        "foundry-local" => Some("microsoft-foundry"),
-        _ => None,
-    };
+    // The vendor a name belongs to: an agent's id, a standard it owns, its registry id or the vendor's own name.
+    let provider_of = |name: &str| crate::vendors::resolve(name).and_then(|known| known.vendor);
     if kind == "foundry-local" {
         return (Some("local"), Some("microsoft-foundry"));
     }
-    let by_prefix = [
-        ("anthropic", "anthropic"),
-        ("claude", "anthropic"),
-        ("openai", "openai"),
-        ("codex", "openai"),
-        ("xai", "xai"),
-        ("grok", "xai"),
-        ("gemini", "google"),
-        ("antigravity", "google"),
-    ]
-    .iter()
-    .find(|(prefix, _)| kind.starts_with(prefix))
-    .map(|(_, provider)| *provider);
+    let by_prefix = crate::vendors::all().into_iter().find_map(|known| {
+        let vendor = known.vendor?;
+        (kind.starts_with(vendor) || kind.starts_with(known.agent)).then_some(vendor)
+    });
     let provider = by_prefix
         .or_else(|| {
             if kind == "harness-login" {
@@ -165,14 +129,12 @@ impl Session {
             }
         };
         if let Some(harness) = who.harness {
-            let vendor = HARNESSES
-                .iter()
-                .find(|(id, _)| *id == harness)
-                .map(|(_, vendor)| *vendor);
-            let from_vendor = MODEL_VARIABLES
-                .iter()
-                .find(|(id, _)| *id == harness)
-                .and_then(|(_, variable)| own(variable));
+            let known = crate::vendors::by_aos(harness);
+            let vendor = known.as_ref().and_then(|known| known.vendor);
+            let from_vendor = known
+                .as_ref()
+                .and_then(|known| known.model_variable)
+                .and_then(own);
             put("AGENTS_HARNESS", Some(harness));
             put("AGENTS_VENDOR", vendor);
             put("AGENT", Some(harness));
@@ -268,7 +230,15 @@ mod tests {
 
     #[test]
     fn each_harness_gets_dotagents_id_and_vendor() {
-        for (id, vendor) in HARNESSES {
+        let loaded: Vec<_> = crate::vendors::all()
+            .into_iter()
+            .filter_map(|known| known.aos.map(|id| (id, known.vendor.unwrap_or_default())))
+            .collect();
+        assert!(
+            loaded.len() >= 5,
+            "the bundled agents are described: {loaded:?}"
+        );
+        for (id, vendor) in loaded {
             let session = Session::new(
                 Who {
                     harness: Some(id),

@@ -49,14 +49,6 @@ impl core::fmt::Debug for Accounts {
     }
 }
 
-/// A harness the host serves as a source of its own when canoa.cfg has no entry of that name: an entry that offers accounts
-/// takes the name, and the source with it.
-const BUILT_IN_SOURCES: [(&str, &str); 3] = [
-    ("Claude", "claude"),
-    ("Codex", "codex"),
-    ("OpenCode", "opencode"),
-];
-
 /// The entries that run a built-in provider: those canoa.cfg has, then the built-in sources it has not named. A built-in source
 /// reaches only this computer's own application, except on the host of a portal, whose sockets only the person's browser reaches.
 fn entries_of(config: &Config, portal: bool) -> Vec<Value> {
@@ -78,7 +70,7 @@ fn entries_of(config: &Config, portal: bool) -> Vec<Value> {
             _ => None,
         })
         .collect();
-    for (name, harness) in BUILT_IN_SOURCES {
+    for (name, harness) in crate::bundled::harness_sources() {
         if config.entries.iter().all(|entry| entry.name != name) {
             entries.push(json!({
                 "name": name, "harness": harness, "accounts": [], "open": portal,
@@ -109,10 +101,9 @@ fn made_keys(entry: &str, built_in: bool, portal: bool) -> Vec<(&'static str, to
 /// The entry that is the agent itself for `harness`: the one canoa.cfg names that runs it (the built-in source's name first),
 /// else the built-in source's name, else the harness's name with a capital.
 fn own_entry_of(config: &Config, harness: &str, apart: &str) -> String {
-    let source = BUILT_IN_SOURCES
-        .iter()
+    let source = crate::bundled::harness_sources()
         .find(|(_, runs)| *runs == harness)
-        .map(|(name, _)| (*name).to_owned());
+        .map(|(name, _)| name.to_owned());
     let named = |entry: &crate::config::Entry| {
         entry.name != apart
             && matches!(&entry.kind, EntryKind::Harness { harness: runs, .. } if runs == harness)
@@ -178,7 +169,7 @@ pub(crate) fn fold_made_entries(
     portal: bool,
 ) -> Result<bool, Refusal> {
     let mut changed = false;
-    for harness in crate::config::BUILT_IN_HARNESSES {
+    for harness in crate::config::built_in_harnesses() {
         let made = format!("{harness}-accounts");
         let Some(entry) = config.entries.iter().find(|entry| entry.name == made) else {
             continue;
@@ -205,7 +196,7 @@ pub(crate) fn fold_made_entries(
             }
         }
         let built_in = config.entries.iter().all(|each| each.name != target)
-            && BUILT_IN_SOURCES.iter().any(|(name, _)| *name == target);
+            && crate::bundled::harness_sources().any(|(name, _)| name == target);
         let keys = made_keys(&target, built_in, portal);
         commands::set_offered(own, &target, harness, &names, &keys)
             .map_err(|failed| refusal(&failed))?;
@@ -246,13 +237,13 @@ fn offer(
     }
     let known = entries_of(config, portal);
     let in_file = config.entries.iter().any(|each| each.name == entry);
-    let built_in = !in_file && BUILT_IN_SOURCES.iter().any(|(name, _)| *name == entry);
+    let built_in = !in_file && crate::bundled::harness_sources().any(|(name, _)| name == entry);
     let harness = match known.iter().find(|each| each["name"] == entry) {
         Some(each) => each["harness"].as_str().unwrap_or_default().to_owned(),
         None => {
             let asked = text(params, "harness").ok();
             asked
-                .filter(|harness| crate::config::BUILT_IN_HARNESSES.contains(harness))
+                .filter(|harness| crate::config::is_built_in_harness(harness))
                 .map(str::to_owned)
                 .ok_or((
                     NOT_FOUND,

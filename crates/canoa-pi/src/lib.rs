@@ -20,6 +20,7 @@ use canoa::store::{
     Check, Download, InstallTools, LatestReport, Launch, MANAGER_NATIVE, MANAGER_NPM,
     MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
 };
+use canoa::vendor::{AgentVendor, ModeTitle, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, Value};
 
@@ -40,9 +41,47 @@ const DIRS: &[&str] = &["~/.pi/agent/bin", "~/.local/bin"];
 
 /// How the host starts Pi when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Pi", "pi")
+    .agent("pi")
     .harness("pi")
     .search(DIRS)
     .managed("pi");
+
+/// Pi's mark: SVG paths in the vendor's own colours, or in the text's where it has none of its own.
+pub const MARK: &str = include_str!("../mark.svg");
+
+/// Who Pi is, as the host and the application show it: its name, mark, vendor, credential standards and the names it reports.
+#[derive(Default, Debug, Clone, Copy, coqui_acp_api::guatiao::Provider)]
+#[provider(AgentVendor, id = "pi_vendor", crate = ::coqui_acp_api::guatiao)]
+pub struct PiVendor;
+
+impl AgentVendor for PiVendor {
+    fn describe(&self) -> Result<VendorInfo, ProviderError> {
+        let mut info = VendorInfo::new("pi", "Pi");
+        info.program = Some("Pi".to_owned());
+        info.vendor = None;
+        info.aos = Some("pi".to_owned());
+        info.model_variable = Some("PI_MODEL".to_owned());
+        info.standards = vec![StandardTitle::new("pi", "Pi")];
+        info.names = vec!["pi-acp".to_owned()];
+        info.modes = vec![
+            ModeTitle::new("manual", "Manual"),
+            ModeTitle::new("accept_edits", "Accept edits"),
+            ModeTitle::new("plan", "Plan"),
+            ModeTitle::new("bypass", "Bypass"),
+        ];
+        info.mark = Some(MARK.to_owned());
+        info.look = None;
+        Ok(info)
+    }
+}
+
+// What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is
+// read, so a bundled agent and an outside one are offered and chosen alike.
+coqui_acp_api::guatiao::local_providers!(
+    id = "canoa-pi",
+    version = env!("CARGO_PKG_VERSION"),
+    providers = [acp::PiProvider, acp::PiAccounts, PiVendor]
+);
 
 /// Pi.
 #[derive(Debug, Default, Clone, Copy)]
