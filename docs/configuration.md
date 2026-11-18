@@ -663,6 +663,8 @@ With no `[host.network]` table every fetch the host makes (the Store's downloads
 
 The desktop app's own requests (the list a saved connection's host serves at `canoa.json`, its status probe, the terminal check) are sent by the host it runs through `network/fetch`, so they follow the same settings; the app's own library would use none of them. A served page's requests are its browser's.
 
+The desktop app's WebSocket to a remote Canoa host follows them too: the app asks its host (`network/tunnel`) to open the connection through the proxy the system names for that address, logged in as above, and talks to the host's loopback end; TLS to the remote host is still the app's own, over the tunnel. An address the system sends direct, or this computer's own, is opened by the app itself. WebTransport, which no HTTP proxy carries, is not used by the desktop app, which dials the WebSocket endpoint. The certificate verifier and client certificates above apply to the host's own requests, not to this connection, whose TLS the app makes with the operating system's trust.
+
 A program the host starts (an agent, Node or Python, `git`) is given `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` for that proxy when its environment names none; variables the person or the entry set are never replaced. A proxy chosen per URL (PAC, WPAD) cannot be written as variables, so it is asked about the addresses the programs reach (the package registries, GitHub, the agents' own services; `endpoints` adds to them) and the proxy it names for those is the one given. Each key below is an override and none is needed:
 
 ```toml
