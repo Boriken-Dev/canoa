@@ -32,14 +32,20 @@ fn the_list_is_what_the_loaded_providers_say_of_their_items() {
     assert_eq!(region["origin"], "regions");
     assert_eq!(region["stored"], "item");
     assert_eq!(region["harnesses"], serde_json::json!(["claude-code"]));
-    let fields = region["fields"].as_array().expect("fields");
-    assert_eq!(fields[0]["name"], "name");
-    assert_eq!(fields[0]["required"], true);
-    assert_eq!(fields[2]["shape"], "choice");
-    assert_eq!(fields[2]["default"], "standard");
+    let schema = &region["schema"];
+    assert_eq!(schema["required"], serde_json::json!(["name"]));
     assert_eq!(
-        fields[2]["choices"],
+        schema["properties"]["tier"]["enum"],
         serde_json::json!(["standard", "fast"])
+    );
+    assert_eq!(schema["properties"]["tier"]["default"], "standard");
+    assert_eq!(schema["properties"]["hosts"]["type"], "array");
+    assert_eq!(region["form"]["sections"][0]["id"], "where");
+    assert_eq!(region["form"]["fields"]["name"]["placeholder"], "eu-west");
+    let token = &schema["properties"]["token"];
+    assert!(
+        token["x-sensitive"] == true || token["writeOnly"] == true,
+        "a secret is marked in the schema the form is drawn from: {token}"
     );
     let access = row(&answer, "access");
     assert_eq!(access["stored"], "setting");

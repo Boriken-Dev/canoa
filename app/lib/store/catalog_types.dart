@@ -6,6 +6,7 @@ library;
 import '../config/catalog_specs.dart';
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
+import '../forms/schema_fields.dart' show schemaProperties;
 
 /// What a Store type calls its catalogs, and what they list.
 final class CatalogWords {
@@ -22,37 +23,17 @@ final class CatalogWords {
   static const generic = CatalogWords(noun: 'catalog', plural: 'catalogs', lists: 'entries');
 }
 
-/// One field of a catalog source's form.
-final class SourceField {
-  const SourceField({required this.name, required this.label, required this.shape, this.required = false, this.defaultText, this.help});
-
-  factory SourceField.fromAnswer(Map<Object?, Object?> each) => SourceField(
-    name: '${each['name']}',
-    label: '${each['label'] ?? each['name']}',
-    shape: '${each['shape'] ?? 'text'}',
-    required: each['required'] == true,
-    defaultText: each['default'] as String?,
-    help: each['help'] as String?,
-  );
-
-  final String name, label;
-
-  /// `text`, `list` (one word a line), `number` or `path`.
-  final String shape;
-  final bool required;
-  final String? defaultText, help;
-}
-
-/// A catalog source the host offers a type: the form its fields make.
+/// A catalog source the host offers a type: the form it asks for, a guatiao schema and the guatiao-intake form that shows it.
 final class CatalogSourceForm {
-  const CatalogSourceForm({required this.id, required this.title, this.help, this.extension, this.fields = const []});
+  const CatalogSourceForm({required this.id, required this.title, this.help, this.extension, this.schema = const {}, this.form = const {}});
 
   factory CatalogSourceForm.fromAnswer(Map<Object?, Object?> each) => CatalogSourceForm(
     id: '${each['id']}',
     title: '${each['title'] ?? each['id']}',
     help: each['help'] as String?,
     extension: each['extension'] as String?,
-    fields: [for (final field in each['fields'] as List<Object?>? ?? const []) if (field is Map<Object?, Object?>) SourceField.fromAnswer(field)],
+    schema: each['schema'] is Map ? (each['schema'] as Map).cast<String, Object?>() : const {},
+    form: each['form'] is Map ? (each['form'] as Map).cast<String, Object?>() : const {},
   );
 
   final String id, title;
@@ -60,7 +41,10 @@ final class CatalogSourceForm {
 
   /// The extension that brought it, none for one built in.
   final String? extension;
-  final List<SourceField> fields;
+  final Map<String, Object?> schema, form;
+
+  /// Whether it asks for anything.
+  bool get hasForm => schemaProperties(schema).isNotEmpty;
 }
 
 /// One catalog of a type as the host lists it.

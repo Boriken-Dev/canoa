@@ -16,20 +16,30 @@ const _everywhere = {
   'id': 'read',
   'title': 'Read an address or a file',
   'types': <String>[],
-  'fields': [
-    {'name': 'source', 'label': 'Source', 'shape': 'text', 'required': true},
-  ],
+  'schema': {
+    'type': 'object',
+    'required': ['source'],
+    'properties': {
+      'source': {'type': 'string', 'title': 'Source'},
+    },
+  },
+  'form': <String, Object?>{},
 };
 
 const _command = {
   'id': 'command',
   'title': 'Run a program',
   'types': <String>[],
-  'fields': [
-    {'name': 'command', 'label': 'Program and arguments', 'shape': 'list', 'required': true},
-    {'name': 'cwd', 'label': 'Folder', 'shape': 'path', 'required': false},
-    {'name': 'timeout', 'label': 'Seconds it may run', 'shape': 'number', 'required': false, 'default': '60'},
-  ],
+  'schema': {
+    'type': 'object',
+    'required': ['command'],
+    'properties': {
+      'command': {'type': 'array', 'items': {'type': 'string'}, 'title': 'Program and arguments'},
+      'cwd': {'type': ['string', 'null'], 'title': 'Folder'},
+      'timeout': {'type': 'integer', 'title': 'Seconds it may run', 'default': 60},
+    },
+  },
+  'form': <String, Object?>{},
 };
 
 /// A source an extension adds, which serves only the Skills type.
@@ -38,10 +48,22 @@ const _standin = {
   'title': 'A stand-in',
   'extension': 'standin_ext',
   'types': ['skills'],
-  'fields': [
-    {'name': 'team', 'label': 'Team name', 'shape': 'text', 'required': true, 'help': "Which team's list"},
-    {'name': 'seats', 'label': 'Seats', 'shape': 'number', 'required': false},
-  ],
+  'schema': {
+    'type': 'object',
+    'required': ['team'],
+    'properties': {
+      'team': {'type': 'string', 'title': 'Team name', 'description': "Which team's list"},
+      'seats': {'type': ['integer', 'null'], 'title': 'Seats'},
+      'layout': {'type': ['string', 'null'], 'title': 'Layout', 'enum': ['flat', 'nested']},
+      'recent': {'type': ['boolean', 'null'], 'title': 'Recent only'},
+      'key': {'type': ['string', 'null'], 'title': 'Key', 'writeOnly': true, 'x-sensitive': true},
+    },
+  },
+  'form': {
+    'fields': {
+      'team': {'placeholder': 'platform'},
+    },
+  },
 };
 
 const _types = [
@@ -266,7 +288,7 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
       await tester.tap(find.text('A stand-in (standin_ext)').last);
       await tester.pumpAndSettle();
       expect(find.text('Team name'), findsOneWidget);
-      expect(find.text('Seats, optional'), findsOneWidget);
+      expect(find.text('Seats'), findsOneWidget);
       expect(find.text("Which team's list"), findsOneWidget);
       expect(find.byKey(const Key('store-catalog-source')), findsNothing, reason: 'the read form is gone');
 
@@ -275,13 +297,13 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
       expect(find.text('Team name is needed'), findsOneWidget);
       expect(stored.catalogSpecs('skills').keys, ['mine']);
 
-      await tester.enterText(find.byKey(const Key('store-field-standin-team')), 'platform');
-      await tester.enterText(find.byKey(const Key('store-field-standin-seats')), 'many');
+      await tester.enterText(find.byKey(const Key('store-standin-field-team')), 'platform');
+      await tester.enterText(find.byKey(const Key('store-standin-field-seats')), 'many');
       await tester.tap(find.byKey(const Key('store-add-catalog')));
       await tester.pumpAndSettle();
       expect(find.text('Seats is a whole number'), findsOneWidget);
 
-      await tester.enterText(find.byKey(const Key('store-field-standin-seats')), '12');
+      await tester.enterText(find.byKey(const Key('store-standin-field-seats')), '12');
       await tester.tap(find.byKey(const Key('store-add-catalog')));
       await tester.pumpAndSettle();
       final added = stored.catalogSpecs('skills')['standin']!;
@@ -291,6 +313,32 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
       expect(find.textContaining('Read by A stand-in'), findsOneWidget);
     });
 
+    testWidgets('a yes or no and a choice are menus, a sensitive field is masked, and what is filled in is written to canoa.cfg as typed', (tester) async {
+      await open(tester, 'skills');
+      await tester.tap(find.byKey(const Key('store-source-provider')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('A stand-in (standin_ext)').last);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byKey(const Key('store-standin-field-team'))).decoration!.hintText, 'platform');
+      expect(tester.widget<TextField>(find.byKey(const Key('store-standin-field-key'))).obscureText, isTrue);
+      expect(tester.widget<TextField>(find.byKey(const Key('store-standin-field-team'))).obscureText, isFalse);
+      await tester.enterText(find.byKey(const Key('store-standin-field-team')), 'platform');
+      await tester.enterText(find.byKey(const Key('store-standin-field-key')), 'abc');
+      await tester.tap(find.byKey(const Key('store-standin-field-layout')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('nested').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('store-standin-field-recent')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Yes').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('store-add-catalog')));
+      await tester.pumpAndSettle();
+      const fields = {'team': 'platform', 'layout': 'nested', 'recent': true, 'key': 'abc'};
+      expect(stored.catalogSpecs('skills')['standin']!.fields, fields);
+      expect(CanoaConfig.parse(stored.encode()).catalogSpecs('skills')['standin']!.fields, fields);
+    });
+
     testWidgets('a program as the source of overlays: its words, one a line, and the seconds it may run', (tester) async {
       await open(tester, 'overlays');
       await tester.tap(find.byKey(const Key('store-source-provider')));
@@ -298,8 +346,8 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
       await tester.tap(find.text('Run a program').last);
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('store-catalog-label')), 'made');
-      await tester.enterText(find.byKey(const Key('store-field-command-command')), 'python\ngen.py\n--all');
-      await tester.enterText(find.byKey(const Key('store-field-command-timeout')), '5');
+      await tester.enterText(find.byKey(const Key('store-command-field-command')), 'python\ngen.py\n--all');
+      await tester.enterText(find.byKey(const Key('store-command-field-timeout')), '5');
       await tester.tap(find.byKey(const Key('store-add-catalog')));
       await tester.pumpAndSettle();
       final made = stored.catalogSpecs('overlays')['made']!;

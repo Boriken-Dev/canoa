@@ -813,7 +813,7 @@ cwd = "C:/work/catalogs"                                              # optional
 timeout = 60                                                          # optional: seconds it may run
 ```
 
-Each source describes itself to the Store: its name, the types it serves (or all of them) and the fields of its form, which is what
+Each source describes itself to the Store: its name, the types it serves (or all of them) and the form it asks for (a schema, and how to show it), which is what
 Store settings shows when you add a catalog to a type. Two come with Canoa. **`read`** reads what the type reads itself: a git source
 (overlays and extensions), `owner/repo`, a git URL or a folder (skills), a registry's address (MCP servers). **`command`** runs a
 program you name, as you and with your environment, each time the catalog is refreshed, and takes its standard output (or the file named

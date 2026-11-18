@@ -2,12 +2,12 @@
 //! They are providers of the `profile_item` kind in a library of their own, registered the way an extension's library is, so the host
 //! treats them as it treats any item an extension adds.
 
-use canoa::form::Field;
 use canoa::profile_item::{
     ApplyRequest, ItemEffect, ItemInfo, NetworkEffect, ProfileItem, Variable, bad_value_error,
 };
-use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::ProviderError;
+use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
+use guatiao_intake::Form;
 use serde_json::Value;
 
 use super::items::values_of;
@@ -35,6 +35,57 @@ fn words(values: &serde_json::Map<String, Value>, name: &str) -> Vec<String> {
 }
 
 /// How the session's programs reach the network.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(rename_all = "snake_case")]
+pub enum ProxyMode {
+    /// Through a proxy the host runs on this computer's loopback address, which follows the system.
+    System,
+    /// No proxy is given to the session's programs.
+    None,
+    /// The proxy at the address.
+    Proxy,
+    /// As system, choosing by the PAC script.
+    Pac,
+    /// A program of the person's that listens and is given to the session's programs.
+    Command,
+}
+
+const fn default_mode() -> ProxyMode {
+    ProxyMode::System
+}
+
+/// What the proxy item holds.
+#[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code, reason = "only its description is read")]
+pub struct ProxyValues {
+    /// system: through a proxy the host runs on this computer's loopback address, which follows the system (PAC, login, bypass list). none: no proxy is given to its programs. proxy: the proxy at the address below. pac: as system, choosing by the PAC script below. command: a program of yours that listens and is given to its programs.
+    #[map(default = default_mode())]
+    #[schema(title = "Reach the network")]
+    pub mode: ProxyMode,
+    /// proxy: [scheme://][user[:password]@]host[:port]. pac: the script's address or a file.
+    #[schema(title = "Address")]
+    pub url: Option<String>,
+    /// command: the program first, then its arguments; {listen} is replaced by the address host:port it must listen on.
+    #[map(default)]
+    #[schema(title = "Program and arguments")]
+    pub command: Vec<String>,
+    /// In the NO_PROXY form. Empty keeps what the network chooses.
+    #[map(default)]
+    #[schema(title = "Hosts that go direct")]
+    pub bypass: Vec<String>,
+    /// The user the proxy asks for.
+    #[schema(title = "Proxy user name")]
+    pub user: Option<String>,
+    /// The name of an environment variable of the host that holds the proxy user's password; the password is never kept in the profile.
+    #[schema(title = "Variable holding the password")]
+    pub password_variable: Option<String>,
+    /// system and pac only. A host (example.com), a host and everything under it (*.example.com) or an address, one per line. For these alone the proxy ends the program's TLS with a certificate of this session's, signed by an authority made for this session in memory (never written to disk, limited to exactly these hosts, gone with the session) that the session's programs alone are told to trust, and makes its own TLS to the host, presenting the client certificate your keystores or [host.network] choose. A program that pins the certificates it trusts, or reads no CA file variable (Windows' own tools), fails for them. Empty ends no TLS.
+    #[map(default)]
+    #[schema(title = "Hosts that get your client certificate")]
+    pub client_certificate_hosts: Vec<String>,
+}
+
+/// How the session's programs reach the network.
 #[derive(Default, Provider)]
 #[provider(ProfileItem, id = "proxy_item", crate = ::coqui_acp_api::guatiao)]
 pub struct ProxyItem;
@@ -46,40 +97,7 @@ impl ProfileItem for ProxyItem {
             "How this session's programs reach the network. By default the host runs a proxy for the session alone, which sends each connection as this computer's own network would."
                 .to_owned(),
         );
-        let mut mode = Field::choice(
-            "mode",
-            "Reach the network",
-            ["system", "none", "proxy", "pac", "command"],
-        );
-        mode.default = Some("system".to_owned());
-        mode.help = Some(
-            "system: through a proxy the host runs on this computer's loopback address, which follows the system (PAC, login, bypass list). none: no proxy is given to its programs. proxy: the proxy at the address below. pac: as system, choosing by the PAC script below. command: a program of yours that listens and is given to its programs."
-                .to_owned(),
-        );
-        let mut url = Field::new("url", "Address", "text");
-        url.help = Some(
-            "proxy: [scheme://][user[:password]@]host[:port]. pac: the script's address or a file."
-                .to_owned(),
-        );
-        let mut command = Field::new("command", "Program and arguments", "list");
-        command.help = Some("command: the program first, then its arguments; {listen} is replaced by the address host:port it must listen on.".to_owned());
-        let mut bypass = Field::new("bypass", "Hosts that go direct", "list");
-        bypass.help =
-            Some("In the NO_PROXY form. Empty keeps what the network chooses.".to_owned());
-        let user = Field::new("user", "Proxy user name", "text");
-        let mut password = Field::new("password_variable", "Variable holding the password", "text");
-        password.help = Some("The name of an environment variable of the host that holds the proxy user's password; the password is never kept in the profile.".to_owned());
-        let mut certificate = Field::new(
-            "client_certificate_hosts",
-            "Hosts that get your client certificate",
-            "list",
-        );
-        certificate.help = Some(
-            "system and pac only. A host (example.com), a host and everything under it (*.example.com) or an address, one per line. For these alone the proxy ends the program's TLS with a certificate of this session's, signed by an authority made for this session in memory (never written to disk, limited to exactly these hosts, gone with the session) that the session's programs alone are told to trust, and makes its own TLS to the host, presenting the client certificate your keystores or [host.network] choose. A program that pins the certificates it trusts, or reads no CA file variable (Windows' own tools), fails for them. Empty ends no TLS."
-                .to_owned(),
-        );
-        info.fields = vec![mode, url, command, bypass, user, password, certificate];
-        Ok(info)
+        info.taking::<ProxyValues>()
     }
 
     fn apply(&self, request: ApplyRequest) -> Result<ItemEffect, ProviderError> {
@@ -117,6 +135,25 @@ impl ProfileItem for ProxyItem {
     }
 }
 
+/// What the identity item holds.
+#[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code, reason = "only its description is read")]
+pub struct IdentityValues {
+    /// The name git commits under.
+    #[schema(title = "Name")]
+    pub name: Option<String>,
+    /// The address git commits under.
+    #[schema(title = "Email address")]
+    pub email: Option<String>,
+    /// What AGENTS_ACCOUNT says to the session's programs.
+    #[schema(title = "Account label")]
+    pub account: Option<String>,
+    /// One NAME=value per line.
+    #[map(default)]
+    #[schema(title = "Other variables")]
+    pub variables: Vec<String>,
+}
+
 /// Who the session's programs say they are.
 #[derive(Default, Provider)]
 #[provider(ProfileItem, id = "identity_item", crate = ::coqui_acp_api::guatiao)]
@@ -129,14 +166,7 @@ impl ProfileItem for IdentityItem {
             "The name and address git commits under, the account label the session reports, and any other variable that says who is working."
                 .to_owned(),
         );
-        let name = Field::new("name", "Name", "text");
-        let email = Field::new("email", "Email address", "text");
-        let mut account = Field::new("account", "Account label", "text");
-        account.help = Some("What AGENTS_ACCOUNT says to the session's programs.".to_owned());
-        let mut variables = Field::new("variables", "Other variables", "list");
-        variables.help = Some("One NAME=value per line.".to_owned());
-        info.fields = vec![name, email, account, variables];
-        Ok(info)
+        info.taking::<IdentityValues>()
     }
 
     fn apply(&self, request: ApplyRequest) -> Result<ItemEffect, ProviderError> {

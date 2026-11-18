@@ -12,6 +12,7 @@ pub mod config;
 pub mod control;
 mod delegate;
 mod format;
+mod forms;
 mod gateway;
 pub mod harness;
 mod history;

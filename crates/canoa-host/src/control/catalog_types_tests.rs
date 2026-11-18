@@ -183,11 +183,26 @@ fn a_source_is_offered_in_the_forms_of_the_types_it_serves_with_the_fields_it_de
         .expect("skills");
     let standin = &skills["sources"][4];
     assert_eq!(standin["extension"], "standin_ext");
-    assert_eq!(standin["fields"][0]["name"], "team");
-    assert_eq!(standin["fields"][0]["label"], "Team name");
-    assert_eq!(standin["fields"][0]["required"], true);
-    assert_eq!(standin["fields"][0]["help"], "Which team's list");
-    assert_eq!(standin["fields"][1]["shape"], "number");
+    let schema = &standin["schema"];
+    assert_eq!(schema["required"], json!(["team"]));
+    assert_eq!(schema["properties"]["team"]["title"], "Team name");
+    assert_eq!(
+        schema["properties"]["team"]["description"],
+        "Which team's list"
+    );
+    assert!(
+        schema["properties"]["seats"]["type"]
+            .to_string()
+            .contains("integer")
+    );
+    assert!(
+        standin["form"].is_object(),
+        "the form the source declares: {standin}"
+    );
+    assert!(
+        skills["sources"][0]["schema"].is_object(),
+        "read asks for its source"
+    );
 }
 
 #[cfg(windows)]

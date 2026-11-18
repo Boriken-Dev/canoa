@@ -22,8 +22,7 @@ use canoa::speech::{
 };
 use coqui_acp_api::ProcessSpawner as _;
 use coqui_acp_api::guatiao::library::Object;
-use coqui_acp_api::guatiao::{Alloc, FromValue, Schema};
-use guatiao_intake::Screen;
+use coqui_acp_api::guatiao::{Alloc, FromValue};
 use serde_json::{Map, Value, json};
 
 use super::files::Files;
@@ -72,15 +71,7 @@ where
     Ok(Arc::new(P::from(settings)))
 }
 
-pub(super) fn schema_of<S: Schema>() -> Result<Value, String> {
-    let value = S::schema().map_err(|error| error.to_string())?;
-    serde_json::to_value(guatiao_serde::Serializable::from(&value)).map_err(|e| e.to_string())
-}
-
-pub(super) fn form_of<S: Screen>() -> Result<Value, String> {
-    let value = S::form(Alloc::rust()).map_err(|error| error.to_string())?;
-    serde_json::to_value(guatiao_serde::Serializable::from(&value)).map_err(|e| e.to_string())
-}
+pub(super) use crate::forms::{form_of, members_of, schema_of, secrets_of};
 
 const KINDS: [Kind; 2] = [
     Kind {
@@ -103,26 +94,6 @@ const KINDS: [Kind; 2] = [
 
 fn kind(id: &str) -> Option<&'static Kind> {
     KINDS.iter().find(|kind| kind.id == id)
-}
-
-/// The settings a schema marks as secrets: a read never answers them.
-pub(super) fn secrets_of(schema: &Value) -> BTreeSet<String> {
-    schema["properties"]
-        .as_object()
-        .into_iter()
-        .flatten()
-        .filter(|(_, field)| field["writeOnly"] == true || field["x-sensitive"] == true)
-        .map(|(key, _)| key.clone())
-        .collect()
-}
-
-pub(super) fn members_of(schema: &Value) -> BTreeSet<String> {
-    schema["properties"]
-        .as_object()
-        .into_iter()
-        .flatten()
-        .map(|(key, _)| key.clone())
-        .collect()
 }
 
 /// One recording a client has open.

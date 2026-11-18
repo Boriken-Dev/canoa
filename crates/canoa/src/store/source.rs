@@ -11,88 +11,14 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use coqui_acp_api::guatiao::library::ProviderError;
-use coqui_acp_api::guatiao::{FromValue, Schema, ToValue};
+use coqui_acp_api::guatiao::{FromValue, Schema, ToValue, Value};
+use guatiao_intake::Screen;
 
 /// The name of the `catalog_source` kind.
 pub const KIND: &str = "catalog_source";
 
 /// The versions of the `catalog_source` kind this host offers.
 pub const KIND_VERSIONS: [&str; 1] = ["1"];
-
-/// The shapes a [`SourceField`]'s value has: one line of text, a list of words (a program and its arguments), a whole number, or
-/// the path of a file or folder on this computer.
-pub const FIELD_SHAPES: [&str; 4] = ["text", "list", "number", "path"];
-
-/// One field of a source's form.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
-#[map(crate = ::coqui_acp_api::guatiao)]
-#[non_exhaustive]
-pub struct SourceField {
-    /// The key canoa.cfg keeps it under, and the key of the field in a [`ReadRequest`]: a word of lower-case letters, digits and
-    /// `_`.
-    pub name: String,
-    /// What the form calls it.
-    pub label: String,
-    /// One of [`FIELD_SHAPES`].
-    pub shape: String,
-    /// Whether the form needs it.
-    #[map(default)]
-    pub required: bool,
-    /// What it holds when the person leaves it empty, as the form shows it.
-    pub default: Option<String>,
-    /// A line of help under the field.
-    pub help: Option<String>,
-}
-
-impl SourceField {
-    /// A field of `shape`, not required, with no default and no help.
-    #[must_use]
-    pub fn new(
-        name: impl Into<String>,
-        label: impl Into<String>,
-        shape: impl Into<String>,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            label: label.into(),
-            shape: shape.into(),
-            required: false,
-            default: None,
-            help: None,
-        }
-    }
-
-    /// This field, needed by the form.
-    #[must_use]
-    pub fn required(mut self) -> Self {
-        self.required = true;
-        self
-    }
-
-    /// Why this field cannot be one, or `None` when it can.
-    #[must_use]
-    pub fn problem(&self) -> Option<String> {
-        let word = !self.name.is_empty()
-            && self.name.len() <= 32
-            && self
-                .name
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
-        if !word {
-            return Some(format!(
-                "the field name {:?} is not 1 to 32 lower-case letters, digits and _",
-                self.name
-            ));
-        }
-        if !FIELD_SHAPES.contains(&self.shape.as_str()) {
-            return Some(format!(
-                "the field {:?} has the shape {:?}, which is none of {FIELD_SHAPES:?}",
-                self.name, self.shape
-            ));
-        }
-        None
-    }
-}
 
 /// What a source provider is, from [`CatalogSourceProvider::describe`].
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
@@ -109,9 +35,11 @@ pub struct SourceInfo {
     /// every type.
     #[map(default)]
     pub types: Vec<String>,
-    /// The fields its form asks for.
-    #[map(default)]
-    pub fields: Vec<SourceField>,
+    /// The values its form asks for, as a guatiao schema of an object; none for a source that asks for nothing. A member the
+    /// schema marks sensitive is never shown in clear.
+    pub schema: Option<Value>,
+    /// How the schema is shown, a guatiao-intake form document; none shows the form the schema implies.
+    pub form: Option<Value>,
 }
 
 impl SourceInfo {
@@ -123,8 +51,21 @@ impl SourceInfo {
             title: title.into(),
             help: None,
             types: Vec::new(),
-            fields: Vec::new(),
+            schema: None,
+            form: None,
         }
+    }
+
+    /// This source asking for the values `S` describes, shown with the screen `S` declares.
+    ///
+    /// # Errors
+    ///
+    /// When `S`'s schema or form cannot be written.
+    pub fn asking<S: Schema + Screen>(mut self) -> Result<Self, ProviderError> {
+        let (schema, form) = crate::settings::describe::<S>()?;
+        self.schema = Some(schema);
+        self.form = Some(form);
+        Ok(self)
     }
 
     /// Whether it serves the Store type `kind`.
@@ -151,15 +92,7 @@ impl SourceInfo {
         if self.title.trim().is_empty() {
             return Some(format!("the source {:?} has no title", self.id));
         }
-        for (at, field) in self.fields.iter().enumerate() {
-            if let Some(problem) = field.problem() {
-                return Some(problem);
-            }
-            if self.fields[..at].iter().any(|each| each.name == field.name) {
-                return Some(format!("the field {:?} is listed twice", field.name));
-            }
-        }
-        None
+        crate::settings::problem(self.schema.as_ref(), self.form.as_ref())
     }
 }
 
@@ -172,7 +105,7 @@ pub struct ReadRequest {
     pub kind: String,
     /// The label the person gave the catalog.
     pub label: String,
-    /// What the form's fields hold, as a JSON object of text, numbers and lists of text, keyed by field name. A field the person
+    /// What the form's fields hold, as a JSON object of what the schema's members hold, keyed by member name. A field the person
     /// left empty is absent, so the provider uses its own default.
     pub fields: String,
 }

@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-Seven Cargo features (`vendor` is the `agent_vendor` kind, `form` the fields of a provider's form and `profile-item` the `profile_item` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
+Six Cargo features (`vendor` is the `agent_vendor` kind and `profile-item` the `profile_item` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
 The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`) and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
 
@@ -29,20 +29,9 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
 - `standards` are the credential standards that are the vendor's own, each with its name. `names` are the `agentInfo.name` values the agent reports; `markers` are the `initialize` `_meta` keys that are `true` for an agent that reports no name. `modes` are the modes it is known to offer before it has run.
 - `mark` is SVG text: a square `viewBox` and `path` elements with a `d` and an optional `#RRGGBB` `fill` (on the path or the root); a path with none, or `currentColor`, takes the text's colour. `look` is a JSON document with an `id`, a `label`, the agent's `vendor` (its `agent` id) and, for `light` and `dark`, colour tokens, as `looks/list` serves it. Both are at most `MAX_DOCUMENT_TEXT` characters.
 
-## `canoa::form` (feature `form`)
+## The form a provider asks for
 
-The fields of a form a provider describes, for any kind whose provider asks the person for something (a profile item asks for the values it takes). The application draws the form from the description and never knows the provider. Needs `coqui-acp-api` and `serde_json`.
-
-```rust
-pub const SHAPES: [&str; 6] = ["text", "list", "number", "path", "bool", "choice"];
-#[non_exhaustive] pub struct Field { pub name: String, pub label: String, pub shape: String, pub required: bool, pub default: Option<String>,
-    pub help: Option<String>, pub choices: Vec<String> }
-impl Field { pub fn new(name, label, shape) -> Self; pub fn choice(name, label, choices) -> Self; pub fn required(self) -> Self;
-    pub fn problem(&self) -> Option<String>; pub fn mismatch(&self, value: &serde_json::Value) -> Option<String> }
-```
-
-- `name` is 1 to 32 lower-case letters, digits and `_`; the values are a JSON object keyed by it, and a field left empty is absent. `text` and `path` are strings, `list` a list of strings, `number` a whole number, `bool` true or false, `choice` one of `choices` (which only a `choice` lists, and which it must).
-- `problem` says why a field cannot be one; `mismatch` says why a value is not of its field's shape. `required` and `default` are the form's: whether a required field is present is the caller's to check.
+A provider that asks the person for something (a profile item, a catalog source) describes it the way every Guatiao provider does: a **guatiao schema** of an object (`schema: Option<Value>`) whose members are what it asks for, and beside it an optional **guatiao-intake form** document (`form: Option<Value>`: sections, a member's widget, placeholder, unit and `visibleWhen`). A type that derives `Schema` and `Form` gives both: `ItemInfo::taking::<S>()` and `SourceInfo::asking::<S>()` fill them from it. `problem` refuses a schema that is not an object's, a form with no schema, and a form that names a member the schema lacks (`guatiao_intake::check`). A member is a secret when the schema marks it sensitive (`Secret<T>`, `#[schema(sensitive)]`): the application draws it masked. The values travel as a JSON object keyed by member name, a member left empty absent, and the host checks them against the schema before a provider sees them. The application draws every such form, speech providers' settings included, with one renderer.
 
 ## `canoa::profile_item` (feature `profile-item`)
 
@@ -50,8 +39,9 @@ The `profile_item` kind: one thing a profile may set, and what it does to a sess
 
 ```rust
 pub const KIND: &str = "profile_item";   pub const KIND_VERSIONS: [&str; 1] = ["1"];   pub const NETWORK_MODES: [&str; 5] = [...];
-#[non_exhaustive] pub struct ItemInfo { pub id: String, pub title: String, pub help: Option<String>, pub harnesses: Vec<String>, pub fields: Vec<Field> }
-#[non_exhaustive] pub struct ApplyRequest { pub harness: String, pub values: String }   // values: a JSON object keyed by field name
+#[non_exhaustive] pub struct ItemInfo { pub id: String, pub title: String, pub help: Option<String>, pub harnesses: Vec<String>,
+    pub schema: Option<Value>, pub form: Option<Value> }
+#[non_exhaustive] pub struct ApplyRequest { pub harness: String, pub values: String }   // values: a JSON object keyed by the schema's members
 #[non_exhaustive] pub struct Variable { pub name: String, pub value: String }
 #[non_exhaustive] pub struct Setting { pub key: String, pub value: String }
 #[non_exhaustive] pub struct NetworkEffect { pub mode: String, pub url: Option<String>, pub command: Vec<String>, pub bypass: Vec<String>,
@@ -65,9 +55,9 @@ pub fn bad_value_error(why) -> ProviderError;   pub fn internal_error(why) -> Pr
 ```
 
 - `id` is the key the profile keeps the item's values under; `harnesses` are AOS harness ids (`claude-code`, the value of `AGENTS_HARNESS`), none meaning every harness. A session on another harness (or on one with no id) does not apply the item and says so.
-- `apply` runs when a session starts, with the values already checked against `fields`; it answers what the session gets: `env` (variables its programs are given; one the profile's own environment sets keeps that value), `args` (added to the command line of a program the host starts), `settings` (`model`, `effort`, `mode`, `context`, `access.sandbox`, `access.network`, `access.approvals`: the session's own, a key it does not have is refused), `network` and `notes` (lines for the report, which carry no value).
+- `apply` runs when a session starts, with the values already checked against `schema`; it answers what the session gets: `env` (variables its programs are given; one the profile's own environment sets keeps that value), `args` (added to the command line of a program the host starts), `settings` (`model`, `effort`, `mode`, `context`, `access.sandbox`, `access.network`, `access.approvals`: the session's own, a key it does not have is refused), `network` and `notes` (lines for the report, which carry no value).
 - `NetworkEffect::mode` is one of `system` (the host runs a proxy on its loopback address for the session alone, which sends each connection as the host's own network would), `none` (the programs are given no proxy: `NO_PROXY=*`, which the host's own process starter reads as no system proxy to add, and the host's own requests for the session go direct), `proxy` (the proxy at `url`, given to the programs as it is), `pac` (as `system`, chosen by the PAC script at `url`) and `command` (a program the host starts, in which `{listen}` stands for the `host:port` it must listen on). `intercept` names hosts (`example.com`, `*.example.com` for a name and what is under it, or an address) whose TLS the host's proxy ends so as to present the person's client certificate: only `system` and `pac`, which run that proxy, take it (`problem()` says so), and every other host stays a tunnel. `bypass` is hosts that go direct in the `NO_PROXY` form; `user` and the name of a host variable holding its password (`password_variable`) are the proxy login, and the password is never in a profile.
-- `ItemInfo::problem` and `ItemEffect::problem` say why a description or an answer cannot be used (a bad id, a repeated field, a variable name that is no name, a value over `MAX_TEXT`, a network that lacks its address or program).
+- `ItemInfo::problem` and `ItemEffect::problem` say why a description or an answer cannot be used (a bad id, a form that does not fit its schema, a variable name that is no name, a value over `MAX_TEXT`, a network that lacks its address or program).
 
 ## `canoa::network` (feature `network`)
 
@@ -208,7 +198,7 @@ A Guatiao kind that adds types to the Store: `describe() -> ExtensionInfo { titl
 
 ## `catalog_source` (`canoa::store::source`, feature `store`)
 
-A Guatiao kind for where a Store type's catalog comes from, and the form that names one. `describe() -> SourceInfo { id, title, help?, types: Vec<String>, fields: Vec<SourceField { name, label, shape, required, default?, help? }> }` is the same answer on every call with nothing run: `types` are the Store type ids it serves (none means every type), `shape` is one of `FIELD_SHAPES` (`text`, `list` of words, `number`, `path`), and `SourceInfo::problem` / `SourceField::problem` say why an id, a name or a shape is refused. `read(ReadRequest { kind, label, fields }) -> String` answers with the catalog's text in the type's own format, or fails with the reason; `fields` is a JSON object of what the form held (a field left empty is absent), and it runs on every refresh of the catalog. canoa.cfg keeps `{ provider = ID, ...fields }` for a catalog under `[store.<type>.catalogs.<label>]`, and a bare string for the provider `read`. `KIND` and `KIND_VERSIONS` name the kind and its versions.
+A Guatiao kind for where a Store type's catalog comes from, and the form that names one. `describe() -> SourceInfo { id, title, help?, types: Vec<String>, schema?: Value, form?: Value }` is the same answer on every call with nothing run: `types` are the Store type ids it serves (none means every type), `schema` and `form` are what the source asks for (see "The form a provider asks for"), and `SourceInfo::problem` says why an id, a title or a form is refused. `read(ReadRequest { kind, label, fields }) -> String` answers with the catalog's text in the type's own format, or fails with the reason; `fields` is a JSON object of what the form held (a member left empty is absent), and it runs on every refresh of the catalog. canoa.cfg keeps `{ provider = ID, ...fields }` for a catalog under `[store.<type>.catalogs.<label>]`, and a bare string for the provider `read`. `KIND` and `KIND_VERSIONS` name the kind and its versions.
 
 ## `program_store` (`canoa::store`, feature `store`)
 

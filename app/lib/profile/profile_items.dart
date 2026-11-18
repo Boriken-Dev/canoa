@@ -1,52 +1,13 @@
 /// The items a profile may set, as the host lists them: each is a provider the host loaded (the ones Canoa carries, the ones that ship
 /// with it and the ones an extension adds), and the app knows an item only by what its provider says of it: its name, the harnesses
-/// it applies to and the form it asks for.
+/// it applies to and the form it asks for, a guatiao schema and the guatiao-intake form that shows it.
 library;
 
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-/// One field of an item's form.
-final class ItemField {
-  const ItemField({
-    required this.name,
-    required this.label,
-    required this.shape,
-    this.required = false,
-    this.defaultValue,
-    this.help,
-    this.choices = const [],
-  });
-
-  /// The key its value is kept under.
-  final String name;
-  final String label;
-
-  /// `text`, `list`, `number`, `path`, `bool` or `choice`.
-  final String shape;
-  final bool required;
-
-  /// What it holds when left empty, as the form shows it.
-  final String? defaultValue;
-  final String? help;
-
-  /// The words a `choice` may be.
-  final List<String> choices;
-
-  static ItemField? read(Object? raw) {
-    if (raw is! Map || raw['name'] is! String || raw['label'] is! String || raw['shape'] is! String) return null;
-    return ItemField(
-      name: raw['name'] as String,
-      label: raw['label'] as String,
-      shape: raw['shape'] as String,
-      required: raw['required'] == true,
-      defaultValue: raw['default'] as String?,
-      help: raw['help'] as String?,
-      choices: [if (raw['choices'] is List) for (final each in raw['choices'] as List) if (each is String) each],
-    );
-  }
-}
+import '../forms/schema_fields.dart' show schemaProperties;
 
 /// One thing a profile may set.
 final class ProfileItemInfo {
@@ -57,7 +18,8 @@ final class ProfileItemInfo {
     this.help,
     this.stored = 'item',
     this.harnesses = const [],
-    this.fields = const [],
+    this.schema = const {},
+    this.form = const {},
   });
 
   /// The id the profile keeps its values under.
@@ -73,7 +35,15 @@ final class ProfileItemInfo {
 
   /// The ids of the harnesses it applies to; none means every harness.
   final List<String> harnesses;
-  final List<ItemField> fields;
+
+  /// The values it takes, as a JSON Schema of an object; empty for an item that takes none.
+  final Map<String, Object?> schema;
+
+  /// How the schema is drawn (sections, widgets, `visibleWhen`).
+  final Map<String, Object?> form;
+
+  /// Whether it asks for anything.
+  bool get hasForm => schemaProperties(schema).isNotEmpty;
 
   bool get isSetting => stored == 'setting';
 
@@ -86,7 +56,8 @@ final class ProfileItemInfo {
       help: raw['help'] as String?,
       stored: raw['stored'] as String? ?? 'item',
       harnesses: [if (raw['harnesses'] is List) for (final each in raw['harnesses'] as List) if (each is String) each],
-      fields: [if (raw['fields'] is List) for (final each in raw['fields'] as List) ?ItemField.read(each)],
+      schema: raw['schema'] is Map ? (raw['schema'] as Map).cast<String, Object?>() : const {},
+      form: raw['form'] is Map ? (raw['form'] as Map).cast<String, Object?>() : const {},
     );
   }
 }

@@ -5,13 +5,12 @@
 
 extern crate alloc;
 
-#[cfg(feature = "form")]
-#[cfg_attr(docsrs, doc(cfg(feature = "form")))]
-pub mod form;
 pub mod preset;
 #[cfg(feature = "profile-item")]
 #[cfg_attr(docsrs, doc(cfg(feature = "profile-item")))]
 pub mod profile_item;
+#[cfg(any(feature = "profile-item", feature = "store"))]
+mod settings;
 
 #[cfg(feature = "network")]
 #[cfg_attr(docsrs, doc(cfg(feature = "network")))]

@@ -140,16 +140,11 @@ fn values_that_do_not_fit_the_form_or_a_harness_it_is_not_for_are_not_applied_an
         not(&applied, "region")
     };
     let ok = json!({"name": "n"});
-    assert!(try_it(json!({"nom": "n"}), Some("claude-code")).contains("nom is not a field"));
-    assert!(try_it(json!({}), Some("claude-code")).contains("name is needed"));
-    assert!(try_it(json!({"name": 3}), Some("claude-code")).contains("name is"));
-    assert!(
-        try_it(json!({"name": "n", "tier": "slow"}), Some("claude-code"))
-            .contains("tier is one of")
-    );
-    assert!(
-        try_it(json!({"name": "n", "hosts": [1]}), Some("claude-code")).contains("hosts is a list")
-    );
+    assert!(try_it(json!({"nom": "n"}), Some("claude-code")).contains("unknown field 'nom'"));
+    assert!(try_it(json!({}), Some("claude-code")).contains("'name'"));
+    assert!(try_it(json!({"name": 3}), Some("claude-code")).contains("'name'"));
+    assert!(try_it(json!({"name": "n", "tier": "slow"}), Some("claude-code")).contains("'tier'"));
+    assert!(try_it(json!({"name": "n", "hosts": [1]}), Some("claude-code")).contains("hosts"));
     assert!(try_it(ok.clone(), Some("codex")).contains("claude-code only"));
     assert!(try_it(ok, None).contains("claude-code only"));
 }
@@ -199,7 +194,7 @@ fn the_built_in_items_turn_a_profile_into_the_sessions_own_settings() {
     assert_eq!(layer.contexts.len(), 1);
     // A value the form does not allow is not applied, whatever the file said.
     let bad = ItemCatalog::built_in().apply_all(&one("access", &json!({"sandbox": "open"})), None);
-    assert!(not(&bad, "access").contains("sandbox is one of"));
+    assert!(not(&bad, "access").contains("'sandbox'"));
 }
 
 #[test]

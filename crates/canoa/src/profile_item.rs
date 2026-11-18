@@ -13,9 +13,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use coqui_acp_api::guatiao::library::ProviderError;
-use coqui_acp_api::guatiao::{FromValue, Schema, Status, ToValue};
-
-use crate::form::Field;
+use coqui_acp_api::guatiao::{FromValue, Schema, Status, ToValue, Value};
+use guatiao_intake::Screen;
 
 /// The name of the `profile_item` kind.
 pub const KIND: &str = "profile_item";
@@ -53,9 +52,12 @@ pub struct ItemInfo {
     /// `AGENTS_HARNESS`); none means every harness.
     #[map(default)]
     pub harnesses: Vec<String>,
-    /// The fields its form asks for.
-    #[map(default)]
-    pub fields: Vec<Field>,
+    /// The values it takes, as a guatiao schema of an object whose members are what its form asks for; none for an item that takes
+    /// no values. A member the schema marks sensitive is never shown in clear.
+    pub schema: Option<Value>,
+    /// How the schema is shown, a guatiao-intake form document (sections, widgets, `visibleWhen`); none shows the form the schema
+    /// implies.
+    pub form: Option<Value>,
 }
 
 impl ItemInfo {
@@ -67,8 +69,21 @@ impl ItemInfo {
             title: title.into(),
             help: None,
             harnesses: Vec::new(),
-            fields: Vec::new(),
+            schema: None,
+            form: None,
         }
+    }
+
+    /// This item taking the values `S` describes, shown with the screen `S` declares.
+    ///
+    /// # Errors
+    ///
+    /// When `S`'s schema or form cannot be written.
+    pub fn taking<S: Schema + Screen>(mut self) -> Result<Self, ProviderError> {
+        let (schema, form) = crate::settings::describe::<S>()?;
+        self.schema = Some(schema);
+        self.form = Some(form);
+        Ok(self)
     }
 
     /// Whether it applies to the harness `harness`.
@@ -95,15 +110,7 @@ impl ItemInfo {
         if self.title.trim().is_empty() {
             return Some(alloc::format!("the item {:?} has no title", self.id));
         }
-        for (at, field) in self.fields.iter().enumerate() {
-            if let Some(problem) = field.problem() {
-                return Some(problem);
-            }
-            if self.fields[..at].iter().any(|each| each.name == field.name) {
-                return Some(alloc::format!("the field {:?} is listed twice", field.name));
-            }
-        }
-        None
+        crate::settings::problem(self.schema.as_ref(), self.form.as_ref())
     }
 }
 
@@ -115,7 +122,7 @@ pub struct ApplyRequest {
     /// The id of the harness the session runs, as [`ItemInfo::harnesses`] names it; empty when it has none, so an item may differ by
     /// harness.
     pub harness: String,
-    /// What the profile holds for the item, as a JSON object keyed by field name; a field left empty is absent.
+    /// What the profile holds for the item, as a JSON object keyed by the schema's member names; a member left empty is absent.
     pub values: String,
 }
 
@@ -357,7 +364,7 @@ impl ItemEffect {
 /// One thing a profile may set.
 ///
 /// `describe` answers the same on every call with nothing run. `apply` runs when a session starts, with the values the profile holds
-/// for the item already read against its fields; it must change nothing outside the effect it answers with.
+/// for the item already read against its schema; it must change nothing outside the effect it answers with.
 #[coqui_acp_api::guatiao::kind(name = "profile_item", crate = ::coqui_acp_api::guatiao)]
 pub trait ProfileItem: Send + Sync {
     /// What this item is and the form it asks for.
@@ -371,29 +378,50 @@ pub trait ProfileItem: Send + Sync {
 mod tests {
     use super::*;
 
+    use guatiao::{FromValue, Schema, ToValue};
+    use guatiao_intake::Form;
+
+    /// The values of a stand-in item.
+    #[derive(ToValue, FromValue, Schema, Form)]
+    #[form(section(id = "net", label = "Network"))]
+    #[allow(dead_code, reason = "only its description is read")]
+    struct Values {
+        /// Where it goes.
+        #[schema(section = "net", title = "Address")]
+        url: String,
+        /// A secret it is given.
+        #[schema(section = "net", title = "Token", sensitive)]
+        token: Option<String>,
+    }
+
     #[test]
-    fn an_item_with_a_word_for_an_id_a_title_and_distinct_fields_is_usable() {
-        let mut info = ItemInfo::new("proxy", "Proxy");
-        info.fields = alloc::vec![
-            Field::new("url", "Address", "text"),
-            Field::new("bypass", "Bypass", "list"),
-        ];
+    fn an_item_with_a_word_for_an_id_a_title_and_a_schema_with_its_form_is_usable() {
+        let mut info = ItemInfo::new("proxy", "Proxy").taking::<Values>().unwrap();
         assert_eq!(info.problem(), None);
+        assert!(info.schema.is_some() && info.form.is_some());
         assert!(info.applies_to("claude"), "no harnesses named is every one");
         info.harnesses = alloc::vec!["codex".into()];
         assert!(!info.applies_to("claude"));
         assert!(info.applies_to("codex"));
+        assert_eq!(
+            ItemInfo::new("none", "None").problem(),
+            None,
+            "an item may take nothing"
+        );
     }
 
     #[test]
-    fn an_item_that_is_no_word_has_no_title_or_repeats_a_field_is_refused() {
+    fn an_item_that_is_no_word_has_no_title_or_a_form_its_schema_does_not_fit_is_refused() {
         for id in ["", "Proxy", "a b", &"a".repeat(33)] {
             assert!(ItemInfo::new(id, "T").problem().is_some(), "{id:?}");
         }
         assert!(ItemInfo::new("a", " ").problem().is_some());
         let mut info = ItemInfo::new("a", "A");
-        info.fields = alloc::vec![Field::new("x", "X", "text"), Field::new("x", "Y", "text")];
-        assert!(info.problem().is_some_and(|why| why.contains("twice")));
+        info.form = Some(guatiao::Value::from(true));
+        assert!(info.problem().is_some_and(|why| why.contains("no schema")));
+        let mut info = ItemInfo::new("a", "A").taking::<Values>().unwrap();
+        info.schema = Some(guatiao::Value::from(true));
+        assert!(info.problem().is_some());
     }
 
     #[test]

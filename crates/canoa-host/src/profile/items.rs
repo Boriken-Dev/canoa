@@ -3,7 +3,7 @@
 //! are, and those the libraries of canoa.cfg's entries and extensions add. Nothing here names an item the host does not find in a
 //! registry: a profile's values for an item no provider offers are kept and reported as not applied.
 //!
-//! A profile holds, for each item, a JSON object of the values the person gave its form's fields. A session starts by asking each
+//! A profile holds, for each item, a JSON object of the values the person gave the members of its schema. A session starts by asking each
 //! item for its effect ([`ItemEffect`]): the host then applies the environment, the arguments, the values of the session's own
 //! settings and the network the effects ask for, and reports each item and what it became.
 #![allow(
@@ -15,13 +15,13 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
-use canoa::form::Field;
 use canoa::profile_item::{
     ApplyRequest, ItemEffect, ItemInfo, NetworkEffect, ProfileItem, Setting, Variable,
     bad_value_error,
 };
-use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::{ProviderError, Registry};
+use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
+use guatiao_intake::Form;
 use serde_json::{Map, Value, json};
 
 use super::{AccessSetting, Context, LayerKind, Profile};
@@ -67,7 +67,16 @@ pub(crate) fn values_of(request: &ApplyRequest) -> Result<Map<String, Value>, Pr
 }
 
 macro_rules! scalar_item {
-    ($(#[$doc:meta])* $name:ident, $provider:literal, $id:literal, $title:literal, $help:literal, $label:literal, $note:literal) => {
+    ($(#[$doc:meta])* $name:ident, $values:ident, $field:ident, $provider:literal, $id:literal, $title:literal, $help:literal, $label:literal, $note:literal) => {
+        /// What the item holds: one text.
+        #[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq, Eq)]
+        #[allow(dead_code, reason = "only its description is read")]
+        pub struct $values {
+            #[doc = $help]
+            #[schema(title = $label)]
+            pub $field: String,
+        }
+
         $(#[$doc])*
         #[derive(Default, Provider)]
         #[provider(ProfileItem, id = $provider, crate = ::coqui_acp_api::guatiao)]
@@ -77,8 +86,7 @@ macro_rules! scalar_item {
             fn describe(&self) -> Result<ItemInfo, ProviderError> {
                 let mut info = ItemInfo::new($id, $title);
                 info.help = Some($help.to_owned());
-                info.fields = vec![Field::new($id, $label, "text").required()];
-                Ok(info)
+                info.taking::<$values>()
             }
 
             fn apply(&self, request: ApplyRequest) -> Result<ItemEffect, ProviderError> {
@@ -90,19 +98,29 @@ macro_rules! scalar_item {
 
 scalar_item!(
     /// The model a session starts with.
-    ModelItem, "model_item", "model", "Model",
+    ModelItem, ModelValues, model, "model_item", "model", "Model",
     "The model the agent starts with; the agent's own when empty.", "Model", "sets the model the agent starts with"
 );
 scalar_item!(
     /// The effort a session starts with.
-    EffortItem, "effort_item", "effort", "Effort",
+    EffortItem, EffortValues, effort, "effort_item", "effort", "Effort",
     "The effort, or thought level, the agent starts with.", "Effort", "sets the effort the agent starts with"
 );
 scalar_item!(
     /// The mode a session starts in.
-    ModeItem, "mode_item", "mode", "Mode",
+    ModeItem, ModeValues, mode, "mode_item", "mode", "Mode",
     "The mode the agent starts in.", "Mode", "sets the mode the agent starts in"
 );
+
+/// What the starting instructions item holds.
+#[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code, reason = "only its description is read")]
+pub struct ContextValues {
+    /// Text added to the session's initial context after every other layer's.
+    #[schema(title = "Starting instructions")]
+    #[form(widget = "textarea")]
+    pub context: String,
+}
 
 /// The starting instructions.
 #[derive(Default, Provider)]
@@ -115,8 +133,7 @@ impl ProfileItem for ContextItem {
         info.help = Some(
             "Text added to the session's initial context after every other layer's.".to_owned(),
         );
-        info.fields = vec![Field::new("context", "Starting instructions", "text").required()];
-        Ok(info)
+        info.taking::<ContextValues>()
     }
 
     fn apply(&self, request: ApplyRequest) -> Result<ItemEffect, ProviderError> {
@@ -126,6 +143,45 @@ impl ProfileItem for ContextItem {
             "adds its text to the session's initial context",
         )
     }
+}
+
+/// How far a command the agent runs may reach.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(rename_all = "kebab-case")]
+pub enum Sandbox {
+    /// The person's own reach.
+    None,
+    /// Write only in the session's folders.
+    Workspace,
+    /// Change nothing.
+    ReadOnly,
+}
+
+/// What is asked before the agent acts.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(rename_all = "snake_case")]
+pub enum Approvals {
+    /// Everything first.
+    Ask,
+    /// Before changes.
+    Edits,
+    /// Nothing.
+    Never,
+}
+
+/// What the access item holds.
+#[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code, reason = "only its description is read")]
+pub struct AccessValues {
+    /// none: the person's own reach. workspace: write only in the session's folders. read-only: change nothing.
+    #[schema(title = "Sandbox")]
+    pub sandbox: Option<Sandbox>,
+    /// Whether the agent's commands may use the network.
+    #[schema(title = "Network")]
+    pub network: Option<bool>,
+    /// ask: everything first. edits: ask before changes. never: ask nothing.
+    #[schema(title = "Approvals")]
+    pub approvals: Option<Approvals>,
 }
 
 /// The access every agent is run with.
@@ -140,15 +196,7 @@ impl ProfileItem for AccessItem {
             "What a command the agent runs may reach, whether it may use the network, and what is asked first: the same for every agent."
                 .to_owned(),
         );
-        let mut sandbox = Field::choice("sandbox", "Sandbox", ["none", "workspace", "read-only"]);
-        sandbox.help = Some("none: the person's own reach. workspace: write only in the session's folders. read-only: change nothing.".to_owned());
-        let network = Field::new("network", "Network", "bool");
-        let mut approvals = Field::choice("approvals", "Approvals", ["ask", "edits", "never"]);
-        approvals.help = Some(
-            "ask: everything first. edits: ask before changes. never: ask nothing.".to_owned(),
-        );
-        info.fields = vec![sandbox, network, approvals];
-        Ok(info)
+        info.taking::<AccessValues>()
     }
 
     fn apply(&self, request: ApplyRequest) -> Result<ItemEffect, ProviderError> {
@@ -242,23 +290,16 @@ pub(crate) struct Listed {
 impl Listed {
     /// The item as `profile_items/list` answers.
     pub(crate) fn json(&self) -> Value {
-        let fields: Vec<Value> = self
-            .info
-            .fields
-            .iter()
-            .map(|field| {
-                json!({
-                    "name": field.name, "label": field.label, "shape": field.shape,
-                    "required": field.required, "default": field.default, "help": field.help,
-                    "choices": field.choices,
-                })
-            })
-            .collect();
+        let described = |value: &Option<_>| match value {
+            Some(value) => crate::forms::json_of(value).unwrap_or(Value::Null),
+            None => Value::Null,
+        };
         json!({
             "id": self.info.id, "title": self.info.title, "help": self.info.help,
             "origin": self.origin,
             "stored": if self.origin == BUILT_IN && SETTING_IDS.contains(&self.info.id.as_str()) { "setting" } else { "item" },
-            "harnesses": self.info.harnesses, "fields": fields,
+            "harnesses": self.info.harnesses,
+            "schema": described(&self.info.schema), "form": described(&self.info.form),
         })
     }
 }
@@ -418,22 +459,9 @@ impl ItemCatalog {
     }
 }
 
-/// Whether `values` fit the form `info` asks for: every key a field, every value of its field's shape, every required field there.
+/// Whether `values` fit the schema `info` takes: every key a member, every value of its member's type, every required member there.
 pub(crate) fn check(info: &ItemInfo, values: &Map<String, Value>) -> Result<(), String> {
-    for (name, value) in values {
-        let Some(field) = info.fields.iter().find(|field| &field.name == name) else {
-            return Err(format!("{name} is not a field of {}", info.id));
-        };
-        if let Some(why) = field.mismatch(value) {
-            return Err(why);
-        }
-    }
-    for field in info.fields.iter().filter(|field| field.required) {
-        if !values.contains_key(&field.name) {
-            return Err(format!("{} is needed", field.name));
-        }
-    }
-    Ok(())
+    crate::forms::check(info.schema.as_ref(), values).map_err(|why| format!("{}: {why}", info.id))
 }
 
 /// What one item became for one session.

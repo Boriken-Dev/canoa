@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../chat/cache_lifetime.dart';
 import '../config/canoa_config.dart';
+import '../forms/schema_fields.dart';
 import 'profile.dart' show ProfileAccess;
 import 'profile_items.dart';
 
@@ -299,8 +300,8 @@ class _ProfileEditorState extends State<ProfileEditor> {
   }
 }
 
-/// The form one item's provider describes: a row for each of its fields, which holds the values the person gave and nothing else.
-class _ItemSection extends StatefulWidget {
+/// The form one item's provider describes, drawn from its schema and form: it holds the values the person gave and nothing else.
+class _ItemSection extends StatelessWidget {
   const _ItemSection({super.key, required this.item, required this.values, required this.onChanged});
 
   final ProfileItemInfo item;
@@ -308,99 +309,7 @@ class _ItemSection extends StatefulWidget {
   final ValueChanged<Map<String, Object?>> onChanged;
 
   @override
-  State<_ItemSection> createState() => _ItemSectionState();
-}
-
-class _ItemSectionState extends State<_ItemSection> {
-  late final Map<String, TextEditingController> _controllers = {
-    for (final field in widget.item.fields)
-      if (const {'text', 'path', 'number', 'list'}.contains(field.shape)) field.name: TextEditingController(text: _shown(widget.values[field.name])),
-  };
-
-  static String _shown(Object? value) => switch (value) {
-    null => '',
-    List<Object?> list => list.join('\n'),
-    _ => '$value',
-  };
-
-  @override
-  void dispose() {
-    for (final controller in _controllers.values) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
-  /// The values the form holds: a field left empty is absent. [chosen] is what a menu has just been given for its field.
-  Map<String, Object?> _read({String? menu, Object? chosen}) {
-    final out = <String, Object?>{};
-    for (final field in widget.item.fields) {
-      final controller = _controllers[field.name];
-      final Object? value;
-      if (controller == null) {
-        value = field.name == menu ? chosen : widget.values[field.name];
-      } else {
-        final text = controller.text.trim();
-        value = text.isEmpty
-            ? null
-            : switch (field.shape) {
-                'list' => [for (final line in controller.text.split('\n')) if (line.trim().isNotEmpty) line.trim()],
-                'number' => int.tryParse(text) ?? text,
-                _ => text,
-              };
-      }
-      if (value != null) out[field.name] = value;
-    }
-    return out;
-  }
-
-  Widget _field(ItemField field) {
-    final key = Key('item-field-${widget.item.id}-${field.name}');
-    final label = field.required ? '${field.label} *' : field.label;
-    final hint = field.defaultValue == null ? null : 'Default: ${field.defaultValue}';
-    switch (field.shape) {
-      case 'bool':
-        return DropdownButtonFormField<bool?>(
-          key: key,
-          isExpanded: true,
-          initialValue: widget.values[field.name] as bool?,
-          decoration: InputDecoration(labelText: label, helperText: field.help, hintText: hint),
-          items: const [
-            DropdownMenuItem<bool?>(value: null, child: Text('Not set')),
-            DropdownMenuItem<bool?>(value: true, child: Text('Yes')),
-            DropdownMenuItem<bool?>(value: false, child: Text('No')),
-          ],
-          onChanged: (value) => widget.onChanged(_read(menu: field.name, chosen: value)),
-        );
-      case 'choice':
-        return DropdownButtonFormField<String?>(
-          key: key,
-          isExpanded: true,
-          initialValue: widget.values[field.name] as String?,
-          decoration: InputDecoration(labelText: label, helperText: field.help, hintText: hint),
-          items: [
-            DropdownMenuItem<String?>(value: null, child: Text(field.defaultValue == null ? 'Not set' : 'Default (${field.defaultValue})')),
-            for (final choice in field.choices) DropdownMenuItem<String?>(value: choice, child: Text(choice)),
-          ],
-          onChanged: (value) => widget.onChanged(_read(menu: field.name, chosen: value)),
-        );
-      default:
-        final list = field.shape == 'list';
-        return TextField(
-          key: key,
-          controller: _controllers[field.name],
-          minLines: list ? 2 : 1,
-          maxLines: list ? 6 : 1,
-          keyboardType: field.shape == 'number' ? TextInputType.number : null,
-          decoration: InputDecoration(labelText: label, helperText: field.help, hintText: list ? 'One a line' : hint),
-          onChanged: (_) => widget.onChanged(_read()),
-        );
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final item = widget.item;
     return Padding(
       padding: const EdgeInsets.only(top: 12),
       child: Column(
@@ -410,7 +319,14 @@ class _ItemSectionState extends State<_ItemSection> {
           Text(item.title, style: Theme.of(context).textTheme.titleSmall),
           if (item.help != null) Text(item.help!, style: Theme.of(context).textTheme.bodySmall),
           if (item.harnesses.isNotEmpty) Text('For ${item.harnesses.join(', ')} only', style: Theme.of(context).textTheme.bodySmall),
-          for (final field in item.fields) ...[const SizedBox(height: 8), _field(field)],
+          SchemaFields(
+            schema: item.schema,
+            form: item.form,
+            values: values,
+            idPrefix: 'item-${item.id}',
+            unsetEntry: true,
+            onValues: (held) => onChanged(collectSchemaValues(item.schema, item.form, held)),
+          ),
         ],
       ),
     );

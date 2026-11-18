@@ -1,35 +1,47 @@
-//! What a catalog source says of itself: which Store types it serves and whether its fields can be a form.
+//! What a catalog source says of itself: which Store types it serves and whether its form can be shown.
 #![cfg(feature = "store")]
 
-use canoa::store::source::{SourceField, SourceInfo};
+use canoa::store::source::SourceInfo;
+use guatiao::{FromValue, Schema, ToValue};
+use guatiao_intake::Form;
 
-#[test]
-fn a_source_with_no_types_serves_every_type_and_one_with_types_serves_only_those() {
-    let everywhere = SourceInfo::new("read", "Read");
-    assert!(everywhere.serves("overlays") && everywhere.serves("anything"));
-    let mut one = SourceInfo::new("only_skills", "Only skills");
-    one.types = vec!["skills".to_owned()];
-    assert!(one.serves("skills"));
-    assert!(!one.serves("overlays"));
+/// What a stand-in source asks for.
+#[derive(ToValue, FromValue, Schema, Form)]
+#[allow(dead_code, reason = "only its description is read")]
+struct Asked {
+    /// The program and its arguments.
+    #[schema(title = "Command")]
+    command: Vec<String>,
+    /// Where it runs.
+    #[schema(title = "Folder")]
+    cwd: Option<String>,
 }
 
 #[test]
-fn a_source_is_refused_for_an_id_a_shape_or_a_field_listed_twice() {
+fn a_source_with_no_types_serves_every_type_and_one_with_types_serves_only_those() {
     let mut info = SourceInfo::new("run", "Run");
-    info.fields = vec![
-        SourceField::new("command", "Command", "list").required(),
-        SourceField::new("cwd", "Folder", "path"),
-    ];
-    assert_eq!(info.problem(), None);
+    assert!(info.serves("overlays") && info.serves("anything"));
+    info.types = vec!["skills".into()];
+    assert!(info.serves("skills"));
+    assert!(!info.serves("overlays"));
+}
 
-    assert!(SourceInfo::new("Bad Id", "x").problem().is_some());
+#[test]
+fn a_source_is_refused_for_an_id_a_missing_title_or_a_form_its_schema_does_not_fit() {
+    let info = SourceInfo::new("run", "Run").asking::<Asked>().unwrap();
+    assert_eq!(info.problem(), None);
+    assert_eq!(
+        SourceInfo::new("run", "Run").problem(),
+        None,
+        "a source may ask for nothing"
+    );
+
+    for id in ["", "Run", "a b", &"a".repeat(33)] {
+        assert!(SourceInfo::new(id, "Run").problem().is_some(), "{id:?}");
+    }
     assert!(SourceInfo::new("run", " ").problem().is_some());
 
-    let mut odd = info.clone();
-    odd.fields.push(SourceField::new("when", "When", "date"));
-    assert!(odd.problem().is_some_and(|why| why.contains("date")));
-
-    let mut twice = info;
-    twice.fields.push(SourceField::new("cwd", "Again", "text"));
-    assert!(twice.problem().is_some_and(|why| why.contains("twice")));
+    let mut odd = SourceInfo::new("run", "Run");
+    odd.form = info.form.clone();
+    assert!(odd.problem().is_some_and(|why| why.contains("no schema")));
 }

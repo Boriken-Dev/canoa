@@ -12,7 +12,8 @@ type Outcome = Result<Value, (i32, String)>;
 impl Control {
     /// `store/catalogs` `{"type"?: string}` -> `{"schema": 1, "types": [{"type", "title", "words": {"noun", "plural", "lists"},
     /// "default"?: {"label", "source"}, "catalogs": [{"label", "provider", "fields", "source"?, "default", "problem"?}],
-    /// "sources": [{"id", "title", "help"?, "extension"?, "types", "fields": [...]}]}]}`. With `type` only that type is answered.
+    /// "sources": [{"id", "title", "help"?, "extension"?, "types", "schema"?, "form"?}]}]}`, the schema and the form a guatiao schema and a
+    /// guatiao-intake form document. With `type` only that type is answered.
     /// Needs `overlay.read`, as the catalogs it lists do.
     pub(super) fn store_catalogs(&self, caller: &Caller, params: &Value) -> Outcome {
         if !caller.may(Grant::OverlayRead) {
@@ -66,14 +67,8 @@ fn answer_for(
                 "help": info.help,
                 "extension": extension,
                 "types": info.types,
-                "fields": info.fields.iter().map(|field| json!({
-                    "name": field.name,
-                    "label": field.label,
-                    "shape": field.shape,
-                    "required": field.required,
-                    "default": field.default,
-                    "help": field.help,
-                })).collect::<Vec<_>>(),
+                "schema": info.schema.as_ref().and_then(|schema| crate::forms::json_of(schema).ok()),
+                "form": info.form.as_ref().and_then(|form| crate::forms::json_of(form).ok()),
             })
         })
         .collect();

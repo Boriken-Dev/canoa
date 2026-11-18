@@ -14,9 +14,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use canoa::store::recipe::{bad_value_error, internal_error};
-use canoa::store::source::{CatalogSourceProvider, KIND, ReadRequest, SourceField, SourceInfo};
-use coqui_acp_api::guatiao::Provider;
+use canoa::store::source::{CatalogSourceProvider, KIND, ReadRequest, SourceInfo};
 use coqui_acp_api::guatiao::library::{ProviderError, Registry};
+use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
+use guatiao_intake::Form;
 use serde_json::{Map, Value};
 
 use super::catalogs::READ;
@@ -27,6 +28,39 @@ pub(crate) const MAX_BYTES: usize = 4 * 1024 * 1024;
 const DEFAULT_SECONDS: u64 = 60;
 /// How much of what a failed program printed on its error stream is kept for the reason.
 const TAIL_BYTES: usize = 2 * 1024;
+
+/// What the `read` source asks for.
+#[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code, reason = "only its description is read")]
+pub struct ReadValues {
+    /// Overlays and extensions: <repository>@<ref>#<file>. Skills: owner/repo, a git URL or a folder. MCP servers: the registry's address.
+    #[schema(title = "Source")]
+    pub source: String,
+}
+
+const fn default_seconds() -> u64 {
+    DEFAULT_SECONDS
+}
+
+/// What the `command` source asks for.
+#[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code, reason = "only its description is read")]
+pub struct CommandValues {
+    /// The program first, then each argument.
+    #[schema(title = "Program and arguments")]
+    pub command: Vec<String>,
+    /// Where it runs; the host's own folder when empty.
+    #[schema(title = "Folder")]
+    pub cwd: Option<String>,
+    /// A file it writes, in its folder, to take instead of what it prints.
+    #[schema(title = "Output file")]
+    pub file: Option<String>,
+    /// How long it may run.
+    #[map(default = default_seconds())]
+    #[schema(title = "Seconds it may run")]
+    #[form(unit = "s")]
+    pub timeout: u64,
+}
 
 /// The `read` provider: a place the Store type reads itself.
 #[derive(Default, Provider)]
@@ -39,14 +73,7 @@ impl CatalogSourceProvider for ReadSource {
         info.help = Some(
             "A git repository, a web address or a file on this computer, in the form the type reads.".to_owned(),
         );
-        let mut source = SourceField::new("source", "Source", "text").required();
-        source.help = Some(
-            "Overlays and extensions: <repository>@<ref>#<file>. Skills: owner/repo, a git URL or a folder. MCP servers: the \
-             registry's address."
-                .to_owned(),
-        );
-        info.fields = vec![source];
-        Ok(info)
+        info.asking::<ReadValues>()
     }
 
     /// A file on this computer. A git source or an address is read by the Store type's own reader, which keeps what it fetched
@@ -79,17 +106,7 @@ impl CatalogSourceProvider for CommandSource {
                 .to_owned(),
         );
         // It serves every type: what it prints is read in the form the type documents.
-        let mut command = SourceField::new("command", "Program and arguments", "list").required();
-        command.help = Some("The program first, then each argument.".to_owned());
-        let mut cwd = SourceField::new("cwd", "Folder", "path");
-        cwd.help = Some("Where it runs; the host's own folder when empty.".to_owned());
-        let mut file = SourceField::new("file", "Output file", "path");
-        file.help =
-            Some("A file it writes, in its folder, to take instead of what it prints.".to_owned());
-        let mut timeout = SourceField::new("timeout", "Seconds it may run", "number");
-        timeout.default = Some(DEFAULT_SECONDS.to_string());
-        info.fields = vec![command, cwd, file, timeout];
-        Ok(info)
+        info.asking::<CommandValues>()
     }
 
     fn read(&self, request: ReadRequest) -> Result<String, ProviderError> {

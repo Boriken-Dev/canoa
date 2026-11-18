@@ -1,9 +1,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use canoa::store::source::{CatalogSourceProvider, ReadRequest, SourceField, SourceInfo};
-use coqui_acp_api::guatiao::Provider;
+use canoa::store::source::{CatalogSourceProvider, ReadRequest, SourceInfo};
 use coqui_acp_api::guatiao::library::{ProviderError, Registry};
+use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
+use guatiao_intake::Form;
 use serde_json::json;
 
 use super::Sources;
@@ -16,14 +17,22 @@ pub(crate) static STANDIN_FAILS: AtomicBool = AtomicBool::new(false);
 #[provider(CatalogSourceProvider, id = "standin", crate = ::coqui_acp_api::guatiao)]
 pub(crate) struct Standin;
 
+/// What the stand-in source asks for.
+#[derive(ToValue, FromValue, Schema, Form)]
+#[allow(dead_code, reason = "only its description is read")]
+struct TeamValues {
+    /// Which team's list
+    #[schema(title = "Team name")]
+    team: String,
+    #[schema(title = "Seats")]
+    seats: Option<u32>,
+}
+
 impl CatalogSourceProvider for Standin {
     fn describe(&self) -> Result<SourceInfo, ProviderError> {
         let mut info = SourceInfo::new("standin", "A stand-in");
         info.types = vec!["skills".to_owned()];
-        let mut team = SourceField::new("team", "Team name", "text").required();
-        team.help = Some("Which team's list".to_owned());
-        info.fields = vec![team, SourceField::new("seats", "Seats", "number")];
-        Ok(info)
+        info.asking::<TeamValues>()
     }
 
     fn read(&self, request: ReadRequest) -> Result<String, ProviderError> {
@@ -103,6 +112,11 @@ pub(crate) fn with_standin() -> Sources {
     sources
 }
 
+/// A source's schema as the host lists it.
+fn schema_of(info: &SourceInfo) -> serde_json::Value {
+    crate::forms::json_of(info.schema.as_ref().expect("a schema")).expect("JSON")
+}
+
 fn run(fields: serde_json::Value) -> Result<String, String> {
     Sources::built_in().read(
         "command",
@@ -149,8 +163,9 @@ fn read_and_command_are_built_in_and_serve_every_type_with_the_forms_they_ask() 
             && read.serves("mcps")
             && read.serves("zzz")
     );
-    assert_eq!(read.fields[0].name, "source");
-    assert!(read.fields[0].required);
+    let read = schema_of(read);
+    assert_eq!(read["required"], json!(["source"]));
+    assert_eq!(read["properties"]["source"]["type"], "string");
 
     let command = sources.info("command").expect("command");
     assert!(command.types.is_empty(), "it serves every type");
@@ -165,15 +180,17 @@ fn read_and_command_are_built_in_and_serve_every_type_with_the_forms_they_ask() 
         .iter()
         .all(|kind| command.serves(kind))
     );
-    let names: Vec<&str> = command
-        .fields
-        .iter()
-        .map(|field| field.name.as_str())
+    let command = schema_of(command);
+    let names: Vec<&str> = command["properties"]
+        .as_object()
+        .expect("members")
+        .keys()
+        .map(String::as_str)
         .collect();
     assert_eq!(names, ["command", "cwd", "file", "timeout"]);
-    assert_eq!(command.fields[0].shape, "list");
-    assert!(command.fields[0].required);
-    assert_eq!(command.fields[3].default.as_deref(), Some("60"));
+    assert_eq!(command["required"], json!(["command"]));
+    assert_eq!(command["properties"]["command"]["type"], "array");
+    assert_eq!(command["properties"]["timeout"]["default"], 60);
 }
 
 #[test]
@@ -185,9 +202,13 @@ fn a_source_an_extension_adds_is_listed_with_its_extension_and_the_form_it_descr
         .expect("listed");
     assert_eq!(found.1, Some("standin_ext"));
     assert_eq!(found.0.types, ["skills"]);
-    assert_eq!(found.0.fields[0].label, "Team name");
-    assert_eq!(found.0.fields[0].help.as_deref(), Some("Which team's list"));
-    assert!(found.0.fields[0].required && !found.0.fields[1].required);
+    let team = schema_of(found.0);
+    assert_eq!(team["properties"]["team"]["title"], "Team name");
+    assert_eq!(
+        team["properties"]["team"]["description"],
+        "Which team's list"
+    );
+    assert_eq!(team["required"], json!(["team"]));
     assert!(
         sources
             .info("everywhere")

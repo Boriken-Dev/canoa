@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../config/canoa_config.dart';
 import '../config/catalog_specs.dart';
+import '../forms/schema_fields.dart';
 import '../loadout/loadout_controller.dart';
 import 'catalog_types.dart';
 import 'overlay_page.dart' show oneLine;
@@ -128,21 +129,26 @@ class AddCatalogForm extends StatefulWidget {
 const _readForm = CatalogSourceForm(
   id: readProvider,
   title: 'Read an address or a file',
-  fields: [SourceField(name: 'source', label: 'Source', shape: 'text', required: true)],
+  schema: {
+    'type': 'object',
+    'required': ['source'],
+    'properties': {
+      'source': {'type': 'string', 'title': 'Source'},
+    },
+  },
 );
 
 class _AddCatalogFormState extends State<AddCatalogForm> {
   final label = TextEditingController();
-  final fields = <String, TextEditingController>{};
+  /// What each source's form holds, by the source's id, and which generation of its fields is shown: a new one clears them.
+  final held = <String, Map<String, Object?>>{};
+  int generation = 0;
   String? chosen;
   String? problem;
 
   @override
   void dispose() {
     label.dispose();
-    for (final controller in fields.values) {
-      controller.dispose();
-    }
     super.dispose();
   }
 
@@ -153,42 +159,24 @@ class _AddCatalogFormState extends State<AddCatalogForm> {
 
   CatalogSourceForm get form => offered.where((each) => each.id == chosen).firstOrNull ?? offered.first;
 
-  TextEditingController _controllerOf(CatalogSourceForm form, String name) => fields.putIfAbsent('${form.id}/$name', TextEditingController.new);
-
   Future<void> _add() async {
     final form = this.form;
-    final values = <String, Object?>{};
-    for (final field in form.fields) {
-      final text = _controllerOf(form, field.name).text.trim();
-      if (text.isEmpty) {
-        if (field.required) {
-          setState(() => problem = '${field.label} is needed');
-          return;
-        }
-        continue;
-      }
-      switch (field.shape) {
-        case 'number':
-          final number = int.tryParse(text);
-          if (number == null || number < 0) {
-            setState(() => problem = '${field.label} is a whole number');
-            return;
-          }
-          values[field.name] = number;
-        case 'list':
-          values[field.name] = [for (final line in text.split('\n')) if (line.trim().isNotEmpty) line.trim()];
-        default:
-          values[field.name] = text;
-      }
+    final values = held[form.id] ?? const <String, Object?>{};
+    final invalid = schemaProblem(form.schema, form.form, values);
+    if (invalid != null) {
+      setState(() => problem = invalid);
+      return;
     }
-    final why = await widget.controller.addCatalogOf(widget.type, label.text, form.id, values);
+    final kept = collectSchemaValues(form.schema, form.form, values);
+    final why = await widget.controller.addCatalogOf(widget.type, label.text, form.id, kept);
     if (!mounted) return;
     setState(() => problem = why);
     if (why == null) {
       label.clear();
-      for (final each in fields.values) {
-        each.clear();
-      }
+      setState(() {
+        held.clear();
+        generation++;
+      });
     }
   }
 
@@ -219,26 +207,17 @@ class _AddCatalogFormState extends State<AddCatalogForm> {
           ),
       ]),
       if (form.help case final help?) Padding(padding: const EdgeInsets.only(top: 4), child: Text(help)),
-      for (final field in form.fields)
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: SizedBox(
-            width: 520,
-            child: TextField(
-              key: Key(form.id == readProvider && field.name == 'source' ? 'store-catalog-source' : 'store-field-${form.id}-${field.name}'),
-              controller: _controllerOf(form, field.name),
-              minLines: 1,
-              maxLines: field.shape == 'list' ? 4 : 1,
-              decoration: InputDecoration(
-                labelText: field.required ? field.label : '${field.label}, optional',
-                hintText: field.defaultText,
-                helperText: field.shape == 'list' ? 'One word a line' : field.help,
-                helperMaxLines: 3,
-              ),
-              onSubmitted: field.shape == 'list' ? null : (_) => unawaited(_add()),
-            ),
-          ),
-        ),
+      SchemaFields(
+        key: ValueKey('${form.id}/$generation'),
+        schema: form.schema,
+        form: form.form,
+        values: held[form.id] ?? const {},
+        idPrefix: 'store-${form.id}',
+        keys: form.id == readProvider ? const {'source': 'store-catalog-source'} : const {},
+        unsetEntry: true,
+        onValues: (values) => held[form.id] = values,
+        onSubmitted: () => unawaited(_add()),
+      ),
       if (problem != null)
         Padding(
           padding: const EdgeInsets.only(top: 4),

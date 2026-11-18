@@ -1,11 +1,19 @@
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/forms/schema_fields.dart';
 import 'package:canoa/profile/profile_editor.dart';
 import 'package:canoa/profile/profile_items.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// What the host answers to `profile_items/list`: the items Canoa carries and, as a stand-in extension's, one that sets a region and
-/// a list of hosts.
+/// A guatiao schema of an object, as the host answers it.
+Map<String, Object?> _object(Map<String, Object?> properties, {List<String> required = const []}) => {
+  'type': 'object',
+  'properties': properties,
+  if (required.isNotEmpty) 'required': required,
+};
+
+/// What the host answers to `profile_items/list`: the items Canoa carries and, as a stand-in extension's, one that sets a region, a list
+/// of hosts and a token that is a secret. Each item's values are a schema and a form, as a provider's own are.
 Map<String, Object?> _listed({bool extension = true}) => {
   'items': [
     {
@@ -14,9 +22,10 @@ Map<String, Object?> _listed({bool extension = true}) => {
       'origin': 'built-in',
       'stored': 'setting',
       'harnesses': <String>[],
-      'fields': [
-        {'name': 'model', 'label': 'Model', 'shape': 'text', 'required': true, 'choices': <String>[]},
-      ],
+      'schema': _object({
+        'model': {'type': 'string', 'title': 'Model'},
+      }, required: ['model']),
+      'form': <String, Object?>{},
     },
     {
       'id': 'access',
@@ -25,11 +34,23 @@ Map<String, Object?> _listed({bool extension = true}) => {
       'origin': 'built-in',
       'stored': 'setting',
       'harnesses': <String>[],
-      'fields': [
-        {'name': 'sandbox', 'label': 'Sandbox', 'shape': 'choice', 'required': false, 'choices': ['none', 'workspace', 'read-only']},
-        {'name': 'network', 'label': 'Network', 'shape': 'bool', 'required': false, 'choices': <String>[]},
-        {'name': 'approvals', 'label': 'Approvals', 'shape': 'choice', 'required': false, 'choices': ['ask', 'edits', 'never']},
-      ],
+      'schema': _object({
+        'sandbox': {
+          'type': ['string', 'null'],
+          'title': 'Sandbox',
+          'enum': ['none', 'workspace', 'read-only'],
+        },
+        'network': {
+          'type': ['boolean', 'null'],
+          'title': 'Network',
+        },
+        'approvals': {
+          'type': ['string', 'null'],
+          'title': 'Approvals',
+          'enum': ['ask', 'edits', 'never'],
+        },
+      }),
+      'form': <String, Object?>{},
     },
     if (extension)
       {
@@ -39,11 +60,26 @@ Map<String, Object?> _listed({bool extension = true}) => {
         'origin': 'regions',
         'stored': 'item',
         'harnesses': ['claude-code'],
-        'fields': [
-          {'name': 'name', 'label': 'Name', 'shape': 'text', 'required': true, 'choices': <String>[]},
-          {'name': 'hosts', 'label': 'Hosts', 'shape': 'list', 'required': false, 'choices': <String>[]},
-          {'name': 'tier', 'label': 'Tier', 'shape': 'choice', 'required': false, 'default': 'standard', 'choices': ['standard', 'fast']},
-        ],
+        'schema': _object({
+          'name': {'type': 'string', 'title': 'Name', 'x-section': 'where'},
+          'hosts': {
+            'type': 'array',
+            'items': {'type': 'string'},
+            'title': 'Hosts',
+            'x-section': 'where',
+          },
+          'tier': {'type': 'string', 'title': 'Tier', 'enum': ['standard', 'fast'], 'default': 'standard', 'x-section': 'where'},
+          'token': {'type': ['string', 'null'], 'title': 'Token', 'writeOnly': true, 'x-sensitive': true, 'x-section': 'access'},
+        }, required: ['name']),
+        'form': {
+          'sections': [
+            {'id': 'where', 'title': 'Where'},
+            {'id': 'access', 'title': 'Access'},
+          ],
+          'fields': {
+            'name': {'placeholder': 'eu-west'},
+          },
+        },
       },
   ],
 };
@@ -90,9 +126,10 @@ void main() {
     expect(region.origin, 'regions');
     expect(region.isSetting, isFalse);
     expect(region.harnesses, ['claude-code']);
-    expect([for (final field in region.fields) '${field.name}:${field.shape}'], ['name:text', 'hosts:list', 'tier:choice']);
-    expect(region.fields.last.defaultValue, 'standard');
-    expect(region.fields.last.choices, ['standard', 'fast']);
+    expect(schemaProperties(region.schema).keys, ['name', 'hosts', 'tier', 'token']);
+    expect(schemaRequired(region.schema), {'name'});
+    expect((region.form['sections']! as List).length, 2);
+    expect(region.hasForm, isTrue);
     expect(catalog.byId('access')!.isSetting, isTrue);
   });
 
@@ -102,9 +139,10 @@ void main() {
     expect(find.text('Where the session runs.'), findsOneWidget);
     expect(find.text('For claude-code only'), findsOneWidget);
     expect(find.byKey(const Key('item-section-model')), findsNothing, reason: 'the model has a row of its own');
+    expect(tester.widget<TextField>(find.byKey(const Key('item-region-field-name'))).decoration!.hintText, 'eu-west', reason: 'the form says its placeholder');
 
-    await tester.enterText(find.byKey(const Key('item-field-region-name')), 'north');
-    await tester.enterText(find.byKey(const Key('item-field-region-hosts')), 'a.example\n\n b.example ');
+    await tester.enterText(find.byKey(const Key('item-region-field-name')), 'north');
+    await tester.enterText(find.byKey(const Key('item-region-field-hosts')), 'a.example\n\n b.example ');
     await _save(tester);
     final made = saved.single.$2;
     expect(made.items, {
@@ -116,13 +154,28 @@ void main() {
     });
   });
 
+  testWidgets('a field the schema marks sensitive is masked and still reaches the profile as typed', (tester) async {
+    final saved = await _pump(tester, ProfileItemCatalog()..adopt(_listed()), const Preset());
+    final token = find.byKey(const Key('item-region-field-token'));
+    expect(tester.widget<TextField>(token).obscureText, isTrue);
+    expect(tester.widget<TextField>(find.byKey(const Key('item-region-field-name'))).obscureText, isFalse);
+    await tester.enterText(find.byKey(const Key('item-region-field-name')), 'north');
+    await tester.enterText(token, 's3cret');
+    await _save(tester);
+    expect(saved.single.$2.items, {
+      'region': {'name': 'north', 'token': 's3cret'},
+    });
+    final written = CanoaConfig.parse('').withPresets({'Deep': saved.single.$2}).encode();
+    expect(CanoaConfig.parse(written).presets['Deep']!.items['region'], {'name': 'north', 'token': 's3cret'}, reason: 'it round-trips through canoa.cfg');
+  });
+
   testWidgets('an item emptied is no longer set', (tester) async {
     final saved = await _pump(
       tester,
       ProfileItemCatalog()..adopt(_listed()),
       const Preset(items: {'region': {'name': 'north'}}),
     );
-    await tester.enterText(find.byKey(const Key('item-field-region-name')), '');
+    await tester.enterText(find.byKey(const Key('item-region-field-name')), '');
     await _save(tester);
     expect(saved.single.$2.items, isEmpty);
   });
@@ -130,11 +183,11 @@ void main() {
   testWidgets('the access is a form the host describes, and it is the profile\'s own access setting', (tester) async {
     final saved = await _pump(tester, ProfileItemCatalog()..adopt(_listed()), const Preset());
     expect(find.byKey(const Key('item-section-access')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('item-field-access-sandbox')));
+    await tester.tap(find.byKey(const Key('item-access-field-sandbox')));
     await tester.pump();
     await tester.tap(find.text('read-only').last);
     await tester.pump();
-    await tester.tap(find.byKey(const Key('item-field-access-network')));
+    await tester.tap(find.byKey(const Key('item-access-field-network')));
     await tester.pump();
     await tester.tap(find.text('No').last);
     await tester.pump();
