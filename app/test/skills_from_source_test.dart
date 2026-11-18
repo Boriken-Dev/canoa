@@ -400,7 +400,7 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
       await open(tester);
       await tapKey(tester, 'store-tab-skills');
       await tapKey(tester, 'skills-discover');
-      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsOneWidget, reason: 'the catalog offers a skill');
+      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsNothing, reason: 'a skill an overlay names comes with its overlay');
 
       await tapKey(tester, 'store-tab-overlays');
       await tapKey(tester, 'overlays-discover');
@@ -424,7 +424,7 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
       final card = find.byKey(const Key('skill-installed-review'));
       expect(find.descendant(of: card, matching: find.text('Comes with team')), findsOneWidget);
       await tapKey(tester, 'skills-discover');
-      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsNothing, reason: 'pdf is here now');
+      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsNothing);
       expect(tester.takeException(), isNull);
     });
 
@@ -440,11 +440,13 @@ pdf = { source = "$skillsHost/pdf.git", pin = "${pinOf('pdf', pdfFiles)}" }
       expect(overlays.skillFetches, isEmpty);
     });
 
-    testWidgets('a skill the catalog offers is installed by choice after its source and pin are shown', (tester) async {
+    testWidgets('a skill pasted is installed by choice after its source is shown', (tester) async {
       await open(tester);
       await tapKey(tester, 'store-tab-skills');
       await tapKey(tester, 'skills-discover');
-      await tapKey(tester, 'store-skill-install-main-pdf');
+      overlays.putSkill('$skillsHost/pdf.git@main#skills/pdf', pdfFiles);
+      await tester.enterText(find.byKey(const Key('skills-paste')), '$skillsHost/pdf.git@main#skills/pdf');
+      await tapKey(tester, 'skills-paste-review');
       expect(find.byKey(const Key('store-skill-review')), findsOneWidget);
       expect(shownText(tester), contains('$skillsHost/pdf.git'));
       expect(overlays.skillFetches, isEmpty, reason: 'shown before it is fetched');

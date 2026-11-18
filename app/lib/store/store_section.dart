@@ -14,7 +14,7 @@ import 'overlay_page.dart' show SaveConfig, shownTags;
 import 'programs.dart';
 import 'overlay_needs.dart';
 import 'programs_view.dart';
-import 'catalog_types.dart' show CatalogTypesRead;
+import 'catalog_types.dart' show CatalogRead, CatalogTypesRead;
 import 'store_catalogs.dart';
 import 'store_extension.dart';
 import 'store_index.dart';
@@ -45,6 +45,7 @@ class StoreSection extends StatefulWidget {
     this.embedded = false,
     this.index,
     this.catalogTypes,
+    this.readCatalog,
     this.now,
     this.selection,
     this.contentsStorage,
@@ -82,6 +83,9 @@ class StoreSection extends StatefulWidget {
 
   /// Asks the host what each Store type that reads catalogs calls them and which sources can add one; none where the app has no host.
   final CatalogTypesRead? catalogTypes;
+
+  /// Reads a catalog of Skills or MCP servers a program or an extension generates, through the host; none where the app has no host.
+  final CatalogRead? readCatalog;
 
   /// The clock the "updated … ago" line reads; the time of day when null.
   final DateTime Function()? now;
@@ -121,6 +125,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     overlayNeeds: widget.overlayNeeds,
     index: widget.index,
     catalogTypes: widget.catalogTypes,
+    readCatalog: widget.readCatalog,
     contentsStorage: widget.contentsStorage,
     contentsReader: widget.contentsReader,
     now: widget.now,
@@ -300,7 +305,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
   int? _discoverCount(String id) => switch (_builtin(id)) {
     StoreType.agents => widget.programs?.statuses.where((status) => !status.installed).length,
     StoreType.overlays => controller.listing?.entries.length,
-    StoreType.skills => controller.home == null ? null : controller.skillsOffered().length,
+    StoreType.skills => null,
     StoreType.mcps => controller.registryRead ? controller.registryEntries.length : null,
     null => _extension(id)?.items().where((item) => !item.installed).length,
   };
@@ -385,7 +390,7 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
   void _forgetGoneCatalogs(String id) {
     final view = viewOf(id);
     // A skill source the person removed is no longer the one Skills reads: it goes back to the catalogs.
-    if (view.source case final source? when !controller.skillSources.containsKey(source) && !(source == skillsSearchSource && controller.skillsSearch != null)) view.source = null;
+    if (view.source case final source? when !controller.skillSources.containsKey(source) && !controller.generatedSkillSources.contains(source) && !(source == skillsSearchSource && controller.skillsSearch != null)) view.source = null;
     if (view.catalogs.isEmpty) return;
     final extension = _extension(id);
     final present = extension != null

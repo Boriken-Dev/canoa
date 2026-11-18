@@ -100,11 +100,13 @@ class CatalogRowTile extends StatelessWidget {
         if (provider != null && provider != readProvider) 'Read by ${titled ?? provider}',
         ?row.problem,
       ].map(oneLine).join('\n')),
-      trailing: TextButton(
-        key: Key('store-remove-catalog-${row.label}'),
-        onPressed: c.busy != null ? null : () => unawaited(c.removeCatalogOf(type, row.label)),
-        child: const Text('Remove'),
-      ),
+      trailing: row.fixed
+          ? null
+          : TextButton(
+              key: Key('store-remove-catalog-${row.label}'),
+              onPressed: c.busy != null ? null : () => unawaited(c.removeCatalogOf(type, row.label)),
+              child: const Text('Remove'),
+            ),
     );
   }
 }

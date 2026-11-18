@@ -24,7 +24,7 @@ const _everywhere = {
 const _command = {
   'id': 'command',
   'title': 'Run a program',
-  'types': ['overlays', 'extensions'],
+  'types': <String>[],
   'fields': [
     {'name': 'command', 'label': 'Program and arguments', 'shape': 'list', 'required': true},
     {'name': 'cwd', 'label': 'Folder', 'shape': 'path', 'required': false},
@@ -62,6 +62,8 @@ Map<String, Object?> _answer(CanoaConfig config) => {
         'words': {'noun': noun, 'plural': plural, 'lists': lists},
         'default': defaultLabel == null ? null : {'label': defaultLabel, 'source': defaultSource},
         'catalogs': [
+          if (id == 'mcps')
+            {'label': 'official', 'provider': 'read', 'fields': {'source': 'https://registry.modelcontextprotocol.io'}, 'source': 'https://registry.modelcontextprotocol.io', 'default': true, 'fixed': true},
           if (defaultLabel != null &&
               !((config.catalogTable(id) as Map?)?.keys.any((key) => '$key'.toLowerCase() == defaultLabel) ?? false))
             {'label': defaultLabel, 'provider': 'read', 'fields': {'source': defaultSource}, 'source': defaultSource, 'default': true},
@@ -215,8 +217,8 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
 
     testWidgets('MCP servers lists only its registries and Extensions only its catalogs', (tester) async {
       await open(tester, 'mcps');
-      expect(shown(tester), {'corp'});
-      expect(find.text('Registries 1'), findsOneWidget);
+      expect(shown(tester), {'official', 'corp'});
+      expect(find.text('Registries 2'), findsOneWidget);
       await open(tester, 'extensions');
       expect(shown(tester), {'plugins'});
     });
@@ -233,6 +235,12 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
       expect(shown(tester), hasLength(2));
     });
 
+    testWidgets('the official MCP registry is always listed first and has no Remove', (tester) async {
+      await open(tester, 'mcps');
+      expect(find.byKey(const Key('store-catalog-official')), findsOneWidget);
+      expect(find.byKey(const Key('store-remove-catalog-official')), findsNothing, reason: 'the type always offers it');
+    });
+
     testWidgets('the sources a type is offered are those that serve it, and the others are not', (tester) async {
       await open(tester, 'overlays');
       Future<List<String>> offered() async {
@@ -246,9 +254,9 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
 
       expect(await offered(), ['read', 'command']);
       await open(tester, 'skills');
-      expect(await offered(), ['read', 'standin']);
+      expect(await offered(), ['read', 'command', 'standin']);
       await open(tester, 'mcps');
-      expect(find.byKey(const Key('store-source-provider')), findsNothing, reason: 'one source serves it, so there is nothing to choose');
+      expect(await offered(), ['read', 'command'], reason: 'a program can generate any catalog; the stand-in serves Skills only');
     });
 
     testWidgets("a source's form is made of the fields it described, and what is filled in is kept under its type", (tester) async {

@@ -190,7 +190,7 @@ void main() {
       final tops = [for (final id in ids) tester.getTopLeft(find.byKey(Key('store-index-$id'))).dy];
       expect(tops, [...tops]..sort(), reason: 'in order');
       expect(find.text('0 installed · 3 to discover'), findsOneWidget, reason: 'overlays across both catalogs');
-      expect(find.text('0 installed · 2 to discover'), findsNWidgets(2), reason: 'skills and themes');
+      expect(find.text('0 installed · 2 to discover'), findsOneWidget, reason: 'themes: a skill an overlay catalog names comes with its overlay, so Skills counts none to discover');
       expect(find.byKey(const Key('store-tabs')), findsNothing, reason: 'the index chooses the type');
     });
 
@@ -258,15 +258,13 @@ void main() {
       await open(tester);
       await tester.tap(find.byKey(const Key('store-index-skills')));
       await tester.pumpAndSettle();
-      expect(find.text('Top skills'), findsOneWidget);
-      expect(find.byKey(const Key('store-offered-skill-team-reviewing')), findsOneWidget);
-      expect(find.byKey(const Key('store-offered-skill-other-linting')), findsOneWidget, reason: 'across both catalogs');
+      expect(find.byKey(const Key('skills-choose-source')), findsOneWidget);
+      expect(find.byKey(const Key('store-offered-skill-team-reviewing')), findsNothing, reason: 'a skill an overlay names comes with its overlay');
+      expect(find.byKey(const Key('store-offered-skill-other-linting')), findsNothing);
       expect(find.byKey(const Key('store-entry-team-review')), findsNothing, reason: 'an overlay is not a skill');
 
       await tester.enterText(find.byKey(const Key('store-search')), 'lint');
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('store-offered-skill-other-linting')), findsOneWidget);
-      expect(find.byKey(const Key('store-offered-skill-team-reviewing')), findsNothing);
       expect(find.byKey(const Key('store-entry-other-lint')), findsNothing, reason: 'the overlay lint is another type\'s');
 
       await tester.tap(find.byKey(const Key('store-index-overlays')));
@@ -337,11 +335,11 @@ void main() {
       final again = ShellLayout(backend: backend);
       await again.load();
       await open(tester, using: again);
-      expect(find.byKey(const Key('store-offered-skill-team-reviewing')), findsOneWidget);
+      expect(find.byKey(const Key('skills-choose-source')), findsOneWidget);
       expect(find.byKey(const Key('store-entry-team-review')), findsNothing);
     });
 
-    testWidgets('a phone has the types in the drawer, which closes once one is chosen, and the banner swipes', (tester) async {
+    testWidgets('a phone has the types in the drawer, which closes once one is chosen', (tester) async {
       await open(tester, size: const Size(420, 800));
       expect(find.byKey(const Key('store-index-skills')), findsNothing);
       await tester.tap(find.byKey(const Key('open-navigation')));
@@ -350,9 +348,7 @@ void main() {
       await tester.tap(find.byKey(const Key('store-index-skills')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('store-index-skills')), findsNothing, reason: 'the drawer closed');
-      expect(find.text('Top skills'), findsOneWidget);
-      expect(find.byKey(const Key('store-banner')), findsOneWidget);
-      expect(find.byKey(const Key('store-banner-next')), findsNothing, reason: 'arrows become swipes');
+      expect(find.byKey(const Key('skills-choose-source')), findsOneWidget);
     });
 
     testWidgets('a catalog that could not be read says so in the page', (tester) async {

@@ -192,7 +192,7 @@ final class SkillHit {
 
 /// One skill a source holds, as its `SKILL.md` says.
 final class ScannedSkill {
-  const ScannedSkill({required this.name, required this.description, required this.path, this.problem});
+  const ScannedSkill({required this.name, required this.description, required this.path, this.problem, this.source, this.ref});
 
   /// The name its front matter gives, which an installed skill is kept under.
   final String name;
@@ -203,14 +203,20 @@ final class ScannedSkill {
 
   /// Why it cannot be installed (a name that is not its folder's), or null.
   final String? problem;
+
+  /// Where a generated listing says the skill is (written as a skill source is), and the ref it pins; null for a skill a scan found,
+  /// which is in the source that was scanned.
+  final String? source, ref;
 }
 
 /// What a source holds at one commit.
 final class SkillScan {
   const SkillScan({required this.commit, required this.skills, this.skipped = 0, this.truncated = false});
 
-  /// The commit read: what the person is shown is what installing fetches.
+  /// The commit read: what the person is shown is what installing fetches. Empty for a listing a program or an extension made,
+  /// which names the sources its skills are in and reads none.
   final String commit;
+
   final List<ScannedSkill> skills;
 
   /// How many `SKILL.md` files were left out: no front matter naming and describing the skill, marked internal, or a repeated name.

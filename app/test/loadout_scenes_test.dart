@@ -15,6 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/catalog_standin.dart';
 import 'fixtures/store_fixtures.dart';
 import 'loadout_test.dart' show registryAnswer, world, withCatalog;
+import 'skills_from_source_test.dart' show pdfFiles;
 
 void main() {
   setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/loadout_scenes_test.dart')));
@@ -88,7 +89,7 @@ void main() {
         await golden(tester, 'empty');
       });
 
-      testWidgets('what the catalog offers as skills, each with its source and pin', (tester) async {
+      testWidgets('Skills Discover: the sources to read, and a skill to paste', (tester) async {
         await open(tester);
         await tester.tap(find.byKey(const Key('store-tab-skills')));
         await tester.pumpAndSettle();
@@ -101,7 +102,9 @@ void main() {
         await tester.tap(find.byKey(const Key('store-tab-skills')));
         await tester.pumpAndSettle();
         await tap(tester, 'skills-discover');
-        await tap(tester, 'store-skill-install-main-pdf');
+        overlays.putSkill('https://example.invalid/skills.git@main#skills/pdf', pdfFiles);
+        await tester.enterText(find.byKey(const Key('skills-paste')), 'https://example.invalid/skills.git@main#skills/pdf');
+        await tap(tester, 'skills-paste-review');
         await tap(tester, 'store-skill-install-confirm');
         await golden(tester, 'skills');
       });

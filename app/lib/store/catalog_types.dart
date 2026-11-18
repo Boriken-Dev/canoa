@@ -65,13 +65,16 @@ final class CatalogSourceForm {
 
 /// One catalog of a type as the host lists it.
 final class CatalogRow {
-  const CatalogRow({required this.label, required this.spec, this.isDefault = false, this.problem});
+  const CatalogRow({required this.label, required this.spec, this.isDefault = false, this.fixed = false, this.problem});
 
   final String label;
   final CatalogSpec? spec;
 
   /// Whether it is the one the type offers until it is removed.
   final bool isDefault;
+
+  /// Whether the type always offers it: it cannot be removed or replaced.
+  final bool fixed;
 
   /// Why the host reads no catalog from the entry.
   final String? problem;
@@ -103,6 +106,7 @@ final class CatalogType {
                   ? CatalogSpec('${row['provider']}', {for (final MapEntry(:key, :value) in ((row['fields'] as Map?) ?? const {}).entries) '$key': value})
                   : null,
               isDefault: row['default'] == true,
+              fixed: row['fixed'] == true,
               problem: row['problem'] as String?,
             ),
       ],
@@ -123,6 +127,40 @@ final class CatalogType {
 
 /// Reads every Store type that has catalogs.
 typedef CatalogTypesRead = Future<List<CatalogType>> Function();
+
+/// Why the host could not read a catalog of Skills or MCP servers, in its words.
+final class CatalogReadFailed implements Exception {
+  const CatalogReadFailed(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+/// Reads one catalog of the type [type] (`skills` or `mcps`) through the host's `store/catalog`: the answer as the host gives it.
+/// [search] and [cursor] ask a registry for its next page. Throws [CatalogReadFailed].
+typedef CatalogRead = Future<Map<Object?, Object?>> Function(String type, String label, {String? search, String? cursor});
+
+/// `store/catalog` over [control], or null where the app has no host.
+CatalogRead? controlCatalogRead(HostControl? control) => control == null
+    ? null
+    : (type, label, {search, cursor}) async {
+        try {
+          final client = await control.ready();
+          final answer = await client.call(
+            'store/catalog',
+            {'type': type, 'label': label, if (search != null && search.isNotEmpty) 'search': search, 'cursor': ?cursor},
+            null,
+            const Duration(seconds: 120),
+          );
+          return answer is Map<Object?, Object?> ? answer : const {};
+        } on ControlFailed catch (error) {
+          throw CatalogReadFailed(error.message);
+        } on CatalogReadFailed {
+          rethrow;
+        } on Object catch (error) {
+          throw CatalogReadFailed('The host could not be reached: $error');
+        }
+      };
 
 /// The host's `store/catalogs`, asked over its control channel.
 final class ControlCatalogTypes {

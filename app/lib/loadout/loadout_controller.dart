@@ -46,6 +46,32 @@ const knownCatalogs = <KnownCatalog>[
 ];
 
 /// The label a catalog added from [spec] gets when the person gives none: its repository's name.
+/// The skills a generated catalog lists, from the host's `store/catalog` answer: each names the source that holds it.
+SkillScan skillListingOf(Map<Object?, Object?> answer) {
+  final listed = answer['skills'];
+  return SkillScan(
+    commit: answer['commit'] is String ? answer['commit']! as String : '',
+    skills: [
+      if (listed is List<Object?>)
+        for (final each in listed)
+          if (each is Map<Object?, Object?> && each['name'] is String)
+            ScannedSkill(
+              name: each['name']! as String,
+              description: each['description'] as String? ?? '',
+              path: each['path'] as String? ?? '',
+              problem: each['problem'] as String?,
+              source: each['source'] as String?,
+              ref: each['ref'] as String?,
+            ),
+    ],
+    skipped: (answer['skipped'] as num?)?.toInt() ?? 0,
+    truncated: answer['truncated'] == true,
+  );
+}
+
+/// The address a generated registry is chosen and recorded under: `store:` and its label.
+const generatedRegistryPrefix = 'store:';
+
 String catalogLabelFor(String spec) {
   final base = spec.split('@').first.split('#').first.split('/').where((part) => part.isNotEmpty).lastOrNull ?? 'catalog';
   var label = base.replaceAll(RegExp(r'\.git$'), '').replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '-');
@@ -80,6 +106,7 @@ class LoadoutController extends ChangeNotifier {
     this.overlayNeeds,
     this.index,
     this.catalogTypes,
+    this.readCatalog,
     ContentsStorage? contentsStorage,
     ContentsReader? contentsReader,
     DateTime Function()? now,
@@ -100,6 +127,9 @@ class LoadoutController extends ChangeNotifier {
   /// Asks the host which Store types read catalogs, what each calls them, which it lists and which sources can add one; none where
   /// the app has no host.
   final CatalogTypesRead? catalogTypes;
+
+  /// Reads a catalog of Skills or MCP servers that a program or an extension generates; none where the app has no host.
+  final CatalogRead? readCatalog;
 
   /// What the host last said of each type that reads catalogs.
   List<CatalogType> types = const [];
@@ -143,7 +173,23 @@ class LoadoutController extends ChangeNotifier {
   late String selectedRegistry = registry;
 
   /// The registries offered: the official one, then those `[store.mcps.catalogs]` names.
-  List<String> get registries => [registry, ...config.storeRegistries.where((address) => address != registry)];
+  List<String> get registries => [
+    registry,
+    ...config.storeRegistries.where((address) => address != registry),
+    for (final label in generatedRegistryLabels) '$generatedRegistryPrefix$label',
+  ];
+
+  /// The labels of the registries a program or an extension generates under `[store.mcps.catalogs]`.
+  List<String> get generatedRegistryLabels => [
+    for (final MapEntry(:key, :value) in config.catalogSpecs('mcps').entries)
+      if (value.provider != readProvider) key,
+  ];
+
+  /// The label of the generated registry [address] names, or null for a registry read from an address.
+  String? generatedRegistryOf(String address) =>
+      address.startsWith(generatedRegistryPrefix) && generatedRegistryLabels.contains(address.substring(generatedRegistryPrefix.length))
+          ? address.substring(generatedRegistryPrefix.length)
+          : null;
 
   List<McpRegistryEntry> registryEntries = const [];
   String? registryNext, registryProblem;
@@ -382,12 +428,13 @@ class LoadoutController extends ChangeNotifier {
   CanoaConfig _withSkillOn(CanoaConfig config, String name, bool on) =>
       config.withLoadoutSkills({...config.loadoutSkills}..remove(name)..addAll(on ? [name] : const []));
 
-  /// The skills the catalogs offer that are not here, as `(catalog label, name, entry)`.
-  List<(String, String, aos.CatalogEntry)> skillsOffered() => [
-    for (final catalog in loaded)
-      if (catalog.catalog case final read?)
-        for (final MapEntry(key: name, value: offer) in read.skills.entries)
-          if (!skills.containsKey(skillKey(name))) (catalog.label, name, offer),
+  /// The skills an installed overlay provides that no fetched copy lists, as `(name, overlay)`: they are installed with the
+  /// overlay and go with it.
+  List<({String name, String overlay})> overlaySkills() => [
+    for (final layer in layers?.layers ?? const <Layer>[])
+      if (layer.id.kind == LayerKind.overlay)
+        for (final name in layer.profile.skills.keys)
+          if (!skills.containsKey(skillKey(name))) (name: name, overlay: layer.id.name),
   ];
 
   Future<void> setSkillOn(String name, bool on) => apply(_withSkillOn(config, name, on));
@@ -410,17 +457,33 @@ class LoadoutController extends ChangeNotifier {
     return source != null && !(aos.normalizeName(label) == aos.normalizeName(defaultSkillSourceLabel) && source.spec == defaultSkillSourceSpec);
   }
 
-  /// Reads which skills [label]'s source holds, at the commit its ref names now.
+  /// The labels of the skill catalogs a program or an extension generates: the host asks it for a listing, which names where each skill is.
+  List<String> get generatedSkillSources => [
+    for (final MapEntry(:key, :value) in config.catalogSpecs('skills').entries)
+      if (value.provider != readProvider) key,
+  ];
+
+  /// Reads which skills [label]'s source holds, at the commit its ref names now; for a generated catalog, its listing.
   Future<void> scanSkillSource(String label) async {
     final home = this.home;
+    final generated = generatedSkillSources.contains(label);
     final source = skillSources[label];
-    if (home == null || source == null || scanningSource != null) return;
+    if (home == null || (source == null && !generated) || scanningSource != null) return;
     scanningSource = label;
     skillScanProblems.remove(label);
     notifyListeners();
     try {
-      skillScans[label] = await home.overlays.scanSkills(source.repo, ref: source.ref, path: source.path, own: skillSourceIsOwn(label));
+      if (generated) {
+        final read = readCatalog;
+        if (read == null) throw const CatalogReadFailed('Catalogs are read through the host, and this app has none');
+        skillScans[label] = skillListingOf(await read('skills', label));
+      } else {
+        skillScans[label] = await home.overlays.scanSkills(source!.repo, ref: source.ref, path: source.path, own: skillSourceIsOwn(label));
+      }
     } on OverlayException catch (error) {
+      skillScans.remove(label);
+      skillScanProblems[label] = error.message;
+    } on CatalogReadFailed catch (error) {
       skillScans.remove(label);
       skillScanProblems[label] = error.message;
     } on Object catch (error) {
@@ -546,6 +609,40 @@ class LoadoutController extends ChangeNotifier {
     }
   }
 
+  /// Finds a skill a generated listing names in the source it names, as any source is read: fetched with none of the person's git
+  /// settings, credentials or keys, since a program or an extension wrote the address. What the listing sent is only where to look.
+  /// Null, with [problem] saying why, when the source cannot be read or holds no such skill.
+  Future<({SkillSource source, SkillScan scan, ScannedSkill skill})?> resolveListedSkill(ScannedSkill listed) async {
+    final home = this.home;
+    if (home == null || listed.source == null || resolvingHit != null) return null;
+    resolvingHit = listed.name;
+    skillSearchProblem = null;
+    notifyListeners();
+    try {
+      final source = SkillSource.parse(listed.source!);
+      final scan = await home.overlays.scanSkills(source.repo, ref: listed.ref ?? source.ref, path: listed.path.isNotEmpty ? listed.path : source.path, own: false);
+      final skill = scan.skills.where((each) => listed.path.isNotEmpty && each.path == listed.path).firstOrNull ??
+          scan.skills.where((each) => each.name.toLowerCase() == listed.name.toLowerCase()).firstOrNull;
+      if (skill == null) {
+        problem = '${listed.source} holds no skill called ${listed.name}: the listing names it, but the source has no SKILL.md for it';
+        return null;
+      }
+      return (source: source, scan: scan, skill: skill);
+    } on FormatException catch (error) {
+      problem = error.message;
+      return null;
+    } on OverlayException catch (error) {
+      problem = error.message;
+      return null;
+    } on Object catch (error) {
+      problem = 'The source could not be read (${error.runtimeType})';
+      return null;
+    } finally {
+      resolvingHit = null;
+      notifyListeners();
+    }
+  }
+
   /// Fetches the skill [item] reviewed, as the person's own choice, and turns it on for new sessions.
   Future<SkillOutcome?> installSkill(SkillItem item) => run('Installing ${item.name}', () async {
     final outcome = await installChosenSkill(home!.overlays, item);
@@ -613,6 +710,12 @@ class LoadoutController extends ChangeNotifier {
 
   /// Forgets a registry the person added; the official one stays.
   Future<void> removeRegistry(String address) async {
+    final generated = generatedRegistryOf(address);
+    if (generated != null) {
+      await apply(config.withoutCatalogOf('mcps', generated));
+      if (selectedRegistry == address) await selectRegistry(registry);
+      return;
+    }
     if (!config.storeRegistries.contains(address)) return;
     await apply(config.withStoreRegistries([...config.storeRegistries]..remove(address)));
     if (isGitRegistry(address)) await home?.overlays.removeCatalog(gitRegistryLabel(address));
@@ -623,6 +726,18 @@ class LoadoutController extends ChangeNotifier {
   Future<void> selectRegistry(String address) {
     selectedRegistry = address;
     return loadRegistry();
+  }
+
+  /// One page of a registry a program or an extension generates, as the host reads it.
+  Future<McpRegistryPage> _readGeneratedRegistry(String label, String search, String? cursor) async {
+    final read = readCatalog;
+    if (read == null) throw const RegistryRefusal('Generated registries are read through the host, and this app has none');
+    try {
+      final answer = await read('mcps', label, search: search, cursor: cursor);
+      return parseRegistryPage(jsonEncode({'servers': answer['servers'], 'metadata': answer['metadata']}));
+    } on CatalogReadFailed catch (error) {
+      throw RegistryRefusal(error.message);
+    }
   }
 
   /// A git registry's one page: the list file at the ref's commit.
@@ -646,8 +761,9 @@ class LoadoutController extends ChangeNotifier {
   /// Reads the registry's first page for [search], or the next page of the last search.
   Future<void> loadRegistry({String? search, bool more = false}) async {
     final read = fetch;
-    final git = isGitRegistry(selectedRegistry);
-    if (read == null && !git) {
+    final generated = generatedRegistryOf(selectedRegistry);
+    final git = generated == null && isGitRegistry(selectedRegistry);
+    if (read == null && !git && generated == null) {
       registryProblem = 'Registries are read through the host, and this app has none';
       registryRead = true;
       notifyListeners();
@@ -662,7 +778,9 @@ class LoadoutController extends ChangeNotifier {
     registryProblem = null;
     notifyListeners();
     try {
-      final page = git
+      final page = generated != null
+          ? await _readGeneratedRegistry(generated, _registryQuery, more ? registryNext : null)
+          : git
           ? await _readGitRegistry(selectedRegistry)
           : parseRegistryPage(await read!(listUri(selectedRegistry, search: _registryQuery, cursor: more ? registryNext : null)));
       // A search the registry does not take is narrowed here, so a registry that ignores `search` still answers it.

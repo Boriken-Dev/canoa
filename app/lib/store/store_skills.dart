@@ -9,15 +9,11 @@ import '../profile/profile.dart';
 import '../profile/profiles_panel.dart' show visible;
 import '../profile/skill_copies.dart';
 import '../selectable.dart';
-import 'entry_details.dart';
 import 'overlay_page.dart' show SkillRows, oneLine;
 import 'skill_sources.dart';
 import 'skills.dart';
-import 'store.dart' show LoadedCatalog;
 import 'store_banner.dart';
 import 'store_cards.dart';
-import 'store_icon.dart';
-import 'store_overlays.dart' show sourceNotes;
 import 'store_view.dart';
 
 /// The Skills type: the skills fetched on this computer, and the skills the catalogs offer.
@@ -71,7 +67,8 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
   }
 
   Widget _installed(BuildContext context, List<Widget> head) {
-    if (c.skills.isEmpty) {
+    final inOverlays = c.overlaySkills();
+    if (c.skills.isEmpty && inOverlays.isEmpty) {
       return CardList(header: [
         ...head,
         const Text('No skills fetched yet. A skill an overlay names is fetched when you install the overlay; others you choose '
@@ -84,11 +81,27 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
       ]);
     }
     final shown = [for (final copy in c.skills.values) if (view.matches(copy.name)) copy];
+    final shownInOverlays = [for (final each in inOverlays) if (view.matches(each.name)) each];
     return CardList(
-      header: [...head, if (shown.isEmpty) const Text('No installed skill matches.', key: Key('skills-installed-nothing'))],
-      cards: [for (final copy in shown) _installedCard(context, copy)],
+      header: [
+        ...head,
+        if (shown.isEmpty && shownInOverlays.isEmpty) const Text('No installed skill matches.', key: Key('skills-installed-nothing')),
+      ],
+      cards: [
+        for (final copy in shown) _installedCard(context, copy),
+        for (final each in shownInOverlays) _overlayCard(each.name, each.overlay),
+      ],
     );
   }
+
+  /// A skill an installed overlay provides: it has no Remove of its own, since removing the overlay removes it.
+  Widget _overlayCard(String name, String overlay) => LoadoutCard(
+    key: Key('skill-installed-${skillKey(name)}'),
+    leading: const LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined),
+    title: name,
+    lines: ['Comes with $overlay'],
+    provenance: 'comes with the overlay $overlay; remove the overlay to remove it',
+  );
 
   Widget _installedCard(BuildContext context, SkillCopy copy) {
     final shown = _sourceShown(copy.source);
@@ -134,22 +147,21 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     }
   }
 
-  /// Which place Discover reads: the catalogs, or one of the sources that hold skills in git, and a field to add a source. Choosing
+  /// Which place Discover reads: one of the sources that hold skills in git, or a search, and a field to add a source. Choosing
   /// a source is what fetches it.
   Widget _sourceRow(BuildContext context) {
     final sources = c.skillSources;
     final chosen = view.source;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        ChoiceChip(
-          key: const Key('skills-from-catalogs'),
-          label: const Text('Catalogs'),
-          selected: chosen == null,
-          onSelected: (_) {
-            view.source = null;
-            view.changed();
-          },
-        ),
+        for (final label in c.generatedSkillSources)
+          ChoiceChip(
+            key: Key('skills-source-$label'),
+            label: Text(label),
+            tooltip: 'Read the skills ${_generatedBy(label)} lists',
+            selected: chosen == label,
+            onSelected: c.scanningSource != null ? null : (_) => unawaited(_choose(label)),
+          ),
         for (final MapEntry(:key, :value) in sources.entries)
           ChoiceChip(
             key: Key('skills-source-$key'),
@@ -169,7 +181,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
               view.changed();
             },
           ),
-        if (chosen != null && sources.containsKey(chosen))
+        if (chosen != null && (sources.containsKey(chosen) || c.generatedSkillSources.contains(chosen)))
           TextButton(
             key: const Key('skills-source-remove'),
             onPressed: c.busy != null ? null : () => unawaited(_removeSource(chosen)),
@@ -288,6 +300,92 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     );
   }
 
+  /// What reads the generated catalog [label], in the person's words: the program, or the extension's source.
+  String _generatedBy(String label) {
+    final spec = c.config.catalogSpecs('skills')[label];
+    final titled = spec == null ? null : c.typeOf('skills')?.sources.where((each) => each.id == spec.provider).firstOrNull?.title;
+    return 'read by ${titled ?? spec?.provider ?? 'a source'} lists';
+  }
+
+  /// The skills a program or an extension lists for [label]: each names where it is, and installing one reads that source, shows
+  /// what was found and asks first.
+  Widget _fromGenerated(BuildContext context, List<Widget> head, String label) {
+    final scan = c.skillScans[label];
+    final text = Theme.of(context).textTheme;
+    final problem = c.skillScanProblems[label];
+    final shown = [if (scan != null) for (final skill in scan.skills) if (view.matches('${skill.name}\n${skill.description}')) skill];
+    return CardList(
+      header: [
+        ...head,
+        _sourceRow(context),
+        Text(
+          'This list is made by ${_generatedBy(label).replaceFirst(' lists', '')} each time you read it. It only says where each skill is: '
+          'installing one reads that source with none of your git settings, credentials or keys, shows what it holds and asks first.',
+          key: const Key('skills-source-note'),
+          style: text.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        if (c.scanningSource == label) const LinearProgressIndicator(),
+        if (problem != null)
+          Text(visible(problem), key: const Key('skills-source-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        if (scan != null) ...[
+          Row(children: [
+            Text(view.query.text.isEmpty ? 'Skills in this list' : 'Matching skills', style: text.titleMedium),
+            const SizedBox(width: 8),
+            Chip(key: const Key('store-count'), label: Text('${shown.length}'), visualDensity: VisualDensity.compact),
+            const Spacer(),
+            TextButton(
+              key: const Key('skills-source-reread'),
+              onPressed: c.scanningSource != null ? null : () => unawaited(c.scanSkillSource(label)),
+              child: const Text('Read again'),
+            ),
+          ]),
+          if (scan.skipped > 0 || scan.truncated)
+            Text(
+              [
+                if (scan.skipped > 0) '${scan.skipped} entries left out: no name or source, or a name already listed.',
+                if (scan.truncated) 'The list names more skills than are shown.',
+              ].join(' '),
+              key: const Key('skills-source-left-out'),
+              style: text.bodySmall,
+            ),
+          const SizedBox(height: 8),
+          if (scan.skills.isEmpty) const Text('This list names no skill.', key: Key('skills-source-none')),
+        ] else if (problem == null && c.scanningSource != label)
+          const Text('Choose the source to read which skills it lists.', key: Key('skills-source-unread')),
+      ],
+      cards: [for (final skill in shown) _listedTile(label, skill)],
+    );
+  }
+
+  Widget _listedTile(String label, ScannedSkill skill) {
+    final here = c.skills[skillKey(skill.name)];
+    return StoreTile(
+      key: Key('store-source-skill-$label-${skill.name}'),
+      leading: const SizedBox.square(dimension: 48, child: Center(child: LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined))),
+      title: skill.name,
+      summary: skill.problem == null ? skill.description : '${skill.description}\nCannot be installed: ${skill.problem}',
+      by: '${skill.source ?? 'no source'}${skill.path.isEmpty ? '' : ' · ${skill.path}'}',
+      installed: here != null,
+      installKey: Key('store-source-skill-install-$label-${skill.name}'),
+      onOpen: () => unawaited(_installListed(skill)),
+      onInstall: skill.problem != null || c.busy != null || c.resolvingHit != null ? null : () => unawaited(_installListed(skill)),
+    );
+  }
+
+  /// Reads the source a listing names for [skill], finds the skill in it and reviews it for install.
+  Future<void> _installListed(ScannedSkill skill) async {
+    if (skill.problem != null) return;
+    final found = await c.resolveListedSkill(skill);
+    if (found == null || !mounted) return;
+    if (found.skill.problem != null) {
+      c.problem = '${skill.name} cannot be installed: ${found.skill.problem}';
+      c.notifyListeners();
+      return;
+    }
+    await _reviewScanned(found.source, found.scan, found.skill, false);
+  }
+
   Widget _scannedTile(String label, SkillSource source, SkillScan scan, ScannedSkill skill, bool own) {
     final here = c.skills[skillKey(skill.name)];
     return StoreTile(
@@ -401,68 +499,18 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     final chosenSource = view.source;
     if (chosenSource == skillsSearchSource && c.skillsSearch != null) return _fromSearch(context, head);
     if (chosenSource != null && c.skillSources.containsKey(chosenSource)) return _fromSource(context, head, chosenSource);
-    final offered = c.skillsOffered();
-    final inScope = [for (final item in offered) if (view.catalogs.isEmpty || view.catalogs.contains(item.$1)) item];
-    final shown = [
-      for (final item in inScope)
-        if (view.matches('${item.$2}\n${item.$1}\n${item.$3.description ?? ''}\n${item.$3.source.shown()}') &&
-            view.tags.every((tag) => _tagsOf(item.$3).contains(tag)))
-          item,
-    ];
-    final scope = [for (final loaded in c.loaded) if (loaded.catalog != null && (view.catalogs.isEmpty || view.catalogs.contains(loaded.label))) loaded];
-    final text = Theme.of(context).textTheme;
-    final filtered = view.tags.isNotEmpty || view.query.text.isNotEmpty;
+    if (chosenSource != null && c.generatedSkillSources.contains(chosenSource)) return _fromGenerated(context, head, chosenSource);
     return CardList(
       header: [
         ...head,
         _sourceRow(context),
-        ...sourceNotes(c, only: view.catalogs),
-        if (c.loadingCatalogs) const LinearProgressIndicator(),
-        if (scope.isNotEmpty)
-          StoreBanner(
-            specs: bannersFor(
-              noun: 'skills',
-              title: 'Skills',
-              scope: scope,
-              items: [for (final (label, name, offer) in inScope) _bannerItem(label, name, offer)],
-              showTag: (tag) {
-                view.tags
-                  ..clear()
-                  ..add(tag);
-                view.changed();
-              },
-            ),
-            iconLimits: c.config.store.iconLimits,
-            mark: StoreType.skills.icon,
-          ),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(children: [
-            Text(filtered ? 'Matching skills' : 'Top skills', style: text.titleMedium),
-            const SizedBox(width: 8),
-            Chip(key: const Key('store-count'), label: Text('${shown.length}'), visualDensity: VisualDensity.compact),
-            const Spacer(),
-            if (filtered)
-              TextButton(
-                key: const Key('store-show-all'),
-                onPressed: () {
-                  view.tags.clear();
-                  view.query.clear();
-                  view.changed();
-                },
-                child: const Text('Show all →'),
-              ),
-          ]),
+        // A skill an overlay names is installed with its overlay, which knows what it needs: it is not offered alone here.
+        const Text(
+          'Choose a source to read which skills it holds. A skill that comes in an overlay is installed with the overlay, from Overlays.',
+          key: Key('skills-choose-source'),
         ),
-        if (offered.isEmpty && !c.loadingCatalogs)
-          Text(c.config.overlayCatalogs.isEmpty
-              ? 'No catalogs yet, so nothing is offered. Add one in Store settings, or paste a skill below.'
-              : 'None of your catalogs offers a skill that is not here already. Paste one below.',
-              key: const Key('skills-nothing'))
-        else if (shown.isEmpty && !c.loadingCatalogs)
-          const Text('Nothing listed matches.', key: Key('skills-nothing-matches')),
       ],
-      cards: [for (final (label, name, offer) in shown) _offerTile(label, name, offer)],
+      cards: const [],
       footer: [
         const SizedBox(height: 16),
         Text('Paste a skill', style: Theme.of(context).textTheme.titleSmall),
@@ -479,69 +527,6 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
         ]),
       ],
     );
-  }
-
-  static List<String> _tagsOf(aos.CatalogEntry offer) => [for (final tag in (offer.about?['tags'] as List?) ?? const []) '$tag'];
-
-  LoadedCatalog? _catalogOf(String label) => c.loaded.where((catalog) => catalog.label == label).firstOrNull;
-
-  BannerItem _bannerItem(String label, String name, aos.CatalogEntry offer) => BannerItem(
-    name: name,
-    catalog: label,
-    iconPath: offer.about?['icon'] as String?,
-    iconBytes: _catalogOf(label)?.icons[name]?.bytes,
-    tags: _tagsOf(offer),
-    open: () => unawaited(_details(label, name, offer)),
-  );
-
-  /// A skill the catalogs offer, as a tile: the + reviews it and installs it on a yes.
-  Widget _offerTile(String label, String name, aos.CatalogEntry offer) => StoreTile(
-    key: Key('store-offered-skill-$label-$name'),
-    leading: StillIcon(name: name, path: offer.about?['icon'] as String?, bytes: _catalogOf(label)?.icons[name]?.bytes, size: 48,
-        limits: c.config.store.iconLimits),
-    title: name,
-    summary: offer.description ?? offer.about?['summary'] as String?,
-    by: '${publisherFrom(offer.about ?? const {}, offer.source.shown())} · $label',
-    needs: needsOf(_catalogOf(label)?.facts['skill:$name']),
-    installed: false,
-    installKey: Key('store-skill-install-$label-$name'),
-    onOpen: () => unawaited(_details(label, name, offer)),
-    onInstall: c.busy != null ? null : () => unawaited(_review(label, name, offer)),
-  );
-
-  Future<void> _details(String label, String name, aos.CatalogEntry offer) async {
-    final catalog = c.loaded.where((each) => each.label == label).firstOrNull;
-    final about = offer.about ?? const <String, Object>{};
-    await Navigator.of(context).push<void>(selectablePage(
-      builder: (_) => EntryDetails(
-        key: Key('skill-details-$label-$name'),
-        title: name,
-        leading: const LoadoutMark(name: 'skill', icon: Icons.auto_stories_outlined),
-        from: 'the catalog $label',
-        summary: offer.description ?? about['summary'] as String?,
-        overview: {
-          for (final field in const ['homepage', 'repository', 'license'])
-            if (about[field] case final String value) '${field[0].toUpperCase()}${field.substring(1)}': value,
-          if (about['authors'] case final List<Object?> authors when authors.isNotEmpty) 'Authors': authors.join(', '),
-          if (about['tags'] case final List<Object?> tags when tags.isNotEmpty) 'Tags': tags.join(', '),
-        },
-        source: {
-          'Source': offer.source.shown(),
-          'Pin': offer.pin ?? 'none: the catalog pins nothing, and installing pins what is fetched',
-          'Catalog': label,
-        },
-        facts: catalog?.facts['skill:$name'],
-        technical: {
-          if (offer.pin != null) 'Pin digest': offer.pin!,
-          if (catalog?.commit != null) 'Catalog commit': catalog!.commit!,
-        },
-        action: FilledButton.tonal(
-          key: const Key('entry-details-action'),
-          onPressed: c.busy != null ? null : () => unawaited(_review(label, name, offer, fromDetails: true)),
-          child: const Text('Review and install…'),
-        ),
-      ),
-    ));
   }
 
   Future<void> _pasted() async {
@@ -564,7 +549,7 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
   }
 
   /// Shows where the skill comes from and what it is pinned to, and fetches it only on a yes.
-  Future<void> _review(String? label, String name, aos.CatalogEntry offer, {bool fromDetails = false, bool own = false}) async {
+  Future<void> _review(String? label, String name, aos.CatalogEntry offer, {bool own = false}) async {
     final item = reviewChosenSkill(c.home!.overlays, c.skills, label, name, offer, pins: c.config.skillPins, own: own);
     final yes = await showSelectableDialog<bool>(
       context: context,
@@ -584,8 +569,6 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
     if (yes != true) return;
     await c.installSkill(item);
     if (!mounted) return;
-    // From a details page, back to the list first.
-    if (fromDetails) Navigator.of(context).pop();
     view.discover = false;
   }
 }

@@ -187,7 +187,9 @@ void main() {
     testWidgets('the default source is listed, and nothing is fetched until it is chosen', (tester) async {
       await open(tester);
       expect(find.byKey(const Key('skills-source-anthropics')), findsOneWidget);
-      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsOneWidget, reason: 'the catalogs are what Discover starts with');
+      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsNothing, reason: 'a skill an overlay names comes with its overlay');
+      expect(find.byKey(const Key('skills-from-catalogs')), findsNothing);
+      expect(find.byKey(const Key('skills-choose-source')), findsOneWidget);
       expect(overlays.scanned, isEmpty);
 
       await tapKey(tester, 'skills-source-anthropics');
@@ -195,14 +197,10 @@ void main() {
       expect(overlays.scannedOwn, [false], reason: 'the default source is fetched with none of the person\'s git settings');
       expect(find.byKey(const Key('store-source-skill-anthropics-pdf')), findsOneWidget);
       expect(find.byKey(const Key('store-source-skill-anthropics-docx')), findsOneWidget);
-      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsNothing);
       expect(find.textContaining('none of your git settings'), findsOneWidget);
       expect(find.textContaining('Read at commit $commit'), findsOneWidget);
       expect(find.byKey(const Key('skills-source-left-out')), findsOneWidget);
       expect(overlays.skillFetches, isEmpty, reason: 'reading a source installs nothing');
-
-      await tapKey(tester, 'skills-from-catalogs');
-      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsOneWidget);
     });
 
     testWidgets('a skill of a source is reviewed with the commit that was read, and fetched only on a yes', (tester) async {
@@ -247,7 +245,7 @@ void main() {
       await tapKey(tester, 'skills-source-remove');
       expect(saved.last.skillSources.keys, ['anthropics']);
       expect(find.byKey(const Key('skills-source-addyosmani-web-quality-skills')), findsNothing);
-      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsOneWidget, reason: 'removing the source it was reading puts Discover back on the catalogs');
+      expect(find.byKey(const Key('skills-choose-source')), findsOneWidget, reason: 'removing the source it was reading puts Discover back on the choice of one');
     });
 
     testWidgets('a skill from a source the person typed is fetched with their own settings', (tester) async {
@@ -268,7 +266,8 @@ void main() {
       expect(saved.last.encode(), contains('anthropics = false'));
       expect(saved.last.skillSources, isEmpty);
       expect(find.byKey(const Key('skills-source-anthropics')), findsNothing);
-      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsOneWidget, reason: 'the Store shows the catalogs again, not nothing');
+      expect(find.byKey(const Key('skills-choose-source')), findsOneWidget, reason: 'the page asks for a source, and its paste field stays');
+      expect(find.byKey(const Key('skills-paste')), findsOneWidget);
     });
 
     testWidgets('a source that cannot be read says so, and a skill whose name is not its folder\'s cannot be installed', (tester) async {

@@ -221,7 +221,8 @@ void main() {
       expect(find.byKey(const Key('store-settings-page')), findsNothing);
       expect(find.byKey(const Key('skills-from-search')), findsNothing);
       expect(find.byKey(const Key('store-search-skill-anthropics/skills/pdf')), findsNothing);
-      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsOneWidget, reason: 'Discover is back on the catalogs');
+      expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsNothing, reason: 'an overlay skill is never offered alone');
+      expect(find.byKey(const Key('skills-choose-source')), findsOneWidget);
     });
   });
 }

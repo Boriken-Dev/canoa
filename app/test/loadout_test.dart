@@ -18,7 +18,7 @@ import 'fixtures/catalog_standin.dart';
 import 'fixtures/store_fixtures.dart';
 import 'fixtures/store_link.dart';
 import 'mcp_registry_test.dart' show npmServer, page;
-import 'skills_from_source_test.dart' show pdfFiles, pinOf, skillsHost;
+import 'skills_from_source_test.dart' show pdfFiles, pinOf, skillMd, skillsHost;
 
 const catalogRepo = 'https://example.invalid/catalog.git';
 const teamRepo = 'https://example.invalid/review.git';
@@ -338,6 +338,40 @@ void main() {
     expect(find.byKey(const Key('overlays-none')), findsOneWidget);
   });
 
+  testWidgets('what an installed overlay provides is listed as installed under its type, marked with the overlay, with no Remove, and goes with it', (tester) async {
+    overlays.put(teamRepo, {'overlay.cfg': reviewCfg, 'skills/helper/SKILL.md': skillMd('helper')});
+    await open(tester);
+    await openTab(tester, 'skills');
+    expect(find.byKey(const Key('skills-none')), findsOneWidget, reason: 'nothing is installed yet');
+    await openTab(tester, 'overlays');
+    await installReview(tester);
+
+    await openTab(tester, 'skills');
+    await tapKey(tester, 'skills-installed');
+    final skill = find.byKey(const Key('skill-installed-helper'));
+    expect(skill, findsOneWidget, reason: 'the overlay\'s skill is installed with it');
+    expect(find.descendant(of: skill, matching: find.text('Comes with review')), findsOneWidget);
+    expect(find.byKey(const Key('skill-remove-helper')), findsNothing, reason: 'it goes only with its overlay');
+    expect(find.byKey(const Key('skills-none')), findsNothing);
+
+    await openTab(tester, 'mcps');
+    await tapKey(tester, 'mcps-installed');
+    final server = find.byKey(const Key('mcp-installed-tracker'));
+    expect(server, findsOneWidget);
+    expect(find.descendant(of: server, matching: find.textContaining('comes with the overlay review')), findsOneWidget);
+    expect(find.byKey(const Key('mcp-remove-tracker')), findsNothing, reason: 'it goes only with its overlay');
+
+    await openTab(tester, 'overlays');
+    await tapKey(tester, 'overlays-installed');
+    await tapKey(tester, 'overlay-remove-review');
+    await tapKey(tester, 'overlay-remove-confirm');
+    await openTab(tester, 'skills');
+    expect(find.byKey(const Key('skill-installed-helper')), findsNothing, reason: 'removing the overlay removes its skill');
+    expect(find.byKey(const Key('skills-none')), findsOneWidget);
+    await openTab(tester, 'mcps');
+    expect(find.byKey(const Key('mcp-installed-tracker')), findsNothing, reason: 'and its MCP server');
+  });
+
   testWidgets('a Discover card says which catalog it is from and its repository, whatever store offers it', (tester) async {
     overlays.put('https://example.invalid/other.git', {'catalog.toml': '[overlays.lint]\nsource = "https://example.invalid/lint.git@main"\n'});
     await open(tester, text: '${withCatalog}other = "https://example.invalid/other.git@main#catalog.toml"\n');
@@ -380,16 +414,25 @@ void main() {
     expect(saved.last.catalogTable('overlays'), {defaultCatalogLabel: defaultCatalogSpec});
   });
 
-  testWidgets('a skill the catalog offers is shown with its source and pin, fetched on a yes, chosen and on for new sessions', (tester) async {
+  testWidgets('Skills Discover lists no skill that only an overlay catalog names', (tester) async {
+    await open(tester);
+    await openTab(tester, 'skills');
+    await tapKey(tester, 'skills-discover');
+    expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsNothing, reason: 'the catalog names pdf for its overlay');
+    expect(find.byKey(const Key('skills-from-catalogs')), findsNothing);
+    expect(find.byKey(const Key('skills-choose-source')), findsOneWidget);
+    expect(find.byKey(const Key('store-banner')), findsNothing);
+  });
+
+  testWidgets('a skill pasted is shown with its source, fetched on a yes, chosen and on for new sessions', (tester) async {
     await open(tester);
     expect(find.text('Skills 0'), findsOneWidget);
     await openTab(tester, 'skills');
     await tapKey(tester, 'skills-discover');
-    final offered = find.byKey(const Key('store-offered-skill-main-pdf'));
-    expect(tester.widget<Text>(find.descendant(of: offered, matching: find.byKey(const Key('provenance')))).data,
-        endsWith(' · main'));
-    await tapKey(tester, 'store-skill-install-main-pdf');
-    expect(find.textContaining('pinned ${pinOf('pdf', pdfFiles)}'), findsWidgets);
+    overlays.putSkill('https://example.invalid/skills.git@main#skills/pdf', pdfFiles);
+    await tester.enterText(find.byKey(const Key('skills-paste')), 'https://example.invalid/skills.git@main#skills/pdf');
+    await tapKey(tester, 'skills-paste-review');
+    expect(find.textContaining('unpinned'), findsWidgets);
     expect(overlays.skillFetches, isEmpty, reason: 'nothing is fetched before the yes');
     await tapKey(tester, 'store-skill-install-confirm');
     expect(overlays.skills.keys, ['pdf']);
@@ -399,7 +442,7 @@ void main() {
 
     final card = find.byKey(const Key('skill-installed-pdf'));
     expect(find.descendant(of: card, matching: find.text('Chosen by you')), findsOneWidget);
-    expect(tester.widget<Text>(find.descendant(of: card, matching: find.byKey(const Key('provenance')))).data, contains('pinned sha256:'));
+    expect(tester.widget<Text>(find.descendant(of: card, matching: find.byKey(const Key('provenance')))).data, contains('unpinned'));
     await tapKey(tester, 'skill-default-pdf');
     expect(saved.last.loadoutSkills, isEmpty, reason: 'off for new sessions, still installed');
     expect(overlays.skills.keys, ['pdf']);
@@ -415,7 +458,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('skills-paste')), 'https://example.invalid/skills.git@main#');
     await tapKey(tester, 'skills-paste-review');
     expect(find.byKey(const Key('skills-problem')), findsOneWidget);
-    overlays.putSkill('https://example.invalid/skills.git#skills/pdf', pdfFiles);
+    overlays.putSkill('https://example.invalid/skills.git@main#skills/pdf', pdfFiles);
     await tester.enterText(find.byKey(const Key('skills-paste')), 'https://example.invalid/skills.git@main#skills/pdf');
     await tapKey(tester, 'skills-paste-review');
     expect(find.byKey(const Key('store-skill-review')), findsOneWidget);

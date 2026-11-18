@@ -171,16 +171,14 @@ void main() {
     expect(card, findsOneWidget);
   });
 
-  testWidgets('Skills: Installed says none yet, Discover offers the catalog\'s skills and a search narrows them', (tester) async {
+  testWidgets('Skills: Installed says none yet, and Discover offers no skill an overlay catalog names', (tester) async {
     await open(tester);
     await tapKey(tester, 'store-tab-skills');
     expect(find.byKey(const Key('skills-none')), findsOneWidget);
     await tapKey(tester, 'skills-discover');
-    expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsOneWidget);
-    await tester.enterText(find.byKey(const Key('store-search')), 'zzz');
-    await tester.pumpAndSettle();
     expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsNothing);
-    expect(find.byKey(const Key('skills-nothing-matches')), findsOneWidget);
+    expect(find.byKey(const Key('skills-choose-source')), findsOneWidget);
+    expect(find.byKey(const Key('skills-source-anthropics')), findsOneWidget);
   });
 
   testWidgets('MCPs: Installed says none yet, and Discover asks the registry', (tester) async {
@@ -193,22 +191,19 @@ void main() {
 
   testWidgets('a card opens its details, and coming back keeps the type, the query and the switch', (tester) async {
     await open(tester);
-    await tapKey(tester, 'store-tab-skills');
-    await tapKey(tester, 'skills-discover');
-    await tester.enterText(find.byKey(const Key('store-search')), 'pdf');
+    await tapKey(tester, 'overlays-discover');
+    await tester.enterText(find.byKey(const Key('store-search')), 'review');
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('store-offered-skill-main-pdf')));
+    await tester.tap(find.byKey(const Key('store-entry-main-review')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('skill-details-main-pdf')), findsOneWidget);
-    expect(find.byKey(const Key('details-contents-unread')), findsOneWidget, reason: 'a skill outside the catalog is only the catalog\'s claim');
     expect(find.byKey(const Key('details-technical')), findsOneWidget);
     expect(find.byKey(const Key('store-skill-review')), findsNothing, reason: 'looking is not installing');
     await tester.pageBack();
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('store-offered-skill-main-pdf')), findsOneWidget);
-    expect(tester.widget<TextField>(find.byKey(const Key('store-search'))).controller!.text, 'pdf');
-    expect(find.byKey(const Key('skills-discover')), findsOneWidget);
-    expect(tester.widget<SegmentedButton<bool>>(find.byKey(const Key('skills-switch'))).selected, {true});
+    expect(find.byKey(const Key('store-entry-main-review')), findsOneWidget);
+    expect(tester.widget<TextField>(find.byKey(const Key('store-search'))).controller!.text, 'review');
+    expect(find.byKey(const Key('overlays-discover')), findsOneWidget);
+    expect(tester.widget<SegmentedButton<bool>>(find.byKey(const Key('overlays-switch'))).selected, {true});
   });
 
   testWidgets('an overlay\'s page shows what the index read of its manifest before anything is fetched', (tester) async {
