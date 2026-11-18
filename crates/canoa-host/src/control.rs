@@ -352,6 +352,8 @@ pub(crate) struct Control {
     overlays: Arc<Overlays>,
     /// Registry reads and the cache of what catalogs provide.
     registry: Registry,
+    /// The requests the app sends through this host's network.
+    fetch: fetch::Fetch,
     /// The catalogs and programs, indexed for `store/index`.
     index: Arc<crate::store::index::StoreIndex>,
     /// Where an extension a catalog lists is kept, and how it is fetched.
@@ -464,6 +466,7 @@ impl Control {
             say: say::Say::default(),
             overlays: Arc::new(Overlays::default()),
             registry: Registry::default(),
+            fetch: fetch::Fetch::default(),
             index: Arc::new(crate::store::index::StoreIndex::default()),
             extensions: extension_install::ExtensionInstall::default(),
             restart: Arc::new(AtomicBool::new(false)),
@@ -553,6 +556,14 @@ impl Control {
     #[must_use]
     pub(crate) fn with_registry(mut self, registry: Registry) -> Self {
         self.registry = registry;
+        self
+    }
+
+    /// Sends `network/fetch` requests through `network` instead of the process's.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_fetch(mut self, fetch: fetch::Fetch) -> Self {
+        self.fetch = fetch;
         self
     }
 
@@ -918,6 +929,9 @@ impl Control {
                     .and_then(|()| self.registry.contents(caller, &params)),
                 Some("store/contents_put") => allow(caller, Grant::OverlayRead)
                     .and_then(|()| self.registry.put_contents(caller, &params)),
+                Some("network/fetch") => {
+                    owner_only_network(caller).and_then(|()| self.fetch.run(&params))
+                }
                 Some("host/which") => allow(caller, Grant::StoreRead)
                     .and_then(|()| registry::which(&params, &crate::sources::runtime_dirs())),
                 Some("host/restart") => {
@@ -1262,6 +1276,18 @@ fn owner_only_history(caller: &Caller) -> Result<(), (i32, String)> {
     }
 }
 
+/// What the app fetches through this host is sent as the person's computer, with its proxy login and client certificates: only this
+/// process asks for it, and no grant says otherwise.
+fn owner_only_network(caller: &Caller) -> Result<(), (i32, String)> {
+    match caller {
+        Caller::Owner => Ok(()),
+        Caller::Peer { .. } => Err((
+            DENIED,
+            "only the person running this host sends requests through its network".to_owned(),
+        )),
+    }
+}
+
 fn allow(caller: &Caller, grant: Grant) -> Result<(), (i32, String)> {
     if caller.may(grant) {
         Ok(())
@@ -1563,6 +1589,9 @@ mod usage_read;
 mod workspace_tests;
 pub(crate) use index::ToolsBackend;
 mod account_move;
+mod fetch;
+#[cfg(test)]
+mod fetch_tests;
 #[cfg(test)]
 mod index_tests;
 mod moves;
