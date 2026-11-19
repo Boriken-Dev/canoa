@@ -90,6 +90,7 @@ impl core::error::Error for SignInError {}
 /// directory made for this sign-in, which is removed however it ended.
 pub(crate) fn sign_in(
     accounts: &Accounts,
+    makers: &crate::makers::Makers,
     provider: &dyn AccountProvider,
     method: &str,
     inputs: &serde_json::Map<String, serde_json::Value>,
@@ -103,7 +104,7 @@ pub(crate) fn sign_in(
     let included = if own {
         None
     } else {
-        crate::makers::login_provider(method)
+        makers.login_provider(method)
     };
     let provider: &dyn AccountProvider = included.as_deref().unwrap_or(provider);
     // The directory goes when this returns, however the sign-in ended.

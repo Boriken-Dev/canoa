@@ -95,6 +95,8 @@ pub struct Config {
     pub skill_pins: BTreeMap<String, String>,
     /// `[host.extensions.NAME]`: the `store_extension` providers that add types to the Store, in the file's order.
     pub extensions: Vec<Extension>,
+    /// The account makers the libraries this config names offer, found when first asked for.
+    pub(crate) makers: crate::makers::Cell,
 }
 
 /// One `[host.extensions.NAME]`: a `store_extension` provider the host loads, whose store types the Store lists.
@@ -2881,6 +2883,7 @@ impl Config {
             delegate,
             skill_pins,
             extensions,
+            makers: crate::makers::Cell::default(),
         })
     }
 

@@ -27,7 +27,14 @@ fn settings(value: serde_json::Value) -> Settings {
 }
 
 fn harness(id: &str, harness: &Settings, accounts: &Settings) -> Result<Harness, ProviderError> {
-    Harness::new(&built_in(), id, (harness, accounts), false, Vec::new())
+    Harness::new(
+        &built_in(),
+        id,
+        (harness, accounts),
+        false,
+        Vec::new(),
+        Arc::default(),
+    )
 }
 
 fn ids(harness: &Harness) -> Vec<String> {

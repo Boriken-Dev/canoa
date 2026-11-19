@@ -27,6 +27,7 @@ use coqui_acp_api::{
 use crate::accounts::matching::Runs;
 use crate::accounts::{ACCOUNT_META, Accounts, Held, Watcher};
 use crate::config::{AccountConfig, Config, Origin, Settings, cache_lifetime_named};
+use crate::makers::Makers;
 use crate::pools::EntryPool;
 use crate::provider::{ProviderError, map_of, open};
 
@@ -86,6 +87,8 @@ pub(crate) struct Harness {
     accounts_of: Option<Arc<dyn AccountProvider>>,
     /// Whether the account provider offers the harness's own login as the automatic `local` account.
     local: bool,
+    /// The account makers the host carries, whose kinds the listing joins and whose accounts this harness runs.
+    makers: Arc<Makers>,
     /// The accounts the entry offers, when it offers any.
     accounts: Option<Offer>,
     /// The entry's `cache_lifetime`: what its sessions ask when the client does not choose.
@@ -156,6 +159,7 @@ impl Harness {
         (settings, account_settings): (&Settings, &Settings),
         profiles: bool,
         roots: Vec<String>,
+        makers: Arc<Makers>,
     ) -> Result<Self, ProviderError> {
         let (plain, departures) =
             instance(registry, id, settings).map_err(|error| match error {
@@ -163,8 +167,13 @@ impl Harness {
                 other => other,
             })?;
         let catalog = plain.accounts().ok();
-        let (accounts_of, listing, local) =
-            account_side(registry, id, (settings, account_settings), catalog.as_ref())?;
+        let (accounts_of, listing, local) = account_side(
+            registry,
+            id,
+            (settings, account_settings),
+            catalog.as_ref(),
+            &makers,
+        )?;
         let profiled = if profiles {
             let mut map = settings.as_map().clone();
             map.insert(CLIENT_PLUGINS.to_owned(), serde_json::Value::Bool(true));
@@ -187,6 +196,7 @@ impl Harness {
             listing,
             accounts_of,
             local,
+            makers,
             accounts: None,
             lifetime: None,
             entry: String::new(),
@@ -278,6 +288,11 @@ impl Harness {
         self.catalog.as_ref()
     }
 
+    /// The account makers in force for this harness: the bundled libraries' and those canoa.cfg's libraries add.
+    pub(crate) const fn makers(&self) -> &Arc<Makers> {
+        &self.makers
+    }
+
     /// The kinds of account and the ways to sign in that the harness's account provider offers, with the host's own beside
     /// them, each kind saying the standards it provides.
     pub(crate) const fn listing(&self) -> &AccountCatalog {
@@ -301,6 +316,7 @@ impl Harness {
         Runs {
             harness: &self.id,
             catalog: self.catalog.as_ref(),
+            makers: Some(&self.makers),
         }
     }
 
@@ -744,6 +760,7 @@ fn account_side(
     harness: &str,
     (settings, own): (&Settings, &Settings),
     accepts: Option<&AccountCatalog>,
+    makers: &Makers,
 ) -> Result<AccountSide, ProviderError> {
     let mut listing = AccountCatalog::new();
     let provider = account_provider(registry, harness, settings, own)?;
@@ -756,7 +773,7 @@ fn account_side(
         listing.kinds.extend(offer.kinds);
         listing.logins = offer.logins;
     }
-    crate::makers::extend(&mut listing, harness, accepts);
+    makers.extend(&mut listing, harness, accepts);
     Ok((provider, listing, local))
 }
 

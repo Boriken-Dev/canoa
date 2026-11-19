@@ -198,6 +198,7 @@ pub(crate) fn serve_stdio(run: &AgentRun) -> Result<(), Refused> {
         (&settings, &Settings::default()),
         false,
         roots,
+        std::sync::Arc::default(),
     )
     .map_err(|error| match error {
         ProviderError::Missing => usage(format!(

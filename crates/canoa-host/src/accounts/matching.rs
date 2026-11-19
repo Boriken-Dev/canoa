@@ -8,11 +8,13 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use coqui_acp_api::{AccountCatalog, AccountKindInfo};
 
 use super::commands::provider_for;
 use crate::config::{AccountConfig, Config};
+use crate::makers::Makers;
 
 /// What a provider says of its accounts: the standards it accepts, and the kinds and sign-in methods its account provider offers.
 #[derive(Clone)]
@@ -73,6 +75,11 @@ impl<'a> Catalogs<'a> {
             .clone()
     }
 
+    /// The account makers in force for this config: the bundled libraries' and those its extensions and entries load.
+    pub(crate) fn makers(&self) -> Arc<Makers> {
+        Makers::of(self.config)
+    }
+
     /// The kinds of account and ways to sign in that the provider `harness` offers; `None` when it cannot be built.
     pub(crate) fn listing(&self, harness: &str) -> Option<AccountCatalog> {
         self.known(harness).map(|known| known.listing)
@@ -90,7 +97,8 @@ impl<'a> Catalogs<'a> {
             .and_then(|known| known.listing.kind(&account.kind).cloned())
             .or_else(|| {
                 // A kind a maker makes is the same whichever harness the account names, or none that can be built.
-                crate::makers::for_kind(&account.kind)
+                self.makers()
+                    .for_kind(&account.kind)
                     .and_then(|maker| maker.kind(&account.kind).cloned())
             })
             // The standards an account provides are its own where its kind says so.
@@ -146,8 +154,8 @@ impl<'a> Catalogs<'a> {
 
 /// Whether `runs` applies `account` as an account of a standard it accepts, not as one of its own kinds: another provider made it,
 /// or a maker did, whichever harness it names.
-pub(crate) fn borrowed(account: &AccountConfig, runs: &str) -> bool {
-    account.harness != runs || crate::makers::makes(&account.kind)
+pub(crate) fn borrowed(makers: &Makers, account: &AccountConfig, runs: &str) -> bool {
+    account.harness != runs || makers.makes(&account.kind)
 }
 
 /// Why `account`, of the kind `info`, cannot run a session on `runs`, whose catalog is `catalog`; `Ok` when it can. The reason
@@ -157,12 +165,13 @@ pub(crate) fn borrowed(account: &AccountConfig, runs: &str) -> bool {
 ///
 /// The standards the account provides and the harness accepts, when none is both.
 pub(crate) fn fits(
+    makers: &Makers,
     catalog: &AccountCatalog,
     runs: &str,
     account: &AccountConfig,
     info: &AccountKindInfo,
 ) -> Result<(), String> {
-    if !borrowed(account, runs) {
+    if !borrowed(makers, account, runs) {
         return Ok(());
     }
     let list = |ids: Vec<&str>| {
@@ -235,6 +244,8 @@ pub(crate) fn moves_endpoint(catalog: &AccountCatalog, provides: &[String]) -> b
 pub(crate) struct Runs<'a> {
     pub(crate) harness: &'a str,
     pub(crate) catalog: Option<&'a AccountCatalog>,
+    /// The account makers in force; the bundled ones when the caller has none to name.
+    pub(crate) makers: Option<&'a Makers>,
 }
 
 impl<'a> Runs<'a> {
@@ -244,13 +255,23 @@ impl<'a> Runs<'a> {
         Self {
             harness,
             catalog: None,
+            makers: None,
         }
+    }
+
+    /// Whether the harness applies `account` as an account of a standard it accepts, not as one of its own kinds.
+    pub(crate) fn borrowed(&self, account: &AccountConfig) -> bool {
+        borrowed(
+            self.makers.unwrap_or(&Makers::default()),
+            account,
+            self.harness,
+        )
     }
 
     /// Whether the harness applies an account of the kind `info` that another provider made from a private directory of the
     /// account's, as the kind of its own that the standard names does.
     pub(crate) fn directory(&self, account: &AccountConfig, info: &AccountKindInfo) -> bool {
-        if !borrowed(account, self.harness) {
+        if !self.borrowed(account) {
             return false;
         }
         let Some(catalog) = self.catalog else {
@@ -273,15 +294,16 @@ impl<'a> Runs<'a> {
 /// others' whose kind provides a standard it accepts.
 pub(crate) fn usable(config: &Config, catalogs: &Catalogs<'_>, harness: &str) -> Vec<String> {
     let catalog = catalogs.of(harness);
+    let makers = catalogs.makers();
     config
         .accounts
         .iter()
         .filter(|(_, account)| {
-            !borrowed(account, harness)
+            !borrowed(&makers, account, harness)
                 || catalog.as_ref().is_some_and(|catalog| {
                     catalogs
                         .kind(account)
-                        .is_some_and(|info| fits(catalog, harness, account, &info).is_ok())
+                        .is_some_and(|info| fits(&makers, catalog, harness, account, &info).is_ok())
                 })
         })
         .map(|(name, _)| name.clone())
@@ -317,7 +339,7 @@ mod tests {
     #[test]
     fn an_account_of_the_harness_s_own_provider_always_fits() {
         let own = account("codex", "k");
-        assert!(fits(&catalog(&[]), "codex", &own, &kind(&[])).is_ok());
+        assert!(fits(&Makers::default(), &catalog(&[]), "codex", &own, &kind(&[])).is_ok());
     }
 
     #[test]
@@ -325,9 +347,9 @@ mod tests {
         let key = account("claude", "k");
         let info = kind(&[standard::ANTHROPIC_API]);
         let pi = catalog(&[standard::OPENAI_API, standard::ANTHROPIC_API]);
-        assert!(fits(&pi, "pi", &key, &info).is_ok());
+        assert!(fits(&Makers::default(), &pi, "pi", &key, &info).is_ok());
         let codex = catalog(&[standard::CODEX, standard::OPENAI_API]);
-        let why = fits(&codex, "codex", &key, &info).expect_err("not accepted");
+        let why = fits(&Makers::default(), &codex, "codex", &key, &info).expect_err("not accepted");
         assert_eq!(
             why,
             "it provides anthropic-api and codex accepts codex, openai-api"
@@ -337,8 +359,14 @@ mod tests {
     #[test]
     fn a_kind_that_provides_nothing_is_taken_only_by_its_own_provider() {
         let key = account("claude", "k");
-        let why = fits(&catalog(&[standard::ANTHROPIC_API]), "pi", &key, &kind(&[]))
-            .expect_err("provides none");
+        let why = fits(
+            &Makers::default(),
+            &catalog(&[standard::ANTHROPIC_API]),
+            "pi",
+            &key,
+            &kind(&[]),
+        )
+        .expect_err("provides none");
         assert!(why.starts_with("it provides none"), "{why}");
     }
 
@@ -346,9 +374,24 @@ mod tests {
     fn a_gateway_account_fits_only_where_a_gateway_can_be_given() {
         let gateway = account("claude", FOUNDRY);
         let info = kind(&[standard::ANTHROPIC_API, standard::OPENAI_API]);
-        assert!(fits(&catalog(&[standard::OPENAI_API]), "codex", &gateway, &info).is_ok());
-        let why = fits(&catalog(&[standard::OPENAI_API]), "grok", &gateway, &info)
-            .expect_err("no gateway route");
+        assert!(
+            fits(
+                &Makers::default(),
+                &catalog(&[standard::OPENAI_API]),
+                "codex",
+                &gateway,
+                &info
+            )
+            .is_ok()
+        );
+        let why = fits(
+            &Makers::default(),
+            &catalog(&[standard::OPENAI_API]),
+            "grok",
+            &gateway,
+            &info,
+        )
+        .expect_err("no gateway route");
         assert_eq!(why, "grok cannot be given a gateway");
     }
 
@@ -366,6 +409,7 @@ mod tests {
         let runs = Runs {
             harness: "pi",
             catalog: Some(&harness),
+            makers: None,
         };
         assert!(runs.directory(&account("claude", "k"), &info));
         assert!(

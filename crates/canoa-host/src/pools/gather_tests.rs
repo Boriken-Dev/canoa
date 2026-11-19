@@ -118,7 +118,7 @@ fn read(
     let address = standin(vec![("tok-work", work_doc), ("tok-work2", work2_doc)]);
     let config = Config::from_str_in(CONFIG, std::path::Path::new("")).expect("parses");
     let entry = config.entry("Claude").expect("an entry");
-    let built = harness_of(entry).expect("a provider");
+    let built = harness_of(entry, Arc::default()).expect("a provider");
     let built = offering(&config, entry, built, &Arc::clone(&store), true).expect("offered");
     let pool = built.pool_named("both", true).expect("the pool").clone();
     let names: Vec<String> = pool

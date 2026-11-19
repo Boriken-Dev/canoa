@@ -157,6 +157,7 @@ fn sign_in(
         });
         let outcome = login::sign_in(
             accounts,
+            provider.makers(),
             &**provider.account_provider().map_err(Failed::run)?,
             method,
             inputs,
@@ -287,6 +288,7 @@ pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harne
         (&settings, &account_settings),
         false,
         Vec::new(),
+        crate::makers::Makers::of(config),
     )
     .map_err(|error| Failed::run(format!("the {harness} provider is unusable: {error}")))
 }
@@ -758,6 +760,7 @@ pub(crate) fn sign_in_relayed(
 ) -> Result<coqui_acp_api::LoginOutcome, Failed> {
     login::sign_in(
         accounts,
+        provider.makers(),
         &**provider.account_provider().map_err(Failed::run)?,
         method,
         inputs,

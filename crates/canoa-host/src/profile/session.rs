@@ -52,6 +52,7 @@ pub(crate) fn account_words(
     kind: &str,
     provides: &[String],
     harness: Option<&str>,
+    makers: &crate::makers::Makers,
 ) -> (Option<&'static str>, Option<&'static str>) {
     // The vendor a name belongs to: an agent's id, a standard it owns, its registry id or the vendor's own name.
     let provider_of = |name: &str| crate::vendors::resolve(name).and_then(|known| known.vendor);
@@ -59,7 +60,7 @@ pub(crate) fn account_words(
         return (Some("local"), Some(vendor));
     }
     // A key to an address a library's account kind names runs the agent through that address: its provider is not the agent's.
-    if crate::makers::makes(kind) {
+    if makers.makes(kind) {
         return (Some("gateway"), None);
     }
     let by_prefix = crate::vendors::all().into_iter().find_map(|known| {

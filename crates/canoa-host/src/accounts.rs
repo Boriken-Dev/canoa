@@ -632,7 +632,7 @@ impl Accounts {
         }
         let keys = standards::keys_for(
             &info.provides,
-            matching::borrowed(config, runs.harness),
+            runs.borrowed(config),
             grant.credentials.expose(),
         );
         let mut held = Held::new(self, name, grant, Some(lock), files, rotates);

@@ -2405,6 +2405,7 @@ mod tests {
             (&settings, &crate::config::Settings::default()),
             false,
             Vec::new(),
+            std::sync::Arc::default(),
         )
         .map(|_| ())
         .map_err(|error| error.to_string())

@@ -1688,6 +1688,7 @@ impl Serving {
                             (settings, &account_settings.clone().unwrap_or_default()),
                             !profiles.is_empty() || local_profile.is_some(),
                             roots.clone(),
+                            crate::makers::Makers::of(config),
                         )
                         .map(|built| {
                             built
@@ -1707,7 +1708,11 @@ impl Serving {
                     // account whose credential is in the environment loads no settings files unless it says which.
                     if let Some(listed) = &listed
                         && kind::declares_setting(&registry, harness, "setting_sources")
-                        && keeps_key_in_environment(listed, harness)
+                        && keeps_key_in_environment(
+                            &crate::makers::Makers::of(config),
+                            listed,
+                            harness,
+                        )
                     {
                         let named = asks.setting_sources.is_some()
                             || settings
@@ -2983,10 +2988,14 @@ fn give_agent_flow<C: Channel>(
         Agent::Program { .. } => None,
     };
     let harness_id = hosted::harness_identity(provider, &served.name);
+    let makers = match &agent {
+        Agent::Harness(harness) => Arc::clone(harness.makers()),
+        Agent::Program { .. } => Arc::default(),
+    };
     let (account_kind, account_provider) = account
         .as_ref()
         .map_or((None, None), |(_, kind, provides)| {
-            account_words(kind, provides, harness_id)
+            account_words(kind, provides, harness_id, &makers)
         });
     let version = hosted::harness_version(provider);
     let connection = match offer {
@@ -3425,9 +3434,13 @@ pub(crate) fn harness_settings(
 /// Whether an offered account's credential reaches the agent in its environment, for a kind that names the model's address:
 /// the login kinds keep theirs in a file, and every other kind with an address is a key or a token. An account another
 /// provider made, that provides an API standard, is a key whatever its kind says of where it rests.
-pub(crate) fn keeps_key_in_environment(listed: &[kind::Offered], runs: &str) -> bool {
+pub(crate) fn keeps_key_in_environment(
+    makers: &crate::makers::Makers,
+    listed: &[kind::Offered],
+    runs: &str,
+) -> bool {
     listed.iter().any(|(_, account, info)| {
-        let borrowed = crate::accounts::matching::borrowed(account, runs)
+        let borrowed = crate::accounts::matching::borrowed(makers, account, runs)
             && info
                 .provides
                 .iter()
@@ -3479,8 +3492,14 @@ pub(crate) fn offered_accounts(
                 account.kind
             ));
         };
-        fits(catalog, harness, account, &info)
-            .map_err(|why| format!("account {name} cannot run on {harness}: {why}"))?;
+        fits(
+            &crate::makers::Makers::of(config),
+            catalog,
+            harness,
+            account,
+            &info,
+        )
+        .map_err(|why| format!("account {name} cannot run on {harness}: {why}"))?;
         crate::accounts::check_settings(&info, account.settings.as_ref())
             .map_err(|why| format!("account {name}: {why}"))?;
         listed.push((name.clone(), account.clone(), info));
@@ -3547,14 +3566,26 @@ pub(crate) fn other_accounts(
         let Some(info) = catalogs.kind(account) else {
             continue;
         };
-        if fits(catalog, harness, account, &info).is_err() {
+        if fits(
+            &crate::makers::Makers::of(config),
+            catalog,
+            harness,
+            account,
+            &info,
+        )
+        .is_err()
+        {
             continue;
         }
         if crate::accounts::check_settings(&info, account.settings.as_ref()).is_err() {
             continue;
         }
         let one = (name.clone(), account.clone(), info);
-        if keeps_key_in_environment(core::slice::from_ref(&one), harness) {
+        if keeps_key_in_environment(
+            &crate::makers::Makers::of(config),
+            core::slice::from_ref(&one),
+            harness,
+        ) {
             continue;
         }
         others.push(one);
@@ -3583,9 +3614,15 @@ pub(crate) fn unfit_accounts(
         .iter()
         .filter_map(|(name, account)| {
             let info = catalogs.kind(account)?;
-            fits(catalog, harness, account, &info)
-                .err()
-                .map(|why| (name.clone(), why))
+            fits(
+                &crate::makers::Makers::of(config),
+                catalog,
+                harness,
+                account,
+                &info,
+            )
+            .err()
+            .map(|why| (name.clone(), why))
         })
         .collect()
 }
@@ -4096,18 +4133,22 @@ settings = { replay_max_bytes = 4096 }
      {
         // Its own provider's key says it by its address; an API standard's account made elsewhere says it by what it provides.
         assert!(keeps_key_in_environment(
+            &crate::makers::Makers::default(),
             &[offered("claude", &["anthropic-api"], true)],
             "claude"
         ));
         assert!(!keeps_key_in_environment(
+            &crate::makers::Makers::default(),
             &[offered("claude", &["claude-code"], false)],
             "claude"
         ));
         assert!(keeps_key_in_environment(
+            &crate::makers::Makers::default(),
             &[offered("claude", &["anthropic-api"], false)],
             "pi"
         ));
         assert!(!keeps_key_in_environment(
+            &crate::makers::Makers::default(),
             &[offered("pi", &["pi"], false)],
             "claude"
         ));

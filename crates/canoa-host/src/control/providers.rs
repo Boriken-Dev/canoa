@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use crate::bundled::{self, Bundle};
 use crate::config::{Config, EntryKind, Origin, Settings};
 use crate::kind::{account_provider, instance};
-use crate::makers::ACCOUNTS_SUFFIX;
+use crate::makers::{ACCOUNTS_SUFFIX, Makers, makers_in};
 
 /// What the loaded providers say of one agent, from every registry that offers a part of it.
 #[derive(Default)]
@@ -36,7 +36,7 @@ pub(crate) fn list(config: &Config) -> Value {
         .map(|(origin, registry)| (origin.as_str(), registry))
         .collect();
     json!({
-        "providers": rows_of(&loaded, bundled::ALL),
+        "providers": rows_of(&loaded, bundled::ALL, &Makers::of(config)),
         "usage_readers": usage_readers_of(&loaded),
         "gateways": gateways_of(),
     })
@@ -83,11 +83,19 @@ pub(crate) fn usage_readers_of(registries: &[(&str, &Registry)]) -> Vec<Value> {
 /// The loaded registries of `config`: the bundled agents' and each entry's and extension's own.
 pub(crate) fn loaded(config: &Config) -> Vec<(String, Registry)> {
     let mut registries: Vec<(String, Registry)> = Vec::new();
-    let mut seen: Vec<Origin> = Vec::new();
     match bundled_registry(bundled::ALL) {
         Ok(registry) => registries.push(("bundled".to_owned(), registry)),
         Err(why) => tracing::warn!("the bundled agents are not listed: {why}"),
     }
+    registries.extend(libraries(config));
+    registries
+}
+
+/// The registries of the libraries and sources `config` names, each with the name of the entry or extension that loads it: the
+/// agent entries' and the extensions' (an extension verified as the Store verifies it), each origin once.
+pub(crate) fn libraries(config: &Config) -> Vec<(String, Registry)> {
+    let mut registries: Vec<(String, Registry)> = Vec::new();
+    let mut seen: Vec<Origin> = Vec::new();
     let origins = config
         .entries
         .iter()
@@ -189,7 +197,11 @@ fn touch(
 }
 
 /// The rows of `registries` (each with the origin it is named by), the sources of `bundles` joined to the agents they start.
-pub(crate) fn rows_of(registries: &[(&str, &Registry)], bundles: &[Bundle]) -> Vec<Value> {
+pub(crate) fn rows_of(
+    registries: &[(&str, &Registry)],
+    bundles: &[Bundle],
+    makers: &Makers,
+) -> Vec<Value> {
     let mut rows: BTreeMap<String, Row> = BTreeMap::new();
     let mut order: Vec<String> = Vec::new();
     for (origin, registry) in registries {
@@ -224,10 +236,14 @@ pub(crate) fn rows_of(registries: &[(&str, &Registry)], bundles: &[Bundle]) -> V
                 slot.title.get_or_insert(info.title);
             }
         }
+        let made: Vec<String> = makers_in(registry)
+            .into_iter()
+            .map(|maker| maker.provider)
+            .collect();
         for offer in registry.offers::<dyn AccountProvider>() {
             let provider_id = offer.id().to_owned();
             // The kinds of a maker's accounts join the listings of the harnesses that can run them: no agent is theirs.
-            if crate::makers::ids().contains(&provider_id) {
+            if made.contains(&provider_id) || makers.ids().contains(&provider_id) {
                 continue;
             }
             let harness = provider_id

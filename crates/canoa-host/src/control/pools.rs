@@ -224,7 +224,8 @@ pub(super) fn turn_with(
     };
     let store = crate::accounts::Accounts::open(&config, accounts.home_dir())
         .map_err(|error| (REFUSED, error.to_string()))?;
-    let built = crate::options::harness_of(source).map_err(|why| (REFUSED, why))?;
+    let built = crate::options::harness_of(source, crate::makers::Makers::of(&config))
+        .map_err(|why| (REFUSED, why))?;
     let built = crate::options::offering(&config, source, built, &store, true)
         .map_err(|why| (REFUSED, why))?;
     let now = crate::usage_splice::unix_now();

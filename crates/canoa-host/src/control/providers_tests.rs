@@ -13,6 +13,7 @@ use serde_json::Value;
 
 use super::providers::{bundled_registry, gateways_of, rows_of, usage_readers_of};
 use crate::bundled::{self, Bundle};
+use crate::makers::Makers;
 
 /// An agent no crate of Canoa's names: a vendor description and an account provider, offered by a library of its own.
 mod standin {
@@ -103,6 +104,69 @@ mod standin {
         }
     }
 
+    /// A gateway's account provider: no agent, so no harness and no vendor is its owner.
+    #[derive(Default, Debug, Provider)]
+    #[provider(AccountProvider, id = "gate_accounts", crate = ::coqui_acp_api::guatiao)]
+    pub(super) struct GateAccounts;
+
+    impl AccountProvider for GateAccounts {
+        fn describe(&self) -> Result<AccountProviderInfo, ProviderError> {
+            Ok(AccountProviderInfo::new("Gate accounts"))
+        }
+
+        fn offers(&self) -> Result<AccountOffer, ProviderError> {
+            let mut offer = AccountOffer::new();
+            offer
+                .kinds
+                .push(AccountKindInfo::new("gate-key", "Gate key").provides(["gate-api"]));
+            Ok(offer)
+        }
+
+        fn login(
+            &self,
+            _: LoginRequest,
+            _: Object<dyn ProcessSpawner>,
+            _: Object<dyn LoginPrompter>,
+        ) -> Result<LoginOutcome, ProviderError> {
+            Err(unsupported())
+        }
+
+        fn renew(
+            &self,
+            _: RenewRequest,
+            _: Object<dyn ProcessSpawner>,
+        ) -> Result<RenewReport, ProviderError> {
+            Err(unsupported())
+        }
+
+        fn watch(
+            &self,
+            _: WatchRequest,
+            _: Object<dyn ProcessSpawner>,
+            _: Object<dyn AccountKeeper>,
+        ) -> Result<Object<dyn AccountWatch>, ProviderError> {
+            Err(unsupported())
+        }
+
+        fn usage(
+            &self,
+            _: AccountUsageQuery,
+            _: Object<dyn ProcessSpawner>,
+            _: Object<dyn AccountKeeper>,
+        ) -> Result<AccountUsage, ProviderError> {
+            Err(unsupported())
+        }
+
+        fn models(
+            &self,
+            _: AccountModelsQuery,
+            _: Object<dyn ProcessSpawner>,
+            _: Object<dyn AccountKeeper>,
+        ) -> Result<coqui_acp_api::ModelListing, ProviderError> {
+            Err(unsupported())
+        }
+    }
+
     #[derive(Default, Debug, Provider)]
     #[provider(UsageReader, id = "zed_usage", crate = ::coqui_acp_api::guatiao)]
     pub(super) struct ZedUsage;
@@ -123,7 +187,7 @@ mod standin {
     coqui_acp_api::guatiao::local_providers!(
         id = "zed",
         version = "0.0.0",
-        providers = [ZedVendor, ZedAccounts, ZedUsage]
+        providers = [ZedVendor, ZedAccounts, GateAccounts, ZedUsage]
     );
 }
 
@@ -137,7 +201,7 @@ fn zed() -> Bundle {
 
 fn rows(bundles: &[Bundle]) -> Vec<Value> {
     let registry = bundled_registry(bundles).expect("the libraries are accepted");
-    rows_of(&[("bundled", &registry)], bundles)
+    rows_of(&[("bundled", &registry)], bundles, &Makers::default())
 }
 
 fn ids(rows: &[Value]) -> Vec<&str> {
@@ -249,7 +313,7 @@ fn a_gateway_a_library_carries_is_listed_with_its_kind_and_vendor_and_its_accoun
     assert_eq!(listed[0]["title"], "Foundry Local");
     // The kind joins the catalogs of the harnesses that can be given a gateway: no agent of its own is listed for it.
     let registry = bundled_registry(bundled::ALL).expect("the libraries are accepted");
-    let rows = rows_of(&[("bundled", &registry)], bundled::ALL);
+    let rows = rows_of(&[("bundled", &registry)], bundled::ALL, &Makers::default());
     assert!(
         rows.iter().all(|row| row["id"] != "foundry"),
         "no row for a gateway's accounts: {rows:?}"
@@ -348,4 +412,24 @@ fn the_apps_fixture_is_what_this_build_lists() {
         held == listed,
         "regenerate it: CANOA_WRITE_PROVIDERS=1 cargo test -p canoa-host --lib providers_tests"
     );
+}
+
+#[test]
+fn an_account_provider_no_agent_owns_is_a_maker_in_any_library_and_is_listed_as_no_agent() {
+    // `zed_accounts` is the account provider of the agent `zed` its library describes; `gate_accounts` is nobody's.
+    let mut all: Vec<Bundle> = bundled::ALL.to_vec();
+    all.push(zed());
+    let registry = bundled_registry(&all).expect("the libraries are accepted");
+    let made: Vec<String> = crate::makers::makers_in(&registry)
+        .into_iter()
+        .map(|maker| maker.provider)
+        .collect();
+    assert!(made.iter().any(|id| id == "gate_accounts"), "{made:?}");
+    assert!(made.iter().all(|id| id != "zed_accounts"), "{made:?}");
+    let rows = rows_of(&[("zed", &registry)], &all, &Makers::default());
+    assert!(
+        rows.iter().all(|row| row["id"] != "gate"),
+        "a maker's provider is no agent row: {rows:?}"
+    );
+    assert_eq!(row(&rows, "zed")["accounts"]["provider"], "zed_accounts");
 }

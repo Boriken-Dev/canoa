@@ -266,6 +266,7 @@ pub fn preset(harness: &str, executable: Option<&OsStr>) -> Choices {
         (&Settings::new(map), &Settings::default()),
         false,
         Vec::new(),
+        Arc::default(),
     ) {
         Ok(configured) => {
             let connection = configured.connection(None, None, CacheLifetime::Default);
@@ -294,7 +295,7 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
     let entry = config.entry(name)?;
     Some(match &entry.kind {
         EntryKind::Harness { options, .. } => {
-            let mut built = match harness_of(entry) {
+            let mut built = match harness_of(entry, crate::makers::Makers::of(config)) {
                 Ok(built) => built,
                 Err(why) => return Some(Choices::failed(why)),
             };
@@ -335,7 +336,10 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
 /// # Errors
 ///
 /// Why it cannot be built: the entry runs no harness, or its provider is missing or refuses its settings.
-pub(crate) fn harness_of(entry: &crate::config::Entry) -> Result<kind::Harness, String> {
+pub(crate) fn harness_of(
+    entry: &crate::config::Entry,
+    makers: Arc<crate::makers::Makers>,
+) -> Result<kind::Harness, String> {
     let EntryKind::Harness {
         harness,
         origin,
@@ -362,6 +366,7 @@ pub(crate) fn harness_of(entry: &crate::config::Entry) -> Result<kind::Harness, 
         (&configured, &account_settings.clone().unwrap_or_default()),
         false,
         Vec::new(),
+        makers,
     )
     .map_err(|error| error.to_string())
 }
@@ -445,7 +450,7 @@ pub(crate) fn as_account(
         Err(refusal) => return Choices::failed(refusal.client_reason()),
     };
     let mut owner = None;
-    if let Some(maker) = crate::makers::for_kind(&held.grant().kind) {
+    if let Some(maker) = built.makers().for_kind(&held.grant().kind) {
         // A maker lists what it made, whichever harness is asked.
         owner = Some((maker.provider(), store.source()));
     } else if held.owner() != built.id() {
@@ -757,6 +762,7 @@ pub(crate) fn usage_for(
         (&configured, &Settings::new(account_settings)),
         false,
         Vec::new(),
+        crate::makers::Makers::of(config),
     )
     .map_err(|error| error.to_string())?;
     let listed = crate::serve::offered_accounts(config, harness, &[name.to_owned()], &built)?;

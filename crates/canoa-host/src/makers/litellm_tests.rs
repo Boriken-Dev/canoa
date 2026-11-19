@@ -89,7 +89,7 @@ fn one_litellm_account_runs_both_harnesses_on_one_budget_and_a_spent_budget_stop
     let mut built = Vec::new();
     for (entry, pool) in [("Claude", "any-anthropic-api"), ("Codex", "any-openai-api")] {
         let entry = config.entry(entry).expect("an entry");
-        let harness = harness_of(entry).expect("a provider");
+        let harness = harness_of(entry, Arc::default()).expect("a provider");
         let harness = offering(&config, entry, harness, &store, true).expect("offered");
         let (_, _, info) = harness.account_named("lite", false).expect("offered here");
         assert_eq!(info.provides, ["openai-api", "anthropic-api"]);

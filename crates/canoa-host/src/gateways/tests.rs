@@ -28,6 +28,7 @@ use crate::accounts::matching::Runs;
 use crate::accounts::store::FileStore;
 use crate::accounts::{Accounts, Refusal};
 use crate::config::AccountConfig;
+use crate::makers::Makers;
 
 /// A directory of its own that goes with the test.
 struct Dir(PathBuf);
@@ -148,7 +149,7 @@ fn stand_in(refuses: Option<&str>) -> (Offer, Arc<Record>) {
 
 fn catalog_of(harness: &str) -> AccountCatalog {
     let mut catalog = AccountCatalog::new();
-    crate::makers::extend(&mut catalog, harness, None);
+    crate::makers::Makers::default().extend(&mut catalog, harness, None);
     catalog
 }
 
@@ -282,7 +283,7 @@ fn the_kind_and_its_method_join_the_catalogs_of_the_harnesses_that_can_be_given_
         assert!(kind.state_dir && kind.notices.len() == 2);
         assert_eq!(catalog.logins[0].produces, KIND);
         let mut again = catalog.clone();
-        crate::makers::extend(&mut again, harness, None);
+        crate::makers::Makers::default().extend(&mut again, harness, None);
         assert_eq!(again, catalog, "adding it twice changes nothing");
     }
     assert!(catalog_of("grok").kind(KIND).is_none());
@@ -314,12 +315,21 @@ fn the_library_offers_the_gateway_and_the_host_finds_its_kind_provider_and_vendo
     assert_eq!(vendor_of(KIND), Some("microsoft-foundry"));
     assert_eq!(vendor_of("anthropic-api-key"), None);
     assert!(
-        crate::makers::ids()
+        crate::makers::Makers::default()
+            .ids()
             .iter()
             .any(|id| id == "foundry_accounts")
     );
-    assert!(crate::makers::login_provider(KIND).is_some());
-    assert!(crate::makers::login_provider("claude-login").is_none());
+    assert!(
+        crate::makers::Makers::default()
+            .login_provider(KIND)
+            .is_some()
+    );
+    assert!(
+        crate::makers::Makers::default()
+            .login_provider("claude-login")
+            .is_none()
+    );
 }
 
 #[test]
@@ -330,13 +340,22 @@ fn signing_in_names_a_model_and_keeps_no_credential_whichever_provider_the_harne
     let mut inputs = serde_json::Map::new();
     inputs.insert("model".to_owned(), json!("qwen3-14b-generic-gpu:2"));
     // The harness's own provider makes no such account: the library's does, and the host finds it by the method.
-    let outcome =
-        sign_in(&accounts, &Plain, KIND, &inputs, Arc::new(Mute), None).expect("signs in");
+    let outcome = sign_in(
+        &accounts,
+        &Makers::default(),
+        &Plain,
+        KIND,
+        &inputs,
+        Arc::new(Mute),
+        None,
+    )
+    .expect("signs in");
     assert_eq!(outcome.kind, KIND);
     assert_eq!(outcome.label.as_deref(), Some("qwen3-14b-generic-gpu:2"));
     assert!(outcome.credentials.expose().is_empty());
     let refused = sign_in(
         &accounts,
+        &Makers::default(),
         &Plain,
         KIND,
         &serde_json::Map::new(),
@@ -347,6 +366,7 @@ fn signing_in_names_a_model_and_keeps_no_credential_whichever_provider_the_harne
     assert!(refused.to_string().contains("model"), "{refused}");
     let own = sign_in(
         &accounts,
+        &Makers::default(),
         &FoundryAccounts,
         KIND,
         &inputs,

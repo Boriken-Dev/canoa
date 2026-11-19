@@ -227,7 +227,14 @@ fn fitting<'a>(
         return None;
     }
     let catalog = catalogs.of(harness)?;
-    matching::fits(&catalog, harness, account, &info).ok()?;
+    matching::fits(
+        &crate::makers::Makers::of(config),
+        &catalog,
+        harness,
+        account,
+        &info,
+    )
+    .ok()?;
     Some(Some((account, info)))
 }
 
@@ -358,6 +365,7 @@ pub(crate) fn for_entry(
                         &member,
                     )
                     && crate::serve::keeps_key_in_environment(
+                        &crate::makers::Makers::of(config),
                         &[(member.clone(), account.clone(), info)],
                         harness,
                     )

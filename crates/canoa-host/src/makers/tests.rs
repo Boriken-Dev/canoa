@@ -200,7 +200,7 @@ fn one_account_of_two_standards_runs_both_harnesses_sits_in_both_pools_and_one_r
     let mut built = Vec::new();
     for (entry, pool) in [("Claude", "any-anthropic-api"), ("Codex", "any-openai-api")] {
         let entry = config.entry(entry).expect("an entry");
-        let harness = harness_of(entry).expect("a provider");
+        let harness = harness_of(entry, Arc::default()).expect("a provider");
         let harness = offering(&config, entry, harness, &store, true).expect("offered");
         let (_, account, info) = harness
             .account_named("shared", false)
@@ -292,7 +292,7 @@ fn a_maker_s_kind_joins_only_the_harnesses_that_accept_a_standard_it_provides() 
             .map(|id| coqui_acp_api::Accepted::new(*id))
             .collect();
         let mut listing = coqui_acp_api::AccountCatalog::new();
-        extend(&mut listing, harness, Some(&catalog));
+        Makers::default().extend(&mut listing, harness, Some(&catalog));
         listing
     };
     let both = join("h", &[standard::OPENAI_API]);
@@ -310,7 +310,7 @@ fn a_maker_s_kind_joins_only_the_harnesses_that_accept_a_standard_it_provides() 
         let mut listing = both.clone();
         let mut catalog = coqui_acp_api::AccountCatalog::new();
         catalog.accepts = vec![coqui_acp_api::Accepted::new(standard::OPENAI_API)];
-        extend(&mut listing, "h", Some(&catalog));
+        Makers::default().extend(&mut listing, "h", Some(&catalog));
         listing
     };
     assert_eq!(again, both, "joining twice changes nothing");
@@ -328,7 +328,7 @@ fn an_account_of_two_standards_is_listed_once_for_every_harness_that_runs_it() {
     let config = Config::from_str_in(CONFIG, std::path::Path::new("")).expect("parses");
     for entry in ["Claude", "Codex"] {
         let entry = config.entry(entry).expect("an entry");
-        let harness = harness_of(entry).expect("a provider");
+        let harness = harness_of(entry, Arc::default()).expect("a provider");
         let harness = offering(&config, entry, harness, &store, true).expect("offered");
         let listed = crate::options::as_account(&config, &harness, "shared", false);
         assert!(listed.known, "{:?}", listed.unknown_because);
@@ -363,19 +363,28 @@ fn an_account_a_maker_made_fits_only_where_a_standard_it_provides_is_accepted_th
         settings: None,
     };
     assert!(
-        borrowed(&account, "claude"),
+        borrowed(&Makers::default(), &account, "claude"),
         "a maker's kind is applied as a standard, by every harness"
     );
     let own = crate::config::AccountConfig {
         kind: "claude-login".to_owned(),
         ..account.clone()
     };
-    assert!(!borrowed(&own, "claude") && borrowed(&own, "codex"));
+    assert!(
+        !borrowed(&Makers::default(), &own, "claude")
+            && borrowed(&Makers::default(), &own, "codex")
+    );
     let mut catalog = coqui_acp_api::AccountCatalog::new();
     catalog.accepts = vec![coqui_acp_api::Accepted::new(standard::ANTHROPIC_API)];
     let only_openai = AccountKindInfo::new(KIND, "K").provides([standard::OPENAI_API]);
-    let why = fits(&catalog, "claude", &account, &only_openai)
-        .expect_err("it speaks only a standard Claude does not accept, though Claude named it");
+    let why = fits(
+        &Makers::default(),
+        &catalog,
+        "claude",
+        &account,
+        &only_openai,
+    )
+    .expect_err("it speaks only a standard Claude does not accept, though Claude named it");
     assert!(
         why.contains("openai-api") && why.contains("anthropic-api"),
         "{why}"
@@ -395,7 +404,7 @@ fn a_kind_that_names_an_address_joins_and_fits_only_a_harness_that_can_point_its
     let fixed = catalog(AcceptedSlot::new("api_key", "own-key"));
     let joined = |catalog: &AccountCatalog| {
         let mut listing = AccountCatalog::new();
-        extend(&mut listing, "h", Some(catalog));
+        Makers::default().extend(&mut listing, "h", Some(catalog));
         let ids: Vec<String> = listing.kinds.iter().map(|kind| kind.id.clone()).collect();
         ids
     };
@@ -416,10 +425,77 @@ fn a_kind_that_names_an_address_joins_and_fits_only_a_harness_that_can_point_its
         )),
     };
     let info = AccountKindInfo::new("litellm", "L").provides([standard::OPENAI_API]);
-    assert!(fits(&moves, "codex", &account, &info).is_ok());
-    let why = fits(&fixed, "pi", &account, &info).expect_err("it cannot be pointed at the address");
+    assert!(fits(&Makers::default(), &moves, "codex", &account, &info).is_ok());
+    let why = fits(&Makers::default(), &fixed, "pi", &account, &info)
+        .expect_err("it cannot be pointed at the address");
     assert!(
         why.contains("pi") && why.contains("openai-api") && why.contains("address"),
         "{why}"
+    );
+}
+
+#[test]
+fn a_library_canoa_cfg_names_cannot_take_a_kind_or_a_sign_in_method_an_earlier_library_offers() {
+    let mut taken = Taken::default();
+    for maker in offered() {
+        taken.note(&maker.accounts);
+    }
+    let provider: Arc<dyn AccountProvider> = Arc::new(Two {
+        asked: Arc::new(AtomicUsize::new(0)),
+        used_up: Arc::new(AtomicBool::new(false)),
+    });
+    let offer = |kinds: &[&str], logins: &[(&str, &str)]| {
+        let mut offer = AccountOffer::new();
+        offer.kinds = kinds
+            .iter()
+            .map(|id| AccountKindInfo::new(*id, "K").provides([standard::OPENAI_API]))
+            .collect();
+        offer.logins = logins
+            .iter()
+            .map(|(id, produces)| LoginMethodInfo::new(*id, "M", *produces))
+            .collect();
+        Maker::new("ext_accounts", offer, Arc::clone(&provider))
+    };
+    // A kind a bundled library offers stays the bundled one's, and with it the sign-in methods that make it; another sign-in method
+    // whose id a bundled library uses is left out too, and the rest are kept.
+    let bundled_kind = offered()[0].accounts.kinds[0].id.clone();
+    let bundled_method = offered()[0].accounts.logins[0].id.clone();
+    let claimed = taken
+        .claim(
+            offer(
+                &[&bundled_kind, "ext-kind"],
+                &[
+                    (&bundled_method, "ext-kind"),
+                    ("ext-key", "ext-kind"),
+                    ("ext-other", &bundled_kind),
+                ],
+            ),
+            "examples",
+        )
+        .expect("one kind is its own");
+    let kinds: Vec<&str> = claimed
+        .accounts
+        .kinds
+        .iter()
+        .map(|kind| kind.id.as_str())
+        .collect();
+    let methods: Vec<&str> = claimed
+        .accounts
+        .logins
+        .iter()
+        .map(|login| login.id.as_str())
+        .collect();
+    assert_eq!(kinds, ["ext-kind"]);
+    assert_eq!(methods, ["ext-key"]);
+    // What it kept is now taken: a later library offering the same kind offers nothing, and so does one that offers only a bundled kind.
+    assert!(
+        taken
+            .claim(offer(&["ext-kind"], &[("again", "ext-kind")]), "later")
+            .is_none()
+    );
+    assert!(
+        taken
+            .claim(offer(&[&bundled_kind], &[]), "bundled-only")
+            .is_none()
     );
 }
