@@ -187,7 +187,8 @@ pub(crate) fn start(
     Ok(made)
 }
 
-/// `_canoa/delegate/targets {sessionId, source?}`: what the session may delegate to. With a `source`, the models it lists too.
+/// `_canoa/delegate/targets {sessionId, source?, account?}`: what the session may delegate to. With a `source`, the models it lists
+/// too, those of the `account` named, else of the source's first.
 pub(crate) fn targets(
     engine: &Arc<Engine>,
     session: &Arc<Session>,
@@ -198,7 +199,12 @@ pub(crate) fn targets(
         Some(Value::String(name)) => Some(name.as_str()),
         Some(_) => return Err("source is a name, as text".to_owned()),
     };
-    listing(engine, session, only)
+    let account = match params.get("account") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(name)) => Some(name.as_str()),
+        Some(_) => return Err("account is a name, as text".to_owned()),
+    };
+    listing(engine, session, (only, account))
 }
 
 /// What `session` may delegate to: each source with where it runs, its accounts, whether it is ready and what a workspace is
@@ -206,7 +212,7 @@ pub(crate) fn targets(
 pub(crate) fn listing(
     engine: &Arc<Engine>,
     session: &Arc<Session>,
-    only: Option<&str>,
+    (only, account): (Option<&str>, Option<&str>),
 ) -> Result<Value, String> {
     let allowed = DelegationAgent::allowed(engine, session);
     let who = session
@@ -217,6 +223,19 @@ pub(crate) fn listing(
         && !allowed.iter().any(|source| source.name == name)
     {
         return Err(format!("{name} is not a source this session may use"));
+    }
+    if let (Some(name), Some(account)) = (only, account)
+        && let Some(source) = allowed.iter().find(|source| source.name == name)
+        && !source.accounts.iter().any(|offered| offered == account)
+    {
+        return Err(format!(
+            "account {account:?} is not one {name} offers{}",
+            if source.accounts.is_empty() {
+                String::new()
+            } else {
+                format!(" (it offers: {})", source.accounts.join(", "))
+            }
+        ));
     }
     let shown: Vec<&Source> = allowed
         .iter()
@@ -266,7 +285,7 @@ pub(crate) fn listing(
         };
         target.insert("workspace".to_owned(), workspace);
         if only.is_some() && source.remote.is_none() {
-            let account = None;
+            let account = account.or_else(|| source.accounts.first().map(String::as_str));
             let host = engine.host().ok_or("the host is stopping")?;
             let choices = host.choices(&source.name, &who, account);
             target.insert(
@@ -275,6 +294,7 @@ pub(crate) fn listing(
                     || json!({"known": false}),
                     |choices| {
                         json!({
+                            "account": account,
                             "known": choices.get("known").cloned().unwrap_or(json!(false)),
                             "list": choices.get("models").cloned().unwrap_or(json!([])),
                         })

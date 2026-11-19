@@ -15,7 +15,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use canoa_host::ACCOUNT_META;
+use canoa_host::{ACCOUNT_META, MODEL_META};
 use serde_json::{Value, json};
 use support::{Host, Scratch, WAIT, cwd, example, host_binary, quoted, with_link};
 
@@ -224,6 +224,57 @@ fn initialize_as_work(
         "initialize",
         json!({"protocolVersion": 1, "clientCapabilities": {}, "_meta": {ACCOUNT_META: "work"}}),
     )
+}
+
+/// A start on the account `work` that names `model`, as the app's start does.
+fn initialize_with_model(
+    rpc: &support::Rpc<'_, coqui_transport_web::websocket::Channel>,
+    model: Value,
+) -> Result<Value, Value> {
+    rpc.request(
+        "initialize",
+        json!({"protocolVersion": 1, "clientCapabilities": {},
+            "_meta": {ACCOUNT_META: "work", MODEL_META: model}}),
+    )
+}
+
+#[test]
+fn a_start_names_the_account_and_a_model_it_lists_and_any_other_is_refused_naming_both() {
+    let fixture = Fixture::signed_in();
+    let (host, _log, _record, _cfg) = fixture.serve();
+    let client = support::key();
+    host.pair(&client);
+    let listed = with_link(host.url("Claude"), &client, host.peer, |rpc| {
+        initialize_with_model(rpc, json!("standin-small")).expect("a model the account lists")
+    })
+    .expect("served");
+    assert_eq!(
+        listed["_meta"][ACCOUNT_META],
+        json!({"name": "work", "kind": "claude-login"}),
+        "{listed}"
+    );
+    let refused = with_link(host.url("Claude"), &client, host.peer, |rpc| {
+        initialize_with_model(rpc, json!("not-a-model")).expect_err("a model it does not list")
+    })
+    .expect("served");
+    assert_eq!(refused["code"], -32602, "{refused}");
+    let why = refused["message"].as_str().expect("a reason");
+    assert!(
+        why.contains("\"work\"")
+            && why.contains("\"not-a-model\"")
+            && why.contains("standin-small"),
+        "{why}"
+    );
+    let bad = with_link(host.url("Claude"), &client, host.peer, |rpc| {
+        initialize_with_model(rpc, json!(3)).expect_err("not text")
+    })
+    .expect("served");
+    assert_eq!(bad["code"], -32602, "{bad}");
+    // A start that names none is as it always was.
+    with_link(host.url("Claude"), &client, host.peer, |rpc| {
+        initialize_as_work(rpc).expect("no model named")
+    })
+    .expect("served");
 }
 
 #[test]

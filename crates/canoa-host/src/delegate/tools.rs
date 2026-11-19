@@ -43,6 +43,7 @@ pub(crate) fn list(engine: &Engine, session: &Session) -> Value {
                             its models and their efforts as well. Never lists a credential.",
             "inputSchema": {"type": "object", "properties": {
                 "source": {"type": "string", "description": "A source to list the models of."},
+                "account": {"type": "string", "description": "With a source: the account whose models to list, one the source offers. Default: the source's first."},
             }, "additionalProperties": false},
         },
         {
@@ -134,7 +135,11 @@ fn text_arg<'a>(args: &'a Value, name: &str) -> Result<Option<&'a str>, String> 
 }
 
 fn targets(engine: &Arc<Engine>, session: &Arc<Session>, args: &Value) -> Result<Value, String> {
-    person::listing(engine, session, text_arg(args, "source")?)
+    person::listing(
+        engine,
+        session,
+        (text_arg(args, "source")?, text_arg(args, "account")?),
+    )
 }
 
 /// The task `id` of `session`, as `task_status` answers it without waiting.

@@ -1744,7 +1744,10 @@ impl Serving {
                         let others = other_accounts(config, harness, &listed, &provider);
                         if !listed.is_empty() || !others.is_empty() {
                             let unfit = unfit_accounts(config, harness, &provider);
-                            provider = provider.offering(host, listed, others).with_unfit(unfit);
+                            provider = provider
+                                .offering(host, listed, others)
+                                .with_unfit(unfit)
+                                .with_config(Arc::new(config.clone()));
                         }
                     }
                     // The shell the entry's own `shell`, else `[host] shell`, names: told to the harness as its documentation allows.
@@ -2869,6 +2872,22 @@ fn give_agent_flow<C: Channel>(
                 .provide(&peer.to_string(), &grants, channel);
         }
     };
+    // A key trusted with accounts may run a session on any account of the entry's provider, not only those the entry lists.
+    let any_account = shared
+        .store_grants(peer, context.is_some())
+        .is_some_and(|grants| grants.contains(&control::Grant::Accounts));
+    // What the client asks of the start (the model it names) is checked against the account before anything starts.
+    let settled;
+    let first = match agent {
+        Agent::Harness(harness) => match harness.settle(first, any_account) {
+            Ok(message) => {
+                settled = message;
+                settled.as_slice()
+            }
+            Err(why) => return turn_away(channel, first, (&served.name, peer), why),
+        },
+        Agent::Program { .. } => first,
+    };
     // A task's connection records what its agent spends as the child of the session that started it.
     let child_scope;
     let scope = match context.and_then(|context| context.parent_session.clone()) {
@@ -2935,10 +2954,6 @@ fn give_agent_flow<C: Channel>(
         .as_ref()
         .map_or_else(|| offer.clone(), |refresh| refresh.offer());
     let offer = fresh.as_ref();
-    // A key trusted with accounts may run a session on any account of the entry's provider, not only those the entry lists.
-    let any_account = shared
-        .store_grants(peer, context.is_some())
-        .is_some_and(|grants| grants.contains(&control::Grant::Accounts));
     let account = match &agent {
         Agent::Harness(harness) => harness.account_facts(first, any_account),
         Agent::Program { .. } => None,
@@ -3535,6 +3550,19 @@ type Joined<'a> = (
     Option<&'a Arc<client_tools::Link>>,
 );
 
+/// Answers the `initialize` in `first` with `-32602` and `why`, and says in the log that the connection was turned away.
+fn turn_away<C: Channel>(channel: &C, first: &[u8], (entry, peer): (&str, &PeerId), why: String) {
+    let id = serde_json::from_slice::<serde_json::Value>(first)
+        .ok()
+        .and_then(|message| message.get("id").cloned());
+    if let Some(id) = id {
+        let answer = serde_json::json!({"jsonrpc": "2.0", "id": id,
+            "error": {"code": -32602, "message": why}});
+        let _ = channel.send(answer.to_string().as_bytes());
+    }
+    tracing::info!(entry, %peer, "turned away: {why}");
+}
+
 /// Serves one connection with an `acp_harness` provider in this process, which [`Stopper::stop_agents`] ends like any agent.
 /// With a profile, its environment goes to the provider's program, and the provider lets Claude Code take the plugin the
 /// host writes for its skills: the host removes every `_meta` a client sends, so that plugin is the only one that can reach
@@ -3548,17 +3576,7 @@ fn give_harness<C: Channel>(
     scope: &Scope,
     (connection, conn, link, store, kb, tools): Joined<'_>,
 ) {
-    let turn_away = |why: String| {
-        let id = serde_json::from_slice::<serde_json::Value>(first)
-            .ok()
-            .and_then(|message| message.get("id").cloned());
-        if let Some(id) = id {
-            let answer = serde_json::json!({"jsonrpc": "2.0", "id": id,
-                "error": {"code": -32602, "message": why}});
-            let _ = channel.send(answer.to_string().as_bytes());
-        }
-        tracing::info!(entry = served.name, %peer, "turned away: {why}");
-    };
+    let turn_away = |why: String| turn_away(channel, first, (&served.name, peer), why);
     let lifetime = match harness.lifetime_of(first) {
         Ok(lifetime) => lifetime,
         Err(why) => return turn_away(why),

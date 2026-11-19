@@ -77,7 +77,7 @@ pub const STORE_META: &str = store::mcp::META;
 /// The `_meta` key of `initialize` that asks for the `canoa-kb` tools.
 pub const KB_META: &str = kb_mcp::META;
 pub use home::{Holder, Home, HomeLock, LockError};
-pub use kind::CACHE_META;
+pub use kind::{CACHE_META, MODEL_META};
 pub use local::{Link, LinkError};
 pub use peers::{Peer, PeerState, PeersError};
 pub use provider::{HostLine, ProviderError, ProviderOptions, serve_stdio};

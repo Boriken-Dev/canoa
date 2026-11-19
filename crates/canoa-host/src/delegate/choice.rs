@@ -148,9 +148,15 @@ impl Choice {
         if self.model.is_none() && self.effort.is_none() {
             return Ok(());
         }
-        let Some(choices) = host.choices(&source.name, who, self.account.as_deref()) else {
+        // The account a task runs on is the one it names, else the entry's first: the models are those that account lists.
+        let account = self.account.as_ref().or_else(|| source.accounts.first());
+        let Some(choices) = host.choices(&source.name, who, account.map(String::as_str)) else {
             return Ok(());
         };
+        let by = account.map_or_else(
+            || format!("the login {} has where it runs", source.name),
+            |account| format!("account {account:?} of {}", source.name),
+        );
         let models = choices
             .get("models")
             .and_then(Value::as_array)
@@ -178,9 +184,8 @@ impl Choice {
             if chosen.is_none() {
                 let ids: Vec<String> = models.iter().filter_map(id_of).collect();
                 return Err(invalid(format!(
-                    "model {model:?} is not one {} offers{}",
-                    source.name,
-                    listed(&ids)
+                    "model {model:?} is not one {by} lists{}",
+                    lists(&ids)
                 )));
             }
         }
@@ -191,12 +196,11 @@ impl Choice {
             };
             if !offered.contains(effort) {
                 return Err(invalid(format!(
-                    "effort {effort:?} is not one {}{} offers{}",
-                    source.name,
+                    "effort {effort:?} is not one {by}{} lists{}",
                     self.model
                         .as_ref()
                         .map_or_else(String::new, |model| format!("'s model {model}")),
-                    listed(&offered)
+                    lists(&offered)
                 )));
             }
         }
@@ -213,11 +217,104 @@ fn listed(values: &[String]) -> String {
     }
 }
 
+/// `(it lists: a, b)` for a model or effort refusal.
+fn lists(values: &[String]) -> String {
+    if values.is_empty() {
+        String::new()
+    } else {
+        format!(" (it lists: {})", values.join(", "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
+    use super::super::{ChildContext, Source};
     use super::*;
+
+    /// A host whose entry lists different models for each account, and the login it has where it runs.
+    struct ByAccount;
+
+    impl Host for ByAccount {
+        fn sources(&self) -> Vec<Source> {
+            Vec::new()
+        }
+        fn may_use(&self, _who: &Principal, _source: &str) -> bool {
+            true
+        }
+        fn kind(&self, _source: &str) -> Option<String> {
+            None
+        }
+        fn choices(&self, _source: &str, _who: &Principal, account: Option<&str>) -> Option<Value> {
+            let ids: &[&str] = match account {
+                Some("big") => &["large", "small"],
+                Some("small") => &["small"],
+                _ => &["local-only"],
+            };
+            Some(
+                json!({"known": true, "models": ids.iter().map(|id| json!({"id": id, "efforts": []})).collect::<Vec<_>>()}),
+            )
+        }
+        fn open(
+            &self,
+            _source: &str,
+            _context: ChildContext,
+        ) -> Result<crate::local::Link, crate::serve::LocalError> {
+            Err(crate::serve::LocalError::NoEntry)
+        }
+        fn prover(
+            &self,
+            _peer: &coqui_peer_webcrypto::PeerId,
+        ) -> Result<coqui_link::auth::Proof, String> {
+            Err(String::new())
+        }
+    }
+
+    fn source(accounts: &[&str]) -> Source {
+        Source {
+            name: "agent".to_owned(),
+            title: None,
+            harness: None,
+            roots: Vec::new(),
+            accounts: accounts.iter().map(|each| (*each).to_owned()).collect(),
+            profiles: Vec::new(),
+            missing: Vec::new(),
+            remote: None,
+        }
+    }
+
+    fn refused(model: &str, account: Option<&str>, offers: &[&str]) -> Option<String> {
+        let choice = Choice {
+            model: Some(model.to_owned()),
+            account: account.map(str::to_owned),
+            ..Choice::default()
+        };
+        choice
+            .check_local(&ByAccount, &Principal::Owner, &source(offers))
+            .err()
+            .map(|error| error.message)
+    }
+
+    #[test]
+    fn a_model_is_one_the_account_it_runs_on_lists_and_the_refusal_names_both() {
+        let offers = ["big", "small"];
+        // The account named lists it, or the task is refused naming the account and the model.
+        assert_eq!(refused("large", Some("big"), &offers), None);
+        let why = refused("large", Some("small"), &offers).expect("small lists no large");
+        assert!(
+            why.contains("\"large\"") && why.contains("\"small\""),
+            "{why}"
+        );
+        assert!(why.contains("it lists: small"), "{why}");
+        // A task that names no account runs on the entry's first, so its models are that account's.
+        assert_eq!(refused("large", None, &offers), None);
+        let why = refused("local-only", None, &offers).expect("the first account is not the login");
+        assert!(why.contains("\"big\""), "{why}");
+        // An entry that offers none runs on the login the program has where it runs.
+        assert_eq!(refused("local-only", None, &[]), None);
+        assert!(refused("large", None, &[]).is_some());
+    }
 
     fn metadata(value: &Value) -> Map<String, Value> {
         value.as_object().cloned().unwrap_or_default()

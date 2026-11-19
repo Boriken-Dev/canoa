@@ -50,7 +50,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
-import 'accounts/account_models.dart' show AccountEntry, accountMeta, machineLogin;
+import 'accounts/account_models.dart' show AccountEntry, accountMeta, machineLogin, modelMeta;
 import 'accounts/accounts_controller.dart';
 import 'accounts/accounts_host.dart';
 import 'desktop/host_grants.dart';
@@ -1737,6 +1737,12 @@ class _CanoaAppState extends State<CanoaApp> {
   Map<String, Object?> _accountMeta(String? account) =>
       account == null ? const {} : {accountMeta: account == machineLogin ? null : account};
 
+  /// `initialize`'s `_meta` for the model [draft] starts on, when the person chose one: the host checks it against what the account lists.
+  Map<String, Object?> _modelMeta(ChatSession draft) {
+    final model = draft.pending.values.where((choice) => choice.role == OptionRole.model).firstOrNull?.value;
+    return model == null ? const {} : {modelMeta: model};
+  }
+
   /// The open session that runs on [account], which a login that rotates its credential allows only one of.
   String? _accountHolder(String account) {
     for (final session in store.sessions) {
@@ -2468,7 +2474,7 @@ class _CanoaAppState extends State<CanoaApp> {
   /// overlays for this session, which they are. Sent unasked, a name from canoa.cfg's own `[overlays]` would narrow an operator's
   /// profile of the entry by names that mean nothing there.
   Map<String, Object?> _startMeta(ChatSession draft) {
-    final cache = {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account)};
+    final cache = {..._cacheMeta(store.cacheLifetimeOf(draft)), ..._accountMeta(draft.account), ..._modelMeta(draft)};
     final asked = draft.overlays;
     final withLoadout = {...cache, ..._loadoutMeta(draft), ..._presetMeta(draft), clientMeta: ?_clientKind};
     if (widget.served == null || asked == null || config.overlays.isEmpty) return withLoadout;
@@ -2694,6 +2700,7 @@ class _CanoaAppState extends State<CanoaApp> {
       client = await timed<VerifiedAgent>('link_and_initialize', () => _linkAgent(name, {
         ..._cacheMeta(store.cacheLifetimeOf(draft)),
         ..._accountMeta(draft.account),
+        ..._modelMeta(draft),
         ..._loadoutMeta(draft),
         ..._presetMeta(draft),
         if (config.overlays.isNotEmpty) overlaysMeta: _overlaysNamed(chosen),

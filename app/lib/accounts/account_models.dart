@@ -305,6 +305,10 @@ final class AccountInfo {
 /// The `_meta` key of `initialize` through which the chat names the account a session runs on.
 const accountMeta = 'dev.boriken.canoa/account';
 
+/// The `_meta` key of `initialize` naming the model a session starts on, by the id its account lists: the host refuses a start on a
+/// model the account does not list, naming both.
+const modelMeta = 'dev.boriken.canoa/model';
+
 /// What a session's account holds when the person chose the login the agent has where it runs, not an account of the host. It is
 /// sent as an explicit null, which an entry that lists accounts reads as "none", where an absent name means its first.
 const machineLogin = '';

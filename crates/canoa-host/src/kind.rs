@@ -26,14 +26,20 @@ use coqui_acp_api::{
 
 use crate::accounts::matching::Runs;
 use crate::accounts::{ACCOUNT_META, Accounts, Held, Watcher};
-use crate::config::{AccountConfig, Origin, Settings, cache_lifetime_named};
+use crate::config::{AccountConfig, Config, Origin, Settings, cache_lifetime_named};
 use crate::provider::{ProviderError, map_of, open};
+
+mod settle;
 
 /// The `_meta` key of a client's `initialize` that says how long its session's prompt cache should live: an object
 /// `{"lifetime": "default" | "short" | "long", "chosen": bool}`. `chosen` (true when absent) says the person chose it for
 /// this session, which wins over the entry's `cache_lifetime`; false is the client's default for its kind of session, which
 /// the entry's setting replaces.
 pub const CACHE_META: &str = "dev.boriken.canoa/cache_lifetime";
+
+/// The `_meta` key of a client's `initialize` that names the model its session starts on, by the id its account lists. A model
+/// the account does not list refuses the start, naming both.
+pub const MODEL_META: &str = "dev.boriken.canoa/model";
 
 /// The setting through which a profiled connection lets a client's plugin reach the harness: Claude Code's provider has it.
 const CLIENT_PLUGINS: &str = "allow_client_plugins";
@@ -105,6 +111,8 @@ struct Offer {
     unfit: Vec<(String, String)>,
     /// Number the plain and the profiled instance's sequences, so one's are not taken for the other's.
     sources: (u64, u64),
+    /// canoa.cfg as the host read it when it started: what lists the models of an account another provider made.
+    config: Option<Arc<Config>>,
 }
 
 /// What one connection runs on: the account it chose, and what the provider is handed for it.
@@ -249,6 +257,11 @@ impl Harness {
         &self.id
     }
 
+    /// Where the accounts this entry offers are kept; `None` for an entry that offers none.
+    pub(crate) fn accounts_host(&self) -> Option<&Arc<Accounts>> {
+        self.accounts.as_ref().map(|offer| &offer.host)
+    }
+
     /// The entry's working roots; none lets any directory.
     pub(crate) fn roots(&self) -> &[String] {
         &self.roots
@@ -313,7 +326,16 @@ impl Harness {
             others,
             unfit: Vec::new(),
             sources: (host.source(), host.source()),
+            config: None,
         });
+        self
+    }
+
+    /// This harness knowing canoa.cfg as the host read it, which a connection's start is checked against.
+    pub(crate) fn with_config(mut self, config: Arc<Config>) -> Self {
+        if let Some(offer) = &mut self.accounts {
+            offer.config = Some(config);
+        }
         self
     }
 

@@ -702,6 +702,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         final got = await _loadChoices(source, as);
         if (got != null && !_disposed && _asks[key] == mine) {
           _choices[key] = got.at(DateTime.now());
+          _dropUnlistedModels(key, as, got);
           _settlePresets();
         }
       } catch (error) {
@@ -713,6 +714,20 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         if (!_disposed) notifyListeners();
       }
     }());
+  }
+
+  /// A draft that runs on [account] and holds a model its choices do not list is taken back to the agent's own: an account lists
+  /// only what it may use, so a model chosen while another account was chosen is not one this account can start on.
+  void _dropUnlistedModels(String key, String? account, SourceChoices listing) {
+    if (!listing.known || listing.models.isEmpty) return;
+    final listed = {for (final model in listing.models) model.id};
+    for (final session in _sessions) {
+      final source = session.source;
+      if (!session.isDraft || source == null || sourceKey(source) != key) continue;
+      if ((session.account ?? defaultAccountOf?.call(source)) != account) continue;
+      session.chat.dropChoices(where: (choice) => choice.role == OptionRole.model && !listed.contains(choice.value));
+      _dropUnofferedEffort(session);
+    }
   }
 
   /// Asks the host for [source]'s choices again now, whatever is held, and tells whoever listens; what it answers, or what was

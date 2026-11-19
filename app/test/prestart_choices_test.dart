@@ -2,7 +2,9 @@
 // while the host answers, then offers them; and a source that has accounts is asked as the account chosen, again when the choice
 // changes.
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:canoa/chat/session_options.dart' show OptionRole, PendingChoice;
 import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/session_store.dart';
 import 'package:canoa/sources/source_choices.dart';
@@ -63,6 +65,30 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 20));
     expect(asked, ['first', 'second'], reason: 'the same choice asks nothing more');
     expect(store.choicesOf(claude), isNotNull);
+  });
+
+  test('a model chosen on one account is taken back when the account chosen does not list it', () async {
+    final big = SourceChoices.parse(jsonEncode(claudeAnswer));
+    final small = SourceChoices.parse(jsonEncode({
+      'known': true,
+      'models': [
+        {'id': 'haiku', 'name': 'Haiku', 'efforts': <String>[]},
+      ],
+    }));
+    final store = SessionStore()
+      ..choicesLoader = ((source) async => big)
+      ..accountChoicesLoader = ((source, account) async => account == 'small' ? small : big)
+      ..defaultAccountOf = (source) => 'big';
+    final draft = store.createDraft(source: claude);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    draft.chat.holdChoice(const PendingChoice('model', OptionRole.model, 'opus', byPerson: true));
+    store.setAccount(draft, 'small');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(draft.pending.values.where((choice) => choice.role == OptionRole.model), isEmpty, reason: 'the small account lists no opus');
+    draft.chat.holdChoice(const PendingChoice('model', OptionRole.model, 'haiku', byPerson: true));
+    store.setAccount(draft, 'big');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(draft.pending.values.where((choice) => choice.role == OptionRole.model).map((choice) => choice.value), ['haiku'], reason: 'the big account lists it too');
   });
 
   test('a host that cannot ask as an account is asked as the machine\'s own login', () async {

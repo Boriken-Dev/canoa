@@ -97,6 +97,10 @@ pub struct Choices {
     pub cache_choices: Vec<(CacheLifetime, String)>,
     /// The entry's own `cache_lifetime`, when canoa.cfg sets one: what its sessions ask unless the person chooses.
     pub configured_cache_lifetime: Option<String>,
+    /// For the models of a pool, parallel to `models`: the accounts of the pool that list each one. Empty for one account's.
+    pub model_accounts: Vec<Vec<String>>,
+    /// For the models of a pool: each account of it and why it listed none, when it did not.
+    pub members: Vec<(String, Option<String>)>,
 }
 
 impl Choices {
@@ -114,7 +118,24 @@ impl Choices {
             cache_lifetime: None,
             cache_choices: Vec::new(),
             configured_cache_lifetime: None,
+            model_accounts: Vec::new(),
+            members: Vec::new(),
         }
+    }
+
+    /// Why `model` is not one that `who` (an account or a pool, named as a sentence reads it) lists, naming both; `None` when it
+    /// is listed, and when the provider could not list its models at all, since the session's own options then decide.
+    #[must_use]
+    pub fn refuses(&self, who: &str, model: &str) -> Option<String> {
+        if !self.known || self.models.is_empty() || self.models.iter().any(|each| each.id == model)
+        {
+            return None;
+        }
+        let listed: Vec<&str> = self.models.iter().map(|each| each.id.as_str()).collect();
+        Some(format!(
+            "model {model:?} is not one {who} lists (it lists: {})",
+            listed.join(", ")
+        ))
     }
 
     /// A source that could not be asked at all: `failed`, with the reason.
@@ -176,10 +197,25 @@ impl Choices {
                 ),
             );
         }
-        out.insert(
-            "models".into(),
-            Value::Array(self.models.iter().map(model_json).collect()),
-        );
+        let mut models: Vec<Value> = self.models.iter().map(model_json).collect();
+        for (model, accounts) in models.iter_mut().zip(&self.model_accounts) {
+            model["accounts"] = json!(accounts);
+        }
+        out.insert("models".into(), Value::Array(models));
+        if !self.members.is_empty() {
+            out.insert(
+                "accounts".into(),
+                Value::Array(
+                    self.members
+                        .iter()
+                        .map(|(name, why)| match why {
+                            Some(why) => json!({"name": name, "listed": false, "why": why}),
+                            None => json!({"name": name, "listed": true}),
+                        })
+                        .collect(),
+                ),
+            );
+        }
         Value::Object(out)
     }
 }
@@ -288,65 +324,29 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
                 Ok(built) => built,
                 Err(error) => return Some(Choices::failed(error.to_string())),
             };
-            let mut held = None;
-            let mut owner = None;
-            if let Some((account, store)) = &asking.account {
-                let listed = match crate::serve::entry_accounts(config, harness, accounts, &built) {
-                    Ok(listed) => listed.unwrap_or_default(),
-                    Err(why) => return Some(Choices::failed(why)),
-                };
-                if !listed.iter().any(|(each, ..)| each == account) && !asking.any_account {
-                    return Some(Choices::failed(format!(
-                        "{name} does not offer the account {account}"
-                    )));
-                }
-                let others = if asking.any_account {
-                    crate::serve::other_accounts(config, harness, &listed, &built)
-                } else {
-                    Vec::new()
-                };
-                let unfit = crate::serve::unfit_accounts(config, harness, &built);
-                built = built.offering(store, listed, others).with_unfit(unfit);
-                match built.hold_account(account, "choices", asking.any_account) {
-                    Ok(taken) => held = Some(taken),
-                    Err(refusal) => return Some(Choices::failed(refusal.client_reason())),
-                }
-                // An account another provider made is listed by that provider, which knows what its kind is.
-                if let Some(taken) = &held
-                    && taken.owner() != harness
-                {
-                    match crate::accounts::commands::provider_for(config, taken.owner()).and_then(
-                        |other| {
-                            other
-                                .account_provider()
-                                .map(Arc::clone)
-                                .map_err(crate::cli::Failed::run)
-                        },
-                    ) {
-                        Ok(provider) => owner = Some((provider, store.source())),
-                        Err(failed) => return Some(Choices::failed(failed.to_string())),
+            let mut choices = match &asking.account {
+                Some((account, store)) => {
+                    let listed =
+                        match crate::serve::entry_accounts(config, harness, accounts, &built) {
+                            Ok(listed) => listed.unwrap_or_default(),
+                            Err(why) => return Some(Choices::failed(why)),
+                        };
+                    if !listed.iter().any(|(each, ..)| each == account) && !asking.any_account {
+                        return Some(Choices::failed(format!(
+                            "{name} does not offer the account {account}"
+                        )));
                     }
+                    let others = if asking.any_account {
+                        crate::serve::other_accounts(config, harness, &listed, &built)
+                    } else {
+                        Vec::new()
+                    };
+                    let unfit = crate::serve::unfit_accounts(config, harness, &built);
+                    built = built.offering(store, listed, others).with_unfit(unfit);
+                    as_account(config, &built, account, asking.any_account)
                 }
-            }
-            let connection = built.connection(None, held.as_ref(), CacheLifetime::Default);
-            let keeper = match &held {
-                Some(taken) => taken.keeper(
-                    owner
-                        .as_ref()
-                        .map_or_else(|| built.plain_source(), |(_, source)| *source),
-                ),
-                None => NoAccounts.into_object(),
+                None => as_local(&built),
             };
-            let who = match &held {
-                Some(taken) => Who::Held(taken, owner.map(|(provider, _)| provider)),
-                None => Who::Local,
-            };
-            let mut choices = ask(
-                &built,
-                connection.harness.as_ref(),
-                (connection.spawner, keeper),
-                who,
-            );
             choices.configured_cache_lifetime = options
                 .cache_lifetime
                 .map(|lifetime| cache_lifetime_name(lifetime).to_owned());
@@ -357,6 +357,59 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
             "this source lists its models in its session, and is not asked before it starts",
         ),
     })
+}
+
+/// What the harness lists on the login it has where it runs, as the automatic `local` account is.
+pub(crate) fn as_local(built: &kind::Harness) -> Choices {
+    let connection = built.connection(None, None, CacheLifetime::Default);
+    ask(
+        built,
+        connection.harness.as_ref(),
+        (connection.spawner, NoAccounts.into_object()),
+        Who::Local,
+    )
+}
+
+/// What the account `account` of `built`'s entry lists, asked as a session on it would be: the account is held for the call, an
+/// account another provider made is listed by that provider, which knows what its kind is, and one a gateway serves by the
+/// gateway's own model. With `any`, the account may be one the entry does not list.
+pub(crate) fn as_account(
+    config: &Config,
+    built: &kind::Harness,
+    account: &str,
+    any: bool,
+) -> Choices {
+    let Some(store) = built.accounts_host() else {
+        return Choices::failed(format!("{} offers no accounts", built.id()));
+    };
+    let held = match built.hold_account(account, "choices", any) {
+        Ok(taken) => taken,
+        Err(refusal) => return Choices::failed(refusal.client_reason()),
+    };
+    let mut owner = None;
+    if held.owner() != built.id() {
+        match crate::accounts::commands::provider_for(config, held.owner()).and_then(|other| {
+            other
+                .account_provider()
+                .map(Arc::clone)
+                .map_err(crate::cli::Failed::run)
+        }) {
+            Ok(provider) => owner = Some((provider, store.source())),
+            Err(failed) => return Choices::failed(failed.to_string()),
+        }
+    }
+    let connection = built.connection(None, Some(&held), CacheLifetime::Default);
+    let keeper = held.keeper(
+        owner
+            .as_ref()
+            .map_or_else(|| built.plain_source(), |(_, source)| *source),
+    );
+    ask(
+        built,
+        connection.harness.as_ref(),
+        (connection.spawner, keeper),
+        Who::Held(&held, owner.map(|(provider, _)| provider)),
+    )
 }
 
 /// What a program speaking ACP lists in a session of its own, asked once per version of the program.
@@ -477,6 +530,8 @@ fn ask(
             })
             .unwrap_or_default(),
         configured_cache_lifetime: None,
+        model_accounts: Vec::new(),
+        members: Vec::new(),
     }
 }
 
