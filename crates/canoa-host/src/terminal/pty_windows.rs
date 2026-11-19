@@ -179,14 +179,10 @@ fn start(program: &OsStr, cwd: &Path, console: HPCON) -> io::Result<Process> {
             OwnedHandle::from_raw_handle(info.hThread),
         )
     };
-    let mut limits = win32job::ExtendedLimitInfo::new();
-    limits.limit_kill_on_job_close();
-    let job = win32job::Job::create_with_limit_info(&limits)
-        .and_then(|job| {
-            job.assign_process(shell.as_raw_handle() as isize)
-                .map(|()| job)
-        })
-        .map_err(io::Error::other);
+    // Suspended, so it cannot have ended: the refusal of a process that has is not met here.
+    let job = crate::spawn::job::create().and_then(|job| {
+        crate::spawn::job::assign(&job, shell.as_raw_handle() as isize, || Ok(false)).map(|_| job)
+    });
     let job = match job {
         Ok(job) => job,
         Err(error) => {

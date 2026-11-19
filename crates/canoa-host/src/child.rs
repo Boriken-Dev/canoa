@@ -132,28 +132,19 @@ impl Prepared {
             }
         };
         #[cfg(windows)]
-        let job = {
-            use std::os::windows::io::AsRawHandle as _;
-            let mut limits = win32job::ExtendedLimitInfo::new();
-            limits.limit_kill_on_job_close();
-            let job = win32job::Job::create_with_limit_info(&limits).and_then(|job| {
-                job.assign_process(child.as_raw_handle() as isize)
-                    .map(|()| job)
-            });
-            match job {
-                Ok(job) => job,
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(io::Error::other(error));
-                }
+        let job = match crate::spawn::job::contain(&mut child) {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
             }
         };
         Ok((
             Running {
                 child: Mutex::new(child),
                 #[cfg(windows)]
-                job: Mutex::new(Some(job)),
+                job: Mutex::new(job),
                 stopped: AtomicBool::new(false),
             },
             streams,

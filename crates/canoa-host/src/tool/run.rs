@@ -986,21 +986,12 @@ impl Process {
             return Err(io::Error::other("the tool's standard streams are missing"));
         };
         #[cfg(windows)]
-        let job = {
-            use std::os::windows::io::AsRawHandle as _;
-            let mut limits = win32job::ExtendedLimitInfo::new();
-            limits.limit_kill_on_job_close();
-            let job = win32job::Job::create_with_limit_info(&limits).and_then(|job| {
-                job.assign_process(child.as_raw_handle() as isize)
-                    .map(|()| job)
-            });
-            match job {
-                Ok(job) => job,
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(io::Error::other(error));
-                }
+        let job = match crate::spawn::job::contain(&mut child) {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
             }
         };
         // Writes go through a thread of their own, since a write to a process that has stopped reading never returns.
@@ -1019,7 +1010,7 @@ impl Process {
                 child: Mutex::new(child),
                 input: Mutex::new(Some(input)),
                 #[cfg(windows)]
-                job: Mutex::new(Some(job)),
+                job: Mutex::new(job),
                 generation,
             },
             stdout,

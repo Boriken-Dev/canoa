@@ -26,6 +26,8 @@ use crate::cli::Program;
 mod apart;
 #[cfg(unix)]
 mod harness;
+#[cfg(windows)]
+pub(crate) mod job;
 #[cfg(unix)]
 pub(crate) mod pty;
 
