@@ -26,6 +26,7 @@ import { Provider } from 'guatiao/provide';
 
 import * as kinds from './kinds.js';
 import { dataOf } from './model.js';
+import { yieldCalls } from './wait.js';
 
 /** @typedef {import('./model.js').Spawner} Spawner the host's, which the source destroys */
 /** @typedef {import('./model.js').Process} Process a program the spawner started */
@@ -184,6 +185,8 @@ function drain(read, deadline, take) {
     if (Date.now() > deadline) return false;
     const got = Number(read(buffer, POLL));
     if (got === 0) return true;
+    // The engine runs one call at a time: let the host's other calls through between looks, as a program can take a minute.
+    yieldCalls();
     if (got < 0) continue; // nothing arrived yet, or the link is down: look at the clock and ask again
     take(buffer.slice(0, got));
   }

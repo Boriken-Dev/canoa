@@ -227,6 +227,81 @@ fn a_cancelled_recording_ends_its_program() {
     assert!(started.elapsed() < Duration::from_secs(10));
 }
 
+/// A recording that waits for its program to end, a stand-in that takes five seconds and leaves a byte in `beat` every 50 ms until
+/// it is ended.
+fn waiting_for_a_program(beat: &std::path::Path) -> Arc<Object<dyn SpeechSession>> {
+    let provider = built(&json!({
+        "program": standin(),
+        "args": ["beat", beat.to_string_lossy()],
+        "timeout_seconds": 60,
+    }))
+    .expect("a provider");
+    Arc::new(open(&provider))
+}
+
+fn beats(beat: &std::path::Path) -> u64 {
+    std::fs::metadata(beat).map_or(0, |meta| meta.len())
+}
+
+#[test]
+fn a_cancel_reaches_a_recording_whose_finish_waits_and_ends_its_program() {
+    let beat = std::env::temp_dir().join(format!("canoa-speech-beat-{}", std::process::id()));
+    let _ = std::fs::remove_file(&beat);
+    let session = waiting_for_a_program(&beat);
+    let finishing = {
+        let session = Arc::clone(&session);
+        std::thread::spawn(move || {
+            let error = session
+                .finish()
+                .err()
+                .expect("a cancelled recording answers nothing");
+            error.message.to_string()
+        })
+    };
+    // The program runs, and `finish` is waiting for it to end.
+    let until = Instant::now() + Duration::from_secs(20);
+    while beats(&beat) < 3 {
+        assert!(Instant::now() < until, "the program never started");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Another provider's calls are answered while that one waits: a call into the script engine, timed, and a whole recording, which
+    // also starts a program and so is not.
+    let other = command(&["fixed"]);
+    let started = Instant::now();
+    other.describe().expect("described");
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+    let recording = open(&other);
+    recording.push(&pcm_second()).expect("taken");
+    assert_eq!(
+        recording.finish().expect("answers").text,
+        "the quick brown fox"
+    );
+
+    // And a cancel of the waiting one is answered at once and ends its program.
+    let started = Instant::now();
+    session.cancel().expect("cancelled");
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+    // The waiting `finish` goes on only once the calls that ran inside it have ended, which another test's long call sharing the
+    // engine can delay: it is not timed, but it says why it ended.
+    let said = finishing.join().expect("the finish ended");
+    assert!(said.contains("cancelled"), "{said}");
+    std::thread::sleep(Duration::from_millis(300));
+    let kept = beats(&beat);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(beats(&beat), kept, "the program went on after the cancel");
+    let _ = std::fs::remove_file(&beat);
+}
+
 #[test]
 fn a_command_s_output_is_kept_only_up_to_a_bound() {
     let session = open(&command(&["flood"]));
@@ -237,6 +312,18 @@ fn a_command_s_output_is_kept_only_up_to_a_bound() {
     assert!(started.elapsed() < Duration::from_secs(3));
     assert_eq!(answer.text.len(), 4 << 20);
     assert!(answer.front_matter.to_string().contains("output_truncated"));
+}
+
+#[test]
+fn a_command_s_long_text_that_is_not_ascii_is_read_in_time() {
+    let session = open(&command(&["flood_utf8"]));
+    let started = Instant::now();
+    let answer = session.finish().expect("answers");
+    assert!(started.elapsed() < Duration::from_secs(3));
+    // 4 MiB is 419 430 whole units of ñ, 日, 😀 and a, then ñ and the first two bytes of 日, which read as one replacement.
+    assert!(answer.text.starts_with("ñ日😀a"));
+    assert_eq!(answer.text.chars().count(), 419_430 * 4 + 2);
+    assert!(answer.text.ends_with(char::REPLACEMENT_CHARACTER));
 }
 
 #[test]

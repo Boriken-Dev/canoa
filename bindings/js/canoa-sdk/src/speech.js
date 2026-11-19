@@ -8,6 +8,7 @@ import { Provider } from 'guatiao/provide';
 
 import * as kinds from './kinds.js';
 import { dataOf } from './model.js';
+import { yieldCalls } from './wait.js';
 
 /** @typedef {import('./model.js').Spawner} Spawner the host's, which the provider destroys */
 
@@ -178,8 +179,6 @@ function namedHints(request) {
   return named;
 }
 
-const NOT_ASCII = /[\u0080-￿]/;
-
 /** What one program has printed, up to `MAX_OUTPUT` bytes, and whether more was dropped. */
 class Capture {
   /** @type {Uint8Array[]} */ chunks = [];
@@ -197,15 +196,6 @@ class Capture {
   }
 
   text() {
-    // The engine's `TextDecoder` reads a byte at a time in script, seconds for a 4 MiB answer, and the one runtime serves every
-    // other call meanwhile: text that is all ASCII (a transcript nearly always is) is joined by the engine's own code instead.
-    const parts = [];
-    for (const chunk of this.chunks) {
-      const part = String.fromCharCode.apply(null, chunk);
-      if (NOT_ASCII.test(part)) break;
-      parts.push(part);
-    }
-    if (parts.length === this.chunks.length) return parts.join('').trim();
     const all = new Uint8Array(this.size);
     let at = 0;
     for (const chunk of this.chunks) {
@@ -227,6 +217,7 @@ class Recording {
   #errEnded = false;
   #input = true;
   #stopped = false;
+  #finishing = false;
   #shown = '';
   #buffer = new Uint8Array(8192);
 
@@ -308,8 +299,15 @@ class Recording {
     return { partial: text };
   }
 
+  /** A `cancel` that came while `finish` waited ended the program and the recording. */
+  #cancelled() {
+    if (this.#stopped) throw new Internal('the recording was cancelled');
+  }
+
   finish() {
     if (this.#stopped) throw new Internal('the recording has ended');
+    if (this.#finishing) throw new Internal('the recording is already finishing');
+    this.#finishing = true;
     try {
       this.#process.closeInput();
     } catch {
@@ -331,9 +329,16 @@ class Recording {
         this.cancel();
         throw new Internal(`the command did not finish in ${Math.round(this.#wait / 1000)} seconds`);
       }
+      // The engine runs one call at a time: let a cancel of this recording, or any other provider's call, through while it waits.
+      yieldCalls();
+      this.#cancelled();
     }
     const grace = Date.now() + OUTPUT_GRACE;
-    while (!this.#ended && Date.now() < grace) this.#pump(50n);
+    while (!this.#ended && Date.now() < grace) {
+      this.#pump(50n);
+      yieldCalls();
+      this.#cancelled();
+    }
     this.#stopped = true;
     if (exit.code !== 0) {
       const how = exit.code === null || exit.code === undefined ? 'was ended by a signal' : `exited with ${exit.code}`;

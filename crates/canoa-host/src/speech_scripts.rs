@@ -53,6 +53,10 @@ static BUNDLE: Bundle = Bundle {
             "speech/sdk/model.js",
             include_str!("../../../bindings/js/canoa-sdk/src/model.js"),
         ),
+        (
+            "speech/sdk/wait.js",
+            include_str!("../../../bindings/js/canoa-sdk/src/wait.js"),
+        ),
     ],
 };
 

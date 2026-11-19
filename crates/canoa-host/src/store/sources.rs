@@ -51,6 +51,10 @@ static BUNDLE: Bundle = Bundle {
             "catalog_sources/sdk/model.js",
             include_str!("../../../../bindings/js/canoa-sdk/src/model.js"),
         ),
+        (
+            "catalog_sources/sdk/wait.js",
+            include_str!("../../../../bindings/js/canoa-sdk/src/wait.js"),
+        ),
     ],
 };
 
