@@ -158,10 +158,12 @@ fn an_extension_installed_from_a_catalog_is_loaded_when_the_host_starts_again() 
     let hosted = host(scratch, &repo);
     let link = hosted.local.open("@control").expect("a link");
     let (types, _) = ask(&link, 1, "store/extensions", json!({})).expect("the types");
+    // The host's own Secret providers type is listed beside what an extension adds.
     let ids: Vec<&str> = types["types"]
         .as_array()
         .expect("a list")
         .iter()
+        .filter(|each| each["extension"] != "built-in")
         .filter_map(|each| each["id"].as_str())
         .collect();
     assert_eq!(
@@ -169,7 +171,11 @@ fn an_extension_installed_from_a_catalog_is_loaded_when_the_host_starts_again() 
         ["echoes", "pictured"],
         "the installed copy loaded: {types}"
     );
-    assert_eq!(types["types"][0]["extension"], "sample");
+    assert!(types["types"].as_array().is_some_and(|types| {
+        types
+            .iter()
+            .any(|each| each["id"] == "echoes" && each["extension"] == "sample")
+    }));
     drop(link);
     hosted.stop();
 }
@@ -183,9 +189,10 @@ fn a_library_that_changed_after_it_was_installed_is_not_loaded() {
     let hosted = host(scratch, &repo);
     let link = hosted.local.open("@control").expect("a link");
     let (types, _) = ask(&link, 1, "store/extensions", json!({})).expect("the types");
-    assert_eq!(
-        types["types"].as_array().map(Vec::len),
-        Some(0),
+    assert!(
+        types["types"]
+            .as_array()
+            .is_some_and(|types| types.iter().all(|each| each["extension"] == "built-in")),
         "the host checked the digest it recorded before it loaded the file: {types}"
     );
     drop(link);
