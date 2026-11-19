@@ -6,6 +6,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | --- | --- |
 | [`crates/canoa/AGENTS.md`](crates/canoa/AGENTS.md) | the `canoa` crate's public API |
 | [`crates/canoa-foundry/AGENTS.md`](crates/canoa-foundry/AGENTS.md) | `canoa-foundry`: the OpenAI and Anthropic APIs over a local Foundry Local model, and its account kind |
+| [`crates/canoa-litellm/AGENTS.md`](crates/canoa-litellm/AGENTS.md) | `canoa-litellm`: the account kind of a LiteLLM proxy, one key for the OpenAI and Anthropic APIs, signed in through the proxy's SSO or set, with the key's budget |
 | [`crates/canoa-host/AGENTS.md`](crates/canoa-host/AGENTS.md) | `canoa-host`: the `canoa` program, canoa.cfg's `[host]`, its command line and library |
 | [`crates/canoa-ffi/AGENTS.md`](crates/canoa-ffi/AGENTS.md) | `canoa-ffi`: the C ABI that runs the host inside an application |
 | [`crates/canoa-launch/AGENTS.md`](crates/canoa-launch/AGENTS.md) | `canoa-launch`: the portable `CanoaUI.exe` and `canoa-pack` |
@@ -26,6 +27,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 | `crates/canoa-host/` | The host: serves stdio ACP agents and Guatiao providers from canoa.cfg to paired keys, on loopback, and the web app; `examples/` holds the programs the tests run (`stdio_agent`, also scripted with `--scripted`; `web_peer`, the page's peer; `mcp_server`; `harness_standin`; `store_control`, the control channel over standard streams with a stand-in program as its only Store) |
 | `crates/canoa-{claude,codex,grok,pi,antigravity}/` | One agent each: its source preset, its Store recipe and, for Claude, Codex and Pi, the coqui-acp provider re-exported; `canoa-host` depends on them and wraps each recipe as a Store provider |
 | `crates/canoa-foundry/` | Foundry Local: Anthropic Messages, OpenAI Responses and chat completions translated to one chat completion, the engines that run it (the person's Foundry Local service, or its Rust SDK) and the `foundry-local` account kind; the host's `gateway` serves it on loopback |
+| `crates/canoa-litellm/` | A LiteLLM proxy as an account: one address and one virtual key that provide `openai-api` and `anthropic-api`, made by the proxy's SSO (the browser, the key handed back to a loopback address) or by a key you set, listing the proxy's models and reporting the key's budget and limits; offered through its library like `canoa-foundry`, so `canoa-host` names it in one line of `bundled.rs` |
 | `crates/canoa-ffi/` | The host as a library inside an application, behind a small C ABI; the only crate with `unsafe`, bar two modules of `canoa-host` (`usage_splice/members/win32.rs`, the Windows process table; `mail/sspi_server.rs`, test code that plays a server for Windows' security package) |
 | `crates/canoa-launch/` | The Windows portable launcher: carries the built app folder, unpacks it once per version, verifies and starts it; `app/tool/portable.py` builds it and the Linux AppImage |
 | `clients/browser/chromium/` | MV3 browser extension code and permission policy |
