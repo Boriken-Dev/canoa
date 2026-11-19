@@ -27,10 +27,14 @@ class ProfileEditor extends StatefulWidget {
     required this.onSave,
     required this.onCancel,
     this.catalog,
+    this.certificates,
   });
 
   /// The items the host lists, which the editor draws a form for; [profileItems] when none is given.
   final ProfileItemCatalog? catalog;
+
+  /// The client certificates the host lists, which a form that asks for one offers; [profileCertificates] when none is given.
+  final ClientCertificateChoices? certificates;
 
   /// The name the profile has in canoa.cfg; null for a new one.
   final String? original;
@@ -106,6 +110,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
   );
 
   ProfileItemCatalog get _catalog => widget.catalog ?? profileItems;
+  ClientCertificateChoices get _certificates => widget.certificates ?? profileCertificates;
 
   /// What the form of [item] holds now.
   Map<String, Object?> _valuesOf(ProfileItemInfo item) => item.id == 'access'
@@ -255,7 +260,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
           ),
         ]),
         ListenableBuilder(
-          listenable: _catalog,
+          listenable: Listenable.merge([_catalog, _certificates]),
           builder: (context, _) {
             final listed = [for (final item in _catalog.items) if (!_ownRows.contains(item.id)) item];
             // An item the profile holds values for that no provider offers now (its extension was removed): the values stay, and say so.
@@ -266,6 +271,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
                   key: ValueKey('item-${item.id}'),
                   item: item,
                   values: _valuesOf(item),
+                  choices: {clientCertificateWidget: _certificates.choices},
                   onChanged: (values) => _take(item, values),
                 ),
               for (final id in gone)
@@ -302,10 +308,11 @@ class _ProfileEditorState extends State<ProfileEditor> {
 
 /// The form one item's provider describes, drawn from its schema and form: it holds the values the person gave and nothing else.
 class _ItemSection extends StatelessWidget {
-  const _ItemSection({super.key, required this.item, required this.values, required this.onChanged});
+  const _ItemSection({super.key, required this.item, required this.values, required this.choices, required this.onChanged});
 
   final ProfileItemInfo item;
   final Map<String, Object?> values;
+  final Map<String, List<SchemaChoice>> choices;
   final ValueChanged<Map<String, Object?>> onChanged;
 
   @override
@@ -325,6 +332,7 @@ class _ItemSection extends StatelessWidget {
             values: values,
             idPrefix: 'item-${item.id}',
             unsetEntry: true,
+            choices: choices,
             onValues: (held) => onChanged(collectSchemaValues(item.schema, item.form, held)),
           ),
         ],

@@ -7,7 +7,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../forms/schema_fields.dart' show schemaProperties;
+import '../forms/schema_fields.dart' show SchemaChoice, formHasWidget, schemaProperties;
 
 /// One thing a profile may set.
 final class ProfileItemInfo {
@@ -47,6 +47,9 @@ final class ProfileItemInfo {
 
   bool get isSetting => stored == 'setting';
 
+  /// Whether a member of its form is one of the host's client certificates, so the list of them is wanted to draw it.
+  bool get asksForClientCertificate => formHasWidget(form, clientCertificateWidget);
+
   static ProfileItemInfo? read(Object? raw) {
     if (raw is! Map || raw['id'] is! String || raw['title'] is! String) return null;
     return ProfileItemInfo(
@@ -76,6 +79,9 @@ final class ProfileItemCatalog extends ChangeNotifier {
 
   /// Why the host could not be asked, or null.
   String? get problem => _problem;
+
+  /// Whether any item's form asks for a client certificate.
+  bool get asksForClientCertificate => _items.any((each) => each.asksForClientCertificate);
 
   ProfileItemInfo? byId(String id) {
     for (final each in _items) {
@@ -120,3 +126,58 @@ final class ProfileItemsRefresh {
 
 /// The items this app's host lists.
 final ProfileItemCatalog profileItems = ProfileItemCatalog();
+
+/// The widget hint a form gives a member that is one of the client certificates the host can present.
+const clientCertificateWidget = 'client_certificate';
+
+/// What a profile's form offers where it asks for a client certificate: the keystores' own choice, then the certificates the host
+/// lists with `network/client_certificates`, as a browser's picker does.
+final class ClientCertificateChoices extends ChangeNotifier {
+  /// The value that leaves the choice to the keystores.
+  static const system = 'system';
+
+  List<SchemaChoice> _certificates = const [];
+
+  static const _first = SchemaChoice(
+    value: system,
+    label: 'System (default)',
+    detail: "The keystores' own choice, by the authorities the server names",
+  );
+
+  /// The choices: the keystores' own, then one for each certificate the host listed, which a form's value names by thumbprint.
+  List<SchemaChoice> get choices => [_first, ..._certificates];
+
+  /// Takes the host's answer to `network/client_certificates`; one that is not an answer (a refusal) leaves only the keystores' own.
+  void adopt(Object? answer, {DateTime? now}) {
+    final raw = answer is Map ? answer['certificates'] : null;
+    final today = now ?? DateTime.now();
+    _certificates = [
+      if (raw is List)
+        for (final each in raw)
+          if (each is Map && each['thumbprint'] is String) _choice(each, today),
+    ];
+    notifyListeners();
+  }
+
+  static SchemaChoice _choice(Map<Object?, Object?> each, DateTime now) {
+    final subject = each['subject'] is String && (each['subject']! as String).isNotEmpty ? each['subject']! as String : 'No subject';
+    final thumbprint = each['thumbprint']! as String;
+    final notAfter = each['not_after'];
+    final ends = notAfter is num ? DateTime.fromMillisecondsSinceEpoch(notAfter.toInt() * 1000, isUtc: true) : null;
+    final date = ends == null ? null : '${ends.year}-${ends.month.toString().padLeft(2, '0')}-${ends.day.toString().padLeft(2, '0')}';
+    final expiry = date == null ? null : (ends!.isBefore(now.toUtc()) ? 'expired $date' : 'expires $date');
+    final issuer = each['issuer'] is String && (each['issuer']! as String).isNotEmpty ? 'issued by ${each['issuer']}' : null;
+    final source = each['source'] is String && (each['source']! as String).isNotEmpty ? each['source']! as String : null;
+    return SchemaChoice(
+      value: thumbprint,
+      label: subject,
+      detail: [?issuer, ?expiry, ?source, 'SHA-256 ${thumbprint.length > 16 ? '${thumbprint.substring(0, 16)}…' : thumbprint}'].join(' · '),
+    );
+  }
+
+  /// The host could not be asked or would not answer: only the keystores' own choice is offered.
+  void failed() => adopt(null);
+}
+
+/// The certificates this app's host lists.
+final ClientCertificateChoices profileCertificates = ClientCertificateChoices();

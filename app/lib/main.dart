@@ -3328,6 +3328,14 @@ class _CanoaAppState extends State<CanoaApp> {
     try {
       final client = await control.ready(wait: wait);
       profileItems.adopt(await client.call('profile_items/list', const {}));
+      if (profileItems.asksForClientCertificate) {
+        // The pick is only for the owner or a key that edits profiles: a refusal leaves the keystores' own choice alone.
+        try {
+          profileCertificates.adopt(await client.call('network/client_certificates', const {}));
+        } on Object {
+          profileCertificates.failed();
+        }
+      }
     } on Object catch (error) {
       profileItems.failed(error is ControlFailed ? error.message : error is StateError ? error.message : 'no link');
     }
