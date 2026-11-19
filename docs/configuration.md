@@ -449,7 +449,7 @@ session's Profile line says the access did not set it.
 With nothing set, every agent starts with the standard access, whatever the configuration of its own command line says: no
 sandbox, the network on, everything asked. Every mode the agent has is offered in the mode control, Bypass included, and any
 paired key may choose any of them. An overlay or a project may not set `access`: a layer from elsewhere could loosen it, so
-such a file is refused (`reserved`). `canoa agent claude|codex` takes the same as `--sandbox none|workspace|read-only`,
+such a file is refused (`reserved`). `canoa agent ID` takes the same as `--sandbox none|workspace|read-only`,
 `--no-network` and `--approvals ask|edits|never`.
 
 ### Applying a profile
@@ -478,7 +478,7 @@ executable, and a `[host.agents]` entry with `harness` runs them inside the host
 | Model, effort | the session's config options `model` and `effort`: the models Claude Code lists and their efforts | the same: the models Codex lists and their reasoning efforts | the session's config option offering that value | the config options `model` and `effort` (Thinking): the models Pi has credentials for | the same |
 | Mode | not supported: the translator offers no mode | not supported: the translator offers no mode | the session's config option offering that value | the config option `mode`: Pi asks nobody, so the translator asks, and refuses protected paths | the same |
 
-Plugins from a client are off in `canoa agent claude` unless `--allow-client-plugins` is given, since a plugin's hooks and
+Plugins from a client are off in `canoa agent claude` unless `--setting allow_client_plugins=true` is given, since a plugin's hooks and
 MCP servers run with nothing asked. The app passes it, as it writes the only plugin, `canoa-profile`. A host entry allows
 them only when it offers profiles, and then only its own: the host removes every `_meta` a client sends.
 

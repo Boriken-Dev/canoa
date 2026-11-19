@@ -41,6 +41,9 @@ fn a_built_in_source_with_no_entry_is_reached_by_a_key_only_on_a_portal_host() {
     assert!(reaches(&Caller::Owner, &config, "Claude", false));
     assert!(!reaches(&key("someone"), &config, "Claude", false));
     assert!(reaches(&key("someone"), &config, "Claude", true));
-    assert_eq!(built_in("Claude"), Some(crate::Harness::Claude));
+    assert_eq!(built_in("Claude"), Some("claude"));
+    assert_eq!(built_in("Codex"), Some("codex"));
     assert_eq!(built_in("nothing"), None);
+    // An agent that is described and has no harness provider of its own is no source to run.
+    assert_eq!(built_in("Gemini"), None);
 }

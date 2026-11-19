@@ -29,7 +29,6 @@ mod probe;
 
 use crate::accounts::Watcher;
 use crate::config::{Config, EntryKind, Settings, cache_lifetime_name};
-use crate::harness::Harness;
 use crate::kind;
 
 /// How long the program's `--version` is waited for.
@@ -208,11 +207,8 @@ fn model_json(model: &ModelInfo) -> Value {
 /// What a built-in harness offers, run as the `canoa agent` command would run it: `executable` when given, else the
 /// variable that command reads, else the harness's own name.
 #[must_use]
-pub fn preset(harness: Harness, executable: Option<&OsStr>) -> Choices {
-    let variable = match harness {
-        Harness::Claude => "COQUI_ACP_CLAUDE_EXECUTABLE",
-        Harness::Codex => "COQUI_ACP_CODEX_EXECUTABLE",
-    };
+pub fn preset(harness: &str, executable: Option<&OsStr>) -> Choices {
+    let variable = crate::harness::executable_variable(harness);
     let executable = executable
         .map(OsStr::to_os_string)
         .or_else(|| std::env::var_os(variable).filter(|value| !value.is_empty()));
@@ -229,7 +225,7 @@ pub fn preset(harness: Harness, executable: Option<&OsStr>) -> Choices {
     };
     match kind::Harness::new(
         &registry,
-        harness.as_str(),
+        harness,
         (&Settings::new(map), &Settings::default()),
         false,
         Vec::new(),

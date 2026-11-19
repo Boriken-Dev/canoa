@@ -15,7 +15,7 @@ mod descriptions;
 mod format;
 mod forms;
 mod gateway;
-pub mod harness;
+mod harness;
 mod history;
 pub mod home;
 pub mod host_log;
@@ -74,7 +74,6 @@ pub const DELEGATE_META: &str = delegate::META;
 pub const STORE_META: &str = store::mcp::META;
 /// The `_meta` key of `initialize` that asks for the `canoa-kb` tools.
 pub const KB_META: &str = kb_mcp::META;
-pub use harness::Harness;
 pub use home::{Holder, Home, HomeLock, LockError};
 pub use kind::CACHE_META;
 pub use local::{Link, LinkError};

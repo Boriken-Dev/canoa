@@ -14,13 +14,11 @@ use crate::config::Config;
 
 type Refusal = (i32, String);
 
-/// The harness a built-in source runs when canoa.cfg has no entry of that name.
-fn built_in(name: &str) -> Option<crate::Harness> {
-    match name {
-        "Claude" => Some(crate::Harness::Claude),
-        "Codex" => Some(crate::Harness::Codex),
-        _ => None,
-    }
+/// The agent a built-in source runs when canoa.cfg has no entry of that name: the bundled agent the source is named for.
+fn built_in(name: &str) -> Option<&'static str> {
+    crate::vendors::by_title(name)
+        .map(|vendor| vendor.agent)
+        .filter(|agent| crate::config::is_built_in_harness(agent))
 }
 
 /// Whether `caller` may start a session on the entry `name` of `config`.

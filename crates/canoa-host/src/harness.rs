@@ -1,232 +1,238 @@
-//! Claude Code and Codex as ACP agents, through coqui-acp's translators of their own stdio protocols, with no Node: what
-//! `canoa agent` serves on its standard streams, and what `serve` runs in this process for a harness entry.
+//! `canoa agent ID`: a harness provider of the bundled agents' libraries served as an ACP agent on this process's standard streams,
+//! the way `serve` runs one for a harness entry. Which agents there are is what the libraries offer; nothing here names one.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
-    reason = "processes, paths and environments are std's"
+    reason = "processes, paths, environments and streams are std's"
 )]
 
 use std::ffi::OsString;
+use std::io::{BufRead as _, Write as _};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::{Mutex, PoisonError};
+use std::time::Duration;
 
-use canoa_claude::acp::{ClaudeAgent, ClaudeLaunch};
-use canoa_codex::acp::{CodexAgent, CodexLaunch};
 use coqui_acp_api::CacheLifetime;
-use coqui_acp_harness::{Harness as Translator, Settings};
+use coqui_transport::{Channel, Failure};
+use serde_json::{Map, Value};
 
-/// A coding agent's command line that the host serves as an ACP agent itself.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Harness {
-    /// Claude Code, `claude`, over stream-json.
-    Claude,
-    /// Codex, `codex app-server`, over its JSON-RPC.
-    Codex,
+use crate::config::Settings;
+use crate::inproc::{End, InProcess, serve_kind};
+use crate::kind;
+use crate::provider::ProviderError;
+
+/// The variable that names the program of the agent `id` for `canoa agent` and `canoa options`: `COQUI_ACP_` and the id in upper
+/// case, with `-` as `_`, then `_EXECUTABLE`.
+pub(crate) fn executable_variable(id: &str) -> String {
+    let id: String = id
+        .chars()
+        .map(|each| {
+            if each == '-' {
+                '_'
+            } else {
+                each.to_ascii_uppercase()
+            }
+        })
+        .collect();
+    format!("COQUI_ACP_{id}_EXECUTABLE")
 }
 
-impl Harness {
-    /// Its name in canoa.cfg and on `canoa agent`'s command line.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-        }
-    }
-
-    /// The harness of that name.
-    #[must_use]
-    pub fn named(name: &str) -> Option<Self> {
-        match name {
-            "claude" => Some(Self::Claude),
-            "codex" => Some(Self::Codex),
-            _ => None,
-        }
-    }
-}
-
-/// How one harness agent runs: what its translator starts the command line with, and what it takes from a client.
-#[derive(Clone)]
-pub(crate) struct AgentOptions {
-    pub(crate) harness: Harness,
-    /// The command line's program; its name looked up on `PATH` when `None`.
+/// What one `canoa agent` serves.
+#[derive(Clone, Debug)]
+pub(crate) struct AgentRun {
+    /// The id of the `acp_harness` provider.
+    pub(crate) id: String,
+    /// The program, when the command line or the environment names it.
     pub(crate) executable: Option<OsString>,
-    pub(crate) model: Option<String>,
-    pub(crate) effort: Option<String>,
-    /// What every session starts with: the sandbox, the network and the approvals, in the words every harness shares.
-    pub(crate) access: coqui_acp_harness::Access,
-    /// Claude Code's `--setting-sources`; `None` is its own default.
-    pub(crate) setting_sources: Option<Vec<String>>,
-    /// Claude Code's `--strict-mcp-config`.
-    pub(crate) strict_mcp_config: bool,
-    /// Claude Code's permission prompts asked through ACP, rather than refused where nothing granted them.
-    pub(crate) permission_prompts: bool,
-    /// Claude Code plugins named in a session's `_meta`; their hooks and MCP servers run with nothing asked.
-    pub(crate) client_plugins: bool,
-    /// Directories a session's `cwd`, more directories and plugins must lie in; none takes any.
-    pub(crate) working_roots: Vec<PathBuf>,
-    /// Directories a resumed Codex thread's own directory must lie in; none takes any.
-    pub(crate) resume_roots: Vec<PathBuf>,
-    pub(crate) client_mcp_servers: bool,
-    pub(crate) network_paths: bool,
-    pub(crate) max_version: u8,
-    pub(crate) max_sessions: usize,
-    /// Added to the environment the command line inherits.
-    pub(crate) env: Vec<(OsString, OsString)>,
-    /// How long the command line's prompt cache should live, where it has a control for it.
-    pub(crate) cache_lifetime: CacheLifetime,
+    /// The settings the command line gives the provider, which it checks against its schema.
+    pub(crate) settings: Map<String, Value>,
+    /// The access every session starts with: the sandbox, the network and the approvals, as one object.
+    pub(crate) access: Option<Value>,
+    /// Whether the access came from the command line, and so is an error for a provider that takes none.
+    pub(crate) access_asked: bool,
+    /// The directories a session's `cwd` and more directories must lie in; none takes any.
+    pub(crate) roots: Vec<PathBuf>,
+    /// How long the prompt cache should live, where the provider has a control for it.
+    pub(crate) lifetime: CacheLifetime,
 }
 
-/// Claude Code's variables for how long its prompt cache lives, for the conversation and for its sub-agents, with the
-/// values `short` (5 minutes) and `long` (1 hour) set them to.
-const CLAUDE_TTL_VARIABLES: [&str; 2] = [
-    "CLAUDE_CODE_PROMPT_CACHE_TTL",
-    "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
-];
-
-/// The variable that turns Claude Code's prompt cache off, for `off`.
-const CLAUDE_CACHE_OFF: &str = "DISABLE_PROMPT_CACHING";
-
-/// What Codex's app server does with a cache lifetime, as its provider words it.
-pub(crate) const CODEX_IGNORES_LIFETIME: &str =
-    "Codex's app server has no setting for how long its prompt cache lives";
-
-/// Names the environment's variables, never their values: a profile's may be secrets.
-impl core::fmt::Debug for AgentOptions {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("AgentOptions")
-            .field("harness", &self.harness)
-            .field("executable", &self.executable)
-            .field("model", &self.model)
-            .field("effort", &self.effort)
-            .field("access", &self.access)
-            .field("setting_sources", &self.setting_sources)
-            .field("permission_prompts", &self.permission_prompts)
-            .field("client_plugins", &self.client_plugins)
-            .field("working_roots", &self.working_roots)
-            .field("resume_roots", &self.resume_roots)
-            .field(
-                "env",
-                &self.env.iter().map(|(name, _)| name).collect::<Vec<_>>(),
-            )
-            .finish_non_exhaustive()
-    }
-}
-
-impl AgentOptions {
-    /// The translator's own defaults: prompts asked through ACP, no client plugins, any directory, ACP version 2 at most.
-    pub(crate) const fn new(harness: Harness) -> Self {
-        Self {
-            harness,
-            executable: None,
-            model: None,
-            effort: None,
-            access: coqui_acp_harness::Access::STANDARD,
-            setting_sources: None,
-            strict_mcp_config: false,
-            permission_prompts: true,
-            client_plugins: false,
-            working_roots: Vec::new(),
-            resume_roots: Vec::new(),
-            client_mcp_servers: true,
-            network_paths: false,
-            max_version: 2,
-            max_sessions: crate::config::DEFAULT_MAX_SESSIONS,
-            env: Vec::new(),
-            cache_lifetime: CacheLifetime::Default,
-        }
-    }
-
-    /// The translator, ready to open sessions.
-    pub(crate) fn agent(&self) -> Arc<dyn Translator> {
-        match self.harness {
-            Harness::Claude => Arc::new(
-                ClaudeAgent::new()
-                    .defaults(self.claude_launch())
-                    .client_plugins(self.client_plugins),
-            ),
-            Harness::Codex => Arc::new(CodexAgent::new().defaults(self.codex_launch())),
-        }
-    }
-
-    /// What every Claude Code session starts from, before a session's own parts are added.
-    pub(crate) fn claude_launch(&self) -> ClaudeLaunch {
-        let mut launch = ClaudeLaunch::new(".");
-        if let Some(executable) = &self.executable {
-            launch.executable.clone_from(executable);
-        } else if let Some((path, environment)) = crate::sources::managed_program("claude") {
+impl AgentRun {
+    /// The provider's settings: what the command line gave, with the program (the command line's, else the environment's, else the
+    /// copy the Store installed when nothing else names it), the access and every mode the agent has, each where the provider's
+    /// schema declares it.
+    ///
+    /// # Errors
+    ///
+    /// A command line that asks for the access of a provider that takes none.
+    pub(crate) fn provider_settings(&self) -> Result<Settings, String> {
+        let mut map = self.settings.clone();
+        let takes = |key: &str| crate::vendors::bundled_declares(&self.id, key);
+        let executable = self
+            .executable
+            .clone()
+            .or_else(|| std::env::var_os(executable_variable(&self.id)).filter(|v| !v.is_empty()));
+        if let Some(executable) = executable {
+            map.insert(
+                "executable".to_owned(),
+                Value::String(executable.to_string_lossy().into_owned()),
+            );
+        } else if crate::bundled::runs_managed_by_own_name(&self.id)
+            && !map.contains_key("executable")
+            && let Some((path, _)) = crate::sources::managed_program(&self.id)
+        {
             // Nothing names the program: the one the Store installed runs, found each time a session starts.
-            launch.executable = path.into_os_string();
-            launch.env.extend(
-                environment
-                    .into_iter()
-                    .map(|(name, value)| (OsString::from(name), OsString::from(value))),
+            map.insert(
+                "executable".to_owned(),
+                Value::String(path.to_string_lossy().into_owned()),
             );
         }
-        launch.model.clone_from(&self.model);
-        launch.effort.clone_from(&self.effort);
-        launch.access = Some(self.access);
-        launch.setting_sources.clone_from(&self.setting_sources);
-        launch.strict_mcp_config = self.strict_mcp_config;
-        // Every mode the agent has is offered, Bypass included.
-        launch.allow_bypass = true;
-        launch.modes = Some(coqui_acp_harness::Mode::ALL.to_vec());
-        launch.permission_prompts = self.permission_prompts;
-        launch.env.extend(self.env.iter().cloned());
-        let ttl = match self.cache_lifetime {
-            CacheLifetime::Short => Some("5m"),
-            CacheLifetime::Long => Some("1h"),
-            _ => None,
-        };
-        if self.cache_lifetime == CacheLifetime::Off {
-            launch
-                .env
-                .insert(OsString::from(CLAUDE_CACHE_OFF), OsString::from("1"));
+        if let Some(access) = &self.access {
+            if takes("access") {
+                map.entry("access".to_owned()).or_insert(access.clone());
+            } else if self.access_asked {
+                return Err(format!("{} takes no access setting", self.id));
+            }
         }
-        if let Some(ttl) = ttl {
-            launch.env.extend(
-                CLAUDE_TTL_VARIABLES
-                    .iter()
-                    .map(|name| (OsString::from(name), OsString::from(ttl))),
-            );
+        // Every mode the agent has is offered, Bypass included: the person's own account runs it.
+        if takes("allow_bypass") {
+            map.entry("allow_bypass".to_owned())
+                .or_insert(Value::Bool(true));
         }
-        launch
+        if takes("modes") {
+            map.entry("modes".to_owned()).or_insert_with(|| {
+                Value::from(
+                    coqui_acp_harness::Mode::ALL
+                        .iter()
+                        .map(|mode| mode.id())
+                        .collect::<Vec<_>>(),
+                )
+            });
+        }
+        Ok(Settings::new(map))
+    }
+}
+
+/// This process's standard input and output as the client's end of one connection: a line is a message.
+struct Stdio {
+    lines: Mutex<Receiver<Option<Vec<u8>>>>,
+}
+
+impl Stdio {
+    fn start() -> Self {
+        let (send, lines) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut input = std::io::stdin().lock();
+            loop {
+                let mut line = Vec::new();
+                match input.read_until(b'\n', &mut line) {
+                    Ok(0) | Err(_) => {
+                        let _ = send.send(None);
+                        return;
+                    }
+                    Ok(_) => {
+                        while matches!(line.last(), Some(b'\n' | b'\r')) {
+                            line.pop();
+                        }
+                        if !line.is_empty() && send.send(Some(line)).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        Self {
+            lines: Mutex::new(lines),
+        }
+    }
+}
+
+impl Channel for Stdio {
+    fn send(&self, message: &[u8]) -> Result<(), Failure> {
+        let mut out = std::io::stdout().lock();
+        out.write_all(message)
+            .and_then(|()| out.write_all(b"\n"))
+            .and_then(|()| out.flush())
+            .map_err(|_| Failure::PathLost)
     }
 
-    /// What every Codex thread starts from, before a session's own parts are added.
-    pub(crate) fn codex_launch(&self) -> CodexLaunch {
-        let mut launch = CodexLaunch::new(".");
-        if let Some(executable) = &self.executable {
-            launch.executable.clone_from(executable);
-        } else if let Some((path, environment)) = crate::sources::managed_program("codex") {
-            launch.executable = path.into_os_string();
-            launch.env.extend(
-                environment
-                    .into_iter()
-                    .map(|(name, value)| (OsString::from(name), OsString::from(value))),
-            );
+    fn receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, Failure> {
+        let lines = self.lines.lock().unwrap_or_else(PoisonError::into_inner);
+        match lines.recv_timeout(timeout.unwrap_or(Duration::from_secs(3600))) {
+            Ok(message) => Ok(message),
+            Err(RecvTimeoutError::Timeout) => Err(Failure::Timeout),
+            Err(RecvTimeoutError::Disconnected) => Ok(None),
         }
-        launch.model.clone_from(&self.model);
-        launch.effort.clone_from(&self.effort);
-        launch.apply_access(self.access);
-        launch.working_roots.clone_from(&self.resume_roots);
-        launch.allow_bypass = true;
-        launch.modes = Some(coqui_acp_harness::Mode::ALL.to_vec());
-        launch.env.extend(self.env.iter().cloned());
-        launch
     }
 
-    /// What the ACP agent takes from a client, each notice and exit given to `on_notice`.
-    pub(crate) fn settings(&self, on_notice: coqui_acp_harness::acp::NoticeHook) -> Settings {
-        let mut settings = Settings::new();
-        settings.max_version = self.max_version;
-        settings.max_sessions = self.max_sessions;
-        settings.working_roots.clone_from(&self.working_roots);
-        settings.client_mcp_servers = self.client_mcp_servers;
-        settings.network_paths = self.network_paths;
-        settings.on_notice = Some(on_notice);
-        settings
+    fn close(&self) {}
+}
+
+/// Why an agent could not be served, and whether the command line is to blame.
+#[derive(Debug)]
+pub(crate) struct Refused {
+    pub(crate) why: String,
+    pub(crate) usage: bool,
+}
+
+/// Serves `run` on standard input and output until the client closes them.
+///
+/// # Errors
+///
+/// A command line the provider does not take (an id nothing offers, a setting it does not declare), or the connection failing.
+pub(crate) fn serve_stdio(run: &AgentRun) -> Result<(), Refused> {
+    let usage = |why: String| Refused { why, usage: true };
+    let settings = run.provider_settings().map_err(usage)?;
+    let registry = std::sync::Arc::new(kind::registry(None).map_err(|error| Refused {
+        why: error.to_string(),
+        usage: false,
+    })?);
+    let roots = run
+        .roots
+        .iter()
+        .map(|root| root.to_string_lossy().into_owned())
+        .collect();
+    let configured = kind::Harness::new(
+        &registry,
+        &run.id,
+        (&settings, &Settings::default()),
+        false,
+        roots,
+    )
+    .map_err(|error| match error {
+        ProviderError::Missing => usage(format!(
+            "{} is not an agent this host carries (the bundled agents' ids are what `canoa providers` lists)",
+            run.id
+        )),
+        ProviderError::Schema(_)
+        | ProviderError::Settings(_)
+        | ProviderError::WrongKind
+        | ProviderError::NeedsConfiguration
+        | ProviderError::TakesNoSettings => usage(error.to_string()),
+        other => Refused {
+            why: other.to_string(),
+            usage: false,
+        },
+    })?;
+    let connection = configured
+        .with_entry(&format!("agent {}", run.id))
+        .connection(None, None, run.lifetime);
+    let control = InProcess::new();
+    let channel = Stdio::start();
+    let end = serve_kind(
+        &channel,
+        &*connection.harness,
+        (connection.request, connection.spawner),
+        connection.watch,
+        crate::serve::MAX_LINE,
+        &control,
+    );
+    match end {
+        End::PeerClosed | End::Stopped => Ok(()),
+        End::Failed | End::Protocol | End::AgentFailed => Err(Refused {
+            why: format!("the connection to {} ended: {end:?}", run.id),
+            usage: false,
+        }),
     }
 }
 

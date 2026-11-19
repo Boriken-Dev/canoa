@@ -7,7 +7,7 @@ WebSocket of its own, on loopback unless its `listen` says otherwise (or on a [p
   protocols (coqui-acp's `coqui-acp-claude` and `coqui-acp-codex`), inside the host, with no Node. See
   [Claude and ChatGPT](#claude-and-chatgpt).
 - **A stdio ACP agent**: any program that speaks the Agent Client Protocol on its standard streams, such as
-  `agy acp`, or `canoa agent claude` itself (with `--allow-client-plugins` when a profile gives it skills).
+  `agy acp`, or `canoa agent claude` itself (with `--setting allow_client_plugins=true` when a profile gives it skills).
 - **A Guatiao provider**: coqui-acp-provider's `agent_provider` kind, served through its ACP facade. It comes from a
   library file, written once in any language Guatiao builds a library from, or from a Guatiao source: a file that runs
   libraries written in another language, such as Python, Lua, JavaScript, Rhai or WebAssembly.
@@ -825,7 +825,7 @@ subscription a 1-hour cache write costs twice the input price against 1.25 times
 run is better with `short`, and a session someone is active in with `long`. Codex's app server has no such setting, and
 `canoa options NAME --entry` prints each provider's own sentence on it as `cache_lifetime` and the lifetimes it honours as `cache_choices`; `off` goes only to a provider that lists it (a client's `off` for Codex is the default). The key is the entry's default: the
 chat asks `long` for a session when the entry says nothing, and the person can choose another for one session in the
-new-session view, which wins. A value other than the four is refused naming `cache_lifetime`. `canoa agent claude|codex`
+new-session view, which wins. A value other than the four is refused naming `cache_lifetime`. `canoa agent ID`
 takes the same as `--cache-lifetime`.
 
 On Windows the providers start `claude.exe` and `codex.exe`, as the native installers put them; an npm-installed `.cmd`
