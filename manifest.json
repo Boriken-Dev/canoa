@@ -1,7 +1,7 @@
 {
   "format": 2,
   "source": "Boriken-Dev/canoa",
-  "sourceCommit": "0044c94a949874c2bb964097d560a554b854cb47",
+  "sourceCommit": "65aa05dacf34b0b88836498a29ce29814465bed7",
   "status": "complete",
   "pubPackages": [
     ".cache",
@@ -106,22 +106,22 @@
       "package": "coqui_acp",
       "url": "https://github.com/Boriken-Dev/coqui-acp.git",
       "path": "bindings/dart/coqui_acp",
-      "ref": "ee1690bfdea215d6b8e726862b4b5666254a7512",
-      "revision": "ee1690bfdea215d6b8e726862b4b5666254a7512"
+      "ref": "165af2eea570bea0b0ad4e7240651d1e047ab473",
+      "revision": "165af2eea570bea0b0ad4e7240651d1e047ab473"
     },
     {
       "package": "coqui_acp_chat",
       "url": "https://github.com/Boriken-Dev/coqui-acp.git",
       "path": "bindings/dart/coqui_acp_chat",
-      "ref": "ee1690bfdea215d6b8e726862b4b5666254a7512",
-      "revision": "ee1690bfdea215d6b8e726862b4b5666254a7512"
+      "ref": "165af2eea570bea0b0ad4e7240651d1e047ab473",
+      "revision": "165af2eea570bea0b0ad4e7240651d1e047ab473"
     },
     {
       "package": "coqui_acp_chat_ui",
       "url": "https://github.com/Boriken-Dev/coqui-acp.git",
       "path": "bindings/dart/coqui_acp_chat_ui",
-      "ref": "ee1690bfdea215d6b8e726862b4b5666254a7512",
-      "revision": "ee1690bfdea215d6b8e726862b4b5666254a7512"
+      "ref": "165af2eea570bea0b0ad4e7240651d1e047ab473",
+      "revision": "165af2eea570bea0b0ad4e7240651d1e047ab473"
     },
     {
       "package": "coqui_aos",
