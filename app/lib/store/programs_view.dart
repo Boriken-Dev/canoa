@@ -336,9 +336,9 @@ class PlanDialog extends StatelessWidget {
               for (final (at, change) in plan.changes.indexed)
                 Text('• ${change.kind}: ${change.target}\n  ${change.detail}${change.undone ? ' (undone by removing it)' : ''}',
                     key: Key('plan-change-$at')),
-            for (final notice in plan.notices) ...[
+            for (final (at, notice) in plan.notices.indexed) ...[
               const SizedBox(height: 8),
-              Text(notice, key: const Key('plan-notice')),
+              Text(notice, key: Key('plan-notice-$at')),
             ],
           ]),
         ),

@@ -196,7 +196,7 @@ void main() {
               changes: [
                 {'kind': 'user_path', 'target': '~/bin', 'detail': 'adds a directory to PATH', 'undone_by_uninstall': true},
               ],
-              notices: ['It stays signed out until you sign in.'],
+              notices: ['It stays signed out until you sign in.', 'It runs with your access.'],
             ),
           },
         ),
@@ -234,7 +234,8 @@ void main() {
       expect(find.byKey(const Key('plan-step-0')), findsOneWidget);
       expect(find.byKey(const Key('plan-change-0')), findsOneWidget);
       expect(tester.widget<Text>(find.byKey(const Key('plan-change-0'))).data, contains('adds a directory to PATH'));
-      expect(find.byKey(const Key('plan-notice')), findsOneWidget);
+      expect(find.byKey(const Key('plan-notice-0')), findsOneWidget);
+      expect(find.byKey(const Key('plan-notice-1')), findsOneWidget, reason: 'every notice is shown, each under a key of its own');
       expect(host.calls.where((call) => call.startsWith('store/apply')), isEmpty);
 
       await tester.tap(find.byKey(const Key('plan-confirm')));
