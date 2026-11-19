@@ -170,7 +170,7 @@ What a profile may set is not a list in Canoa: each thing is an **item**, a prov
 harnesses it is for and the form it asks for, and that turns the values you gave it into what a session gets (environment
 variables, arguments for a program the host starts, values of the session's own settings, the network its programs use). The model,
 effort, mode, starting instructions and access are items Canoa carries, kept in a profile under their own keys; a proxy and an
-identity are items that ship with the host as extensions, and an extension of canoa.cfg's `[host.extensions]` (or a library or source
+identity are items that ship with the host as scripts (JavaScript, offered as an extension's would be), and an extension of canoa.cfg's `[host.extensions]` (or a library or source
 an agent entry loads) adds more the same way. Settings → Profiles draws a form for each item the host lists
 (`profile_items/list`), and a profile keeps what you entered for an item under `items`:
 
@@ -838,7 +838,7 @@ timeout = 60                                                          # optional
 ```
 
 Each source describes itself to the Store: its name, the types it serves (or all of them) and the form it asks for (a schema, and how to show it), which is what
-Store settings shows when you add a catalog to a type. Two come with Canoa. **`read`** reads what the type reads itself: a git source
+Store settings shows when you add a catalog to a type. Two come with Canoa, as scripts the host carries. **`read`** reads what the type reads itself: a git source
 (overlays and extensions), `owner/repo`, a git URL or a folder (skills), a registry's address (MCP servers). **`command`** runs a
 program you name, as you and with your environment, each time the catalog is refreshed, and takes its standard output (or the file named
 by `file`, in the folder it ran in) as the catalog in the type's own format, read exactly as a fetched one is. It serves every type;
@@ -965,7 +965,8 @@ is dropped, and one whose repository has no `SKILL.md` for it says so. Turning t
 
 ### Extensions catalogs
 
-An extension is code the host loads to add to Canoa: today a library that adds store types. Store, Extensions lists the extensions of
+An extension is code the host loads to add to Canoa: a library that adds store types, or a [package of scripts](script_providers.md)
+that serves any kind of provider. Store, Extensions lists the extensions of
 the **extensions catalogs** you name in `[store.extensions.catalogs]`, a label of yours for each, written as a catalog is in
 `[store.overlays.catalogs]` (`<repository>@<ref>#<file>`) but a list of its own: none is offered until you add one, and a catalog of overlays is
 never read as one of extensions. Canoa's own format, described here, is not the overlay catalog's.
@@ -1010,6 +1011,12 @@ source = "./kits/local"
 pin = "sha256:8280aaf5de7c4f61342f648586d534e481ae095cef223dded70f5b1db5bd84a1"
 load = "local.dll"
 provider = "example_local"
+
+[extensions.team-notes]                  # a package of scripts: a folder with a manifest, the same on every platform
+source = "./packages/team_notes"
+pin = "sha256:8280aaf5de7c4f61342f648586d534e481ae095cef223dded70f5b1db5bd84a1"
+runtime = "js"
+provider = "team_notes_notes"
 ```
 
 | Key | Meaning |
@@ -1019,6 +1026,7 @@ provider = "example_local"
 | `pin` | Required with a git or relative `source`, refused with a URL: the tree digest of the folder (`sha256:` and 64 hexadecimal digits), the same digest an overlay's `pin` is |
 | `sha256` | Required with a URL, refused with a git `source`: the SHA-256 of the file, 64 hexadecimal digits |
 | `load` | The library file in the tree the host loads (a `/`-separated path of plain names). Required for a tree by this host, refused with a URL, whose file is the library |
+| `runtime` | Optional, for a git or relative `source` with no `load`: `js` or `python`, a package of scripts whose folder is the library (it has a `*.guatiao` manifest at its root). It needs no build and no `platforms`; the host runs `js` with the QuickJS it carries, and a host with no Python source refuses `python` at the plan |
 | `provider` | Required. The id of the `store_extension` provider the library offers: letters, digits, `_`, `.`, `-` |
 | `needs` | Optional. `kind` (a name; this host offers `store_extension`), `version` (compared as written; this host offers `1`; needs a `kind`) and `platforms` (a list of `windows`, `linux`, `macos` or the same with an architecture, `linux-aarch64`; the host's own OS, or its OS and architecture, must be one) |
 | `description`, `about` | Informational: `about` takes `summary`, `icon` (a PNG or WebP file beside the catalog), `homepage`, `repository` (web addresses), `license`, `authors` and `tags`; one that is not valid is left out and the entry is still listed |
@@ -1038,14 +1046,16 @@ settings, one anywhere else with none of them, no credential helper, ssh key or 
 | a `ref` beside a relative source, a URL, or an `@<ref>` of the source's own (`ref-not-allowed`), or a `ref` git cannot be asked for (`:`, `\`, `@`, `#`, `?`, `*`, `[`, `^`, `~`, `..`, white space, a leading `-`) | the source would have two refs or none to put it on, and git would read the others as a refspec or an option |
 | a `pin` or `sha256` that is not a digest (`invalid-pin`), a `pin` with a URL or a `sha256` with a git source, a `load` with a URL (`invalid-entry`), no digest (`unpinned`) | the digest is the install's integrity, not a restriction: what is fetched is checked against it before anything is kept, so an entry that gives none, or one its source cannot be checked by, has nothing to check |
 | a `needs` this host does not offer: another `kind` or `version`, or other `platforms` | the library cannot run here |
-| a tree with no `load` | this host loads one library file; with no name it cannot choose |
+| a tree with no `load` and no `runtime` | this host loads one library file; with no name it cannot choose |
+| a `runtime` of any language but `js` and `python`, or one beside a `load` or a URL | a package of scripts is a folder the host reads whole: it names no file, and a lone file is no package |
 | a file larger than 4 MiB for the catalog, more than 2000 entries, a download over 256 MiB | so a hostile or broken source cannot take the host's memory or disk |
 
 Installing needs the `hosting` grant, which already names the libraries the host loads. The host shows a plan first: the source, the
 digest, the provider, where the files will be kept (`<home>/extensions/NAME`) and the `[host.extensions.NAME]` it will write, and the
 notice that an extension runs with your access. Only after you confirm does it fetch, and it keeps nothing unless what it fetched has the
 tree digest or the SHA-256 the entry gives. It then writes `library`, `provider` and `pin` and `root` (or `sha256`) into
-`[host.extensions.NAME]`, and the host restarts to load it. The digest is checked again each time the host loads the extension, before
+`[host.extensions.NAME]` (for a package of scripts, `source = "bundled:js"` and `source_settings = { dirs = [...] }` in place of
+`library`), and the host restarts to load it. The digest is checked again each time the host loads the extension, before
 the file is opened, and an extension whose bytes changed is skipped and logged. Settings, Extensions lists what is installed (marking
 what the Store installed) and removes an extension with its files; one you name there by hand has no digest and is loaded as it is.
 
