@@ -1,7 +1,7 @@
 //! PIN pairing over any channel, so it works through a reverse proxy that ends TLS.
 //!
 //! Two strangers run the handshake admitting anyone who proves a key, which yields a pairing session: it runs one exchange and
-//! can carry nothing else, so a connection like this can never reach an agent. Inside it the PIN confirms both keys, both PAKE
+//! can carry nothing else, so a connection like this can never reach the application. Inside it the PIN confirms both keys, both PAKE
 //! messages and a secret export of the session, so a relay that swaps a key or changes a message fails on both sides. A peer then
 //! connects again, pinned. Only PIN mode is offered, with the PIN this side shows.
 //!

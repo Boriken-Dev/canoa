@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-api at 165af2eea570bea0b0ad4e7240651d1e047ab473, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-api at e7089d83577cb2c4ad8332350b18bb968ae217fd, with what it inherits written out.
 example = [{ name = "echo_harness", crate-type = ["cdylib"] }, { name = "echo_account_provider", crate-type = ["cdylib"] }]
 test = [{ name = "echo", required-features = ["contract"] }, { name = "check", required-features = ["contract"] }, { name = "account_provider", required-features = ["contract"] }]
 [package]

@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-history at 165af2eea570bea0b0ad4e7240651d1e047ab473, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-history at e7089d83577cb2c4ad8332350b18bb968ae217fd, with what it inherits written out.
 example = [{ name = "history", required-features = ["cli"] }]
 [package]
 name = "coqui-acp-history"

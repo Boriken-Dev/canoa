@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 use coqui_transport::Failure;
 use serde_json::json;
 
-use crate::link::{Accepted, Handler};
-use crate::mux::{CloseReason, LinkStream, StreamLife};
+use coqui_link::link::{Accepted, Handler};
+use coqui_link::mux::{CloseReason, LinkStream, StreamLife};
 
 /// The stream that offers a stdio server.
 pub const OFFER_PROTOCOL: &str = "mcp-offer/1";
@@ -484,9 +484,9 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
-    use crate::link::{Host, Options, Services, serve_with};
-    use crate::mux::{Limits, Mux, Side};
-    use crate::peers::{MemoryPeers, NoEvents, PeerRecord, PeerStore as _};
+    use coqui_link::link::{Host, Options, Services, serve_with};
+    use coqui_link::mux::{Limits, Mux, Side};
+    use coqui_link::peers::{MemoryPeers, NoEvents, PeerRecord, PeerStore as _};
 
     const WAIT: Duration = Duration::from_secs(10);
     const PEER: &str = "sha256:peer";
@@ -610,7 +610,7 @@ mod tests {
         entry: Value,
     }
 
-    fn read_entry<C: Channel>(stream: &crate::mux::Stream<'_, C>) -> Offered {
+    fn read_entry<C: Channel>(stream: &coqui_link::mux::Stream<'_, C>) -> Offered {
         let first = stream.receive(Some(WAIT)).unwrap().unwrap();
         let entry: Value = serde_json::from_slice(&first).unwrap();
         let env = entry["env"].as_array().unwrap();

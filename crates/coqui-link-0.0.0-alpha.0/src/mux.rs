@@ -1,4 +1,4 @@
-//! Named channels inside one link, so ACP, A2A, MCP or anything else can share one proven connection. Each stream is a
+//! Named channels inside one link, so any number of protocols can share one proven connection. Each stream is a
 //! [`Channel`] of its own, and a reader that stops holds up only its own stream.
 //!
 //! The wire is in `docs/link.md`, and `vectors/mux.json` holds it as data for every language to run. Nothing here replays: a stream
@@ -290,7 +290,7 @@ impl Frame {
     }
 }
 
-/// A protocol token: `acp/1`, `a2a/1`, `mcp`. Printable ASCII with no spaces, so it can go in a DNS-SD record as it is.
+/// A protocol token: `files/1`, `rpc/1`, `tcp`. Printable ASCII with no spaces, so it can go in a DNS-SD record as it is.
 #[must_use]
 pub fn valid_protocol(protocol: &str) -> bool {
     !protocol.is_empty()
@@ -300,7 +300,7 @@ pub fn valid_protocol(protocol: &str) -> bool {
             .all(|byte| byte.is_ascii_graphic() && byte != b',' && byte != b'=')
 }
 
-/// Whether a link's first message opens a mux, rather than being plain ACP, whose JSON starts with `{` or whitespace. Lets one
+/// Whether a link's first message opens a mux, rather than being a plain message, such as JSON, which starts with `{` or whitespace. Lets one
 /// listener serve both, with nothing to agree first, and so through any proxy.
 #[must_use]
 pub fn starts_mux(first_message: &[u8]) -> bool {
@@ -1936,7 +1936,7 @@ mod tests {
     #[test]
     fn the_vectors_are_the_wire() {
         let vectors: serde_json::Value =
-            serde_json::from_str(include_str!("../../../vectors/mux.json")).unwrap();
+            serde_json::from_str(include_str!("../vectors/mux.json")).unwrap();
         let hex = |text: &str| -> Vec<u8> {
             (0..text.len())
                 .step_by(2)

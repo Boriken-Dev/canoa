@@ -525,6 +525,7 @@ mod tests {
 
     #[test]
     fn a_target_has_one_spelling_and_bad_ones_are_refused() {
+        let _deadline = crate::deadline::within(120);
         for (text, spelled) in [
             ("LocalHost:80", "localhost:80"),
             ("127.0.0.1:65535", "127.0.0.1:65535"),
@@ -579,6 +580,7 @@ mod tests {
 
     #[test]
     fn a_granted_target_is_reached_and_half_close_gets_the_answer() {
+        let _deadline = crate::deadline::within(120);
         let (target, _) = answering_server();
         let store = MemoryPeers::default();
         store.put(&grant(PeerRecord::new("peer"), &target)).unwrap();
@@ -596,6 +598,7 @@ mod tests {
 
     #[test]
     fn nothing_connects_for_a_target_or_a_peer_without_a_grant() {
+        let _deadline = crate::deadline::within(120);
         let (target, connections) = answering_server();
         let (other, _) = answering_server();
         let refused = |stream: &Stream<'_, Wire>| {
@@ -631,6 +634,7 @@ mod tests {
 
     #[test]
     fn a_granted_target_that_is_not_there_says_so() {
+        let _deadline = crate::deadline::within(120);
         let free = TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
@@ -649,6 +653,7 @@ mod tests {
 
     #[test]
     fn taking_a_target_away_ends_only_its_connections() {
+        let _deadline = crate::deadline::within(120);
         let holder = TcpListener::bind("127.0.0.1:0").unwrap();
         let held: Target = holder.local_addr().unwrap().to_string().parse().unwrap();
         let (kept, _) = answering_server();
@@ -690,6 +695,7 @@ mod tests {
 
     #[test]
     fn the_side_that_answered_the_link_can_be_the_one_that_listens() {
+        let _deadline = crate::deadline::within(120);
         // It opens the stream, and the side that dialed decides, from its own store.
         let (target, _) = answering_server();
         let (dialed, answered) = wires();
@@ -746,6 +752,7 @@ mod tests {
 
     #[test]
     fn a_listener_with_no_grant_on_the_far_side_drops_the_connection() {
+        let _deadline = crate::deadline::within(120);
         let (target, connections) = answering_server();
         let store = MemoryPeers::default();
         with_link(&store, |mux| {
@@ -769,6 +776,7 @@ mod tests {
 
     #[test]
     fn a_reader_slower_than_a_send_can_wait_loses_nothing() {
+        let _deadline = crate::deadline::within(120);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let target: Target = listener.local_addr().unwrap().to_string().parse().unwrap();
         let size = 4 * 1024 * 1024;
@@ -855,6 +863,7 @@ mod tests {
 
     #[test]
     fn revoking_ends_a_connection_whose_target_never_closes() {
+        let _deadline = crate::deadline::within(120);
         let (target, held) = quiet_target();
         let held = Mutex::new(held);
         let store = MemoryPeers::default();
@@ -878,6 +887,7 @@ mod tests {
 
     #[test]
     fn revoking_ends_a_connection_whose_target_has_stopped_reading() {
+        let _deadline = crate::deadline::within(120);
         let (target, held) = quiet_target();
         let held = Mutex::new(held);
         let store = MemoryPeers::default();
@@ -908,6 +918,7 @@ mod tests {
 
     #[test]
     fn a_link_ending_ends_a_connection_whose_target_stays_quiet() {
+        let _deadline = crate::deadline::within(120);
         let (target, held) = quiet_target();
         let held = Mutex::new(held);
         let store = MemoryPeers::default();
@@ -921,6 +932,7 @@ mod tests {
 
     #[test]
     fn a_peer_closing_in_order_ends_a_connection_whose_target_stays_quiet() {
+        let _deadline = crate::deadline::within(120);
         let (target, held) = quiet_target();
         let held = Mutex::new(held);
         let store = MemoryPeers::default();
@@ -941,6 +953,7 @@ mod tests {
 
     #[test]
     fn a_silent_link_does_not_leave_a_connection_spinning() {
+        let _deadline = crate::deadline::within(120);
         let (target, held) = quiet_target();
         let held = Mutex::new(held);
         let store = MemoryPeers::default();
@@ -990,6 +1003,7 @@ mod tests {
 
     #[test]
     fn a_target_that_fails_midway_does_not_read_as_finished() {
+        let _deadline = crate::deadline::within(120);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let target: Target = listener.local_addr().unwrap().to_string().parse().unwrap();
         thread::spawn(move || {

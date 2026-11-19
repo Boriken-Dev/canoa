@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-bridge at 165af2eea570bea0b0ad4e7240651d1e047ab473, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-bridge at e7089d83577cb2c4ad8332350b18bb968ae217fd, with what it inherits written out.
 [package]
 name = "coqui-acp-bridge"
 description = "Put a stdio Agent Client Protocol agent on the network, under a proven peer identity"
@@ -18,9 +18,13 @@ url = "2.5"
 [dependencies.clap]
 version = "4"
 features = ["derive"]
+[dependencies.coqui-link]
+git = "https://github.com/Boriken-Dev/coqui-link"
+rev = "40123baab01440c0522a27baa7321a31892b3735"
+features = ["sealed", "forward"]
 [dependencies.coqui-agentic-peer]
 git = "https://github.com/Boriken-Dev/coqui-agentic-peer"
-rev = "f45938e8cede85a2a2e00afedea1b4944f7c8a67"
+rev = "161307f9ebc216a56e21d7407688baa80f442823"
 [dependencies.coqui-peer]
 git = "https://github.com/Boriken-Dev/coqui-peer"
 rev = "984db3d54b73de10c7892b06fe269a259de2d1c5"

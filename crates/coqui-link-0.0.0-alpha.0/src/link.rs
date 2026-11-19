@@ -2,6 +2,8 @@
 //! link. It grants no protocol, so each open is decided here, and again while the stream runs.
 
 use std::collections::BTreeMap;
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread;
@@ -24,15 +26,19 @@ const ACCEPT_POLL: Duration = Duration::from_millis(100);
 pub fn instance() -> &'static str {
     static INSTANCE: OnceLock<String> = OnceLock::new();
     INSTANCE.get_or_init(|| {
-        let mut bytes = [0_u8; 16];
-        // No randomness is a broken machine, and an instance id is no secret: the time still tells restarts apart.
-        if coqui_peer_webcrypto::random().fill(&mut bytes).is_err() {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default();
-            bytes[..16].copy_from_slice(&now.as_nanos().to_le_bytes());
-        }
-        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+        // An instance id is no secret: it only tells restarts apart. The standard library seeds each hasher from the system's
+        // randomness, and the time is mixed in so a missing source still tells restarts apart.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let word = |index: usize| {
+            let mut hasher = RandomState::new().build_hasher();
+            hasher.write_u128(now);
+            hasher.write_usize(index);
+            hasher.finish()
+        };
+        format!("{:016x}{:016x}", word(0), word(1))
     })
 }
 
@@ -523,6 +529,7 @@ mod tests {
 
     #[test]
     fn one_entry_two_capabilities_and_claims_reach_the_service() {
+        let _deadline = crate::deadline::within(60);
         let store = MemoryPeers::default();
         store
             .put(
@@ -547,6 +554,7 @@ mod tests {
 
     #[test]
     fn being_admitted_grants_nothing_and_a_grant_added_later_needs_no_second_pairing() {
+        let _deadline = crate::deadline::within(60);
         let store = MemoryPeers::default();
         store
             .put(&PeerRecord::new("peer").granting("acp/1"))
@@ -583,6 +591,7 @@ mod tests {
 
     #[test]
     fn nothing_unserved_and_no_record_means_refused() {
+        let _deadline = crate::deadline::within(60);
         let store = MemoryPeers::default();
         with_host(&store, &NoEvents, |mux| {
             assert_eq!(
@@ -607,6 +616,7 @@ mod tests {
 
     #[test]
     fn taking_a_grant_away_ends_that_stream_saying_so_and_leaves_the_other() {
+        let _deadline = crate::deadline::within(60);
         let store = MemoryPeers::default();
         store
             .put(&PeerRecord::new("peer").granting("acp/1").granting("mcp"))
@@ -662,6 +672,7 @@ mod tests {
 
     #[test]
     fn a_store_that_cannot_be_read_fails_closed() {
+        let _deadline = crate::deadline::within(60);
         let store = Breakable::default();
         store
             .put(&PeerRecord::new("peer").granting("acp/1"))
@@ -690,6 +701,7 @@ mod tests {
 
     #[test]
     fn a_slow_service_holds_up_nothing_else() {
+        let _deadline = crate::deadline::within(60);
         let store = MemoryPeers::default();
         store
             .put(&PeerRecord::new("peer").granting("slow").granting("fast"))
@@ -735,6 +747,7 @@ mod tests {
 
     #[test]
     fn a_refused_stream_is_told_why_before_it_closes() {
+        let _deadline = crate::deadline::within(60);
         let store = MemoryPeers::default();
         with_host(&store, &NoEvents, |mux| {
             let stream = mux.open("mcp").unwrap();
@@ -747,6 +760,7 @@ mod tests {
 
     #[test]
     fn a_prefilled_channel_gives_its_first_message_first() {
+        let _deadline = crate::deadline::within(60);
         let (ours, theirs) = wires();
         theirs.out.send(b"second".to_vec()).unwrap();
         let channel = Prefilled::new(&ours, b"first".to_vec());
@@ -756,6 +770,7 @@ mod tests {
 
     #[test]
     fn opening_as_fast_as_it_can_does_not_put_off_a_revocation() {
+        let _deadline = crate::deadline::within(60);
         let store = MemoryPeers::default();
         store
             .put(&PeerRecord::new("peer").granting("acp/1"))
@@ -788,6 +803,7 @@ mod tests {
 
     #[test]
     fn a_revocation_is_reported_once() {
+        let _deadline = crate::deadline::within(60);
         let store = MemoryPeers::default();
         store
             .put(&PeerRecord::new("peer").granting("acp/1"))

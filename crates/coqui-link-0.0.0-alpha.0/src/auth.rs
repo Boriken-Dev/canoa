@@ -1,4 +1,4 @@
-//! Proving a peer before any byte reaches the agent, and keeping everything after it inside the session the proof made.
+//! Proving a peer before any byte reaches the application, and keeping everything after it inside the session the proof made.
 //! A plain message after the handshake comes from whoever carries the connection, so none is ever taken.
 //!
 //! An endpoint proves by one [`Method`], chosen when it is built and never negotiated on a connection: a peer of the other method
@@ -1278,7 +1278,7 @@ mod tests {
     #[test]
     fn an_identity_file_is_read_as_its_keys_method_and_never_used_for_the_other() {
         let dir = std::env::temp_dir().join(format!(
-            "coqui-agentic-peer-auth-{}-{:?}",
+            "coqui-link-auth-{}-{:?}",
             std::process::id(),
             thread::current().id()
         ));
@@ -1397,10 +1397,8 @@ mod tests {
 
     #[test]
     fn an_identity_that_cannot_be_written_says_why() {
-        let dir = std::env::temp_dir().join(format!(
-            "coqui-agentic-peer-unwritable-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("coqui-link-unwritable-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // A file where the parent directory should be.
