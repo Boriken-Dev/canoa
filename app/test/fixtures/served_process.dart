@@ -7,7 +7,8 @@ import 'dart:io';
 
 import 'package:canoa/auth/peer_proof.dart';
 
-/// A host started as a supervisor starts one, which a test ends and starts again ([stop], [start]) on the same configuration and home.
+/// A host started as a supervisor starts one (`--supervised`, which offers `host/restart`), which a test ends and starts again
+/// ([stop], [start], or [supervise] after the host asked to restart) on the same configuration and home.
 /// Everything it writes goes under [dir]: its identity and the scripts that ship in it in `peers`, and
 /// the home folder it reports as the person's in `home`.
 final class ServedProcess {
@@ -23,6 +24,9 @@ final class ServedProcess {
   final Directory dir;
   final File config;
   final String method;
+
+  /// The status `canoa serve` ends with when a key granted `host.restart` asked it to start again.
+  static const restartStatus = 75;
 
   late Process process;
   final urls = <String, String>{};
@@ -48,6 +52,7 @@ final class ServedProcess {
       config.path,
       '--method',
       method,
+      '--supervised',
     ], environment: _environment);
     process.stderr.transform(utf8.decoder).listen(stderr.write);
     final ready = Completer<void>();
@@ -69,6 +74,20 @@ final class ServedProcess {
   /// Another `canoa` command on this host's home.
   Future<ProcessResult> command(List<String> args) =>
       Process.run(binary, args, environment: _environment);
+
+  /// What a supervisor does when the host ends because a key asked it to restart: waits for it to end with the status that says so
+  /// ([restartStatus]), then starts it again on the same configuration and home.
+  Future<void> supervise({
+    Duration within = const Duration(seconds: 30),
+  }) async {
+    final code = await process.exitCode.timeout(within);
+    if (code != restartStatus) {
+      throw StateError(
+        'the host ended with status $code, not the restart status $restartStatus',
+      );
+    }
+    await start();
+  }
 
   Future<void> stop() async {
     process.kill();

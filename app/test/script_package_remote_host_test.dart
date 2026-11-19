@@ -11,6 +11,7 @@
 @Timeout(Duration(minutes: 4))
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -317,14 +318,39 @@ team = ${jsonEncode('$catalog@main#extensions.toml')}
           );
         }
 
-        // A host loads its extensions when it starts: the remote one is ended and started again, as its supervisor would, and then
-        // lists the package's type, which the near one does not.
-        await tester.runAsync(() async {
-          // The Store's own link is let go first: a host that ends under a link the page still holds is an error of that link.
-          await remoteControl.close();
-          await remote.stop();
-          await remote.start();
-        });
+        // A host loads its extensions when it starts: the page asks the remote one to restart, as the app does, its supervisor (this
+        // test) starts it again, and it then lists the package's type, which the near one does not. The answer is waited for on the
+        // clock the widgets run on, since the page's link was made there: a call on that link from outside it is not delivered
+        // until that clock next runs.
+        Object? refused;
+        var answered = false;
+        unawaited(
+          HostFiles(remoteControl).restart().then(
+            (_) => answered = true,
+            onError: (Object error) => refused = error,
+          ),
+        );
+        await until(
+          tester,
+          () => answered || refused != null,
+          'the host to answer the restart',
+        );
+        expect(
+          refused,
+          isNull,
+          reason: 'a supervised host restarts when asked',
+        );
+        await tester.runAsync(remote.supervise);
+        // The link ends with the host, which the transport reports once as an error of that link; the page's next request dials
+        // the host again and finds it up.
+        await settle(tester);
+        final ended = tester.takeException();
+        expect(
+          ended == null || '$ended'.contains('Transport disconnected'),
+          isTrue,
+          reason: '$ended',
+        );
+        await tester.runAsync(() => HostFiles(remoteControl).awaitHost());
         final again = control(remote);
         final after = StoreExtensions(
           control: () => again.ready(wait: false),

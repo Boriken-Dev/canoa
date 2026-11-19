@@ -217,3 +217,25 @@ mod base64_for_test {
         data_encoding::BASE64.encode(bytes)
     }
 }
+
+#[test]
+fn a_restart_answers_and_the_host_ends_while_the_page_still_holds_its_link() {
+    let writer = key();
+    let config = format!(
+        "[host.control]\nlisten = \"127.0.0.1:0\"\ngrants = {{ \"{}\" = [\"config.read\", \"host.restart\"] }}\n",
+        writer.peer_id()
+    );
+    let mut host = Host::start_with(&config, 1, &["--supervised"], &[]);
+    host.pair(&writer);
+    let url = host.url("@control").to_owned();
+    let peer = host.peer;
+    // The link stays open until the host has ended: a page does not close it before it asks.
+    let status = with_link(&url, &writer, peer, |rpc| {
+        let answer = rpc.request("host/restart", json!({}));
+        assert_eq!(answer.expect("an answer")["restarting"], true);
+        host.ended_within(std::time::Duration::from_secs(20))
+    })
+    .expect("a link");
+    let status = status.expect("the host ends with the link still open");
+    assert_eq!(status.code(), Some(75), "{status:?}");
+}
