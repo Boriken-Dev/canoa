@@ -826,9 +826,13 @@ version = "0.0.0-alpha.0"
 dependencies = [
  "canoa",
  "coqui-acp-api",
+ "coqui-acp-harness",
  "foundry-local-sdk",
+ "getrandom 0.4.3",
+ "guatiao-serde",
  "serde_json",
  "tokio",
+ "tracing",
  "ureq",
 ]
 

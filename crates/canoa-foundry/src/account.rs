@@ -1,4 +1,4 @@
-//! Foundry Local as an account: what a harness is given so that it talks to the gateway, and what the account's person chooses.
+//! Foundry Local as an account: what the person chooses, and the kind and sign-in method that say so to a host.
 //!
 //! The gateway answers any model name with the one model the account serves, so a harness needs only an address and a bearer.
 //! Each harness takes those through an account kind of its own, which its description says (`agent_vendor`'s `gateway_route`), so the
@@ -7,6 +7,9 @@
 use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
 
+use coqui_acp_api::{
+    AccountKindInfo, AccountOffer, EndpointSlot, LoginMethodInfo, MODEL_API, standard,
+};
 use serde_json::{Map, Value, json};
 
 /// The id of the account kind, and of the sign-in method that makes it.
@@ -107,6 +110,35 @@ pub fn settings_schema() -> Value {
     })
 }
 
+fn schema(json: &Value) -> coqui_acp_api::guatiao::Value {
+    guatiao_serde::from_serde(json.clone()).expect("a schema is a value")
+}
+
+/// The kind and the sign-in method that make an account of this kind, as an account provider offers them: the settings are the
+/// sign-in's inputs, and no credential is kept.
+#[must_use]
+pub fn offer() -> AccountOffer {
+    let mut kind = AccountKindInfo::new(KIND, "Foundry Local");
+    kind.description = "A model run by Foundry Local on this computer, served to the agent through a gateway the host runs for each session. No credential is kept: the model's name and where the service is are the account.".to_owned();
+    kind.settings = schema(&settings_schema());
+    kind.endpoints = vec![EndpointSlot::new(MODEL_API).key("endpoint")];
+    // Codex runs in a folder of its own for the account, where the host writes its configuration.
+    kind.state_dir = true;
+    kind.notices = notices();
+    // The gateway answers both wire formats, so an agent that speaks either can use the account.
+    kind.provides = vec![
+        standard::ANTHROPIC_API.to_owned(),
+        standard::OPENAI_API.to_owned(),
+    ];
+    let mut method = LoginMethodInfo::new(KIND, "Use a Foundry Local model", KIND);
+    method.description = "Names a model Foundry Local serves. It is not loaded or checked here: load it in Foundry Local before a session.".to_owned();
+    method.inputs = schema(&settings_schema());
+    let mut offer = AccountOffer::new();
+    offer.kinds = vec![kind];
+    offer.logins = vec![method];
+    offer
+}
+
 /// What each setting's absence or presence means, for a line a person reads when the account is added.
 #[must_use]
 pub fn notices() -> Vec<String> {
@@ -140,6 +172,21 @@ mod tests {
         assert_eq!(sdk.engine, EngineKind::Sdk);
         assert!(Settings::from_map(&table(json!({"model": "m", "engine": "cloud"}))).is_err());
         assert!(Settings::from_map(&table(json!({"model": "m", "key": "x"}))).is_err());
+    }
+
+    #[test]
+    fn the_offer_is_one_kind_and_the_sign_in_that_makes_it() {
+        let offer = offer();
+        let kind = offer.kind(KIND).expect("the kind");
+        assert!(kind.state_dir && !kind.rotates && !kind.renews);
+        assert_eq!(
+            kind.provides,
+            [standard::ANTHROPIC_API, standard::OPENAI_API]
+        );
+        assert_eq!(offer.logins.len(), 1);
+        assert_eq!(offer.logins[0].id, KIND);
+        assert_eq!(offer.logins[0].produces, KIND);
+        assert!(offer.usage.is_empty(), "a local model has no plan limits");
     }
 
     #[test]

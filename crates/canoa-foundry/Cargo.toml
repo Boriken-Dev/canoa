@@ -22,12 +22,18 @@ daemon = ["dep:ureq", "canoa/network"]
 sdk = ["dep:foundry-local-sdk", "dep:tokio"]
 
 [dependencies]
-canoa = { workspace = true, features = ["store"] }
+canoa = { workspace = true, features = ["store", "gateway", "loopback"] }
 coqui-acp-api.workspace = true
+guatiao-serde.workspace = true
+getrandom.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
 ureq = { workspace = true, optional = true }
 foundry-local-sdk = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+coqui-acp-harness.workspace = true
 
 [lints.rust]
 missing_docs = "warn"
