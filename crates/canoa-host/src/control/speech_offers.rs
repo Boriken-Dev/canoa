@@ -18,11 +18,13 @@
 
 use std::path::{Path, PathBuf};
 
+use coqui_acp_api::{AccountKindInfo, EndpointSlot, MODEL_API, standard};
 use serde_json::{Map, Value, json};
 
 use super::accounts::Accounts as HostAccounts;
 use super::files::Files;
 use super::{Caller, Grant, NOT_FOUND, REFUSED, Stores, allow, bad, text_param};
+use crate::accounts::matching::Catalogs;
 use crate::config::{AccountConfig, Config, Layers};
 use crate::store::whisper::{MODELS, held_model, model_path};
 
@@ -71,12 +73,8 @@ const FOUNDRY_SERVICE: &str = "foundry_local";
 /// The offer made of one of the person's accounts is `openai_account:NAME`.
 const ACCOUNT_OFFER: &str = "openai_account";
 
-/// The kind of account Codex's sign-in makes of an OpenAI API key, and the credential that holds the key.
-const OPENAI_KEY_KIND: &str = "codex-api-key";
+/// The credential that holds the key of an account of the `openai-api` standard, which that standard fixes.
 const OPENAI_KEY_FIELD: &str = "api_key";
-
-/// The setting of that kind that moves its requests to another address.
-const OPENAI_BASE_SETTING: &str = "openai_base_url";
 
 /// What an OpenAI key's service is called at, without the path.
 const OPENAI_BASE: &str = "https://api.openai.com/v1";
@@ -178,7 +176,12 @@ impl<'a> Lend<'a> {
             .accounts
             .get(name)
             .ok_or_else(|| format!("the account {name} is gone: add the provider again"))?;
-        openai_key(account)
+        openai_key(&Catalogs::new(config), account).unwrap_or_else(|| {
+            Err(format!(
+                "an account of kind {} is not an OpenAI API key",
+                account.kind
+            ))
+        })
     }
 
     /// The API key of the account `name`, from the store its credentials rest in.
@@ -265,44 +268,61 @@ impl<'a> Lend<'a> {
     }
 }
 
-/// Whether the account `account` holds an OpenAI API key that OpenAI's service takes; the reason when it does not. A ChatGPT
-/// sign-in is no API key, and a key whose requests go to another address is not sent to OpenAI's.
-fn openai_key(account: &AccountConfig) -> Result<(), String> {
-    match account.kind.as_str() {
-        OPENAI_KEY_KIND => {
-            let moved = account
-                .settings
-                .as_ref()
-                .and_then(|settings| settings.as_map().get(OPENAI_BASE_SETTING))
-                .and_then(Value::as_str)
-                .map(|address| address.trim().trim_end_matches('/'))
-                .filter(|address| !address.is_empty() && *address != OPENAI_BASE);
-            match moved {
-                Some(address) => Err(format!(
-                    "its key is for {address}, not for api.openai.com, and Canoa has not measured that address's speech-to-text, so it is not offered"
-                )),
-                None => Ok(()),
-            }
-        }
-        "codex-chatgpt" | "codex-access-token" => Err(
-            "a ChatGPT sign-in is not an OpenAI API key, and Canoa has no measured way to send audio to OpenAI with it, so it is not offered: add an API key as an account to use OpenAI's speech-to-text".to_owned(),
-        ),
-        other => Err(format!("an account of kind {other} is not an OpenAI API key")),
-    }
+/// What an account's kind says of an OpenAI API key, for an account of a provider that signs in to OpenAI: `None` for an account of
+/// a provider none of whose kinds is a key for the OpenAI API at OpenAI's own address, `Ok` for a key that may call OpenAI's
+/// transcriptions and the reason for an account that is not one. The kind says it: the standard it provides (`openai-api`), the
+/// address its model API is called at when nothing moves it, and the setting that moves it.
+fn openai_key(kinds: &Catalogs<'_>, account: &AccountConfig) -> Option<Result<(), String>> {
+    let listing = kinds.listing(&account.harness)?;
+    let own = |kind: &AccountKindInfo| {
+        kind.provides
+            .iter()
+            .any(|each| each == standard::OPENAI_API)
+            && openai_slot(kind).is_some_and(|slot| {
+                slot.default
+                    .as_deref()
+                    .is_some_and(|url| url.trim_end_matches('/') == OPENAI_BASE)
+            })
+    };
+    listing.kinds.iter().find(|kind| own(kind))?;
+    let Some(kind) = listing.kind(&account.kind).filter(|kind| own(kind)) else {
+        return Some(Err(format!(
+            "an account of kind {} is not an OpenAI API key, and Canoa has no measured way to send audio to OpenAI with it, so it is not offered: add an API key as an account to use OpenAI's speech-to-text",
+            account.kind
+        )));
+    };
+    let moved = openai_slot(kind)
+        .and_then(|slot| slot.key.as_deref())
+        .and_then(|key| account.settings.as_ref()?.as_map().get(key))
+        .and_then(Value::as_str)
+        .map(|address| address.trim().trim_end_matches('/'))
+        .filter(|address| !address.is_empty() && *address != OPENAI_BASE);
+    Some(match moved {
+        Some(address) => Err(format!(
+            "its key is for {address}, not for api.openai.com, and Canoa has not measured that address's speech-to-text, so it is not offered"
+        )),
+        None => Ok(()),
+    })
 }
 
-/// The offers made of the person's accounts, one for each account that signs in to OpenAI through Codex.
+/// The slot of `kind` that says where its model API is called.
+fn openai_slot(kind: &AccountKindInfo) -> Option<&EndpointSlot> {
+    kind.endpoints.iter().find(|slot| slot.purpose == MODEL_API)
+}
+
+/// The offers made of the person's accounts, one for each account of a provider that signs in to OpenAI.
 fn account_offers(files: &Files, lend: &Lend<'_>) -> Result<Vec<Value>, (i32, String)> {
     let Ok(config) = lend.config() else {
         return Ok(Vec::new());
     };
+    let kinds = Catalogs::new(&config);
     let mut rows = Vec::new();
     for (name, account) in &config.accounts {
-        if account.harness != "codex" {
+        let Some(usable) = openai_key(&kinds, account) else {
             continue;
-        }
+        };
         let id = format!("{ACCOUNT_OFFER}:{name}");
-        let unavailable = openai_key(account).err();
+        let unavailable = usable.err();
         rows.push(json!({
             "id": id,
             "title": format!("OpenAI, account {name}"),

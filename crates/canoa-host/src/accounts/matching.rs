@@ -70,6 +70,11 @@ impl<'a> Catalogs<'a> {
             .clone()
     }
 
+    /// The kinds of account and ways to sign in that the provider `harness` offers; `None` when it cannot be built.
+    pub(crate) fn listing(&self, harness: &str) -> Option<AccountCatalog> {
+        self.known(harness).map(|known| known.listing)
+    }
+
     /// The catalog of the provider `harness`; `None` when it cannot be built or lists none.
     pub(crate) fn of(&self, harness: &str) -> Option<AccountCatalog> {
         self.known(harness).map(|known| known.catalog)
