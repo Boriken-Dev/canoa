@@ -13,7 +13,9 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use canoa::panel_tab::PanelTabVtable;
 use canoa::secret_provider::SecretProviderVtable;
+use canoa::settings_section::SettingsSectionVtable;
 use canoa::speech::output::{SpeechOutputVtable, SpeechUtteranceVtable};
 use canoa::speech::{SpeechProviderVtable, SpeechSessionVtable};
 use canoa::store::extension::StoreExtensionVtable;
@@ -33,6 +35,8 @@ pub(crate) fn document() -> String {
         AgentVendorVtable::description(),
         StoreExtensionVtable::description(),
         SecretProviderVtable::description(),
+        SettingsSectionVtable::description(),
+        PanelTabVtable::description(),
         ProgramStoreVtable::description(),
         InstallPrompterVtable::description(),
         InstallToolsVtable::description(),
@@ -119,6 +123,8 @@ mod tests {
             "agent_vendor",
             "store_extension",
             "secret_provider",
+            "settings_section",
+            "panel_tab",
             "acp_harness",
             "transport",
         ] {
