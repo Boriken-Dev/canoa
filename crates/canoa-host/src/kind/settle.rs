@@ -114,50 +114,38 @@ impl Harness {
         }
     }
 
-    /// The account of `pool` a start takes: the first that is free, and that lists `model` when the start names one.
+    /// The account of `pool` a start takes: the next in turn of those that are free, list `model` when the start names one, and
+    /// have usage left for it.
     fn account_of(
         &self,
         pool: &EntryPool,
         model: Option<&str>,
         any: bool,
     ) -> Result<String, String> {
-        let Some(offer) = &self.accounts else {
+        let Some(config) = self
+            .accounts
+            .as_ref()
+            .and_then(|offer| offer.config.as_deref())
+        else {
             return Err(format!("this entry offers no pool {}", pool.name));
         };
-        let mut left_out: Vec<String> = Vec::new();
-        for member in pool.usable(any) {
-            let Some((name, config, info)) = self.account_named(&member.name, any) else {
-                left_out.push(format!("{}: this entry does not offer it", member.name));
-                continue;
-            };
-            if info.rotates && offer.host.held(&config.id) {
-                left_out.push(format!("{name}: another connection holds it"));
-                continue;
-            }
-            if let (Some(model), Some(config)) = (model, &offer.config) {
-                let listed = crate::options::as_account(config, self, name, any);
-                if let Some(why) = listed.refuses(&format!("account {name:?}"), model) {
-                    left_out.push(format!("{name}: {why}"));
-                    continue;
-                }
-            }
-            return Ok(name.clone());
-        }
-        let what = model.map_or_else(
-            || "a session".to_owned(),
-            |model| format!("a session on {model:?}"),
+        let names: Vec<String> = pool.usable(any).map(|member| member.name.clone()).collect();
+        let candidates = crate::pools::gather::candidates(
+            config,
+            self,
+            &names,
+            (model, None),
+            (&[], &crate::options::limits::Endpoints::default()),
+            any,
         );
-        Err(if left_out.is_empty() {
-            format!(
-                "pool {} holds no account this connection may use",
-                pool.name
-            )
-        } else {
-            format!(
-                "no account of pool {} can start {what}: {}",
-                pool.name,
-                left_out.join("; ")
-            )
-        })
+        let turn = crate::pools::turn::Turn {
+            current: None,
+            model,
+            idle: None,
+            lifetime: coqui_acp_api::CacheLifetime::Default,
+            now: crate::usage_splice::unix_now(),
+        };
+        crate::pools::turn::decide(&pool.name, &crate::pools::turn::CURSOR, &candidates, &turn)
+            .map(|chosen| chosen.account)
     }
 }

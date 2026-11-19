@@ -404,5 +404,8 @@ pub(crate) fn for_entry(
     Ok(pools)
 }
 
+pub(crate) mod gather;
+pub(crate) mod turn;
+
 #[cfg(test)]
 mod tests;

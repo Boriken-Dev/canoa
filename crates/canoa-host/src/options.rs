@@ -293,80 +293,24 @@ pub fn entry(config: &Config, name: &str) -> Option<Choices> {
 pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choices> {
     let entry = config.entry(name)?;
     Some(match &entry.kind {
-        EntryKind::Harness {
-            harness,
-            origin,
-            executable,
-            options,
-            settings,
-            account_settings,
-            accounts,
-            ..
-        } => {
-            let configured = crate::serve::harness_settings(
-                entry,
-                harness,
-                executable.as_ref(),
-                options,
-                settings.as_ref(),
-            );
-            let registry = match kind::registry(origin.as_ref()) {
-                Ok(registry) => Arc::new(registry),
-                Err(error) => return Some(Choices::failed(error.to_string())),
-            };
-            let mut built = match kind::Harness::new(
-                &registry,
-                harness,
-                (&configured, &account_settings.clone().unwrap_or_default()),
-                false,
-                Vec::new(),
-            ) {
+        EntryKind::Harness { options, .. } => {
+            let mut built = match harness_of(entry) {
                 Ok(built) => built,
-                Err(error) => return Some(Choices::failed(error.to_string())),
+                Err(why) => return Some(Choices::failed(why)),
             };
             let mut choices = match &asking.account {
                 Some((account, store)) => {
-                    let listed =
-                        match crate::serve::entry_accounts(config, harness, accounts, &built) {
-                            Ok(listed) => listed.unwrap_or_default(),
-                            Err(why) => return Some(Choices::failed(why)),
-                        };
-                    let pools = match built.catalog() {
-                        Some(catalog) => {
-                            let catalogs = crate::accounts::matching::Catalogs::with(
-                                config,
-                                harness,
-                                (catalog, built.listing()),
-                                built.local_account().is_some(),
-                            );
-                            match crate::pools::for_entry(config, &catalogs, harness, accounts) {
-                                Ok(pools) => pools,
-                                Err(why) => return Some(Choices::failed(why)),
-                            }
-                        }
-                        None => Vec::new(),
+                    built = match offering(config, entry, built, store, asking.any_account) {
+                        Ok(built) => built,
+                        Err(why) => return Some(Choices::failed(why)),
                     };
-                    let pooled = pools
-                        .iter()
-                        .any(|pool| pool.name == *account && pool.open_to(asking.any_account));
-                    if !pooled
-                        && !listed.iter().any(|(each, ..)| each == account)
-                        && !asking.any_account
+                    if built.pool_named(account, asking.any_account).is_none()
+                        && built.account_named(account, asking.any_account).is_none()
                     {
                         return Some(Choices::failed(format!(
                             "{name} does not offer the account {account}"
                         )));
                     }
-                    let others = if asking.any_account {
-                        crate::serve::other_accounts(config, harness, &listed, &built)
-                    } else {
-                        Vec::new()
-                    };
-                    let unfit = crate::serve::unfit_accounts(config, harness, &built);
-                    built = built
-                        .offering(store, listed, others)
-                        .with_unfit(unfit)
-                        .with_pools(pools, None);
                     match built.pool_named(account, asking.any_account) {
                         Some(pool) => pool_choices(config, &built, pool, asking.any_account),
                         None => as_account(config, &built, account, asking.any_account),
@@ -384,6 +328,93 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
             "this source lists its models in its session, and is not asked before it starts",
         ),
     })
+}
+
+/// The provider the harness entry `entry` runs, configured as the entry says, offering no account yet.
+///
+/// # Errors
+///
+/// Why it cannot be built: the entry runs no harness, or its provider is missing or refuses its settings.
+pub(crate) fn harness_of(entry: &crate::config::Entry) -> Result<kind::Harness, String> {
+    let EntryKind::Harness {
+        harness,
+        origin,
+        executable,
+        options,
+        settings,
+        account_settings,
+        ..
+    } = &entry.kind
+    else {
+        return Err(format!("{} runs no harness", entry.name));
+    };
+    let configured = crate::serve::harness_settings(
+        entry,
+        harness,
+        executable.as_ref(),
+        options,
+        settings.as_ref(),
+    );
+    let registry = Arc::new(kind::registry(origin.as_ref()).map_err(|error| error.to_string())?);
+    kind::Harness::new(
+        &registry,
+        harness,
+        (&configured, &account_settings.clone().unwrap_or_default()),
+        false,
+        Vec::new(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// `built`, the provider of the harness entry `entry`, offering what the entry offers: its accounts (each pool it names standing
+/// for the accounts it holds), the pools, and canoa.cfg as it stands, kept in `store`. With `any`, the accounts of the provider the
+/// entry does not list are there to be chosen too.
+///
+/// # Errors
+///
+/// Why the entry's accounts cannot be offered: a pool its harness cannot take, an account it cannot run.
+pub(crate) fn offering(
+    config: &Config,
+    entry: &crate::config::Entry,
+    built: kind::Harness,
+    store: &Arc<crate::accounts::Accounts>,
+    any: bool,
+) -> Result<kind::Harness, String> {
+    let EntryKind::Harness {
+        harness, accounts, ..
+    } = &entry.kind
+    else {
+        return Err(format!("{} runs no harness", entry.name));
+    };
+    let listed =
+        crate::serve::entry_accounts(config, harness, accounts, &built)?.unwrap_or_default();
+    let pools = match built.catalog() {
+        Some(catalog) => {
+            let catalogs = crate::accounts::matching::Catalogs::with(
+                config,
+                harness,
+                (catalog, built.listing()),
+                built.local_account().is_some(),
+            );
+            crate::pools::for_entry(config, &catalogs, harness, accounts)?
+        }
+        None => Vec::new(),
+    };
+    let default_pool = accounts
+        .first()
+        .filter(|first| crate::pools::is_pool(config, first))
+        .cloned();
+    let others = if any {
+        crate::serve::other_accounts(config, harness, &listed, &built)
+    } else {
+        Vec::new()
+    };
+    let unfit = crate::serve::unfit_accounts(config, harness, &built);
+    Ok(built
+        .offering(store, listed, others)
+        .with_unfit(unfit)
+        .with_pools(pools, default_pool)
+        .with_config(Arc::new(config.clone())))
 }
 
 /// What the harness lists on the login it has where it runs, as the automatic `local` account is.
@@ -653,6 +684,17 @@ pub(crate) fn usage_at(
         .accounts
         .get(name)
         .ok_or_else(|| format!("no account called {name}"))?;
+    usage_for(config, (name, account), store, endpoints)
+}
+
+/// What the account provider reports of the allowances of `account`, which is `name` in canoa.cfg or the automatic `local` account
+/// of a harness (`AccountConfig::local`, which no file holds); see [`usage_at`].
+pub(crate) fn usage_for(
+    config: &Config,
+    (name, account): (&str, &crate::config::AccountConfig),
+    store: &Arc<crate::accounts::Accounts>,
+    endpoints: &limits::Endpoints,
+) -> Result<Value, String> {
     let harness = account.harness.as_str();
     let runs = |entry: &&crate::config::Entry| matches!(&entry.kind, EntryKind::Harness { harness: each, .. } if each == harness);
     let entry = config

@@ -109,7 +109,7 @@ pub enum Grant {
     /// the window a model is run with.
     StorePrograms,
     /// `accounts/catalog`, `accounts/list`, `accounts/add`, `accounts/login`, `accounts/remove`, `accounts/entries` and
-    /// `accounts/offer`, and `pools/list`, `pools/set` and `pools/remove` (sets of accounts of one standard): sign in to a provider on this host, which runs the provider's program as this user and keeps a credential in
+    /// `accounts/offer`, and `pools/list`, `pools/set` `pools/remove` and `pools/turn` (sets of accounts of one standard, and which of them takes a turn): sign in to a provider on this host, which runs the provider's program as this user and keeps a credential in
     /// the host's keyring, and choose which accounts an agent entry offers. A key with it can attach any account to any harness entry,
     /// including an entry whose `peers` leave that key out, and can make an entry for a built-in source.
     Accounts,
@@ -1158,7 +1158,7 @@ impl Control {
                 Some(
                     method @ ("accounts/catalog" | "accounts/list" | "accounts/remove"
                     | "accounts/entries" | "accounts/offer" | "pools/list" | "pools/set"
-                    | "pools/remove"),
+                    | "pools/remove" | "pools/turn"),
                 ) => allow(caller, Grant::Accounts)
                     .and_then(|()| self.accounts())
                     .and_then(|accounts| accounts.call(method, &params)),

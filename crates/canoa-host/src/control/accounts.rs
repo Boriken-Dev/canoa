@@ -475,6 +475,7 @@ impl Accounts {
             "pools/list" => Ok(super::pools::list(&config)),
             "pools/set" => super::pools::set(&self.layers.own, &config, params),
             "pools/remove" => super::pools::remove(&self.layers.own, &config, params),
+            "pools/turn" => super::pools::turn(self, params),
             _ => Err((super::NO_METHOD, "this host has no such method".to_owned())),
         }
     }

@@ -300,7 +300,9 @@ fn with_a_pool(accounts: &str) -> Fixture {
             "{}\n[host.pools.both]\nstandard = \"claude-code\"\naccounts = [\"work\", \"work2\"]\n",
             cfg.replace(
                 "account_settings = { renew_poll_ms = 100 }",
-                &format!("accounts = [{accounts}]\naccount_settings = {{ renew_poll_ms = 100 }}"),
+                &format!(
+                    "accounts = [{accounts}]\naccount_settings = {{ renew_poll_ms = 100, usage_endpoint = \"http://127.0.0.1:9\" }}"
+                ),
             )
         ),
     )

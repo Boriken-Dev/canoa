@@ -32,6 +32,11 @@ impl Endpoints {
         self
     }
 
+    /// Whether no reader is sent anywhere but where its provider sends it.
+    pub(crate) fn is_default(&self) -> bool {
+        self.0.is_empty()
+    }
+
     /// The `usage_endpoint` an account provider of `harness` is configured with, when one is named.
     pub(crate) fn of(&self, harness: &str) -> Option<&str> {
         self.0.get(harness).map(String::as_str)

@@ -765,6 +765,161 @@ fn a_pool_is_made_edited_and_removed_over_the_link_and_an_entry_offers_it() {
     host.stop();
 }
 
+/// As [`host`], with every provider's usage read from a port nothing listens on, so no usage is ever asked of the real services.
+fn host_without_usage() -> Hosted {
+    let claude = example("harness_standin", false);
+    Hosted::start_with_setup(
+        |dir| {
+            let program = dir.join(format!("claude{}", std::env::consts::EXE_SUFFIX));
+            std::fs::copy(&claude, &program).expect("the stand-in is copied");
+            format!(
+                "[secrets]\naccounts = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\naccount_settings = {{ renew_poll_ms = 100, usage_endpoint = \"http://127.0.0.1:9\" }}\n",
+                quoted(&program.to_string_lossy())
+            )
+        },
+        &[],
+    )
+}
+
+#[test]
+fn the_next_turn_of_a_pool_session_is_asked_of_the_host_and_a_single_account_is_never_moved() {
+    let host = host_without_usage();
+    let link = host.local.open("@control").expect("a link");
+    let mut app = app_of(&host);
+    for name in ["one", "two"] {
+        let (_, added) = app.drive(
+            &link,
+            1,
+            "accounts/add",
+            &json!({"name": name, "harness": "claude", "method": "api-key"}),
+            &Typed::Fills(&[("api_key", KEY)]),
+        );
+        added.expect("a key account");
+    }
+    plain_call(
+        &link,
+        2,
+        "pools/set",
+        json!({"name": "turns", "standard": "anthropic-api", "accounts": ["one", "two"]}),
+    )
+    .expect("made");
+    plain_call(
+        &link,
+        3,
+        "accounts/offer",
+        json!({"entry": "Claude", "accounts": ["turns"]}),
+    )
+    .expect("offered");
+    let turn = |id: u64, params: Value| plain_call(&link, id, "pools/turn", params);
+    let ask = |extra: Value| {
+        let mut params = json!({"entry": "Claude", "account": "turns"});
+        for (key, value) in extra.as_object().expect("an object") {
+            params[key] = value.clone();
+        }
+        params
+    };
+    // A session that starts is given the pool's accounts in turn.
+    let first = turn(4, ask(json!({}))).expect("a start");
+    assert_eq!(
+        (
+            first["account"].as_str(),
+            first["why"].as_str(),
+            first["pool"].as_str()
+        ),
+        (Some("one"), Some("start"), Some("turns")),
+        "{first}"
+    );
+    let second = turn(5, ask(json!({}))).expect("another start");
+    assert_eq!(second["account"], "two", "{second}");
+    // A warm cache keeps the account the session is on, however the others have been given out.
+    let warm = turn(
+        6,
+        ask(json!({"current": "one", "idle_seconds": 30, "lifetime": "long"})),
+    )
+    .expect("kept");
+    assert_eq!(
+        (
+            warm["account"].as_str(),
+            warm["moved"].as_bool(),
+            warm["why"].as_str()
+        ),
+        (Some("one"), Some(false), Some("kept")),
+        "{warm}"
+    );
+    // A cache that has lapsed gives the turn to the next account, which moves the session.
+    let cold = turn(
+        7,
+        ask(json!({"current": "two", "idle_seconds": 4000, "lifetime": "long"})),
+    )
+    .expect("in turn");
+    assert_eq!(
+        (
+            cold["account"].as_str(),
+            cold["moved"].as_bool(),
+            cold["why"].as_str()
+        ),
+        (Some("one"), Some(true), Some("in_turn")),
+        "{cold}"
+    );
+    // A limit the client heard of moves it even while the cache is warm, and the account it left is named.
+    let hit = turn(
+        8,
+        ask(
+            json!({"current": "one", "idle_seconds": 5, "lifetime": "long",
+        "limited": [{"account": "one", "resets_at": 4_102_444_800_i64}]}),
+        ),
+    )
+    .expect("moved");
+    assert_eq!(
+        (
+            hit["account"].as_str(),
+            hit["moved"].as_bool(),
+            hit["why"].as_str()
+        ),
+        (Some("two"), Some(true), Some("exhausted")),
+        "{hit}"
+    );
+    assert_eq!(hit["skipped"][0]["account"], "one", "{hit}");
+    // With every account out the turn is refused, saying when the soonest allowance refills.
+    let none = turn(9, ask(json!({"current": "two", "idle_seconds": 5,
+        "limited": [{"account": "one", "resets_at": 4_102_444_800_i64}, {"account": "two", "resets_at": 4_102_358_400_i64}]})))
+        .expect_err("none has room");
+    assert!(
+        none.contains("refills") && none.contains("2099-12-31 00:00 UTC"),
+        "{none}"
+    );
+    // An account that is not one the entry offers, and a pool it does not, are not found.
+    let missing = turn(10, json!({"entry": "Claude", "account": "nobody"})).expect_err("none");
+    assert!(missing.contains("-32003"), "{missing}");
+
+    // One account is never moved: when it runs out, the answer says so and lists what could take the session in its place.
+    let single = turn(
+        11,
+        json!({"entry": "Claude", "account": "one", "current": "one"}),
+    )
+    .expect("a single account");
+    assert_eq!(
+        (
+            single["moved"].as_bool(),
+            single["exhausted"].as_bool(),
+            single["pool"].is_null()
+        ),
+        (Some(false), Some(false), true),
+        "{single}"
+    );
+    let out = turn(
+        12,
+        json!({"entry": "Claude", "account": "one", "current": "one", "idle_seconds": 9999,
+            "limited": [{"account": "one", "resets_at": 4_102_444_800_i64}]}),
+    )
+    .expect("a single account that ran out");
+    assert_eq!(out["moved"], false, "{out}");
+    assert_eq!(out["exhausted"], true, "{out}");
+    assert_eq!(out["account"], "one", "{out}");
+    assert_eq!(out["alternatives"], json!(["two"]), "{out}");
+    host.stop();
+}
+
 #[test]
 fn an_account_says_what_it_provides_an_entry_what_it_accepts_and_an_offer_follows_them() {
     let host = host();
