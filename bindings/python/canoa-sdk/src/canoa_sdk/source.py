@@ -168,7 +168,7 @@ class ReadCatalogSource(CatalogSource, abstract=True):
             if not isinstance(source, str) or not source:
                 raise BadValue("the source is needed")
             try:
-                data = bytes(spawner.read_file(source, MAX_BYTES + 1))
+                data = bytes(_plain(spawner.read_file(source, MAX_BYTES + 1)))
             except NotFound:
                 raise Internal(f"{source} cannot be read: it is not there") from None
             except Exception as error:  # a refusal of the host: its words say why
@@ -316,7 +316,7 @@ class CommandCatalogSource(CatalogSource, abstract=True):
             if file is not None:
                 path = file if _absolute(file) or folder is None else f"{folder.rstrip('/' + chr(92))}/{file}"
                 try:
-                    data = bytes(spawner.read_file(path, MAX_BYTES + 1))
+                    data = bytes(_plain(spawner.read_file(path, MAX_BYTES + 1)))
                 except NotFound:
                     raise Internal(f"{path} cannot be read: it is not there") from None
                 except Exception:
