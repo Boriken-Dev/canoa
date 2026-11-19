@@ -3427,7 +3427,7 @@ pub(crate) fn harness_settings(
 /// provider made, that provides an API standard, is a key whatever its kind says of where it rests.
 pub(crate) fn keeps_key_in_environment(listed: &[kind::Offered], runs: &str) -> bool {
     listed.iter().any(|(_, account, info)| {
-        let borrowed = account.harness != runs
+        let borrowed = crate::accounts::matching::borrowed(account, runs)
             && info
                 .provides
                 .iter()

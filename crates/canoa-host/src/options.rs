@@ -582,17 +582,7 @@ fn models_of(
             if let Some(listing) = held.gateway_models() {
                 return listing;
             }
-            let mut grant = held.grant();
-            // An account of several standards is listed for the one this harness runs it on, so a provider that tells its models by
-            // standard answers for that one; the others give one list.
-            if grant.provides.len() > 1
-                && let Some(accepted) = built
-                    .catalog()
-                    .and_then(|catalog| catalog.accepted_by(&grant.provides).ok())
-            {
-                grant.provides = vec![accepted.standard.clone()];
-            }
-            (grant, other)
+            (held.grant(), other)
         }
     };
     let provider = match other {

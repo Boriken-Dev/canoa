@@ -135,7 +135,7 @@ impl AccountProvider for Two {
         _spawner: Object<dyn ProcessSpawner>,
         _keeper: Object<dyn AccountKeeper>,
     ) -> Result<ModelListing, ProviderError> {
-        // One model for each standard the grant says it is run on.
+        // One model for each standard the grant provides.
         Ok(ModelListing::of(
             query
                 .account
@@ -297,7 +297,13 @@ fn a_maker_s_kind_joins_only_the_harnesses_that_accept_a_standard_it_provides() 
     };
     let both = join("h", &[standard::OPENAI_API]);
     assert!(both.kind(KIND).is_some());
-    assert_eq!(both.logins.len(), 1);
+    assert_eq!(
+        both.logins
+            .iter()
+            .filter(|method| method.produces == KIND)
+            .count(),
+        1
+    );
     assert!(join("h", &[standard::XAI_API]).kind(KIND).is_none());
     assert!(join("h", &[]).kind(KIND).is_none());
     let again = {
@@ -311,7 +317,7 @@ fn a_maker_s_kind_joins_only_the_harnesses_that_accept_a_standard_it_provides() 
 }
 
 #[test]
-fn an_account_of_two_standards_is_listed_for_the_standard_the_harness_runs_it_on() {
+fn an_account_of_two_standards_is_listed_once_for_every_harness_that_runs_it() {
     let (asked, used_up) = (
         Arc::new(AtomicUsize::new(0)),
         Arc::new(AtomicBool::new(false)),
@@ -320,15 +326,13 @@ fn an_account_of_two_standards_is_listed_for_the_standard_the_harness_runs_it_on
     let dir = Dir::new();
     let store = store(&dir);
     let config = Config::from_str_in(CONFIG, std::path::Path::new("")).expect("parses");
-    for (entry, standard) in [
-        ("Claude", standard::ANTHROPIC_API),
-        ("Codex", standard::OPENAI_API),
-    ] {
+    for entry in ["Claude", "Codex"] {
         let entry = config.entry(entry).expect("an entry");
         let harness = harness_of(entry).expect("a provider");
         let harness = offering(&config, entry, harness, &store, true).expect("offered");
         let listed = crate::options::as_account(&config, &harness, "shared", false);
         assert!(listed.known, "{:?}", listed.unknown_because);
+        // The maker is given every standard the account provides, so one list serves both harnesses.
         let ids: Vec<&str> = listed
             .models
             .iter()
@@ -336,9 +340,44 @@ fn an_account_of_two_standards_is_listed_for_the_standard_the_harness_runs_it_on
             .collect();
         assert_eq!(
             ids,
-            [format!("model-of-{standard}")],
-            "{entry:?}",
-            entry = entry.name
+            ["model-of-anthropic-api", "model-of-openai-api"],
+            "{}",
+            entry.name
         );
     }
+}
+
+#[test]
+fn an_account_a_maker_made_fits_only_where_a_standard_it_provides_is_accepted_the_harness_that_names_it_included()
+ {
+    use crate::accounts::matching::{borrowed, fits};
+    let (asked, used_up) = (
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let _serving = stand_ins::serving(vec![maker(&asked, &used_up)]);
+    let account = crate::config::AccountConfig {
+        harness: "claude".to_owned(),
+        kind: KIND.to_owned(),
+        id: "id".to_owned(),
+        settings: None,
+    };
+    assert!(
+        borrowed(&account, "claude"),
+        "a maker's kind is applied as a standard, by every harness"
+    );
+    let own = crate::config::AccountConfig {
+        kind: "claude-login".to_owned(),
+        ..account.clone()
+    };
+    assert!(!borrowed(&own, "claude") && borrowed(&own, "codex"));
+    let mut catalog = coqui_acp_api::AccountCatalog::new();
+    catalog.accepts = vec![coqui_acp_api::Accepted::new(standard::ANTHROPIC_API)];
+    let only_openai = AccountKindInfo::new(KIND, "K").provides([standard::OPENAI_API]);
+    let why = fits(&catalog, "claude", &account, &only_openai)
+        .expect_err("it speaks only a standard Claude does not accept, though Claude named it");
+    assert!(
+        why.contains("openai-api") && why.contains("anthropic-api"),
+        "{why}"
+    );
 }

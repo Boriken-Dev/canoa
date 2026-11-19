@@ -295,7 +295,7 @@ fn offer(
             .accounts
             .get(name)
             .ok_or((NOT_FOUND, format!("no account called {name}")))?;
-        if account.harness != harness {
+        if matching::borrowed(account, harness) {
             let catalogs = catalogs.get_or_insert_with(|| Catalogs::new(config));
             let fit = match (catalogs.of(harness), catalogs.kind(account)) {
                 (Some(catalog), Some(info)) => matching::fits(&catalog, harness, account, &info),

@@ -83,7 +83,8 @@ impl<'a> Catalogs<'a> {
         self.known(harness).map(|known| known.catalog)
     }
 
-    /// The kind `account` is of, as the account provider of the provider that made it offers it.
+    /// The kind `account` is of, as the account provider of the provider that made it offers it, providing the standards the account
+    /// provides.
     pub(crate) fn kind(&self, account: &AccountConfig) -> Option<AccountKindInfo> {
         self.known(&account.harness)
             .and_then(|known| known.listing.kind(&account.kind).cloned())
@@ -92,6 +93,8 @@ impl<'a> Catalogs<'a> {
                 crate::makers::for_kind(&account.kind)
                     .and_then(|maker| maker.kind(&account.kind).cloned())
             })
+            // The standards an account provides are its own where its kind says so.
+            .map(|info| super::standards::of_account(info, account.settings.as_ref()))
     }
 
     /// Every harness whose accounts this host can make or run: the bundled agents' and those canoa.cfg's entries run.
@@ -141,6 +144,12 @@ impl<'a> Catalogs<'a> {
     }
 }
 
+/// Whether `runs` applies `account` as an account of a standard it accepts, not as one of its own kinds: another provider made it,
+/// or a maker did, whichever harness it names.
+pub(crate) fn borrowed(account: &AccountConfig, runs: &str) -> bool {
+    account.harness != runs || crate::makers::makes(&account.kind)
+}
+
 /// Why `account`, of the kind `info`, cannot run a session on `runs`, whose catalog is `catalog`; `Ok` when it can. The reason
 /// names standards, never a value.
 ///
@@ -153,7 +162,7 @@ pub(crate) fn fits(
     account: &AccountConfig,
     info: &AccountKindInfo,
 ) -> Result<(), String> {
-    if account.harness == runs {
+    if !borrowed(account, runs) {
         return Ok(());
     }
     let list = |ids: Vec<&str>| {
@@ -208,7 +217,7 @@ impl<'a> Runs<'a> {
     /// Whether the harness applies an account of the kind `info` that another provider made from a private directory of the
     /// account's, as the kind of its own that the standard names does.
     pub(crate) fn directory(&self, account: &AccountConfig, info: &AccountKindInfo) -> bool {
-        if account.harness == self.harness {
+        if !borrowed(account, self.harness) {
             return false;
         }
         let Some(catalog) = self.catalog else {
@@ -235,7 +244,7 @@ pub(crate) fn usable(config: &Config, catalogs: &Catalogs<'_>, harness: &str) ->
         .accounts
         .iter()
         .filter(|(_, account)| {
-            account.harness == harness
+            !borrowed(account, harness)
                 || catalog.as_ref().is_some_and(|catalog| {
                     catalogs
                         .kind(account)

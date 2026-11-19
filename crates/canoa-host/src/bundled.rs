@@ -117,11 +117,18 @@ pub(crate) struct Included {
 }
 
 /// Every library this build carries that is no agent.
-pub(crate) const INCLUDED: &[Included] = &[Included {
-    name: canoa_foundry::LIBRARY,
-    library: canoa_foundry::library,
-    helper: Some(canoa_foundry::run_helper),
-}];
+pub(crate) const INCLUDED: &[Included] = &[
+    Included {
+        name: canoa_foundry::LIBRARY,
+        library: canoa_foundry::library,
+        helper: Some(canoa_foundry::run_helper),
+    },
+    Included {
+        name: canoa::api_gateway::LIBRARY,
+        library: canoa::api_gateway::library,
+        helper: None,
+    },
+];
 
 /// Registers each of [`INCLUDED`] in `registry`.
 ///
@@ -162,16 +169,17 @@ mod tests {
         let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
         register(&mut registry, ALL).expect("the agents");
         register_included(&mut registry).expect("the libraries that are no agent");
-        let included: Vec<&str> = INCLUDED.iter().map(|each| each.name).collect();
         assert!(
-            included
+            INCLUDED
                 .iter()
-                .all(|name| ALL.iter().all(|bundle| bundle.name != *name))
+                .all(|each| ALL.iter().all(|bundle| bundle.name != each.name))
         );
-        for name in included {
-            assert!(
-                run_helper(name, &["--no-such-argument".to_owned()]).is_some(),
-                "{name} carries a helper"
+        for each in INCLUDED {
+            assert_eq!(
+                run_helper(each.name, &["--no-such-argument".to_owned()]).is_some(),
+                each.helper.is_some(),
+                "{} carries a helper when it says it does",
+                each.name
             );
         }
         assert!(run_helper("no-such-library", &[]).is_none());

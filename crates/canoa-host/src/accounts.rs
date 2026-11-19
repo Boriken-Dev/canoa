@@ -18,6 +18,7 @@ pub(crate) mod login;
 pub(crate) mod matching;
 mod private;
 mod spawner;
+pub(crate) mod standards;
 pub(crate) mod store;
 #[cfg(test)]
 mod tests;
@@ -557,7 +558,7 @@ impl Accounts {
     ) -> AccountGrant {
         let id = config.id.clone();
         let mut grant = AccountGrant::new(id.clone(), config.kind.clone())
-            .settings(settings_value(config.settings.as_ref()))
+            .settings(standards::for_harness(info, config.settings.as_ref()))
             .provides(info.provides.iter().cloned());
         if config.kind != HARNESS_LOGIN && (info.state_dir || runs.directory(config, info)) {
             grant = grant.state_dir(self.state_dir(&id).to_string_lossy().into_owned());
@@ -576,7 +577,7 @@ impl Accounts {
         holder: &str,
     ) -> Result<Held, Refusal> {
         let id = config.id.clone();
-        let settings = settings_value(config.settings.as_ref());
+        let settings = standards::for_harness(info, config.settings.as_ref());
         let mut grant = AccountGrant::new(id.clone(), config.kind.clone())
             .settings(settings)
             .provides(info.provides.iter().cloned());
