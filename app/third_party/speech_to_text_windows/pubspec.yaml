@@ -1,0 +1,22 @@
+name: speech_to_text_windows
+description: Windows implementation of speech_to_text over the desktop speech recognizer (SAPI 5), Canoa's copy.
+version: 1.0.1+1
+homepage: https://github.com/csdcorp/speech_to_text
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.0.0"
+
+flutter:
+  plugin:
+    implements: speech_to_text
+    platforms:
+      windows:
+        pluginClass: SpeechToTextWindows
+        dartPluginClass: SpeechToTextWindows
+
+dependencies:
+  flutter:
+    sdk: flutter
+  speech_to_text_platform_interface: ^2.4.0

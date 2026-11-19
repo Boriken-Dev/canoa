@@ -73,6 +73,12 @@ dev_dependencies:
   file_selector_platform_interface: ^2.7.0
   flutter_lints: ^6.0.0
 
+# speech_to_text's Windows plugin never asked SAPI for the phrase being spoken and lost a phrase still in the recognizer when
+# dictation stopped; this copy of it (see its README) delivers both.
+dependency_overrides:
+  speech_to_text_windows:
+    path: third_party/speech_to_text_windows
+
 flutter:
   uses-material-design: true
   assets:
