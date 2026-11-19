@@ -40,6 +40,7 @@ mod replace;
 mod scope;
 mod secrets;
 pub mod serve;
+mod settings_sections;
 mod share;
 pub mod shells;
 mod site;

@@ -4,6 +4,7 @@ import 'package:canoa/ledger/session_ledger.dart';
 import 'package:canoa/mail/mail_accounts.dart';
 import 'package:canoa/permissions/permission_rules.dart';
 import 'package:canoa/profile/profile_home.dart';
+import 'package:canoa/settings/host_sections.dart';
 import 'package:canoa/settings/settings_page.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/store/programs.dart';
@@ -48,6 +49,7 @@ Future<SettingsHarness> openSettings(
   HostSpeechCatalog? hostSpeech,
   VoiceOutputs? voiceOutputs,
   ReplyReader? reader,
+  HostSections? hostSections,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -80,6 +82,7 @@ Future<SettingsHarness> openSettings(
       hostSpeech: hostSpeech,
       voiceOutputs: voiceOutputs,
       reader: reader,
+      hostSections: hostSections,
     ),
   ));
   await tester.pumpAndSettle();

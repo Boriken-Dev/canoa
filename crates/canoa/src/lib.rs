@@ -9,8 +9,15 @@ pub mod preset;
 #[cfg(feature = "profile-item")]
 #[cfg_attr(docsrs, doc(cfg(feature = "profile-item")))]
 pub mod profile_item;
-#[cfg(any(feature = "profile-item", feature = "store"))]
+#[cfg(any(
+    feature = "profile-item",
+    feature = "store",
+    feature = "settings-section"
+))]
 mod settings;
+#[cfg(feature = "settings-section")]
+#[cfg_attr(docsrs, doc(cfg(feature = "settings-section")))]
+pub mod settings_section;
 
 #[cfg(feature = "network")]
 #[cfg_attr(docsrs, doc(cfg(feature = "network")))]

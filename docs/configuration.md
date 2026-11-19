@@ -1139,6 +1139,15 @@ trust is kept per directory, links resolved, in `trust.json` beside canoa.cfg, w
 shown: if the file changes, it is ignored again until you trust it again. **Stop trusting** revokes it for every later
 session. A web build reads no working directory and installs no overlay.
 
+### Settings sections from extensions
+
+An extension can add to Settings the way it adds to the Store. A provider of the `settings_section` kind says a section's name, icon
+and the form it asks for (a guatiao schema and the guatiao-intake form that shows it). It either sits in Settings' list under a heading
+of its own (`Extensions` when it names none) or is a titled group at the end of an existing section's page (`under`). Its values are
+kept in `[settings.ID]` of canoa.cfg, or by the provider itself; a field the schema marks sensitive is never shown again, only said to
+be set. The host lists the sections it loaded with `settings/sections`. A section disappears from Settings with the extension that
+offered it, and the values it kept stay in canoa.cfg until you remove the table.
+
 ## Windows, macOS and Linux tray behavior
 
 Canoa uses a desktop tray controller and the shared Flutter app under root app/. The app can start without a visible main window, remain alive when its window closes, and expose Open Canoa, Hosting, Settings, Hide and Exit commands via the notification area. Closing the window leaves the app, its conversations, its own agents and `canoa` running; Exit, or **Quit Canoa** in Settings, ends them.

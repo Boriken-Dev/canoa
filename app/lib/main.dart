@@ -124,6 +124,7 @@ import 'secrets/secrets_host.dart';
 import 'secrets/provider_setup.dart';
 import 'secrets/secrets_section.dart';
 import 'settings/extension_settings.dart';
+import 'settings/host_sections.dart';
 import 'settings/shell_settings.dart';
 import 'settings/settings_page.dart';
 import 'rail/session_groups.dart';
@@ -822,6 +823,7 @@ class _CanoaAppState extends State<CanoaApp> {
       accounts: _accounts,
       mail: _mail,
       extensions: _extensionSettings,
+      hostSections: _hostSections,
       shells: _shellSettings,
       usageSection: _usage != null,
       voiceBackends: _speech,
@@ -3342,12 +3344,16 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
+  /// The sections of Settings the host's providers offer, drawn from what each says of itself.
+  late final HostSections? _hostSections = _control == null ? null : HostSections((method, params) async => (await _control.ready(wait: false)).call(method, params));
+
   /// Asks the host which items a profile may set: the editor draws a form for each from what its provider says of it.
   Future<void> _loadProfileItems({bool wait = false}) async {
     final control = _control;
     if (control == null) return;
     try {
       final client = await control.ready(wait: wait);
+      unawaited(_hostSections?.load());
       profileItems.adopt(await client.call('profile_items/list', const {}));
       if (profileItems.asksForClientCertificate) {
         // The pick is only for the owner or a key that edits profiles: a refusal leaves the keystores' own choice alone.

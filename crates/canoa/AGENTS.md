@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-Seven Cargo features (`vendor` is the `agent_vendor` kind, `profile-item` the `profile_item` kind and `secret` the `secret_provider` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
+Eight Cargo features (`vendor` is the `agent_vendor` kind, `profile-item` the `profile_item` kind, `secret` the `secret_provider` kind and `settings-section` the `settings_section` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
 The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`) and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
 
@@ -93,6 +93,30 @@ pub fn unsupported(why) / unavailable(why) / bad_value(why) / internal(why) -> P
 - **Written in a script.** A library in Python or JavaScript subclasses the Canoa SDK's `SecretProvider` (`bindings/python/canoa-sdk`, `bindings/js/canoa-sdk`): `get` is the one slot it must write; `title`, `can_list`, `can_store` and `needs_person` make `describe`; `names`, `put` and `forget` refuse with `UNSUPPORTED` until it overrides them; a slot receives the spawner as its last argument and the provider destroys it. `FormSecretProvider` is the person's form and `SystemStoreSecretProvider` a provider over a store of keys and texts the subclass supplies (`read`, `write`, `remove`), with the index of names such a store needs. A request and an answer cross as plain data: `{name}`, `{name, value}`, `{value, expires_in}` (`{}` for nothing held), `{names}`. The kind reaches a source of JavaScript in the host's one document of descriptions (`descriptions.rs`).
 
 Each kind's description is `include/canoa.<kind>.kinds.json` and every model's schema `include/canoa.<kind>.schemas.json`, checked current by `tests/script_kinds.rs` for `agent_vendor` (`vendor`), `store_extension` (`store`) and `secret_provider` (`secret`); regenerate with `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret --test script_kinds`. A library written in Python or JavaScript is built against them with the Canoa SDK (`bindings/python/canoa-sdk`, `bindings/js/canoa-sdk`), one base class per kind.
+
+## `canoa::settings_section` (feature `settings-section`)
+
+The `settings_section` kind: a page, or a group on a page, of the application's Settings. Which sections Settings has beyond the ones the application draws itself is not Canoa's to say: each is a provider, the ones Canoa carries and the ones an extension adds alike.
+
+```rust
+pub const KIND: &str = "settings_section";   pub const KIND_VERSIONS: [&str; 1] = ["1"];   pub const DEFAULT_GROUP: &str = "Extensions";   pub const MAX_VALUES: usize = 64 * 1024;
+pub enum Stored { Config, Provider }    // where the values live: `[settings.ID]` of the host's canoa.cfg, or with the provider
+#[non_exhaustive] pub struct SectionInfo { pub id: String, pub title: String, pub help: Option<String>, pub icon: Option<String>,
+    pub group: Option<String>, pub under: Option<String>, pub keywords: Option<String>, pub stored: Stored,
+    pub schema: Option<Value>, pub form: Option<Value> }
+#[guatiao::kind(name = "settings_section")] pub trait SettingsSection: Send + Sync {
+    fn describe(&self) -> Result<SectionInfo, ProviderError>;     // the same on every call, with nothing run
+    fn read(&self) -> Result<String, ProviderError>;              // `Stored::Provider`: a JSON object of the values, a sensitive member left out
+    fn write(&self, values: String) -> Result<(), ProviderError>; // `Stored::Provider`: the values, already checked against `schema`
+}
+pub fn bad_value_error(why) -> ProviderError;   pub fn internal_error(why) -> ProviderError;
+impl SectionInfo { pub fn new(id, title) -> Self; pub fn taking<S: Schema + Screen>(self) -> Result<Self, ProviderError>; pub fn problem(&self) -> Option<String> }
+```
+
+- `id` is a word of lower-case letters, digits and `_` (1 to 32). With no `under` the section is a page of its own in Settings' list under the heading `group` (`DEFAULT_GROUP` when none); with `under` naming one of the application's sections (or another provider's), it is a titled group inside that page. An `under` that names no section the application has makes it a page of its own.
+- `schema` is a guatiao schema of an object and `form` the guatiao-intake form that shows it, built from a type with `taking::<S>()` (`Schema` and `Form` derives); the application draws them with the renderer every such form is drawn with. A member the schema marks sensitive is never answered in clear: the host names it as set instead.
+- `Stored::Config` values are written by the host into `[settings.ID]` after it checked them; `read` and `write` are then not asked and answer nothing. `Stored::Provider` values are the provider's: the host calls `read` to show them and `write` with the checked values to keep them.
+- `SectionInfo::problem` says why a description cannot be used (a bad id, no title, a section under itself, an empty group, a form its schema does not fit).
 
 ## `canoa::network` (feature `network`)
 

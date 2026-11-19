@@ -23,13 +23,14 @@ import 'app_sections.dart';
 import '../shell/shell.dart' show ShellScope;
 import 'overlay_sections.dart';
 import 'extension_settings.dart';
+import 'host_sections.dart';
 import 'shell_settings.dart';
 import 'setting_layers.dart';
 import 'settings_controller.dart';
 
 /// One page of Settings in the list at its left.
 final class SettingsSection {
-  const SettingsSection({required this.id, required this.group, required this.title, required this.icon, required this.keywords});
+  const SettingsSection({required this.id, required this.group, required this.title, required this.icon, required this.keywords, this.host});
 
   /// The name the page opens at, and the suffix of its list entry's key (`settings-nav-<id>`).
   final String id;
@@ -38,6 +39,20 @@ final class SettingsSection {
 
   /// What the search box finds the section by, besides its title.
   final String keywords;
+
+  /// The provider's description when a provider of the host offers this section, drawn by the generic form renderer; null for a
+  /// section the app draws itself.
+  final HostSection? host;
+
+  /// The section a provider describes, as a section of its own.
+  factory SettingsSection.of(HostSection section) => SettingsSection(
+    id: section.id,
+    group: section.group ?? defaultSectionGroup,
+    title: section.title,
+    icon: section.iconData,
+    keywords: '${section.keywords} ${section.help ?? ''}',
+    host: section,
+  );
 }
 
 const _sections = [
@@ -89,6 +104,7 @@ class SettingsPage extends StatefulWidget {
     this.voiceOutputs,
     this.reader,
     this.version = '',
+    this.hostSections,
   });
 
   final CanoaConfig config;
@@ -160,6 +176,9 @@ class SettingsPage extends StatefulWidget {
   /// The app's version, for About.
   final String version;
 
+  /// The sections the host's providers offer: each is a section of its own, or a group inside one of the sections here.
+  final HostSections? hostSections;
+
   @override
   State<SettingsPage> createState() => SettingsPageState();
 }
@@ -169,15 +188,42 @@ class SettingsPageState extends State<SettingsPage> {
   final _search = TextEditingController();
   String? _selected;
 
-  List<SettingsSection> get _available => [
-    for (final section in _sections)
-      if ((section.id != 'accounts' || widget.accounts != null) && (section.id != 'mail' || widget.mail != null) && (section.id != 'extensions' || widget.extensions != null) && (section.id != 'shells' || widget.shells != null) && (section.id != 'usage' || !widget.usageSection)) section,
-  ];
+  /// The sections the app draws itself that this build and key have, then those the host's providers offer as sections of their own
+  /// (before About, which stays last). A provider's section that names an id the app uses is left out.
+  List<SettingsSection> get _available {
+    final own = [
+      for (final section in _sections)
+        if ((section.id != 'accounts' || widget.accounts != null) && (section.id != 'mail' || widget.mail != null) && (section.id != 'extensions' || widget.extensions != null) && (section.id != 'shells' || widget.shells != null) && (section.id != 'usage' || !widget.usageSection)) section,
+    ];
+    final held = widget.hostSections;
+    if (held == null) return own;
+    final taken = {for (final section in own) section.id};
+    final added = <SettingsSection>[];
+    final known = {for (final section in _sections) section.id, for (final section in held.sections) if (section.under == null) section.id};
+    for (final section in held.ownOf(known)) {
+      if (taken.add(section.id)) added.add(SettingsSection.of(section));
+    }
+    final about = own.indexWhere((section) => section.id == 'about');
+    return [...own.take(about < 0 ? own.length : about), ...added, ...own.skip(about < 0 ? own.length : about)];
+  }
+
+  /// The groups providers put inside the section [id].
+  List<HostSection> _groups(String id) => widget.hostSections?.groupsIn(id) ?? const [];
 
   @override
   void initState() {
     super.initState();
+    widget.hostSections?.addListener(_changed);
     if (_available.any((section) => section.id == widget.section)) _selected = widget.section;
+  }
+
+  @override
+  void didUpdateWidget(SettingsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.hostSections != widget.hostSections) {
+      oldWidget.hostSections?.removeListener(_changed);
+      widget.hostSections?.addListener(_changed);
+    }
   }
 
   void _changed() {
@@ -191,6 +237,7 @@ class SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
+    widget.hostSections?.removeListener(_changed);
     controller
       ..removeListener(_changed)
       ..dispose();
@@ -202,11 +249,14 @@ class SettingsPageState extends State<SettingsPage> {
   String _agentWords(SettingsSection section) =>
       section.id == 'sources' || section.id == 'accounts' ? providerCatalog.providers.map((each) => '${each.title} ${each.program}').join(' ') : '';
 
+  /// What the groups inside a section are called and found by, so a search for one finds the section that holds it.
+  String _groupWords(SettingsSection section) => _groups(section.id).map((group) => '${group.title} ${group.keywords}').join(' ');
+
   List<SettingsSection> get _matching {
     final words = _search.text.toLowerCase().split(' ').where((word) => word.isNotEmpty);
     return [
       for (final section in _available)
-        if (words.every((word) => '${section.title} ${section.keywords} ${_agentWords(section)}'.toLowerCase().contains(word))) section,
+        if (words.every((word) => '${section.title} ${section.keywords} ${_agentWords(section)} ${_groupWords(section)}'.toLowerCase().contains(word))) section,
     ];
   }
 
@@ -256,7 +306,38 @@ class SettingsPageState extends State<SettingsPage> {
 
   Widget _body(BuildContext context, SettingsSection section) {
     final config = controller.config;
-    final child = switch (section.id) {
+    final child = section.host != null
+        ? HostSectionForm(key: Key('settings-host-${section.id}'), section: section.host!, sections: widget.hostSections!)
+        : _builtIn(section, config);
+    final groups = _groups(section.id);
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: ListView(
+          key: Key('settings-section-${section.id}'),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Text(section.title, style: Theme.of(context).textTheme.headlineSmall),
+            ),
+            if (controller.problem case final problem?)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(problem, key: const Key('settings-write-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+            SettingsLayers(controller: controller, child: child),
+            for (final group in groups) HostSectionForm(key: Key('settings-host-${group.id}'), section: group, sections: widget.hostSections!, asGroup: true),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A section the app draws itself.
+  Widget _builtIn(SettingsSection section, CanoaConfig config) {
+    return switch (section.id) {
       'general' => GeneralSection(controller: controller, ledger: widget.ledger, hostWorkspacePreview: widget.hostWorkspacePreview),
       'appearance' => AppearanceSection(controller: controller),
       'notifications' => NotificationsSection(controller: controller, onAllowNotifications: widget.onAllowNotifications),
@@ -283,28 +364,6 @@ class SettingsPageState extends State<SettingsPage> {
       'shells' => ShellsSection(key: const Key('settings-shells'), settings: widget.shells!),
       _ => AboutSection(version: widget.version),
     };
-    return Align(
-      alignment: Alignment.topCenter,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
-        child: ListView(
-          key: Key('settings-section-${section.id}'),
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Text(section.title, style: Theme.of(context).textTheme.headlineSmall),
-            ),
-            if (controller.problem case final problem?)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(problem, key: const Key('settings-write-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
-              ),
-            SettingsLayers(controller: controller, child: child),
-          ],
-        ),
-      ),
-    );
   }
 
   @override

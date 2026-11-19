@@ -29,6 +29,8 @@ vendor = ["dep:coqui-acp-api"]
 profile-item = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:regex"]
 # The `secret_provider` kind: somewhere a secret comes from and goes to (the person's form, the system's store, a password manager).
 secret = ["dep:guatiao", "dep:coqui-acp-api"]
+# The settings_section kind: a page, or a group on a page, of the application Settings.
+settings-section = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake"]
 # The `speech_provider` kind: audio streamed in, text and front matter out.
 speech = ["dep:guatiao", "dep:coqui-acp-api"]
 # The two providers that ship with it: a program the person names, and a speech-to-text HTTP endpoint the person names.
