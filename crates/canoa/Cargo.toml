@@ -67,7 +67,7 @@ required-features = ["store"]
 
 [[test]]
 name = "script_kinds"
-required-features = ["store", "vendor"]
+required-features = ["store", "vendor", "secret"]
 
 [[test]]
 name = "speech_kinds"

@@ -1,6 +1,5 @@
-//! The `secret_provider` kind: the contract outside providers, scripts included, are built against.
-//! Regenerate the description files with `CANOA_SECRET_WRITE_KINDS=1 cargo test -p canoa --features secret --test secret_kinds`,
-//! then `python python/write_secret_kinds.py` with Guatiao's Python binding on `PYTHONPATH`.
+//! The `secret_provider` kind: the contract outside providers, scripts included, are built against. Its description files are
+//! checked with the other kinds' by `script_kinds.rs`.
 #![cfg(feature = "secret")]
 #![allow(
     clippy::std_instead_of_core,
@@ -8,79 +7,14 @@
     reason = "a test names what it uses from std"
 )]
 
-use std::path::PathBuf;
-
 use canoa::secret_provider::{
     Held, Keeping, Named, Names, ProviderInfo, SecretProvider, SecretProviderVtable,
 };
-use coqui_acp_api::{ProcessSpawner, ProcessSpawnerVtable, SpawnedProcessVtable};
+use coqui_acp_api::ProcessSpawner;
 use coqui_acp_harness::LocalSpawner;
 use guatiao::library::Object;
-use guatiao::{FromValue, Map, Schema, ToValue, Value};
-use guatiao_serde::Serializable;
+use guatiao::{FromValue, Map, ToValue, Value};
 use serde_json::Value as Json;
-
-fn file(path: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
-}
-
-fn pretty(value: &Json) -> String {
-    let mut text = serde_json::to_string_pretty(value).expect("written");
-    text.push('\n');
-    text
-}
-
-fn committed(path: &str, fresh: &str) {
-    let path = file(path);
-    if std::env::var_os("CANOA_SECRET_WRITE_KINDS").is_some() {
-        std::fs::create_dir_all(path.parent().expect("a directory")).expect("directory");
-        std::fs::write(&path, fresh).expect("the file is written");
-    }
-    let committed = std::fs::read_to_string(&path).expect("the file is committed");
-    let (committed, fresh): (Json, Json) = (
-        serde_json::from_str(&committed).expect("the committed file is JSON"),
-        serde_json::from_str(fresh).expect("the fresh text is JSON"),
-    );
-    assert!(committed == fresh, "regenerate {}", path.display());
-}
-
-fn schema_of<T: Schema>() -> Json {
-    let value = T::schema().expect("a model describes itself");
-    serde_json::to_value(Serializable::from(&value)).expect("a schema is JSON")
-}
-
-#[test]
-fn the_committed_description_is_what_this_build_describes() {
-    let document = format!(
-        "{{\"kinds\":[{},{},{}]}}",
-        SecretProviderVtable::description(),
-        ProcessSpawnerVtable::description(),
-        SpawnedProcessVtable::description()
-    );
-    committed(
-        "include/canoa.secret.kinds.json",
-        &pretty(&serde_json::from_str(&document).expect("a kind's description is JSON")),
-    );
-}
-
-#[test]
-fn the_committed_schemas_are_what_this_build_describes() {
-    let schemas: Vec<(&str, Json)> = vec![
-        ("ProviderInfo", schema_of::<ProviderInfo>()),
-        ("Named", schema_of::<Named>()),
-        ("Keeping", schema_of::<Keeping>()),
-        ("Held", schema_of::<Held>()),
-        ("Names", schema_of::<Names>()),
-    ];
-    let document: serde_json::Map<String, Json> = schemas
-        .into_iter()
-        .map(|(n, s)| (n.to_owned(), s))
-        .collect();
-    committed(
-        "include/canoa.secret.schemas.json",
-        &pretty(&Json::Object(document)),
-    );
-}
 
 fn map(pairs: &[(&str, Value)]) -> Value {
     let mut map = Map::new();
@@ -211,24 +145,4 @@ fn a_provider_that_cannot_do_a_call_says_so_with_unsupported() {
         .put(Keeping::new("n", "v"), LocalSpawner::new().into_object())
         .expect_err("refused");
     assert_eq!(error.status, guatiao::Status::GUATIAO_ERR_UNSUPPORTED);
-}
-
-/// The module a JavaScript library imports the kind from carries the description the host gives its source; a library whose module
-/// differs is refused, so it must not drift from the committed one.
-#[test]
-fn the_javascript_module_carries_the_committed_description() {
-    let module = std::fs::read_to_string(file("js/canoa_secret_kinds.js")).expect("the module");
-    let start = module.find("kindsOf(").expect("a description") + "kindsOf(".len();
-    let end = module
-        .find(");\n\n/**")
-        .expect("the end of the description");
-    let embedded: Json = serde_json::from_str(&module[start..end]).expect("JSON");
-    let committed: Json = serde_json::from_str(
-        &std::fs::read_to_string(file("include/canoa.secret.kinds.json")).expect("committed"),
-    )
-    .expect("JSON");
-    assert_eq!(
-        embedded, committed,
-        "regenerate it with python js/write_secret_kinds.py"
-    );
 }

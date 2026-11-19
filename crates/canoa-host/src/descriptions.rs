@@ -13,6 +13,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use canoa::secret_provider::SecretProviderVtable;
 use canoa::speech::output::{SpeechOutputVtable, SpeechUtteranceVtable};
 use canoa::speech::{SpeechProviderVtable, SpeechSessionVtable};
 use canoa::store::extension::StoreExtensionVtable;
@@ -31,6 +32,7 @@ pub(crate) fn document() -> String {
     let kinds = [
         AgentVendorVtable::description(),
         StoreExtensionVtable::description(),
+        SecretProviderVtable::description(),
         ProgramStoreVtable::description(),
         InstallPrompterVtable::description(),
         InstallToolsVtable::description(),
@@ -116,6 +118,7 @@ mod tests {
         for needed in [
             "agent_vendor",
             "store_extension",
+            "secret_provider",
             "acp_harness",
             "transport",
         ] {

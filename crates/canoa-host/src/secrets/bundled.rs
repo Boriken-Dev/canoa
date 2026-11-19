@@ -15,7 +15,7 @@ use coqui_acp_api::guatiao::{List, Map};
 use crate::provider::add_bundled_js;
 
 /// Each file of the bundled libraries, by its path under the folder they are kept in.
-const FILES: [(&str, &str); 5] = [
+const FILES: [(&str, &str); 4] = [
     (
         "bitwarden/bitwarden.js",
         include_str!("../../extensions/bitwarden/bitwarden.js"),
@@ -31,10 +31,6 @@ const FILES: [(&str, &str); 5] = [
     (
         "bitwarden/canoa_secret_kinds.js",
         canoa::secret_provider::KINDS_JS,
-    ),
-    (
-        "canoa.secret.kinds.json",
-        canoa::secret_provider::KINDS_JSON,
     ),
 ];
 
@@ -75,9 +71,10 @@ pub(super) fn registry(home: &Path) -> Result<Registry, String> {
     let text = |path: PathBuf| path.to_string_lossy().into_owned();
     let mut config = Map::new();
     config.set("dirs", List::from_iter([text(folder.join("bitwarden"))]));
+    // The descriptions of every kind a script may serve, as the host gives any source.
     config.set(
         "kinds",
-        List::from_iter([text(folder.join("canoa.secret.kinds.json"))]),
+        List::from_iter([text(crate::descriptions::file()?)]),
     );
     let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
     add_bundled_js(&mut registry, &config).map_err(|error| error.to_string())?;

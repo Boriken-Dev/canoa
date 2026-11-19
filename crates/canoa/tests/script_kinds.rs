@@ -1,7 +1,7 @@
-//! The description of the `agent_vendor` and `store_extension` kinds, and their models' schemas: what a library written in Python or
-//! JavaScript is built against. Regenerate the files with
-//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor --test script_kinds`.
-#![cfg(all(feature = "store", feature = "vendor"))]
+//! The description of the `agent_vendor`, `store_extension` and `secret_provider` kinds, and their models' schemas: what a library
+//! written in Python or JavaScript is built against. Regenerate the files with
+//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret --test script_kinds`.
+#![cfg(all(feature = "store", feature = "vendor", feature = "secret"))]
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -10,9 +10,11 @@
 
 use std::path::PathBuf;
 
+use canoa::secret_provider::{Held, Keeping, Named, Names, ProviderInfo, SecretProviderVtable};
 use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtensionVtable};
 use canoa::vendor::{AgentVendorVtable, ModeTitle, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::Schema;
+use coqui_acp_api::{ProcessSpawnerVtable, SpawnedProcessVtable};
 use guatiao_serde::Serializable;
 use serde_json::Value as Json;
 
@@ -92,6 +94,34 @@ fn the_committed_extension_schemas_are_what_this_build_describes() {
         &schemas(vec![
             ("ExtensionInfo", schema_of::<ExtensionInfo>()),
             ("ExtensionType", schema_of::<ExtensionType>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_secret_description_is_what_this_build_describes() {
+    // The spawner every call but `describe` is handed is described beside it, as the other kinds that name it do.
+    committed(
+        "include/canoa.secret.kinds.json",
+        &document(&format!(
+            "{},{},{}",
+            SecretProviderVtable::description(),
+            ProcessSpawnerVtable::description(),
+            SpawnedProcessVtable::description()
+        )),
+    );
+}
+
+#[test]
+fn the_committed_secret_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.secret.schemas.json",
+        &schemas(vec![
+            ("ProviderInfo", schema_of::<ProviderInfo>()),
+            ("Named", schema_of::<Named>()),
+            ("Keeping", schema_of::<Keeping>()),
+            ("Held", schema_of::<Held>()),
+            ("Names", schema_of::<Names>()),
         ]),
     );
 }
