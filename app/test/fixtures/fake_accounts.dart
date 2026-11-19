@@ -213,6 +213,29 @@ final class FakeAccountsHost implements AccountsHost {
   final poolsRemoved = <String>[];
   String? poolRefusal;
 
+  /// What the host is asked for each turn, and what it answers: [turnAdvice] by what the session was started on (a pool or an
+  /// account), a refusal, or a failure of the host that is not one.
+  final turnAsks = <({String entry, String account, String? model, String? current, int? idleSeconds, String? lifetime, List<LimitHint> limited})>[];
+  final turnAdvice = <String, TurnAdvice>{};
+  String? turnRefusal;
+  bool turnFails = false;
+
+  @override
+  Future<TurnAdvice> poolsTurn({
+    required String entry,
+    required String account,
+    String? model,
+    String? current,
+    int? idleSeconds,
+    String? lifetime,
+    List<LimitHint> limited = const [],
+  }) async {
+    turnAsks.add((entry: entry, account: account, model: model, current: current, idleSeconds: idleSeconds, lifetime: lifetime, limited: limited));
+    if (turnFails) throw StateError('the host cannot be asked');
+    if (turnRefusal != null) throw TurnRefused(turnRefusal!);
+    return turnAdvice[account] ?? TurnAdvice(account: current ?? account);
+  }
+
   @override
   Future<List<PoolInfo>> pools() async => List.of(hostPools);
 

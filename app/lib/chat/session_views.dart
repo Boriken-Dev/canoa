@@ -83,6 +83,58 @@ class SessionPermissionCard extends StatelessWidget {
   }
 }
 
+/// What the person is offered when the account [session] runs on has run out: a line saying so and a button for each account that
+/// could take the conversation. Nothing moves until one is pressed.
+class SessionAccountOffer extends StatelessWidget {
+  const SessionAccountOffer({super.key, required this.store, required this.session});
+
+  final SessionStore store;
+  final ChatSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    final offer = session.accountOffer;
+    if (offer == null) return const SizedBox.shrink();
+    final look = context.chatLook;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: look.messageWidth + 100),
+          child: Container(
+            key: const Key('account-offer'),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              border: Border.all(color: look.muted.withValues(alpha: 0.35)),
+              borderRadius: BorderRadius.circular(look.radius),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                'Account ${offer.account.isEmpty ? "this machine's login" : offer.account} has run out${offer.left == null ? '' : ' (${offer.left})'}. Move this conversation to another account?',
+                key: const Key('account-offer-text'),
+              ),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final other in offer.alternatives)
+                  FilledButton.tonal(
+                    key: Key('account-offer-move $other'),
+                    onPressed: () => unawaited(store.takeAccountOffer(session, other)),
+                    child: Text('Move to $other'),
+                  ),
+                TextButton(
+                  key: const Key('account-offer-dismiss'),
+                  onPressed: () => store.dismissAccountOffer(session),
+                  child: const Text('Not now'),
+                ),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// The oldest question [session]'s agent is waiting on, as a form.
 class SessionQuestionCard extends StatelessWidget {
   const SessionQuestionCard({super.key, required this.store, required this.session});

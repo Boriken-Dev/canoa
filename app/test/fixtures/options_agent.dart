@@ -150,6 +150,11 @@ final class OptionsAgent {
   /// What the client said of the extension in `initialize`.
   Object? usageOptIn;
 
+  /// Whether `initialize` answers which account the connection runs on, as the host does: the account the client named, or for a
+  /// name in [poolTakes] the member the pool gives it, with the pool.
+  bool reportsAccount = false;
+  final poolTakes = <String, String>{};
+
   /// Tells the last started copy a report changed, as an agent does: for [session] when one is named.
   void pushUsage(Map<String, Object?> report, {String? session}) {
     usage = report;
@@ -222,7 +227,10 @@ final class OptionsAgent {
         switch (method) {
           case 'initialize':
             usageOptIn = ((params['clientCapabilities'] ?? params['capabilities']) as Map?)?['_meta'];
-            reply(id, {'protocolVersion': 1, 'agentCapabilities': {
+            final named = ((params['_meta'] as Map?)?['dev.boriken.canoa/account']) as String?;
+            reply(id, {'protocolVersion': 1, if (reportsAccount && named != null) '_meta': {
+              'dev.boriken.canoa/account': {'name': poolTakes[named] ?? named, 'kind': 'anthropic-api-key', if (poolTakes.containsKey(named)) 'pool': named},
+            }, 'agentCapabilities': {
               'loadSession': true,
               if (offersResume) 'sessionCapabilities': {'resume': <String, Object?>{}},
               'promptCapabilities': {'image': images, 'embeddedContext': files},

@@ -50,7 +50,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
-import 'accounts/account_models.dart' show AccountEntry, accountMeta, machineLogin, modelMeta;
+import 'accounts/account_models.dart' show AccountEntry, LimitHint, TurnAdvice, accountMeta, machineLogin, modelMeta;
 import 'accounts/accounts_controller.dart';
 import 'accounts/accounts_host.dart';
 import 'desktop/host_grants.dart';
@@ -2887,6 +2887,68 @@ class _CanoaAppState extends State<CanoaApp> {
     return client;
   }
 
+  /// The accounts of the host [session] runs on: this computer's, or the remote host's the session belongs to.
+  AccountsController? _accountsOfSession(ChatSession session) => session.host == null ? _accounts : _accountsOn(session.host);
+
+  /// Moves [session] to [account]: the host carries the conversation, then its agent is started for the account and opens it. With
+  /// [pool] the session goes on naming the pool and its agent is started on [account], the member the host chose.
+  Future<bool> _switchAccount(ChatSession session, String account, {({String pool, String why})? pool}) => store.switchAccount(
+    session,
+    account,
+    move: _accountsOfSession(session) == null
+        ? null
+        : (moving, from, to) => _accountsOfSession(moving)!.host.moveSession(
+            entry: moving.source?.hostEntry ?? moving.agent,
+            session: moving.remoteSessionId!,
+            cwd: moving.cwd!,
+            from: from,
+            to: to,
+          ),
+    start: (moving) async {
+      final client = await _agentFor(
+        place: moving.place,
+        entryName: moving.agent,
+        address: moving.endpoint?.toString(),
+        fallback: moving.websocketFallback?.toString(),
+        methodId: moving.method,
+        peerId: moving.peerId,
+        cacheLifetime: moving.cacheLifetime?.id,
+        overlays: moving.overlays?.toList(),
+        account: moving.startAccount ?? moving.account,
+      );
+      _ownedClients.add(client);
+      return client;
+    },
+    expected: _hasProfiles,
+    pool: pool,
+  );
+
+  /// Whether the account [session] was started on is a pool its entry offers.
+  bool _runsOnPool(ChatSession session) => _accountsOfSession(session)?.poolOf(session.source?.hostEntry ?? session.agent, session.account) != null;
+
+  /// Asks the host which account takes the next turn of [session].
+  Future<TurnAdvice> _askTurn(
+    ChatSession session, {
+    required String account,
+    String? model,
+    String? current,
+    int? idleSeconds,
+    required String lifetime,
+    required List<LimitHint> limited,
+  }) {
+    final accounts = _accountsOfSession(session);
+    if (accounts == null) throw StateError('this host manages no accounts here');
+    return accounts.host.poolsTurn(
+      entry: session.source?.hostEntry ?? session.agent,
+      account: account,
+      model: model,
+      current: current,
+      idleSeconds: idleSeconds,
+      lifetime: lifetime,
+      limited: limited,
+    );
+  }
+
   /// The host's entries come and go as it starts and ends, and a hosted source can run only while it serves one.
   List<AgentSource>? _serving;
   void _hostChanged() {
@@ -3000,6 +3062,9 @@ class _CanoaAppState extends State<CanoaApp> {
     store.defaultPresetOf = () => config.presets[presetDefault];
     store.choicesLoader = _askChoices;
     store.accountChoicesLoader = _askChoicesAs;
+    store.runsOnPool = _runsOnPool;
+    store.poolTurn = _askTurn;
+    store.moveAccount = _switchAccount;
     store.defaultAccountOf = _defaultAccountOf;
     store.gitReader = _gitReaderFor;
     store.pathsOnHost ??= _pathsOnHost;
@@ -3113,6 +3178,9 @@ class _CanoaAppState extends State<CanoaApp> {
     if (identical(store.starter, _startDraft)) store.starter = null;
     if (identical(store.choicesLoader, _askChoices)) store.choicesLoader = null;
     if (identical(store.accountChoicesLoader, _askChoicesAs)) store.accountChoicesLoader = null;
+    if (identical(store.runsOnPool, _runsOnPool)) store.runsOnPool = null;
+    if (identical(store.poolTurn, _askTurn)) store.poolTurn = null;
+    if (identical(store.moveAccount, _switchAccount)) store.moveAccount = null;
     if (identical(store.gitReader, _gitReaderFor)) store.gitReader = null;
     if (identical(store.pathsOnHost, _pathsOnHost)) store.pathsOnHost = null;
     widget.host?.removeListener(_hostChanged);
@@ -3241,35 +3309,7 @@ class _CanoaAppState extends State<CanoaApp> {
     accounts: _accounts,
     accountsOf: (session) => _accountsOn(session.host),
     onAccountSettings: () => unawaited(_showSettings(section: 'accounts')),
-    switchAccount: (session, account) => store.switchAccount(
-      session,
-      account,
-      move: _accounts == null
-          ? null
-          : (moving, from, to) => _accounts!.host.moveSession(
-              entry: moving.source?.hostEntry ?? moving.agent,
-              session: moving.remoteSessionId!,
-              cwd: moving.cwd!,
-              from: from,
-              to: to,
-            ),
-      start: (moving) async {
-        final client = await _agentFor(
-          place: moving.place,
-          entryName: moving.agent,
-          address: moving.endpoint?.toString(),
-          fallback: moving.websocketFallback?.toString(),
-          methodId: moving.method,
-          peerId: moving.peerId,
-          cacheLifetime: moving.cacheLifetime?.id,
-          overlays: moving.overlays?.toList(),
-          account: moving.account,
-        );
-        _ownedClients.add(client);
-        return client;
-      },
-      expected: _hasProfiles,
-    ),
+    switchAccount: (session, account) => _switchAccount(session, account),
     switchAgent: _moves == null || !_canSwitchAgents
         ? null
         : (session, target) => store.switchAgent(
@@ -4175,6 +4215,7 @@ class _ConversationState extends State<_Conversation> {
             children: [for (final task in session.tasks.live) ChildView.of(task)],
             onStop: () => unawaited(widget.store.stopTasks(session)),
           ),
+        if (session.accountOffer != null) SessionAccountOffer(store: widget.store, session: session),
         if (session.queue.isNotEmpty) SessionQueuePanel(store: widget.store, session: session, toComposer: _queuedToComposer),
         if (session.pendingPermissions.isNotEmpty) SessionPermissionCard(store: widget.store, session: session),
         if (session.pendingQuestions.isNotEmpty) SessionQuestionCard(store: widget.store, session: session),

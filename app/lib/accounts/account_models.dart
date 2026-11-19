@@ -266,6 +266,91 @@ final class EntryPool {
   final List<PoolMember> members;
 }
 
+/// A limit the client heard of for an account, which the host holds the account back for: until [resetsAt] (Unix seconds) when the
+/// refusal said when, else until the client says it is over.
+typedef LimitHint = ({String account, int? resetsAt});
+
+/// The host's answer to which account the next turn of a session runs on (`pools/turn`). For a pool: [account] is the one that
+/// takes the turn, [moved] whether that is not the account the session runs on, and [why] `start`, `kept` (the cache is warm),
+/// `in_turn` (it lapsed, so the turn is the next account's) or `exhausted` ([left] says what the account it left had used up).
+/// For one account the host never moves anything: [exhausted] says it has run out and [alternatives] the entry's other accounts
+/// that could take the session, for the person to be offered.
+final class TurnAdvice {
+  const TurnAdvice({
+    required this.account,
+    this.pool,
+    this.moved = false,
+    this.why,
+    this.left,
+    this.skipped = const [],
+    this.exhausted = false,
+    this.refillsAt,
+    this.alternatives = const [],
+  });
+
+  /// One answer of `pools/turn`, or null when it is not one.
+  static TurnAdvice? parse(Object? json) {
+    if (json is! Map || json['account'] is! String) return null;
+    String? text(String key) => json[key] is String ? json[key] as String : null;
+    return TurnAdvice(
+      account: json['account'] as String,
+      pool: text('pool'),
+      moved: json['moved'] == true,
+      why: text('why'),
+      left: text('left'),
+      skipped: [
+        if (json['skipped'] is List)
+          for (final each in json['skipped'] as List)
+            if (each is Map && each['account'] is String) (account: each['account'] as String, why: '${each['why'] ?? ''}'),
+      ],
+      exhausted: json['exhausted'] == true,
+      refillsAt: json['refills_at'] is int ? json['refills_at'] as int : null,
+      alternatives: [if (json['alternatives'] is List) for (final each in json['alternatives'] as List) if (each is String) each],
+    );
+  }
+
+  final String account;
+
+  /// The pool the session was started on; null for one account.
+  final String? pool;
+  final bool moved;
+  final String? why, left;
+
+  /// The accounts of the pool that could not take the turn, and why.
+  final List<({String account, String why})> skipped;
+  final bool exhausted;
+
+  /// Unix seconds, when the host knows when the account's allowance comes back.
+  final int? refillsAt;
+  final List<String> alternatives;
+}
+
+/// The host refused the turn: no account of the pool has usage left. [message] is its words, which say when the soonest allowance
+/// refills.
+final class TurnRefused implements Exception {
+  const TurnRefused(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// A session's account has run out and the person may move it: what is offered in the conversation. It moves nothing by itself.
+final class AccountOffer {
+  const AccountOffer({required this.account, required this.alternatives, this.left, this.refillsAt});
+
+  /// The account the session runs on, which has run out.
+  final String account;
+
+  /// The accounts the host says could take the session, at most three.
+  final List<String> alternatives;
+
+  /// What the account has used up, in the host's words.
+  final String? left;
+  final int? refillsAt;
+}
+
 /// An agent entry of the host that runs a provider with accounts, as the host lists it: what it offers a client is the host's to say,
 /// and a built-in source (Claude, Codex) is one before canoa.cfg names it.
 final class AccountEntry {

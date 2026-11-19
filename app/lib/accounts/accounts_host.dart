@@ -147,6 +147,20 @@ abstract interface class AccountsHost {
   /// Takes the pool [name] out of canoa.cfg; the host refuses while an entry offers it.
   Future<void> removePool(String name);
 
+  /// Which account the next turn of a session of [entry] runs on. [account] is what the session was started on (a pool, whose accounts
+  /// are taken in turn, or one account), [current] the account it runs on now, [idleSeconds] how long ago its last turn ended (null
+  /// for one that has had none), [lifetime] its prompt cache (`default`, `off`, `short` or `long`) and [limited] the limits the client
+  /// heard of. Throws [TurnRefused] when no account of the pool has usage left.
+  Future<TurnAdvice> poolsTurn({
+    required String entry,
+    required String account,
+    String? model,
+    String? current,
+    int? idleSeconds,
+    String? lifetime,
+    List<LimitHint> limited = const [],
+  });
+
   /// Makes the entry [entry] offer exactly [accounts], in that order, in the host's canoa.cfg, which the host alone writes. An entry
   /// it does not have is made when [harness] says what it runs. The host reads it when it starts.
   Future<void> offer(String entry, List<String> accounts, {String? harness});
@@ -228,6 +242,34 @@ final class ControlAccountsHost implements AccountsHost {
   @override
   Future<void> removePool(String name) async {
     await _call('pools/remove', {'name': name});
+  }
+
+  @override
+  Future<TurnAdvice> poolsTurn({
+    required String entry,
+    required String account,
+    String? model,
+    String? current,
+    int? idleSeconds,
+    String? lifetime,
+    List<LimitHint> limited = const [],
+  }) async {
+    try {
+      final result = await _call('pools/turn', {
+        'entry': entry,
+        'account': account,
+        'model': ?model,
+        'current': ?current,
+        'idle_seconds': ?idleSeconds,
+        'lifetime': ?lifetime,
+        if (limited.isNotEmpty) 'limited': [for (final hit in limited) {'account': hit.account, 'resets_at': ?hit.resetsAt}],
+      });
+      return TurnAdvice.parse(result) ?? (throw StateError('the host did not say which account takes the turn'));
+    } on ControlFailed catch (error) {
+      // -32002 is a refusal: no account of the pool can take it. Any other failure is a host that cannot say.
+      if (error.code == -32002) throw TurnRefused(error.message);
+      rethrow;
+    }
   }
 
   @override

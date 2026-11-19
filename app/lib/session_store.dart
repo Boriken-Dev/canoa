@@ -33,7 +33,7 @@ import 'chat/session_options.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart'
     show SecretCardEnvironment, shortLine;
 import 'drafts/draft_store.dart';
-import 'accounts/account_models.dart' show AccountMove, machineLogin;
+import 'accounts/account_models.dart' show AccountMove, AccountOffer, LimitHint, TurnAdvice, TurnRefused, machineLogin;
 import 'history/session_move.dart' show MoveReport, lossText;
 import 'ledger/session_ledger.dart';
 import 'permissions/permission_rules.dart';
@@ -247,6 +247,23 @@ class ChatSession {
   /// The account the host ran the session on, and the pool it took it from when [account] names a pool, as the host said them when
   /// the session started; null before then and for a host that names none. Not kept: the next start says them again.
   String? ranOnAccount, ranOnPool;
+
+  /// The account a start or a move of the session names to its agent when that is not [account]: the member of the pool the host
+  /// took the turn from. Only while the agent is being started; null otherwise.
+  String? startAccount;
+
+  /// When the session's last turn ended, by the store's clock, and whether it failed; null before its first. The host reads how
+  /// long ago it was against how long the prompt cache lives.
+  DateTime? lastTurnEnded;
+  bool lastTurnFailed = false;
+
+  /// The move the person is offered because the account the session runs on has run out; null when there is none. Nothing moves
+  /// until they take it.
+  AccountOffer? accountOffer;
+
+  /// Whether the account's running out has been dealt with (offered, or dismissed) or is being asked about: it is not offered
+  /// again until the account has had room.
+  bool offerHeld = false;
 
   /// What is written in a draft's composer, kept with it.
   String draftText = '';
@@ -651,6 +668,31 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
   /// Asks the host for a source's models and efforts before its agent runs; set by the app. Without it nothing is asked.
   ChoicesLoader? choicesLoader;
 
+  /// Whether the account [session] was started on names a pool of its agent; set by the app. Without it no session is on one.
+  bool Function(ChatSession session)? runsOnPool;
+
+  /// Asks the host which account the next turn of [session] runs on; set by the app. It throws [TurnRefused] when no account of a
+  /// pool has usage left, and anything else when the host cannot be asked.
+  Future<TurnAdvice> Function(
+    ChatSession session, {
+    required String account,
+    String? model,
+    String? current,
+    int? idleSeconds,
+    required String lifetime,
+    required List<LimitHint> limited,
+  })?
+  poolTurn;
+
+  /// Moves [session] to [account], as the picker does; set by the app. With [pool] the session goes on naming the pool and runs on
+  /// [account], and the line it leaves in the conversation says why.
+  Future<bool> Function(
+    ChatSession session,
+    String account, {
+    ({String pool, String why})? pool,
+  })?
+  moveAccount;
+
   /// Asks for a source's choices as one of its accounts, so that a signed-in account lists what it may use; set by the app. When
   /// it is not set or says nothing, [choicesLoader] asks as the machine's own login.
   AccountChoicesLoader? accountChoicesLoader;
@@ -1044,6 +1086,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         (accountUsage[account]?.revision ?? -1) <= report.revision) {
       accountUsage[account] = report;
     }
+    _watchExhaustion(session);
     notifyListeners();
   }
 
@@ -2278,6 +2321,10 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     if (outcome == TurnOutcome.failed && session.id != _selectedId) {
       session.failed = true;
     }
+    session
+      ..lastTurnEnded = clock()
+      ..lastTurnFailed = outcome == TurnOutcome.failed;
+    _watchExhaustion(session);
     _keepText(session);
     _keepCursor(session);
     unawaited(refreshGit(session));
@@ -2632,9 +2679,12 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     Future<AccountMove> Function(ChatSession session, String? from, String to)?
     move,
     bool expected = false,
+    ({String pool, String why})? pool,
   }) async {
     final before = session.account;
-    if (before == account) return true;
+    // A session on a pool goes on naming it and moves between its accounts: it runs on [ranOn], the host's word for it.
+    final ranOn = session.ranOnAccount;
+    if (pool == null ? before == account : ranOn == account) return true;
     final block = accountSwitchBlock(session);
     if (block != null) {
       session.chat.note(
@@ -2643,6 +2693,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       return false;
     }
     final old = _clients[session.id]!;
+    _moving.add(session.id);
     final oldId = session.remoteSessionId!, cwd = session.cwd!;
     for (final role in const [OptionRole.model, OptionRole.effort]) {
       final option = optionIn(session.options, role);
@@ -2680,14 +2731,18 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     try {
       // The old agent holds the account's login, and the conversation is read from its folder: it ends first.
       await old.close();
-      moved = move == null ? null : await move(session, before, account);
-      session.account = account;
+      moved = move == null
+          ? null
+          : await move(session, pool == null ? before : ranOn, account);
+      session
+        ..account = pool?.pool ?? account
+        ..startAccount = pool == null ? null : account;
       final client = await reopenOn(
         moved != null && moved.moved ? moved.session : oldId,
       );
       session
-        ..ranOnAccount = client.identity.ranOnAccount
-        ..ranOnPool = client.identity.ranOnPool;
+        ..ranOnAccount = client.identity.ranOnAccount ?? (pool == null ? null : account)
+        ..ranOnPool = pool?.pool ?? client.identity.ranOnPool;
       if (moved != null && moved.moved) {
         // The conversation has a new id in the new folder: the list follows it, with what the person had made of it.
         if (oldEntry != null) ledger?.remove(oldEntry);
@@ -2704,7 +2759,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
         _record(session, client);
       }
     } catch (error) {
-      session.account = before;
+      session
+        ..account = before
+        ..startAccount = pool == null ? null : ranOn;
       try {
         await reopenOn(oldId);
         session.chat.note(
@@ -2715,17 +2772,171 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
           'Account: not moved to ${_accountWords(account)}: ${reasonOf(error)}. Its agent could not be started again on ${before == null ? 'its first account' : _accountWords(before)} either: ${reasonOf(again)}. Open it again from Earlier conversations.',
         );
       }
+      session.startAccount = null;
+      _moving.remove(session.id);
       notifyListeners();
       return false;
     }
+    session.startAccount = null;
+    _moving.remove(session.id);
+    _watchExhaustion(session);
     final how = moved != null && moved.moved
         ? 'moved to that account\'s own folder (${moved.via == 'record' ? 'from what this host recorded of it' : 'by the agent\'s own export'}) and picked up'
         : 'picked up as it was';
     session.chat.note(
-      'Account: ${before == null ? 'the first' : _accountWords(before)} → ${_accountWords(account)}. The conversation was $how.',
+      pool == null
+          ? 'Account: ${before == null ? 'the first' : _accountWords(before)} → ${_accountWords(account)}. The conversation was $how.'
+          : 'Pool ${pool.pool}: moved from ${ranOn == null ? 'its first account' : _accountWords(ranOn)} to ${_accountWords(account)}: ${pool.why}. The conversation was $how.',
     );
     notifyListeners();
     return true;
+  }
+
+  /// What the host's answer comes to in words, for the line a move leaves in the conversation.
+  static String _whyMoved(TurnAdvice advice, String? from) => advice.why == "exhausted"
+      ? "${from ?? 'its account'} had run out${advice.left == null ? '' : ' (${advice.left})'}"
+      : "the prompt cache had lapsed, so this turn goes to the next account in turn";
+
+  /// What a limit the agent reported for the account [session] runs on comes to: a hint for the host while it holds, which is until
+  /// the time it names, or with none until the turn it refused is no longer the last.
+  List<LimitHint> _limitsOf(ChatSession session) {
+    final account = session.ranOnAccount, hit = session.usageReport?.limit;
+    if (account == null || hit == null) return const [];
+    final now = clock().millisecondsSinceEpoch ~/ 1000;
+    final until =
+        hit.resetsAt ??
+        (hit.retryAfter == null ? null : hit.observedAt + hit.retryAfter!.inSeconds);
+    if (until != null ? until <= now : !session.lastTurnFailed) return const [];
+    return [(account: account, resetsAt: until)];
+  }
+
+  /// What the host is asked of a turn of [session] on [account]: the model it is on, how long ago its last turn ended and how long
+  /// its cache lives.
+  Future<TurnAdvice> _askTurn(ChatSession session, String account) {
+    final ended = session.lastTurnEnded;
+    final model = optionIn(session.options, OptionRole.model)?.current;
+    return poolTurn!(
+      session,
+      account: account,
+      model: model == null || model.isEmpty ? null : model,
+      current: session.ranOnAccount,
+      idleSeconds: ended == null
+          ? null
+          : clock().difference(ended).inSeconds.clamp(0, 1 << 40).toInt(),
+      lifetime: cacheLifetimeOf(session).lifetime.id,
+      limited: _limitsOf(session),
+    );
+  }
+
+  /// Whether a message on [session] first asks the host which account of its pool takes the turn. A message on any other session
+  /// goes at once, with no wait in between, so what the agent sends back cannot arrive before the message is in the conversation.
+  bool _asksPool(ChatSession session) =>
+      session.account != null &&
+      poolTurn != null &&
+      moveAccount != null &&
+      session.ranOnAccount != null &&
+      session.status != SessionStatus.working &&
+      (runsOnPool?.call(session) ?? false);
+
+  /// Before a message goes on a session that was started on a pool: the host says which account of the pool takes the turn, and
+  /// when that is not the one the session runs on, the conversation moves to it first. A refusal (no account has usage left) stops
+  /// the message, which stays with the person, and says why in the conversation. A host that cannot be asked never holds a message
+  /// back.
+  Future<void> _beforeTurn(ChatSession session) async {
+    final pool = session.account;
+    if (pool == null || !_asksPool(session)) return;
+    final TurnAdvice advice;
+    try {
+      advice = await _askTurn(session, pool);
+    } on TurnRefused catch (refused) {
+      session.chat.note('Pool $pool: ${refused.message}');
+      notifyListeners();
+      throw StateError(refused.message);
+    } catch (_) {
+      return;
+    }
+    final from = session.ranOnAccount;
+    if (!advice.moved || advice.account == from) return;
+    await moveAccount!(
+      session,
+      advice.account,
+      pool: (pool: pool, why: _whyMoved(advice, from)),
+    );
+  }
+
+  /// What has run out for [account], as the session's own report says it: a bucket that is exhausted for the session's model and
+  /// whose window has not ended, or a refusal for a limit that still holds. Null when there is room.
+  String? _exhaustedFor(ChatSession session) {
+    final report = session.usageReport;
+    if (report == null) return null;
+    final now = clock().millisecondsSinceEpoch ~/ 1000;
+    final model = optionIn(session.options, OptionRole.model)?.current;
+    for (final bucket in report.buckets) {
+      if (!bucket.isExhausted || bucket.pastReset(now)) continue;
+      final covers = bucket.models.kind == 'only'
+          ? model != null && bucket.models.models.contains(model)
+          : true;
+      if (covers) return '${bucket.name} is used up';
+    }
+    if (_limitsOf(session).isNotEmpty) return 'a turn was refused for a limit';
+    return null;
+  }
+
+  /// The sessions being moved to another account now: what their agents report meanwhile is not about the account they end on.
+  final Set<String> _moving = {};
+
+  /// When the account a single-account session runs on has run out, asks the host what could take it and offers the person the
+  /// move, once. Nothing moves by itself, and nothing is offered again until the account has had room.
+  void _watchExhaustion(ChatSession session) {
+    if (session.isDraft || session.status == SessionStatus.preview || _moving.contains(session.id)) return;
+    final account = session.ranOnAccount ?? session.account;
+    if (account == null || account == machineLogin || poolTurn == null) return;
+    final left = _exhaustedFor(session);
+    if (left == null) {
+      session.offerHeld = false;
+      session.accountOffer = null;
+      return;
+    }
+    if (session.offerHeld || (runsOnPool?.call(session) ?? false)) return;
+    session.offerHeld = true;
+    unawaited(() async {
+      try {
+        final advice = await _askTurn(session, account);
+        if (_disposed || !advice.exhausted || (session.ranOnAccount ?? session.account) != account) return;
+        final others = advice.alternatives.take(3).toList();
+        if (others.isEmpty) {
+          session.chat.note(
+            'Account ${_accountWords(account)} has run out (${advice.left ?? left}), and no other account of this agent could take the conversation.',
+          );
+        } else {
+          session.accountOffer = AccountOffer(
+            account: account,
+            alternatives: others,
+            left: advice.left ?? left,
+            refillsAt: advice.refillsAt,
+          );
+        }
+        notifyListeners();
+      } catch (_) {
+        // A host that cannot say leaves the person with the conversation as it is; it is asked again when the account is.
+        session.offerHeld = false;
+      }
+    }());
+  }
+
+  /// Moves [session] to [account], which its offer named, and takes the offer away. It is the person's own move.
+  Future<bool> takeAccountOffer(ChatSession session, String account) async {
+    session.accountOffer = null;
+    notifyListeners();
+    final move = moveAccount;
+    return move == null ? false : move(session, account);
+  }
+
+  /// Takes the offer away, and does not make it again until the account has had room.
+  void dismissAccountOffer(ChatSession session) {
+    session.accountOffer = null;
+    session.offerHeld = true;
+    notifyListeners();
   }
 
   /// What the person and the agent have said in [session], which is what an agent's own copy of it holds.
@@ -3167,6 +3378,7 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       await _startThenDeliver(session, text);
       return;
     }
+    if (_asksPool(session)) await _beforeTurn(session);
     await _send(session, text, held, from: from, steer: steer);
   }
 
