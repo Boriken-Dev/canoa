@@ -68,8 +68,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp"
-      ref: "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
-      resolved-ref: "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
+      ref: ee1690bfdea215d6b8e726862b4b5666254a7512
+      resolved-ref: ee1690bfdea215d6b8e726862b4b5666254a7512
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -77,8 +77,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat"
-      ref: "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
-      resolved-ref: "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
+      ref: ee1690bfdea215d6b8e726862b4b5666254a7512
+      resolved-ref: ee1690bfdea215d6b8e726862b4b5666254a7512
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -86,8 +86,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat_ui"
-      ref: "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
-      resolved-ref: "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
+      ref: ee1690bfdea215d6b8e726862b4b5666254a7512
+      resolved-ref: ee1690bfdea215d6b8e726862b4b5666254a7512
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -95,8 +95,8 @@ packages:
     dependency: "direct main"
     description:
       path: dart
-      ref: 169125d3bfcb1b2cb1c3b33b297e373f2930c54a
-      resolved-ref: 169125d3bfcb1b2cb1c3b33b297e373f2930c54a
+      ref: "169125d3bfcb1b2cb1c3b33b297e373f2930c54a"
+      resolved-ref: "169125d3bfcb1b2cb1c3b33b297e373f2930c54a"
       url: "https://github.com/Boriken-Dev/coqui-aos.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -714,10 +714,10 @@ packages:
     dependency: transitive
     description:
       name: url_launcher_android
-      sha256: "611e87fb320b70d1dd721dc46af89c98aceccea9b31fde49e084591414e0c610"
+      sha256: b8073b1e5173d63afe1a18985a75896d72f759d3bc1817eb1ae8d26e8527cceb
       url: "https://pub.dev"
     source: hosted
-    version: "6.3.33"
+    version: "6.3.35"
   url_launcher_ios:
     dependency: transitive
     description:
