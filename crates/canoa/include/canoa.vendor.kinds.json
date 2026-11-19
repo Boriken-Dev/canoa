@@ -2,9 +2,9 @@
   "kinds": [
     {
       "name": "agent_vendor",
-      "floor_hash": 1152284818,
+      "floor_hash": 757122965,
       "object": false,
-      "doc": "Describes an agent. The same answer on every call, with nothing run and no connection opened.",
+      "doc": "Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with\nnothing run and no connection opened; every other method has a default that says the agent has nothing to add.",
       "slots": [
         {
           "name": "describe",
@@ -15,6 +15,106 @@
             "type": "value"
           },
           "doc": "Who the agent is."
+        },
+        {
+          "name": "account_variables",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "grant",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The variables that holding the account `grant` describes sets in the agent's environment and that hold no credential (its\nconfiguration directory, its endpoint), so a profile's layers can read them before a session starts. The default: none."
+        },
+        {
+          "name": "login_file",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "kind",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Where a login of the account kind `kind` lives in the account's directory, when the agent's provider renews it by looking\nat the directory. The default: nowhere."
+        },
+        {
+          "name": "shell_advice",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "shell",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "How the agent is told to use `shell`. The default says the agent documents no setting for its shell."
+        },
+        {
+          "name": "context_not_taken",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Why the agent does not take the starting instructions of a profile, in words, when it does not. The default: it does not\nsay it does."
+        },
+        {
+          "name": "skills_not_taken",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Why the agent does not take the skills of a profile, in words, when it does not. The default: it does not say."
+        },
+        {
+          "name": "sessions",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The sessions the agent's own program kept on this computer, found and read as the program lays them out; `None` for an agent\nwhose sessions Canoa cannot bring in."
+        },
+        {
+          "name": "session_history",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The standard session history of one session file's text. The default refuses: the agent has none to give."
         }
       ]
     }

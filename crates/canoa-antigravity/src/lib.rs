@@ -61,6 +61,12 @@ impl AgentVendor for AgyVendor {
         info.look = None;
         Ok(info)
     }
+
+    fn skills_not_taken(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(
+            "Antigravity reads skills from a session's additionalDirectories, and this agent does not say it takes them".to_owned(),
+        ))
+    }
 }
 
 /// Gemini CLI has no crate of its own: Google's agents are described here, so a program that reports itself as `gemini-cli` is
@@ -78,6 +84,18 @@ impl AgentVendor for GeminiVendor {
         info.model_variable = Some("GEMINI_MODEL".to_owned());
         info.names = vec!["gemini-cli".to_owned()];
         Ok(info)
+    }
+
+    fn context_not_taken(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(
+            "Gemini CLI takes no system prompt over ACP; GEMINI_SYSTEM_MD would replace its whole prompt".to_owned(),
+        ))
+    }
+
+    fn skills_not_taken(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(
+            "Gemini CLI reads skills only from its own, your home's and the project's skill directories".to_owned(),
+        ))
     }
 }
 

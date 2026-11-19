@@ -135,10 +135,7 @@ fn a_claude_login_reads_its_windows_with_no_session_and_sends_its_token_only_to_
             "seven_day": {"utilization": 40.0, "resets_at": "2099-01-05T00:00:00Z"},
         }),
     );
-    let endpoints = Endpoints {
-        claude: Some(server.address.clone()),
-        ..Endpoints::default()
-    };
+    let endpoints = Endpoints::default().with("claude", server.address.clone());
     let row = super::super::usage_at(&claude_config(), "work", &store, &endpoints).expect("read");
     assert_eq!(row["supported"], true, "{row}");
     assert_eq!(row["account"], "id-work", "{row}");
@@ -226,10 +223,7 @@ fn a_refused_login_is_told_to_renew_and_a_failed_renewal_is_said() {
         )
         .expect("stored");
     let server = standin(401, json!({"error": "no"}));
-    let endpoints = Endpoints {
-        claude: Some(server.address.clone()),
-        ..Endpoints::default()
-    };
+    let endpoints = Endpoints::default().with("claude", server.address.clone());
     // A `claude` program that does not exist: the renewal cannot run, which the answer says after the refusal.
     let config = config(
         "[host.agents]\n[host.accounts.work]\nharness = \"claude\"\nkind = \"claude-login\"\nid = \"id-work\"\n\
@@ -271,10 +265,7 @@ fn a_codex_chatgpt_login_reads_and_pi_says_it_offers_none() {
         "[host.accounts.chat]\nharness = \"codex\"\nkind = \"codex-chatgpt\"\nid = \"id-codex\"\n\
          [host.accounts.pi]\nharness = \"pi\"\nkind = \"pi-oauth\"\nid = \"id-pi\"\n",
     );
-    let endpoints = Endpoints {
-        codex: Some(server.address.clone()),
-        ..Endpoints::default()
-    };
+    let endpoints = Endpoints::default().with("codex", server.address.clone());
     let row = super::super::usage_at(&config, "chat", &store, &endpoints).expect("read");
     assert_eq!(row["supported"], true, "{row}");
     let ids: Vec<&str> = row["buckets"]
@@ -305,10 +296,7 @@ fn a_refused_login_is_renewed_from_the_directory_the_stored_copy_was_written_to(
         )
         .expect("stored");
     let server = standin(401, json!({"error": "no"}));
-    let endpoints = Endpoints {
-        claude: Some(server.address.clone()),
-        ..Endpoints::default()
-    };
+    let endpoints = Endpoints::default().with("claude", server.address.clone());
     let config = config(
         "[host.agents.Claude]\nharness = \"claude\"\nexecutable = \"canoa-no-such-claude\"\naccounts = [\"work\"]\n\
          [host.accounts.work]\nharness = \"claude\"\nkind = \"claude-login\"\nid = \"id-work\"\n",

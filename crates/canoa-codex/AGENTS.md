@@ -4,6 +4,8 @@ Header-file-style reference for `canoa-codex`: everything Canoa offers for Codex
 
 MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No Cargo features. `#![forbid(unsafe_code)]`. Depends on `canoa` (feature `store`), `coqui-acp-api`, `serde_json`, `coqui-acp-codex`.
 
+`CodexVendor` also answers `AgentVendor`'s per-agent methods: `account_variables`, `login_file`, `shell_advice` and `sessions`/`session_history` (the program's own session folder, read for the host's `history/importable` and `history/import`).
+
 ## Exports
 
 ```rust

@@ -12,7 +12,11 @@ use std::path::PathBuf;
 
 use canoa::secret_provider::{Held, Keeping, Named, Names, ProviderInfo, SecretProviderVtable};
 use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtensionVtable};
-use canoa::vendor::{AgentVendorVtable, ModeTitle, StandardTitle, VendorInfo};
+use canoa::vendor::{
+    AgentVendorVtable, HistoryAnswer, HistoryRequest, LoginFile, ModeTitle, SessionFile,
+    SessionListing, SessionsRequest, ShellAdvice, ShellRequest, StandardTitle, Variable,
+    VendorInfo,
+};
 use coqui_acp_api::guatiao::Schema;
 use coqui_acp_api::{ProcessSpawnerVtable, SpawnedProcessVtable};
 use guatiao_serde::Serializable;
@@ -75,6 +79,15 @@ fn the_committed_vendor_schemas_are_what_this_build_describes() {
             ("VendorInfo", schema_of::<VendorInfo>()),
             ("StandardTitle", schema_of::<StandardTitle>()),
             ("ModeTitle", schema_of::<ModeTitle>()),
+            ("Variable", schema_of::<Variable>()),
+            ("LoginFile", schema_of::<LoginFile>()),
+            ("ShellRequest", schema_of::<ShellRequest>()),
+            ("ShellAdvice", schema_of::<ShellAdvice>()),
+            ("SessionsRequest", schema_of::<SessionsRequest>()),
+            ("SessionFile", schema_of::<SessionFile>()),
+            ("SessionListing", schema_of::<SessionListing>()),
+            ("HistoryRequest", schema_of::<HistoryRequest>()),
+            ("HistoryAnswer", schema_of::<HistoryAnswer>()),
         ]),
     );
 }

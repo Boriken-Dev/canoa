@@ -16,8 +16,9 @@ publish = false
 [dependencies]
 canoa = { workspace = true, features = ["store", "vendor"] }
 coqui-acp-api.workspace = true
-coqui-acp-codex.workspace = true
+coqui-acp-history.workspace = true
 serde_json.workspace = true
+coqui-acp-codex.workspace = true
 
 [lints.rust]
 missing_docs = "warn"

@@ -159,5 +159,305 @@
       "id",
       "title"
     ]
+  },
+  "Variable": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Its name."
+      },
+      "value": {
+        "type": "string",
+        "description": "Its value."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "value"
+    ]
+  },
+  "LoginFile": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "key": {
+        "type": "string",
+        "description": "The credential that holds the file's text."
+      },
+      "file": {
+        "type": "string",
+        "description": "The file's name in the account's directory."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "key",
+      "file"
+    ]
+  },
+  "ShellRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "The shell program's path."
+      },
+      "name": {
+        "type": "string",
+        "description": "The program's file name without its extension, in lower case (`bash`, `pwsh`)."
+      },
+      "family": {
+        "type": "string",
+        "description": "Its family: `bash`, `zsh`, `powershell`, `cmd`, or `other`."
+      },
+      "wsl": {
+        "type": "boolean",
+        "description": "Whether it is the one the Windows Subsystem for Linux starts."
+      },
+      "windows": {
+        "type": "boolean",
+        "description": "Whether the host runs on Windows."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "path",
+      "name",
+      "family",
+      "wsl",
+      "windows"
+    ]
+  },
+  "ShellAdvice": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "env": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Its name."
+            },
+            "value": {
+              "type": "string",
+              "description": "Its value."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "value"
+          ]
+        },
+        "description": "The variables that make the agent use the shell.",
+        "default": []
+      },
+      "notice": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Why the agent does not use it, in words, when it cannot be told."
+      }
+    },
+    "additionalProperties": false
+  },
+  "SessionsRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "home": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The folder the program keeps them in, or none for where the program itself looks."
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most files to look at."
+      },
+      "peek": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "How many of the newest files are read for their title and folder."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "limit",
+      "peek"
+    ]
+  },
+  "SessionFile": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The session's id as the program names it."
+      },
+      "path": {
+        "type": "string",
+        "description": "The file's path."
+      },
+      "bytes": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Its size in bytes."
+      },
+      "updated_ms": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "When it last changed, in milliseconds since the Unix epoch."
+      },
+      "title": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The first thing the person said in it, tidy and short."
+      },
+      "cwd": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The folder the session worked in."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "path",
+      "bytes",
+      "updated_ms"
+    ]
+  },
+  "SessionListing": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "home": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The folder they were read from, when there is one."
+      },
+      "max_bytes": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The most bytes of a session file [`AgentVendor::session_history`] takes."
+      },
+      "files": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The session's id as the program names it."
+            },
+            "path": {
+              "type": "string",
+              "description": "The file's path."
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "Its size in bytes."
+            },
+            "updated_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "When it last changed, in milliseconds since the Unix epoch."
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The first thing the person said in it, tidy and short."
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The folder the session worked in."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "path",
+            "bytes",
+            "updated_ms"
+          ]
+        },
+        "description": "The session files found, the newest first.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "max_bytes"
+    ]
+  },
+  "HistoryRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "The file's text."
+      },
+      "session": {
+        "type": "string",
+        "description": "The id the history's session is given (a UUID)."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "text",
+      "session"
+    ]
+  },
+  "HistoryAnswer": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "history": {
+        "type": "string",
+        "description": "The history in the standard session-history format: its JSON lines."
+      },
+      "title": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The first thing the person said in the session, tidy and short."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "history"
+    ]
   }
 }

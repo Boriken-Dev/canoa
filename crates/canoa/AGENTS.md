@@ -10,7 +10,7 @@ No `unsafe` code (`#![forbid(unsafe_code)]`).
 
 ## `canoa::vendor` (feature `vendor`)
 
-The `agent_vendor` kind: who an agent is and how Canoa shows it. A harness provider and an account provider say what they do; a provider of this kind says what the person calls the agent, its vendor, mark, credential standards and names, so the host and the application hold no list of agents.
+The `agent_vendor` kind: who an agent is, how Canoa shows it and what Canoa does for it beyond that. A harness provider and an account provider say what they do; a provider of this kind says what the person calls the agent, its vendor, mark, credential standards and names, so the host and the application hold no list of agents, and answers the few things Canoa does per agent that are neither ACP nor an account's (below), so the host holds no string of an agent either.
 
 ```rust
 pub const KIND: &str = "agent_vendor";
@@ -21,7 +21,21 @@ pub const MAX_DOCUMENT_TEXT: usize = 65536;                                    /
 VendorInfo::new(agent, title); .problem() -> Option<String>                      // why the description cannot be used
 #[non_exhaustive] pub struct StandardTitle { pub id: String, pub title: String }  // StandardTitle::new(id, title)
 #[non_exhaustive] pub struct ModeTitle { pub id: String, pub title: String }      // ModeTitle::new(id, title)
-#[guatiao::kind(name = "agent_vendor")] pub trait AgentVendor: Send + Sync { fn describe(&self) -> Result<VendorInfo, ProviderError>; }
+#[guatiao::kind(name = "agent_vendor")] pub trait AgentVendor: Send + Sync {
+    fn describe(&self) -> Result<VendorInfo, ProviderError>;   // required: the same answer every call, nothing run
+    // each of these has a default that says the agent has nothing to add
+    fn account_variables(&self, grant: AccountGrant) -> Result<Vec<Variable>, ProviderError>;   // the credential-free variables an account sets (its directory, its endpoint); default none
+    fn login_file(&self, kind: String) -> Result<Option<LoginFile>, ProviderError>;              // where a kind's login lives in the account's directory, for a provider that renews it by looking there; default none
+    fn shell_advice(&self, shell: ShellRequest) -> Result<ShellAdvice, ProviderError>;           // how the agent is told to use a shell: variables, or why it cannot be; default `NO_SHELL_SETTING`
+    fn context_not_taken(&self) -> Result<Option<String>, ProviderError>;                        // why it takes no starting instructions, when it does not
+    fn skills_not_taken(&self) -> Result<Option<String>, ProviderError>;                         // why it takes no profile skills, when it does not
+    fn sessions(&self, request: SessionsRequest) -> Result<Option<SessionListing>, ProviderError>;   // the sessions its program kept on this computer (None: cannot be brought in)
+    fn session_history(&self, request: HistoryRequest) -> Result<HistoryAnswer, ProviderError>;     // one session file's text as a standard session history; default refuses UNSUPPORTED
+}
+// Plain data, `non_exhaustive` with `new`: Variable { name, value }, LoginFile { key, file }, ShellRequest { path, name, family: bash|zsh|powershell|cmd|other, wsl, windows },
+// ShellAdvice { env, notice } (`cannot(why)`, `sets(name, value)`), SessionsRequest { home?, limit, peek }, SessionFile { id, path, bytes, updated_ms, title?, cwd? },
+// SessionListing { home?, max_bytes, files (newest first; the newest `peek` carry title and cwd) }, HistoryRequest { text, session }, HistoryAnswer { history, title? }.
+// `canoa::vendor::sessions` holds what a crate listing session files needs: `tidy`, `folders`, `files`, `found`, `window_lines`, `json_lines`, `listing`.
 ```
 
 - `agent`: 1 to 64 lower-case letters, digits, `-` and `_`: the id of the agent's `acp_harness` provider when it has one (`claude`), else its source's name in lower case. Every other provider and source of the agent names it this way.

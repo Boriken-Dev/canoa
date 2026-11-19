@@ -1657,47 +1657,35 @@ pub(crate) fn harness_version(provider: Option<&str>) -> Option<String> {
 /// state directory) are applied inside the provider, after the request's environment, and are not these.
 pub(crate) fn host_variables(provider: Option<&str>) -> Vec<(String, String)> {
     match provider {
-        Some(program @ ("claude" | "codex")) => crate::sources::managed_program(program)
-            .map(|(_, environment)| environment)
-            .unwrap_or_default(),
+        Some(program) if crate::bundled::runs_managed_by_own_name(program) => {
+            crate::sources::managed_program(program)
+                .map(|(_, environment)| environment)
+                .unwrap_or_default()
+        }
         _ => Vec::new(),
     }
 }
 
-fn context_not_taken(harness: Option<&str>) -> &'static str {
-    match harness {
-        Some("pi") => {
-            "pi-acp takes no system prompt; Pi reads SYSTEM.md and APPEND_SYSTEM.md only from its own directory"
-        }
-        Some("gemini-cli") => {
-            "Gemini CLI takes no system prompt over ACP; GEMINI_SYSTEM_MD would replace its whole prompt"
-        }
-        Some("opencode") => {
-            "OpenCode takes instructions only from its configuration, when it starts"
-        }
-        _ => "the agent does not say it takes a system prompt",
-    }
+/// What the agent whose registry id is `harness` says of why it does not take something, from its description provider.
+fn not_taken(
+    harness: Option<&str>,
+    ask: impl FnOnce(
+        &dyn canoa::vendor::AgentVendor,
+    ) -> Result<Option<String>, coqui_acp_api::guatiao::library::ProviderError>,
+) -> Option<String> {
+    let known = crate::vendors::by_aos(harness?)?;
+    crate::vendors::behave(known.agent, ask)?.ok().flatten()
 }
 
-fn skills_not_taken(harness: Option<&str>) -> &'static str {
-    match harness {
-        Some("pi") => {
-            "pi-acp passes Pi no --skill; Pi reads skills only from its own and the project's directories"
-        }
-        Some("gemini-cli") => {
-            "Gemini CLI reads skills only from its own, your home's and the project's skill directories"
-        }
-        Some("opencode") => {
-            "OpenCode reads skills only from its configuration and the project's directories"
-        }
-        Some("codex") => {
-            "the adapter does not say it takes more directories, where Codex would read them"
-        }
-        Some("antigravity") => {
-            "Antigravity reads skills from a session's additionalDirectories, and this agent does not say it takes them"
-        }
-        _ => "ACP has no field for skills, and Canoa knows no other way this agent takes them",
-    }
+fn context_not_taken(harness: Option<&str>) -> String {
+    not_taken(harness, |vendor| vendor.context_not_taken())
+        .unwrap_or_else(|| "the agent does not say it takes a system prompt".to_owned())
+}
+
+fn skills_not_taken(harness: Option<&str>) -> String {
+    not_taken(harness, |vendor| vendor.skills_not_taken()).unwrap_or_else(|| {
+        "ACP has no field for skills, and Canoa knows no other way this agent takes them".to_owned()
+    })
 }
 
 /// A private directory in a connection's own, removed with it; `under` is that directory, which is never made here.

@@ -7,6 +7,8 @@
 
 extern crate alloc;
 
+mod behaviour;
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 
@@ -18,7 +20,11 @@ use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
     MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
 };
-use canoa::vendor::{AgentVendor, ModeTitle, StandardTitle, VendorInfo};
+use canoa::vendor::{
+    AgentVendor, HistoryAnswer, HistoryRequest, LoginFile, ModeTitle, SessionListing,
+    SessionsRequest, ShellAdvice, ShellRequest, StandardTitle, Variable, VendorInfo,
+};
+use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
 use canoa::store::recipe::{
@@ -71,6 +77,34 @@ impl AgentVendor for CodexVendor {
         info.mark = Some(MARK.to_owned());
         info.look = Some(LOOK.to_owned());
         Ok(info)
+    }
+
+    fn skills_not_taken(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(
+            "the adapter does not say it takes more directories, where Codex would read them"
+                .to_owned(),
+        ))
+    }
+
+    fn account_variables(&self, grant: AccountGrant) -> Result<Vec<Variable>, ProviderError> {
+        Ok(behaviour::account_variables(&grant))
+    }
+
+    fn login_file(&self, kind: String) -> Result<Option<LoginFile>, ProviderError> {
+        Ok(behaviour::login_file(&kind))
+    }
+
+    fn shell_advice(&self, shell: ShellRequest) -> Result<ShellAdvice, ProviderError> {
+        drop(shell);
+        Ok(behaviour::shell_advice())
+    }
+
+    fn sessions(&self, request: SessionsRequest) -> Result<Option<SessionListing>, ProviderError> {
+        Ok(Some(behaviour::sessions(&request)))
+    }
+
+    fn session_history(&self, request: HistoryRequest) -> Result<HistoryAnswer, ProviderError> {
+        behaviour::session_history(&request)
     }
 }
 

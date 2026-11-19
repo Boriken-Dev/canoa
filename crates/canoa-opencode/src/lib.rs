@@ -60,6 +60,19 @@ impl AgentVendor for OpenCodeVendor {
         info.mark = Some(MARK.to_owned());
         Ok(info)
     }
+
+    fn context_not_taken(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(
+            "OpenCode takes instructions only from its configuration, when it starts".to_owned(),
+        ))
+    }
+
+    fn skills_not_taken(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(
+            "OpenCode reads skills only from its configuration and the project's directories"
+                .to_owned(),
+        ))
+    }
 }
 
 canoa::store_provider!(

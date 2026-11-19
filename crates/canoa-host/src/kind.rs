@@ -441,12 +441,11 @@ impl Harness {
             return Vec::new();
         };
         let grant = offer.host.preview(config, info, self.runs());
-        let set = match self.id.as_str() {
-            "claude" => canoa_claude::acp::accounts::variables(&grant),
-            "codex" => canoa_codex::acp::accounts::variables(&grant),
-            _ => Vec::new(),
-        };
+        let set = crate::vendors::behave(&self.id, |vendor| vendor.account_variables(grant))
+            .and_then(Result::ok)
+            .unwrap_or_default();
         set.into_iter()
+            .map(|variable| (variable.name, variable.value))
             .filter(|(name, _)| !coqui_aos::is_reserved_variable(name))
             .collect()
     }

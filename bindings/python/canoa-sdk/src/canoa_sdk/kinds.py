@@ -451,13 +451,58 @@ class StoreExtension(KindProtocol, Protocol, kind="store_extension", floor_hash=
         ...
 
 
-class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=1152284818):
-    """Describes an agent. The same answer on every call, with nothing run and no connection opened."""
+class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=757122965):
+    """Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with
+    nothing run and no connection opened; every other method has a default that says the agent has nothing to add.
+    """
 
     @required
     @fallible
     def describe(self) -> ValueAnswer:
         """Who the agent is."""
+        ...
+
+    @fallible
+    def account_variables(self, grant: Ref) -> ValueAnswer:
+        """The variables that holding the account `grant` describes sets in the agent's environment and that hold no credential (its
+        configuration directory, its endpoint), so a profile's layers can read them before a session starts. The default: none.
+        """
+        ...
+
+    @fallible
+    def login_file(self, kind: Ref) -> ValueAnswer:
+        """Where a login of the account kind `kind` lives in the account's directory, when the agent's provider renews it by looking
+        at the directory. The default: nowhere.
+        """
+        ...
+
+    @fallible
+    def shell_advice(self, shell: Ref) -> ValueAnswer:
+        """How the agent is told to use `shell`. The default says the agent documents no setting for its shell."""
+        ...
+
+    @fallible
+    def context_not_taken(self) -> ValueAnswer:
+        """Why the agent does not take the starting instructions of a profile, in words, when it does not. The default: it does not
+        say it does.
+        """
+        ...
+
+    @fallible
+    def skills_not_taken(self) -> ValueAnswer:
+        """Why the agent does not take the skills of a profile, in words, when it does not. The default: it does not say."""
+        ...
+
+    @fallible
+    def sessions(self, request: Ref) -> ValueAnswer:
+        """The sessions the agent's own program kept on this computer, found and read as the program lays them out; `None` for an agent
+        whose sessions Canoa cannot bring in.
+        """
+        ...
+
+    @fallible
+    def session_history(self, request: Ref) -> ValueAnswer:
+        """The standard session history of one session file's text. The default refuses: the agent has none to give."""
         ...
 
 

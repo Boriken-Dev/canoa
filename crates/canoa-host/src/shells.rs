@@ -6,8 +6,8 @@
 //! `canoa-git-bash`, `canoa-pwsh`), which `[host] shell`, an agent entry's `shell` and `terminal/open` name; a setting that is
 //! no id is a program, an absolute path or a name found on the `PATH`.
 //!
-//! One setting, translated for each agent by [`for_harness`]: only what a harness documents is passed (Claude Code's
-//! `CLAUDE_CODE_GIT_BASH_PATH` on Windows and `CLAUDE_CODE_SHELL` elsewhere), and what it cannot take is said in words.
+//! One setting, translated for each agent by [`for_harness`]: only what a harness documents is passed (a variable it reads, say),
+//! and what it cannot take is said in words, by the agent's own provider.
 //! Nothing here writes a program's own settings file.
 #![allow(
     clippy::std_instead_of_core,
@@ -18,6 +18,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use canoa::vendor::ShellRequest;
 use serde_json::{Value, json};
 
 /// What kind of shell a program is, by its name: what a harness's setting for a bash or a PowerShell takes.
@@ -484,55 +485,36 @@ pub struct Applied {
     pub notice: Option<String>,
 }
 
-/// How `harness` is told to use `shell`: Claude Code's `CLAUDE_CODE_GIT_BASH_PATH` on Windows (its documentation: "path to the
-/// Git Bash executable (`bash.exe`)", read only when the file is named `bash.exe`, `sh.exe`, `bash` or `sh`) and
-/// `CLAUDE_CODE_SHELL` elsewhere ("a path to a `bash` or `zsh` binary"). Codex has no setting for its shell (it looks for
-/// `pwsh` and `powershell` on the `PATH` on Windows and takes the account's login shell elsewhere), Pi reads `shellPath` from
-/// its own `settings.json` only, and Grok and Antigravity document none: each is said, none is guessed.
+/// How `harness` is told to use `shell`, as the agent's own description provider says (`AgentVendor::shell_advice`): each agent
+/// documents what it takes (a variable, a setting in its own file) or that it takes none, and only what is documented is passed.
+/// An agent with no provider of its own, or none that answers, is said to document no setting.
 #[must_use]
 pub fn for_harness(harness: &str, shell: &Shell, windows: bool) -> Applied {
-    let words = |text: &str| Applied {
-        env: Vec::new(),
-        notice: Some(text.to_owned()),
-    };
-    match harness {
-        "claude" => {
-            let name = stem(&shell.path);
-            let path = shell.path.to_string_lossy().into_owned();
-            match shell.family {
-                Family::Bash | Family::Zsh if windows => {
-                    if shell.origin == Origin::Wsl {
-                        words(
-                            "Claude Code on Windows runs Git Bash, and WSL's bash.exe starts a Linux shell: choose Git Bash or MSYS2's bash for it",
-                        )
-                    } else if name == "bash" || name == "sh" {
-                        Applied {
-                            env: vec![("CLAUDE_CODE_GIT_BASH_PATH".to_owned(), path)],
-                            notice: None,
-                        }
-                    } else {
-                        words("Claude Code on Windows takes a bash.exe or sh.exe")
-                    }
-                }
-                Family::Bash | Family::Zsh if name == "bash" || name == "zsh" => Applied {
-                    env: vec![("CLAUDE_CODE_SHELL".to_owned(), path)],
-                    notice: None,
-                },
-                Family::PowerShell => words(
-                    "Claude Code takes no path for PowerShell: its PowerShell tool runs the first pwsh on the PATH, which a copy the Store installed is on",
-                ),
-                _ => words(
-                    "Claude Code runs its commands with bash (or zsh), and takes no other shell",
-                ),
-            }
-        }
-        "codex" => words(
-            "Codex has no setting that names its shell: it looks for pwsh or powershell on the PATH on Windows and uses the account's login shell elsewhere",
-        ),
-        "pi" => words(
-            "Pi reads its shell only from shellPath in its own settings.json, which Canoa never writes: set it there",
-        ),
-        _ => words("this agent documents no setting for its shell"),
+    let mut request = ShellRequest::new(
+        shell.path.to_string_lossy(),
+        stem(&shell.path),
+        match shell.family {
+            Family::Bash => "bash",
+            Family::Zsh => "zsh",
+            Family::PowerShell => "powershell",
+            Family::Other => "other",
+        },
+    );
+    request.wsl = shell.origin == Origin::Wsl;
+    request.windows = windows;
+    match crate::vendors::behave(harness, |vendor| vendor.shell_advice(request)) {
+        Some(Ok(advice)) => Applied {
+            env: advice
+                .env
+                .into_iter()
+                .map(|variable| (variable.name, variable.value))
+                .collect(),
+            notice: advice.notice,
+        },
+        _ => Applied {
+            env: Vec::new(),
+            notice: Some(canoa::vendor::NO_SHELL_SETTING.to_owned()),
+        },
     }
 }
 

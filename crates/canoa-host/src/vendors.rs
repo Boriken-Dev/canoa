@@ -117,3 +117,27 @@ pub(crate) fn resolve(name: &str) -> Option<Vendor> {
             || each.standards.contains(&name)
     })
 }
+
+static BUNDLED_PROVIDERS: OnceLock<Option<Registry>> = OnceLock::new();
+
+/// Runs `f` on the `agent_vendor` provider of the bundled agent `agent`, which is what Canoa asks of an agent beyond its description
+/// (the variables an account sets, how a shell is chosen, where its sessions are kept); `None` when no bundled agent goes by that
+/// id. An agent a library from canoa.cfg adds answers through its description only.
+pub(crate) fn behave<T>(agent: &str, f: impl FnOnce(&dyn AgentVendor) -> T) -> Option<T> {
+    let registry = BUNDLED_PROVIDERS
+        .get_or_init(|| {
+            crate::control::providers::bundled_registry(crate::bundled::ALL)
+                .map_err(|why| tracing::warn!("the bundled agents' providers are not kept: {why}"))
+                .ok()
+        })
+        .as_ref()?;
+    for offer in registry.offers::<dyn AgentVendor>() {
+        let Some(vendor) = offer.default_instance() else {
+            continue;
+        };
+        if vendor.describe().is_ok_and(|info| info.agent == agent) {
+            return Some(f(vendor));
+        }
+    }
+    None
+}

@@ -20,7 +20,7 @@ use canoa::store::{
     Check, Download, InstallTools, LatestReport, Launch, MANAGER_NATIVE, MANAGER_NPM,
     MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
 };
-use canoa::vendor::{AgentVendor, ModeTitle, StandardTitle, VendorInfo};
+use canoa::vendor::{AgentVendor, ModeTitle, ShellAdvice, ShellRequest, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, Value};
 
@@ -72,6 +72,25 @@ impl AgentVendor for PiVendor {
         info.mark = Some(MARK.to_owned());
         info.look = None;
         Ok(info)
+    }
+
+    fn context_not_taken(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(
+            "pi-acp takes no system prompt; Pi reads SYSTEM.md and APPEND_SYSTEM.md only from its own directory".to_owned(),
+        ))
+    }
+
+    fn skills_not_taken(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(
+            "pi-acp passes Pi no --skill; Pi reads skills only from its own and the project's directories".to_owned(),
+        ))
+    }
+
+    fn shell_advice(&self, shell: ShellRequest) -> Result<ShellAdvice, ProviderError> {
+        drop(shell);
+        Ok(ShellAdvice::cannot(
+            "Pi reads its shell only from shellPath in its own settings.json, which Canoa never writes: set it there",
+        ))
     }
 }
 

@@ -117,10 +117,9 @@ fn homes_with_both(tree: &Tree) -> Homes {
         &format!("codex/sessions/2026/11/11/rollout-2026-11-11T16-40-40-{CODEX_ID}.jsonl"),
         &codex_rollout("Add a health endpoint"),
     );
-    Homes {
-        claude: Some(tree.claude()),
-        codex: Some(tree.codex()),
-    }
+    Homes::default()
+        .with("claude", tree.claude())
+        .with("codex", tree.codex())
 }
 
 fn control(tree: &Tree, homes: Homes) -> Control {
@@ -317,13 +316,7 @@ fn what_a_file_says_is_shown_cleaned_and_never_followed() {
         &format!("claude/projects/p/{id}/subagents/{CLAUDE_ID}.jsonl"),
         &claude_transcript("no"),
     );
-    let control = control(
-        &tree,
-        Homes {
-            claude: Some(tree.claude()),
-            codex: None,
-        },
-    );
+    let control = control(&tree, Homes::default().with("claude", tree.claude()));
     let listed = importable(&control, "claude");
     assert_eq!(listed["result"]["found"], 1, "{listed}");
     assert_eq!(
@@ -467,13 +460,7 @@ fn a_session_file_that_is_a_link_is_not_followed() {
         tree.claude().join(format!("projects/p/{CLAUDE_ID}.jsonl")),
     )
     .expect("a link");
-    let control = control(
-        &tree,
-        Homes {
-            claude: Some(tree.claude()),
-            codex: None,
-        },
-    );
+    let control = control(&tree, Homes::default().with("claude", tree.claude()));
     let listed = importable(&control, "claude");
     assert_eq!(listed["result"]["found"], 0, "{listed}");
 }

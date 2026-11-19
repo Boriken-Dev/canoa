@@ -20,21 +20,21 @@ use crate::config::AccountConfig;
 use crate::kind;
 
 /// Where each reader sends its request in place of the provider's own address, for a test's stand-in: the account provider's
-/// `usage_endpoint`. The credential is sent there.
+/// `usage_endpoint`, by the harness it serves. The credential is sent there.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Endpoints {
-    pub(crate) claude: Option<String>,
-    pub(crate) codex: Option<String>,
-}
+pub(crate) struct Endpoints(alloc::collections::BTreeMap<String, String>);
 
 impl Endpoints {
+    /// These endpoints and `endpoint` for the account provider of `harness`.
+    #[cfg(test)]
+    pub(crate) fn with(mut self, harness: &str, endpoint: impl Into<String>) -> Self {
+        self.0.insert(harness.to_owned(), endpoint.into());
+        self
+    }
+
     /// The `usage_endpoint` an account provider of `harness` is configured with, when one is named.
     pub(crate) fn of(&self, harness: &str) -> Option<&str> {
-        match harness {
-            "claude" => self.claude.as_deref(),
-            "codex" => self.codex.as_deref(),
-            _ => None,
-        }
+        self.0.get(harness).map(String::as_str)
     }
 }
 
@@ -130,17 +130,11 @@ fn why(error: &ProviderError) -> String {
 }
 
 /// Where a login lives in the account's directory, for the kinds whose provider renews it by looking at that directory: the
-/// credential holding the file's text, and the file's name.
-fn login_file(harness: &str, kind: &str) -> Option<(&'static str, &'static str)> {
-    use canoa_claude::acp::accounts as claude;
-    use canoa_codex::acp::accounts as codex;
-    match (harness, kind) {
-        ("claude", claude::LOGIN | claude::CONSOLE) => {
-            Some((claude::FILE_KEY, claude::CREDENTIALS_FILE))
-        }
-        ("codex", codex::CHATGPT) => Some((codex::FILE_KEY, codex::AUTH_FILE)),
-        _ => None,
-    }
+/// credential holding the file's text, and the file's name, as the agent's description provider says.
+fn login_file(harness: &str, kind: &str) -> Option<canoa::vendor::LoginFile> {
+    crate::vendors::behave(harness, |vendor| vendor.login_file(kind.to_owned()))
+        .and_then(Result::ok)
+        .flatten()
 }
 
 /// Renews the login through the account provider and stores what it made. It holds the account while it does, so a connection
@@ -155,7 +149,8 @@ fn renew(
         .hold_account(name, "usage", false)
         .map_err(|refusal| refusal.client_reason())?;
     let grant = held.grant();
-    if let Some((key, file)) = login_file(held.owner(), &grant.kind) {
+    if let Some(login) = login_file(held.owner(), &grant.kind) {
+        let (key, file) = (login.key.as_str(), login.file.as_str());
         let text = grant
             .credentials
             .expose()

@@ -781,6 +781,8 @@ dependencies = [
  "canoa",
  "coqui-acp-api",
  "coqui-acp-claude",
+ "coqui-acp-history",
+ "serde_json",
 ]
 
 [[package]]
@@ -790,6 +792,7 @@ dependencies = [
  "canoa",
  "coqui-acp-api",
  "coqui-acp-codex",
+ "coqui-acp-history",
  "serde_json",
 ]
 
