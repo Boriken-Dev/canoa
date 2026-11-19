@@ -25,7 +25,10 @@ fn row<'a>(answer: &'a Value, id: &str) -> &'a Value {
 #[test]
 fn the_hosts_terminal_and_log_are_providers_like_an_extensions_and_the_list_has_them_all() {
     let answer = list(&with_extension());
-    assert_eq!(ids(&answer), ["terminal", "logs", "buildlog", "devshell"]);
+    assert_eq!(
+        ids(&answer),
+        ["terminal", "logs", "buildlog", "devshell", "docs"]
+    );
     assert_eq!(row(&answer, "terminal")["origin"], "built-in");
     assert_eq!(row(&answer, "terminal")["shows"], "terminal");
     assert_eq!(row(&answer, "terminal")["shell"], Value::Null);
@@ -34,6 +37,22 @@ fn the_hosts_terminal_and_log_are_providers_like_an_extensions_and_the_list_has_
     assert_eq!(dev["origin"], "builds");
     assert_eq!(dev["shell"], "git-bash");
     assert_eq!(dev["icon"], "code");
+    assert_eq!(dev["url"], Value::Null);
+}
+
+#[test]
+fn a_page_on_the_loopback_is_listed_with_its_address_and_one_naming_another_site_is_not_offered() {
+    let answer = list(&with_extension());
+    let docs = row(&answer, "docs");
+    assert_eq!(docs["shows"], "page");
+    assert_eq!(docs["url"], "http://127.0.0.1:8123/docs");
+    assert_eq!(docs["origin"], "builds");
+    assert!(
+        !ids(&answer).contains(&"outside".to_owned()),
+        "a tab for https://example.com/ is refused: {answer}"
+    );
+    let refused = tail(&with_extension(), &json!({"id": "docs"})).expect_err("shows no log");
+    assert!(refused.1.contains("shows no log"), "{}", refused.1);
 }
 
 #[test]

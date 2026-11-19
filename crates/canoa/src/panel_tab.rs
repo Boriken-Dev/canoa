@@ -2,7 +2,8 @@
 //!
 //! Which kinds of tab the panel offers is not Canoa's to say: each is a provider of this kind, the ones Canoa carries (a terminal,
 //! the host's log) and the ones an extension adds alike. A provider describes itself (its id, name, icon and what the tab shows) and,
-//! for a log, answers the latest lines the application polls for.
+//! for a log, answers the latest lines the application polls for. A tab can also stand for a page the extension serves on this
+//! computer's loopback, which the application opens in the person's own browser.
 //!
 //! The models are plain data, the same in every language.
 
@@ -34,6 +35,9 @@ pub enum Shows {
     Terminal,
     /// Lines of text the provider keeps, which [`PanelTab::tail`] answers and the application shows as they come.
     Log,
+    /// A page the extension serves on this computer's loopback, at [`TabInfo::url`]: the tab names it and opens it in the person's
+    /// browser, since the application has no web view of its own.
+    Page,
 }
 
 /// What a kind of tab is, from [`PanelTab::describe`].
@@ -53,6 +57,9 @@ pub struct TabInfo {
     pub shows: Shows,
     /// For [`Shows::Terminal`]: the id of the shell the host lists that a new tab runs; none for the host's own choice.
     pub shell: Option<String>,
+    /// For [`Shows::Page`]: the address of the page, `http` or `https` on this computer's loopback (`127.0.0.1`, `[::1]` or
+    /// `localhost`, with or without a port), which the extension's own server answers.
+    pub url: Option<String>,
 }
 
 impl TabInfo {
@@ -66,7 +73,16 @@ impl TabInfo {
             icon: None,
             shows,
             shell: None,
+            url: None,
         }
+    }
+
+    /// A tab that opens the page at `url`.
+    #[must_use]
+    pub fn page(id: impl Into<String>, title: impl Into<String>, url: impl Into<String>) -> Self {
+        let mut info = Self::new(id, title, Shows::Page);
+        info.url = Some(url.into());
+        info
     }
 
     /// Why this provider cannot be offered, or `None` when it can.
@@ -93,8 +109,57 @@ impl TabInfo {
                 self.id
             ));
         }
-        None
+        match (&self.url, self.shows) {
+            (Some(_), shows) if shows != Shows::Page => Some(alloc::format!(
+                "the tab {:?} names an address but shows no page",
+                self.id
+            )),
+            (None, Shows::Page) => Some(alloc::format!(
+                "the tab {:?} shows a page and names none",
+                self.id
+            )),
+            (Some(url), _) => loopback_problem(url)
+                .map(|why| alloc::format!("the tab {:?} names {url:?}, which {why}", self.id)),
+            (None, _) => None,
+        }
     }
+}
+
+/// Why `url` is no page this computer's loopback serves, or `None` when it is one: `http` or `https`, the host `127.0.0.1`, `[::1]` or
+/// `localhost` and a port that is a number when there is one, with no user information and only printable ASCII. A page is the
+/// extension's own and opens in the person's browser, so what it names is a server on this computer and not another site.
+#[must_use]
+pub fn loopback_problem(url: &str) -> Option<&'static str> {
+    if !url.bytes().all(|byte| byte.is_ascii_graphic()) {
+        return Some("is not printable ASCII");
+    }
+    let Some(rest) = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))
+    else {
+        return Some("is not an http or https address");
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.contains('@') {
+        return Some("carries user information");
+    }
+    let (host, port) = match authority.strip_prefix('[') {
+        Some(inner) => match inner.split_once(']') {
+            Some((host, after)) => (alloc::format!("[{host}]"), after.strip_prefix(':')),
+            None => return Some("has an unclosed address"),
+        },
+        None => match authority.split_once(':') {
+            Some((host, port)) => (String::from(host), Some(port)),
+            None => (String::from(authority), None),
+        },
+    };
+    if !(host == "127.0.0.1" || host == "[::1]" || host.eq_ignore_ascii_case("localhost")) {
+        return Some("is not on this computer's loopback (127.0.0.1, [::1] or localhost)");
+    }
+    if port.is_some_and(|port| port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit())) {
+        return Some("has a port that is not a number");
+    }
+    None
 }
 
 /// How many of the latest lines a log is asked for.
@@ -149,5 +214,46 @@ mod tests {
             );
         }
         assert!(TabInfo::new("a", " ", Shows::Log).problem().is_some());
+    }
+
+    #[test]
+    fn a_page_names_an_address_on_this_computers_loopback_and_nothing_else_names_one() {
+        for url in [
+            "http://127.0.0.1:8123/",
+            "https://localhost/app?x=1#top",
+            "http://[::1]:9/a",
+            "http://LOCALHOST:80",
+        ] {
+            assert_eq!(TabInfo::page("docs", "Docs", url).problem(), None, "{url}");
+        }
+        for url in [
+            "http://example.com/",
+            "http://127.0.0.1.example.com/",
+            "http://localhost.evil.test/",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "http://user@127.0.0.1/",
+            "http://127.0.0.1:port/",
+            "http://127.0.0.1:/",
+            "http://[::1/",
+            "http://127.0.0.1/\u{e9}",
+            "127.0.0.1:80",
+        ] {
+            assert!(
+                TabInfo::page("docs", "Docs", url).problem().is_some(),
+                "{url}"
+            );
+        }
+        assert!(
+            TabInfo::new("docs", "Docs", Shows::Page)
+                .problem()
+                .is_some_and(|why| why.contains("names none"))
+        );
+        let mut log = TabInfo::new("logs", "Logs", Shows::Log);
+        log.url = Some("http://127.0.0.1/".into());
+        assert!(
+            log.problem()
+                .is_some_and(|why| why.contains("shows no page"))
+        );
     }
 }

@@ -1165,8 +1165,10 @@ Accounts and the rest) are listed by the host the same way, so the app learns wh
 
 The bottom panel of a conversation is one bar of tabs. Its + menu offers Terminal (and Terminal in each shell the host lists), the host's
 Logs and what an extension adds: a provider of the `panel_tab` kind says a tab's name, icon and whether it shows a shell (the host's
-own, or one it names) or a log whose latest lines the provider answers. The host lists the kinds with `panel_tabs/list`. Opening
-Logs and an extension's logs needs the key to hold `hosting`.
+own, or one it names), a log whose latest lines the provider answers, or a page the extension serves on this computer's loopback
+(`http` or `https` on `127.0.0.1`, `[::1]` or `localhost`; any other address is refused). The host lists the kinds with `panel_tabs/list`.
+Opening Logs and an extension's logs needs the key to hold `hosting`. A page's tab names its address and has a button that opens it in
+your browser; Canoa embeds no web view, and a page on a host that runs on another computer is not offered, since its loopback is not yours.
 
 ## Windows, macOS and Linux tray behavior
 

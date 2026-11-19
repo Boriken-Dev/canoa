@@ -645,6 +645,10 @@ class _CanoaAppState extends State<CanoaApp> {
             // A log is the host's own diagnostics: only a key that may change the host's settings reads it.
             if (_panelTabs case final kinds? when _grants?.may(HostGrants.hosting) ?? false)
               for (final kind in kinds.logs) LogSurface(kind, kinds),
+            // A page is on the host's own loopback, which a browser reaches only on the computer the host runs on: a page served by
+            // another computer's host offers none.
+            if (_panelTabs case final kinds? when widget.served == null)
+              for (final kind in kinds.pages) PageSurface(kind),
           ],
           addedChanged: _panelTabs,
         )

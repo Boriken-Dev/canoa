@@ -1,4 +1,4 @@
-//! A stand-in extension: a library of its own that offers two kinds of tab, as an extension of canoa.cfg would.
+//! A stand-in extension: a library of its own that offers kinds of tab, as an extension of canoa.cfg would.
 
 use canoa::panel_tab::{PanelTab, Shows, TabInfo, TailRequest};
 use coqui_acp_api::guatiao::Provider;
@@ -44,13 +44,46 @@ impl PanelTab for BuildLog {
     }
 }
 
+/// A page its server answers on this computer's loopback.
+#[derive(Default, Debug, Provider)]
+#[provider(PanelTab, id = "docs_page", crate = ::coqui_acp_api::guatiao)]
+pub(crate) struct DocsPage;
+
+impl PanelTab for DocsPage {
+    fn describe(&self) -> Result<TabInfo, ProviderError> {
+        let mut info = TabInfo::page("docs", "Docs", "http://127.0.0.1:8123/docs");
+        info.icon = Some("book".to_owned());
+        info.help = Some("The extension's documentation.".to_owned());
+        Ok(info)
+    }
+
+    fn tail(&self, _request: TailRequest) -> Result<String, ProviderError> {
+        Ok(String::new())
+    }
+}
+
+/// A tab that names a site of someone else's, which a kind of tab may not.
+#[derive(Default, Debug, Provider)]
+#[provider(PanelTab, id = "outside_page", crate = ::coqui_acp_api::guatiao)]
+pub(crate) struct OutsidePage;
+
+impl PanelTab for OutsidePage {
+    fn describe(&self) -> Result<TabInfo, ProviderError> {
+        Ok(TabInfo::page("outside", "Outside", "https://example.com/"))
+    }
+
+    fn tail(&self, _request: TailRequest) -> Result<String, ProviderError> {
+        Ok(String::new())
+    }
+}
+
 mod library {
-    use super::{BuildLog, DevShell};
+    use super::{BuildLog, DevShell, DocsPage, OutsidePage};
 
     coqui_acp_api::guatiao::local_providers!(
         id = "builds",
         version = "1.0.0",
-        providers = [DevShell, BuildLog]
+        providers = [DevShell, BuildLog, DocsPage, OutsidePage]
     );
 }
 

@@ -173,8 +173,8 @@ impl TabCatalog {
         Self::from_registries(crate::control::providers::loaded(config))
     }
 
-    /// The kinds as `panel_tabs/list` answers: each with its `id`, `title`, `help`, `icon`, `shows` (`terminal` or `log`), `shell`
-    /// and `origin` (`built-in`, or the name of the entry or extension that loads it).
+    /// The kinds as `panel_tabs/list` answers: each with its `id`, `title`, `help`, `icon`, `shows` (`terminal`, `log` or `page`),
+    /// `shell`, `url` and `origin` (`built-in`, or the name of the entry or extension that loads it).
     pub(crate) fn list(&self) -> Value {
         let tabs: Vec<Value> = self
             .entries
@@ -183,8 +183,8 @@ impl TabCatalog {
                 let info = &entry.info;
                 json!({
                     "id": info.id, "title": info.title, "help": info.help, "icon": info.icon,
-                    "shows": match info.shows { Shows::Terminal => "terminal", Shows::Log => "log" },
-                    "shell": info.shell, "origin": entry.origin,
+                    "shows": match info.shows { Shows::Terminal => "terminal", Shows::Log => "log", Shows::Page => "page" },
+                    "shell": info.shell, "url": info.url, "origin": entry.origin,
                 })
             })
             .collect();

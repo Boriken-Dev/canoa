@@ -12,6 +12,7 @@ import 'package:canoa/shell/layout_state.dart';
 import 'package:canoa/shell/panel_tabs.dart';
 import 'package:canoa/shell/surface.dart';
 import 'package:canoa/shell/work_panel.dart';
+import 'package:canoa/store/links.dart' as links;
 import 'package:canoa/surfaces/terminal_controller.dart';
 import 'package:canoa/surfaces/terminal_surface.dart';
 import 'package:canoa/theme/look.dart';
@@ -24,6 +25,7 @@ import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 const _terminal = {'id': 'terminal', 'title': 'Terminal', 'icon': 'terminal', 'shows': 'terminal', 'shell': null, 'origin': 'built-in'};
 const _logs = {'id': 'logs', 'title': 'Logs', 'icon': 'article', 'shows': 'log', 'shell': null, 'origin': 'built-in'};
 const _buildLog = {'id': 'buildlog', 'title': 'Build log', 'icon': null, 'shows': 'log', 'shell': null, 'origin': 'builds'};
+const _docs = {'id': 'docs', 'title': 'Docs', 'icon': 'book', 'shows': 'page', 'url': 'http://127.0.0.1:8123/docs', 'help': 'The extension\'s documentation.', 'origin': 'builds'};
 const _devShell = {'id': 'devshell', 'title': 'Dev shell', 'icon': 'code', 'shows': 'terminal', 'shell': 'git-bash', 'origin': 'builds'};
 
 /// The host's two methods over what each log holds.
@@ -165,6 +167,88 @@ void main() {
     expect(_key('open terminal'), findsOneWidget);
     await tester.tapAt(const Offset(2, 2));
     await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  test('a page is read with the address its provider gives, and one without a plain http or https address is left out', () async {
+    final host = _Host();
+    final kinds = PanelTabKinds(host.call);
+    addTearDown(kinds.dispose);
+    host.listed = [
+      _terminal,
+      _docs,
+      {..._docs, 'id': 'nourl', 'url': null},
+      {..._docs, 'id': 'file', 'url': 'file:///etc/passwd'},
+      {..._docs, 'id': 'script', 'url': 'javascript:alert(1)'},
+    ];
+    await kinds.load();
+    expect([for (final each in kinds.pages) each.id], ['docs']);
+    expect(kinds.pages.single.url, Uri.parse('http://127.0.0.1:8123/docs'));
+    expect([for (final each in kinds.terminals) each.id], ['terminal'], reason: 'a page is no terminal or log');
+    expect(kinds.logs, isEmpty);
+  });
+
+  testWidgets('a page an extension serves is offered by the + menu and opens in the browser; a browser that takes none says so', (tester) async {
+    final host = _Host()..listed = [_terminal, _logs, _docs];
+    final kinds = PanelTabKinds(host.call);
+    addTearDown(kinds.dispose);
+    await kinds.load();
+    final opened = <Uri>[];
+    var answer = true;
+    final before = links.openLink;
+    links.openLink = (uri) async {
+      opened.add(uri);
+      return answer;
+    };
+    addTearDown(() => links.openLink = before);
+    final store = SessionStore();
+    addTearDown(store.dispose);
+    final session = store.addProviderSession(title: 'T', agent: 'Claude Code', peerId: 'local:claude', remoteSessionId: 'r-t');
+    final registry = WorkSurfaces(
+      [const _Probe()],
+      added: () => [for (final kind in kinds.pages) PageSurface(kind)],
+      addedChanged: kinds,
+    );
+    addTearDown(registry.dispose);
+    final open = registry.of(session.id)..openSurface(registry.registry.first, SurfaceSlot.bottom);
+    await tester.binding.setSurfaceSize(const Size(900, 360));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: themeFor(LookId.canoa, Brightness.dark),
+      home: Scaffold(
+        body: SurfaceEnvironment(
+          store: store,
+          onComment: (_) {},
+          onOpenChild: () {},
+          child: ListenableBuilder(
+            listenable: registry,
+            builder: (context, _) => WorkPanel(slot: SurfaceSlot.bottom, session: session, surfaces: open, offered: registry.availableFor(session, SurfaceSlot.bottom), layout: ShellLayout()),
+          ),
+        ),
+      ),
+    ));
+    await tester.pump();
+    await tester.tap(_key('panel-add'));
+    await tester.pumpAndSettle();
+    expect(_key('open page:docs'), findsOneWidget);
+    await tester.tap(_key('open page:docs'));
+    await tester.pumpAndSettle();
+    expect(_key('tab page:docs'), findsOneWidget);
+    expect(find.text('http://127.0.0.1:8123/docs'), findsOneWidget);
+    expect(find.text('The extension\'s documentation.'), findsOneWidget);
+    expect(opened, isEmpty, reason: 'nothing opens until the person asks');
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/panel_page_tab.png'));
+
+    await tester.tap(_key('page open'));
+    await tester.pumpAndSettle();
+    expect(opened, [Uri.parse('http://127.0.0.1:8123/docs')]);
+    expect(_key('page problem'), findsNothing);
+
+    answer = false;
+    await tester.tap(_key('page open'));
+    await tester.pumpAndSettle();
+    expect(_key('page problem'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 

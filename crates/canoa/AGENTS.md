@@ -178,20 +178,21 @@ The `panel_tab` kind: a kind of tab the application's bottom panel can open. Whi
 
 ```rust
 pub const KIND: &str = "panel_tab";   pub const KIND_VERSIONS: [&str; 1] = ["1"];   pub const MAX_TAIL_LINES: u32 = 5000;
-pub enum Shows { Terminal, Log }
+pub enum Shows { Terminal, Log, Page }
 #[non_exhaustive] pub struct TabInfo { pub id: String, pub title: String, pub help: Option<String>, pub icon: Option<String>,
-    pub shows: Shows, pub shell: Option<String> }
+    pub shows: Shows, pub shell: Option<String>, pub url: Option<String> }
 #[non_exhaustive] pub struct TailRequest { pub lines: u32 }
 #[guatiao::kind(name = "panel_tab")] pub trait PanelTab: Send + Sync {
     fn describe(&self) -> Result<TabInfo, ProviderError>;                    // the same on every call, with nothing run
     fn tail(&self, request: TailRequest) -> Result<String, ProviderError>;   // `Shows::Log`: the latest lines, oldest first; empty for a terminal
 }
 pub fn internal_error(why) -> ProviderError;
-impl TabInfo { pub fn new(id, title, shows) -> Self; pub fn problem(&self) -> Option<String> }
+impl TabInfo { pub fn new(id, title, shows) -> Self; pub fn page(id, title, url) -> Self; pub fn problem(&self) -> Option<String> }
+pub fn loopback_problem(url: &str) -> Option<&'static str>;   // None for http/https on 127.0.0.1, [::1] or localhost, no user information, a numeric port if any
 ```
 
-- `id` is a word of lower-case letters, digits and `_` (1 to 32). `Shows::Terminal` opens a shell on the host: `shell` is the id of one the host lists (`shell/list`), none for the host's own choice. `Shows::Log` is a text the provider keeps: the application asks for the latest lines every couple of seconds while the tab is open.
-- `TabInfo::problem` says why a description cannot be used (a bad id, no title, a shell named by a kind that shows no terminal).
+- `id` is a word of lower-case letters, digits and `_` (1 to 32). `Shows::Terminal` opens a shell on the host: `shell` is the id of one the host lists (`shell/list`), none for the host's own choice. `Shows::Log` is a text the provider keeps: the application asks for the latest lines every couple of seconds while the tab is open. `Shows::Page` is a page the extension's own server answers on this computer's loopback, at `url`: the application has no web view of its own, so the tab names the page and a button opens it in the person's browser (the same decision as the Browser surface: nothing is embedded, and the extension's own permissions stay in the browser).
+- `TabInfo::problem` says why a description cannot be used (a bad id, no title, a shell named by a kind that shows no terminal, an address on a kind that shows no page, a page with none or one that is not `http`/`https` on the loopback: a tab names a server on this computer, not another site).
 
 ## `canoa::network` (feature `network`)
 
