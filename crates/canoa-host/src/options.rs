@@ -445,7 +445,10 @@ pub(crate) fn as_account(
         Err(refusal) => return Choices::failed(refusal.client_reason()),
     };
     let mut owner = None;
-    if held.owner() != built.id() {
+    if let Some(maker) = crate::makers::for_kind(&held.grant().kind) {
+        // A maker lists what it made, whichever harness is asked.
+        owner = Some((maker.provider(), store.source()));
+    } else if held.owner() != built.id() {
         match crate::accounts::commands::provider_for(config, held.owner()).and_then(|other| {
             other
                 .account_provider()
@@ -579,7 +582,17 @@ fn models_of(
             if let Some(listing) = held.gateway_models() {
                 return listing;
             }
-            (held.grant(), other)
+            let mut grant = held.grant();
+            // An account of several standards is listed for the one this harness runs it on, so a provider that tells its models by
+            // standard answers for that one; the others give one list.
+            if grant.provides.len() > 1
+                && let Some(accepted) = built
+                    .catalog()
+                    .and_then(|catalog| catalog.accepted_by(&grant.provides).ok())
+            {
+                grant.provides = vec![accepted.standard.clone()];
+            }
+            (grant, other)
         }
     };
     let provider = match other {

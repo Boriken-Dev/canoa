@@ -148,7 +148,7 @@ fn stand_in(refuses: Option<&str>) -> (Offer, Arc<Record>) {
 
 fn catalog_of(harness: &str) -> AccountCatalog {
     let mut catalog = AccountCatalog::new();
-    extend(&mut catalog, harness);
+    crate::makers::extend(&mut catalog, harness, None);
     catalog
 }
 
@@ -282,7 +282,7 @@ fn the_kind_and_its_method_join_the_catalogs_of_the_harnesses_that_can_be_given_
         assert!(kind.state_dir && kind.notices.len() == 2);
         assert_eq!(catalog.logins[0].produces, KIND);
         let mut again = catalog.clone();
-        extend(&mut again, harness);
+        crate::makers::extend(&mut again, harness, None);
         assert_eq!(again, catalog, "adding it twice changes nothing");
     }
     assert!(catalog_of("grok").kind(KIND).is_none());
@@ -313,9 +313,13 @@ fn the_library_offers_the_gateway_and_the_host_finds_its_kind_provider_and_vendo
     assert_eq!(offer.provider, "foundry_accounts");
     assert_eq!(vendor_of(KIND), Some("microsoft-foundry"));
     assert_eq!(vendor_of("anthropic-api-key"), None);
-    assert!(account_providers().any(|id| id == "foundry_accounts"));
-    assert!(login_provider(KIND).is_some());
-    assert!(login_provider("claude-login").is_none());
+    assert!(
+        crate::makers::ids()
+            .iter()
+            .any(|id| id == "foundry_accounts")
+    );
+    assert!(crate::makers::login_provider(KIND).is_some());
+    assert!(crate::makers::login_provider("claude-login").is_none());
 }
 
 #[test]

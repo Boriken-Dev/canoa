@@ -85,10 +85,13 @@ impl<'a> Catalogs<'a> {
 
     /// The kind `account` is of, as the account provider of the provider that made it offers it.
     pub(crate) fn kind(&self, account: &AccountConfig) -> Option<AccountKindInfo> {
-        self.known(&account.harness)?
-            .listing
-            .kind(&account.kind)
-            .cloned()
+        self.known(&account.harness)
+            .and_then(|known| known.listing.kind(&account.kind).cloned())
+            .or_else(|| {
+                // A kind a maker makes is the same whichever harness the account names, or none that can be built.
+                crate::makers::for_kind(&account.kind)
+                    .and_then(|maker| maker.kind(&account.kind).cloned())
+            })
     }
 
     /// Every harness whose accounts this host can make or run: the bundled agents' and those canoa.cfg's entries run.

@@ -26,6 +26,7 @@ mod launcher;
 mod local;
 mod loopback;
 mod mail;
+mod makers;
 pub mod native;
 mod network;
 pub mod options;

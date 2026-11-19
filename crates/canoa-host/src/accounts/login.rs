@@ -103,7 +103,7 @@ pub(crate) fn sign_in(
     let included = if own {
         None
     } else {
-        crate::gateways::login_provider(method)
+        crate::makers::login_provider(method)
     };
     let provider: &dyn AccountProvider = included.as_deref().unwrap_or(provider);
     // The directory goes when this returns, however the sign-in ended.

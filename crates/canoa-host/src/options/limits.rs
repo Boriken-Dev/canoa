@@ -49,12 +49,19 @@ pub(super) fn read(
     name: &str,
     account: &AccountConfig,
 ) -> Result<UsageReport, String> {
-    let Ok(provider) = built.account_provider() else {
-        return Ok(UsageReport::unsupported(
-            "this account's provider reads no plan limits: it has no account provider",
-        ));
+    // An account a maker made is read by the maker, whichever harness it is read through; any other by its harness's provider.
+    let provider = match crate::makers::for_kind(&account.kind) {
+        Some(maker) => maker.provider(),
+        None => match built.account_provider() {
+            Ok(provider) => alloc::sync::Arc::clone(provider),
+            Err(_) => {
+                return Ok(UsageReport::unsupported(
+                    "this account's provider reads no plan limits: it has no account provider",
+                ));
+            }
+        },
     };
-    read_account(built, provider, name, account)
+    read_account(built, &provider, name, account)
 }
 
 fn read_account(

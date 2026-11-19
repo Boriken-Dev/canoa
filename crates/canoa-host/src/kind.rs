@@ -163,7 +163,8 @@ impl Harness {
                 other => other,
             })?;
         let catalog = plain.accounts().ok();
-        let (accounts_of, listing, local) = account_side(registry, id, settings, account_settings)?;
+        let (accounts_of, listing, local) =
+            account_side(registry, id, (settings, account_settings), catalog.as_ref())?;
         let profiled = if profiles {
             let mut map = settings.as_map().clone();
             map.insert(CLIENT_PLUGINS.to_owned(), serde_json::Value::Bool(true));
@@ -730,19 +731,19 @@ pub(crate) fn instance(
     }
 }
 
-/// A harness's account provider, what it offers listed with the kinds that gateways serve, and whether it offers the harness's own
-/// login as the automatic `local` account.
+/// A harness's account provider, what it offers listed with the kinds the account makers offer that it can run, and whether it
+/// offers the harness's own login as the automatic `local` account.
 type AccountSide = (Option<Arc<dyn AccountProvider>>, AccountCatalog, bool);
 
-/// The account provider the library of harness `harness` offers as `<harness>_accounts`, what it offers listed with the kinds that
-/// gateways serve. `own` configures it; the harness's `executable`, `harness`, `node` and `script` settings are
-/// given to it where it declares them, so that it runs the program the harness runs. A library with no such provider has no
-/// accounts to make, and its listing holds only the login a program has where it runs.
+/// The account provider the library of harness `harness` offers as `<harness>_accounts`, what it offers listed with the kinds the
+/// account makers offer that the harness can run (`accepts` is what it takes). `own` configures it; the harness's `executable`,
+/// `harness`, `node` and `script` settings are given to it where it declares them, so that it runs the program the harness runs. A
+/// library with no such provider has no accounts to make, and its listing holds only the login a program has where it runs.
 fn account_side(
     registry: &Registry,
     harness: &str,
-    settings: &Settings,
-    own: &Settings,
+    (settings, own): (&Settings, &Settings),
+    accepts: Option<&AccountCatalog>,
 ) -> Result<AccountSide, ProviderError> {
     let mut listing = AccountCatalog::new();
     let provider = account_provider(registry, harness, settings, own)?;
@@ -755,7 +756,7 @@ fn account_side(
         listing.kinds.extend(offer.kinds);
         listing.logins = offer.logins;
     }
-    crate::gateways::extend(&mut listing, harness);
+    crate::makers::extend(&mut listing, harness, accepts);
     Ok((provider, listing, local))
 }
 

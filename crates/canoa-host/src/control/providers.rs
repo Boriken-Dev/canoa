@@ -14,9 +14,7 @@ use serde_json::{Value, json};
 use crate::bundled::{self, Bundle};
 use crate::config::{Config, EntryKind, Origin, Settings};
 use crate::kind::{account_provider, instance};
-
-/// The suffix of an account provider's id: `<harness>_accounts` serves the accounts of harness `<harness>`.
-const ACCOUNTS_SUFFIX: &str = "_accounts";
+use crate::makers::ACCOUNTS_SUFFIX;
 
 /// What the loaded providers say of one agent, from every registry that offers a part of it.
 #[derive(Default)]
@@ -228,8 +226,8 @@ pub(crate) fn rows_of(registries: &[(&str, &Registry)], bundles: &[Bundle]) -> V
         }
         for offer in registry.offers::<dyn AccountProvider>() {
             let provider_id = offer.id().to_owned();
-            // The kinds of a gateway's accounts join the catalogs of the harnesses that can be given a gateway: no agent is theirs.
-            if crate::gateways::account_providers().any(|each| each == provider_id) {
+            // The kinds of a maker's accounts join the listings of the harnesses that can run them: no agent is theirs.
+            if crate::makers::ids().contains(&provider_id) {
                 continue;
             }
             let harness = provider_id

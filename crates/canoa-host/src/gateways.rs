@@ -16,8 +16,8 @@ use canoa::gateway::{GatewayInfo, GatewayLease, GatewayRequest, ModelGateway};
 use coqui_acp_api::guatiao::Value;
 use coqui_acp_api::guatiao::library::{Object, Registry};
 use coqui_acp_api::{
-    AccountCatalog, AccountGrant, AccountOffer, AccountProvider, Credentials, ModelListing,
-    ProcessSpawner, UnknownKind,
+    AccountGrant, AccountOffer, AccountProvider, Credentials, ModelListing, ProcessSpawner,
+    UnknownKind,
 };
 use coqui_acp_harness::LocalSpawner;
 
@@ -35,7 +35,6 @@ pub(crate) struct Offer {
     pub(crate) provider: String,
     /// What that provider offers: the kinds, and the sign-in methods.
     pub(crate) accounts: AccountOffer,
-    maker: Arc<dyn AccountProvider>,
 }
 
 impl Offer {
@@ -53,7 +52,6 @@ impl Offer {
             gateway,
             provider: provider.into(),
             accounts,
-            maker,
         })
     }
 
@@ -99,55 +97,10 @@ pub(crate) fn for_kind(kind: &str) -> Option<&'static Offer> {
     offered().iter().find(|offer| offer.info.kind == kind)
 }
 
-/// The id of each account provider whose kinds a gateway serves: they join the catalogs of the harnesses, and are no agent's own.
-pub(crate) fn account_providers() -> impl Iterator<Item = &'static str> {
-    offered().iter().map(|offer| offer.provider.as_str())
-}
-
 /// The vendor of what runs the model of accounts of `kind`, in the words a session's identity variables use, when a gateway
 /// serves the kind.
 pub(crate) fn vendor_of(kind: &str) -> Option<&'static str> {
     for_kind(kind).map(|offer| offer.info.vendor.as_str())
-}
-
-/// Adds the kinds and sign-in methods the gateways serve to `catalog`, for a harness that can be given a gateway: one whose
-/// description says how it takes an address and a bearer.
-pub(crate) fn extend(catalog: &mut AccountCatalog, harness: &str) {
-    extend_with(offered(), catalog, harness);
-}
-
-fn extend_with(offers: &[Offer], catalog: &mut AccountCatalog, harness: &str) {
-    if crate::vendors::gateway_route(harness).is_none() {
-        return;
-    }
-    for offer in offers {
-        if catalog.kinds.iter().any(|kind| kind.id == offer.info.kind) {
-            continue;
-        }
-        catalog.kinds.extend(offer.kind().cloned());
-        catalog.logins.extend(
-            offer
-                .accounts
-                .logins
-                .iter()
-                .filter(|method| method.produces == offer.info.kind)
-                .cloned(),
-        );
-    }
-}
-
-/// The account provider whose sign-in method is `method`, when it is one a gateway's kind is made with.
-pub(crate) fn login_provider(method: &str) -> Option<Arc<dyn AccountProvider>> {
-    offered()
-        .iter()
-        .find(|offer| {
-            offer
-                .accounts
-                .logins
-                .iter()
-                .any(|login| login.id == method && login.produces == offer.info.kind)
-        })
-        .map(|offer| Arc::clone(&offer.maker))
 }
 
 /// What the gateways need of the host: where its home is, which canoa.cfg to read each gateway's table from, and how to start the

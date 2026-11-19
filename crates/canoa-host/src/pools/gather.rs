@@ -72,7 +72,8 @@ fn reported(
     endpoints: &Endpoints,
 ) -> Option<UsageReport> {
     let store = built.accounts_host()?;
-    let key = format!("{}\0{}\0{}", built.id(), account.id, account.kind);
+    // One account has one allowance, whichever harness or pool asks: it is read once and counts everywhere the account is.
+    let key = format!("{}\0{}", account.id, account.kind);
     let stand_in = !endpoints.is_default();
     if !stand_in && let Some(held) = kept(&REPORTED, &key, REPORTED_FOR) {
         return held;
@@ -83,6 +84,15 @@ fn reported(
         keep(&REPORTED, key, report.clone());
     }
     report
+}
+
+/// Forgets what was read of the allowances, for a test that changes what its provider reports.
+#[cfg(test)]
+pub(crate) fn forget_reports() -> usize {
+    let mut kept = REPORTED.lock().unwrap_or_else(PoisonError::into_inner);
+    let count = kept.len();
+    kept.clear();
+    count
 }
 
 /// What a client heard of an account: a turn a limit refused, and when its limit lets go, when it said.

@@ -58,6 +58,10 @@ pub(crate) fn account_words(
     if let Some(vendor) = crate::gateways::vendor_of(kind) {
         return (Some("local"), Some(vendor));
     }
+    // A key to an address a library's account kind names runs the agent through that address: its provider is not the agent's.
+    if crate::makers::makes(kind) {
+        return (Some("gateway"), None);
+    }
     let by_prefix = crate::vendors::all().into_iter().find_map(|known| {
         let vendor = known.vendor?;
         (kind.starts_with(vendor) || kind.starts_with(known.agent)).then_some(vendor)
