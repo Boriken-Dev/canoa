@@ -736,7 +736,7 @@ const described = kindsOf({
     },
     {
       "name": "agent_vendor",
-      "floor_hash": 1152284818,
+      "floor_hash": 3218056832,
       "object": false,
       "slots": [
         {
@@ -744,6 +744,195 @@ const described = kindsOf({
           "required": true,
           "fallible": true,
           "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "account_variables",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "grant",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "login_file",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "kind",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "shell_advice",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "shell",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "context_not_taken",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "skills_not_taken",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "mcp_not_taken",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "mcp_note",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "skills_delivery",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "hooks_delivery",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "hook_support",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "gateway_route",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "gateway_files",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "address",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "access_target",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "sessions",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "session_history",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
           "answer": {
             "type": "value"
           }
@@ -839,5 +1028,8 @@ export const InstallTools = described["install_tools"];
 /** Adds types to the Store. The same answer on every call, with nothing run and no connection opened. */
 export const StoreExtension = described["store_extension"];
 
-/** Describes an agent. The same answer on every call, with nothing run and no connection opened. */
+/**
+ * Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with
+ * nothing run and no connection opened; every other method has a default that says the agent has nothing to add.
+ */
 export const AgentVendor = described["agent_vendor"];

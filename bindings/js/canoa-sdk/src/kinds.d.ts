@@ -646,20 +646,192 @@ export interface StoreExtensionRemote extends k.RemoteBase<typeof StoreExtension
 export declare const StoreExtension: k.DescribedKind<StoreExtension, StoreExtensionRemote, false>;
 
 /**
- * Describes an agent. The same answer on every call, with nothing run and no connection opened.
+ * Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with
+ * nothing run and no connection opened; every other method has a default that says the agent has nothing to add.
  *
  * The `agent_vendor` kind: what a provider of it implements.
  */
 export interface AgentVendor {
   /** Who the agent is. */
   describe(): unknown;
+  /**
+   * The variables that holding the account `grant` describes sets in the agent's environment and that hold no credential (its
+   * configuration directory, its endpoint), so a profile's layers can read them before a session starts. The default: none.
+   */
+  accountVariables?(grant: g.Ref): unknown;
+  /**
+   * Where a login of the account kind `kind` lives in the account's directory, when the agent's provider renews it by looking
+   * at the directory. The default: nowhere.
+   */
+  loginFile?(kind: g.Ref): unknown;
+  /** How the agent is told to use `shell`. The default says the agent documents no setting for its shell. */
+  shellAdvice?(shell: g.Ref): unknown;
+  /**
+   * Why the agent does not take the starting instructions of a profile, in words, when it does not. The default: it does not
+   * say it does.
+   */
+  contextNotTaken?(): unknown;
+  /** Why the agent does not take the skills of a profile, in words, when it does not. The default: it does not say. */
+  skillsNotTaken?(): unknown;
+  /**
+   * Why the agent starts none of the MCP servers a session request gives it, in words, when it starts none. The default: it
+   * starts them as ACP says.
+   */
+  mcpNotTaken?(): unknown;
+  /**
+   * What the report adds to an MCP server the agent is given, in words, where the agent does something with it that the person
+   * should know; `{name}` is the server's name. The default: nothing.
+   */
+  mcpNote?(): unknown;
+  /**
+   * How the agent is given the skills of a profile, for an agent that says what it takes in `request`; `None` when it cannot be.
+   * The default: it cannot.
+   */
+  skillsDelivery?(request: g.Ref): unknown;
+  /**
+   * How the agent runs hooks that report to the host: the moments of `request` that only the agent's own hooks show, as the
+   * files of a plugin. `None` when the agent's own hooks cannot be given. The default: they cannot.
+   */
+  hooksDelivery?(request: g.Ref): unknown;
+  /**
+   * What the agent's own hooks do for an event ACP does not show; `None` when the agent says nothing of it, which the host
+   * reports as an event no hook of the agent's reaches. The default: nothing.
+   */
+  hookSupport?(request: g.Ref): unknown;
+  /**
+   * How the agent is given a gateway the host runs for a session (the address and bearer of a local model's server), when it can be:
+   * the account kind of its own that takes them. The default: it cannot.
+   */
+  gatewayRoute?(): unknown;
+  /**
+   * The files the agent reads from its own folder to use a gateway at `address` (what [`GatewayRoute::address`] leaves out, and what
+   * a gateway cannot serve turned off). The default: none.
+   */
+  gatewayFiles?(address: g.Ref): unknown;
+  /**
+   * The table of words that says what became of the access a profile sets, for the agent the host starts or serves; `None` for an
+   * agent no table covers, which is started as its entry says. The default: none.
+   */
+  accessTarget?(): unknown;
+  /**
+   * The sessions the agent's own program kept on this computer, found and read as the program lays them out; `None` for an agent
+   * whose sessions Canoa cannot bring in.
+   */
+  sessions?(request: g.Ref): unknown;
+  /** The standard session history of one session file's text. The default refuses: the agent has none to give. */
+  sessionHistory?(request: g.Ref): unknown;
 }
 
 /** A caller's handle on a `agent_vendor` table: a method per slot. */
 export interface AgentVendorRemote extends k.RemoteBase<typeof AgentVendor> {
   /** Who the agent is. */
   describe(): g.Value;
+  /**
+   * The variables that holding the account `grant` describes sets in the agent's environment and that hold no credential (its
+   * configuration directory, its endpoint), so a profile's layers can read them before a session starts. The default: none.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  accountVariables(grant: unknown): g.Value;
+  /**
+   * Where a login of the account kind `kind` lives in the account's directory, when the agent's provider renews it by looking
+   * at the directory. The default: nowhere.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  loginFile(kind: unknown): g.Value;
+  /**
+   * How the agent is told to use `shell`. The default says the agent documents no setting for its shell.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  shellAdvice(shell: unknown): g.Value;
+  /**
+   * Why the agent does not take the starting instructions of a profile, in words, when it does not. The default: it does not
+   * say it does.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  contextNotTaken(): g.Value;
+  /**
+   * Why the agent does not take the skills of a profile, in words, when it does not. The default: it does not say.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  skillsNotTaken(): g.Value;
+  /**
+   * Why the agent starts none of the MCP servers a session request gives it, in words, when it starts none. The default: it
+   * starts them as ACP says.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  mcpNotTaken(): g.Value;
+  /**
+   * What the report adds to an MCP server the agent is given, in words, where the agent does something with it that the person
+   * should know; `{name}` is the server's name. The default: nothing.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  mcpNote(): g.Value;
+  /**
+   * How the agent is given the skills of a profile, for an agent that says what it takes in `request`; `None` when it cannot be.
+   * The default: it cannot.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  skillsDelivery(request: unknown): g.Value;
+  /**
+   * How the agent runs hooks that report to the host: the moments of `request` that only the agent's own hooks show, as the
+   * files of a plugin. `None` when the agent's own hooks cannot be given. The default: they cannot.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  hooksDelivery(request: unknown): g.Value;
+  /**
+   * What the agent's own hooks do for an event ACP does not show; `None` when the agent says nothing of it, which the host
+   * reports as an event no hook of the agent's reaches. The default: nothing.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  hookSupport(request: unknown): g.Value;
+  /**
+   * How the agent is given a gateway the host runs for a session (the address and bearer of a local model's server), when it can be:
+   * the account kind of its own that takes them. The default: it cannot.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  gatewayRoute(): g.Value;
+  /**
+   * The files the agent reads from its own folder to use a gateway at `address` (what [`GatewayRoute::address`] leaves out, and what
+   * a gateway cannot serve turned off). The default: none.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  gatewayFiles(address: unknown): g.Value;
+  /**
+   * The table of words that says what became of the access a profile sets, for the agent the host starts or serves; `None` for an
+   * agent no table covers, which is started as its entry says. The default: none.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  accessTarget(): g.Value;
+  /**
+   * The sessions the agent's own program kept on this computer, found and read as the program lays them out; `None` for an agent
+   * whose sessions Canoa cannot bring in.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  sessions(request: unknown): g.Value;
+  /**
+   * The standard session history of one session file's text. The default refuses: the agent has none to give.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  sessionHistory(request: unknown): g.Value;
 }
 
-/** Describes an agent. The same answer on every call, with nothing run and no connection opened. */
+/**
+ * Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with
+ * nothing run and no connection opened; every other method has a default that says the agent has nothing to add.
+ */
 export declare const AgentVendor: k.DescribedKind<AgentVendor, AgentVendorRemote, false>;

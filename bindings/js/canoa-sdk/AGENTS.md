@@ -11,7 +11,7 @@ Imports only `guatiao`, `guatiao/kinds`, `guatiao/provide` and its own files by 
 ```js
 class AgentVendor extends Provider {          // vendor.js
   static agent; static title;                 // required; agent = its acp_harness id, else its source's name
-  static program; static vendor; static aos; static model_variable; static mark; static look;   // optional
+  static program; static vendor; static aos; static model_variable; static tool_name; static skills_folder; static mark; static look;   // optional
   static standards = []; static names = []; static markers = []; static modes = [];             // {id, title} lists
   info()                                      // override to compute the description
 }

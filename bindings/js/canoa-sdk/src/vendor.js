@@ -26,6 +26,8 @@ export class AgentVendor extends Provider {
   /** @type {string | undefined} */ static vendor;
   /** @type {string | undefined} */ static aos;
   /** @type {string | undefined} */ static model_variable;
+  /** @type {string | undefined} */ static tool_name;
+  /** @type {string | undefined} */ static skills_folder;
   /** @type {{id: string, title: string}[]} */ static standards = [];
   /** @type {string[]} */ static names = [];
   /** @type {string[]} */ static markers = [];
@@ -43,6 +45,8 @@ export class AgentVendor extends Provider {
       vendor: c.vendor,
       aos: c.aos,
       model_variable: c.model_variable,
+      tool_name: c.tool_name,
+      skills_folder: c.skills_folder,
       standards: c.standards,
       names: c.names,
       markers: c.markers,

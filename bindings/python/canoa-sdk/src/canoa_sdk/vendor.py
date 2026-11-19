@@ -51,6 +51,8 @@ class VendorInfo(Model):
     vendor: Optional[str] = None
     aos: Optional[str] = None
     model_variable: Optional[str] = None
+    tool_name: Optional[str] = None
+    skills_folder: Optional[str] = None
     standards: List[StandardTitle] = field(default_factory=list)
     names: List[str] = field(default_factory=list)
     markers: List[str] = field(default_factory=list)
@@ -74,6 +76,8 @@ class AgentVendor(WithForm, provide.Provider, kinds.AgentVendor):
     vendor: ClassVar[Optional[str]] = None
     aos: ClassVar[Optional[str]] = None
     model_variable: ClassVar[Optional[str]] = None
+    tool_name: ClassVar[Optional[str]] = None
+    skills_folder: ClassVar[Optional[str]] = None
     standards: ClassVar[Sequence[StandardTitle]] = ()
     names: ClassVar[Sequence[str]] = ()
     markers: ClassVar[Sequence[str]] = ()
@@ -90,6 +94,8 @@ class AgentVendor(WithForm, provide.Provider, kinds.AgentVendor):
             vendor=self.vendor,
             aos=self.aos,
             model_variable=self.model_variable,
+            tool_name=self.tool_name,
+            skills_folder=self.skills_folder,
             standards=list(self.standards),
             names=list(self.names),
             markers=list(self.markers),
