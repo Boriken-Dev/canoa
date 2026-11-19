@@ -34,6 +34,9 @@ pub mod speech;
 #[cfg(feature = "store")]
 #[cfg_attr(docsrs, doc(cfg(feature = "store")))]
 pub mod store;
+#[cfg(feature = "usage")]
+#[cfg_attr(docsrs, doc(cfg(feature = "usage")))]
+pub mod usage_reader;
 #[cfg(feature = "vendor")]
 #[cfg_attr(docsrs, doc(cfg(feature = "vendor")))]
 pub mod vendor;

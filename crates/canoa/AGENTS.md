@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-Nine Cargo features (`vendor` is the `agent_vendor` kind, `profile-item` the `profile_item` kind, `secret` the `secret_provider` kind, `settings-section` the `settings_section` kind and `panel-tab` the `panel_tab` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
+Ten Cargo features (`usage` is the `usage_reader` kind, `vendor` is the `agent_vendor` kind, `profile-item` the `profile_item` kind, `secret` the `secret_provider` kind, `settings-section` the `settings_section` kind and `panel-tab` the `panel_tab` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
 The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`) and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
 
@@ -60,6 +60,32 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
 ## The form a provider asks for
 
 A provider that asks the person for something (a profile item, a catalog source) describes it the way every Guatiao provider does: a **guatiao schema** of an object (`schema: Option<Value>`) whose members are what it asks for, and beside it an optional **guatiao-intake form** document (`form: Option<Value>`: sections, a member's widget, placeholder, unit and `visibleWhen`). A type that derives `Schema` and `Form` gives both: `ItemInfo::taking::<S>()` and `SourceInfo::asking::<S>()` fill them from it. `problem` refuses a schema that is not an object's, a form with no schema, and a form that names a member the schema lacks (`guatiao_intake::check`). A member is a secret when the schema marks it sensitive (`Secret<T>`, `#[schema(sensitive)]`): the application draws it masked. The values travel as a JSON object keyed by member name, a member left empty absent, and the host checks them against the schema before a provider sees them. The application draws every such form, speech providers' settings included, with one renderer.
+
+## `canoa::usage_reader` (feature `usage`)
+
+The `usage_reader` kind: how an agent's own quota is read when the agent reports none over ACP. A provider knows where the figures are (Antigravity's language server on a loopback port) and reads them; the host decides when and runs it on a thread of its own. Offered by a bundled agent's crate, named by the `usage` key of an agent entry and by `SourcePreset::usage`. It is not part of the script kinds: no `include/` description and no SDK class.
+
+```rust
+pub const KIND: &str = "usage_reader";
+#[non_exhaustive] pub struct ReaderInfo { pub id: String, pub bucket_prefix: String, pub settle_ms: u64, pub retries_ms: Vec<u64>, pub cache_ms: u64, pub private_limit_ms: u64, pub private_retries_ms: Vec<u64> }
+impl ReaderInfo { pub fn new(id, bucket_prefix) -> Self; pub fn problem(&self) -> Option<String> }   // new: settle 10 s, no retries, cache 15 s, 40 s for a private agent
+#[non_exhaustive] pub enum Retry { Never, NotYet, NoAnswer }
+#[non_exhaustive] pub struct Failure { pub why: String, pub retry: Retry }
+#[non_exhaustive] pub struct Reading { pub buckets: Vec<Bucket>, pub failure: Option<Failure> }     // Reading::read(buckets), Reading::failed(failure)
+#[guatiao::kind(object, name = "process_members")] pub trait ProcessMembers: Send + Sync { fn members(&self, root: u32) -> Result<Vec<u32>, ProviderError>; }
+#[guatiao::kind(name = "usage_reader")] pub trait UsageReader: Send + Sync {
+    fn describe(&self) -> Result<ReaderInfo, ProviderError>;
+    fn open(&self, members: Object<dyn ProcessMembers>) -> Result<Object<dyn UsageReading>, ProviderError>;
+}
+#[guatiao::kind(object, name = "usage_reading")] pub trait UsageReading: Send + Sync {
+    fn opened(&self, result: &str) -> Result<(), ProviderError>;                  // the agent's `session/new` or `session/load` result, as JSON text
+    fn read(&self, root: u32, tree: bool) -> Result<Reading, ProviderError>;      // tree: look through the process tree from the first try
+}
+```
+
+- `ReaderInfo`: `id` is what an entry's `usage` names; `bucket_prefix` starts every bucket id, so the host replaces this reader's buckets and no other's. The times are milliseconds: `settle_ms` a session is open with no turn running before its first reading (the agent's own start and first turn go first), `retries_ms` each further try after that while the agent shows nothing to read, `cache_ms` a reading counts as current, `private_limit_ms` an agent the host starts only to read may take, `private_retries_ms` each wait between its tries.
+- `ProcessMembers` is the host's: `root` and the processes below it, plus on Unix those in its process group, from the operating system's process table (always holds `root`). The agent may sit below a launcher, so its port is not always its own process's. A reading that cannot ask treats the agent as `root` alone.
+- A reading's methods are called one at a time from different threads. `Reading` with no `failure` is the complete set of buckets, which replaces the reader's earlier ones; `Retry::NotYet` says the agent shows nothing to read yet and `Retry::NoAnswer` that something showed and did not answer, both worth asking again; the connection's reading asks again after both, the host's private agent only after `NotYet`.
 
 ## `canoa::profile_item` (feature `profile-item`)
 

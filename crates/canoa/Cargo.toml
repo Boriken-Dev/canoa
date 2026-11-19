@@ -25,6 +25,8 @@ alloc_instead_of_core = "warn"
 store = ["dep:coqui-acp-api", "dep:serde_json", "dep:guatiao", "dep:guatiao-intake", "dep:sha2"]
 # The `agent_vendor` kind: who an agent's vendor is and how it is shown.
 vendor = ["dep:coqui-acp-api"]
+# The `usage_reader` kind: how an agent's own quota is read, which the host asks for.
+usage = ["dep:coqui-acp-api"]
 # The `profile_item` kind: one thing a profile may set, and what it does to a session.
 profile-item = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:regex"]
 # The `secret_provider` kind: somewhere a secret comes from and goes to (the person's form, the system's store, a password manager).
