@@ -220,7 +220,9 @@ class SettingsPageState extends State<SettingsPage> {
     final pages = <SettingsSection>[];
     final taken = <String>{};
     for (final section in held.ownOf(known)) {
-      if (!(_own[section.id]?.ready ?? true)) continue;
+      final own = _own[section.id];
+      // An id the app draws itself belongs to the page the host registers for it, whoever else lists one.
+      if (own != null && (!own.ready || section.origin != 'built-in')) continue;
       if (taken.add(section.id)) pages.add(SettingsSection.of(section));
     }
     return [...pages.where((section) => section.id != 'about'), ...pages.where((section) => section.id == 'about')];

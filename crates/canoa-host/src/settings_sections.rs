@@ -74,6 +74,11 @@ impl Section<'_> {
         &self.entry.info
     }
 
+    /// Whether this is one of the pages the application draws itself.
+    pub(crate) fn is_built_in(&self) -> bool {
+        self.entry.origin == BUILT_IN
+    }
+
     /// The section as `settings/sections` answers.
     pub(crate) fn json(&self) -> Value {
         let described = |value: &Option<_>| match value {

@@ -1,3 +1,9 @@
+// What the host lists of the application's own Settings pages: the list Settings shows until the host has answered, and when it
+// cannot or will not. Written by `CANOA_WRITE_SECTIONS=1 cargo test -p canoa-host --lib settings_sections`, which also checks it.
+library;
+
+/// The answer of `settings/sections` for the pages the application draws itself, as JSON.
+const builtInSectionsListing = r'''
 {
   "sections": [
     {
@@ -210,3 +216,4 @@
     }
   ]
 }
+''';

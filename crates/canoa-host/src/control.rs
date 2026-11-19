@@ -834,392 +834,402 @@ impl Control {
         };
         let id = request.get("id")?.clone();
         let params = request.get("params").cloned().unwrap_or(Value::Null);
-        let outcome = match request.get("method").and_then(Value::as_str) {
-            Some("ledger/list") => self.list(caller, &params),
-            Some("sessions/running") => {
-                allow(caller, Grant::LedgerRead).and_then(|()| self.running_sessions(caller))
-            }
-            Some("ledger/put") => self.put(caller, &params),
-            Some("ledger/remove") => self.remove(caller, &params),
-            Some("ledger/clear") => self.clear(caller),
-            Some("peer/forget") => self.forget(caller),
-            Some("fs/read") => self.fs_read(caller, &params),
-            Some(
-                method @ ("state/get" | "state/put" | "state/append" | "state/list"
-                | "state/remove"),
-            ) => allow(caller, Grant::State).and_then(|()| match method {
-                "state/get" => self.state.get(&params),
-                "state/put" => self.state.put(&params),
-                "state/append" => self.state.append(&params),
-                "state/list" => self.state.list(&params),
-                _ => self.state.remove(&params),
-            }),
-            Some("fs/list") => {
-                allow(caller, Grant::Folders).and_then(|()| self.files.list(caller, &params))
-            }
-            Some("workspace/openers") => {
-                allow(caller, Grant::WorkspaceOpen).and_then(|()| self.files.workspace_openers())
-            }
-            Some("workspace/open") => allow(caller, Grant::WorkspaceOpen)
-                .and_then(|()| self.files.workspace_open(caller, &params)),
-            Some("fs/info") => {
-                allow(caller, Grant::Folders).and_then(|()| self.files.info(caller, &params))
-            }
-            Some("fs/realpath") => {
-                allow(caller, Grant::Folders).and_then(|()| self.files.realpath(caller, &params))
-            }
-            Some("fs/guards") => allow(caller, Grant::Folders).and_then(|()| self.files.guards()),
-            Some("fs/repo_root") => {
-                allow(caller, Grant::Folders).and_then(|()| self.files.repo_root(caller, &params))
-            }
-            Some("fs/mentions") => {
-                allow(caller, Grant::Folders).and_then(|()| self.files.mentions(caller, &params))
-            }
-            Some("fs/resolve") => {
-                allow(caller, Grant::Folders).and_then(|()| self.files.resolve(caller, &params))
-            }
-            Some(method @ ("fs/scratch" | "fs/scratch_remove" | "fs/scratch_preview")) => {
-                allow(caller, Grant::Folders).and_then(|()| {
-                    self.files.scratch(
-                        &params,
-                        match method {
-                            "fs/scratch" => files::Scratch::Make,
-                            "fs/scratch_remove" => files::Scratch::Remove,
-                            _ => files::Scratch::Preview,
-                        },
-                    )
-                })
-            }
-            Some("profile/canonical") => allow(caller, Grant::OverlayRead)
-                .and_then(|()| self.files.profile_canonical(caller, &params)),
-            Some("profile/tree") => {
-                allow(caller, Grant::OverlayRead).and_then(|()| self.files.profile_tree(&params))
-            }
-            Some("profile/project") => allow(caller, Grant::Folders)
-                .and_then(|()| self.files.profile_project(caller, &params)),
-            Some("trust/list") => {
-                allow(caller, Grant::ConfigRead).and_then(|()| self.files.trust_list())
-            }
-            Some("trust/set") => allow(caller, Grant::ConfigWriteSessions)
-                .and_then(|()| self.files.trust_set(caller, &params)),
-            Some("trust/revoke") => allow(caller, Grant::ConfigWrite)
-                .and_then(|()| self.files.trust_revoke(caller, &params)),
-            Some("config/get") if owner_section(caller, &params).is_some() => self
-                .files
-                .owner_get(owner_section(caller, &params).unwrap_or_default()),
-            Some("config/set") if owner_section(caller, &params).is_some() => self.files.owner_set(
-                &params,
-                owner_section(caller, &params).unwrap_or_default(),
-                true,
-            ),
-            Some("config/check") if owner_section(caller, &params).is_some() => {
-                self.files.owner_set(
-                    &params,
-                    owner_section(caller, &params).unwrap_or_default(),
-                    false,
-                )
-            }
-            Some("config/get") if names_host(&params) => {
-                allow(caller, Grant::Hosting).and_then(|()| self.files.host_get())
-            }
-            Some("config/get") => {
-                allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(&params))
-            }
-            Some("config/set") if names_host(&params) => {
-                allow(caller, Grant::Hosting).and_then(|()| self.files.host_set(&params, true))
-            }
-            Some("looks/list") => allow(caller, Grant::ConfigRead)
-                .and_then(|()| self.loaded_config())
-                .map(|config| looks::list(&config)),
-            Some("profile_items/list") => allow(caller, Grant::ConfigRead)
-                .and_then(|()| self.loaded_config())
-                .map(|config| profile_items::list(&config)),
-            Some("settings/sections") => allow(caller, Grant::ConfigRead)
-                .and_then(|()| self.loaded_config())
-                .map(|config| {
-                    settings_sections::list(&crate::settings_sections::SectionCatalog::of(&config))
+        let outcome =
+            match request.get("method").and_then(Value::as_str) {
+                Some("ledger/list") => self.list(caller, &params),
+                Some("sessions/running") => {
+                    allow(caller, Grant::LedgerRead).and_then(|()| self.running_sessions(caller))
+                }
+                Some("ledger/put") => self.put(caller, &params),
+                Some("ledger/remove") => self.remove(caller, &params),
+                Some("ledger/clear") => self.clear(caller),
+                Some("peer/forget") => self.forget(caller),
+                Some("fs/read") => self.fs_read(caller, &params),
+                Some(
+                    method @ ("state/get" | "state/put" | "state/append" | "state/list"
+                    | "state/remove"),
+                ) => allow(caller, Grant::State).and_then(|()| match method {
+                    "state/get" => self.state.get(&params),
+                    "state/put" => self.state.put(&params),
+                    "state/append" => self.state.append(&params),
+                    "state/list" => self.state.list(&params),
+                    _ => self.state.remove(&params),
                 }),
-            Some("settings/section_get") => allow(caller, Grant::ConfigRead)
-                .and_then(|()| self.loaded_config())
-                .and_then(|config| {
-                    settings_sections::get(
-                        &crate::settings_sections::SectionCatalog::of(&config),
-                        &self.files,
-                        &settings_sections::Keeper::new(&config, self.section_home()),
-                        &params,
-                    )
-                }),
-            Some("settings/section_set") => allow(caller, Grant::ConfigWrite)
-                .and_then(|()| self.loaded_config())
-                .and_then(|config| {
-                    settings_sections::set(
-                        &crate::settings_sections::SectionCatalog::of(&config),
-                        &self.files,
-                        &settings_sections::Keeper::new(&config, self.section_home()),
-                        &params,
-                    )
-                }),
-            Some("panel_tabs/list") => allow(caller, Grant::ConfigRead)
-                .and_then(|()| self.loaded_config())
-                .map(|config| panel_tabs::list(&crate::panel_tabs::TabCatalog::of(&config))),
-            Some("panel_tabs/tail") => allow(caller, Grant::Hosting)
-                .and_then(|()| self.loaded_config())
-                .and_then(|config| {
-                    panel_tabs::tail(&crate::panel_tabs::TabCatalog::of(&config), &params)
-                }),
-            Some("providers/list") => allow(caller, Grant::ConfigRead)
-                .and_then(|()| self.loaded_config())
-                .map(|config| providers::list(&config)),
-            Some("config/set") => allow(caller, Grant::ConfigWrite)
-                .and_then(|()| self.guard_sources(caller, &params))
-                .and_then(|()| {
-                    self.files
-                        .config_set(&params, caller.may(Grant::ConfigWriteSessions))
-                }),
-            Some("config/check") if names_host(&params) => {
-                allow(caller, Grant::Hosting).and_then(|()| self.files.host_set(&params, false))
-            }
-            Some("config/check") => allow(caller, Grant::ConfigWrite)
-                .and_then(|()| self.guard_sources(caller, &params))
-                .and_then(|()| {
-                    self.files
-                        .config_check(&params, caller.may(Grant::ConfigWriteSessions))
-                }),
-            Some("host/keys") => allow(caller, Grant::Hosting)
-                .and_then(|()| self.keys_store())
-                .and_then(|store| hosting::keys(store)),
-            Some("host/accept") => allow(caller, Grant::Hosting)
-                .and_then(|()| self.keys_store())
-                .and_then(|store| hosting::accept(store, &params)),
-            Some("extension/catalogs") => self.extension_catalogs(caller, &params),
-            Some("store/catalogs") => self.store_catalogs(caller, &params),
-            Some("store/catalog") => allow(caller, Grant::OverlayWrite)
-                .and_then(|()| self.store_catalog(caller, &params)),
-            Some("extension/plan") => {
-                allow(caller, Grant::Hosting).and_then(|()| self.extension_plan(&params))
-            }
-            Some("extension/apply") => {
-                allow(caller, Grant::Hosting).and_then(|()| self.extension_apply(&params))
-            }
-            Some("extension/remove") => {
-                allow(caller, Grant::Hosting).and_then(|()| self.extension_remove(&params))
-            }
-            Some("host/revoke") => allow(caller, Grant::Hosting)
-                .and_then(|()| self.keys_store())
-                .and_then(|store| hosting::revoke(store, &params)),
-            Some("upload/put") => {
-                allow(caller, Grant::Upload).and_then(|()| self.files.upload_put(caller, &params))
-            }
-            Some("upload/remove") => allow(caller, Grant::Upload)
-                .and_then(|()| self.files.upload_remove(caller, &params)),
-            Some("overlay/installed") => {
-                allow(caller, Grant::OverlayRead).and_then(|()| self.overlays.installed(&params))
-            }
-            Some("overlay/needs") => allow(caller, Grant::OverlayRead)
-                .and_then(|()| allow(caller, Grant::StorePrograms))
-                .and_then(|()| self.overlays.needs(&params)),
-            Some("overlay/prepare") => allow(caller, Grant::OverlayWrite)
-                .and_then(|()| allow(caller, Grant::StorePrograms))
-                .and_then(|()| self.overlays.prepare(&params)),
-            Some("overlay/read") => {
-                allow(caller, Grant::OverlayRead).and_then(|()| self.overlays.read(caller, &params))
-            }
-            Some("catalog/read") => {
-                allow(caller, Grant::OverlayRead).and_then(|()| self.overlays.catalog_read(&params))
-            }
-            Some("overlay/check") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                self.overlays
-                    .check(caller, &params, &|repo| self.may_read_source(caller, repo))
-            }),
-            Some("overlay/apply") => allow(caller, Grant::OverlayWrite)
-                .and_then(|()| self.overlays.apply(caller, &params)),
-            Some("overlay/remove") => {
-                allow(caller, Grant::OverlayWrite).and_then(|()| self.overlays.remove(&params))
-            }
-            Some("overlay/discard") => {
-                allow(caller, Grant::OverlayWrite).and_then(|()| self.overlays.discard(&params))
-            }
-            Some("catalog/fetch") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                self.overlays
-                    .catalog_fetch(&params, &|repo| self.may_read_source(caller, repo))
-            }),
-            Some("catalog/remove") => allow(caller, Grant::OverlayWrite)
-                .and_then(|()| self.overlays.catalog_remove(&params)),
-            Some("skill/list") => {
-                allow(caller, Grant::OverlayRead).and_then(|()| self.overlays.skill_list())
-            }
-            Some("skill/read") => {
-                allow(caller, Grant::OverlayRead).and_then(|()| self.overlays.skill_read(&params))
-            }
-            Some("skill/fetch") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                self.overlays
-                    .skill_fetch(&params, &|repo| self.may_read_source(caller, repo))
-            }),
-            Some("skill/scan") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                self.overlays
-                    .skill_scan(&params, &|repo| self.may_read_source(caller, repo))
-            }),
-            Some("skill/save") => {
-                allow(caller, Grant::OverlayWrite).and_then(|()| self.overlays.skill_save(&params))
-            }
-            Some("skill/remove") => allow(caller, Grant::OverlayWrite)
-                .and_then(|()| self.overlays.skill_remove(&params)),
-            Some("registry/fetch") => allow(caller, Grant::OverlayWrite)
-                .and_then(|()| self.registry_fetch(caller, &params)),
-            Some("skill/search") => {
-                allow(caller, Grant::OverlayWrite).and_then(|()| self.skill_search(&params))
-            }
-            Some("store/read_ahead") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                self.overlays
-                    .read_ahead(caller, &params, &|repo| self.may_read_source(caller, repo))
-            }),
-            Some("store/contents") => allow(caller, Grant::OverlayRead)
-                .and_then(|()| self.registry.contents(caller, &params)),
-            Some("store/contents_put") => allow(caller, Grant::OverlayRead)
-                .and_then(|()| self.registry.put_contents(caller, &params)),
-            Some("network/fetch") => {
-                owner_only_network(caller).and_then(|()| self.fetch.run(&params))
-            }
-            Some("network/tunnel") => {
-                owner_only_network(caller).and_then(|()| self.tunnel.run(&params))
-            }
-            Some("network/client_certificates") => {
-                allow(caller, Grant::ConfigWrite).map(|()| self.client_certificates.list())
-            }
-            Some("host/which") => allow(caller, Grant::StoreRead)
-                .and_then(|()| registry::which(&params, &crate::sources::runtime_dirs())),
-            Some("host/restart") => {
-                allow(caller, Grant::HostRestart).and_then(|()| self.restart_now())
-            }
-            Some(
-                method @ ("worktree/new" | "worktree/status" | "worktree/remove" | "worktree/diff"),
-            ) => {
-                return Some(self.worktree(caller, method, &request, &id));
-            }
-            Some(
-                method @ ("store/list" | "store/extensions" | "store/report" | "store/latest"
-                | "store/plan"),
-            ) => {
-                // Running a program of the user's, and choosing which copy, is the person's; a key reads what is found.
-                let runs = method == "store/report"
-                    && (params
-                        .get("probe")
-                        .is_some_and(|probe| probe != &Value::Bool(false))
-                        || params.get("pick").is_some_and(|pick| !pick.is_null()));
-                allow(caller, Grant::StoreRead)
-                    .and_then(|()| {
-                        if runs {
-                            allow(caller, Grant::StorePrograms)
-                        } else {
-                            Ok(())
-                        }
-                    })
-                    .and_then(|()| self.stores())
-                    .and_then(|stores| {
-                        stores.read(
-                            method,
+                Some("fs/list") => {
+                    allow(caller, Grant::Folders).and_then(|()| self.files.list(caller, &params))
+                }
+                Some("workspace/openers") => allow(caller, Grant::WorkspaceOpen)
+                    .and_then(|()| self.files.workspace_openers()),
+                Some("workspace/open") => allow(caller, Grant::WorkspaceOpen)
+                    .and_then(|()| self.files.workspace_open(caller, &params)),
+                Some("fs/info") => {
+                    allow(caller, Grant::Folders).and_then(|()| self.files.info(caller, &params))
+                }
+                Some("fs/realpath") => allow(caller, Grant::Folders)
+                    .and_then(|()| self.files.realpath(caller, &params)),
+                Some("fs/guards") => {
+                    allow(caller, Grant::Folders).and_then(|()| self.files.guards())
+                }
+                Some("fs/repo_root") => allow(caller, Grant::Folders)
+                    .and_then(|()| self.files.repo_root(caller, &params)),
+                Some("fs/mentions") => allow(caller, Grant::Folders)
+                    .and_then(|()| self.files.mentions(caller, &params)),
+                Some("fs/resolve") => {
+                    allow(caller, Grant::Folders).and_then(|()| self.files.resolve(caller, &params))
+                }
+                Some(method @ ("fs/scratch" | "fs/scratch_remove" | "fs/scratch_preview")) => {
+                    allow(caller, Grant::Folders).and_then(|()| {
+                        self.files.scratch(
                             &params,
-                            caller.may(Grant::StorePrograms).then(|| caller.owner()),
+                            match method {
+                                "fs/scratch" => files::Scratch::Make,
+                                "fs/scratch_remove" => files::Scratch::Remove,
+                                _ => files::Scratch::Preview,
+                            },
                         )
                     })
-            }
-            Some("foundry/models") => allow(caller, Grant::StorePrograms)
-                .and_then(|()| foundry::models(foundry::locate(), &self.files.foundry_windows())),
-            Some("foundry/model") => allow(caller, Grant::StorePrograms)
-                .and_then(|()| foundry::act(&params, foundry::locate())),
-            Some("foundry/window") => allow(caller, Grant::StorePrograms)
-                .and_then(|()| foundry::window(&params, &self.files)),
-            Some("store/index") => self.store_index(caller, &params),
-            Some(method @ ("store/rollback" | "store/remove")) => {
-                allow(caller, Grant::StorePrograms)
-                    .and_then(|()| self.stores())
-                    .and_then(|stores| stores.change(method, &params))
-            }
-            Some(method @ ("history/export" | "history/move")) => {
-                owner_only_history(caller).and_then(|()| self.history_call(method, &params))
-            }
-            Some("history/portable") => {
-                owner_only_history(caller).and_then(|()| self.history_portable())
-            }
-            Some("history/account") => {
-                owner_only_history(caller).and_then(|()| self.account_move(&params))
-            }
-            Some(method @ ("history/importable" | "history/import" | "history/imported")) => {
-                owner_only_history(caller).and_then(|()| self.import_call(method, &params))
-            }
-            Some(
-                method @ ("accounts/catalog" | "accounts/list" | "accounts/remove"
-                | "accounts/entries" | "accounts/offer"),
-            ) => allow(caller, Grant::Accounts)
-                .and_then(|()| self.accounts())
-                .and_then(|accounts| accounts.call(method, &params)),
-            Some(method @ ("mail/accounts" | "mail/add" | "mail/test" | "mail/remove")) => {
-                allow(caller, Grant::MailSetup)
-                    .and_then(|()| self.mail_setup())
-                    .and_then(|setup| setup.call(method, &params))
-            }
-            Some(method @ ("usage/summary" | "usage/limits")) => {
-                allow(caller, Grant::Usage).and_then(|()| self.usage_call(method, &params))
-            }
-            Some("usage/read") => allow(caller, Grant::Usage)
-                .and_then(|()| self.accounts())
-                .and_then(|accounts| usage_read::call(accounts, self.usage.as_deref(), &params)),
-            Some("options/choices") => self
-                .accounts()
-                .and_then(|accounts| choices::call(accounts, caller, &params)),
-            Some("discover/nearby") => {
-                allow(caller, Grant::Discover).and_then(|()| discover::nearby(&params))
-            }
-            Some(method @ ("speech/offers" | "speech/enable")) => speech_offers::call(
-                caller,
-                &self.files,
-                self.stores(),
-                &speech_offers::Lend::new(self.accounts.as_ref()),
-                method,
-                &params,
-            ),
-            Some(
-                method @ ("speech/voices"
-                | "speech/say"
-                | "speech/audio"
-                | "speech/stop"
-                | "speech/say_configure"),
-            ) => self.say.call(caller, &self.files, method, &params),
-            Some(method) if method.starts_with("speech/") => self.speech.call(
-                caller,
-                &self.files,
-                &speech_offers::Lend::new(self.accounts.as_ref()),
-                method,
-                &params,
-            ),
-            Some("host/grants") => Ok(caller.grants_json()),
-            // The shells a terminal could start, and which one each agent is told to use: for a key that may open a terminal
-            // or read what programs are installed here (their paths are in `store/report` too).
-            Some("shell/list") => if caller.may(Grant::StoreRead) {
-                Ok(())
-            } else {
-                allow(caller, Grant::Terminal)
-            }
-            .map(|()| self.shells.report(&crate::shells::Lookup::here())),
-            Some(method) if method.starts_with("terminal/") => allow(caller, Grant::Terminal)
-                .and_then(|()| {
-                    Err((
-                        REFUSED,
-                        "this needs a link that can carry its output".to_owned(),
-                    ))
+                }
+                Some("profile/canonical") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.files.profile_canonical(caller, &params)),
+                Some("profile/tree") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.files.profile_tree(&params)),
+                Some("profile/project") => allow(caller, Grant::Folders)
+                    .and_then(|()| self.files.profile_project(caller, &params)),
+                Some("trust/list") => {
+                    allow(caller, Grant::ConfigRead).and_then(|()| self.files.trust_list())
+                }
+                Some("trust/set") => allow(caller, Grant::ConfigWriteSessions)
+                    .and_then(|()| self.files.trust_set(caller, &params)),
+                Some("trust/revoke") => allow(caller, Grant::ConfigWrite)
+                    .and_then(|()| self.files.trust_revoke(caller, &params)),
+                Some("config/get") if owner_section(caller, &params).is_some() => self
+                    .files
+                    .owner_get(owner_section(caller, &params).unwrap_or_default()),
+                Some("config/set") if owner_section(caller, &params).is_some() => {
+                    self.files.owner_set(
+                        &params,
+                        owner_section(caller, &params).unwrap_or_default(),
+                        true,
+                    )
+                }
+                Some("config/check") if owner_section(caller, &params).is_some() => {
+                    self.files.owner_set(
+                        &params,
+                        owner_section(caller, &params).unwrap_or_default(),
+                        false,
+                    )
+                }
+                Some("config/get") if names_host(&params) => {
+                    allow(caller, Grant::Hosting).and_then(|()| self.files.host_get())
+                }
+                Some("config/get") => {
+                    allow(caller, Grant::ConfigRead).and_then(|()| self.files.config_get(&params))
+                }
+                Some("config/set") if names_host(&params) => {
+                    allow(caller, Grant::Hosting).and_then(|()| self.files.host_set(&params, true))
+                }
+                Some("looks/list") => allow(caller, Grant::ConfigRead)
+                    .and_then(|()| self.loaded_config())
+                    .map(|config| looks::list(&config)),
+                Some("profile_items/list") => allow(caller, Grant::ConfigRead)
+                    .and_then(|()| self.loaded_config())
+                    .map(|config| profile_items::list(&config)),
+                // The list of pages is the application's own preferences too, so any key reads it; the pages a provider adds, whose forms
+                // hold what the host keeps, are listed only to a key that reads the configuration.
+                Some("settings/sections") => {
+                    if caller.may(Grant::ConfigRead) {
+                        self.loaded_config().map(|config| {
+                            settings_sections::list(
+                                &crate::settings_sections::SectionCatalog::of(&config),
+                                true,
+                            )
+                        })
+                    } else {
+                        Ok(settings_sections::list(
+                            &crate::settings_sections::SectionCatalog::from_registries(Vec::new()),
+                            false,
+                        ))
+                    }
+                }
+                Some("settings/section_get") => allow(caller, Grant::ConfigRead)
+                    .and_then(|()| self.loaded_config())
+                    .and_then(|config| {
+                        settings_sections::get(
+                            &crate::settings_sections::SectionCatalog::of(&config),
+                            &self.files,
+                            &settings_sections::Keeper::new(&config, self.section_home()),
+                            &params,
+                        )
+                    }),
+                Some("settings/section_set") => allow(caller, Grant::ConfigWrite)
+                    .and_then(|()| self.loaded_config())
+                    .and_then(|config| {
+                        settings_sections::set(
+                            &crate::settings_sections::SectionCatalog::of(&config),
+                            &self.files,
+                            &settings_sections::Keeper::new(&config, self.section_home()),
+                            &params,
+                        )
+                    }),
+                Some("panel_tabs/list") => allow(caller, Grant::ConfigRead)
+                    .and_then(|()| self.loaded_config())
+                    .map(|config| panel_tabs::list(&crate::panel_tabs::TabCatalog::of(&config))),
+                Some("panel_tabs/tail") => allow(caller, Grant::Hosting)
+                    .and_then(|()| self.loaded_config())
+                    .and_then(|config| {
+                        panel_tabs::tail(&crate::panel_tabs::TabCatalog::of(&config), &params)
+                    }),
+                Some("providers/list") => allow(caller, Grant::ConfigRead)
+                    .and_then(|()| self.loaded_config())
+                    .map(|config| providers::list(&config)),
+                Some("config/set") => allow(caller, Grant::ConfigWrite)
+                    .and_then(|()| self.guard_sources(caller, &params))
+                    .and_then(|()| {
+                        self.files
+                            .config_set(&params, caller.may(Grant::ConfigWriteSessions))
+                    }),
+                Some("config/check") if names_host(&params) => {
+                    allow(caller, Grant::Hosting).and_then(|()| self.files.host_set(&params, false))
+                }
+                Some("config/check") => allow(caller, Grant::ConfigWrite)
+                    .and_then(|()| self.guard_sources(caller, &params))
+                    .and_then(|()| {
+                        self.files
+                            .config_check(&params, caller.may(Grant::ConfigWriteSessions))
+                    }),
+                Some("host/keys") => allow(caller, Grant::Hosting)
+                    .and_then(|()| self.keys_store())
+                    .and_then(|store| hosting::keys(store)),
+                Some("host/accept") => allow(caller, Grant::Hosting)
+                    .and_then(|()| self.keys_store())
+                    .and_then(|store| hosting::accept(store, &params)),
+                Some("extension/catalogs") => self.extension_catalogs(caller, &params),
+                Some("store/catalogs") => self.store_catalogs(caller, &params),
+                Some("store/catalog") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| self.store_catalog(caller, &params)),
+                Some("extension/plan") => {
+                    allow(caller, Grant::Hosting).and_then(|()| self.extension_plan(&params))
+                }
+                Some("extension/apply") => {
+                    allow(caller, Grant::Hosting).and_then(|()| self.extension_apply(&params))
+                }
+                Some("extension/remove") => {
+                    allow(caller, Grant::Hosting).and_then(|()| self.extension_remove(&params))
+                }
+                Some("host/revoke") => allow(caller, Grant::Hosting)
+                    .and_then(|()| self.keys_store())
+                    .and_then(|store| hosting::revoke(store, &params)),
+                Some("upload/put") => allow(caller, Grant::Upload)
+                    .and_then(|()| self.files.upload_put(caller, &params)),
+                Some("upload/remove") => allow(caller, Grant::Upload)
+                    .and_then(|()| self.files.upload_remove(caller, &params)),
+                Some("overlay/installed") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.overlays.installed(&params)),
+                Some("overlay/needs") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| allow(caller, Grant::StorePrograms))
+                    .and_then(|()| self.overlays.needs(&params)),
+                Some("overlay/prepare") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| allow(caller, Grant::StorePrograms))
+                    .and_then(|()| self.overlays.prepare(&params)),
+                Some("overlay/read") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.overlays.read(caller, &params)),
+                Some("catalog/read") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.overlays.catalog_read(&params)),
+                Some("overlay/check") => allow(caller, Grant::OverlayWrite).and_then(|()| {
+                    self.overlays
+                        .check(caller, &params, &|repo| self.may_read_source(caller, repo))
                 }),
-            Some(
-                method @ ("secrets/providers" | "secrets/list" | "secrets/reveal"
-                | "secrets/forget" | "secrets/configure"),
-            ) => allow(caller, Grant::Secrets)
-                .and_then(|()| self.vault())
-                .and_then(|vault| secrets::call(&vault, &self.files, method, &params)),
-            Some("store/apply" | "accounts/add" | "accounts/login" | "host/pair") => Err((
-                REFUSED,
-                "this needs a link that can carry its progress".to_owned(),
-            )),
-            _ => Err((NO_METHOD, "this host has no such method".to_owned())),
-        };
+                Some("overlay/apply") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| self.overlays.apply(caller, &params)),
+                Some("overlay/remove") => {
+                    allow(caller, Grant::OverlayWrite).and_then(|()| self.overlays.remove(&params))
+                }
+                Some("overlay/discard") => {
+                    allow(caller, Grant::OverlayWrite).and_then(|()| self.overlays.discard(&params))
+                }
+                Some("catalog/fetch") => allow(caller, Grant::OverlayWrite).and_then(|()| {
+                    self.overlays
+                        .catalog_fetch(&params, &|repo| self.may_read_source(caller, repo))
+                }),
+                Some("catalog/remove") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| self.overlays.catalog_remove(&params)),
+                Some("skill/list") => {
+                    allow(caller, Grant::OverlayRead).and_then(|()| self.overlays.skill_list())
+                }
+                Some("skill/read") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.overlays.skill_read(&params)),
+                Some("skill/fetch") => allow(caller, Grant::OverlayWrite).and_then(|()| {
+                    self.overlays
+                        .skill_fetch(&params, &|repo| self.may_read_source(caller, repo))
+                }),
+                Some("skill/scan") => allow(caller, Grant::OverlayWrite).and_then(|()| {
+                    self.overlays
+                        .skill_scan(&params, &|repo| self.may_read_source(caller, repo))
+                }),
+                Some("skill/save") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| self.overlays.skill_save(&params)),
+                Some("skill/remove") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| self.overlays.skill_remove(&params)),
+                Some("registry/fetch") => allow(caller, Grant::OverlayWrite)
+                    .and_then(|()| self.registry_fetch(caller, &params)),
+                Some("skill/search") => {
+                    allow(caller, Grant::OverlayWrite).and_then(|()| self.skill_search(&params))
+                }
+                Some("store/read_ahead") => allow(caller, Grant::OverlayWrite).and_then(|()| {
+                    self.overlays
+                        .read_ahead(caller, &params, &|repo| self.may_read_source(caller, repo))
+                }),
+                Some("store/contents") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.registry.contents(caller, &params)),
+                Some("store/contents_put") => allow(caller, Grant::OverlayRead)
+                    .and_then(|()| self.registry.put_contents(caller, &params)),
+                Some("network/fetch") => {
+                    owner_only_network(caller).and_then(|()| self.fetch.run(&params))
+                }
+                Some("network/tunnel") => {
+                    owner_only_network(caller).and_then(|()| self.tunnel.run(&params))
+                }
+                Some("network/client_certificates") => {
+                    allow(caller, Grant::ConfigWrite).map(|()| self.client_certificates.list())
+                }
+                Some("host/which") => allow(caller, Grant::StoreRead)
+                    .and_then(|()| registry::which(&params, &crate::sources::runtime_dirs())),
+                Some("host/restart") => {
+                    allow(caller, Grant::HostRestart).and_then(|()| self.restart_now())
+                }
+                Some(
+                    method @ ("worktree/new" | "worktree/status" | "worktree/remove"
+                    | "worktree/diff"),
+                ) => {
+                    return Some(self.worktree(caller, method, &request, &id));
+                }
+                Some(
+                    method @ ("store/list" | "store/extensions" | "store/report" | "store/latest"
+                    | "store/plan"),
+                ) => {
+                    // Running a program of the user's, and choosing which copy, is the person's; a key reads what is found.
+                    let runs = method == "store/report"
+                        && (params
+                            .get("probe")
+                            .is_some_and(|probe| probe != &Value::Bool(false))
+                            || params.get("pick").is_some_and(|pick| !pick.is_null()));
+                    allow(caller, Grant::StoreRead)
+                        .and_then(|()| {
+                            if runs {
+                                allow(caller, Grant::StorePrograms)
+                            } else {
+                                Ok(())
+                            }
+                        })
+                        .and_then(|()| self.stores())
+                        .and_then(|stores| {
+                            stores.read(
+                                method,
+                                &params,
+                                caller.may(Grant::StorePrograms).then(|| caller.owner()),
+                            )
+                        })
+                }
+                Some("foundry/models") => allow(caller, Grant::StorePrograms).and_then(|()| {
+                    foundry::models(foundry::locate(), &self.files.foundry_windows())
+                }),
+                Some("foundry/model") => allow(caller, Grant::StorePrograms)
+                    .and_then(|()| foundry::act(&params, foundry::locate())),
+                Some("foundry/window") => allow(caller, Grant::StorePrograms)
+                    .and_then(|()| foundry::window(&params, &self.files)),
+                Some("store/index") => self.store_index(caller, &params),
+                Some(method @ ("store/rollback" | "store/remove")) => {
+                    allow(caller, Grant::StorePrograms)
+                        .and_then(|()| self.stores())
+                        .and_then(|stores| stores.change(method, &params))
+                }
+                Some(method @ ("history/export" | "history/move")) => {
+                    owner_only_history(caller).and_then(|()| self.history_call(method, &params))
+                }
+                Some("history/portable") => {
+                    owner_only_history(caller).and_then(|()| self.history_portable())
+                }
+                Some("history/account") => {
+                    owner_only_history(caller).and_then(|()| self.account_move(&params))
+                }
+                Some(method @ ("history/importable" | "history/import" | "history/imported")) => {
+                    owner_only_history(caller).and_then(|()| self.import_call(method, &params))
+                }
+                Some(
+                    method @ ("accounts/catalog" | "accounts/list" | "accounts/remove"
+                    | "accounts/entries" | "accounts/offer"),
+                ) => allow(caller, Grant::Accounts)
+                    .and_then(|()| self.accounts())
+                    .and_then(|accounts| accounts.call(method, &params)),
+                Some(method @ ("mail/accounts" | "mail/add" | "mail/test" | "mail/remove")) => {
+                    allow(caller, Grant::MailSetup)
+                        .and_then(|()| self.mail_setup())
+                        .and_then(|setup| setup.call(method, &params))
+                }
+                Some(method @ ("usage/summary" | "usage/limits")) => {
+                    allow(caller, Grant::Usage).and_then(|()| self.usage_call(method, &params))
+                }
+                Some("usage/read") => allow(caller, Grant::Usage)
+                    .and_then(|()| self.accounts())
+                    .and_then(|accounts| {
+                        usage_read::call(accounts, self.usage.as_deref(), &params)
+                    }),
+                Some("options/choices") => self
+                    .accounts()
+                    .and_then(|accounts| choices::call(accounts, caller, &params)),
+                Some("discover/nearby") => {
+                    allow(caller, Grant::Discover).and_then(|()| discover::nearby(&params))
+                }
+                Some(method @ ("speech/offers" | "speech/enable")) => speech_offers::call(
+                    caller,
+                    &self.files,
+                    self.stores(),
+                    &speech_offers::Lend::new(self.accounts.as_ref()),
+                    method,
+                    &params,
+                ),
+                Some(
+                    method @ ("speech/voices"
+                    | "speech/say"
+                    | "speech/audio"
+                    | "speech/stop"
+                    | "speech/say_configure"),
+                ) => self.say.call(caller, &self.files, method, &params),
+                Some(method) if method.starts_with("speech/") => self.speech.call(
+                    caller,
+                    &self.files,
+                    &speech_offers::Lend::new(self.accounts.as_ref()),
+                    method,
+                    &params,
+                ),
+                Some("host/grants") => Ok(caller.grants_json()),
+                // The shells a terminal could start, and which one each agent is told to use: for a key that may open a terminal
+                // or read what programs are installed here (their paths are in `store/report` too).
+                Some("shell/list") => if caller.may(Grant::StoreRead) {
+                    Ok(())
+                } else {
+                    allow(caller, Grant::Terminal)
+                }
+                .map(|()| self.shells.report(&crate::shells::Lookup::here())),
+                Some(method) if method.starts_with("terminal/") => allow(caller, Grant::Terminal)
+                    .and_then(|()| {
+                        Err((
+                            REFUSED,
+                            "this needs a link that can carry its output".to_owned(),
+                        ))
+                    }),
+                Some(
+                    method @ ("secrets/providers" | "secrets/list" | "secrets/reveal"
+                    | "secrets/forget" | "secrets/configure"),
+                ) => allow(caller, Grant::Secrets)
+                    .and_then(|()| self.vault())
+                    .and_then(|vault| secrets::call(&vault, &self.files, method, &params)),
+                Some("store/apply" | "accounts/add" | "accounts/login" | "host/pair") => Err((
+                    REFUSED,
+                    "this needs a link that can carry its progress".to_owned(),
+                )),
+                _ => Err((NO_METHOD, "this host has no such method".to_owned())),
+            };
         Some(match outcome {
             Ok(result) => {
                 serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "result": result}))

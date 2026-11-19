@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'fixtures/providers_fixture.dart';
-import 'fixtures/sections_fixture.dart';
 import 'fixtures/sample_render.dart';
 import 'fixtures/vendor_looks_fixture.dart';
 
@@ -10,6 +9,5 @@ import 'fixtures/vendor_looks_fixture.dart';
 Future<void> testExecutable(FutureOr<void> Function() testMain) {
   listCrateLooks();
   listBundledProviders();
-  listBuiltInSections();
   return renderSamplesIfAsked(testMain);
 }

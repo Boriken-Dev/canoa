@@ -46,7 +46,7 @@ fn row<'a>(answer: &'a Value, id: &str) -> &'a Value {
 
 #[test]
 fn an_extensions_section_is_listed_as_its_own_and_another_as_a_group_under_an_existing_section() {
-    let answer = list(&with_extension());
+    let answer = list(&with_extension(), true);
     let region = row(&answer, "region");
     assert_eq!(region["origin"], "regions");
     assert_eq!(region["group"], "Regions");
@@ -97,9 +97,9 @@ fn ids(answer: &Value) -> Vec<String> {
 #[test]
 fn the_sections_the_application_draws_are_listed_as_providers_first_and_an_extension_taken_away_takes_only_its_own()
  {
-    let without = list(&SectionCatalog::from_registries(Vec::new()));
+    let without = list(&SectionCatalog::from_registries(Vec::new()), true);
     assert_eq!(ids(&without), BUILT_IN);
-    let with = ids(&list(&with_extension()));
+    let with = ids(&list(&with_extension(), true));
     assert_eq!(with[..BUILT_IN.len()], BUILT_IN);
     assert_eq!(with[BUILT_IN.len()..], ["cache", "region"]);
     for id in BUILT_IN {
@@ -119,23 +119,50 @@ fn the_sections_the_application_draws_are_listed_as_providers_first_and_an_exten
     assert_eq!(row(&without, "about")["group"], "About");
 }
 
+/// The Dart file the application falls back on, written from what the host lists of its own.
+fn fallback_source(listed: &Value) -> String {
+    let json = serde_json::to_string_pretty(listed).expect("rows are JSON");
+    assert!(!json.contains("'''"), "the raw string would end early");
+    format!(
+        "// What the host lists of the application's own Settings pages: the list Settings shows until the host has answered, and when it\n\
+         // cannot or will not. Written by `CANOA_WRITE_SECTIONS=1 cargo test -p canoa-host --lib settings_sections`, which also checks it.\n\
+         library;\n\
+         \n\
+         /// The answer of `settings/sections` for the pages the application draws itself, as JSON.\n\
+         const builtInSectionsListing = r'''\n{json}\n''';\n"
+    )
+}
+
 #[test]
-fn the_apps_fixture_is_what_this_build_lists() {
-    let listed = list(&SectionCatalog::from_registries(Vec::new()));
+fn the_apps_fallback_is_what_this_build_lists_of_its_own() {
+    let listed = list(&SectionCatalog::from_registries(Vec::new()), false);
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../app/test/fixtures/settings_sections.json");
+        .join("../../app/lib/settings/built_in_sections.dart");
+    let text = fallback_source(&listed);
     if std::env::var_os("CANOA_WRITE_SECTIONS").is_some() {
-        let mut text = serde_json::to_string_pretty(&listed).expect("rows are JSON");
-        text.push('\n');
-        fs::write(&path, text).expect("the fixture is written");
+        fs::write(&path, &text).expect("the file is written");
     }
-    let held: Value =
-        serde_json::from_str(&fs::read_to_string(&path).expect("the fixture is committed"))
-            .expect("the fixture is JSON");
     assert!(
-        held == listed,
+        fs::read_to_string(&path).expect("the file is committed") == text,
         "regenerate it: CANOA_WRITE_SECTIONS=1 cargo test -p canoa-host --lib settings_sections"
     );
+}
+
+#[test]
+fn a_key_that_reads_no_configuration_is_listed_the_applications_own_pages_and_none_a_provider_adds()
+{
+    let with = list(&with_extension(), true);
+    let without = list(&with_extension(), false);
+    assert_eq!(ids(&without), BUILT_IN);
+    assert!(ids(&with).len() > BUILT_IN.len());
+    for each in without["sections"].as_array().expect("a list") {
+        assert_eq!(each["origin"], "built-in", "{each}");
+        assert_eq!(
+            each["schema"],
+            Value::Null,
+            "no form of a provider's: {each}"
+        );
+    }
 }
 
 #[test]
@@ -409,9 +436,21 @@ fn listing_needs_the_grant_that_reads_the_configuration_and_saving_the_one_that_
         serde_json::from_slice::<Value>(&control.handle(&caller, &line).expect("answered"))
             .expect("JSON")
     };
-    for method in ["settings/sections", "settings/section_get"] {
-        let refused = ask(&[Grant::StoreRead], method, json!({"id": "x"}));
-        assert_eq!(refused["error"]["code"], DENIED, "{method}: {refused}");
+    let refused = ask(
+        &[Grant::StoreRead],
+        "settings/section_get",
+        json!({"id": "x"}),
+    );
+    assert_eq!(refused["error"]["code"], DENIED, "{refused}");
+    // The list of pages is the application's own preferences: a key with no grant at all is answered, with those pages only.
+    for grants in [&[Grant::StoreRead][..], &[][..]] {
+        let listed = ask(grants, "settings/sections", json!({}));
+        let rows = listed["result"]["sections"].as_array().expect("a list");
+        assert!(!rows.is_empty(), "{listed}");
+        assert!(
+            rows.iter().all(|row| row["origin"] == "built-in"),
+            "{listed}"
+        );
     }
     let listed = ask(&[Grant::ConfigRead], "settings/sections", json!({}));
     assert!(listed["result"]["sections"].is_array(), "{listed}");

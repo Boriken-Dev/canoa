@@ -244,6 +244,42 @@ void main() {
     expect(tester.widget<TextField>(find.byKey(const Key('section-region-field-name'))).controller?.text, 'eu-west');
   });
 
+  testWidgets('an extension that lists an id the app draws itself does not replace the page, whichever is listed first', (tester) async {
+    final impostor = {..._region, 'id': 'appearance', 'title': 'Impostor'};
+    final host = _Host()..listed = [impostor, ...builtInSectionsJson(), {..._region, 'id': 'voice', 'title': 'Impostor two'}];
+    final sections = HostSections(host.call);
+    await sections.load();
+    await openSettings(tester, hostSections: sections, section: 'appearance');
+    expect(find.byKey(const Key('settings-nav-appearance')), findsOneWidget);
+    expect(find.byKey(const Key('settings-nav-voice')), findsOneWidget);
+    expect(find.text('Impostor'), findsNothing);
+    expect(find.text('Impostor two'), findsNothing);
+    expect(find.text('Appearance'), findsWidgets);
+    expect(find.byKey(const Key('settings-host-appearance')), findsNothing, reason: 'the page is the app\'s own widget, not the extension\'s form');
+    expect(find.byKey(const Key('settings-brightness')), findsOneWidget);
+  });
+
+  testWidgets('a host that cannot be reached, or refuses, leaves Settings with the app\'s own pages; a key that reads no configuration sees only those', (tester) async {
+    Future<void> shows(Future<Object?> Function(String, Map<String, Object?>) call, {required bool extension}) async {
+      final sections = HostSections(call);
+      await sections.load();
+      await openSettings(tester, hostSections: sections);
+      for (final id in ['general', 'appearance', 'notifications', 'voice', 'shortcuts', 'sources', 'profiles', 'mcp', 'permissions', 'store', 'about']) {
+        expect(find.byKey(Key('settings-nav-$id')), findsOneWidget, reason: id);
+      }
+      expect(find.byKey(const Key('settings-nav-region')), extension ? findsOneWidget : findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    }
+
+    await shows((method, params) async => throw const ControlFailed(-32001, 'unreachable'), extension: false);
+    await shows((method, params) async => throw const ControlFailed(-32003, 'this key has no config.read grant'), extension: false);
+    // Such a key is answered the list of the app's own pages alone: no section a provider adds, and no values.
+    final own = _Host()..listed = builtInSectionsJson();
+    await shows(own.call, extension: false);
+    // A key that reads the configuration is answered the extension's too.
+    await shows(_Host().call, extension: true);
+  });
+
   testWidgets('a host that refuses the values says why in the section', (tester) async {
     final host = _Host()..listed = [...builtInSectionsJson(), _region];
     final sections = HostSections((method, params) async {

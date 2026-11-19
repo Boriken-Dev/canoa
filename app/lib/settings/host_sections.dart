@@ -4,21 +4,18 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
 import '../desktop/control_client.dart' show ControlFailed;
 import '../forms/schema_fields.dart';
 import '../store/store_extensions.dart' show extensionIcons;
+import 'built_in_sections.dart';
 import 'settings_row.dart';
 
 /// What the app asks the host with: `settings/sections`, `settings/section_get` and `settings/section_set`.
 typedef SectionCall = Future<Object?> Function(String method, Map<String, Object?> params);
-
-/// What Settings lists before its host has listed its sections, and when the host cannot: nothing, since the sections are the host's to
-/// list. A test whose host is never asked stands in for the list by setting this.
-@visibleForTesting
-List<Object?> sectionsUntilListed = const [];
 
 /// The heading a section sits under when its provider names none.
 const defaultSectionGroup = 'Extensions';
@@ -85,7 +82,16 @@ typedef SectionValues = ({Map<String, Object?> values, Set<String> secretsSet, S
 
 /// The sections the host lists, and the values of each.
 final class HostSections extends ChangeNotifier {
-  HostSections(this._call) : _sections = [for (final each in sectionsUntilListed) ?HostSection.read(each)];
+  /// Until the host answers, and for good when it cannot or will not, the sections are the application's own pages: what the host lists
+  /// of them, kept in [builtInSectionsListing], so Settings is never empty and the person's own preferences show whatever the host
+  /// grants.
+  HostSections(this._call) : _sections = builtIn();
+
+  /// The application's own pages, as the host lists them.
+  static List<HostSection> builtIn() {
+    final raw = (jsonDecode(builtInSectionsListing) as Map)['sections'] as List;
+    return [for (final each in raw) ?HostSection.read(each)];
+  }
 
   /// The sections of an app that has no host to ask.
   HostSections.withoutHost() : this((method, params) async => throw const ControlFailed(-32601, 'this app has no host'));
@@ -127,7 +133,7 @@ final class HostSections extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Asks the host for the sections again; a host that cannot answer leaves the list as it was.
+  /// Asks the host for the sections again; a host that cannot answer or refuses leaves the list as it was.
   Future<void> load() async {
     try {
       adopt(await _call('settings/sections', const {}));

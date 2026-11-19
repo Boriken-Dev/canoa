@@ -25,8 +25,18 @@ pub(crate) const TABLE: &str = "settings";
 
 /// `{"sections": [...]}`: each with its `id`, `title`, `help`, `icon`, `group`, `under`, `keywords`, `origin` (`bundled`, or the
 /// name of the entry or extension that loads it), `stored` (`config` or `provider`) and its form's `schema` and `form`.
-pub(crate) fn list(catalog: &SectionCatalog) -> Value {
-    json!({ "sections": catalog.list().iter().map(Section::json).collect::<Vec<_>>() })
+///
+/// With `all` false only the application's own pages are listed: the names, headings and icons of the preferences it draws itself,
+/// and none of what a provider adds.
+pub(crate) fn list(catalog: &SectionCatalog, all: bool) -> Value {
+    json!({
+        "sections": catalog
+            .list()
+            .iter()
+            .filter(|section| all || section.is_built_in())
+            .map(Section::json)
+            .collect::<Vec<_>>()
+    })
 }
 
 fn section<'a>(catalog: &'a SectionCatalog, params: &Value) -> Result<Section<'a>, (i32, String)> {
