@@ -1,0 +1,20 @@
+# The folders below a project whose subfolders are skills, which a skill scan looks in before searching the whole tree: the
+# `npx skills` conventions and the folders other agents read skills from. One folder a line, `/`-separated; a line that starts with
+# `#` is a comment. The agents this host carries add their own (their description's `skills_folder`), so they are not listed here.
+skills
+skills/.curated
+skills/.experimental
+skills/.system
+.agents/skills
+.agent/skills
+.cursor/skills
+.github/skills
+.windsurf/skills
+.augment/skills
+.cline/skills
+.continue/skills
+.goose/skills
+.kiro/skills
+.roo/skills
+.trae/skills
+.zed/skills

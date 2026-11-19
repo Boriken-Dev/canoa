@@ -162,7 +162,8 @@ fn a_repository_with_an_agents_skills_folder_lists_those_skills() {
 }
 
 #[test]
-fn the_folder_each_loaded_agent_reads_skills_from_is_one_of_the_usual_ones() {
+fn the_folder_each_agent_reads_skills_from_is_one_of_the_usual_ones_the_loaded_agents_and_a_data_file_name()
+ {
     let (control, tmp, _overlays) = host("scan-vendor-folders");
     let upstream = repo(
         &tmp,
@@ -171,6 +172,7 @@ fn the_folder_each_loaded_agent_reads_skills_from_is_one_of_the_usual_ones() {
             (".codex/skills/plan/SKILL.md", &skill_md("plan")),
             (".pi/skills/chat/SKILL.md", &skill_md("chat")),
             (".gemini/skills/ask/SKILL.md", &skill_md("ask")),
+            (".cursor/skills/draw/SKILL.md", &skill_md("draw")),
             ("tools/other/SKILL.md", &skill_md("other")),
         ],
     );
@@ -180,6 +182,7 @@ fn the_folder_each_loaded_agent_reads_skills_from_is_one_of_the_usual_ones() {
         [
             pair("ask", ".gemini/skills/ask"),
             pair("chat", ".pi/skills/chat"),
+            pair("draw", ".cursor/skills/draw"),
             pair("plan", ".codex/skills/plan")
         ],
         "a skill outside the folders the loaded agents name is not offered while there are some in them: {answer}"

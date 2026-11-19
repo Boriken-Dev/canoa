@@ -22,20 +22,18 @@ const MAX_DESCRIPTION: usize = 1024;
 /// How deep below the folder scanned a `SKILL.md` is looked for when none is in the usual places.
 const MAX_DEPTH: usize = 5;
 
-/// The folders whose subfolders are skills, which `npx skills` reads first: its own `skills/`, the three folders under it, the
-/// `.agents/skills` and `.agent/skills` that agents share, and the folder each loaded agent says it reads skills from.
+/// The folders whose subfolders are skills that no agent of this host owns, which `npx skills` reads first and other agents read from:
+/// a data file, one folder a line.
+const COMMON_FOLDERS: &str = include_str!("skill_folders.txt");
+
+/// The folders whose subfolders are skills: those of [`COMMON_FOLDERS`] and the folder each loaded agent says it reads skills from.
 fn skill_folders() -> Vec<String> {
-    let mut folders: Vec<String> = [
-        "skills",
-        "skills/.curated",
-        "skills/.experimental",
-        "skills/.system",
-        ".agents/skills",
-        ".agent/skills",
-    ]
-    .into_iter()
-    .map(str::to_owned)
-    .collect();
+    let mut folders: Vec<String> = COMMON_FOLDERS
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_owned)
+        .collect();
     for folder in crate::vendors::all()
         .into_iter()
         .filter_map(|vendor| vendor.skills_folder)
