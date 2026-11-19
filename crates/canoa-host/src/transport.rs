@@ -22,7 +22,7 @@ use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::Instant;
 
-use coqui_agentic_peer::auth;
+use coqui_link::auth;
 use coqui_transport::{Channel, Failure};
 use coqui_transport_guatiao::guatiao::library::kind::InstantiateError;
 use coqui_transport_guatiao::guatiao::library::{Object, ProviderError as KindError, Registry};

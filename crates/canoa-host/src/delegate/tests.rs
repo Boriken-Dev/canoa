@@ -41,7 +41,7 @@ impl Host for Fake {
     fn prover(
         &self,
         _peer: &coqui_peer_webcrypto::PeerId,
-    ) -> Result<coqui_agentic_peer::auth::Proof, String> {
+    ) -> Result<coqui_link::auth::Proof, String> {
         Err("a test host dials no one".to_owned())
     }
 }

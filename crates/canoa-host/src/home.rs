@@ -18,9 +18,9 @@ use std::fs::{self, File, TryLockError};
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
-use coqui_agentic_peer::Error;
-use coqui_agentic_peer::auth::{Identity, Method};
 use coqui_agentic_peer::home::{self, METHOD_FILE, identity_file};
+use coqui_link::Error;
+use coqui_link::auth::{Identity, Method};
 use coqui_peer_webcrypto::TrustStore;
 use serde_json::{Value, json};
 

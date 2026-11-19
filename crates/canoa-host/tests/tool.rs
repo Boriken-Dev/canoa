@@ -11,7 +11,7 @@ mod support;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use coqui_agentic_peer::auth::Identity;
+use coqui_link::auth::Identity;
 use coqui_transport_web::websocket::Channel;
 use serde_json::{Value, json};
 use support::{Host, Rpc, Scratch, WAIT, cwd, example, quoted, running, with_link};

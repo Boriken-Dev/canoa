@@ -30,7 +30,7 @@ mod with_python {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
-    use coqui_agentic_peer::auth::Identity;
+    use coqui_link::auth::Identity;
     use serde_json::{Value, json};
 
     use crate::support::{

@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-use coqui_agentic_peer::auth::{self, Identity};
-use coqui_agentic_peer::pairing;
+use coqui_link::auth::{self, Identity};
+use coqui_link::pairing;
 use coqui_peer_webcrypto::TrustStore;
 use coqui_peer_webcrypto::pair::PairingDesk;
 use coqui_transport::{Channel as _, Failure};

@@ -13,8 +13,8 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use coqui_agentic_peer::auth::Identity;
-use coqui_agentic_peer::{auth, pairing};
+use coqui_link::auth::Identity;
+use coqui_link::{auth, pairing};
 use coqui_peer_webcrypto::TrustStore;
 use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
 use coqui_transport::Channel as _;

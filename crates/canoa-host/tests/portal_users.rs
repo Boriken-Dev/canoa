@@ -258,7 +258,7 @@ fn start_portal_with(config: &str) -> Portal {
 /// A person at a browser: a cookie, and a key of its own.
 struct Browser {
     cookie: String,
-    key: coqui_agentic_peer::auth::Identity,
+    key: coqui_link::auth::Identity,
     host: PeerId,
     addr: SocketAddr,
 }

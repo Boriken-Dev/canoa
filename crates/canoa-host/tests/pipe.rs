@@ -49,7 +49,7 @@ fn host_on_a_pipe(extra: &str) -> (Host, String) {
 /// Noise's finishes on its last message and hears it as the link ending before anything is answered.
 fn refused_link<T: core::fmt::Debug>(link: &Result<Result<T, Value>, String>) -> bool {
     match support::method() {
-        coqui_agentic_peer::auth::Method::WebCrypto => link.is_err(),
+        coqui_link::auth::Method::WebCrypto => link.is_err(),
         _ => !matches!(link, Ok(Ok(_))),
     }
 }

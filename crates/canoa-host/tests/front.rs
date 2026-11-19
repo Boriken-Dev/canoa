@@ -16,7 +16,7 @@ use std::time::Duration;
 use canoa_host::Home;
 use canoa_host::cli::{self, Cli, Front, Program};
 use clap::Parser as _;
-use coqui_agentic_peer::{auth, pairing};
+use coqui_link::{auth, pairing};
 use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
 use coqui_transport::Channel as _;
 use coqui_transport_web::Dialer as _;

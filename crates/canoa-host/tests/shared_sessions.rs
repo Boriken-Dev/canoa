@@ -284,7 +284,7 @@ fn an_unshared_entry_gives_each_connection_an_agent_of_its_own() {
 
 fn running_sessions(
     url: &str,
-    key: &coqui_agentic_peer::auth::Identity,
+    key: &coqui_link::auth::Identity,
     host: &Host,
 ) -> Result<Value, Value> {
     with_link(url, key, host.peer, |rpc| {

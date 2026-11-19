@@ -330,7 +330,7 @@ fn a_paired_key_runs_a_turn_through_the_relay_and_an_unpaired_one_is_refused() {
     let refused = support::with_channel(link, &client, host.peer, |rpc| rpc.initialize());
     let refused = refused.map(|inner| inner.map_err(|error| error.to_string()));
     let none = match support::method() {
-        coqui_agentic_peer::auth::Method::WebCrypto => refused.is_err(),
+        coqui_link::auth::Method::WebCrypto => refused.is_err(),
         _ => !matches!(refused, Ok(Ok(_))),
     };
     assert!(none, "an unpaired key gets nothing: {refused:?}");
@@ -665,7 +665,7 @@ fn pairing_door(home: &Path) -> (Child, Value) {
 
 #[test]
 fn a_browser_pairs_by_pin_through_the_relay_and_its_key_is_bound_to_its_extension() {
-    use coqui_agentic_peer::pairing;
+    use coqui_link::pairing;
     use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
 
     let host = host();
@@ -737,7 +737,7 @@ fn the_pairing_door_is_closed_unless_a_person_asked_for_a_pin() {
 
 #[test]
 fn a_wrong_pin_pairs_nobody() {
-    use coqui_agentic_peer::pairing;
+    use coqui_link::pairing;
     use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
 
     let host = host();
@@ -767,7 +767,7 @@ fn a_wrong_pin_pairs_nobody() {
 /// Runs `body` on the control channel through the door, as a key the host has paired.
 fn on_control<R>(
     host: &Host,
-    client: &coqui_agentic_peer::auth::Identity,
+    client: &coqui_link::auth::Identity,
     body: impl FnOnce(&support::Rpc<'_, Link<'_>>) -> R,
 ) -> Result<R, String> {
     let relay = Relay::start(&host.home(), ORIGIN);
@@ -855,7 +855,7 @@ fn an_unreadable_record_of_origins_closes_the_door_to_every_key() {
 
 #[test]
 fn pairing_that_cannot_record_its_origin_leaves_no_accepted_key() {
-    use coqui_agentic_peer::pairing;
+    use coqui_link::pairing;
     use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
 
     let host = host();
@@ -1158,8 +1158,8 @@ fn provide_until(
 }
 
 /// Pairs a new key the way the extension does: by the PIN `canoa pair --native` shows, which binds the key to `ORIGIN`.
-fn pair_by_pin(host: &Host) -> coqui_agentic_peer::auth::Identity {
-    use coqui_agentic_peer::pairing;
+fn pair_by_pin(host: &Host) -> coqui_link::auth::Identity {
+    use coqui_link::pairing;
     use coqui_peer_webcrypto::pair::{CodeAlphabet, Pin};
 
     let (mut pair, shown) = pairing_door(&host.home());

@@ -19,12 +19,7 @@ fn control_config(admin: &str, other: &str) -> String {
     )
 }
 
-fn call(
-    host: &Host,
-    who: &coqui_agentic_peer::auth::Identity,
-    method: &str,
-    params: Value,
-) -> Value {
+fn call(host: &Host, who: &coqui_link::auth::Identity, method: &str, params: Value) -> Value {
     with_link(host.url("@control"), who, host.peer, |rpc| {
         match rpc.request(method, params) {
             Ok(result) => json!({"result": result}),

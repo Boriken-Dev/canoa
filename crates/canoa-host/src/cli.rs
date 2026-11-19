@@ -15,8 +15,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use coqui_agentic_peer::auth;
-use coqui_agentic_peer::auth::Method;
+use coqui_link::auth;
+use coqui_link::auth::Method;
 
 mod bridge;
 

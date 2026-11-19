@@ -13,7 +13,7 @@ use coqui_acp::secret::{
     DEFAULT_LIFETIME, IdentityId, LinkKey, LinkRole, Method, Prover, RequestParams, RequestReply,
     Verifier, unprotected,
 };
-use coqui_agentic_peer::auth::Identity;
+use coqui_link::auth::Identity;
 use serde_json::{Value, json};
 
 /// What the person does when the host puts a form.

@@ -42,7 +42,7 @@ use coqui_acp::secret::{
     unprotected,
 };
 use coqui_acp_secrets::{Secrets, SessionTools};
-use coqui_agentic_peer::auth::Identity;
+use coqui_link::auth::Identity;
 use coqui_peer_webcrypto::{PeerId, TrustStore};
 use zeroize::Zeroizing;
 

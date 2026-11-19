@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use coqui_acp::secret::CAPABILITY;
-use coqui_agentic_peer::auth::{Identity, Method};
+use coqui_link::auth::{Identity, Method};
 use coqui_peer_webcrypto::TrustStore;
 use serde_json::{Value, json};
 

@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use coqui_agentic_peer::auth::Identity;
+use coqui_link::auth::Identity;
 use coqui_peer_webcrypto::TrustStore;
 use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};

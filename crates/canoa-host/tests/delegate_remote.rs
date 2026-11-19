@@ -19,9 +19,9 @@ use coqui_a2a::model::{
     SendMessageResponse, StreamResponse, TaskState,
 };
 use coqui_a2a::{Client, ClientError};
-use coqui_agentic_peer::auth::{self, Identity, Proof, Sealed, Trust};
 use coqui_agentic_peer::home::identity_file;
-use coqui_agentic_peer::mux::{Limits, Mux, Side};
+use coqui_link::auth::{self, Identity, Proof, Sealed, Trust};
+use coqui_link::mux::{Limits, Mux, Side};
 use coqui_peer_webcrypto::{PeerId, TrustStore};
 use coqui_transport::Channel as _;
 use coqui_transport_web::Dialer as _;

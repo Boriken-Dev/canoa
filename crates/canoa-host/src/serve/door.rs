@@ -8,7 +8,7 @@ use core::time::Duration;
 use std::path::{Path, PathBuf};
 use std::thread;
 
-use coqui_agentic_peer::auth;
+use coqui_link::auth;
 use coqui_transport::Channel as _;
 use serde_json::{Value, json};
 

@@ -22,10 +22,10 @@ use canoa::{Capability, ClientId, Registry, Service, ServiceId};
 use coqui_acp_api::guatiao::library::Registry as GuatiaoRegistry;
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
 use coqui_acp_bridge::relay::relay;
-use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
-use coqui_agentic_peer::link::Prefilled;
-use coqui_agentic_peer::mux;
 use coqui_builder::builder::BuildError;
+use coqui_link::auth::{self, Identity, Method, Proof, Sealed, Trust};
+use coqui_link::link::Prefilled;
+use coqui_link::mux;
 use coqui_peer_webcrypto::{PeerId, TrustStore};
 use coqui_transport::{Channel, Failure};
 use coqui_transport_web::Limits;
@@ -2698,10 +2698,10 @@ fn connection<C: Channel>(
     ) {
         Ok(established) => established,
         // A client of the other method has no key here to accept: it has to pair again under this host's method.
-        Err(error @ coqui_agentic_peer::Error::OtherMethod { .. }) => {
+        Err(error @ coqui_link::Error::OtherMethod { .. }) => {
             return tracing::info!(entry = served.name, "a client was refused: {error}");
         }
-        Err(error @ coqui_agentic_peer::Error::Proof(_)) => {
+        Err(error @ coqui_link::Error::Proof(_)) => {
             return tracing::info!(
                 entry = served.name,
                 "a key was refused: {error}; a key that proved itself and is not paired waits for `canoa accept`"

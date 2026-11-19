@@ -35,10 +35,10 @@ use coqui_a2a::error::{A2aError, ErrorKind};
 use coqui_a2a::tasks::TaskStore;
 use coqui_a2a::wire::ServiceParameters;
 use coqui_a2a::{Caller, Server, Watch};
-use coqui_agentic_peer::auth::Proof;
-use coqui_agentic_peer::link::{self, Host as LinkHost, Options, Services};
-use coqui_agentic_peer::mux::{Heartbeat, Side};
-use coqui_agentic_peer::peers::{NoEvents, PeerRecord, PeerStore};
+use coqui_link::auth::Proof;
+use coqui_link::link::{self, Host as LinkHost, Options, Services};
+use coqui_link::mux::{Heartbeat, Side};
+use coqui_link::peers::{NoEvents, PeerRecord, PeerStore};
 use coqui_peer_webcrypto::PeerId;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -1546,7 +1546,7 @@ impl Drop for Delegation {
 struct Grants(Vec<String>);
 
 impl PeerStore for Grants {
-    fn get(&self, peer: &str) -> Result<Option<PeerRecord>, coqui_agentic_peer::Error> {
+    fn get(&self, peer: &str) -> Result<Option<PeerRecord>, coqui_link::Error> {
         Ok(self
             .0
             .iter()
@@ -1554,14 +1554,14 @@ impl PeerStore for Grants {
             .then(|| PeerRecord::new(peer).granting(coqui_a2a::PROTOCOL)))
     }
 
-    fn put(&self, _record: &PeerRecord) -> Result<(), coqui_agentic_peer::Error> {
-        Err(coqui_agentic_peer::Error::Identity(
+    fn put(&self, _record: &PeerRecord) -> Result<(), coqui_link::Error> {
+        Err(coqui_link::Error::Identity(
             "the grants are canoa.cfg's".to_owned(),
         ))
     }
 
-    fn remove(&self, _peer: &str) -> Result<(), coqui_agentic_peer::Error> {
-        Err(coqui_agentic_peer::Error::Identity(
+    fn remove(&self, _peer: &str) -> Result<(), coqui_link::Error> {
+        Err(coqui_link::Error::Identity(
             "the grants are canoa.cfg's".to_owned(),
         ))
     }

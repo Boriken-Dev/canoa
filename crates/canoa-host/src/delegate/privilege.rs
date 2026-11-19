@@ -294,7 +294,7 @@ mod tests {
         fn prover(
             &self,
             _peer: &coqui_peer_webcrypto::PeerId,
-        ) -> Result<coqui_agentic_peer::auth::Proof, String> {
+        ) -> Result<coqui_link::auth::Proof, String> {
             Err(String::new())
         }
     }

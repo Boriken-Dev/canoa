@@ -387,7 +387,7 @@ fn agent_entry(extra: &str) -> String {
     )
 }
 
-fn accept(home: &Path, identity: &coqui_agentic_peer::auth::Identity) {
+fn accept(home: &Path, identity: &coqui_link::auth::Identity) {
     let store = coqui_peer_webcrypto::TrustStore::open(&home.join("peers")).expect("a store");
     store
         .accept_key(&identity.key_material())
@@ -575,7 +575,7 @@ fn pair_origin_records_the_origin_beside_the_key_it_paired() {
 #[test]
 fn the_library_commands_hold_to_the_method_a_running_host_keeps() {
     let host = support::Host::start(&agent_entry(""), 1);
-    let other = coqui_agentic_peer::auth::Method::ALL
+    let other = coqui_link::auth::Method::ALL
         .into_iter()
         .find(|method| *method != support::method())
         .expect("another method");

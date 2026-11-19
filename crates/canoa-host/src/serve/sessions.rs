@@ -1095,7 +1095,7 @@ fn open<C: Channel>(
         thread::Builder::new()
             .name("canoa-session-agent".to_owned())
             .spawn(move || {
-                let prefilled = coqui_agentic_peer::link::Prefilled::new(&host, first.clone());
+                let prefilled = coqui_link::link::Prefilled::new(&host, first.clone());
                 super::give_agent_flow(
                     &shared,
                     &served,

@@ -20,8 +20,8 @@ use coqui_acp::secret::{
     RequestParams, RequestReply, ShowDeliver, ShowDone, ShowOpen, ShowOpened, Verifier,
     unprotected,
 };
-use coqui_agentic_peer::auth::{self, Identity, Sealed};
 use coqui_agentic_peer::home::identity_file;
+use coqui_link::auth::{self, Identity, Sealed};
 use coqui_transport::Channel as _;
 use coqui_transport_web::Dialer as _;
 use coqui_transport_web::websocket::{self, Frames};
