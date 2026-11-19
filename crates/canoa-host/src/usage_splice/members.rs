@@ -1,6 +1,6 @@
 //! The processes that belong to an agent: its own and everything it started, found from a snapshot of the machine's
-//! process table. Antigravity may sit below a launcher (`canoa launch` with a profile), so its listening port is
-//! owned by a grandchild of the process the host started.
+//! process table. An agent may sit below a launcher (`canoa launch` with a profile), so what a usage reader looks for (a listening
+//! port) may be owned by a grandchild of the process the host started.
 //!
 //! The table is read in this process by Windows' Toolhelp snapshot and on Linux from `/proc`, and by `ps` elsewhere, which
 //! runs on a worker thread bounded in time and size. A snapshot that cannot be had leaves the agent's own process alone, which is the answer for an

@@ -1,10 +1,9 @@
-//! Antigravity's quota for the usage splice. `agy acp` serves its own language server on loopback once a session is open, and
-//! `coqui_acp_harness::antigravity` reads the account's remaining fraction and reset time for each model from it. This module
-//! decides when: once a session has been open for [`SETTLE`] with no turn running, or when its first turn ends (with retries,
-//! since the port comes up a moment later), after each prompt, and when a client asks and the last reading is old. Nothing
-//! is read while the session is starting or a first turn runs: the agent is busy with its own start then. The port that
-//! answered is kept for the agent's life and asked again without listing any ports. With no session open it starts an `agy acp` of its own, opens an empty session,
-//! reads and ends it.
+//! An agent's own quota for the usage splice. What reads it is the agent's `usage_reader` provider: an agent may serve its quota
+//! only once a session is open, so this module decides when: once a session has been open for the reader's settle time with no
+//! turn running, or when its first turn ends (with retries, since what serves the figures comes up a moment later), after each
+//! prompt, and when a client asks and the last reading is old. Nothing is read while the session is starting or a first turn
+//! runs: the agent is busy with its own start then. With no session open it starts the entry's program of its own, opens an
+//! empty session, reads and ends it.
 //!
 //! A reading never runs on the relay thread: it lists sockets and the process table, which take a while. A worker thread
 //! updates the entry's [`Quota`] and leaves an answer in the connection's [`Link`]; the splice delivers it on the next
@@ -22,45 +21,141 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::Instant;
 
+use canoa::usage_reader::{
+    Failure as ReadFailure, ProcessMembers, ReaderInfo, Retry, UsageReader, UsageReading,
+};
+use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::{Source, UsageReport, UsageSupport};
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
 use coqui_acp_bridge::relay::relay;
 use coqui_acp_harness::UsageTracker;
-use coqui_acp_harness::antigravity::{AcpModel, AgyQuota, BUCKET_PREFIX, ReadError, ReadLimits};
 use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
 
 use super::members::members;
 use super::{Inference, answer_of, lock, unix_now};
 
-/// How long a reading counts as current: a request younger than this is answered from it, and no private agent is started
-/// more often.
-pub(crate) const CACHE: Duration = Duration::from_secs(15);
-/// How long a session is open with no turn running before its quota is read: the agent's own start and first turn go first.
-pub(crate) const SETTLE: Duration = Duration::from_secs(10);
-/// How long after a session opens each further try waits, while the agent has no port yet.
-const RETRIES: [Duration; 4] = [
-    Duration::from_secs(2),
-    Duration::from_secs(4),
-    Duration::from_secs(8),
-    Duration::from_secs(16),
-];
-/// How long a private agent may take from start to end.
-const PRIVATE_LIMIT: Duration = Duration::from_secs(40);
-/// How long a private agent waits between tries for its port.
-const PRIVATE_RETRIES: [Duration; 5] = [
-    Duration::from_millis(500),
-    Duration::from_secs(1),
-    Duration::from_secs(2),
-    Duration::from_secs(4),
-    Duration::from_secs(8),
-];
 /// How many messages of the private agent's are read before its answers to the two requests come.
 const PRIVATE_MESSAGES: usize = 4096;
 
-/// How to run an entry's agy, from its configuration.
+/// The host's [`ProcessMembers`]: the processes of an agent's tree, from this machine's process table.
+#[derive(Debug, Clone, Copy)]
+struct Table;
+
+impl ProcessMembers for Table {
+    fn members(&self, root: u32) -> Result<Vec<u32>, ProviderError> {
+        Ok(members(root))
+    }
+}
+
+/// A bundled agent's `usage_reader` provider, as it described itself: when to read and how its buckets are named.
 #[derive(Clone, Debug)]
-pub(crate) struct Antigravity {
+pub(crate) struct Reader {
+    info: Arc<ReaderInfo>,
+}
+
+impl Reader {
+    /// The bundled reader whose id is `id`, or `None` when no bundled agent offers one.
+    pub(crate) fn named(id: &str) -> Option<Self> {
+        let registry = crate::vendors::bundled_providers()?;
+        registry.offers::<dyn UsageReader>().find_map(|offer| {
+            offer
+                .default_instance()
+                .and_then(|reader| reader.describe().ok())
+                .filter(|info| info.id == id && info.problem().is_none())
+                .map(|info| Self {
+                    info: Arc::new(info),
+                })
+        })
+    }
+
+    /// The ids of the bundled readers.
+    pub(crate) fn ids() -> Vec<String> {
+        let Some(registry) = crate::vendors::bundled_providers() else {
+            return Vec::new();
+        };
+        registry
+            .offers::<dyn UsageReader>()
+            .filter_map(|offer| offer.default_instance()?.describe().ok())
+            .filter(|info| info.problem().is_none())
+            .map(|info| info.id)
+            .collect()
+    }
+
+    /// A reading of one agent's figures.
+    fn open(&self) -> Result<Object<dyn UsageReading>, String> {
+        let registry = crate::vendors::bundled_providers().ok_or("no reader is loaded")?;
+        for offer in registry.offers::<dyn UsageReader>() {
+            let Some(reader) = offer.default_instance() else {
+                continue;
+            };
+            if reader.describe().is_ok_and(|info| info.id == self.info.id) {
+                return reader
+                    .open(Table.into_object())
+                    .map_err(|error| error.message().to_owned());
+            }
+        }
+        Err("the reader is no longer offered".to_owned())
+    }
+
+    /// How long a reading counts as current: a request younger than this is answered from it, and no private agent is started
+    /// more often.
+    fn cache(&self) -> Duration {
+        Duration::from_millis(self.info.cache_ms)
+    }
+
+    /// How long a session is open with no turn running before its quota is read: the agent's own start and first turn go first.
+    pub(crate) fn settle(&self) -> Duration {
+        Duration::from_millis(self.info.settle_ms)
+    }
+
+    fn id(&self) -> &str {
+        &self.info.id
+    }
+}
+
+/// One agent's reading, opened from its reader and asked one thread at a time.
+struct Opened(Mutex<Object<dyn UsageReading>>);
+
+impl Opened {
+    fn new(reader: &Reader) -> Result<Self, String> {
+        reader.open().map(|reading| Self(Mutex::new(reading)))
+    }
+
+    /// What the agent said when it opened a session.
+    fn opened(&self, result: &str) {
+        if let Err(error) = lock(&self.0).opened(result) {
+            tracing::debug!("usage reader: {}", error.message());
+        }
+    }
+
+    /// The figures of the agent whose process is `root`: `Ok` once read, or why not.
+    fn read(
+        &self,
+        root: u32,
+        tree: bool,
+    ) -> Result<Vec<coqui_acp_api::usage::Bucket>, ReadFailure> {
+        match lock(&self.0).read(root, tree) {
+            Ok(reading) => match reading.failure {
+                None => Ok(reading.buckets),
+                Some(failure) => Err(failure),
+            },
+            Err(error) => Err(ReadFailure::new(error.message(), Retry::Never)),
+        }
+    }
+}
+
+impl core::fmt::Debug for Opened {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("Opened")
+    }
+}
+
+/// How to run an entry's agent, from its configuration, and who reads its quota.
+#[derive(Clone, Debug)]
+pub(crate) struct Launch {
+    /// What reads the agent's quota.
+    pub(crate) reader: Reader,
     pub(crate) program: OsString,
     pub(crate) args: Vec<OsString>,
     /// The host's state directory; a private agent needs it for its empty working directory.
@@ -121,10 +216,10 @@ impl core::fmt::Debug for Private {
     }
 }
 
-/// An entry's agy usage: the buckets every connection read, shared by them.
+/// An entry's agent's usage: the buckets every connection read, shared by them.
 #[derive(Debug)]
 pub(crate) struct Quota {
-    command: Antigravity,
+    command: Launch,
     tracker: Mutex<UsageTracker>,
     read_at: Mutex<Option<Instant>>,
     private: Mutex<Private>,
@@ -135,7 +230,8 @@ pub(crate) struct Quota {
 }
 
 impl Quota {
-    pub(crate) fn new(command: Antigravity) -> Self {
+    pub(crate) fn new(command: Launch) -> Self {
+        let settle = command.reader.settle();
         let mut support = UsageSupport::none();
         support.sources = alloc::vec![Source::Reported, Source::Inferred];
         support.needs_session = true;
@@ -144,7 +240,7 @@ impl Quota {
             tracker: Mutex::new(UsageTracker::new(support, None)),
             read_at: Mutex::new(None),
             private: Mutex::new(Private::default()),
-            settle: SETTLE,
+            settle,
             starting: AtomicUsize::new(0),
         }
     }
@@ -172,18 +268,19 @@ impl Quota {
 
     /// Takes a complete reading.
     pub(crate) fn apply(&self, buckets: Vec<coqui_acp_api::usage::Bucket>) {
-        self.tracker().replace(BUCKET_PREFIX, buckets, unix_now());
+        self.tracker()
+            .replace(&self.command.reader.info.bucket_prefix, buckets, unix_now());
         *lock(&self.read_at) = Some(Instant::now());
     }
 
-    /// Whether a reading is younger than [`CACHE`].
+    /// Whether a reading is younger than the reader's cache time.
     pub(crate) fn fresh(&self) -> bool {
-        lock(&self.read_at).is_some_and(|at| at.elapsed() < CACHE)
+        lock(&self.read_at).is_some_and(|at| at.elapsed() < self.command.reader.cache())
     }
 
     /// Reads with a private agent on a thread of its own and runs `done` after, unless that is not allowed now: no
     /// directory to work in or no way to start it through the host, an entry that gives its agent an environment, or one
-    /// started less than [`CACHE`] ago, or while a session of this entry is starting (the figures as they stand answer
+    /// started less than the reader's cache time ago, or while a session of this entry is starting (the figures as they stand answer
     /// then). A request that comes while one is reading waits for it. `false` says nothing was started and `done` will
     /// not run.
     pub(crate) fn read_privately(self: &Arc<Self>, done: impl FnOnce() + Send + 'static) -> bool {
@@ -205,7 +302,10 @@ impl Quota {
                 private.waiting.push(Box::new(done));
                 return true;
             }
-            if private.last.is_some_and(|at| at.elapsed() < CACHE) {
+            if private
+                .last
+                .is_some_and(|at| at.elapsed() < self.command.reader.cache())
+            {
                 return false;
             }
             private.busy = true;
@@ -213,7 +313,7 @@ impl Quota {
         }
         let quota = Arc::clone(self);
         let started = thread::Builder::new()
-            .name("canoa-agy-private".to_owned())
+            .name("canoa-usage-private".to_owned())
             .spawn(move || {
                 // Whatever ends the reading, a panic included, frees the next one and answers who waited.
                 let _finish = Finally(Some(|| {
@@ -228,7 +328,10 @@ impl Quota {
                     }
                 }));
                 if let Err(why) = quota.private_reading(&directory) {
-                    tracing::debug!("antigravity usage, private agent: {why}");
+                    tracing::debug!(
+                        "usage reader {}, private agent: {why}",
+                        quota.command.reader.id()
+                    );
                 }
             });
         if started.is_err() {
@@ -269,7 +372,7 @@ impl Quota {
             inbound: Mutex::new(inbound),
             outbound: Mutex::new(Some(outbound)),
         };
-        let end = Instant::now() + PRIVATE_LIMIT;
+        let end = Instant::now() + Duration::from_millis(self.command.reader.info.private_limit_ms);
         let pid = agent.pid();
         thread::scope(|scope| {
             scope.spawn(|| {
@@ -322,38 +425,28 @@ impl Quota {
             json!({"protocolVersion": 1, "clientCapabilities": {}}),
         )?;
         let opened = ask(2, "session/new", json!({"cwd": cwd, "mcpServers": []}))?;
-        let models = models_of(&opened);
-        let mut reader = AgyQuota::new(ReadLimits::default());
-        for delay in PRIVATE_RETRIES {
-            thread::sleep(delay.min(end.saturating_duration_since(Instant::now())));
+        let reading = Opened::new(&self.command.reader)?;
+        reading.opened(&opened.to_string());
+        // The agent was started for this, below nothing of the host's: its whole tree is looked through from the first try.
+        let mut why = "the agent shows nothing to read".to_owned();
+        for delay in &self.command.reader.info.private_retries_ms {
+            thread::sleep(
+                Duration::from_millis(*delay).min(end.saturating_duration_since(Instant::now())),
+            );
             if Instant::now() >= end {
                 break;
             }
-            match reader.read(&members(pid), &models) {
+            match reading.read(pid, true) {
                 Ok(buckets) => {
                     self.apply(buckets);
                     return Ok(());
                 }
-                Err(ReadError::NoPort) => {}
-                Err(error) => return Err(error.to_string()),
+                Err(failure) if failure.retry == Retry::NotYet => why = failure.why,
+                Err(failure) => return Err(failure.why),
             }
         }
-        Err(ReadError::NoPort.to_string())
+        Err(why)
     }
-}
-
-/// The models a `session/new` answer lists: `models.availableModels[].{modelId, name}`.
-pub(crate) fn models_of(result: &Value) -> Vec<AcpModel> {
-    result["models"]["availableModels"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|model| {
-            let id = model.get("modelId")?.as_str()?;
-            let name = model.get("name").and_then(Value::as_str).unwrap_or(id);
-            Some(AcpModel::new(id, name))
-        })
-        .collect()
 }
 
 /// A [`Channel`] whose peer is the host itself: what the relay reads from the agent's output and what it writes to its input.
@@ -451,10 +544,7 @@ pub(crate) struct Reading {
     link: Arc<Link>,
     account: Option<String>,
     root: u32,
-    reader: Mutex<AgyQuota>,
-    models: Mutex<Vec<AcpModel>>,
-    /// Whether the agent's port was not its own process's, so the whole tree is looked through.
-    wide: AtomicBool,
+    reading: Opened,
     busy: AtomicBool,
     /// Usage requests waiting for the reading under way, answered after it.
     waiters: Mutex<Vec<Value>>,
@@ -479,22 +569,27 @@ impl Reading {
         link: Arc<Link>,
         account: Option<String>,
         root: u32,
-    ) -> Self {
-        Self {
+    ) -> Option<Self> {
+        let reading = match Opened::new(&quota.command.reader) {
+            Ok(reading) => reading,
+            Err(why) => {
+                tracing::debug!("usage reader {}: {why}", quota.command.reader.id());
+                return None;
+            }
+        };
+        Some(Self {
             inference,
             quota,
             link,
             account,
             root,
-            reader: Mutex::new(AgyQuota::new(ReadLimits::default())),
-            models: Mutex::new(Vec::new()),
-            wide: AtomicBool::new(false),
+            reading,
             busy: AtomicBool::new(false),
             waiters: Mutex::new(Vec::new()),
             starting: AtomicBool::new(false),
             running: AtomicUsize::new(0),
             turned: AtomicBool::new(false),
-        }
+        })
     }
 
     /// A session of this connection is being opened: the entry reads nothing privately until it is.
@@ -527,7 +622,7 @@ impl Reading {
         }
         let me = Arc::clone(self);
         let started = thread::Builder::new()
-            .name("canoa-agy-usage".to_owned())
+            .name("canoa-usage-reader".to_owned())
             .spawn(move || {
                 // However the job ends, a panic included, the next one may start and a request that waited is answered
                 // with what there is.
@@ -547,37 +642,18 @@ impl Reading {
     }
 
     /// One reading of the agent's own processes.
-    fn read_now(&self) -> Result<(), ReadError> {
-        let models = lock(&self.models).clone();
-        let mut reader = lock(&self.reader);
-        // The agent keeps its port for its life: ports are listed for the first reading and after a failure.
-        if let Some(buckets) = reader.read_remembered(&models) {
-            self.quota.apply(buckets);
-            return Ok(());
-        }
-        let wide = self.wide.load(Ordering::SeqCst);
-        let mut read = reader.read(
-            &if wide {
-                members(self.root)
-            } else {
-                alloc::vec![self.root]
-            },
-            &models,
-        );
-        if !wide && matches!(read, Err(ReadError::NoPort | ReadError::NotOwned)) {
-            let owners = members(self.root);
-            if owners.len() > 1 {
-                self.wide.store(true, Ordering::SeqCst);
-                read = reader.read(&owners, &models);
-            }
-        }
-        self.quota.apply(read?);
+    fn read_now(&self) -> Result<(), ReadFailure> {
+        self.quota.apply(self.reading.read(self.root, false)?);
         Ok(())
     }
 
     fn read_quietly(&self) {
-        if let Err(why) = self.read_now() {
-            tracing::debug!("antigravity usage: {why}");
+        if let Err(failure) = self.read_now() {
+            tracing::debug!(
+                "usage reader {}: {}",
+                self.quota.command.reader.id(),
+                failure.why
+            );
         }
         self.flush_waiters();
     }
@@ -591,18 +667,30 @@ impl Reading {
         }
     }
 
-    /// A session opened: once its first turn has ended, or it has been idle for the entry's settle time, reads, and again
-    /// after 2, 4, 8 and 16 seconds while the agent has no port or does not answer in time.
-    pub(crate) fn opened(self: &Arc<Self>, models: Vec<AcpModel>) {
+    /// A session opened and the agent answered with `result` (JSON text): once its first turn has ended, or it has been idle for the
+    /// reader's settle time, reads, and again after each of the reader's retry times while the agent shows nothing to read or
+    /// does not answer in time.
+    pub(crate) fn opened(self: &Arc<Self>, result: Option<&str>) {
         self.started();
-        if !models.is_empty() {
-            *lock(&self.models) = models;
+        if let Some(result) = result {
+            self.reading.opened(result);
         }
         self.spawn(|me| {
             if !me.settle() {
                 return;
             }
-            let delays: Vec<Duration> = [Duration::ZERO].into_iter().chain(RETRIES).collect();
+            let delays: Vec<Duration> = [Duration::ZERO]
+                .into_iter()
+                .chain(
+                    me.quota
+                        .command
+                        .reader
+                        .info
+                        .retries_ms
+                        .iter()
+                        .map(|ms| Duration::from_millis(*ms)),
+                )
+                .collect();
             for (index, wait) in delays.iter().enumerate() {
                 if !me.pause(*wait) {
                     return;
@@ -611,9 +699,15 @@ impl Reading {
                 me.flush_waiters();
                 match read {
                     Ok(()) => return,
-                    Err(ReadError::NoPort | ReadError::Io(_)) if index + 1 < delays.len() => {}
-                    Err(why) => {
-                        tracing::debug!("antigravity usage: {why}");
+                    Err(failure)
+                        if matches!(failure.retry, Retry::NotYet | Retry::NoAnswer)
+                            && index + 1 < delays.len() => {}
+                    Err(failure) => {
+                        tracing::debug!(
+                            "usage reader {}: {}",
+                            me.quota.command.reader.id(),
+                            failure.why
+                        );
                         return;
                     }
                 }

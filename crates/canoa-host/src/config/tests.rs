@@ -1054,11 +1054,8 @@ fn an_agent_entry_names_where_its_usage_is_read_from() {
         parse("[host.agents.a]\nprogram = \"agy\"\nargs = [\"acp\"]\nusage = \"antigravity\"\n")
             .expect("parses");
     assert!(matches!(
-        config.entries[0].kind,
-        EntryKind::Agent {
-            usage: Some(UsageSource::Antigravity),
-            ..
-        }
+        &config.entries[0].kind,
+        EntryKind::Agent { usage: Some(reader), .. } if reader == "antigravity"
     ));
     for text in [
         "[host.agents.a]\nprogram = \"agy\"\nusage = \"other\"\n",

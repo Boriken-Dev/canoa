@@ -564,8 +564,14 @@ fn words_said_in_a_session_with_no_open_turn_are_not_kept() {
     assert_eq!(report_of(&splice)["buckets"], json!([]));
 }
 
+/// The bundled Antigravity reader, which the tests below read their stand-in agent with.
+fn antigravity() -> Reader {
+    Reader::named("antigravity").expect("a bundled agent offers it")
+}
+
 fn quota_entry(state_dir: Option<std::path::PathBuf>, private: bool) -> Quota {
-    Quota::new(Antigravity {
+    Quota::new(Launch {
+        reader: antigravity(),
         program: "canoa-test-no-such-agy".into(),
         args: Vec::new(),
         state_dir,
@@ -815,7 +821,8 @@ fn a_session_opening_reads_the_quota_and_the_client_that_asked_is_told() {
 }
 
 fn per_connection_entry() -> Arc<Inference> {
-    Arc::new(Inference::new(None).with_antigravity(Antigravity {
+    Arc::new(Inference::new(None).with_reader(Launch {
+        reader: antigravity(),
         program: "canoa-test-no-such-agy".into(),
         args: Vec::new(),
         state_dir: None,
@@ -928,13 +935,16 @@ fn a_panic_in_a_reading_frees_the_connection_and_answers_the_request_that_waited
     let inference = Arc::new(Inference::new(None).with_quota(quota_entry(None, false)));
     let quota = inference.quota.clone().expect("a quota");
     let link = Arc::new(Link::default());
-    let reading = Arc::new(Reading::new(
-        Arc::clone(&inference),
-        quota,
-        Arc::clone(&link),
-        Some("work".to_owned()),
-        std::process::id(),
-    ));
+    let reading = Arc::new(
+        Reading::new(
+            Arc::clone(&inference),
+            quota,
+            Arc::clone(&link),
+            Some("work".to_owned()),
+            std::process::id(),
+        )
+        .expect("the reader opens a reading"),
+    );
     reading.wait_for(json!(7));
     assert!(reading.spawn(|_| panic!("a reading that goes wrong")));
     let until = std::time::Instant::now() + PATIENCE;
@@ -960,7 +970,8 @@ fn a_panic_in_a_reading_frees_the_connection_and_answers_the_request_that_waited
 #[test]
 fn a_panic_in_a_private_reading_still_answers_who_asked() {
     let state = std::env::temp_dir().join(format!("canoa-panic-test-{}", std::process::id()));
-    let quota = Arc::new(Quota::new(Antigravity {
+    let quota = Arc::new(Quota::new(Launch {
+        reader: antigravity(),
         program: "x".into(),
         args: Vec::new(),
         state_dir: Some(state.clone()),
@@ -982,7 +993,8 @@ fn a_request_that_comes_while_a_private_agent_reads_waits_for_it() {
     let state = std::env::temp_dir().join(format!("canoa-wait-test-{}", std::process::id()));
     let (release, gate) = std::sync::mpsc::channel::<()>();
     let gate = Mutex::new(gate);
-    let quota = Arc::new(Quota::new(Antigravity {
+    let quota = Arc::new(Quota::new(Launch {
+        reader: antigravity(),
         program: "x".into(),
         args: Vec::new(),
         state_dir: Some(state.clone()),
@@ -1183,8 +1195,9 @@ fn run_for(splice: &Splice, time: Duration) {
 #[test]
 fn an_idle_session_just_opened_is_not_read_at_once() {
     let stand_in = StandIn::start();
-    assert_eq!(agy::SETTLE, Duration::from_secs(10));
-    let splice = opened_on(&stand_in, agy::SETTLE);
+    let settle = antigravity().settle();
+    assert_eq!(settle, Duration::from_secs(10));
+    let splice = opened_on(&stand_in, settle);
     run_for(&splice, Duration::from_millis(2500));
     assert_eq!(
         stand_in.requests(),

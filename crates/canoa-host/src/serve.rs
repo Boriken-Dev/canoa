@@ -38,7 +38,7 @@ use crate::child::{self, Running};
 use crate::client_tools::{self, ToolsLayer, ToolsPeek};
 use crate::config::{
     Config, Entry, EntryKind, HarnessOptions, HostProfile, ImportSearch, Layers, Listen, Origin,
-    Settings, UsageSource,
+    Settings,
 };
 use crate::control;
 use crate::delegate::{self, Delegating, Delegation, Peek, Principal};
@@ -56,7 +56,7 @@ use crate::secrets::{self, Layer, Raw};
 use crate::sources;
 use crate::store::mcp::{self as store_mcp, StoreLayer, StorePeek};
 use crate::transport;
-use crate::usage_splice::{Antigravity, Starter};
+use crate::usage_splice::{Launch, Reader, Starter};
 use crate::worktree::Worktrees;
 
 /// Requests a harness provider's connection works on at once, unless the entry's `settings` say otherwise.
@@ -1545,8 +1545,9 @@ impl Serving {
                                 .account(entry.name.clone())
                                 .limit_phrases(config.limit_phrases.clone())
                                 .usage_log(usage_log.clone(), &harness);
-                            match usage {
-                                Some(UsageSource::Antigravity) => scope.antigravity(Antigravity {
+                            match usage.as_deref().and_then(Reader::named) {
+                                Some(reader) => scope.quota(Launch {
+                                    reader,
                                     program: program.clone(),
                                     args: args.clone(),
                                     state_dir: options.state_dir.clone(),

@@ -4,8 +4,8 @@
 //! `inferred`, answers `_coqui_acp/usage` itself and tells the clients that asked when the report changes. An agent that
 //! advertises the capability is never touched: its messages pass as they came.
 //!
-//! An entry that names `usage = "antigravity"` also has its agy's quota read ([`agy`]): the buckets join the report beside
-//! any inferred hit, and the capability says `reported` as well as `inferred`.
+//! An entry that names a `usage` reader (`usage = "<reader id>"`) also has its agent's quota read by that reader's provider
+//! ([`reader`]): the buckets join the report beside any inferred hit, and the capability says `reported` as well as `inferred`.
 //!
 //! One [`Inference`] belongs to an entry and is shared by its connections, since a limit is the account's; one [`Splice`]
 //! belongs to a connection and keeps what that client asked and which turns are open. The reader of an agent that reports real
@@ -30,18 +30,17 @@ use coqui_acp_api::{
     DEFAULT_LIMIT_PHRASES, LimitHit, Source, USAGE_CAPABILITY, USAGE_METHOD, USAGE_NOTIFICATION,
     USAGE_VERSION, UsageReport, infer_limit,
 };
-use coqui_acp_harness::antigravity::AcpModel;
 use coqui_transport::Failure;
 use serde_json::{Value, json};
 
 use crate::usage_log::UsageLog;
 
-mod agy;
 mod members;
+mod reader;
 mod tap;
 
-pub(crate) use agy::{Antigravity, Quota, Starter};
-use agy::{Link, Reading};
+pub(crate) use reader::{Launch, Quota, Reader, Starter};
+use reader::{Link, Reading};
 use tap::Tap;
 
 /// JSON-RPC's code for a message the receiver cannot place.
@@ -105,11 +104,11 @@ pub(crate) struct Inference {
     /// `None` is [`DEFAULT_LIMIT_PHRASES`]; a list replaces them, and an empty one reads nothing.
     phrases: Option<Vec<String>>,
     held: Mutex<Held>,
-    /// Set for an entry whose agy's quota is read, one quota for all its connections.
+    /// Set for an entry whose agent's quota is read, one quota for all its connections.
     quota: Option<Arc<Quota>>,
     /// Set for an entry whose connections may run as different accounts (it has profiles): each connection reads a quota of
     /// its own, so none is answered from another's reading.
-    per_connection: Option<Antigravity>,
+    per_connection: Option<Launch>,
 }
 
 impl Inference {
@@ -127,7 +126,7 @@ impl Inference {
         self.phrases.clone()
     }
 
-    /// This entry's agy reads its quota too, one for its connections.
+    /// This entry's agent has its quota read too, one for its connections.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn with_quota(mut self, quota: Quota) -> Self {
@@ -135,10 +134,10 @@ impl Inference {
         self
     }
 
-    /// This entry's agy reads its quota as `command` says: one shared by the connections, or one for each when
+    /// This entry's agent has its quota read as `command` says: one shared by the connections, or one for each when
     /// `per_connection`.
     #[must_use]
-    pub(crate) fn with_antigravity(mut self, command: Antigravity) -> Self {
+    pub(crate) fn with_reader(mut self, command: Launch) -> Self {
         if command.per_connection {
             self.per_connection = Some(command);
         } else {
@@ -283,11 +282,12 @@ pub(crate) enum Event {
     Said { session: String, text: String },
     /// The answer to the `session/prompt` `id`.
     Ended { id: String, outcome: Outcome },
-    /// The answer to the `session/new` or `session/load` `id`: whether it opened a session, and the models it listed.
+    /// The answer to the `session/new` or `session/load` `id`: whether it opened a session, and its `result` as JSON text, which
+    /// the reader takes what it needs from (the models the agent listed).
     Opened {
         id: String,
         ok: bool,
-        models: Vec<AcpModel>,
+        result: Option<String>,
     },
 }
 
@@ -325,7 +325,7 @@ struct Conn {
     prompts: BTreeMap<String, String>,
     /// Ids of `session/new` and `session/load` requests waiting for theirs, kept for an entry that reads a quota.
     opens: BTreeSet<String>,
-    /// A session has been opened on this connection, which is when its agy serves its quota.
+    /// A session has been opened on this connection, which is when its agent serves its quota.
     opened: bool,
     /// What the agent said in a session during its open turn.
     said: BTreeMap<String, String>,
@@ -341,7 +341,7 @@ pub(crate) struct Splice {
     conn: Mutex<Conn>,
     /// What the threads reading for this connection leave for it.
     link: Arc<Link>,
-    /// The connection's own agy, once its process is known.
+    /// The connection's own agent, once its process is known.
     reading: Option<Arc<Reading>>,
     /// The quota read for this connection: the entry's, or its own where the entry gives each connection one.
     quota: Option<Arc<Quota>>,
@@ -417,13 +417,14 @@ impl Splice {
     /// As [`Splice::agent`], in place: for an owner that cannot give the splice up.
     pub(crate) fn set_agent(&mut self, pid: u32) {
         if let Some(quota) = &self.quota {
-            self.reading = Some(Arc::new(Reading::new(
+            self.reading = Reading::new(
                 Arc::clone(&self.inference),
                 Arc::clone(quota),
                 Arc::clone(&self.link),
                 self.account.clone(),
                 pid,
-            )));
+            )
+            .map(Arc::new);
         }
     }
 
@@ -605,13 +606,13 @@ impl Splice {
         if conn.opens.contains(&key) {
             drop(conn);
             let ok = value.get("error").is_none();
-            let models = value.get("result").map(agy::models_of).unwrap_or_default();
+            let result = value.get("result").map(ToString::to_string);
             return Seen {
                 rewritten: None,
                 event: Some(Event::Opened {
                     id: key,
                     ok,
-                    models,
+                    result,
                 }),
                 hush: false,
             };
@@ -740,7 +741,7 @@ impl Splice {
                     }
                 }
             }
-            Event::Opened { id, ok, models } => {
+            Event::Opened { id, ok, result } => {
                 conn.opens.remove(&id);
                 if ok {
                     conn.opened = true;
@@ -748,7 +749,7 @@ impl Splice {
                 drop(conn);
                 if let Some(reading) = &self.reading {
                     if ok {
-                        reading.opened(models);
+                        reading.opened(result.as_deref());
                     } else {
                         reading.started();
                     }

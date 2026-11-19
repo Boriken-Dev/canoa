@@ -1306,24 +1306,6 @@ pub const fn cache_lifetime_name(lifetime: CacheLifetime) -> &'static str {
 /// Claude Code's setting sources.
 pub const SETTING_SOURCES: &[&str] = &["user", "project", "local"];
 
-/// Where the host reads a stdio agent's usage figures from, beyond its failed turns (`usage = "..."` on the entry).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum UsageSource {
-    /// Antigravity (`agy acp`): its quota, read from the loopback port its own language server opens once a session is open.
-    Antigravity,
-}
-
-impl UsageSource {
-    /// The source named `name` in canoa.cfg.
-    #[must_use]
-    pub fn named(name: &str) -> Option<Self> {
-        match name {
-            "antigravity" => Some(Self::Antigravity),
-            _ => None,
-        }
-    }
-}
 /// What an entry runs for each connection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -1336,8 +1318,9 @@ pub enum EntryKind {
         args: Vec<OsString>,
         /// The `[host.profiles]` a client may choose among, the first when it names none; empty launches it bare.
         profiles: Vec<String>,
-        /// How the host reads this agent's usage when the agent reports none itself; `None` reads only its failed turns.
-        usage: Option<UsageSource>,
+        /// The id of the `usage_reader` provider that reads this agent's quota when the agent reports none itself (`usage = "..."`
+        /// on the entry), one a bundled agent offers; `None` reads only its failed turns.
+        usage: Option<String>,
     },
     /// An `acp_harness` provider, chosen by its id and run in this process: the host is the ACP client's end, and the provider
     /// starts the agent's program through the host's spawner. `claude` and `codex` are built in; any other id is an outside
@@ -2512,10 +2495,18 @@ impl Config {
                     }
                     let usage = match agent.usage.as_deref() {
                         None => None,
-                        Some(text) => Some(
-                            UsageSource::named(text)
-                                .ok_or_else(|| invalid(&name, "usage is antigravity"))?,
-                        ),
+                        Some(text) => {
+                            if crate::usage_splice::Reader::named(text).is_none() {
+                                return Err(invalid(
+                                    &name,
+                                    &format!(
+                                        "usage names no usage reader this host has ({})",
+                                        crate::usage_splice::Reader::ids().join(", ")
+                                    ),
+                                ));
+                            }
+                            Some(text.to_owned())
+                        }
                     };
                     EntryKind::Agent {
                         program: OsString::from(program),
@@ -3997,7 +3988,7 @@ fn local_agents_of(agents: &IndexMap<String, toml::Value>) -> Result<Vec<Entry>,
                 .ok_or_else(|| bad("args is not a list of text"))?,
             Some(_) => return Err(bad("args is not a list of text")),
         };
-        let usage = (is_agy(program) && args == ["acp"]).then_some(UsageSource::Antigravity);
+        let usage = usage_of_command(program, &args);
         let mut entry = entry(
             name.clone(),
             EntryKind::Agent {
@@ -4087,8 +4078,9 @@ fn remote_agents_of(
     Ok(out)
 }
 
-/// Whether `program` is Antigravity's `agy`, whatever its directory or extension: its quota is read beside its turns.
-fn is_agy(program: &str) -> bool {
+/// The usage reader of the bundled agent whose own command `program` with `args` is, whatever the program's directory or
+/// extension: its quota is read beside its turns.
+fn usage_of_command(program: &str, args: &[String]) -> Option<String> {
     let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
     let stem = name.rsplit_once('.').map_or(name, |(stem, extension)| {
         if matches!(
@@ -4100,7 +4092,18 @@ fn is_agy(program: &str) -> bool {
             name
         }
     });
-    stem.eq_ignore_ascii_case("agy")
+    crate::bundled::ALL.iter().find_map(|bundle| {
+        let preset = &bundle.preset;
+        let same = preset.harness.is_none()
+            && preset.program.eq_ignore_ascii_case(stem)
+            && preset.args.len() == args.len()
+            && preset
+                .args
+                .iter()
+                .zip(args)
+                .all(|(own, given)| own == given);
+        preset.usage.filter(|_| same).map(str::to_owned)
+    })
 }
 
 /// The keys of an entry that name a `transport` provider and where it loads from.

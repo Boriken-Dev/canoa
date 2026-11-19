@@ -24,7 +24,7 @@ use crate::config::plain_absolute;
 use crate::share;
 use crate::site::Sites;
 use crate::usage_log::UsageLog;
-use crate::usage_splice::{Antigravity, Client, Inference, Splice};
+use crate::usage_splice::{Client, Inference, Launch, Splice};
 use crate::worktree::Worktrees;
 
 /// JSON-RPC's code for a message that is not JSON.
@@ -108,10 +108,10 @@ impl Scope {
         self
     }
 
-    /// This scope reading an Antigravity agent's quota too, as `command` runs it.
+    /// This scope having its agent's quota read too, as `command` runs it.
     #[must_use]
-    pub(crate) fn antigravity(mut self, command: Antigravity) -> Self {
-        self.usage = Arc::new(Inference::new(self.usage.phrases()).with_antigravity(command));
+    pub(crate) fn quota(mut self, command: Launch) -> Self {
+        self.usage = Arc::new(Inference::new(self.usage.phrases()).with_reader(command));
         self
     }
 
