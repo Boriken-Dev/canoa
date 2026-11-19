@@ -59,9 +59,9 @@ dependencies = [
 
 [[package]]
 name = "bumpalo"
-version = "3.20.3"
+version = "3.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
+checksum = "87a0cf66fd1eb2fb7b822cb78370d82303750809bc6ba855f3f58e517d3238db"
 
 [[package]]
 name = "canoa-noise-web"
@@ -136,7 +136,7 @@ dependencies = [
 [[package]]
 name = "coqui-peer-noise"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-peer-noise?rev=384ac068f9b8d8b0cd852e99e7192dc3222c6514#384ac068f9b8d8b0cd852e99e7192dc3222c6514"
+source = "git+https://github.com/Boriken-Dev/coqui-peer-noise?rev=bb4b538a8f2e2a02b9b6271b002d66668bd0bd7b#bb4b538a8f2e2a02b9b6271b002d66668bd0bd7b"
 dependencies = [
  "aes-gcm",
  "coqui-builder",
@@ -661,9 +661,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.9.1"
+version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
+checksum = "85ccff8a4805aba1eaa4cd4afcd49f7557dd2cf5fd79ffc37f8959466effc5aa"
 dependencies = [
  "zeroize_derive",
 ]
