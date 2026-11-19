@@ -12,7 +12,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use canoa::secret_provider::{
     Held, Keeping, Named, Names, ProviderInfo, SecretProvider, unavailable, unsupported,
 };
-use coqui_acp_api::guatiao::library::{ProviderError, Registry};
+use coqui_acp_api::ProcessSpawner;
+use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
 
 use super::*;
@@ -58,11 +59,11 @@ impl SecretProvider for Manager {
         Ok(info)
     }
 
-    fn names(&self) -> Result<Names, ProviderError> {
+    fn names(&self, _: Object<dyn ProcessSpawner>) -> Result<Names, ProviderError> {
         Err(unsupported("it lists nothing here"))
     }
 
-    fn get(&self, request: Named) -> Result<Held, ProviderError> {
+    fn get(&self, request: Named, _: Object<dyn ProcessSpawner>) -> Result<Held, ProviderError> {
         lock(&CALLS).push(self.settings.tag.clone());
         if self.settings.unlock.is_some() && self.settings.unlock != self.settings.key {
             return Err(unavailable("the manager is locked"));
@@ -85,11 +86,11 @@ impl SecretProvider for Manager {
         })
     }
 
-    fn put(&self, _: Keeping) -> Result<(), ProviderError> {
+    fn put(&self, _: Keeping, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
         Err(unsupported("it keeps nothing"))
     }
 
-    fn forget(&self, _: Named) -> Result<(), ProviderError> {
+    fn forget(&self, _: Named, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
         Err(unsupported("it keeps nothing"))
     }
 }
@@ -122,7 +123,7 @@ impl SecretProvider for Keeper {
         Ok(info)
     }
 
-    fn names(&self) -> Result<Names, ProviderError> {
+    fn names(&self, _: Object<dyn ProcessSpawner>) -> Result<Names, ProviderError> {
         let mut names: Vec<String> = lock(&KEPT)
             .iter()
             .filter(|(tag, _, _)| *tag == self.tag)
@@ -132,7 +133,7 @@ impl SecretProvider for Keeper {
         Ok(Names::new(names))
     }
 
-    fn get(&self, request: Named) -> Result<Held, ProviderError> {
+    fn get(&self, request: Named, _: Object<dyn ProcessSpawner>) -> Result<Held, ProviderError> {
         lock(&CALLS).push(self.tag.clone());
         Ok(lock(&KEPT)
             .iter()
@@ -140,7 +141,7 @@ impl SecretProvider for Keeper {
             .map_or_else(Held::none, |(_, _, value)| Held::of(value.clone())))
     }
 
-    fn put(&self, request: Keeping) -> Result<(), ProviderError> {
+    fn put(&self, request: Keeping, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
         let mut kept = lock(&KEPT);
         kept.retain(|(tag, name, _)| !(*tag == self.tag && *name == request.name));
         kept.push((
@@ -151,7 +152,7 @@ impl SecretProvider for Keeper {
         Ok(())
     }
 
-    fn forget(&self, request: Named) -> Result<(), ProviderError> {
+    fn forget(&self, request: Named, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
         lock(&KEPT).retain(|(tag, name, _)| !(*tag == self.tag && *name == request.name));
         Ok(())
     }

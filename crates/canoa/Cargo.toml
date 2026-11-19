@@ -28,7 +28,7 @@ vendor = ["dep:coqui-acp-api"]
 # The `profile_item` kind: one thing a profile may set, and what it does to a session.
 profile-item = ["dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-intake", "dep:regex"]
 # The `secret_provider` kind: somewhere a secret comes from and goes to (the person's form, the system's store, a password manager).
-secret = ["dep:guatiao"]
+secret = ["dep:guatiao", "dep:coqui-acp-api"]
 # The `speech_provider` kind: audio streamed in, text and front matter out.
 speech = ["dep:guatiao", "dep:coqui-acp-api"]
 # The two providers that ship with it: a program the person names, and a speech-to-text HTTP endpoint the person names.

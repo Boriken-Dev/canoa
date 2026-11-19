@@ -16,11 +16,18 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use guatiao::library::ProviderError;
+use coqui_acp_api::ProcessSpawner;
+use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, Secret, Status, ToValue};
 
 /// The name of the `secret_provider` kind.
 pub const KIND: &str = "secret_provider";
+
+/// The description of the kind (and of the spawner it hands a provider), which a host gives a source of scripts so its libraries can serve it.
+pub const KINDS_JSON: &str = include_str!("../include/canoa.secret.kinds.json");
+
+/// The kind as a module a library written in JavaScript imports `SecretProvider` from, carrying [`KINDS_JSON`].
+pub const KINDS_JS: &str = include_str!("../js/canoa_secret_kinds.js");
 
 /// The longest name of a secret, in bytes.
 pub const MAX_NAME: usize = 256;
@@ -173,6 +180,10 @@ impl Names {
 /// A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
 /// instance with none to describe the provider before anyone has set it up.
 ///
+/// A provider that runs a program (a password manager's command) starts it through the `spawner` it is handed, which is the host's:
+/// every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
+/// to start one.
+///
 /// A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
 /// reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
 /// the person instead.
@@ -182,16 +193,28 @@ pub trait SecretProvider: Send + Sync {
     fn describe(&self) -> Result<ProviderInfo, ProviderError>;
 
     /// The names it holds, and nothing else. `UNSUPPORTED` when [`ProviderInfo::can_list`] is false.
-    fn names(&self) -> Result<Names, ProviderError>;
+    fn names(&self, spawner: Object<dyn ProcessSpawner>) -> Result<Names, ProviderError>;
 
     /// What it holds under `request`'s name: [`Held::none`] when nothing.
-    fn get(&self, request: Named) -> Result<Held, ProviderError>;
+    fn get(
+        &self,
+        request: Named,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<Held, ProviderError>;
 
     /// Keeps a value, replacing one of that name. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false.
-    fn put(&self, request: Keeping) -> Result<(), ProviderError>;
+    fn put(
+        &self,
+        request: Keeping,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<(), ProviderError>;
 
     /// Forgets what it keeps under the name; not having it is no error. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false.
-    fn forget(&self, request: Named) -> Result<(), ProviderError>;
+    fn forget(
+        &self,
+        request: Named,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<(), ProviderError>;
 }
 
 /// Why `name` cannot be a secret's name, or `None` when it can: 1 to [`MAX_NAME`] bytes, no control character.

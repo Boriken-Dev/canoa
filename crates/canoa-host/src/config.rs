@@ -3087,13 +3087,19 @@ fn origin_of(
         (None, Some(source), settings) => {
             let mut settings = settings_of(name, settings.unwrap_or_default())?;
             absolute_paths(name, directory, &mut settings)?;
+            // QuickJS is built into the host: a source named so is no file.
+            let bundled = source == crate::provider::BUNDLED_JS;
             let import_search = match keys.import_search {
                 None => ImportSearch::default_for(&settings),
                 Some(text) => ImportSearch::named(text)
                     .ok_or_else(|| invalid(name, "import_search is library or path"))?,
             };
             Ok(Some(Origin::Source {
-                file: file(source)?,
+                file: if bundled {
+                    PathBuf::from(source)
+                } else {
+                    file(source)?
+                },
                 settings,
                 import_search,
                 import_search_named: keys.import_search.is_some(),
@@ -3728,7 +3734,7 @@ fn is_digest(text: &str) -> bool {
 /// The source settings read as lists of paths: `dirs` and `manifests` by every Guatiao bridge source, `paths` by Python's,
 /// `import_dirs` by the registry. A source may resolve a relative one against whatever working directory it has later, or
 /// against its own file's, so each is made absolute here.
-const PATH_LISTS: [&str; 4] = ["dirs", "manifests", "paths", "import_dirs"];
+const PATH_LISTS: [&str; 5] = ["dirs", "manifests", "paths", "import_dirs", "kinds"];
 
 /// The source settings read as one path: `home`, the Python installation Python's source runs from.
 const PATHS: [&str; 1] = ["home"];

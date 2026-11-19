@@ -191,9 +191,34 @@ impl Catalog {
         Self { offered }
     }
 
-    /// The built-in providers and those the libraries of `config`'s entries and extensions add.
-    pub(crate) fn of(config: &Config) -> Self {
-        Self::from_registries(crate::control::providers::loaded(config))
+    /// The built-in providers, the script providers that ship in the host (kept in `home`, when the host has one) and those the
+    /// libraries of `config`'s entries and extensions add.
+    pub(crate) fn of(config: &Config, home: Option<&std::path::Path>) -> Self {
+        let mut found = Self::bundled_scripts(home);
+        found.extend(crate::control::providers::loaded(config));
+        Self::from_registries(found)
+    }
+
+    /// The script providers that ship in the host, as built-in ones.
+    fn bundled_scripts(home: Option<&std::path::Path>) -> Vec<(String, Registry)> {
+        let Some(home) = home else {
+            return Vec::new();
+        };
+        match super::bundled::registry(home) {
+            Ok(registry) => vec![(BUILT_IN.to_owned(), registry)],
+            Err(why) => {
+                tracing::warn!(
+                    "the script secret providers that ship in the host are not offered: {why}"
+                );
+                Vec::new()
+            }
+        }
+    }
+
+    /// The built-in providers and the script providers that ship in the host, kept in `home`.
+    #[cfg(test)]
+    pub(crate) fn built_in_in(home: &std::path::Path) -> Self {
+        Self::from_registries(Self::bundled_scripts(Some(home)))
     }
 
     /// The providers offered, in the order they were found.

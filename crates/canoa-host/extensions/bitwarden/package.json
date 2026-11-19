@@ -1,0 +1,9 @@
+{
+  "name": "canoa_bitwarden",
+  "version": "1.0.0",
+  "description": "A secret provider for Bitwarden, read through its bw command",
+  "license": "MPL-2.0",
+  "private": true,
+  "type": "module",
+  "exports": "./bitwarden.js"
+}

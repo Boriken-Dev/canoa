@@ -253,7 +253,7 @@ impl Vault {
             return None;
         }
         let provider = self.instance(&catalog, settings, entry, depth)?;
-        match provider.get(Named::new(name)) {
+        match provider.get(Named::new(name), super::spawner::spawner()) {
             Ok(held) => {
                 if held.expires_in == Some(0) {
                     return None;
@@ -404,7 +404,7 @@ impl Vault {
                 .instance(&catalog, &settings, &entry, 0)
                 .ok_or("the provider that keeps secrets cannot be reached")?;
             provider
-                .put(Keeping::new(name, value))
+                .put(Keeping::new(name, value), super::spawner::spawner())
                 .map_err(|error| error.message().to_owned())?;
             // What the store holds is read from it from now on, so no copy of an older value stays in memory.
             lock(&self.cache).remove(name);
@@ -462,7 +462,7 @@ impl Vault {
             let Some(provider) = self.instance(&catalog, &settings, entry, 0) else {
                 continue;
             };
-            let Ok(names) = provider.names() else {
+            let Ok(names) = provider.names(super::spawner::spawner()) else {
                 continue;
             };
             for name in names.names {
@@ -521,7 +521,7 @@ impl Vault {
                 .instance(&catalog, &settings, entry, 0)
                 .ok_or("that provider cannot be reached")?;
             instance
-                .put(Keeping::new(name, text))
+                .put(Keeping::new(name, text), super::spawner::spawner())
                 .map_err(|error| error.message().to_owned())?;
             lock(&self.cache).remove(name);
             return Ok(());
@@ -557,7 +557,7 @@ impl Vault {
             && let Some(instance) = self.instance(&catalog, &settings, entry, 0)
         {
             instance
-                .forget(Named::new(name))
+                .forget(Named::new(name), super::spawner::spawner())
                 .map_err(|error| error.message().to_owned())?;
             forgot = true;
         }

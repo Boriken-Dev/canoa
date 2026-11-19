@@ -14,7 +14,8 @@ use canoa::secret_provider::{
     Held, Keeping, Named, Names, ProviderInfo, SecretProvider, bad_value, internal, name_problem,
     unavailable, unsupported,
 };
-use coqui_acp_api::guatiao::library::ProviderError;
+use coqui_acp_api::ProcessSpawner;
+use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
 use guatiao_intake::Form;
 
@@ -44,22 +45,22 @@ impl SecretProvider for FormProvider {
         Ok(info)
     }
 
-    fn names(&self) -> Result<Names, ProviderError> {
+    fn names(&self, _: Object<dyn ProcessSpawner>) -> Result<Names, ProviderError> {
         Err(unsupported("a form holds nothing to list"))
     }
 
-    fn get(&self, request: Named) -> Result<Held, ProviderError> {
+    fn get(&self, request: Named, _: Object<dyn ProcessSpawner>) -> Result<Held, ProviderError> {
         check(&request.name)?;
         Ok(Held::none())
     }
 
-    fn put(&self, _: Keeping) -> Result<(), ProviderError> {
+    fn put(&self, _: Keeping, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
         Err(unsupported(
             "a form keeps nothing: the host keeps it for as long as you chose",
         ))
     }
 
-    fn forget(&self, _: Named) -> Result<(), ProviderError> {
+    fn forget(&self, _: Named, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
         Err(unsupported("a form keeps nothing"))
     }
 }
@@ -144,12 +145,12 @@ impl SecretProvider for SystemSecrets {
         Ok(info)
     }
 
-    fn names(&self) -> Result<Names, ProviderError> {
+    fn names(&self, _: Object<dyn ProcessSpawner>) -> Result<Names, ProviderError> {
         let _one = self.index.lock().unwrap_or_else(PoisonError::into_inner);
         Ok(Names::new(self.names_held()?.into_iter().collect()))
     }
 
-    fn get(&self, request: Named) -> Result<Held, ProviderError> {
+    fn get(&self, request: Named, _: Object<dyn ProcessSpawner>) -> Result<Held, ProviderError> {
         check(&request.name)?;
         let key = format!("s:{}", request.name);
         let Some(mut bytes) = self.store.get(&key).map_err(|why| failed(&why))? else {
@@ -160,7 +161,7 @@ impl SecretProvider for SystemSecrets {
         held.map_err(|_| internal("the stored value is not text"))
     }
 
-    fn put(&self, request: Keeping) -> Result<(), ProviderError> {
+    fn put(&self, request: Keeping, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
         check(&request.name)?;
         let value = request.value.expose();
         if value.len() > canoa::secret_provider::MAX_VALUE {
@@ -178,7 +179,7 @@ impl SecretProvider for SystemSecrets {
         Ok(())
     }
 
-    fn forget(&self, request: Named) -> Result<(), ProviderError> {
+    fn forget(&self, request: Named, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
         check(&request.name)?;
         let _one = self.index.lock().unwrap_or_else(PoisonError::into_inner);
         let mut names = self.names_held()?;
@@ -204,6 +205,7 @@ mod tests {
 
     use super::*;
     use crate::accounts::store::StoreError;
+    use crate::secrets::spawner::spawner;
 
     /// A store that keeps bytes in memory: what the operating system's store is in a test.
     #[derive(Debug, Default)]
@@ -233,32 +235,46 @@ mod tests {
     #[test]
     fn the_system_provider_keeps_reads_lists_and_forgets_a_secret() {
         let provider = system();
-        assert!(provider.get(Named::new("token")).unwrap().value.is_none());
+        assert!(
+            provider
+                .get(Named::new("token"), spawner())
+                .unwrap()
+                .value
+                .is_none()
+        );
         provider
-            .put(Keeping::new("token", "tr0ub4dor-value"))
+            .put(Keeping::new("token", "tr0ub4dor-value"), spawner())
             .unwrap();
-        provider.put(Keeping::new("other", "x")).unwrap();
-        let held = provider.get(Named::new("token")).unwrap();
+        provider.put(Keeping::new("other", "x"), spawner()).unwrap();
+        let held = provider.get(Named::new("token"), spawner()).unwrap();
         assert_eq!(held.value.unwrap().expose(), "tr0ub4dor-value");
         assert_eq!(held.expires_in, None);
-        assert_eq!(provider.names().unwrap().names, ["other", "token"]);
-        provider.forget(Named::new("token")).unwrap();
-        assert!(provider.get(Named::new("token")).unwrap().value.is_none());
-        assert_eq!(provider.names().unwrap().names, ["other"]);
+        assert_eq!(provider.names(spawner()).unwrap().names, ["other", "token"]);
+        provider.forget(Named::new("token"), spawner()).unwrap();
+        assert!(
+            provider
+                .get(Named::new("token"), spawner())
+                .unwrap()
+                .value
+                .is_none()
+        );
+        assert_eq!(provider.names(spawner()).unwrap().names, ["other"]);
         // Forgetting what is not there is no error.
-        provider.forget(Named::new("token")).unwrap();
+        provider.forget(Named::new("token"), spawner()).unwrap();
     }
 
     #[test]
     fn a_replaced_secret_is_listed_once_and_a_secret_called_like_the_index_is_only_a_secret() {
         let provider = system();
-        provider.put(Keeping::new("a", "1")).unwrap();
-        provider.put(Keeping::new("a", "2")).unwrap();
-        provider.put(Keeping::new("i:names", "3")).unwrap();
-        assert_eq!(provider.names().unwrap().names, ["a", "i:names"]);
+        provider.put(Keeping::new("a", "1"), spawner()).unwrap();
+        provider.put(Keeping::new("a", "2"), spawner()).unwrap();
+        provider
+            .put(Keeping::new("i:names", "3"), spawner())
+            .unwrap();
+        assert_eq!(provider.names(spawner()).unwrap().names, ["a", "i:names"]);
         assert_eq!(
             provider
-                .get(Named::new("a"))
+                .get(Named::new("a"), spawner())
                 .unwrap()
                 .value
                 .unwrap()
@@ -270,9 +286,9 @@ mod tests {
     #[test]
     fn a_name_that_is_no_name_is_refused_before_the_store_is_touched() {
         let provider = system();
-        assert!(provider.put(Keeping::new("", "v")).is_err());
-        assert!(provider.get(Named::new("a\nb")).is_err());
-        assert!(provider.names().unwrap().names.is_empty());
+        assert!(provider.put(Keeping::new("", "v"), spawner()).is_err());
+        assert!(provider.get(Named::new("a\nb"), spawner()).is_err());
+        assert!(provider.names(spawner()).unwrap().names.is_empty());
     }
 
     #[test]
@@ -280,9 +296,14 @@ mod tests {
         let form = FormProvider;
         let info = form.describe().unwrap();
         assert!(info.needs_person && !info.can_store && !info.can_list);
-        assert!(form.get(Named::new("x")).unwrap().value.is_none());
-        assert!(form.put(Keeping::new("x", "v")).is_err());
-        assert!(form.names().is_err());
+        assert!(
+            form.get(Named::new("x"), spawner())
+                .unwrap()
+                .value
+                .is_none()
+        );
+        assert!(form.put(Keeping::new("x", "v"), spawner()).is_err());
+        assert!(form.names(spawner()).is_err());
     }
 
     /// A made-up service, so the operating system's real store is exercised with an entry nobody else has, and removed.
@@ -292,18 +313,24 @@ mod tests {
         let provider = SystemSecrets::from(SystemSettings {
             service: Some(service),
         });
-        let put = provider.put(Keeping::new("probe", "a-made-up-value"));
+        let put = provider.put(Keeping::new("probe", "a-made-up-value"), spawner());
         let Ok(()) = put else {
             // No credential store here (a container with no session bus): the memory store above is the test.
             eprintln!("NOT RUN: the operating system's store does not answer here");
             return;
         };
-        let held = provider.get(Named::new("probe")).unwrap();
+        let held = provider.get(Named::new("probe"), spawner()).unwrap();
         assert_eq!(held.value.unwrap().expose(), "a-made-up-value");
-        assert_eq!(provider.names().unwrap().names, ["probe"]);
-        provider.forget(Named::new("probe")).unwrap();
-        assert!(provider.get(Named::new("probe")).unwrap().value.is_none());
-        assert!(provider.names().unwrap().names.is_empty());
+        assert_eq!(provider.names(spawner()).unwrap().names, ["probe"]);
+        provider.forget(Named::new("probe"), spawner()).unwrap();
+        assert!(
+            provider
+                .get(Named::new("probe"), spawner())
+                .unwrap()
+                .value
+                .is_none()
+        );
+        assert!(provider.names(spawner()).unwrap().names.is_empty());
         // The index entry the test made is removed with the rest.
         provider.store.remove(INDEX).unwrap();
     }

@@ -17,21 +17,15 @@
 
 pub(crate) mod ask;
 mod builtin;
+mod bundled;
 pub(crate) mod catalog;
 mod http;
 mod layers;
 mod link;
-#[cfg(all(test, canoa_test_python))]
+#[cfg(test)]
 mod script_tests;
-#[cfg(all(test, not(canoa_test_python)))]
-mod script_tests {
-    #[test]
-    #[ignore = "NOT RUN: set CANOA_TEST_PYTHON to a Python 3.9 or later that has its shared library"]
-    fn a_script_is_a_secret_provider_the_host_lists_describes_and_asks_like_any_other() {
-        panic!("CANOA_TEST_PYTHON names no Python");
-    }
-}
 pub(crate) mod settings;
+pub(crate) mod spawner;
 pub(crate) mod vault;
 pub(crate) use link::is_bypass;
 #[cfg(test)]

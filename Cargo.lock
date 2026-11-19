@@ -878,8 +878,11 @@ dependencies = [
  "flate2",
  "getrandom 0.4.3",
  "guatiao",
+ "guatiao-bridge",
  "guatiao-intake",
+ "guatiao-libffi",
  "guatiao-serde",
+ "guatiao-source-js",
  "hmac 0.13.0",
  "httparse",
  "if-addrs",
@@ -894,7 +897,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "serde",
- "serde-saphyr",
+ "serde-saphyr 2.1.1",
  "serde_json",
  "sha1",
  "sha2 0.10.9",
@@ -1474,7 +1477,7 @@ source = "git+https://github.com/Boriken-Dev/coqui-aos?rev=169125d3bfcb1b2cb1c3b
 dependencies = [
  "data-encoding",
  "globset",
- "granit-parser",
+ "granit-parser 2.1.0",
  "guatiao",
  "serde",
  "serde_json",
@@ -2263,7 +2266,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2642,6 +2645,16 @@ dependencies = [
 
 [[package]]
 name = "granit-parser"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e20f99e46474f56bd905c56e817ebddcf377a611f94c53ac4649e4d3fa3c0cd0"
+dependencies = [
+ "arraydeque",
+ "smallvec",
+]
+
+[[package]]
+name = "granit-parser"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05f05586d4d4df3d47123207826c40b252728b438a1a07bad3c01ee6bea401df"
@@ -2671,6 +2684,16 @@ dependencies = [
  "object",
  "sha2 0.10.9",
  "winapi-util",
+]
+
+[[package]]
+name = "guatiao-bridge"
+version = "0.0.0-alpha.1"
+source = "git+https://github.com/Boriken-Dev/guatiao?rev=e0136dcc9760ddd6dd8dc89fc4d41320eec6306e#e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+dependencies = [
+ "anycfg",
+ "guatiao",
+ "guatiao-serde",
 ]
 
 [[package]]
@@ -2711,13 +2734,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "guatiao-libffi"
+version = "0.0.0-alpha.1"
+source = "git+https://github.com/Boriken-Dev/guatiao?rev=e0136dcc9760ddd6dd8dc89fc4d41320eec6306e#e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+dependencies = [
+ "guatiao",
+ "libffi",
+]
+
+[[package]]
 name = "guatiao-serde"
 version = "0.0.0-alpha.1"
 source = "git+https://github.com/Boriken-Dev/guatiao?rev=e0136dcc9760ddd6dd8dc89fc4d41320eec6306e#e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
 dependencies = [
  "guatiao",
  "serde",
+ "serde-saphyr 1.3.0",
  "serde_json",
+ "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
+name = "guatiao-source-js"
+version = "0.0.0-alpha.1"
+source = "git+https://github.com/Boriken-Dev/guatiao?rev=e0136dcc9760ddd6dd8dc89fc4d41320eec6306e#e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+dependencies = [
+ "guatiao",
+ "guatiao-bridge",
+ "guatiao-libffi",
+ "guatiao-serde",
+ "rquickjs",
 ]
 
 [[package]]
@@ -2767,6 +2813,11 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash",
+]
 
 [[package]]
 name = "heck"
@@ -3480,6 +3531,25 @@ name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
+
+[[package]]
+name = "libffi"
+version = "5.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a8d526bc07aa02e6826944ec446ecd8d228bd97b1cbd21e5bc5e3407a09a585"
+dependencies = [
+ "libc",
+ "libffi-sys",
+]
+
+[[package]]
+name = "libffi-sys"
+version = "4.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eab801a4ae9065bfea87f37204a7940523e752056e4a090eaaaab9b47fc826b5"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "libgssapi"
@@ -4308,7 +4378,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4479,6 +4549,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "relative-path"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38540a682c6e9bca04a8bca9e5ec5a6ba168dfbb04c9998fe517a9befb92eb68"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4554,6 +4633,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "rquickjs"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0a22bf72f515cc4189dd7c63d016f6de92a11eee98ddf7dd64794198f6eb34e"
+dependencies = [
+ "rquickjs-core",
+]
+
+[[package]]
+name = "rquickjs-core"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6657979a24d543e5fc66f32cef2f47ca82ce8eb55cec5f7d59a12b7b570bbf24"
+dependencies = [
+ "hashbrown 0.17.1",
+ "relative-path",
+ "rquickjs-sys",
+]
+
+[[package]]
+name = "rquickjs-sys"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cee271d0eeba64f0915b846cb7ae02e16faf3dfdffdca91731101d9d30fe3423"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "rtoolbox"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4597,7 +4705,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4666,7 +4774,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4835,6 +4943,23 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
+dependencies = [
+ "annotate-snippets",
+ "base64 0.22.1",
+ "encoding_rs_io",
+ "granit-parser 1.3.0",
+ "nohash-hasher",
+ "num-traits",
+ "serde_core",
+ "smallvec",
+ "zmij",
+]
+
+[[package]]
+name = "serde-saphyr"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d43fb82d550b07e6f929a58d7d0935182602f48ddead875f5ee313c41c8f07fe"
@@ -4842,7 +4967,7 @@ dependencies = [
  "annotate-snippets",
  "base64 0.23.1",
  "encoding_rs_io",
- "granit-parser",
+ "granit-parser 2.1.0",
  "nohash-hasher",
  "num-traits",
  "serde_core",
@@ -5297,7 +5422,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6074,7 +6199,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

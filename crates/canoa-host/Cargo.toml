@@ -76,6 +76,9 @@ guatiao.workspace = true
 guatiao-serde.workspace = true
 # The speech providers' forms, which a settings screen draws.
 guatiao-intake.workspace = true
+guatiao-source-js.workspace = true
+guatiao-bridge.workspace = true
+guatiao-libffi.workspace = true
 httparse.workspace = true
 # The address a remote source is dialed at; already in the graph through coqui-transport-web.
 url.workspace = true

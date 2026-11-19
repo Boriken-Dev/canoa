@@ -8,7 +8,7 @@ use core::fmt;
 use core::net::SocketAddr;
 use std::io::{BufRead, Read as _, Write};
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use coqui_acp::lines;
 use coqui_acp_provider::guatiao::library::{ImportSearch, Registry};
@@ -258,6 +258,35 @@ fn serve_on(
         .map_err(|error| ProviderError::Facade(error.to_string()))
 }
 
+/// What `source` names in place of a file to say QuickJS, built into the host, serves libraries written in JavaScript.
+pub(crate) const BUNDLED_JS: &str = "bundled:js";
+
+/// Adds the source of JavaScript libraries built into the host to `registry`, with `config` (`dirs`, `kinds`, `limits`), and has it
+/// read the libraries of its directories.
+///
+/// # Errors
+///
+/// [`ProviderError::Source`] with the source's words.
+pub(crate) fn add_bundled_js(registry: &mut Registry, config: &Map) -> Result<(), ProviderError> {
+    let source = guatiao_bridge::BridgeSource::<guatiao_source_js::JsEngine>::pinned(
+        config,
+        "guatiao-source-js",
+    )
+    .map_err(|error| ProviderError::Source(error.to_string()))?
+    .with_mechanism(Arc::new(guatiao_libffi::Libffi));
+    registry
+        .add_source(BUNDLED_JS, source)
+        .map_err(|error| ProviderError::Source(error.to_string()))?;
+    for refused in registry.refresh().refused {
+        tracing::warn!(
+            library = refused.id.as_deref().unwrap_or("?"),
+            "the source refused a library: {}",
+            refused.reason
+        );
+    }
+    Ok(())
+}
+
 /// Loads the library or adds the source `origin` names to `registry`, whose providers it then offers.
 ///
 /// # Errors
@@ -284,6 +313,9 @@ pub(crate) fn open(registry: &mut Registry, origin: &Origin) -> Result<(), Provi
                 _ => ImportSearch::Library,
             });
             let config = map_of(&with_kinds(settings)).map_err(ProviderError::Source)?;
+            if file == Path::new(BUNDLED_JS) {
+                return add_bundled_js(registry, &config);
+            }
             registry
                 .add_source_file(file, &config)
                 .map_err(|error| ProviderError::Source(error.to_string()))?;

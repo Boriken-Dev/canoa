@@ -1,274 +1,482 @@
-//! The Bitwarden provider, a Python library, loaded through Guatiao's source of Python libraries into the host's catalog and asked
-//! through the vault, with a stand-in `bw` as the program it runs. It proves the `secret_provider` kind is one a script can serve:
-//! its description, the values it answers, the flags that say what it needs, and the errors it raises.
+//! The Bitwarden provider, a library written in JavaScript that ships in the host, run by the QuickJS built into it, against a stand-in
+//! for `bw`. It proves the `secret_provider` kind is one a script can serve: its description and settings, the values it answers, the
+//! flags that say what it needs, the errors it raises, and that every program it starts goes through the spawner it is handed.
 //!
-//! The source is a `cdylib` built against a Python, so this builds it from Cargo's checkout of Guatiao at the workspace's revision,
-//! with the Python `CANOA_TEST_PYTHON` names; without that variable the test is not built, and a run counts it as not run.
+//! The stand-in is Rust here (a spawner that speaks the parts of `bw` the provider uses, as `bw` does); `end_to_end` also runs the real
+//! process spawner against `tests/bw_standin.py` when `CANOA_TEST_PYTHON` names an interpreter.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
     reason = "tests name what they use from std"
 )]
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
-use serde_json::{Value, json};
+use canoa::secret_provider::{Keeping, Named, SecretProvider};
+use coqui_acp_api::guatiao::Secret;
+use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::{
+    FileInfo, HarnessNotice, LinkState, ProcessExit, ProcessSpawner, READ_TIMED_OUT, SecretBytes,
+    SpawnSpec, SpawnedProcess, SpawnerInfo, TerminalSize,
+};
+use serde_json::{Map, Value, json};
 
 use super::catalog::Catalog;
-use super::vault::Vault;
 
-const PROBE: &str = r"
-import os, sys
-print(sys.executable)
-print(sys.base_prefix)
-";
+pub(super) const GOOD_KEY: &str = "good-session-key-made-up";
+pub(super) const VALUE: &str = "gh-pw-zq9-made-up";
 
-fn python() -> (String, PathBuf) {
-    let named = env!("CANOA_TEST_PYTHON");
-    let output = Command::new(named)
-        .args(["-I", "-c", PROBE])
-        .output()
-        .unwrap_or_else(|error| panic!("CANOA_TEST_PYTHON={named} does not run: {error}"));
-    assert!(output.status.success(), "CANOA_TEST_PYTHON={named} failed");
-    let text = String::from_utf8(output.stdout).expect("UTF-8");
-    let mut lines = text.lines();
-    (
-        lines.next().expect("an executable").to_owned(),
-        PathBuf::from(lines.next().expect("a prefix")),
-    )
+/// A folder of its own for the bundled files, removed when dropped.
+pub(super) struct Home(pub(super) std::path::PathBuf);
+
+impl Home {
+    pub(super) fn new(tag: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("canoa-bundled-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a directory");
+        Self(dir)
+    }
 }
 
-fn checkout(name: &str) -> PathBuf {
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
-    let output = Command::new(cargo)
-        .args(["metadata", "--format-version", "1", "--manifest-path"])
-        .arg(&manifest)
-        .output()
-        .expect("cargo metadata runs");
-    assert!(output.status.success());
-    let metadata: Value = serde_json::from_slice(&output.stdout).expect("JSON");
-    let package = metadata["packages"]
-        .as_array()
-        .expect("packages")
-        .iter()
-        .find(|package| package["name"] == name)
-        .unwrap_or_else(|| panic!("{name} is in the graph"));
-    PathBuf::from(package["manifest_path"].as_str().expect("a path"))
-        .ancestors()
-        .nth(3)
-        .expect("a crate under <checkout>/crates")
-        .to_path_buf()
+impl Drop for Home {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
-fn copy_tree(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).expect("a directory");
-    for entry in std::fs::read_dir(from).expect("a readable checkout") {
-        let entry = entry.expect("a readable entry");
-        let target = to.join(entry.file_name());
-        if entry.file_type().expect("a file type").is_dir() {
-            copy_tree(&entry.path(), &target);
-        } else {
-            std::fs::copy(entry.path(), &target).expect("a file copies");
+/// What the stand-in was asked: the words after the program, and whether the session key was in the environment.
+#[derive(Clone, Debug)]
+pub(super) struct Call {
+    pub(super) program: String,
+    pub(super) words: Vec<String>,
+    pub(super) session_in_env: bool,
+    pub(super) key_on_command_line: bool,
+}
+
+/// A process that has finished: what it printed and how it ended.
+struct Canned {
+    out: Mutex<Vec<u8>>,
+    err: Mutex<Vec<u8>>,
+    code: i64,
+    hangs: bool,
+}
+
+fn take(from: &Mutex<Vec<u8>>, into: &mut [u8]) -> i64 {
+    let mut have = from.lock().unwrap();
+    let n = have.len().min(into.len());
+    into[..n].copy_from_slice(&have[..n]);
+    have.drain(..n);
+    i64::try_from(n).unwrap()
+}
+
+impl SpawnedProcess for Canned {
+    fn write(&self, _: &[u8]) -> Result<(), ProviderError> {
+        Ok(())
+    }
+    fn close_input(&self) -> Result<(), ProviderError> {
+        Ok(())
+    }
+    fn read(&self, dst: &mut [u8], _: u64) -> Result<i64, ProviderError> {
+        if self.hangs {
+            return Ok(READ_TIMED_OUT);
         }
+        Ok(take(&self.out, dst))
+    }
+    fn read_error(&self, dst: &mut [u8], _: u64) -> Result<i64, ProviderError> {
+        Ok(take(&self.err, dst))
+    }
+    fn resize(&self, _: TerminalSize) -> Result<(), ProviderError> {
+        Err(canoa::secret_provider::unsupported("no terminal"))
+    }
+    fn wait(&self, _: u64) -> Result<ProcessExit, ProviderError> {
+        Ok(if self.hangs {
+            ProcessExit::running()
+        } else {
+            ProcessExit::ended(Some(self.code), None)
+        })
+    }
+    fn kill(&self) -> Result<(), ProviderError> {
+        Ok(())
+    }
+    fn link(&self) -> Result<LinkState, ProviderError> {
+        Ok(LinkState::up())
     }
 }
 
-/// Builds guatiao-source-py from a copy of Guatiao's checkout, since a build writes beside its manifest.
-fn build_source(python: &str, guatiao: &Path) -> PathBuf {
-    let revision = guatiao.file_name().expect("a directory of its own");
-    let scratch = std::env::temp_dir()
-        .join("canoa-secret-script-tests")
-        .join(revision);
-    let copy = scratch.join("guatiao");
-    if !copy.join("Cargo.toml").is_file() {
-        copy_tree(&guatiao.join("crates"), &copy.join("crates"));
-        copy_tree(&guatiao.join("examples"), &copy.join("examples"));
-        std::fs::copy(guatiao.join("Cargo.toml"), copy.join("Cargo.toml")).expect("copied");
+/// `bw` as the tests' spawner runs it, in the words `bw` uses, with made-up items.
+pub(super) struct StandIn {
+    pub(super) calls: Arc<Mutex<Vec<Call>>>,
+}
+
+impl StandIn {
+    pub(super) fn new() -> (Self, Arc<Mutex<Vec<Call>>>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        (
+            Self {
+                calls: Arc::clone(&calls),
+            },
+            calls,
+        )
     }
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let built = Command::new(cargo)
-        .arg("build")
-        .arg("--manifest-path")
-        .arg(copy.join("crates/guatiao-source-py/Cargo.toml"))
-        .arg("--target-dir")
-        .arg(scratch.join("target"))
-        .env("PYO3_PYTHON", python)
-        .output()
-        .expect("cargo runs");
-    assert!(
-        built.status.success(),
-        "the Python source did not build:\n{}",
-        String::from_utf8_lossy(&built.stderr)
-    );
-    scratch.join("target/debug").join(format!(
-        "{}guatiao_source_py{}",
-        std::env::consts::DLL_PREFIX,
-        std::env::consts::DLL_SUFFIX
-    ))
+
+    fn item(name: &str, part: &str) -> Option<&'static str> {
+        Some(match (name, part) {
+            ("github", "password") => "gh-pw-zq9-made-up\n",
+            ("github", "username") => "ana",
+            ("github", "notes") => "a note",
+            ("github", "totp") => "123456",
+            ("github", "uri") => "https://github.com",
+            ("empty", "password") => "",
+            ("two lines", "password") => "line one\nline two",
+            _ => return None,
+        })
+    }
 }
 
-fn extension() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/bitwarden")
+fn failed(why: &str) -> Canned {
+    Canned {
+        out: Mutex::new(Vec::new()),
+        err: Mutex::new(why.as_bytes().to_vec()),
+        code: 1,
+        hangs: false,
+    }
 }
 
-/// canoa.cfg with the script as `[host.extensions.bitwarden]`, as a person adds one: the source, the folder of its library and where it
-/// finds Guatiao's Python binding. The provider it names is not a store extension, since it adds no type to the Store.
-fn script_config(python: &str, prefix: &Path) -> crate::config::Config {
-    let guatiao = checkout("guatiao");
-    let source = build_source(python, &guatiao);
-    let quoted = |path: &Path| format!("{:?}", path.to_string_lossy().replace(r"\", "/"));
-    let text = format!(
-        "[host.extensions.bitwarden]
-source = {}
-provider = \"bitwarden\"
-import_search = \"path\"
-         [host.extensions.bitwarden.source_settings]
-dirs = [{}]
-paths = [{}]
-import_dirs = [{}]
-",
-        quoted(&source),
-        quoted(&extension()),
-        quoted(&guatiao.join("bindings/python/guatiao/src")),
-        quoted(prefix),
-    );
-    crate::config::Config::from_str_in(&text, &std::env::temp_dir()).expect("canoa.cfg parses")
+impl ProcessSpawner for StandIn {
+    fn describe(&self) -> Result<SpawnerInfo, ProviderError> {
+        Ok(SpawnerInfo::new("test", "test", true))
+    }
+
+    fn spawn(&self, spec: SpawnSpec) -> Result<Object<dyn SpawnedProcess>, ProviderError> {
+        let environment = spec.environment.expose();
+        let key = environment.get("BW_SESSION").map(str::to_owned);
+        let words: Vec<String> = spec
+            .args
+            .iter()
+            .filter(|word| *word != "--nointeraction")
+            .cloned()
+            .collect();
+        self.calls.lock().unwrap().push(Call {
+            program: spec.program.clone(),
+            words: spec.args.clone(),
+            session_in_env: key.is_some(),
+            key_on_command_line: spec.args.iter().any(|word| word.contains(GOOD_KEY)),
+        });
+        if spec.program == "no-such-program-bw" {
+            return Err(ProviderError::new(
+                coqui_acp_api::guatiao::Status::GUATIAO_ERR_NOT_FOUND,
+                "no such program",
+            ));
+        }
+        if spec.program == "slow-bw" {
+            return Ok(Canned {
+                out: Mutex::new(Vec::new()),
+                err: Mutex::new(Vec::new()),
+                code: 0,
+                hangs: true,
+            }
+            .into_object());
+        }
+        let asked_nothing = spec.args.iter().any(|word| word == "--nointeraction")
+            && environment.get("BW_NOINTERACTION") == Some("true");
+        let canned = if !asked_nothing {
+            failed("would have asked a question\n")
+        } else if key.as_deref() != Some(GOOD_KEY) {
+            failed("Vault is locked.\n")
+        } else if words.len() >= 2 && words[0] == "list" && words[1] == "items" {
+            let items: Vec<Value> = ["github", "empty", "two lines", "github"]
+                .iter()
+                .map(|name| json!({"name": name, "login": {"password": "x"}}))
+                .collect();
+            Canned {
+                out: Mutex::new(Value::Array(items).to_string().into_bytes()),
+                err: Mutex::new(Vec::new()),
+                code: 0,
+                hangs: false,
+            }
+        } else if words.len() == 3 && words[0] == "get" {
+            match Self::item(&words[2], &words[1]) {
+                Some(text) => {
+                    let mut printed = text.as_bytes().to_vec();
+                    if !text.ends_with('\n') {
+                        printed.push(b'\n');
+                    }
+                    Canned {
+                        out: Mutex::new(printed),
+                        err: Mutex::new(Vec::new()),
+                        code: 0,
+                        hangs: false,
+                    }
+                }
+                None => failed("Not found.\n"),
+            }
+        } else {
+            failed("unknown command\n")
+        };
+        Ok(canned.into_object())
+    }
+
+    fn write_file(&self, _: &str, _: Secret<SecretBytes>, _: bool) -> Result<(), ProviderError> {
+        Err(canoa::secret_provider::unsupported("no files"))
+    }
+    fn read_file(&self, _: &str, _: u64) -> Result<Secret<SecretBytes>, ProviderError> {
+        Err(canoa::secret_provider::unsupported("no files"))
+    }
+    fn file_info(&self, _: &str) -> Result<Option<FileInfo>, ProviderError> {
+        Err(canoa::secret_provider::unsupported("no files"))
+    }
+    fn remove_file(&self, _: &str) -> Result<(), ProviderError> {
+        Err(canoa::secret_provider::unsupported("no files"))
+    }
+    fn notice(&self, _: HarnessNotice) -> Result<(), ProviderError> {
+        Ok(())
+    }
 }
 
-/// The catalog of the providers the host offers with that extension loaded.
-fn script_catalog(python: &str, prefix: &Path) -> Catalog {
-    Catalog::of(&script_config(python, prefix))
+/// The Bitwarden provider of the bundled catalog, configured with `settings`.
+fn provider(home: &Home, settings: &Value) -> Arc<dyn SecretProvider> {
+    let catalog = Catalog::built_in_in(&home.0);
+    let config: Map<String, Value> = settings.as_object().cloned().unwrap_or_default();
+    catalog
+        .instance("bitwarden", &config)
+        .unwrap_or_else(|why| panic!("the provider is made: {why}"))
 }
 
-const VALUE: &str = "gh-pw-zq9-made-up";
+fn standin() -> (Object<dyn ProcessSpawner>, Arc<Mutex<Vec<Call>>>) {
+    let (standin, calls) = StandIn::new();
+    (standin.into_object(), calls)
+}
+
+fn good() -> Value {
+    json!({"command": "bw", "session": GOOD_KEY})
+}
+
+fn value_of(provider: &Arc<dyn SecretProvider>, name: &str) -> Option<String> {
+    let (spawner, _) = standin();
+    provider
+        .get(Named::new(name), spawner)
+        .expect("an answer")
+        .value
+        .map(|value| value.expose().clone())
+}
+
+fn provider_settings(part: &str) -> Value {
+    json!({"command": "bw", "session": GOOD_KEY, "part": part})
+}
 
 #[test]
-fn a_script_is_a_secret_provider_the_host_lists_describes_and_asks_like_any_other() {
-    let (python, prefix) = python();
-    let catalog = script_catalog(&python, &prefix);
+fn the_bundled_library_is_offered_as_a_built_in_provider_with_the_settings_it_declares() {
+    let home = Home::new("offer");
+    let catalog = Catalog::built_in_in(&home.0);
     let listed = catalog.list();
-    let bitwarden = listed
-        .iter()
-        .find(|each| each.id == "bitwarden")
-        .expect("the script's provider is offered beside the built-in ones");
-    assert_eq!(
-        bitwarden.origin, "bitwarden",
-        "the origin is the extension that loads it"
-    );
-    // What the host reads of a script is what it reads of a Rust provider: a description with the flags, and a settings schema that
-    // marks the session key as a secret so a form hides it.
+    let ids: Vec<&str> = listed.iter().map(|each| each.id.as_str()).collect();
+    assert_eq!(ids, ["form", "system", "bitwarden"], "{ids:?}");
+    let bitwarden = &listed[2];
+    assert_eq!(bitwarden.origin, "built-in");
     assert_eq!(bitwarden.info.title, "Bitwarden");
     assert!(bitwarden.info.can_list && !bitwarden.info.can_store && !bitwarden.info.needs_person);
     let schema = bitwarden.schema.as_ref().expect("a schema");
     let session = &schema["properties"]["session"];
     assert!(
-        session["writeOnly"] == true || session["x-sensitive"] == true,
-        "{session}"
+        session["writeOnly"] == true && session["x-sensitive"] == true,
+        "the session key is a secret, so a form hides it: {session}"
     );
-    assert_eq!(listed.iter().filter(|each| each.id == "form").count(), 1);
-
-    let command = python.clone();
-    let standin = extension().join("tests/bw_standin.py");
-    let clock = std::sync::Arc::new(AtomicU64::new(1_000_000));
-    let read = std::sync::Arc::clone(&clock);
-    let vault = Vault::with_clock(
-        catalog,
-        std::sync::Arc::new(move || {
-            Ok(Some(json!({
-                "names": {"github": "bw", "ghost": "bw"},
-                "providers": {"bw": {
-                    "provider": "bitwarden", "keep": "close",
-                    "command": command.clone(), "arguments": [standin.to_string_lossy()],
-                    "session": {"from": "form", "name": "bw_session"}
-                }}
-            })))
-        }),
-        std::sync::Arc::new(move || read.load(Ordering::SeqCst)),
-    );
-    let recall = |session: &str, name: &str| {
-        vault
-            .recall(session, name)
-            .map(|value| String::from_utf8(value.to_vec()).expect("text"))
-    };
-    // Locked: the key is not held, so the vault is not even opened and the person is asked for the secret itself.
-    assert_eq!(recall("s1", "github"), None);
-    // A wrong key is the provider's `GONE`, which the host reads as nothing held.
-    vault
-        .remember(None, "bw_session", b"not-the-key", "close")
-        .unwrap();
-    assert_eq!(recall("s1", "github"), None);
-    // The right key opens it, and an item that is not there is no value.
-    vault
-        .remember(None, "bw_session", b"good-session-key-made-up", "close")
-        .unwrap();
-    assert_eq!(recall("s1", "github").as_deref(), Some(VALUE));
-    assert_eq!(recall("s1", "ghost"), None);
-    let rows = vault.rows();
-    let row = rows
-        .iter()
-        .find(|row| row.name == "github")
-        .expect("what the script gave is in the table");
-    assert_eq!(row.provider, "bw");
     assert_eq!(
-        row.expires_in, None,
+        session["x-from-secret"], true,
+        "and it may be taken from another provider"
+    );
+    assert!(
+        schema
+            .get("required")
+            .is_none_or(|required| required == &json!([])),
+        "every setting has a default, so a description needs none"
+    );
+    let form = bitwarden.form.as_ref().expect("a form");
+    assert_eq!(form["sections"][0]["id"], "vault");
+    // A setting the script does not declare is refused by the host before the script is asked.
+    let mut surprise = Map::new();
+    surprise.insert("surprise".to_owned(), json!(1));
+    assert!(catalog.instance("bitwarden", &surprise).is_err());
+}
+
+#[test]
+fn the_files_that_ship_are_rewritten_when_they_differ() {
+    let home = Home::new("rewrite");
+    let folder = super::bundled::keep(&home.0).expect("kept");
+    let file = folder.join("bitwarden/bitwarden.js");
+    let shipped = std::fs::read(&file).expect("shipped");
+    std::fs::write(&file, "export const planted = 1;\n").expect("changed");
+    super::bundled::keep(&home.0).expect("kept again");
+    assert_eq!(std::fs::read(&file).expect("shipped again"), shipped);
+}
+
+#[test]
+fn a_part_of_an_item_is_the_value_and_the_line_break_bw_adds_is_not() {
+    let home = Home::new("parts");
+    let password = provider(&home, &provider_settings("password"));
+    assert_eq!(value_of(&password, "github").as_deref(), Some(VALUE));
+    assert_eq!(
+        value_of(&password, "two lines").as_deref(),
+        Some("line one\nline two")
+    );
+    let username = provider(&home, &provider_settings("username"));
+    assert_eq!(value_of(&username, "github").as_deref(), Some("ana"));
+}
+
+#[test]
+fn an_item_that_is_not_there_or_has_no_such_part_is_no_value_and_no_failure() {
+    let home = Home::new("missing");
+    let password = provider(&home, &provider_settings("password"));
+    assert_eq!(value_of(&password, "ghost"), None);
+    assert_eq!(value_of(&password, "empty"), None);
+    let totp = provider(&home, &provider_settings("totp"));
+    assert_eq!(value_of(&totp, "empty"), None);
+    let (spawner, _) = standin();
+    let held = password.get(Named::new("github"), spawner).expect("held");
+    assert_eq!(
+        held.expires_in, None,
         "a Bitwarden item has no end of its own"
     );
-    // A setting the script does not declare is refused by the host before the script is asked.
-    let mut surprise = serde_json::Map::new();
-    surprise.insert("surprise".to_owned(), json!(1));
+}
+
+#[test]
+fn names_are_listed_once_each_and_nothing_else() {
+    let home = Home::new("names");
+    let provider = provider(&home, &good());
+    let (spawner, _) = standin();
+    let names = provider.names(spawner).expect("names").names;
+    assert_eq!(names, ["empty", "github", "two lines"]);
+}
+
+#[test]
+fn it_describes_a_reader_that_lists_and_needs_no_person() {
+    let home = Home::new("describe");
+    let info = provider(&home, &good()).describe().expect("described");
+    assert_eq!(info.title, "Bitwarden");
+    assert!(info.can_list && !info.can_store && !info.needs_person);
+}
+
+#[test]
+fn a_wrong_or_missing_session_key_is_gone_and_the_message_holds_no_key() {
+    let home = Home::new("locked");
+    for settings in [
+        json!({"command": "bw", "session": "not-the-key-zq9"}),
+        json!({"command": "bw"}),
+    ] {
+        let provider = provider(&home, &settings);
+        let (spawner, _) = standin();
+        let error = provider
+            .get(Named::new("github"), spawner)
+            .expect_err("locked");
+        assert_eq!(
+            error.status,
+            coqui_acp_api::guatiao::Status::GUATIAO_ERR_GONE
+        );
+        assert!(error.message().contains("locked"), "{}", error.message());
+        assert!(!error.message().contains("not-the-key-zq9"));
+    }
+}
+
+#[test]
+fn a_program_that_is_not_there_is_gone_and_says_what_is_needed() {
+    let home = Home::new("absent");
+    let provider = provider(
+        &home,
+        &json!({"command": "no-such-program-bw", "session": GOOD_KEY}),
+    );
+    let (spawner, _) = standin();
+    let error = provider
+        .get(Named::new("github"), spawner)
+        .expect_err("gone");
+    assert_eq!(
+        error.status,
+        coqui_acp_api::guatiao::Status::GUATIAO_ERR_GONE
+    );
     assert!(
-        script_catalog(&python, &prefix)
-            .instance("bitwarden", &surprise)
-            .is_err()
+        error
+            .message()
+            .contains("Bitwarden's command line is needed"),
+        "{}",
+        error.message()
     );
 }
 
-/// The library's own tests, run by the test Python with Guatiao's Python binding: the provider against a stand-in `bw`, no value in a
-/// failure, the session key in the environment and never on a command line.
 #[test]
-fn the_scripts_own_tests_pass() {
-    let (python, _) = python();
-    let guatiao = checkout("guatiao");
-    let output = Command::new(&python)
-        .args(["-m", "unittest", "discover", "-s", "tests"])
-        .current_dir(extension())
-        .env("PYTHONPATH", guatiao.join("bindings/python/guatiao/src"))
-        .env("PYTHONDONTWRITEBYTECODE", "1")
-        .env_remove("BW_SESSION")
-        .output()
-        .expect("python runs");
-    let said = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "the script's tests failed:
-{said}"
+fn a_command_that_does_not_answer_in_time_is_gone() {
+    let home = Home::new("slow");
+    let provider = provider(
+        &home,
+        &json!({"command": "slow-bw", "session": GOOD_KEY, "timeout_seconds": 1}),
     );
-    assert!(said.contains("OK"), "{said}");
+    let (spawner, _) = standin();
+    let started = std::time::Instant::now();
+    let error = provider
+        .get(Named::new("github"), spawner)
+        .expect_err("gone");
+    assert!(error.message().contains("in time"), "{}", error.message());
+    assert!(started.elapsed() < std::time::Duration::from_secs(20));
 }
 
-/// An extension whose library offers no store type is no error and adds none: the Store is as it was.
 #[test]
-fn a_library_that_adds_no_store_type_is_loaded_for_its_other_kinds_and_leaves_the_store_alone() {
-    use crate::control::Stores;
-    use crate::store::programs::Programs;
-    use crate::store::shelf::Shelf;
-
-    let (python, prefix) = python();
-    let config = script_config(&python, &prefix);
-    let root = std::env::temp_dir().join(format!("canoa-secret-stores-{}", std::process::id()));
-    let programs = Programs::new(
-        Shelf::unchecked(&root),
-        crate::store::registry::built_in().expect("the built-in stores"),
+fn the_session_key_goes_in_the_environment_and_never_on_a_command_line() {
+    let home = Home::new("env");
+    let provider = provider(&home, &good());
+    let (standin, calls) = StandIn::new();
+    provider
+        .get(Named::new("github"), standin.into_object())
+        .expect("held");
+    let (standin, _) = (
+        StandIn {
+            calls: Arc::clone(&calls),
+        },
+        (),
     );
-    let plain = Stores::new(Arc::new(programs), Vec::new());
-    let extended = plain.extended(&config.extensions);
-    let types = extended
-        .read("store/extensions", &json!({}), None)
-        .expect("the types");
-    assert_eq!(types["types"], json!([]), "{types}");
-    let _ = std::fs::remove_dir_all(&root);
+    provider.names(standin.into_object()).expect("names");
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    for call in calls.iter() {
+        assert_eq!(call.program, "bw");
+        assert!(call.session_in_env, "{call:?}");
+        assert!(!call.key_on_command_line, "{call:?}");
+        assert!(call.words.iter().any(|word| word == "--nointeraction"));
+    }
+}
+
+#[test]
+fn a_request_for_a_name_that_is_no_name_is_refused_before_bw_is_run() {
+    let home = Home::new("names_refused");
+    let provider = provider(&home, &good());
+    for name in ["", "a\nb", &"x".repeat(300)] {
+        let (standin, calls) = StandIn::new();
+        let error = provider
+            .get(Named::new(name), standin.into_object())
+            .expect_err("refused");
+        assert_eq!(
+            error.status,
+            coqui_acp_api::guatiao::Status::GUATIAO_ERR_BAD_VALUE
+        );
+        assert!(calls.lock().unwrap().is_empty(), "{name:?}");
+    }
+}
+
+#[test]
+fn it_keeps_nothing_and_forgets_nothing() {
+    let home = Home::new("unsupported");
+    let provider = provider(&home, &good());
+    let (spawner, _) = standin();
+    let error = provider
+        .put(Keeping::new("a", "v"), spawner)
+        .expect_err("unsupported");
+    assert_eq!(
+        error.status,
+        coqui_acp_api::guatiao::Status::GUATIAO_ERR_UNSUPPORTED
+    );
+    let (spawner, _) = standin();
+    let error = provider
+        .forget(Named::new("a"), spawner)
+        .expect_err("unsupported");
+    assert_eq!(
+        error.status,
+        coqui_acp_api::guatiao::Status::GUATIAO_ERR_UNSUPPORTED
+    );
 }
