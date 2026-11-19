@@ -54,9 +54,10 @@ fieldsOf(request); releaseSpawner(spawner); MAX_BYTES; DEFAULT_SECONDS; TAIL_BYT
 class SettingsSection extends Provider {      // section.js: static section, title, help, icon, group, under, keywords, stored = 'config'|'provider', values, form
   read()  // '{}' for a config section; write(values)
 }
-class PanelTab extends Provider {             // panel.js: static tab, title, help, icon, shows = 'log'|'terminal', shell; tail(request)
+class PanelTab extends Provider {             // panel.js: static tab, title, help, icon, shows = 'log'|'terminal'|'page', shell, url; tail(request)
 }
-class TerminalPanelTab extends PanelTab; class LogPanelTab extends PanelTab   // lines() -> the log's lines, oldest first
+class TerminalPanelTab extends PanelTab; class PagePanelTab extends PanelTab   // a page at `url`, on this computer's loopback
+class LogPanelTab extends PanelTab   // lines() -> the log's lines, oldest first
 ```
 
 A catalog source's `read` is handed the host's `spawner`: `spawner.spawn(spec)` starts a program as the person, `spawner.readFile(path, max)`

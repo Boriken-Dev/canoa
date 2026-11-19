@@ -17,7 +17,7 @@ export {
   nameOf,
   release,
 } from './secret.js';
-export { LogPanelTab, MAX_TAIL_LINES, PanelTab, TerminalPanelTab } from './panel.js';
+export { LogPanelTab, MAX_TAIL_LINES, PagePanelTab, PanelTab, TerminalPanelTab } from './panel.js';
 export {
   EnvProfileItem,
   NETWORK_MODES,

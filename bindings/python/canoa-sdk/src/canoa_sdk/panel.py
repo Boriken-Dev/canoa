@@ -9,10 +9,13 @@ class Builds(LogPanelTab):
         return ["build 41 passed", "build 42 failed"]
 ```
 
-A tab shows a shell on the host (`shows = "terminal"`, optionally the one `shell` names) or a log, lines of text the provider keeps which
-the application asks for every couple of seconds while the tab is open (`shows = "log"`, answered by `tail`).
+A tab shows a shell on the host (`shows = "terminal"`, optionally the one `shell` names), a log, lines of text the provider keeps which
+the application asks for every couple of seconds while the tab is open (`shows = "log"`, answered by `tail`), or a page the extension
+serves on this computer's loopback (`shows = "page"`, at `url`: `http` or `https` on `127.0.0.1`, `[::1]` or `localhost`, which the
+application opens in the person's browser).
 
-The classes that mirror what Canoa carries are `TerminalPanelTab` (a shell) and `LogPanelTab` (a log whose lines the subclass supplies).
+The classes that mirror what Canoa carries are `TerminalPanelTab` (a shell), `LogPanelTab` (a log whose lines the subclass supplies)
+and `PagePanelTab` (a page at `url`).
 """
 
 from __future__ import annotations
@@ -26,14 +29,14 @@ from . import kinds
 from ._model import present
 from ._provider import WithForm
 
-__all__ = ["LogPanelTab", "MAX_TAIL_LINES", "PanelTab", "TerminalPanelTab"]
+__all__ = ["LogPanelTab", "MAX_TAIL_LINES", "PagePanelTab", "PanelTab", "TerminalPanelTab"]
 
 #: The most lines a `tail` answers.
 MAX_TAIL_LINES = 5000
 
 
 class PanelTab(WithForm, provide.Provider, kinds.PanelTab, abstract=True):
-    """Subclass it with `tab` (1 to 32 lower-case letters, digits and `_`), `title` and `shows`; a log answers `tail`."""
+    """Subclass it with `tab` (1 to 32 lower-case letters, digits and `_`), `title` and `shows` (`"terminal"`, `"log"` or `"page"`, which also names `url`); a log answers `tail`."""
 
     tab: ClassVar[str]
     title: ClassVar[str]
@@ -41,11 +44,20 @@ class PanelTab(WithForm, provide.Provider, kinds.PanelTab, abstract=True):
     icon: ClassVar[Optional[str]] = None
     shows: ClassVar[str] = "log"
     shell: ClassVar[Optional[str]] = None
+    url: ClassVar[Optional[str]] = None
 
     def info(self) -> Dict[str, Any]:
         """The description, from the class attributes."""
         return present(
-            {"id": self.tab, "title": self.title, "help": self.help, "icon": self.icon, "shows": self.shows, "shell": self.shell}
+            {
+                "id": self.tab,
+                "title": self.title,
+                "help": self.help,
+                "icon": self.icon,
+                "shows": self.shows,
+                "shell": self.shell,
+                "url": self.url,
+            }
         )
 
     def describe(self) -> ValueAnswer:
@@ -60,6 +72,12 @@ class TerminalPanelTab(PanelTab, abstract=True):
     """A shell on the host: the one `shell` names, or the host's own choice."""
 
     shows = "terminal"
+
+
+class PagePanelTab(PanelTab, abstract=True):
+    """A page the extension serves on this computer's loopback: set `url` to `http` or `https` on `127.0.0.1`, `[::1]` or `localhost`."""
+
+    shows = "page"
 
 
 class LogPanelTab(PanelTab, abstract=True):

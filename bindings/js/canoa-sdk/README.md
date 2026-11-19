@@ -29,10 +29,10 @@ nothing else, so a library imports the SDK by a relative path to where it is und
 | `profile_item` | `ProfileItem`, `SettingProfileItem`, `EnvProfileItem`, `NetworkProfileItem` | `canoa-sdk/profile` |
 | `catalog_source` | `CatalogSource`, `CommandCatalogSource`, `ReadCatalogSource` | `canoa-sdk/source` |
 | `settings_section` | `SettingsSection` | `canoa-sdk/section` |
-| `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab` | `canoa-sdk/panel` |
+| `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab`, `PagePanelTab` | `canoa-sdk/panel` |
 | `usage_reader` | `UsageReader`, `UsageReading` | `canoa-sdk/usage` |
 
 The examples in `examples/providers/js` are loaded by `crates/canoa-host/tests/script_providers.rs`. See `AGENTS.md` for the API.
 Development: `npm install` (TypeScript is a dev dependency), then `GUATIAO_NODE=<guatiao>/bindings/node/guatiao npm test`, which typechecks the SDK and the
-examples in `examples/providers/js` and writes the `.d.ts` files to a folder it removes afterwards (`npm run typecheck` is the check alone, `npm run types` writes `types/`);
+examples in `examples/providers/js`, writes the `.d.ts` files to a folder it removes afterwards and runs the unit tests in `test/` (`npm run typecheck` is the check alone, `npm run unit` the tests alone, `npm run types` writes `types/`);
 after a kind's description changes, `GUATIAO_NODE=<guatiao>/bindings/node/guatiao node tools/write_kinds.mjs`.

@@ -9,7 +9,7 @@ descriptions, which the base classes sit on.
 from __future__ import annotations
 
 from .forms import Section, form_meta, form_of, section, ui
-from .panel import LogPanelTab, PanelTab, TerminalPanelTab
+from .panel import LogPanelTab, PagePanelTab, PanelTab, TerminalPanelTab
 from .profile import (
     EnvProfileItem,
     ItemEffect,
@@ -52,6 +52,7 @@ __all__ = [
     "ModeTitle",
     "NetworkEffect",
     "NetworkProfileItem",
+    "PagePanelTab",
     "PanelTab",
     "ProfileItem",
     "ProgramStore",

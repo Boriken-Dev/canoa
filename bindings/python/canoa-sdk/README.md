@@ -29,7 +29,7 @@ examples in `examples/providers/python` are loaded by `crates/canoa-host/tests/s
 | `profile_item` | `ProfileItem`, `SettingProfileItem`, `EnvProfileItem`, `NetworkProfileItem` | `canoa_sdk.profile` |
 | `catalog_source` | `CatalogSource`, `CommandCatalogSource`, `ReadCatalogSource` | `canoa_sdk.source` |
 | `settings_section` | `SettingsSection` | `canoa_sdk.settings` |
-| `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab` | `canoa_sdk.panel` |
+| `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab`, `PagePanelTab` | `canoa_sdk.panel` |
 | `usage_reader` | `UsageReader`, `UsageReading` | `canoa_sdk.usage` |
 | coqui-acp's `acp_harness`, `agent_provider` | re-exported | `canoa_sdk.acp` |
 

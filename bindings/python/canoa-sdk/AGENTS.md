@@ -51,8 +51,9 @@ class CommandCatalogSource(CatalogSource)   # a program the person named; its ou
 class ReadCatalogSource(CatalogSource)      # a place the type reads itself; read answers a file on this computer
 fields_of(request); MAX_BYTES; DEFAULT_SECONDS; TAIL_BYTES
 class SettingsSection:    # canoa_sdk.settings: section, title, help, icon, group, under, keywords, stored = "config" | "provider", values; read(), write(values)
-class PanelTab:           # canoa_sdk.panel: tab, title, help, icon, shows = "log" | "terminal", shell; tail(request)
-class TerminalPanelTab(PanelTab); class LogPanelTab(PanelTab)   # lines() -> the log's lines, oldest first
+class PanelTab:           # canoa_sdk.panel: tab, title, help, icon, shows = "log" | "terminal" | "page", shell, url; tail(request)
+class TerminalPanelTab(PanelTab); class PagePanelTab(PanelTab)   # a page at `url`, on this computer's loopback
+class LogPanelTab(PanelTab)   # lines() -> the log's lines, oldest first
 ```
 
 A catalog source's `read` is handed the host's `spawner`: `spawner.spawn(spec)` starts a program as the person, `spawner.read_file(path, max)`

@@ -447,6 +447,38 @@ def test_a_settings_section_and_a_panel_tab_describe_themselves_from_their_class
     assert provide.library("tabs", "1", providers=[Builds, Shell]).kinds == ("panel_tab",)
 
 
+def test_a_panel_tab_can_show_a_page_at_an_address() -> None:
+    class Docs(sdk.PagePanelTab):
+        tab = "docs"
+        title = "Docs"
+        icon = "book"
+        url = "http://127.0.0.1:4100/docs"
+
+    assert Docs().describe() == {
+        "id": "docs",
+        "title": "Docs",
+        "icon": "book",
+        "shows": "page",
+        "url": "http://127.0.0.1:4100/docs",
+    }
+    assert Docs().tail({"lines": 5}) == ""
+
+    class Plain(sdk.PanelTab):
+        tab = "plain"
+        title = "Plain"
+        shows = "page"
+        url = "https://localhost/"
+
+    assert Plain().describe()["shows"] == "page" and Plain().describe()["url"] == "https://localhost/"
+    # A tab that shows no page leaves the address out of its description.
+    class Shell(sdk.TerminalPanelTab):
+        tab = "dev"
+        title = "Dev shell"
+
+    assert "url" not in Shell().describe()
+    assert provide.library("tabs", "1", providers=[Docs, Plain]).kinds == ("panel_tab",)
+
+
 def test_a_catalog_source_is_the_provider_of_the_id_it_is_described_under() -> None:
     class Team(sdk.CatalogSource):
         source = "team"

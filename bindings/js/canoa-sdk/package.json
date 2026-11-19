@@ -75,7 +75,8 @@
   "scripts": {
     "types": "node tools/typecheck.mjs --types types",
     "typecheck": "node tools/typecheck.mjs",
-    "test": "node tools/typecheck.mjs --types"
+    "unit": "node --import ./tools/guatiao_hook.mjs --test --test-timeout=60000 test/*.test.mjs",
+    "test": "node tools/typecheck.mjs --types && npm run unit"
   },
   "peerDependencies": {
     "guatiao": "*"
