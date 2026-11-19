@@ -627,3 +627,32 @@ fn the_catalog_the_app_reads_is_the_one_the_host_writes() {
         text
     );
 }
+
+#[test]
+fn the_libraries_own_gateway_answers_a_session_on_its_account_in_its_own_words_when_the_service_is_not_there()
+ {
+    let dir = Dir::new();
+    let accounts = Accounts::with_store(
+        dir.0.join("accounts"),
+        Box::new(FileStore::new(dir.0.join("accounts"))),
+    )
+    .expect("opens");
+    accounts
+        .store_login("id-local", &Credentials::new(), None)
+        .expect("stored");
+    let info = catalog_of("claude").kind(KIND).expect("the kind").clone();
+    let mut map = serde_json::Map::new();
+    map.insert("model".to_owned(), json!("local-model"));
+    // Nothing listens on port 1: the library's service engine says so, and the host passes it on.
+    map.insert("endpoint".to_owned(), json!("http://127.0.0.1:1"));
+    let mut account = config("claude");
+    account.settings = Some(Settings::new(map));
+    let refused = accounts
+        .begin("local", &account, &info, Runs::plain("claude"), "a session")
+        .expect_err("no service");
+    let Refusal::Gateway(why) = &refused else {
+        panic!("a gateway refusal: {refused:?}");
+    };
+    assert!(!why.is_empty(), "the library says why");
+    assert!(!accounts.held("id-local"), "the account was let go");
+}

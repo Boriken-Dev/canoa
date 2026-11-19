@@ -249,7 +249,8 @@ fn act_with(
     let program = program.ok_or_else(|| {
         (
             REFUSED,
-            "Foundry Local is not installed: install it from the Store's Foundry Local list".to_owned(),
+            "Foundry Local is not installed: install it from the Store's Foundry Local list"
+                .to_owned(),
         )
     })?;
     let limit = limit.unwrap_or(match action {
