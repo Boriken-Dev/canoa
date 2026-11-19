@@ -3,7 +3,7 @@
 // never one a connection suggests.
 import * as webcrypto from "./vendor/coqui-peer-webcrypto.mjs";
 import * as noise from "./vendor/coqui-peer-noise.mjs";
-import { createMux } from "./vendor/coqui-agentic-peer/mux.mjs";
+import { createMux } from "./vendor/coqui-link/mux.mjs";
 
 /** The proof methods, in no order of preference. */
 export const METHODS = Object.freeze(["noise", "webcrypto"]);

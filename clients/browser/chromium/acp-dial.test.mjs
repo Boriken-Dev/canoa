@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { createDeframer, dialAgent, frame } from "./acp-dial.js";
-import { createMux } from "./vendor/coqui-agentic-peer/mux.mjs";
+import { createMux } from "./vendor/coqui-link/mux.mjs";
 import { createResponder, generateIdentity } from "./vendor/coqui-peer-webcrypto.mjs";
 
 const text = (buffer) => new TextDecoder().decode(buffer);
