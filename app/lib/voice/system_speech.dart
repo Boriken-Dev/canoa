@@ -20,10 +20,14 @@ List<SpeechBackend> platformSpeechBackends() => [
 final class SystemSpeech implements SpeechBackend {
   /// [finishWithin] is how long the system may take, after [stop], to say it has finished before the dictation is ended with a
   /// reason: a recognizer that never says it is done must not hold the composer.
-  SystemSpeech(this.name, {SpeechToText? engine, this.finishWithin = const Duration(seconds: 10)}) : _engine = engine ?? SpeechToText();
+  ///
+  /// [options] go to the platform plugin when it starts. The Windows plugin reads a recorded WAV from the option inputFile and plays
+  /// it in place of the microphone, which tests use.
+  SystemSpeech(this.name, {SpeechToText? engine, this.finishWithin = const Duration(seconds: 10), this.options}) : _engine = engine ?? SpeechToText();
 
   final SpeechToText _engine;
   final Duration finishWithin;
+  final List<SpeechConfigOption>? options;
   final _levels = StreamController<double>.broadcast();
   StreamController<Transcript>? _capture;
   Timer? _deadline;
@@ -48,6 +52,9 @@ final class SystemSpeech implements SpeechBackend {
 
   @override
   Future<List<SpeechChoice>> languages() async {
+    // Windows' plugin only lists the recognizers installed, so it starts for the list; elsewhere starting is what asks for the
+    // microphone, which waits for the person to dictate.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) await _initialize();
     if (!_ready) return const [];
     return [for (final locale in await _engine.locales()) SpeechChoice(locale.localeId, locale.name)];
   }
@@ -83,23 +90,26 @@ final class SystemSpeech implements SpeechBackend {
     _finish();
   }
 
+  Future<bool> _initialize() async {
+    if (_ready) return true;
+    return _ready = await _engine.initialize(
+      options: options,
+      onError: (SpeechRecognitionError error) {
+        if (error.permanent) _fail(_said(error.errorMsg));
+      },
+      onStatus: (status) {
+        if (status == SpeechToText.doneStatus || status == SpeechToText.notListeningStatus) _finish();
+      },
+    );
+  }
+
   Future<void> _run(StreamController<Transcript> capture, String? language) async {
     try {
-      if (!_ready) {
-        _ready = await _engine.initialize(
-          onError: (SpeechRecognitionError error) {
-            if (error.permanent) _fail(_said(error.errorMsg));
-          },
-          onStatus: (status) {
-            if (status == SpeechToText.doneStatus || status == SpeechToText.notListeningStatus) _finish();
-          },
-        );
-        if (!_ready) {
-          if (identical(_capture, capture)) {
-            _fail('The system has no speech service ready. Check that the microphone is allowed and speech recognition is on.');
-          }
-          return;
+      if (!await _initialize()) {
+        if (identical(_capture, capture)) {
+          _fail('The system has no speech service ready. Check that the microphone is allowed and speech recognition is on.');
         }
+        return;
       }
       await _engine.listen(
         onResult: (SpeechRecognitionResult result) {
@@ -121,6 +131,9 @@ final class SystemSpeech implements SpeechBackend {
     'error_permission' || 'error_audio' => 'The microphone is not allowed or not available.',
     'error_network' || 'error_network_timeout' => 'The speech service could not be reached.',
     'error_no_match' || 'error_speech_timeout' => 'No speech was heard.',
+    'error_initialize' || 'error_listen' => 'The speech service could not start.',
+    'error_no_recognizer' => 'Windows has no speech recognizer installed.',
+    'error_language_unavailable' => 'No installed speech recognizer understands the language chosen.',
     _ => 'The speech service stopped: $code.',
   };
 
