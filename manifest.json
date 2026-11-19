@@ -1,7 +1,7 @@
 {
   "format": 2,
   "source": "Boriken-Dev/canoa",
-  "sourceCommit": "a952b991",
+  "sourceCommit": "f9847c38c1fbf1e7ed64e20a61db7d562d0c9b57",
   "status": "complete",
   "pubPackages": [
     ".cache",
@@ -47,7 +47,6 @@
     "menu_base-0.1.1",
     "meta-1.18.0",
     "mustache_template-2.0.4",
-    "pasteboard-0.5.0",
     "path-1.9.1",
     "petitparser-7.0.2",
     "platform-3.2.0",
@@ -71,7 +70,6 @@
     "source_span-1.10.2",
     "speech_to_text-7.5.0",
     "speech_to_text_platform_interface-2.5.0",
-    "speech_to_text_windows-1.0.1",
     "stack_trace-1.12.1",
     "stream_channel-2.1.4",
     "string_scanner-1.4.1",
@@ -108,36 +106,36 @@
       "package": "coqui_acp",
       "url": "https://github.com/Boriken-Dev/coqui-acp.git",
       "path": "bindings/dart/coqui_acp",
-      "ref": "d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c",
-      "revision": "d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c"
+      "ref": "145e9b83bf14fcf7935d48b69ddcd0621c735fbe",
+      "revision": "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
     },
     {
       "package": "coqui_acp_chat",
       "url": "https://github.com/Boriken-Dev/coqui-acp.git",
       "path": "bindings/dart/coqui_acp_chat",
-      "ref": "d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c",
-      "revision": "d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c"
+      "ref": "145e9b83bf14fcf7935d48b69ddcd0621c735fbe",
+      "revision": "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
     },
     {
       "package": "coqui_acp_chat_ui",
       "url": "https://github.com/Boriken-Dev/coqui-acp.git",
       "path": "bindings/dart/coqui_acp_chat_ui",
-      "ref": "d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c",
-      "revision": "d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c"
+      "ref": "145e9b83bf14fcf7935d48b69ddcd0621c735fbe",
+      "revision": "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
     },
     {
       "package": "coqui_aos",
       "url": "https://github.com/Boriken-Dev/coqui-aos.git",
       "path": "dart",
-      "ref": "caa9bf6dcf8485fb179f092bbd2cd9db17861670",
-      "revision": "caa9bf6dcf8485fb179f092bbd2cd9db17861670"
+      "ref": "169125d3bfcb1b2cb1c3b33b297e373f2930c54a",
+      "revision": "169125d3bfcb1b2cb1c3b33b297e373f2930c54a"
     },
     {
-      "package": "coqui_web",
-      "url": "https://github.com/Boriken-Dev/coqui-web.git",
-      "path": "bindings/dart/coqui_web",
-      "ref": "445007acb04f1b11f8f0f7c9fcf104f694189a2b",
-      "revision": "445007acb04f1b11f8f0f7c9fcf104f694189a2b"
+      "package": "coqui_transport_web",
+      "url": "https://github.com/Boriken-Dev/coqui-transport-web.git",
+      "path": "bindings/dart/coqui_transport_web",
+      "ref": "baebbd9550a936c883927b261738b21c0678729d",
+      "revision": "baebbd9550a936c883927b261738b21c0678729d"
     }
   ],
   "gitDependenciesNote": "not mirrored; pub fetches them from their URL, so they need the network",
@@ -157,16 +155,10 @@
       "benchmark": 41,
       "benchmarks": 4,
       "doc": 307,
-      "example": 1790,
-      "test": 1875,
-      "zip": 1
+      "example": 1647,
+      "test": 1875
     },
-    "deletedFlaggedFiles": [
-      {
-        "path": "pub.dev/pasteboard-0.5.0/android/gradle/wrapper/gradle-wrapper.jar",
-        "kind": "zip"
-      }
-    ]
+    "deletedFlaggedFiles": []
   },
   "cdnFiles": [
     {

@@ -37,7 +37,8 @@ pub mod vectors;
 
 pub use apply::{
     Change, ComposedEnvironment, Effective, Environment, Facts, Needs, NonDefaultSetting, Phase,
-    Preparation, ScriptRun, SetupRecord, SetupRun, composed_environment, effective, preparation,
+    Preparation, ScriptCall, ScriptFailure, ScriptReport, ScriptResult, ScriptRun, SetupRecord,
+    SetupRun, composed_environment, composed_environment_running, effective, preparation,
     read_dotenv, setup_phase,
 };
 pub use catalog::{

@@ -79,11 +79,11 @@ fields. Unknown keys are skipped when reading.
 | `AuthorizationDecision` | `allowed`, `limits: BTreeMap<String, Value>` |
 | `Description` | `name?`, `takes?` (one of `takes::PASSWORD`, `KEY`, `REQUEST`, `OTP`) |
 | `AccountInfo` | `id`, `name`, `groups`, `disabled?`, `made_unix?`, `expires_unix?` |
-| `AccountPut` | `name`, `secret?`, `groups?`, `disabled?`, `expires_unix?`, `display_name?` (the label an enrolment shows; providers keeping none ignore it) |
+| `AccountPut` | `name`, `secret?`, `groups?`, `disabled?`, `expires_unix?`, `display_name?` (the label an enrolment shows; providers keeping none ignore it), `proved_current` (bool, default false, not written when false: the caller checked the account's current secret in this request; the one-time code provider refuses a rotation without it, the others ignore it) |
 | `PutOutcome` | `secret?`, `codes?: Vec<String>` (one-time recovery codes, said once) |
 | `Waiting` | `shown`, `peer?`, `seen_unix?` |
 | `Factor` | `method`, `provider?` (the id that accepted the step), `person?` (the `Person::id` it named; `Debug` hides it) |
-| `SignInContext` | `purpose`, `done: Vec<Factor>`, `address?` (the client's IP as text, no port; `None` when unknown), `client?`, `service?`, `time_unix?`, `person?`, `attributes` (empty is not written) |
+| `SignInContext` | `purpose`, `done: Vec<Factor>`, `address?` (the client's IP as text, no port; `None` when unknown), `client?` (from the endpoint the request arrived on, never from what the client says; a consumer that does that sets `attributes[attributes::CLIENT_VERIFIED]` to `true` with `with_verified_client()`, and `client_is_verified()` reads it, so a policy may treat any other `client` as a claim), `service?`, `time_unix?`, `person?`, `attributes` (empty is not written) |
 | `Offer` | `method`, `providers: Vec<String>` (empty is any provider taking the method; empty is not written) |
 | `SignInDecision` | `complete`, `methods: Vec<Offer>`, `rule?`, `limits` (empty is not written) |
 
@@ -113,6 +113,7 @@ pub mod methods { pub const PASSWORD, CERTIFICATE, PROXY, KEY, TOTP, RECOVERY_CO
                   pub const NEEDS_ACCOUNT: &[&str]; }     // [TOTP, RECOVERY_CODE]
 pub mod purposes { pub const SIGN_IN, RESUME, ENROL: &str; }   // "sign_in" | "resume" | "enrol"
 pub mod clients  { pub const BROWSER, APP, API: &str; }         // "browser" | "app" | "api"
+pub mod attributes { pub const CLIENT_VERIFIED: &str; }          // "client_verified"
 pub mod takes    { /* PASSWORD, KEY, REQUEST, */ pub const OTP: &str; }   // "otp"
 ```
 
@@ -123,20 +124,30 @@ pub mod takes    { /* PASSWORD, KEY, REQUEST, */ pub const OTP: &str; }   // "ot
 
 ```rust
 #[non_exhaustive]
-pub enum Subject { Account(String), Person(String), Group(String) }  // Clone, Eq, Ord, Hash
+pub enum Subject { Account(String), Person(String), Group(String), AnySignedIn }  // Clone, Eq, Ord, Hash
 impl Subject {
-    pub fn kind(&self) -> &'static str;          // "account" | "person" | "group"
-    pub fn value(&self) -> &str;
+    pub fn kind(&self) -> &'static str;          // "account" | "person" | "group" | "any"
+    pub fn value(&self) -> &str;                 // "signed-in" for AnySignedIn
     pub fn matches(&self, person: &Person) -> bool;
 }
-impl FromStr for Subject { type Err = SubjectError; }   // "account:<name>", "person:<id>", "group:<name>"
+impl FromStr for Subject { type Err = SubjectError; }   // "account:<name>", "person:<id>", "group:<name>", "any:signed-in"
 impl Display for Subject;                               // the same text
 pub struct SubjectError;                                // non_exhaustive, Error
 ```
 
 - `Account` matches `Person::name`, `Person` matches `Person::id`, `Group` any of
-  `Person::groups`; all compare exact strings.
-- The value after the first colon may hold colons; empty or holding a control character is
+  `Person::groups`. `Account` and `Person` compare exact strings. `Group` compares by Unicode
+  lowercase (`char::to_lowercase`, not full case folding), so `group:Domain Users` matches a
+  person whose groups hold `domain users` (SSSD reports Active Directory groups in lowercase),
+  and two POSIX groups that differ only in case are one. `==` on a `Subject` stays exact.
+  `AnySignedIn` matches every person whose
+  `Person::id` is not empty, so an anonymous caller never matches; it grants nothing by itself.
+- `any:signed-in` is the only reserved `any:` name: every other text starting `any:` is a
+  `SubjectError` (`group:any:signed-in` is still a group, since the kind comes first).
+  `Debug` shows `Subject(any:signed-in)` whole, since it names no one. Everything that reads a
+  `Subject` (roles, ACL principals, sign-in rule subjects) accepts it.
+- The value after the first colon may hold colons and inner spaces (`group:Domain Users`); empty,
+  holding a control character, or starting or ending with whitespace is
   refused. Policies add their own length and character rules.
 - `Debug` shows the kind only: the value is an identity.
 

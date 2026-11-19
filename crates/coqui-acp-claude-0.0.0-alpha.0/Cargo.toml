@@ -1,5 +1,4 @@
-# coqui-acp/crates/coqui-acp-claude at cf01e16e59bf637e2466ff2a82aa1089cf8500c6, with what it inherits written out.
-bin = [{ name = "coqui-acp-claude", path = "src/main.rs" }]
+# coqui-acp/crates/coqui-acp-claude at 7c431b27a609546506c104b5688b9694d46ba547, with what it inherits written out.
 example = [{ name = "claude_provider", crate-type = ["cdylib"] }]
 [package]
 name = "coqui-acp-claude"
@@ -12,7 +11,7 @@ repository = "https://github.com/Boriken-Dev/coqui-acp"
 homepage = "https://boriken-dev.github.io/coqui-acp/"
 readme = "README.md"
 keywords = ["acp", "agent", "claude", "stream-json"]
-categories = ["development-tools", "command-line-utilities"]
+categories = ["development-tools"]
 exclude = [".*", "*.local.*"]
 publish = false
 [package.metadata]

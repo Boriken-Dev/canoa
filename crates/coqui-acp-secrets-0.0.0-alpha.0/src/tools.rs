@@ -1,6 +1,7 @@
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use core::fmt;
+use core::time::Duration;
 
 use coqui_acp::secret::{
     Context, Form, Method, RequestParams, RequestReply, ShowDeliver, ShowDone, ShowOpen, ShowOpened,
@@ -10,7 +11,7 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::files::shown;
-use crate::host::FOLDER_NOTICE;
+use crate::host::{FOLDER_NOTICE, KEEP_FIELD, Keep};
 use crate::run::{CommandLine, CommandSpec};
 use crate::session::{Core, Inner};
 use crate::{Action, Approval, Error, Event, program};
@@ -62,9 +63,55 @@ impl fmt::Debug for SessionTools {
     }
 }
 
+/// `schema` with the question that offers `keeps` added, answered by default with the first.
+fn with_keep(schema: &str, keeps: &[Keep]) -> Result<String, Error> {
+    let mut value: Value =
+        serde_json::from_str(schema).map_err(|_| Error::Arguments("the schema is not JSON"))?;
+    let root = value
+        .as_object_mut()
+        .ok_or(Error::Arguments("the schema is not an object"))?;
+    let options: Vec<Value> = keeps
+        .iter()
+        .map(|keep| json!({"const": keep.id, "title": keep.label}))
+        .collect();
+    let first = keeps
+        .first()
+        .map(|keep| keep.id.clone())
+        .unwrap_or_default();
+    root.get_mut("properties")
+        .and_then(Value::as_object_mut)
+        .ok_or(Error::Arguments("the schema has no properties"))?
+        .insert(
+            KEEP_FIELD.to_owned(),
+            json!({"type": "string", "title": "Keep it", "oneOf": options, "default": first}),
+        );
+    Ok(value.to_string())
+}
+
 const REQUEST: &str = "secret_request";
 const USE: &str = "secret_use";
 const SHOW: &str = "secret_show";
+
+/// The schema of `wait_seconds`, with the frontend's longest wait as its maximum when it states one.
+fn wait_property(longest: Option<Duration>) -> Value {
+    let mut property = json!({
+        "type": "integer",
+        "minimum": 1,
+        "description": "How many seconds you can wait for the person to answer. The question is withdrawn when they have not, and \
+            the status is `timed_out`; when no one is at the screen the status is `no_one_present` at once. Leave it out to wait \
+            as long as the host allows."
+    });
+    if let Some(longest) = longest {
+        let seconds = longest.as_secs().max(1);
+        property["maximum"] = json!(seconds);
+        property["description"] = json!(format!(
+            "How many seconds you can wait for the person to answer, at most {seconds}: the host waits no longer whatever you ask. \
+            The question is withdrawn when they have not answered, and the status is `timed_out`; when no one is at the screen the \
+            status is `no_one_present` at once. Leave it out to wait {seconds} seconds."
+        ));
+    }
+    property
+}
 
 fn form_schema_property(what: &str) -> Value {
     json!({
@@ -101,13 +148,16 @@ impl SessionTools {
                 name: REQUEST,
                 description: "Ask the person for values, secrets included, in a form on their own screen. The answer does not come to you: \
                     you get the plain values they typed and, for each secret field (`writeOnly: true`), only a handle. Use the handle \
-                    with secret_use. Mark every secret field `writeOnly: true` and give it no default.",
+                    with secret_use. Mark every secret field `writeOnly: true` and give it no default. The status is `accepted`, \
+                    `declined`, `cancelled`, `timed_out` (they did not answer in `wait_seconds`) or `no_one_present` (no one is at \
+                    the screen, so nothing was asked).",
                 input_schema: json!({
                     "type": "object",
                     "properties": {
                         "message": {"type": "string", "description": "What the person is asked and why."},
                         "schema": form_schema_property("A flat JSON Schema object: `properties` are the questions; a secret one is `writeOnly: true`."),
-                        "form": form_schema_property("Optional layout: sections and, per question, `widget`, `placeholder`, `unit`, `visibleWhen`.")
+                        "form": form_schema_property("Optional layout: sections and, per question, `widget`, `placeholder`, `unit`, `visibleWhen`."),
+                        "wait_seconds": wait_property(self.core.frontend.longest_wait())
                     },
                     "required": ["message", "schema"],
                     "additionalProperties": false
@@ -212,7 +262,7 @@ impl SessionTools {
     fn request(&self, args: &Value) -> Result<Value, Error> {
         let settings = &self.inner.settings;
         self.require(self.core.capability.request, "secret requests")?;
-        let ask = Ask::read(args, settings, false)?;
+        let mut ask = Ask::read(args, settings, false)?;
         let form = Form::parse_text(&ask.schema, &settings.limits)?;
         let secrets = form.fields.iter().filter(|field| field.secret).count();
         if secrets == 0 {
@@ -221,7 +271,26 @@ impl SessionTools {
             ));
         }
         self.core.check_room(secrets, settings, self.inner.now())?;
+        let wait = self.wait_of(args)?;
         let _busy = self.core.busy()?;
+        if let Some(held) = self.recalled(&form)? {
+            return Ok(held);
+        }
+        if !self.core.frontend.attended() {
+            return Ok(json!({
+                "status": "no_one_present",
+                "message": "No one is at the screen to answer, so nothing was asked. Ask again when the person is back, or go on without it."
+            }));
+        }
+        let keeps = self.core.frontend.keeps();
+        if !keeps.is_empty() {
+            if form.field(KEEP_FIELD).is_some() {
+                return Err(Error::Arguments(
+                    "the name _keep is the host's own question: ask it under another name",
+                ));
+            }
+            ask.schema = with_keep(&ask.schema, &keeps)?;
+        }
         let request_id = Uuid::new_v4().to_string();
         let context = Context {
             session_id: self.core.id.clone(),
@@ -247,8 +316,17 @@ impl SessionTools {
             recipient: receiver.recipient().clone(),
         };
         // The only frontend ever asked is the session owner's.
-        let reply = self.core.frontend.request(&params)?;
+        let reply = match wait {
+            None => Some(self.core.frontend.request(&params)?),
+            Some(wait) => self.core.frontend.request_within(&params, wait)?,
+        };
         self.complete(&request_id)?;
+        let Some(reply) = reply else {
+            return Ok(json!({
+                "status": "timed_out",
+                "message": "The person did not answer in time and the question was withdrawn. Ask again later, or go on without it."
+            }));
+        };
         let RequestReply::Accept {
             plain,
             sealed,
@@ -263,7 +341,7 @@ impl SessionTools {
             return Ok(json!({"status": status}));
         };
         let now = self.inner.now();
-        let opened = receiver.open_values(
+        let mut opened = receiver.open_values(
             &self.inner.verifier,
             &self.core.owner,
             &plain,
@@ -271,7 +349,30 @@ impl SessionTools {
             &auth,
             now,
         )?;
-        let made = self.core.store(opened.secrets, settings, now)?;
+        let kept = if keeps.is_empty() {
+            None
+        } else {
+            // A frontend that left the question unanswered keeps it as the form started: with the first way offered.
+            let chosen = match opened.plain.remove(KEEP_FIELD) {
+                None => keeps.first().map(|keep| keep.id.clone()),
+                Some(value) => value
+                    .as_str()
+                    .map(str::to_owned)
+                    .filter(|chosen| keeps.iter().any(|keep| &keep.id == chosen)),
+            };
+            Some(chosen.ok_or(Error::Arguments("the way to keep it was not one offered"))?)
+        };
+        let typed: Vec<(String, Zeroizing<Vec<u8>>)> = opened
+            .secrets
+            .iter()
+            .map(|(field, value)| (field.clone(), Zeroizing::new(value.expose().to_vec())))
+            .collect();
+        let made = self.core.store(typed.iter().cloned(), settings, now)?;
+        if let Some(kept) = &kept {
+            for (field, value) in &typed {
+                self.core.frontend.remember(field, value, kept);
+            }
+        }
         let mut handles = Map::new();
         for (field, handle) in made {
             self.inner.emit(&Event::Stored {
@@ -282,6 +383,59 @@ impl SessionTools {
             handles.insert(field, Value::String(handle));
         }
         Ok(json!({"status": "accepted", "plain": opened.plain, "handles": handles}))
+    }
+
+    /// How long this request waits for the person: what the agent asked for, never more than the frontend's longest wait, and that
+    /// longest wait when the agent asked for none. `None` when neither is given.
+    fn wait_of(&self, args: &Value) -> Result<Option<Duration>, Error> {
+        let asked = match args.get("wait_seconds") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .as_u64()
+                    .filter(|seconds| *seconds >= 1)
+                    .map(Duration::from_secs)
+                    .ok_or(Error::Arguments(
+                        "wait_seconds is a whole number of seconds, at least 1",
+                    ))?,
+            ),
+        };
+        Ok(match (asked, self.core.frontend.longest_wait()) {
+            (Some(asked), Some(longest)) => Some(asked.min(longest)),
+            (Some(only), None) | (None, Some(only)) => Some(only),
+            (None, None) => None,
+        })
+    }
+
+    /// The answer to a request whose every question is a secret one the frontend holds already, or `None` when the person has to be
+    /// asked: a plain question, or a secret the frontend does not hold, needs them.
+    fn recalled(&self, form: &Form) -> Result<Option<Value>, Error> {
+        if form.fields.iter().any(|field| !field.secret) {
+            return Ok(None);
+        }
+        let mut held = Vec::new();
+        for field in &form.fields {
+            let name = &field.field.name;
+            match self.core.frontend.recall(name) {
+                Some(value) => held.push((name.clone(), value)),
+                None => return Ok(None),
+            }
+        }
+        let made = self
+            .core
+            .store(held, &self.inner.settings, self.inner.now())?;
+        let mut handles = Map::new();
+        for (field, handle) in made {
+            self.inner.emit(&Event::Recalled {
+                session_id: self.core.id.clone(),
+                handle: handle.clone(),
+                secret: field.clone(),
+            });
+            handles.insert(field, Value::String(handle));
+        }
+        Ok(Some(
+            json!({"status": "accepted", "plain": {}, "handles": handles}),
+        ))
     }
 
     fn admit(&self, id: &str, now: u64) -> Result<(), Error> {

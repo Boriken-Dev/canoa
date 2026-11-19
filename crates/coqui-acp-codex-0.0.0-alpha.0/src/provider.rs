@@ -19,14 +19,14 @@ use coqui_acp_api::{
     ProcessSpawner, Requirement, SessionExport, SessionImport, StartRequest, UnknownKind,
     UsageQuery, UsageReport,
 };
-use coqui_acp_harness::Mode;
-use coqui_acp_harness::account::{Accounts, Files, Hold, fingerprint, same_name};
+use coqui_acp_harness::account::{Accounts, Files, Hold};
 use coqui_acp_harness::acp::Harness;
 use coqui_acp_harness::provider::{Reports, Serving, shared, takes_of};
+use coqui_acp_harness::{Access, Mode};
 use coqui_acp_harness::{Settings, ThroughSpawner};
 
+use crate::accounts;
 use crate::{CodexAgent, CodexLaunch, CodexSession, CodexSettings, ModelRead};
-use crate::{accounts, signin};
 
 /// How the Codex provider is configured.
 #[derive(ToValue, FromValue, Schema, Debug, Clone)]
@@ -45,6 +45,13 @@ pub struct ProviderSettings {
     /// The sandbox every session starts in: `read-only`, `workspace-write` or `danger-full-access`. Codex's own when
     /// absent.
     pub sandbox: Option<String>,
+    /// The access every session starts with, in the words every harness shares: the sandbox, the network and the approvals,
+    /// turned into Codex's approval policy, sandbox and the workspace sandbox's network setting. Absent, only `approval_policy`
+    /// and `sandbox` above decide, and Codex's own configuration where they are absent too.
+    pub access: Option<Access>,
+    /// Whether a client may give a session its own access through `_meta` (`dev.boriken.coqui.acp/access`).
+    #[map(default = false)]
+    pub allow_client_access: bool,
     /// Whether the Bypass mode may be chosen: never ask, no sandbox.
     #[map(default = false)]
     pub allow_bypass: bool,
@@ -82,6 +89,8 @@ impl Default for ProviderSettings {
             effort: None,
             approval_policy: None,
             sandbox: None,
+            access: None,
+            allow_client_access: false,
             allow_bypass: false,
             modes: None,
             max_acp_version: 2,
@@ -113,7 +122,7 @@ pub struct CodexProvider {
     /// What the provider knows of the files it placed for its accounts.
     accounts: Arc<Accounts>,
     /// For each home a key or token was saved in, a fingerprint of it.
-    saved: std::sync::Mutex<alloc::collections::BTreeMap<String, u64>>,
+    saved: accounts::Saved,
     /// The ids a host seeded with no history, and the thread Codex gave each once started.
     seeds: crate::Seeds,
 }
@@ -160,6 +169,7 @@ impl CodexProvider {
             .approval_policy
             .clone_from(&self.settings.approval_policy);
         launch.sandbox.clone_from(&self.settings.sandbox);
+        launch.access = self.settings.access;
         launch.allow_bypass = self.settings.allow_bypass;
         launch.modes.clone_from(&self.settings.modes);
         for (name, value) in environment.iter() {
@@ -207,10 +217,9 @@ impl CodexProvider {
         Duration::from_millis(self.settings.command_timeout_ms)
     }
 
-    /// Applies `account` to `launch`: the variables Codex is given, every credential variable removed first, the
-    /// files of a login placed in the account's home through `files`, and a key or token saved by `codex login`. The
-    /// keeper is let go of: what happens to the files afterwards is for the account provider's watch to tell, and this
-    /// provider tells nothing.
+    /// Applies `account` to `launch` as [`accounts::apply_with`] does, and places and holds the files of a login in the
+    /// account's home through `files`. The keeper is let go of: what happens to the files afterwards is for the
+    /// account provider's watch to tell, and this provider tells nothing.
     ///
     /// # Errors
     ///
@@ -225,82 +234,13 @@ impl CodexProvider {
         let Some(grant) = account else {
             return Ok(Applying { hold: None });
         };
-        let Some(mut applied) = accounts::plan(grant)? else {
-            return Ok(Applying { hold: None });
-        };
         let files = Files::new(Arc::clone(spawner));
-        if !files.available() {
-            return Err(unsupported(
-                "this spawner serves no private files, which the credential is kept in",
-            ));
-        }
-        // What the host's environment holds under a credential name does not reach Codex beside the account's.
-        launch.env.retain(|name, _| {
-            !applied
-                .remove
-                .iter()
-                .any(|v| same_name(&name.to_string_lossy(), v))
-        });
-        launch.remove_env = applied.remove.iter().map(OsString::from).collect();
-        for (name, value) in &applied.set {
-            launch.env.insert(name.into(), value.into());
-        }
-        launch
-            .config_overrides
-            .extend(applied.config.iter().cloned());
-        signin::configure(&files)?;
-        if let Some(login) = &applied.login {
-            let spawn = ThroughSpawner::shared(Arc::clone(spawner));
-            let print = fingerprint(&login.secret);
-            let there = files.info(accounts::AUTH_FILE)?.is_some();
-            // A key already in `auth.json` is not saved again. A token, which Codex does not show back, is saved once
-            // for this home while the file is there: a poll of the account's usage does not run `codex login` each time.
-            let saved = if login.key == "api_key" {
-                files
-                    .read(accounts::AUTH_FILE)?
-                    .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-                    .is_some_and(|auth| auth["OPENAI_API_KEY"].as_str() == Some(&login.secret))
-            } else {
-                there
-                    && self
-                        .saved
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .get(&applied.dir)
-                        == Some(&print)
-            };
-            if !saved {
-                signin::save(
-                    &spawn,
-                    &self.executable(),
-                    &applied.dir,
-                    login,
-                    self.command_limit(),
-                    None,
-                )?;
-                self.saved
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(applied.dir.clone(), print);
-            }
-        }
-        if applied.watched.is_empty() {
-            return Ok(Applying { hold: None });
-        }
-        let hold = self.accounts.hold(
-            files,
-            None,
-            &grant.id,
-            &applied.dir,
-            grant.revision,
-            grant.credentials.expose(),
-            core::mem::take(&mut applied.watched),
-        )?;
-        Ok(Applying { hold: Some(hold) })
-    }
-
-    fn executable(&self) -> OsString {
-        OsString::from(&self.settings.executable)
+        let options = accounts::ApplyOptions::new().timeout(self.command_limit());
+        let applied =
+            accounts::apply_as(grant, launch, &files, &options, false, Some(&self.saved))?;
+        Ok(Applying {
+            hold: applied.hold(&self.accounts, &files)?,
+        })
     }
 }
 
@@ -367,9 +307,11 @@ impl AcpHarness for CodexProvider {
             serving = serving.ending(move || hold.finish());
         }
         let seeds = Arc::clone(&self.seeds);
+        let client_access = self.settings.allow_client_access;
         serving.open_shared(spawner, sink, move |spawn| {
             Ok(shared(
                 CodexAgent::new()
+                    .client_access(client_access)
                     .seeded_sessions(seeds)
                     .defaults(launch)
                     .spawn(spawn),

@@ -1,0 +1,38 @@
+# coqui-acp/crates/coqui-acp-hub at 7c431b27a609546506c104b5688b9694d46ba547, with what it inherits written out.
+[package]
+name = "coqui-acp-hub"
+description = "One live Agent Client Protocol session served to any number of attached clients: attach, replay, queued prompts and shared permission requests, with no I/O of its own"
+version = "0.0.0-alpha.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-acp"
+homepage = "https://boriken-dev.github.io/coqui-acp/"
+readme = "README.md"
+keywords = ["acp", "agent", "session", "remote-control"]
+categories = ["network-programming"]
+exclude = [".*", "*.local.*"]
+publish = false
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[features]
+serde = ["dep:serde"]
+[dependencies]
+[dependencies.serde]
+version = "1"
+default-features = false
+features = ["derive", "std"]
+optional = true
+[dependencies.serde_json]
+version = "1"
+[lints]
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

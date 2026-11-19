@@ -68,8 +68,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp"
-      ref: d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c
-      resolved-ref: d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c
+      ref: "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
+      resolved-ref: "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -77,8 +77,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat"
-      ref: d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c
-      resolved-ref: d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c
+      ref: "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
+      resolved-ref: "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -86,8 +86,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat_ui"
-      ref: d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c
-      resolved-ref: d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c
+      ref: "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
+      resolved-ref: "145e9b83bf14fcf7935d48b69ddcd0621c735fbe"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -95,18 +95,18 @@ packages:
     dependency: "direct main"
     description:
       path: dart
-      ref: caa9bf6dcf8485fb179f092bbd2cd9db17861670
-      resolved-ref: caa9bf6dcf8485fb179f092bbd2cd9db17861670
+      ref: "169125d3bfcb1b2cb1c3b33b297e373f2930c54a"
+      resolved-ref: "169125d3bfcb1b2cb1c3b33b297e373f2930c54a"
       url: "https://github.com/Boriken-Dev/coqui-aos.git"
     source: git
     version: "0.0.0-alpha.0"
-  coqui_web:
+  coqui_transport_web:
     dependency: "direct main"
     description:
-      path: "bindings/dart/coqui_web"
-      ref: "445007acb04f1b11f8f0f7c9fcf104f694189a2b"
-      resolved-ref: "445007acb04f1b11f8f0f7c9fcf104f694189a2b"
-      url: "https://github.com/Boriken-Dev/coqui-web.git"
+      path: "bindings/dart/coqui_transport_web"
+      ref: baebbd9550a936c883927b261738b21c0678729d
+      resolved-ref: baebbd9550a936c883927b261738b21c0678729d
+      url: "https://github.com/Boriken-Dev/coqui-transport-web.git"
     source: git
     version: "0.0.0-alpha.0"
   cross_file:
@@ -422,10 +422,9 @@ packages:
   pasteboard:
     dependency: "direct main"
     description:
-      name: pasteboard
-      sha256: fedbe8da188d2f713aa8b01260737342e6e1087534a3ab26e1a719f8d3e8f32f
-      url: "https://pub.dev"
-    source: hosted
+      path: "third_party/pasteboard"
+      relative: true
+    source: path
     version: "0.5.0"
   path:
     dependency: transitive
@@ -617,13 +616,12 @@ packages:
     source: hosted
     version: "2.5.0"
   speech_to_text_windows:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: speech_to_text_windows
-      sha256: "2d1d10565b23262386b453b33656299608dc7a66784453735d6c1318f13f44d7"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.1"
+      path: "third_party/speech_to_text_windows"
+      relative: true
+    source: path
+    version: "1.0.1+1"
   stack_trace:
     dependency: transitive
     description:

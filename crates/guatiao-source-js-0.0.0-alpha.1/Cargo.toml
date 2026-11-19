@@ -1,0 +1,51 @@
+# guatiao/crates/guatiao-source-js at e0136dcc9760ddd6dd8dc89fc4d41320eec6306e, with what it inherits written out.
+[package]
+name = "guatiao-source-js"
+description = "A guatiao source of JavaScript libraries, run by QuickJS built into the file: ES modules written as the Node binding's providers are"
+version = "0.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.89"
+repository = "https://github.com/Boriken-Dev/guatiao"
+license = "MPL-2.0"
+readme = "README.md"
+publish = false
+exclude = [".*", "*.local.*"]
+[lib]
+name = "guatiao_source_js"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+[dependencies]
+[dependencies.guatiao]
+path = "../guatiao"
+version = "=0.0.0-alpha.1"
+features = ["load"]
+[dependencies.guatiao-bridge]
+path = "../guatiao-bridge"
+version = "=0.0.0-alpha.1"
+features = ["json", "yaml"]
+[dependencies.guatiao-libffi]
+path = "../guatiao-libffi"
+version = "=0.0.0-alpha.1"
+[dependencies.guatiao-serde]
+path = "../guatiao-serde"
+version = "=0.0.0-alpha.1"
+default-features = false
+features = ["json"]
+[dependencies.rquickjs]
+version = "0.14.0"
+default-features = false
+features = ["loader", "array-buffer", "properties"]
+[dev-dependencies]
+[dev-dependencies.greeter_kind]
+path = "../../examples/greeter_kind"
+[dev-dependencies.channel_echo_kind]
+path = "../../examples/channel_echo/kind"
+[dev-dependencies.guatiao-channel]
+path = "../guatiao-channel"
+[lints]
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"
