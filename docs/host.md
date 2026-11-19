@@ -479,8 +479,8 @@ canoa accounts add local --harness claude --method foundry-local --input model=q
   canoa.cfg:
 
   ```toml
-  [foundry.windows]
-  "qwen3-1.7b-generic-gpu:2" = 16384
+  [foundry.models."qwen3-1.7b-generic-gpu:2"]
+  window = 16384
   ```
 
   A number above the model's context length is lowered to it, and the page says so. Foundry Local's cache is never edited
