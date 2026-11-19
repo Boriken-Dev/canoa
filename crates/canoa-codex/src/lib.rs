@@ -22,9 +22,9 @@ use canoa::store::{
     MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
 };
 use canoa::vendor::{
-    AccessTarget, AgentVendor, HistoryAnswer, HistoryRequest, HookSupport, HookSupportRequest,
-    LoginFile, ModeTitle, SessionListing, SessionsRequest, ShellAdvice, ShellRequest,
-    SkillsDelivery, SkillsRequest, StandardTitle, Variable, VendorInfo,
+    AccessTarget, AgentVendor, DeliveredFile, GatewayRoute, HistoryAnswer, HistoryRequest,
+    HookSupport, HookSupportRequest, LoginFile, ModeTitle, SessionListing, SessionsRequest,
+    ShellAdvice, ShellRequest, SkillsDelivery, SkillsRequest, StandardTitle, Variable, VendorInfo,
 };
 use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
@@ -104,6 +104,15 @@ impl AgentVendor for CodexVendor {
 
     fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {
         Ok(Some(AccessTarget::new("codex", false)))
+    }
+
+    fn gateway_route(&self) -> Result<Option<GatewayRoute>, ProviderError> {
+        Ok(Some(delivery::gateway_route()))
+    }
+
+    fn gateway_files(&self, address: String) -> Result<Vec<DeliveredFile>, ProviderError> {
+        drop(address);
+        Ok(delivery::gateway_files())
     }
 
     fn mcp_note(&self) -> Result<Option<String>, ProviderError> {

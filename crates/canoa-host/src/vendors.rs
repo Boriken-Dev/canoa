@@ -128,6 +128,11 @@ pub(crate) fn behave_aos<T>(aos: &str, f: impl FnOnce(&dyn AgentVendor) -> T) ->
     behave(known.agent, f)
 }
 
+/// How the bundled agent `agent` is given a gateway the host runs for a session, when it can be.
+pub(crate) fn gateway_route(agent: &str) -> Option<canoa::vendor::GatewayRoute> {
+    behave(agent, |vendor| vendor.gateway_route())?.ok()?
+}
+
 /// Runs `f` on the `agent_vendor` provider of the bundled agent that reports itself as `name` in `initialize`.
 pub(crate) fn behave_name<T>(name: &str, f: impl FnOnce(&dyn AgentVendor) -> T) -> Option<T> {
     let known = by_name(name)?;

@@ -451,7 +451,7 @@ class StoreExtension(KindProtocol, Protocol, kind="store_extension", floor_hash=
         ...
 
 
-class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=137759391):
+class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=3218056832):
     """Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with
     nothing run and no connection opened; every other method has a default that says the agent has nothing to add.
     """
@@ -525,6 +525,20 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=137759
     def hook_support(self, request: Ref) -> ValueAnswer:
         """What the agent's own hooks do for an event ACP does not show; `None` when the agent says nothing of it, which the host
         reports as an event no hook of the agent's reaches. The default: nothing.
+        """
+        ...
+
+    @fallible
+    def gateway_route(self) -> ValueAnswer:
+        """How the agent is given a gateway the host runs for a session (the address and bearer of a local model's server), when it can be:
+        the account kind of its own that takes them. The default: it cannot.
+        """
+        ...
+
+    @fallible
+    def gateway_files(self, address: Ref) -> ValueAnswer:
+        """The files the agent reads from its own folder to use a gateway at `address` (what [`GatewayRoute::address`] leaves out, and what
+        a gateway cannot serve turned off). The default: none.
         """
         ...
 

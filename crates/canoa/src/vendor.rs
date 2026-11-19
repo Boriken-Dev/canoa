@@ -653,6 +653,40 @@ impl AccessTarget {
     }
 }
 
+/// Where an agent takes the address and bearer of a gateway the host runs for a session, by an account kind of its own.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct GatewayRoute {
+    /// The agent's own account kind that takes an address and a secret.
+    pub kind: String,
+    /// The key of that kind's credentials that holds the bearer.
+    pub credential: String,
+    /// The key of its settings that holds the address; absent when the agent reads it from a file in its folder
+    /// ([`AgentVendor::gateway_files`]).
+    pub address: Option<String>,
+    /// What follows the gateway's address in the address the agent is given (`/v1`).
+    #[map(default)]
+    pub suffix: String,
+    /// Settings of that kind the account fixes, each a key and its value.
+    #[map(default)]
+    pub fixed: Vec<Variable>,
+}
+
+impl GatewayRoute {
+    /// A route through the kind `kind`, whose bearer is the credential `credential`, with no address setting, suffix or fixed setting.
+    #[must_use]
+    pub fn new(kind: impl Into<String>, credential: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            credential: credential.into(),
+            address: None,
+            suffix: String::new(),
+            fixed: Vec::new(),
+        }
+    }
+}
+
 /// What a shell is said to do for an agent that has no word of its own.
 pub const NO_SHELL_SETTING: &str = "this agent documents no setting for its shell";
 
@@ -736,6 +770,19 @@ pub trait AgentVendor: Send + Sync {
         Ok(None)
     }
 
+    /// How the agent is given a gateway the host runs for a session (the address and bearer of a local model's server), when it can be:
+    /// the account kind of its own that takes them. The default: it cannot.
+    fn gateway_route(&self) -> Result<Option<GatewayRoute>, ProviderError> {
+        Ok(None)
+    }
+
+    /// The files the agent reads from its own folder to use a gateway at `address` (what [`GatewayRoute::address`] leaves out, and what
+    /// a gateway cannot serve turned off). The default: none.
+    fn gateway_files(&self, address: String) -> Result<Vec<DeliveredFile>, ProviderError> {
+        drop(address);
+        Ok(Vec::new())
+    }
+
     /// The table of words that says what became of the access a profile sets, for the agent the host starts or serves; `None` for an
     /// agent no table covers, which is started as its entry says. The default: none.
     fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {
@@ -799,6 +846,11 @@ mod tests {
             None
         );
         assert_eq!(plain.access_target().expect("answers"), None);
+        assert_eq!(plain.gateway_route().expect("answers"), None);
+        assert_eq!(
+            plain.gateway_files("http://x".to_owned()).expect("answers"),
+            []
+        );
         assert_eq!(plain.mcp_not_taken().expect("answers"), None);
         assert_eq!(plain.mcp_note().expect("answers"), None);
         assert_eq!(

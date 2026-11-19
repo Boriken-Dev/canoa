@@ -954,6 +954,7 @@ dependencies = [
  "canoa",
  "coqui-acp-api",
  "coqui-acp-pi",
+ "serde_json",
 ]
 
 [[package]]

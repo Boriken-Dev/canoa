@@ -21,9 +21,10 @@ use canoa::store::{
     MANAGER_UNKNOWN, MANAGER_WINGET, Platform, Serves, StoreInfo, Updatable,
 };
 use canoa::vendor::{
-    AccessTarget, AgentVendor, HistoryAnswer, HistoryRequest, HookSupport, HookSupportRequest,
-    HooksDelivery, HooksRequest, LoginFile, ModeTitle, SessionListing, SessionsRequest,
-    ShellAdvice, ShellRequest, SkillsDelivery, SkillsRequest, StandardTitle, Variable, VendorInfo,
+    AccessTarget, AgentVendor, GatewayRoute, HistoryAnswer, HistoryRequest, HookSupport,
+    HookSupportRequest, HooksDelivery, HooksRequest, LoginFile, ModeTitle, SessionListing,
+    SessionsRequest, ShellAdvice, ShellRequest, SkillsDelivery, SkillsRequest, StandardTitle,
+    Variable, VendorInfo,
 };
 use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
@@ -116,6 +117,12 @@ impl AgentVendor for ClaudeVendor {
 
     fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {
         Ok(Some(AccessTarget::new("claude-code", false)))
+    }
+
+    fn gateway_route(&self) -> Result<Option<GatewayRoute>, ProviderError> {
+        let mut route = GatewayRoute::new("anthropic-auth-token", "auth_token");
+        route.address = Some("base_url".to_owned());
+        Ok(Some(route))
     }
 
     fn sessions(&self, request: SessionsRequest) -> Result<Option<SessionListing>, ProviderError> {

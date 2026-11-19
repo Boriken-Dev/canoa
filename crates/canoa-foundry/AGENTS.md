@@ -144,14 +144,10 @@ pub mod models {
 // Foundry Local as an account of the host.
 pub mod account {
     pub const KIND: &str = "foundry-local";
-    #[non_exhaustive] pub struct Route { pub kind: &'static str, pub credential: &'static str, pub address: Option<&'static str>, pub suffix: &'static str, pub fixed: &'static [(&'static str, &'static str)] }
-    pub fn route(harness: &str) -> Option<Route>;                        // claude: anthropic-auth-token; codex: codex-api-key (+/v1); pi: pi-api-key (OPENAI_API_KEY)
     #[non_exhaustive] pub struct Settings { pub model: String, pub endpoint: Option<String>, pub library: Option<String>, pub engine: EngineKind, pub window: Option<u64> }   // `window` is no key of the account: the host fills it from its own configuration
     impl Settings { pub fn from_map(map: &Map<String, Value>) -> Result<Self, String>; }
     #[non_exhaustive] pub enum EngineKind { Service, Sdk }
     pub fn settings_schema() -> Value;                                   // model (required), endpoint, engine, library
-    pub const fn codex_config() -> &'static str;                         // config.toml: web_search off, multi_agent and goals off
-    pub fn pi_models(address: &str) -> String;                           // models.json: the openai provider's baseUrl
     pub fn notices() -> Vec<String>;
 }
 ```

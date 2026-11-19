@@ -756,5 +756,59 @@
       "harness",
       "at_launch"
     ]
+  },
+  "GatewayRoute": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "description": "The agent's own account kind that takes an address and a secret."
+      },
+      "credential": {
+        "type": "string",
+        "description": "The key of that kind's credentials that holds the bearer."
+      },
+      "address": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The key of its settings that holds the address; absent when the agent reads it from a file in its folder ([`AgentVendor::gateway_files`])."
+      },
+      "suffix": {
+        "type": "string",
+        "description": "What follows the gateway's address in the address the agent is given (`/v1`).",
+        "default": ""
+      },
+      "fixed": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Its name."
+            },
+            "value": {
+              "type": "string",
+              "description": "Its value."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "value"
+          ]
+        },
+        "description": "Settings of that kind the account fixes, each a key and its value.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "kind",
+      "credential"
+    ]
   }
 }

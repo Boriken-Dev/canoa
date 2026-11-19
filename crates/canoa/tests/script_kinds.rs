@@ -13,10 +13,10 @@ use std::path::PathBuf;
 use canoa::secret_provider::{Held, Keeping, Named, Names, ProviderInfo, SecretProviderVtable};
 use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtensionVtable};
 use canoa::vendor::{
-    AccessTarget, AgentVendorVtable, DeliveredFile, HistoryAnswer, HistoryRequest, HookCommand,
-    HookSupport, HookSupportRequest, HooksDelivery, HooksRequest, LoginFile, ModeTitle,
-    PluginDelivery, SessionFile, SessionListing, SessionsRequest, ShellAdvice, ShellRequest,
-    SkillsDelivery, SkillsRequest, StandardTitle, Variable, VendorInfo,
+    AccessTarget, AgentVendorVtable, DeliveredFile, GatewayRoute, HistoryAnswer, HistoryRequest,
+    HookCommand, HookSupport, HookSupportRequest, HooksDelivery, HooksRequest, LoginFile,
+    ModeTitle, PluginDelivery, SessionFile, SessionListing, SessionsRequest, ShellAdvice,
+    ShellRequest, SkillsDelivery, SkillsRequest, StandardTitle, Variable, VendorInfo,
 };
 use coqui_acp_api::guatiao::Schema;
 use coqui_acp_api::{ProcessSpawnerVtable, SpawnedProcessVtable};
@@ -99,6 +99,7 @@ fn the_committed_vendor_schemas_are_what_this_build_describes() {
             ("HookSupportRequest", schema_of::<HookSupportRequest>()),
             ("HookSupport", schema_of::<HookSupport>()),
             ("AccessTarget", schema_of::<AccessTarget>()),
+            ("GatewayRoute", schema_of::<GatewayRoute>()),
         ]),
     );
 }

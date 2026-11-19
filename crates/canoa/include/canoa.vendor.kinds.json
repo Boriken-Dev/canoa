@@ -2,7 +2,7 @@
   "kinds": [
     {
       "name": "agent_vendor",
-      "floor_hash": 137759391,
+      "floor_hash": 3218056832,
       "object": false,
       "doc": "Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with\nnothing run and no connection opened; every other method has a default that says the agent has nothing to add.",
       "slots": [
@@ -151,6 +151,32 @@
             "type": "value"
           },
           "doc": "What the agent's own hooks do for an event ACP does not show; `None` when the agent says nothing of it, which the host\nreports as an event no hook of the agent's reaches. The default: nothing."
+        },
+        {
+          "name": "gateway_route",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "How the agent is given a gateway the host runs for a session (the address and bearer of a local model's server), when it can be:\nthe account kind of its own that takes them. The default: it cannot."
+        },
+        {
+          "name": "gateway_files",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "address",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The files the agent reads from its own folder to use a gateway at `address` (what [`GatewayRoute::address`] leaves out, and what\na gateway cannot serve turned off). The default: none."
         },
         {
           "name": "access_target",

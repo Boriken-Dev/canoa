@@ -34,6 +34,8 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
     fn skills_delivery(&self, request: SkillsRequest) -> Result<Option<SkillsDelivery>, ProviderError>;   // how it is given a profile's skills (a folder, files beside them, a plugin loaded through the request's `_meta`, an additional directory); default: it cannot be
     fn hooks_delivery(&self, request: HooksRequest) -> Result<Option<HooksDelivery>, ProviderError>;      // the files of a plugin whose hooks run the host's forwarder for the moments ACP does not show; default: its own hooks cannot be given
     fn hook_support(&self, request: HookSupportRequest) -> Result<Option<HookSupport>, ProviderError>;    // what its own hooks do for `cd`, `pre-compact` and a `session-start` after a `compact` or `clear`; default: nothing said
+    fn gateway_route(&self) -> Result<Option<GatewayRoute>, ProviderError>;                      // how it is given a gateway the host runs for a session (its own account kind, credential, address setting, suffix, fixed settings); default none
+    fn gateway_files(&self, address: String) -> Result<Vec<DeliveredFile>, ProviderError>;       // the files it reads from its own folder to use a gateway at `address`; default none
     fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError>;                      // the table of words (by registry id) for the access, and whether a program the host starts is given it at launch; default none
     fn sessions(&self, request: SessionsRequest) -> Result<Option<SessionListing>, ProviderError>;   // the sessions its program kept on this computer (None: cannot be brought in)
     fn session_history(&self, request: HistoryRequest) -> Result<HistoryAnswer, ProviderError>;     // one session file's text as a standard session history; default refuses UNSUPPORTED
@@ -43,7 +45,8 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
 // SessionListing { home?, max_bytes, files (newest first; the newest `peek` carry title and cwd) }, HistoryRequest { text, session }, HistoryAnswer { history, title? }.
 // SkillsRequest { additional_directories }, SkillsDelivery { folder, files, plugin?, directory, how (`{name}`) }, PluginDelivery { folder, meta (JSON merged into the request's `_meta`; a string `PLUGIN_PATH` is the folder's path) },
 // DeliveredFile { path, text }, HooksRequest { commands: [HookCommand { kind: start|pre-compact|batch, command }], timeout_seconds }, HooksDelivery { files, plugin },
-// HookSupportRequest { event, reason? }, HookSupport { fires, text } (`fires`, `cannot`), AccessTarget { harness, at_launch }.
+// HookSupportRequest { event, reason? }, HookSupport { fires, text } (`fires`, `cannot`), AccessTarget { harness, at_launch },
+// GatewayRoute { kind, credential, address?, suffix, fixed: [Variable] } (`GatewayRoute::new(kind, credential)`).
 // `canoa::vendor::sessions` holds what a crate listing session files needs: `tidy`, `folders`, `files`, `found`, `window_lines`, `json_lines`, `listing`.
 ```
 

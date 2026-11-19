@@ -291,7 +291,9 @@ impl Gateways {
 
 /// Adds the kind and its sign-in method to `catalog`, for a harness that can be given a gateway.
 pub(crate) fn extend(catalog: &mut AccountCatalog, harness: &str) {
-    if account::route(harness).is_none() || catalog.kinds.iter().any(|kind| kind.id == KIND) {
+    if crate::vendors::gateway_route(harness).is_none()
+        || catalog.kinds.iter().any(|kind| kind.id == KIND)
+    {
         return;
     }
     let mut kind = AccountKindInfo::new(KIND, "Foundry Local");
@@ -342,25 +344,25 @@ pub(crate) fn grant(
     harness: &str,
     grant: &AccountGrant,
 ) -> Result<(AccountGrant, Ticket), Why> {
-    let route =
-        account::route(harness).ok_or_else(|| format!("{harness} cannot be given a gateway"))?;
+    let route = crate::vendors::gateway_route(harness)
+        .ok_or_else(|| format!("{harness} cannot be given a gateway"))?;
     let table = grant_settings(grant)?;
     let settings = Foundry::from_map(&table)?;
     let ticket = gateways.ticket(&grant.id, &settings)?;
     let address = format!("{}{}", ticket.address(), route.suffix);
     let mut credentials = Credentials::new();
-    credentials.insert(route.credential.to_owned(), ticket.bearer().to_owned());
+    credentials.insert(route.credential.clone(), ticket.bearer().to_owned());
     let mut kept = serde_json::Map::new();
-    if let Some(key) = route.address {
-        kept.insert(key.to_owned(), serde_json::Value::String(address.clone()));
+    if let Some(key) = &route.address {
+        kept.insert(key.clone(), serde_json::Value::String(address.clone()));
     }
-    for (key, value) in route.fixed {
+    for fixed in &route.fixed {
         kept.insert(
-            (*key).to_owned(),
-            serde_json::Value::String((*value).to_owned()),
+            fixed.name.clone(),
+            serde_json::Value::String(fixed.value.clone()),
         );
     }
-    let mut mapped = AccountGrant::new(grant.id.clone(), route.kind)
+    let mut mapped = AccountGrant::new(grant.id.clone(), route.kind.clone())
         .settings(Value::from(map_of(&Settings::new(kept))?))
         .credentials(credentials)
         .revision(grant.revision);
@@ -376,16 +378,17 @@ fn grant_settings(grant: &AccountGrant) -> Result<serde_json::Map<String, serde_
         .map_err(|_| "the account's settings are not a table".to_owned())
 }
 
-/// Writes what the harness reads from its folder beside the address: Codex's configuration, which turns off what a gateway
-/// cannot serve, and Pi's, which points its OpenAI provider at the gateway.
+/// Writes what the harness reads from its folder to use the gateway at `address`, as its description says: its configuration
+/// that turns off what a gateway cannot serve, or the file that points a provider at the gateway.
 fn prepare(harness: &str, address: &str, dir: &Path) -> Result<(), Why> {
-    let (name, text) = match harness {
-        "codex" => ("config.toml", account::codex_config().to_owned()),
-        "pi" => ("models.json", account::pi_models(address)),
-        _ => return Ok(()),
-    };
-    let file = dir.join(name);
-    std::fs::write(&file, text).map_err(|error| format!("{}: {error}", file.display()))
+    let files = crate::vendors::behave(harness, |vendor| vendor.gateway_files(address.to_owned()))
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    for each in files {
+        let file = dir.join(&each.path);
+        std::fs::write(&file, each.text).map_err(|error| format!("{}: {error}", file.display()))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -21,7 +21,8 @@ use canoa::store::{
     MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
 };
 use canoa::vendor::{
-    AccessTarget, AgentVendor, ModeTitle, ShellAdvice, ShellRequest, StandardTitle, VendorInfo,
+    AccessTarget, AgentVendor, DeliveredFile, GatewayRoute, ModeTitle, ShellAdvice, ShellRequest,
+    StandardTitle, Variable, VendorInfo,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, Value};
@@ -86,6 +87,21 @@ impl AgentVendor for PiVendor {
         Ok(Some(
             "pi-acp passes Pi no --skill; Pi reads skills only from its own and the project's directories".to_owned(),
         ))
+    }
+
+    /// Pi's own OpenAI provider, whose address `models.json` of its folder overrides and whose key is read from the variable the kind
+    /// names.
+    fn gateway_route(&self) -> Result<Option<GatewayRoute>, ProviderError> {
+        let mut route = GatewayRoute::new("pi-api-key", "api_key");
+        route.suffix = "/v1".to_owned();
+        route.fixed = vec![Variable::new("variable", "OPENAI_API_KEY")];
+        Ok(Some(route))
+    }
+
+    /// The `models.json` of a Pi account's folder: its OpenAI provider is the gateway, at `address`.
+    fn gateway_files(&self, address: String) -> Result<Vec<DeliveredFile>, ProviderError> {
+        let text = serde_json::json!({"providers": {"openai": {"baseUrl": address}}}).to_string();
+        Ok(vec![DeliveredFile::new("models.json", text)])
     }
 
     fn mcp_not_taken(&self) -> Result<Option<String>, ProviderError> {
@@ -348,6 +364,23 @@ mod tests {
     #[test]
     fn the_preset_starts_the_program_the_recipe_installs() {
         assert_eq!([PRESET.program], PiRecipe.names());
+    }
+
+    #[test]
+    fn a_gateway_is_given_to_pis_openai_provider_through_its_models_file() {
+        let route = PiVendor.gateway_route().expect("answers").expect("a route");
+        assert_eq!(route.kind, "pi-api-key");
+        assert_eq!(route.address, None);
+        assert_eq!(route.fixed, [Variable::new("variable", "OPENAI_API_KEY")]);
+        let files = PiVendor
+            .gateway_files("http://127.0.0.1:1/v1".to_owned())
+            .expect("answers");
+        let file: serde_json::Value = serde_json::from_str(&files[0].text).expect("JSON");
+        assert_eq!(files[0].path, "models.json");
+        assert_eq!(
+            file["providers"]["openai"]["baseUrl"],
+            "http://127.0.0.1:1/v1"
+        );
     }
 
     #[test]

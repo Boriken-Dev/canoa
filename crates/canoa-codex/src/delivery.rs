@@ -1,6 +1,8 @@
 //! How Codex is given what the host adds to a session: the skills of a profile, in a directory its adapter hands to Codex.
 
-use canoa::vendor::{HookSupport, HookSupportRequest, SkillsDelivery, SkillsRequest};
+use canoa::vendor::{
+    DeliveredFile, GatewayRoute, HookSupport, HookSupportRequest, SkillsDelivery, SkillsRequest,
+};
 
 /// The directory below a session's folders where Codex looks for skills.
 pub(crate) const SKILLS_FOLDER: &str = ".agents/skills";
@@ -15,6 +17,24 @@ pub(crate) fn skills_delivery(request: &SkillsRequest) -> Option<SkillsDelivery>
         delivery.directory = true;
         delivery
     })
+}
+
+/// Codex takes the address and bearer of a gateway as an OpenAI API key whose base URL is moved, the gateway's `/v1` below its address.
+pub(crate) fn gateway_route() -> GatewayRoute {
+    let mut route = GatewayRoute::new("codex-api-key", "api_key");
+    route.address = Some("openai_base_url".to_owned());
+    route.suffix = "/v1".to_owned();
+    route
+}
+
+/// The `config.toml` Codex is run with in its account's folder when a gateway serves it: the tools and features a local model's
+/// gateway cannot serve are off (its hosted web search, and the multi-agent and goal tools whose request shapes only OpenAI's models
+/// take).
+pub(crate) fn gateway_files() -> Vec<DeliveredFile> {
+    vec![DeliveredFile::new(
+        "config.toml",
+        "web_search = \"disabled\"\n\n[features]\nmulti_agent = false\ngoals = false\n",
+    )]
 }
 
 /// Codex has no hook that reports what ACP does not show.
@@ -44,6 +64,24 @@ mod tests {
         assert!(delivery.directory);
         assert_eq!(delivery.folder, ".agents/skills");
         assert_eq!(delivery.plugin, None);
+    }
+
+    #[test]
+    fn a_gateway_is_an_api_key_with_its_address_moved_and_codex_runs_without_what_it_cannot_serve()
+    {
+        let route = gateway_route();
+        assert_eq!(
+            (route.kind.as_str(), route.suffix.as_str()),
+            ("codex-api-key", "/v1")
+        );
+        assert_eq!(route.address.as_deref(), Some("openai_base_url"));
+        let files = gateway_files();
+        assert_eq!(files[0].path, "config.toml");
+        assert!(files[0].text.contains("web_search = \"disabled\""));
+        assert!(
+            files[0].text.contains("multi_agent = false")
+                && files[0].text.contains("goals = false")
+        );
     }
 
     #[test]
