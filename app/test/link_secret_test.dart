@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:canoa/acp/client.dart';
+import 'package:canoa/acp/secret_wire.dart' show secretWithdrawMethod;
 import 'package:canoa/main.dart';
 import 'package:canoa/session_store.dart';
 import 'package:coqui_acp/secret.dart';
@@ -144,5 +145,35 @@ void main() {
     expect(answer, isNotNull, reason: 'the host got an answer');
     expect(answer!['error'] != null || (answer['result'] as Map)['action'] == 'cancel', isTrue,
         reason: 'an error or a cancel, never an answer that carries values');
+  });
+
+  testWidgets('a question the host gives up on is taken off the screen, and a notice for another question leaves it', (tester) async {
+    tester.view.physicalSize = const Size(1100, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = SessionStore();
+    final linkSecrets = await tester.runAsync(() => linkSecretIdentity(linkSecret)) as LinkSecretIdentity;
+    final (host, session, _) = await linked(tester, store, linkSecrets: linkSecrets);
+    await tester.pumpWidget(CanoaApp(store: store));
+    await tester.pump();
+    final end = (await tester.runAsync(() => hostEnd(linkSecret)))!;
+    host.ask(7, acpSecretRequestMethod, (await tester.runAsync(() => linkRequest(end.host, end.app, 'l1')))!);
+    await settle(tester);
+    expect(find.byType(SecretRequestCard), findsOneWidget);
+    expect(session.pendingSecrets, hasLength(1));
+
+    void withdraw(String requestId) => host.input.add(jsonEncode({
+          'jsonrpc': '2.0',
+          'method': secretWithdrawMethod,
+          'params': {'sessionId': 's1', 'requestId': requestId},
+        }));
+    withdraw('some-other-question');
+    await settle(tester);
+    expect(session.pendingSecrets, hasLength(1), reason: 'another question was withdrawn, not this one');
+    withdraw('l1');
+    await settle(tester);
+    expect(session.pendingSecrets, isEmpty);
+    expect(find.byType(SecretRequestCard), findsNothing);
+    expect(host.sent.where((message) => message['method'] == secretWithdrawMethod), isEmpty, reason: 'the shared client never saw it');
   });
 }

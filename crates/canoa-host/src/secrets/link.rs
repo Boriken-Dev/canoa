@@ -29,6 +29,8 @@ use crate::delegate::privilege::{Modes, modes_of};
 pub(crate) const SERVER_NAME: &str = "canoa-secrets";
 /// The prefix of the id of every request the host makes of the app, which tells an answer to one from any other message.
 const ID_PREFIX: &str = "canoa-secret-";
+/// What the host tells the app when it gives up on a question, so the card of a question nobody can answer any more goes away.
+pub(crate) const WITHDRAW_METHOD: &str = "_coqui_acp/secret_withdraw";
 /// How long the host waits for the person, past the longest a binding lasts.
 const WAIT: Duration = Duration::from_secs(300);
 /// Requests the host remembers an answer for.
@@ -588,7 +590,8 @@ impl Link {
         }
         let sessions: Vec<(String, Arc<Held>)> = lock(&self.state).sessions.drain().collect();
         for (session, held) in sessions {
-            self.hub.tokens.remove(&held.digest);
+            // The agent may go on without the person: its bearer answers that no one is there rather than failing.
+            self.hub.tokens.detach(&held.digest);
             self.secrets.end_session(&session);
             self.hub.vault.end_session(&session);
         }
@@ -610,6 +613,28 @@ impl Link {
 
     /// Asks the app and waits for the person: the `result` of its answer.
     pub(super) fn ask(&self, method: &str, params: Value) -> Result<Value, Error> {
+        self.ask_within(method, params, WAIT)?
+            .ok_or(Error::Frontend("the person's app did not answer"))
+    }
+
+    /// Tells the app the question of `request` is no longer asked, so it takes the card away. The app may have answered already.
+    fn withdraw(&self, session: &str, request: &str) {
+        let notice = json!({
+            "jsonrpc": "2.0",
+            "method": WITHDRAW_METHOD,
+            "params": {"sessionId": session, "requestId": request},
+        });
+        lock(&self.outbox).push_back(notice.to_string().into_bytes());
+    }
+
+    /// As [`Link::ask`], giving up after `wait`: `None` when the person had not answered by then. A link that ends first is an
+    /// error, as for `ask`.
+    pub(super) fn ask_within(
+        &self,
+        method: &str,
+        params: Value,
+        wait: Duration,
+    ) -> Result<Option<Value>, Error> {
         if self.is_closed() {
             return Err(Error::Frontend("the person's app is gone"));
         }
@@ -629,7 +654,7 @@ impl Link {
         lock(&self.waiting).insert(id.clone(), Arc::clone(&waiting));
         let request = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         lock(&self.outbox).push_back(request.to_string().into_bytes());
-        let until = Instant::now() + WAIT;
+        let until = Instant::now() + wait;
         let mut answer = lock(&waiting.answer);
         while answer.is_none() && !self.is_closed() {
             let left = until.saturating_duration_since(Instant::now());
@@ -645,7 +670,10 @@ impl Link {
         drop(answer);
         lock(&self.waiting).remove(&id);
         let Some(reply) = taken else {
-            return Err(Error::Frontend("the person's app did not answer"));
+            if self.is_closed() {
+                return Err(Error::Frontend("the person's app did not answer"));
+            }
+            return Ok(None);
         };
         if reply.get("error").is_some() {
             return Err(Error::Frontend("the person's app refused the question"));
@@ -653,6 +681,7 @@ impl Link {
         reply
             .get("result")
             .cloned()
+            .map(Some)
             .ok_or(Error::Frontend("the person's app gave no answer"))
     }
 
@@ -660,7 +689,10 @@ impl Link {
     #[cfg(test)]
     pub(super) fn bearer_open(&self, token: &str) -> bool {
         let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-        self.hub.tokens.find(&digest).is_some()
+        self.hub
+            .tokens
+            .find(&digest)
+            .is_some_and(|grant| !grant.detached.load(Ordering::SeqCst))
     }
 
     #[cfg(test)]
@@ -689,6 +721,15 @@ impl Front {
             .upgrade()
             .ok_or(Error::Frontend("the person's app is gone"))
     }
+
+    /// The person's answer to `params`, read the way the question's form says.
+    fn read(params: &RequestParams, reply: &Value) -> Result<RequestReply, Error> {
+        let form = Form::parse_text(&params.context.schema, &Limits::new()).map_err(malformed)?;
+        RequestReply::from_value(reply, |name| {
+            form.field(name).is_some_and(|field| field.secret)
+        })
+        .map_err(malformed)
+    }
 }
 
 fn malformed(_: coqui_acp::secret::Error) -> Error {
@@ -706,11 +747,36 @@ impl Frontend for Front {
 
     fn request(&self, params: &RequestParams) -> Result<RequestReply, Error> {
         let reply = self.link()?.ask(REQUEST_METHOD, params.to_value())?;
-        let form = Form::parse_text(&params.context.schema, &Limits::new()).map_err(malformed)?;
-        RequestReply::from_value(&reply, |name| {
-            form.field(name).is_some_and(|field| field.secret)
+        Self::read(params, &reply)
+    }
+
+    /// The person is there while the connection to their app lasts: a session whose connection ended has lost its tools already, and
+    /// an agent that goes on calling is answered that no one is.
+    fn attended(&self) -> bool {
+        self.link.upgrade().is_some_and(|link| !link.is_closed())
+    }
+
+    fn longest_wait(&self) -> Option<Duration> {
+        // Never longer than the sealed question lasts: an answer after that is refused.
+        self.link.upgrade().map(|link| {
+            link.hub
+                .vault
+                .max_wait()
+                .min(link.secrets.settings().answer_lifetime)
         })
-        .map_err(malformed)
+    }
+
+    fn request_within(
+        &self,
+        params: &RequestParams,
+        wait: Duration,
+    ) -> Result<Option<RequestReply>, Error> {
+        let link = self.link()?;
+        let Some(reply) = link.ask_within(REQUEST_METHOD, params.to_value(), wait)? else {
+            link.withdraw(&self.session, &params.context.request_id);
+            return Ok(None);
+        };
+        Self::read(params, &reply).map(Some)
     }
 
     fn show_open(&self, open: &ShowOpen) -> Result<ShowOpened, Error> {

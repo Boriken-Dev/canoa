@@ -159,6 +159,11 @@ impl Vault {
         cache
     }
 
+    /// The most a request waits for the person, whatever the agent asks for.
+    pub(crate) fn max_wait(&self) -> core::time::Duration {
+        core::time::Duration::from_secs(self.settings().max_wait)
+    }
+
     /// The ways a typed secret may be kept, the one `[secrets] keep` names first, and `Remember` when there is a provider to keep it.
     pub(crate) fn keeps(&self) -> Vec<Keep> {
         let settings = self.settings();

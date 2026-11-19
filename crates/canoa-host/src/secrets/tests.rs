@@ -931,3 +931,126 @@ fn what_was_kept_for_a_session_ends_with_the_session() {
         "the connection ended"
     );
 }
+
+/// The tools of the session `s1` of an in-process link, taken through the bearer the host gave its agent.
+fn session_tools(hub: &Arc<Hub>, link: &Arc<Link>) -> (coqui_acp_secrets::SessionTools, String) {
+    use sha2::{Digest as _, Sha256};
+
+    offer(link, "link-hmac-sha256");
+    http_agent(link);
+    let given = servers(&new_session(link, 2, &std::env::temp_dir()));
+    let token = given[0]["headers"][0]["value"]
+        .as_str()
+        .expect("a bearer")
+        .trim_start_matches("Bearer ")
+        .to_owned();
+    answer(link, 2, &json!({"sessionId": "s1"}));
+    let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
+    let grant = hub
+        .tokens
+        .find(&digest)
+        .expect("the bearer opens the session");
+    (super::link::tools_of(&grant).expect("its tools"), token)
+}
+
+#[test]
+fn the_tools_state_the_longest_wait_and_a_question_nobody_answers_in_time_says_so_and_is_withdrawn()
+{
+    let dir = Dir::new("wait");
+    let (hub, _) = hub(&dir, Method::WebCrypto);
+    let link = hub.local_link().expect("the in-process link");
+    let (tools, _) = session_tools(&hub, &link);
+    let listed = tools.definitions();
+    let property = &listed
+        .iter()
+        .find(|tool| tool.name == "secret_request")
+        .expect("the request tool")
+        .input_schema["properties"]["wait_seconds"];
+    assert_eq!(
+        property["maximum"], 240,
+        "the host's longest wait is in the schema: {property}"
+    );
+    let started = std::time::Instant::now();
+    let result = {
+        let tools = tools.clone();
+        std::thread::spawn(move || {
+            tools.call(
+                "secret_request",
+                &json!({"message": "m", "wait_seconds": 1, "schema": {"type": "object",
+                    "properties": {"waited_token": {"type": "string", "writeOnly": true}}, "required": ["waited_token"]}}),
+            )
+        })
+    }
+    .join()
+    .expect("the call ended");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(30),
+        "the agent's limit, not the host's, ended the wait"
+    );
+    let result: Value = serde_json::from_str(&result.text).expect("JSON");
+    assert_eq!(result["status"], "timed_out", "{result}");
+    let sent: Vec<Value> = link
+        .drain()
+        .iter()
+        .map(|message| serde_json::from_slice(message).expect("JSON"))
+        .collect();
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    assert_eq!(sent[0]["method"], "_coqui_acp/secret_request");
+    assert_eq!(sent[1]["method"], "_coqui_acp/secret_withdraw");
+    assert!(sent[1].get("id").is_none(), "a notice, not a question");
+    assert_eq!(
+        sent[1]["params"]["requestId"], sent[0]["params"]["requestId"],
+        "the card withdrawn is the one asked"
+    );
+    assert_eq!(sent[1]["params"]["sessionId"], "s1");
+}
+
+#[test]
+fn an_agent_whose_person_has_gone_is_told_at_once_that_no_one_is_present() {
+    use crate::loopback::Service;
+    use sha2::Digest as _;
+
+    let dir = Dir::new("unattended");
+    let (hub, _) = hub(&dir, Method::WebCrypto);
+    let link = hub.local_link().expect("the in-process link");
+    let (_, token) = session_tools(&hub, &link);
+    link.close();
+    let digest: [u8; 32] = sha2::Sha256::digest(token.as_bytes()).into();
+    let grant = hub.tokens.find(&digest).expect("kept to answer the agent");
+    assert!(super::link::tools_of(&grant).is_none(), "its tools ended");
+    let call = |name: &str| {
+        let message = json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": {"name": name, "arguments": {"message": "m", "schema": {}}}});
+        match hub.tokens.answer(&grant, &message) {
+            crate::loopback::Answer::Json(answer) => answer,
+            _ => panic!("the agent was not answered"),
+        }
+    };
+    let asked = call("secret_request");
+    assert_eq!(asked["id"], 7);
+    assert_eq!(asked["result"]["isError"], false);
+    let text = asked["result"]["content"][0]["text"]
+        .as_str()
+        .expect("text");
+    assert!(text.contains("no_one_present"), "{text}");
+    let used = call("secret_use");
+    assert_eq!(used["result"]["isError"], true, "{used}");
+    let listing = json!({"jsonrpc": "2.0", "id": 8, "method": "tools/list"});
+    assert!(matches!(
+        hub.tokens.answer(&grant, &listing),
+        crate::loopback::Answer::Unavailable
+    ));
+    assert!(!link.bearer_open(&token), "it opens no session any more");
+}
+
+#[test]
+fn the_longest_wait_is_a_setting_of_whole_seconds() {
+    use super::settings::Settings;
+
+    assert_eq!(Settings::read(None).expect("defaults").max_wait, 240);
+    let read = |value: Value| Settings::read(Some(&json!({"max_wait": value})));
+    assert_eq!(read(json!(90)).expect("seconds").max_wait, 90);
+    for bad in [json!(0), json!(-1), json!("90"), json!(1.5)] {
+        assert!(read(bad.clone()).is_err(), "{bad}");
+    }
+}

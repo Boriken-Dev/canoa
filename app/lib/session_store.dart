@@ -1880,6 +1880,23 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     );
   }
 
+  @override
+  void withdrawSecret(String sessionId, String requestId, VerifiedAgent from) {
+    // Only the connection that carried the question can take it back.
+    final session = _sessionOf(sessionId, from);
+    if (session == null) return;
+    final withdrawn = [
+      for (final prompt in session.pendingSecrets)
+        if (prompt is SecretRequestPrompt && prompt.request.context.requestId == requestId) prompt,
+    ];
+    if (withdrawn.isEmpty) return;
+    for (final prompt in withdrawn) {
+      session.pendingSecrets.remove(prompt);
+      prompt.cancel();
+    }
+    notifyListeners();
+  }
+
   /// The person's answer to [prompt], a request of [session]'s.
   void answerSecret(
     ChatSession session,

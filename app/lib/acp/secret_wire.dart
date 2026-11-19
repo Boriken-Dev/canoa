@@ -20,7 +20,14 @@ abstract interface class AgentSecrets {
 
   /// True when the person saw the values and closed them.
   Future<bool> deliverSecretShow(AcpSecretShowDeliver deliver, VerifiedAgent from);
+
+  /// The host gave up on the question [requestId] of [sessionId]: the card of it goes away. A question already answered or never
+  /// asked is no error.
+  void withdrawSecret(String sessionId, String requestId, VerifiedAgent from);
 }
+
+/// The host's notice that it gave up on a question nobody answered in time.
+const String secretWithdrawMethod = '_coqui_acp/secret_withdraw';
 
 /// The secret-prompt extension on a connection to a host that was proven by its peer identity, beside the shared ACP client, which
 /// never sees these messages: the capability added to `initialize`, and the host's three requests, answered on the same connection.
@@ -71,6 +78,14 @@ final class SecretWire {
       decoded = jsonDecode(message);
     } on FormatException {
       return false;
+    }
+    if (decoded is Map && decoded['method'] == secretWithdrawMethod && decoded['id'] == null) {
+      final params = decoded['params'];
+      final from = agent;
+      if (from != null && params is Map && params['sessionId'] is String && params['requestId'] is String) {
+        _secrets.withdrawSecret(params['sessionId'] as String, params['requestId'] as String, from);
+      }
+      return true;
     }
     if (decoded is! Map || !_methods.contains(decoded['method']) || decoded['id'] == null) return false;
     final id = decoded['id'];

@@ -37,9 +37,10 @@ pub(crate) use link::is_bypass;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
-use std::sync::atomic::AtomicUsize;
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use coqui_acp::secret::{
     BINDING_DH, BINDING_ECDSA, BINDING_LINK, IdentityId, LinkKey, LinkRole, Prover, Verifier,
@@ -64,12 +65,20 @@ pub(crate) struct Grant {
     tools: Mutex<Option<SessionTools>>,
     /// Calls this bearer has under way.
     calls: AtomicUsize,
+    /// The connection of the person's app ended while the agent's session went on: the agent is answered that no one is there.
+    detached: AtomicBool,
 }
+
+/// How many detached bearers are kept to answer an agent whose person has gone, and for how long.
+const MAX_DETACHED: usize = 256;
+const DETACHED_FOR: Duration = Duration::from_secs(60 * 60);
 
 /// The bearers the tool server accepts, by their digest: a token is never kept.
 #[derive(Default)]
 pub(crate) struct Tokens {
     grants: Mutex<HashMap<[u8; 32], Arc<Grant>>>,
+    /// The bearers whose connection ended, oldest first.
+    detached: Mutex<VecDeque<([u8; 32], Instant)>>,
 }
 
 impl Tokens {
@@ -81,6 +90,7 @@ impl Tokens {
         let grant = Arc::new(Grant {
             tools: Mutex::new(None),
             calls: AtomicUsize::new(0),
+            detached: AtomicBool::new(false),
         });
         lock(&self.grants).insert(digest, Arc::clone(&grant));
         grant
@@ -88,6 +98,25 @@ impl Tokens {
 
     fn remove(&self, digest: &[u8; 32]) {
         lock(&self.grants).remove(digest);
+    }
+
+    /// Ends what the bearer opens but keeps it long enough to tell an agent that goes on calling that no one is there.
+    fn detach(&self, digest: &[u8; 32]) {
+        let Some(grant) = self.find(digest) else {
+            return;
+        };
+        *lock(&grant.tools) = None;
+        grant.detached.store(true, Ordering::SeqCst);
+        let mut kept = lock(&self.detached);
+        kept.push_back((*digest, Instant::now()));
+        while kept
+            .front()
+            .is_some_and(|(_, since)| since.elapsed() > DETACHED_FOR || kept.len() > MAX_DETACHED)
+        {
+            if let Some((old, _)) = kept.pop_front() {
+                self.remove(&old);
+            }
+        }
     }
 }
 

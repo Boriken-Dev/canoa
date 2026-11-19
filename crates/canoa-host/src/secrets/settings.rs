@@ -5,6 +5,8 @@
 //! default = "form"           # the entry that answers a name no `names` line gives (default `form`)
 //! store = "system"           # the entry "remember" keeps a typed secret in (default `system`)
 //! keep = "session"           # what the form offers first: once, session, close, 15m, 1h, 8h, 1d
+//! max_wait = 240             # the most seconds a request waits for the person, whatever the agent asks (default 240, and never
+//!                            # more than a sealed question lasts)
 //!
 //! [secrets.names]
 //! github_token = "work_vault"
@@ -117,6 +119,8 @@ pub(crate) struct Settings {
     pub(crate) store: Option<String>,
     /// What the form offers first.
     pub(crate) first: Keep,
+    /// The most seconds a request waits for the person, whatever the agent asks for.
+    pub(crate) max_wait: u64,
     /// The entry that answers each name given a line.
     pub(crate) names: BTreeMap<String, String>,
     /// The entries, `form` and `system` included.
@@ -134,6 +138,7 @@ fn defaults() -> Settings {
         default: FORM.to_owned(),
         store: Some(SYSTEM.to_owned()),
         first: Keep::Session,
+        max_wait: DEFAULT_WAIT,
         names: BTreeMap::new(),
         entries: implicit(),
     }
@@ -154,6 +159,9 @@ fn implicit() -> BTreeMap<String, Entry> {
         })
         .collect()
 }
+
+/// How many seconds a request waits for the person unless `[secrets] max_wait` says otherwise.
+pub(crate) const DEFAULT_WAIT: u64 = 240;
 
 /// The keys of an entry's table that are the host's and not the provider's own settings.
 const HOST_KEYS: [&str; 2] = ["provider", "keep"];
@@ -184,6 +192,12 @@ impl Settings {
                     settings.first = Keep::parse(&text(value, "keep")?)
                         .filter(|keep| *keep != Keep::Store)
                         .ok_or("[secrets] keep is once, session, close, 15m, 1h, 8h, 1d or ttl:SECONDS")?;
+                }
+                "max_wait" => {
+                    settings.max_wait = value
+                        .as_u64()
+                        .filter(|seconds| *seconds >= 1)
+                        .ok_or("[secrets] max_wait is a whole number of seconds, at least 1")?;
                 }
                 "names" => {
                     for (name, entry) in value.as_object().ok_or("[secrets.names] is a table")? {
