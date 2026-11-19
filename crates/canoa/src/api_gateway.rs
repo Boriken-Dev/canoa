@@ -7,19 +7,22 @@
 //! runs on it, the address moved to the harness's own endpoint setting.
 //!
 //! The standards are the account's own: the kind's settings schema marks the property that names them `"x-provides": true`, which a
-//! host reads as the standards the account provides in place of the kind's.
+//! host reads as the standards the account provides in place of the kind's. A gateway that serves its standards at different
+//! addresses, or wants a key as a bearer token for one and as a key for another, says so for each in the property marked
+//! `"x-by-standard": true`: the address and the credential key a program is given when it applies the account as that standard.
 //!
 //! [`ApiGatewayAccounts`] is the `account_provider` of the kind and [`library`] what a host loads. The rest is what an account
 //! provider of another service in front of models (a sign-in that hands back a key, a budget to report) builds on: [`http`] reaches
 //! the address through the person's own network, [`openai_models`] lists what it serves, [`parse_standards`] and [`check_address`]
 //! say what a setting may be, and [`key_form`] asks for the key in the form only the person's application reads.
 
+use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
 
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Provider, Status};
-use coqui_acp_api::standard::{OPENAI_API, is_standard};
+use coqui_acp_api::standard::{OPENAI_API, is_standard, well_known};
 use coqui_acp_api::{
     AccountKeeper, AccountKindInfo, AccountModelsQuery, AccountOffer, AccountProvider,
     AccountProviderInfo, AccountUsage, AccountUsageQuery, AccountWatch, Credentials, EndpointSlot,
@@ -47,6 +50,19 @@ pub const STANDARDS: &str = "standards";
 
 /// The annotation of the setting that names the standards.
 pub const PROVIDES_NOTE: &str = "x-provides";
+
+/// The setting that holds, for a standard the address speaks, the address a program is given and the credential key its key is given
+/// under.
+pub const BY_STANDARD: &str = "by_standard";
+
+/// The annotation of the setting that holds them: a host gives each program the address and the key form of the standard it applies.
+pub const BY_STANDARD_NOTE: &str = "x-by-standard";
+
+/// The sign-in input that names an address for some standards: `standard=address` pairs.
+pub const ADDRESSES: &str = "addresses";
+
+/// The sign-in input that names how the key is sent for some standards: `standard=credential` pairs.
+pub const CREDENTIALS: &str = "credentials";
 
 fn refused(why: impl AsRef<str>) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why.as_ref())
@@ -138,6 +154,56 @@ pub fn parse_standards(text: &str) -> Result<Vec<String>, String> {
     Ok(found)
 }
 
+/// Splits `text` (`name=value` pairs separated by commas or white space) into its pairs, in the order given.
+///
+/// # Errors
+///
+/// A part that is not `name=value`.
+pub fn parse_pairs(text: &str) -> Result<Vec<(String, String)>, String> {
+    text.split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|part| !part.is_empty())
+        .map(|part| match part.split_once('=') {
+            Some((name, value)) if !name.is_empty() && !value.is_empty() => {
+                Ok((name.to_owned(), value.to_owned()))
+            }
+            _ => Err(format!("`{part}` is not `standard=value`")),
+        })
+        .collect()
+}
+
+/// Whether `key` is a credential key the standard `standard` takes: one of the keys it names when it is a well-known standard, else
+/// any key written as a name (lower-case letters, digits and underscores, starting with a letter).
+///
+/// # Errors
+///
+/// Why it is not.
+pub fn check_credential(standard: &str, key: &str) -> Result<(), String> {
+    if let Some(known) = well_known(standard) {
+        return if known.credentials.contains(&key) {
+            Ok(())
+        } else {
+            Err(format!(
+                "{standard} takes its key as {}, not {key}",
+                known.credentials.join(" or ")
+            ))
+        };
+    }
+    let name = key
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_lowercase())
+        && key
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    if name {
+        Ok(())
+    } else {
+        Err(format!(
+            "`{key}` is not a credential key (lower-case letters, digits and underscores, starting with a letter)"
+        ))
+    }
+}
+
 /// Whether `url` is an address a key may be sent to: an `https` one, or an `http` one to this computer.
 ///
 /// # Errors
@@ -220,23 +286,38 @@ pub fn openai_models(base: &str, key: &str) -> ModelListing {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Settings {
-    /// The address, as the person wrote it.
+    /// The address, as the person wrote it: the one a program is given for a standard that names none of its own.
     pub base_url: String,
     /// The standards it speaks.
     pub standards: Vec<String>,
+    /// What an account says of a standard it speaks, by the standard's id.
+    pub by_standard: BTreeMap<String, StandardSettings>,
+}
+
+/// What an account says of one standard it speaks: where a program that applies the account as that standard is sent, and the
+/// credential key its key is given under there.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct StandardSettings {
+    /// The address for this standard, in place of the account's own.
+    pub base_url: Option<String>,
+    /// The key the account's credential is given under for this standard (`auth_token` for a bearer token).
+    pub credential: Option<String>,
 }
 
 impl Settings {
     /// Reads the settings from a table, where `standards` is a list of ids or text of ids separated by commas or white space.
+    /// `by_standard` is a table keyed by the standards' ids; `addresses` and `credentials`, as a sign-in's inputs have them, are text
+    /// of `standard=address` and `standard=credential` pairs, and name the same things.
     ///
     /// # Errors
     ///
-    /// A missing or wrong address or standard, or a key the kind lacks.
+    /// A missing or wrong address or standard, a standard the address does not speak named for an address or a key, or a key the
+    /// kind lacks.
     pub fn from_map(map: &Map<String, Value>) -> Result<Self, String> {
-        if let Some(extra) = map
-            .keys()
-            .find(|key| ![BASE_URL, STANDARDS].contains(&key.as_str()))
-        {
+        if let Some(extra) = map.keys().find(|key| {
+            ![BASE_URL, STANDARDS, BY_STANDARD, ADDRESSES, CREDENTIALS].contains(&key.as_str())
+        }) {
             return Err(format!("{extra} is not a setting of this kind"));
         }
         let base_url = map
@@ -257,16 +338,106 @@ impl Settings {
             )?,
             _ => return Err("standards lists what the address speaks".to_owned()),
         };
+        let mut by_standard: BTreeMap<String, StandardSettings> = BTreeMap::new();
+        match map.get(BY_STANDARD) {
+            None | Some(Value::Null) => {}
+            Some(Value::Object(table)) => {
+                for (standard, entry) in table {
+                    let Value::Object(entry) = entry else {
+                        return Err(format!("{BY_STANDARD}.{standard} is a table"));
+                    };
+                    if let Some(extra) = entry
+                        .keys()
+                        .find(|key| ![BASE_URL, "credential"].contains(&key.as_str()))
+                    {
+                        return Err(format!(
+                            "{extra} is not a setting of {standard} in {BY_STANDARD}"
+                        ));
+                    }
+                    let text = |field: &str| {
+                        entry
+                            .get(field)
+                            .map(|value| {
+                                value.as_str().map(str::to_owned).ok_or_else(|| {
+                                    format!("{BY_STANDARD}.{standard}.{field} is text")
+                                })
+                            })
+                            .transpose()
+                    };
+                    let slot = by_standard.entry(standard.clone()).or_default();
+                    slot.base_url = text(BASE_URL)?;
+                    slot.credential = text("credential")?;
+                }
+            }
+            Some(_) => return Err(format!("{BY_STANDARD} is a table of the standards' ids")),
+        }
+        for (input, address) in [(ADDRESSES, true), (CREDENTIALS, false)] {
+            let Some(text) = map.get(input) else { continue };
+            let text = text
+                .as_str()
+                .ok_or_else(|| format!("{input} is `standard=value` pairs, as text"))?;
+            for (standard, value) in parse_pairs(text).map_err(|why| format!("{input}: {why}"))? {
+                let slot = by_standard.entry(standard).or_default();
+                if address {
+                    slot.base_url = Some(value);
+                } else {
+                    slot.credential = Some(value);
+                }
+            }
+        }
+        for (standard, slot) in &mut by_standard {
+            if !standards.contains(standard) {
+                return Err(format!(
+                    "{standard} is named for an address or a key, and the address does not speak it"
+                ));
+            }
+            if let Some(url) = &slot.base_url {
+                check_address(url).map_err(|why| format!("the address for {standard}: {why}"))?;
+                slot.base_url = Some(url.trim_end_matches('/').to_owned());
+            }
+            if let Some(key) = &slot.credential {
+                check_credential(standard, key)?;
+            }
+        }
+        by_standard.retain(|_, slot| slot.base_url.is_some() || slot.credential.is_some());
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_owned(),
             standards,
+            by_standard,
         })
     }
 
     /// The settings as the account's table holds them.
     #[must_use]
     pub fn to_value(&self) -> Value {
-        json!({BASE_URL: self.base_url, STANDARDS: self.standards})
+        let mut value = json!({BASE_URL: self.base_url, STANDARDS: self.standards});
+        if !self.by_standard.is_empty() {
+            let table: Map<String, Value> = self
+                .by_standard
+                .iter()
+                .map(|(standard, slot)| {
+                    let mut entry = Map::new();
+                    if let Some(url) = &slot.base_url {
+                        entry.insert(BASE_URL.to_owned(), json!(url));
+                    }
+                    if let Some(key) = &slot.credential {
+                        entry.insert("credential".to_owned(), json!(key));
+                    }
+                    (standard.clone(), Value::Object(entry))
+                })
+                .collect();
+            value[BY_STANDARD] = Value::Object(table);
+        }
+        value
+    }
+
+    /// The address a program that applies the account as `standard` is given: the one the account names for it, else its own.
+    #[must_use]
+    pub fn address_for(&self, standard: &str) -> &str {
+        self.by_standard
+            .get(standard)
+            .and_then(|slot| slot.base_url.as_deref())
+            .unwrap_or(&self.base_url)
     }
 }
 
@@ -280,7 +451,7 @@ pub fn settings_schema() -> Value {
                 "type": "string",
                 "format": "uri",
                 "title": "Address",
-                "description": "Where the gateway is, as each program that runs on the account takes it: `https://llm.example.com`. A program adds its own path to it, and OpenAI-API programs such as Codex expect it to end in `/v1` where Claude Code does not. For a gateway that serves its standards at different addresses, make one account for each.",
+                "description": "Where the gateway is, as each program that runs on the account takes it: `https://llm.example.com`. A program adds its own path to it, and some expect it to end in `/v1` where others do not: name the address of a standard that differs in `by_standard`.",
             },
             STANDARDS: {
                 "type": "array",
@@ -288,6 +459,20 @@ pub fn settings_schema() -> Value {
                 "title": "Standards it speaks",
                 "description": "The credential standards the address accepts a key for, such as `openai-api` and `anthropic-api`. Every program that takes one of them runs on this account.",
                 PROVIDES_NOTE: true,
+            },
+            BY_STANDARD: {
+                "type": "object",
+                "title": "Address and key form for each standard",
+                "description": "For a standard the address speaks: `base_url`, where a program that applies the account as that standard is sent in place of the address above (`https://llm.example.com/v1`), and `credential`, the key the account's key is given under for it (`auth_token` sends it as a bearer token where the standard takes one, `api_key` as a key).",
+                "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                        BASE_URL: {"type": "string", "format": "uri"},
+                        "credential": {"type": "string"},
+                    },
+                    "additionalProperties": false,
+                },
+                BY_STANDARD_NOTE: true,
             },
             CREDENTIAL: credential_schema("Key", "The key the gateway gave you."),
         },
@@ -312,6 +497,16 @@ pub fn inputs_schema() -> Value {
                 "type": "string",
                 "title": "Standards it speaks",
                 "description": "Ids separated by commas, such as `openai-api, anthropic-api`. Every program that takes one of them runs on this account.",
+            },
+            ADDRESSES: {
+                "type": "string",
+                "title": "Address for a standard",
+                "description": "`standard=address` pairs, separated by commas, for a standard the address above does not serve: `openai-api=https://llm.example.com/v1`. Optional.",
+            },
+            CREDENTIALS: {
+                "type": "string",
+                "title": "How the key is sent for a standard",
+                "description": "`standard=credential` pairs, separated by commas, for a standard that takes its key another way than `api_key`: `anthropic-api=auth_token` sends it as a bearer token. Optional.",
             },
         },
         "required": [BASE_URL, STANDARDS],
@@ -455,7 +650,13 @@ impl AccountProvider for ApiGatewayAccounts {
             .get(CREDENTIAL)
             .ok_or_else(|| refused("the account holds no key"))?
             .to_string();
-        Ok(openai_models(base, &key))
+        let address = settings
+            .get(BY_STANDARD)
+            .and_then(|table| table.get(OPENAI_API))
+            .and_then(|entry| entry.get(BASE_URL))
+            .and_then(Value::as_str)
+            .unwrap_or(base);
+        Ok(openai_models(address, &key))
     }
 }
 

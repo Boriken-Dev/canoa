@@ -329,3 +329,107 @@ fn usage_is_not_offered_and_that_is_the_answer() {
     assert!(!usage.supported);
     assert_eq!(usage.account.as_deref(), Some("id-one"));
 }
+
+#[test]
+fn an_account_names_an_address_and_a_key_form_for_each_standard_and_nothing_a_standard_does_not_take()
+ {
+    let table =
+        |value: Value| -> Map<String, Value> { value.as_object().cloned().expect("a table") };
+    let both = json!({
+        "base_url": "https://llm.example.com/",
+        "standards": "openai-api, anthropic-api",
+        "addresses": "openai-api=https://llm.example.com/v1/",
+        "credentials": "anthropic-api=auth_token",
+    });
+    let read = Settings::from_map(&table(both)).expect("reads");
+    assert_eq!(read.address_for(OPENAI_API), "https://llm.example.com/v1");
+    assert_eq!(
+        read.address_for(ANTHROPIC_API),
+        "https://llm.example.com",
+        "its own where it names none"
+    );
+    assert_eq!(
+        read.by_standard[ANTHROPIC_API].credential.as_deref(),
+        Some("auth_token")
+    );
+    // The settings a sign-in makes hold the table, which reads back the same as one written by hand.
+    let value = read.to_value();
+    assert_eq!(
+        value["by_standard"],
+        json!({
+            "openai-api": {"base_url": "https://llm.example.com/v1"},
+            "anthropic-api": {"credential": "auth_token"},
+        })
+    );
+    assert_eq!(Settings::from_map(&table(value)).expect("again"), read);
+    let schema = api_gateway::settings_schema();
+    assert_eq!(
+        schema["properties"]["by_standard"]["x-by-standard"],
+        json!(true)
+    );
+    for bad in [
+        // A standard the address does not speak.
+        json!({"base_url": "https://g.example", "standards": "openai-api", "addresses": "anthropic-api=https://g.example"}),
+        // A key a well-known standard does not take.
+        json!({"base_url": "https://g.example", "standards": "openai-api", "credentials": "openai-api=auth_token"}),
+        // A far plain address, and a pair with no value.
+        json!({"base_url": "https://g.example", "standards": "openai-api", "addresses": "openai-api=http://far.example/v1"}),
+        json!({"base_url": "https://g.example", "standards": "openai-api", "addresses": "openai-api"}),
+        json!({"base_url": "https://g.example", "standards": "openai-api", "by_standard": {"openai-api": {"key": "x"}}}),
+    ] {
+        assert!(Settings::from_map(&table(bad.clone())).is_err(), "{bad}");
+    }
+    // A standard no one has listed takes a key written as a name.
+    let own = Settings::from_map(&table(json!({
+        "base_url": "https://g.example", "standards": "x-api", "credentials": "x-api=token_two",
+    })))
+    .expect("a name");
+    assert_eq!(
+        own.by_standard["x-api"].credential.as_deref(),
+        Some("token_two")
+    );
+}
+
+#[test]
+fn signing_in_with_an_address_for_a_standard_keeps_it_in_the_settings_and_the_models_are_read_there()
+ {
+    let outcome = sign_in(
+        &json!({
+            "base_url": "https://llm.example.com",
+            "standards": "openai-api anthropic-api",
+            "addresses": "openai-api=https://llm.example.com/openai",
+            "credentials": "anthropic-api=auth_token",
+        }),
+        CANARY,
+    )
+    .expect("signed in");
+    let settings = guatiao_serde::adapt::from_value::<Map<String, Value>>(&outcome.settings)
+        .expect("settings");
+    assert_eq!(
+        settings["by_standard"]["openai-api"]["base_url"],
+        "https://llm.example.com/openai"
+    );
+    assert_eq!(
+        outcome.credentials.expose().len(),
+        1,
+        "the key is held once"
+    );
+    // The models are listed at the address of the OpenAI API, not the account's own.
+    let (address, seen) = stand_in(&["gpt-x"]);
+    let mut by = Map::new();
+    by.insert(
+        "openai-api".to_owned(),
+        json!({"base_url": format!("{address}/v1")}),
+    );
+    let mut credentials = Credentials::new();
+    credentials.insert(CREDENTIAL, CANARY);
+    let account = AccountGrant::new("id-one", KIND)
+        .settings(api_gateway::value(
+            &json!({"base_url": "https://never.example.com", "by_standard": by}),
+        ))
+        .credentials(credentials)
+        .provides([OPENAI_API]);
+    let listing = models(account);
+    assert!(listing.known, "{:?}", listing.unknown_because);
+    assert_eq!(seen.lock().unwrap_or_else(PoisonError::into_inner).len(), 1);
+}
