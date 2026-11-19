@@ -14,6 +14,7 @@ from canoa_sdk import (
     CommandCatalogSource,
     EnvProfileItem,
     LogPanelTab,
+    PagePanelTab,
     ReadCatalogSource,
     SettingsSection,
     fields_of,
@@ -22,7 +23,7 @@ from canoa_sdk import (
 )
 
 __version__ = "1.0.0"
-__all__ = ["BuildsTab", "EchoCommand", "EchoRead", "RegionItem", "RegionSection", "TeamSource"]
+__all__ = ["BuildsTab", "DocsTab", "EchoCommand", "EchoRead", "RegionItem", "RegionSection", "TeamSource"]
 
 
 @dataclass
@@ -96,3 +97,11 @@ class BuildsTab(LogPanelTab):
 
     def lines(self) -> List[str]:
         return ["build 41 passed", "build 42 failed"]
+
+
+class DocsTab(PagePanelTab):
+    """A tab of the bottom panel that names a page this computer serves and opens it in the browser."""
+
+    tab = "docs"
+    title = "Team docs"
+    url = "http://127.0.0.1:4100/docs"

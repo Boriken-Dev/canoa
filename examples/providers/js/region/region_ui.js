@@ -1,7 +1,7 @@
 // What a team might add to Canoa's screens, written in JavaScript: a profile item that tells a session which region it runs in, a
 // catalog source that lists a team's skills, a page of Settings and a tab of the bottom panel. One library serves four kinds; each
 // class is a provider the host offers as it offers any extension's.
-import { LogPanelTab } from '../../../../bindings/js/canoa-sdk/src/panel.js';
+import { LogPanelTab, PagePanelTab } from '../../../../bindings/js/canoa-sdk/src/panel.js';
 import { EnvProfileItem } from '../../../../bindings/js/canoa-sdk/src/profile.js';
 import { SettingsSection } from '../../../../bindings/js/canoa-sdk/src/section.js';
 import {
@@ -86,4 +86,11 @@ export class BuildsTab extends LogPanelTab {
   lines() {
     return ['build 41 passed', 'build 42 failed'];
   }
+}
+
+/** A tab of the bottom panel that names a page this computer serves and opens it in the browser. */
+export class DocsTab extends PagePanelTab {
+  static tab = 'docs';
+  static title = 'Team docs';
+  static url = 'http://127.0.0.1:4100/docs';
 }

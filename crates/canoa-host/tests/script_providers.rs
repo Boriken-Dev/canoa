@@ -306,6 +306,15 @@ mod with_source {
             .find(|row| row["id"] == "builds")
             .unwrap_or_else(|| panic!("the tab is listed: {tabs}"));
         assert_eq!(builds["shows"], "log");
+        let docs = tabs["tabs"]
+            .as_array()
+            .expect("tabs")
+            .iter()
+            .find(|row| row["id"] == "docs")
+            .unwrap_or_else(|| panic!("the page tab is listed: {tabs}"));
+        assert_eq!(docs["shows"], "page");
+        assert_eq!(docs["url"], "http://127.0.0.1:4100/docs");
+        assert_eq!(docs["origin"], "examples");
         let (tail, _) = ask(
             &link,
             6,
