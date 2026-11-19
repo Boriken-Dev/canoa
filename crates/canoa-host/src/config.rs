@@ -4436,8 +4436,19 @@ fn read_raw(bytes: &[u8], name: Option<&str>) -> Result<RawFile, anycfg::Error> 
     formats().from_slice_typed::<RawFile>(bytes, options)
 }
 
-/// anycfg's refusal as ours: the position or the key's path, and its words only where they come from the schema. A value,
-/// or a key nobody declared, is never told.
+/// What a key the host does not know is told as: its name, and what took the place of one that was removed.
+fn unknown_key(table: &str, key: &str) -> String {
+    let moved = match (table, key) {
+        ("host", "account_store") => {
+            "; `accounts` under `[secrets]` replaced it (`file` is `file`, `os` is `system`)"
+        }
+        _ => "",
+    };
+    format!("{key} is not a setting this host knows{moved}")
+}
+
+/// anycfg's refusal as ours: the position or the key's path, and its words only where they come from the schema. A value is
+/// never told; the name of a key the host does not know is.
 fn config_error(error: &anycfg::Error, file: Option<&Path>) -> ConfigError {
     use anycfg::Error;
     let parse = |file: Option<&Path>, line, column, what: String| ConfigError::Parse {
@@ -4465,12 +4476,14 @@ fn config_error(error: &anycfg::Error, file: Option<&Path>) -> ConfigError {
         Error::Conversion { path, message } => {
             let message = message.as_deref().unwrap_or("not of the expected shape");
             let (path, what) = if message.starts_with("unknown field") {
-                // The unknown key is the last of the path, and is not told.
-                let parent = path
-                    .as_deref()
-                    .and_then(|path| path.rsplit_once('.'))
-                    .map(|(parent, _)| parent.to_owned());
-                (parent, "a setting this host does not know".to_owned())
+                // The key is the last of the path; its name is told, never its value.
+                match path.as_deref().map(|path| path.rsplit_once('.')) {
+                    Some(Some((parent, key))) => {
+                        (Some(parent.to_owned()), unknown_key(parent, key))
+                    }
+                    Some(None) => (None, unknown_key("", path.as_deref().unwrap_or_default())),
+                    None => (None, "a setting this host does not know".to_owned()),
+                }
             } else if message.starts_with("duplicate field") {
                 (path.clone(), "a key is given twice".to_owned())
             } else {

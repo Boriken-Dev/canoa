@@ -2192,7 +2192,28 @@ fn the_secrets_table_is_carried_for_who_keeps_the_accounts_and_the_old_account_s
         Some(serde_json::json!({"accounts": "file"}))
     );
     let refused = parse("[host]\naccount_store = \"file\"\n").expect_err("refused");
-    assert!(refused.to_string().contains("does not know"), "{refused}");
+    let refused = refused.to_string();
+    assert!(
+        refused.contains("host: account_store is not a setting this host knows"),
+        "{refused}"
+    );
+    assert!(
+        refused.contains("`accounts` under `[secrets]`"),
+        "{refused}"
+    );
+    // A key with no replacement is named and nothing more; its value is not.
+    let refused = parse(
+        "[host]
+unheard_of = \"hunter2\"
+",
+    )
+    .expect_err("refused")
+    .to_string();
+    assert!(refused.contains("host: unheard_of is not a setting this host knows"));
+    assert!(
+        !refused.contains("replaced") && !refused.contains("hunter2"),
+        "{refused}"
+    );
 }
 
 #[test]

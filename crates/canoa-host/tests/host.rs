@@ -265,6 +265,28 @@ fn id_prints_the_key_serve_reports() {
 }
 
 #[test]
+fn check_names_a_removed_key_and_what_replaced_it() {
+    let scratch = Scratch::new();
+    let path = scratch.0.join("canoa.cfg");
+    std::fs::write(
+        &path,
+        "[host]
+account_store = \"file\"
+",
+    )
+    .expect("written");
+    let checked = std::process::Command::new(host_binary())
+        .args(["check", "--config", &path.to_string_lossy()])
+        .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
+        .output()
+        .expect("runs");
+    assert_eq!(checked.status.code(), Some(2), "{checked:?}");
+    let said = String::from_utf8_lossy(&checked.stderr);
+    assert!(said.contains("account_store"), "{said}");
+    assert!(said.contains("`accounts` under `[secrets]`"), "{said}");
+}
+
+#[test]
 fn check_prints_entries_and_a_bad_configuration_exits_2() {
     let scratch = Scratch::new();
     let path = scratch.0.join("canoa.cfg");
