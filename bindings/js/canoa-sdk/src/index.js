@@ -6,6 +6,17 @@
 // the SDK is under the library's `paths`.
 export { FORM_KEY, formMeta, section, ui, when } from './forms.js';
 export * as kinds from './kinds.js';
+export {
+  FormSecretProvider,
+  MAX_NAME,
+  MAX_NAMES,
+  MAX_VALUE,
+  SecretProvider,
+  SystemStoreSecretProvider,
+  keepingOf,
+  nameOf,
+  release,
+} from './secret.js';
 export { SpeechOutput, SpeechProvider } from './speech.js';
 export { ProgramStore, StoreExtension } from './store.js';
 export { AgentVendor } from './vendor.js';

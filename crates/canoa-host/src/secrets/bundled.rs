@@ -15,7 +15,7 @@ use coqui_acp_api::guatiao::{List, Map};
 use crate::provider::add_bundled_js;
 
 /// Each file of the bundled libraries, by its path under the folder they are kept in.
-const FILES: [(&str, &str); 4] = [
+const FILES: [(&str, &str); 6] = [
     (
         "bitwarden/bitwarden.js",
         include_str!("../../extensions/bitwarden/bitwarden.js"),
@@ -28,9 +28,18 @@ const FILES: [(&str, &str); 4] = [
         "bitwarden/canoa_bitwarden.guatiao",
         include_str!("../../extensions/bitwarden/canoa_bitwarden.guatiao"),
     ),
+    // The SDK's modules the script imports, kept beside it.
     (
-        "bitwarden/canoa_secret_kinds.js",
-        canoa::secret_provider::KINDS_JS,
+        "bitwarden/sdk/secret.js",
+        include_str!("../../../../bindings/js/canoa-sdk/src/secret.js"),
+    ),
+    (
+        "bitwarden/sdk/kinds.js",
+        include_str!("../../../../bindings/js/canoa-sdk/src/kinds.js"),
+    ),
+    (
+        "bitwarden/sdk/model.js",
+        include_str!("../../../../bindings/js/canoa-sdk/src/model.js"),
     ),
 ];
 

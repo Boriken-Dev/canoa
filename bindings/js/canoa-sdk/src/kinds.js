@@ -7,8 +7,8 @@ const described = kindsOf({
   "format": 1,
   "kinds": [
     {
-      "name": "speech_provider",
-      "floor_hash": 3259429719,
+      "name": "secret_provider",
+      "floor_hash": 246402531,
       "object": false,
       "slots": [
         {
@@ -21,7 +21,23 @@ const described = kindsOf({
           }
         },
         {
-          "name": "open",
+          "name": "names",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "get",
           "required": true,
           "fallible": true,
           "args": [
@@ -38,45 +54,44 @@ const described = kindsOf({
             }
           ],
           "answer": {
-            "type": "object",
-            "kind": "speech_session"
+            "type": "value"
           }
-        }
-      ]
-    },
-    {
-      "name": "speech_session",
-      "floor_hash": 1051878882,
-      "object": true,
-      "slots": [
+        },
         {
-          "name": "push",
+          "name": "put",
           "required": true,
           "fallible": true,
           "args": [
             {
-              "name": "audio",
-              "type": "bytes"
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
             }
-          ],
-          "answer": {
-            "type": "value"
-          }
+          ]
         },
         {
-          "name": "finish",
+          "name": "forget",
           "required": true,
           "fallible": true,
-          "args": [],
-          "answer": {
-            "type": "value"
-          }
-        },
-        {
-          "name": "cancel",
-          "required": true,
-          "fallible": true,
-          "args": []
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            }
+          ]
         }
       ]
     },
@@ -285,6 +300,80 @@ const described = kindsOf({
           "fallible": true,
           "name": "link",
           "required": true
+        }
+      ]
+    },
+    {
+      "name": "speech_provider",
+      "floor_hash": 3259429719,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "open",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "speech_session"
+          }
+        }
+      ]
+    },
+    {
+      "name": "speech_session",
+      "floor_hash": 1051878882,
+      "object": true,
+      "slots": [
+        {
+          "name": "push",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "audio",
+              "type": "bytes"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "finish",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "cancel",
+          "required": true,
+          "fallible": true,
+          "args": []
         }
       ]
     },
@@ -664,19 +753,19 @@ const described = kindsOf({
   ]
 });
 
-/** A provider of speech to text. One instance is one configuration of one provider. */
-export const SpeechProvider = described["speech_provider"];
-
 /**
- * One recording: audio goes in a chunk at a time, text comes out.
+ * A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
+ * instance with none to describe the provider before anyone has set it up.
  *
- * A session's methods may be called from different threads, one at a time. Every session ends with [`finish`] or
- * [`cancel`], and dropping one is a cancel.
+ * A provider that runs a program (a password manager's command) starts it through the `spawner` it is handed, which is the host's:
+ * every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
+ * to start one.
  *
- * [`finish`]: SpeechSession::finish
- * [`cancel`]: SpeechSession::cancel
+ * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
+ * reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
+ * the person instead.
  */
-export const SpeechSession = described["speech_session"];
+export const SecretProvider = described["secret_provider"];
 
 /**
  * Starts programs where the host chooses: on this machine, on another over SSH, in a container or
@@ -696,6 +785,20 @@ export const ProcessSpawner = described["process_spawner"];
  * Destroying it kills the whole tree, as [`kill`](Self::kill) does.
  */
 export const SpawnedProcess = described["spawned_process"];
+
+/** A provider of speech to text. One instance is one configuration of one provider. */
+export const SpeechProvider = described["speech_provider"];
+
+/**
+ * One recording: audio goes in a chunk at a time, text comes out.
+ *
+ * A session's methods may be called from different threads, one at a time. Every session ends with [`finish`] or
+ * [`cancel`], and dropping one is a cancel.
+ *
+ * [`finish`]: SpeechSession::finish
+ * [`cancel`]: SpeechSession::cancel
+ */
+export const SpeechSession = described["speech_session"];
 
 /** A provider of text to speech. One instance is one configuration of one provider. */
 export const SpeechOutput = described["speech_output"];

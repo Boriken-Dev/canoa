@@ -29,9 +29,14 @@ class ProgramStore:       # canoa_sdk.store: knows one program; abstract slots p
 class SpeechProvider:     # canoa_sdk.speech: audio in, text out; abstract slot open(request, spawner) -> SpeechSession
     title: str; encodings: Sequence[str]; description = max_seconds = None; partials = False; hints = ()
 class SpeechOutput:       # canoa_sdk.speech: text in, audio out; abstract slots voices, say; info() -> dict (the OutputInfo)
+class SecretProvider:     # canoa_sdk.secret: somewhere a secret comes from; abstract slot get(request, spawner); names, put, forget refuse UNSUPPORTED
+    title: str; description = None; can_store = can_list = needs_person = False
+class FormSecretProvider(SecretProvider)         # the person's form: needs_person, holds nothing
+class SystemStoreSecretProvider(SecretProvider)  # a store of keys and texts you supply (abstract read, write, remove), with an index of names
+name_of(request) -> str; keeping_of(request) -> (name, value)   # a request's name and value, checked as the kind says
 ```
 
-Models (`VendorInfo`, `StandardTitle`, `ModeTitle`, `ExtensionInfo`, `ExtensionType`, `SpeechInfo`) are dataclasses with `to_data()`: the
+Models (`VendorInfo`, `StandardTitle`, `ModeTitle`, `ExtensionInfo`, `ExtensionType`, `SpeechInfo`, `ProviderInfo`, `Held`) are dataclasses with `to_data()`: the
 plain map the host reads, an absent (`None`) field left out. The host checks what a provider answers and says why it refuses it in
 its log; the SDK checks only what a missing attribute makes impossible.
 

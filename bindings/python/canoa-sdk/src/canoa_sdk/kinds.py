@@ -158,6 +158,50 @@ class ProcessSpawner(KindProtocol, Protocol, kind="process_spawner", floor_hash=
         ...
 
 
+class SecretProvider(KindProtocol, Protocol, kind="secret_provider", floor_hash=246402531):
+    """A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
+    instance with none to describe the provider before anyone has set it up.
+
+    A provider that runs a program (a password manager's command) starts it through the `spawner` it is handed, which is the host's:
+    every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
+    to start one.
+
+    A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
+    reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
+    the person instead.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What it is and can do. Cheap, and the same on every call."""
+        ...
+
+    @required
+    @fallible
+    def names(self, spawner: Taken[ProcessSpawner]) -> ValueAnswer:
+        """The names it holds, and nothing else. `UNSUPPORTED` when [`ProviderInfo::can_list`] is false."""
+        ...
+
+    @required
+    @fallible
+    def get(self, request: Ref, spawner: Taken[ProcessSpawner]) -> ValueAnswer:
+        """What it holds under `request`'s name: [`Held::none`] when nothing."""
+        ...
+
+    @required
+    @fallible
+    def put(self, request: Ref, spawner: Taken[ProcessSpawner]) -> None:
+        """Keeps a value, replacing one of that name. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false."""
+        ...
+
+    @required
+    @fallible
+    def forget(self, request: Ref, spawner: Taken[ProcessSpawner]) -> None:
+        """Forgets what it keeps under the name; not having it is no error. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false."""
+        ...
+
+
 class SpeechSession(KindProtocol, Protocol, kind="speech_session", floor_hash=1051878882, is_object=True):
     """One recording: audio goes in a chunk at a time, text comes out.
 
@@ -417,4 +461,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=115228
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "SecretProvider", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "AgentVendor"]

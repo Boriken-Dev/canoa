@@ -14,13 +14,9 @@
 // there is no value, not an error. Bitwarden items have no end of their own, so no answer carries one.
 
 import { BadValue, Gone, Internal, NotFound, Unsupported } from 'guatiao';
-import { Provider } from 'guatiao/provide';
 
-import { SecretProvider } from './canoa_secret_kinds.js';
+import { MAX_NAMES, MAX_VALUE, SecretProvider, nameOf, release } from './sdk/secret.js';
 
-const MAX_NAMES = 1000;
-const MAX_NAME = 256;
-const MAX_VALUE = 64 * 1024;
 /** The most of `bw`'s output read: a listing of a large vault with every item's fields is the biggest. */
 const MAX_OUTPUT = 64 * 1024 * 1024;
 /** What `bw` says on standard error when the vault cannot be opened, in the words it uses. */
@@ -32,21 +28,6 @@ const POLL = 100n;
 
 /** `bw` said the item is not there: no value, and no failure. */
 class Missing extends Error {}
-
-/** The name a request asks for, checked as the kind says a name is. */
-function nameOf(request) {
-  const keys = request && typeof request === 'object' ? Object.keys(request) : [];
-  if (keys.length !== 1 || keys[0] !== 'name') throw new BadValue('a request names one secret and nothing else');
-  const name = request.name;
-  if (typeof name !== 'string' || name.length === 0 || new TextEncoder().encode(name).length > MAX_NAME) {
-    throw new BadValue(`a secret's name is 1 to ${MAX_NAME} bytes of text`);
-  }
-  for (const char of name) {
-    const code = char.codePointAt(0);
-    if (code < 32 || code === 127) throw new BadValue("a secret's name has a control character");
-  }
-  return name;
-}
 
 /** All of what `read` gives, until it ends or `limit` bytes or `deadline` pass. */
 function drain(read, limit, deadline) {
@@ -71,10 +52,12 @@ function drain(read, limit, deadline) {
   return all;
 }
 
-export class Bitwarden extends Provider {
-  static kinds = [SecretProvider];
+export class Bitwarden extends SecretProvider {
   static id = 'bitwarden';
   static displayName = 'Bitwarden';
+  static title = 'Bitwarden';
+  static description = 'Your Bitwarden vault, read through its `bw` command with a session key you give once.';
+  static can_list = true;
   static configSchema = {
     type: 'object',
     additionalProperties: false,
@@ -200,16 +183,6 @@ export class Bitwarden extends Provider {
     }
   }
 
-  describe() {
-    return {
-      title: 'Bitwarden',
-      description: 'Your Bitwarden vault, read through its `bw` command with a session key you give once.',
-      can_store: false,
-      can_list: true,
-      needs_person: false,
-    };
-  }
-
   names(spawner) {
     let items;
     try {
@@ -233,7 +206,7 @@ export class Bitwarden extends Provider {
     try {
       name = nameOf(request);
     } catch (error) {
-      spawner.destroy();
+      release(spawner);
       throw error;
     }
     let text;
@@ -249,13 +222,13 @@ export class Bitwarden extends Provider {
     return value ? { value } : {};
   }
 
-  put(request, spawner) {
-    spawner.destroy();
+  put(_request, spawner) {
+    release(spawner);
     throw new Unsupported('Bitwarden keeps its own items: add this one in Bitwarden');
   }
 
-  forget(request, spawner) {
-    spawner.destroy();
+  forget(_request, spawner) {
+    release(spawner);
     throw new Unsupported('Bitwarden keeps its own items: remove this one in Bitwarden');
   }
 }

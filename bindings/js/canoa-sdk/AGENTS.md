@@ -24,6 +24,11 @@ class SpeechProvider extends Provider {       // speech.js: static title, encodi
 }
 class SpeechOutput extends Provider {         // speech.js: info() (the OutputInfo), voices, say
 }
+class SecretProvider extends Provider {       // secret.js: static title, description, can_store, can_list, needs_person; get(request, spawner); names, put, forget refuse with Unsupported
+}
+class FormSecretProvider extends SecretProvider            // the person's form: needs_person, holds nothing
+class SystemStoreSecretProvider extends SecretProvider     // a store of keys and texts you supply (read, write, remove), with an index of names
+nameOf(request); keepingOf(request); release(spawner)      // a request's name and value, checked as the kind says; lets the host's spawner go
 ```
 
 `describe()` is answered from the statics (`info()`), an absent field left out. A slot a base leaves in place (`open`, `voices`, `say`,

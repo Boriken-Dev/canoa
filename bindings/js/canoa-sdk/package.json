@@ -18,6 +18,7 @@
     "./vendor": { "types": "./types/vendor.d.ts", "import": "./src/vendor.js" },
     "./store": { "types": "./types/store.d.ts", "import": "./src/store.js" },
     "./speech": { "types": "./types/speech.d.ts", "import": "./src/speech.js" },
+    "./secret": { "types": "./types/secret.d.ts", "import": "./src/secret.js" },
     "./forms": { "types": "./types/forms.d.ts", "import": "./src/forms.js" },
     "./kinds": { "types": "./types/kinds.d.ts", "import": "./src/kinds.js" }
   },

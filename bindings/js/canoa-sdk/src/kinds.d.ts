@@ -5,96 +5,59 @@ import type * as g from 'guatiao';
 import type * as k from 'guatiao/kinds';
 
 /**
- * A provider of speech to text. One instance is one configuration of one provider.
+ * A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
+ * instance with none to describe the provider before anyone has set it up.
  *
- * The `speech_provider` kind: what a provider of it implements.
+ * A provider that runs a program (a password manager's command) starts it through the `spawner` it is handed, which is the host's:
+ * every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
+ * to start one.
+ *
+ * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
+ * reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
+ * the person instead.
+ *
+ * The `secret_provider` kind: what a provider of it implements.
  */
-export interface SpeechProvider {
-  /** What it can do. Cheap, and the same on every call. */
+export interface SecretProvider {
+  /** What it is and can do. Cheap, and the same on every call. */
   describe(): unknown;
-  /**
-   * Starts a recording. Nothing is started for a recording it refuses: `UNSUPPORTED` (with the encodings it takes) for a
-   * format it does not read, `BAD_VALUE` for a setting that cannot be used. The provider may start a process or open a
-   * connection here, and its session ends them.
-   *
-   * `spawner` is the host's: every program a provider runs starts through it, and the provider destroys it, even when it
-   * refuses. A provider that starts no program just drops it.
-   */
-  open(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): SpeechSession | k.ObjectHandle<typeof SpeechSession>;
+  /** The names it holds, and nothing else. `UNSUPPORTED` when [`ProviderInfo::can_list`] is false. */
+  names(spawner: k.ObjectHandle<typeof ProcessSpawner>): unknown;
+  /** What it holds under `request`'s name: [`Held::none`] when nothing. */
+  get(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): unknown;
+  /** Keeps a value, replacing one of that name. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false. */
+  put(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): void;
+  /** Forgets what it keeps under the name; not having it is no error. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false. */
+  forget(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): void;
 }
 
-/** A caller's handle on a `speech_provider` table: a method per slot. */
-export interface SpeechProviderRemote extends k.RemoteBase<typeof SpeechProvider> {
-  /** What it can do. Cheap, and the same on every call. */
+/** A caller's handle on a `secret_provider` table: a method per slot. */
+export interface SecretProviderRemote extends k.RemoteBase<typeof SecretProvider> {
+  /** What it is and can do. Cheap, and the same on every call. */
   describe(): g.Value;
-  /**
-   * Starts a recording. Nothing is started for a recording it refuses: `UNSUPPORTED` (with the encodings it takes) for a
-   * format it does not read, `BAD_VALUE` for a setting that cannot be used. The provider may start a process or open a
-   * connection here, and its session ends them.
-   *
-   * `spawner` is the host's: every program a provider runs starts through it, and the provider destroys it, even when it
-   * refuses. A provider that starts no program just drops it.
-   */
-  open(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): k.ObjectHandle<typeof SpeechSession>;
-}
-
-/** A provider of speech to text. One instance is one configuration of one provider. */
-export declare const SpeechProvider: k.DescribedKind<SpeechProvider, SpeechProviderRemote, false>;
-
-/**
- * One recording: audio goes in a chunk at a time, text comes out.
- *
- * A session's methods may be called from different threads, one at a time. Every session ends with [`finish`] or
- * [`cancel`], and dropping one is a cancel.
- *
- * [`finish`]: SpeechSession::finish
- * [`cancel`]: SpeechSession::cancel
- *
- * The `speech_session` kind: what an object of it implements.
- */
-export interface SpeechSession {
-  /**
-   * Takes the next chunk, in order, in the format the recording opened with. It returns when the provider has taken the
-   * chunk, so a provider that cannot keep up slows the caller down rather than growing a queue. The chunk is borrowed
-   * for this call.
-   */
-  push(audio: Uint8Array): unknown;
-  /**
-   * Ends the audio and answers the final text, when the provider has it. A provider that fails answers the reason in the
-   * error, never an empty text.
-   */
-  finish(): unknown;
-  /** Abandons the recording: whatever the provider started is ended, and nothing is answered. */
-  cancel(): void;
-}
-
-/** A caller's handle on a `speech_session` table or object: a method per slot. */
-export interface SpeechSessionRemote extends k.RemoteBase<typeof SpeechSession> {
-  /**
-   * Takes the next chunk, in order, in the format the recording opened with. It returns when the provider has taken the
-   * chunk, so a provider that cannot keep up slows the caller down rather than growing a queue. The chunk is borrowed
-   * for this call.
-   */
-  push(audio: Uint8Array | ArrayBuffer | ArrayBufferView): g.Value;
-  /**
-   * Ends the audio and answers the final text, when the provider has it. A provider that fails answers the reason in the
-   * error, never an empty text.
-   */
-  finish(): g.Value;
-  /** Abandons the recording: whatever the provider started is ended, and nothing is answered. */
-  cancel(): void;
+  /** The names it holds, and nothing else. `UNSUPPORTED` when [`ProviderInfo::can_list`] is false. */
+  names(spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): g.Value;
+  /** What it holds under `request`'s name: [`Held::none`] when nothing. */
+  get(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): g.Value;
+  /** Keeps a value, replacing one of that name. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false. */
+  put(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): void;
+  /** Forgets what it keeps under the name; not having it is no error. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false. */
+  forget(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): void;
 }
 
 /**
- * One recording: audio goes in a chunk at a time, text comes out.
+ * A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
+ * instance with none to describe the provider before anyone has set it up.
  *
- * A session's methods may be called from different threads, one at a time. Every session ends with [`finish`] or
- * [`cancel`], and dropping one is a cancel.
+ * A provider that runs a program (a password manager's command) starts it through the `spawner` it is handed, which is the host's:
+ * every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
+ * to start one.
  *
- * [`finish`]: SpeechSession::finish
- * [`cancel`]: SpeechSession::cancel
+ * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
+ * reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
+ * the person instead.
  */
-export declare const SpeechSession: k.DescribedKind<SpeechSession, SpeechSessionRemote, true>;
+export declare const SecretProvider: k.DescribedKind<SecretProvider, SecretProviderRemote, false>;
 
 /**
  * Starts programs where the host chooses: on this machine, on another over SSH, in a container or
@@ -303,6 +266,98 @@ export interface SpawnedProcessRemote extends k.RemoteBase<typeof SpawnedProcess
  * Destroying it kills the whole tree, as [`kill`](Self::kill) does.
  */
 export declare const SpawnedProcess: k.DescribedKind<SpawnedProcess, SpawnedProcessRemote, true>;
+
+/**
+ * A provider of speech to text. One instance is one configuration of one provider.
+ *
+ * The `speech_provider` kind: what a provider of it implements.
+ */
+export interface SpeechProvider {
+  /** What it can do. Cheap, and the same on every call. */
+  describe(): unknown;
+  /**
+   * Starts a recording. Nothing is started for a recording it refuses: `UNSUPPORTED` (with the encodings it takes) for a
+   * format it does not read, `BAD_VALUE` for a setting that cannot be used. The provider may start a process or open a
+   * connection here, and its session ends them.
+   *
+   * `spawner` is the host's: every program a provider runs starts through it, and the provider destroys it, even when it
+   * refuses. A provider that starts no program just drops it.
+   */
+  open(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): SpeechSession | k.ObjectHandle<typeof SpeechSession>;
+}
+
+/** A caller's handle on a `speech_provider` table: a method per slot. */
+export interface SpeechProviderRemote extends k.RemoteBase<typeof SpeechProvider> {
+  /** What it can do. Cheap, and the same on every call. */
+  describe(): g.Value;
+  /**
+   * Starts a recording. Nothing is started for a recording it refuses: `UNSUPPORTED` (with the encodings it takes) for a
+   * format it does not read, `BAD_VALUE` for a setting that cannot be used. The provider may start a process or open a
+   * connection here, and its session ends them.
+   *
+   * `spawner` is the host's: every program a provider runs starts through it, and the provider destroys it, even when it
+   * refuses. A provider that starts no program just drops it.
+   */
+  open(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): k.ObjectHandle<typeof SpeechSession>;
+}
+
+/** A provider of speech to text. One instance is one configuration of one provider. */
+export declare const SpeechProvider: k.DescribedKind<SpeechProvider, SpeechProviderRemote, false>;
+
+/**
+ * One recording: audio goes in a chunk at a time, text comes out.
+ *
+ * A session's methods may be called from different threads, one at a time. Every session ends with [`finish`] or
+ * [`cancel`], and dropping one is a cancel.
+ *
+ * [`finish`]: SpeechSession::finish
+ * [`cancel`]: SpeechSession::cancel
+ *
+ * The `speech_session` kind: what an object of it implements.
+ */
+export interface SpeechSession {
+  /**
+   * Takes the next chunk, in order, in the format the recording opened with. It returns when the provider has taken the
+   * chunk, so a provider that cannot keep up slows the caller down rather than growing a queue. The chunk is borrowed
+   * for this call.
+   */
+  push(audio: Uint8Array): unknown;
+  /**
+   * Ends the audio and answers the final text, when the provider has it. A provider that fails answers the reason in the
+   * error, never an empty text.
+   */
+  finish(): unknown;
+  /** Abandons the recording: whatever the provider started is ended, and nothing is answered. */
+  cancel(): void;
+}
+
+/** A caller's handle on a `speech_session` table or object: a method per slot. */
+export interface SpeechSessionRemote extends k.RemoteBase<typeof SpeechSession> {
+  /**
+   * Takes the next chunk, in order, in the format the recording opened with. It returns when the provider has taken the
+   * chunk, so a provider that cannot keep up slows the caller down rather than growing a queue. The chunk is borrowed
+   * for this call.
+   */
+  push(audio: Uint8Array | ArrayBuffer | ArrayBufferView): g.Value;
+  /**
+   * Ends the audio and answers the final text, when the provider has it. A provider that fails answers the reason in the
+   * error, never an empty text.
+   */
+  finish(): g.Value;
+  /** Abandons the recording: whatever the provider started is ended, and nothing is answered. */
+  cancel(): void;
+}
+
+/**
+ * One recording: audio goes in a chunk at a time, text comes out.
+ *
+ * A session's methods may be called from different threads, one at a time. Every session ends with [`finish`] or
+ * [`cancel`], and dropping one is a cancel.
+ *
+ * [`finish`]: SpeechSession::finish
+ * [`cancel`]: SpeechSession::cancel
+ */
+export declare const SpeechSession: k.DescribedKind<SpeechSession, SpeechSessionRemote, true>;
 
 /**
  * A provider of text to speech. One instance is one configuration of one provider.

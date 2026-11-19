@@ -132,3 +132,90 @@ def test_the_kinds_module_is_what_the_descriptions_write() -> None:
 
 def test_every_form_helper_is_exported() -> None:
     assert set(forms.__all__) <= set(dir(forms))
+
+
+class Memory(sdk.SystemStoreSecretProvider):
+    title = "Memory"
+
+    def __init__(self) -> None:
+        self.cells: dict = {}
+
+    def read(self, key):  # type: ignore[no-untyped-def]
+        return self.cells.get(key)
+
+    def write(self, key, text):  # type: ignore[no-untyped-def]
+        self.cells[key] = text
+
+    def remove(self, key):  # type: ignore[no-untyped-def]
+        self.cells.pop(key, None)
+
+
+def test_a_secret_provider_answers_its_description_from_its_class_attributes() -> None:
+    class Vault(sdk.SecretProvider):
+        title = "Vault"
+        can_list = True
+
+        def get(self, request, spawner):  # type: ignore[no-untyped-def]
+            return sdk.Held("v", expires_in=30).to_data()
+
+    assert Vault().describe() == {"title": "Vault", "can_store": False, "can_list": True, "needs_person": False}
+    assert Vault().get({"name": "n"}, None) == {"value": "v", "expires_in": 30}
+    assert provide.library("vault", "1", providers=[Vault]).kinds == ("secret_provider",)
+
+
+def test_a_secret_provider_refuses_what_it_does_not_say_it_can_do() -> None:
+    class Vault(sdk.SecretProvider):
+        title = "Vault"
+
+        def get(self, request, spawner):  # type: ignore[no-untyped-def]
+            return sdk.Held().to_data()
+
+    from guatiao.errors import Unsupported
+
+    for call in (lambda: Vault().names(None), lambda: Vault().put({"name": "n", "value": "v"}, None), lambda: Vault().forget({"name": "n"}, None)):
+        with pytest.raises(Unsupported):
+            call()
+
+
+def test_a_secret_provider_that_leaves_get_in_place_is_refused_at_creation() -> None:
+    with pytest.raises(TypeError, match="Mute does not implement get"):
+
+        class Mute(sdk.SecretProvider):
+            title = "Mute"
+
+
+def test_the_form_provider_holds_nothing_and_needs_the_person() -> None:
+    from guatiao.errors import Unsupported
+
+    form = sdk.FormSecretProvider()
+    assert form.describe()["needs_person"] is True
+    assert form.get({"name": "token"}, None) == {}
+    with pytest.raises(Unsupported):
+        form.put({"name": "token", "value": "v"}, None)
+
+
+def test_a_request_names_one_secret_checked_as_the_kind_says() -> None:
+    from guatiao.errors import BadValue
+
+    assert sdk.name_of({"name": "github_token"}) == "github_token"
+    for bad in ({}, {"name": ""}, {"name": "a\nb"}, {"name": "x" * 257}, {"name": "n", "extra": 1}, {"name": 1}):
+        with pytest.raises(BadValue):
+            sdk.name_of(bad)
+    assert sdk.keeping_of({"name": "n", "value": "v"}) == ("n", "v")
+    with pytest.raises(BadValue):
+        sdk.keeping_of({"name": "n", "value": "v" * (64 * 1024 + 1)})
+
+
+def test_a_store_provider_keeps_secrets_with_an_index_of_their_names() -> None:
+    store = Memory()
+    assert store.describe()["can_store"] is True and store.describe()["can_list"] is True
+    store.put({"name": "b", "value": "2"}, None)
+    store.put({"name": "a", "value": "1"}, None)
+    store.put({"name": "a", "value": "3"}, None)
+    assert store.names(None) == {"names": ["a", "b"]}
+    assert store.get({"name": "a"}, None) == {"value": "3"}
+    assert store.get({"name": "missing"}, None) == {}
+    store.forget({"name": "a"}, None)
+    store.forget({"name": "a"}, None)
+    assert store.names(None) == {"names": ["b"]}
+    assert "s:a" not in store.cells
