@@ -527,14 +527,18 @@ fn no_bus(_: &str) -> Result<(), StoreError> {
     ))
 }
 
+/// The configuration a host with `text` for canoa.cfg has.
+fn config_of(text: &str) -> crate::config::Config {
+    crate::config::Config::from_str_in(text, &std::env::temp_dir()).expect("canoa.cfg parses")
+}
+
 #[test]
 fn auto_keeps_accounts_in_sealed_files_and_says_why_when_the_store_does_not_answer() {
     let dir = Dir::new();
-    let accounts =
-        Accounts::open_probing(AccountStore::Auto, &dir.0, &no_bus).expect("opens on files");
+    let accounts = Accounts::open_probing(&config_of(""), &dir.0, &no_bus).expect("opens on files");
     let note = accounts.note().expect("a note");
     assert!(
-        note.starts_with("non-default: host.account_store is auto and "),
+        note.starts_with("non-default: [secrets] accounts is auto and "),
         "{note}"
     );
     assert!(note.contains("no session bus"), "{note}");
@@ -543,53 +547,145 @@ fn auto_keeps_accounts_in_sealed_files_and_says_why_when_the_store_does_not_answ
         accounts.load("one").expect("reads").expect("held").revision,
         3
     );
-    assert!(holds_files_in(&dir.0));
+    assert!(holds_secret_files_in(&dir.0));
+    assert!(!holds_files_in(&dir.0), "the earlier folder is not written");
 }
 
 #[test]
 fn auto_uses_the_operating_systems_store_when_it_answers() {
     let dir = Dir::new();
-    let accounts = Accounts::open_probing(AccountStore::Auto, &dir.0, &|_| Ok(())).expect("opens");
+    let accounts = Accounts::open_probing(&config_of(""), &dir.0, &|_| Ok(())).expect("opens");
     assert!(accounts.note().is_none());
-    assert!(accounts.store.describe().contains("operating system"));
+    // Nothing is written to the operating system's store: the choice is what is checked.
+    assert_eq!(accounts.store.describe(), "a secret provider's store");
 }
 
 #[test]
-fn a_home_whose_accounts_are_in_files_stays_on_files_though_the_store_answers() {
+fn accounts_kept_before_the_move_are_moved_into_the_provider_when_they_are_first_read_and_keep_working()
+ {
     let dir = Dir::new();
-    let first = Accounts::open_probing(AccountStore::Auto, &dir.0, &no_bus).expect("opens");
-    first.save("one", &a_record()).expect("saved");
-    drop(first);
-    let probed = std::cell::Cell::new(false);
-    let again = Accounts::open_probing(AccountStore::Auto, &dir.0, &|_| {
-        probed.set(true);
-        Ok(())
-    })
+    // An earlier host's sealed file in the accounts folder.
+    let earlier = FileStore::new(dir.0.join("accounts"));
+    let mut record = a_record();
+    record
+        .credentials
+        .insert("TOKEN".to_owned(), "an-earlier-secret-zq9".to_owned());
+    earlier
+        .put("one", &serde_json::to_vec(&record).expect("a record"))
+        .expect("kept by the earlier host");
+    assert!(holds_files_in(&dir.0));
+    let accounts = Accounts::open_probing(
+        &config_of("[secrets]\naccounts = \"file\"\n"),
+        &dir.0,
+        &no_bus,
+    )
     .expect("opens");
-    assert!(!probed.get(), "the store was not asked");
-    assert!(
-        again
-            .note()
-            .expect("a note")
-            .contains("already kept in files")
+    let read = accounts.load("one").expect("reads").expect("still held");
+    assert_eq!(read.revision, 3);
+    assert_eq!(
+        read.credentials.get("TOKEN").map(String::as_str),
+        Some("an-earlier-secret-zq9")
     );
-    assert_eq!(again.load("one").expect("reads").expect("held").revision, 3);
+    assert!(!holds_files_in(&dir.0), "the earlier copy is gone");
+    assert!(holds_secret_files_in(&dir.0), "the provider holds it now");
+    // It is read from the provider from now on, and is no more where it was.
+    assert!(earlier.get("one").expect("asks").is_none());
+    assert_eq!(
+        accounts.load("one").expect("reads").expect("held").revision,
+        3
+    );
+    // Removing an account clears the provider and any place that still held it.
+    earlier
+        .put("two", &serde_json::to_vec(&a_record()).expect("a record"))
+        .expect("another");
+    accounts.forget_credentials("one").expect("forgotten");
+    accounts.forget_credentials("two").expect("forgotten");
+    assert!(accounts.load("one").expect("reads").is_none());
+    assert!(accounts.load("two").expect("reads").is_none());
+    assert!(earlier.get("two").expect("asks").is_none());
 }
 
 #[test]
-fn an_explicit_file_choice_is_noted_and_an_explicit_os_choice_never_falls_back() {
+fn an_explicit_file_choice_is_noted_and_an_entry_the_person_made_is_not() {
     let dir = Dir::new();
-    let files = Accounts::open_probing(AccountStore::File, &dir.0, &no_bus).expect("opens");
+    let files = Accounts::open_probing(
+        &config_of("[secrets]\naccounts = \"file\"\n"),
+        &dir.0,
+        &no_bus,
+    )
+    .expect("opens");
     assert!(
         files
             .note()
             .expect("a note")
-            .contains("account_store is file")
+            .contains("[secrets] accounts is file")
     );
     let other = Dir::new();
-    let os = Accounts::open_probing(AccountStore::Os, &other.0, &no_bus).expect("opens");
-    assert!(os.note().is_none());
-    assert!(!holds_files_in(&other.0));
+    let folder = other.0.join("mine");
+    let text = format!(
+        "[secrets]\naccounts = \"mine\"\n[secrets.providers.mine]\nprovider = \"file\"\ndirectory = {:?}\n",
+        folder.to_string_lossy().replace('\\', "/")
+    );
+    let chosen = Accounts::open_probing(&config_of(&text), &other.0, &no_bus).expect("opens");
+    assert!(chosen.note().is_none());
+    chosen.save("one", &a_record()).expect("saved");
+    assert!(store::holds_files(&folder), "it rests where the entry says");
+    assert!(!holds_secret_files_in(&other.0));
+}
+
+/// An earlier host's record in the operating system's store, under the service of this home alone, is moved the same way. The entry is
+/// made for the test, under a service nothing else uses, and is gone when it ends.
+#[test]
+fn an_account_the_operating_systems_store_held_under_the_homes_own_service_is_moved_too() {
+    let dir = Dir::new();
+    let earlier = KeyringStore::new(store::service_for(&dir.0));
+    let mut record = a_record();
+    record
+        .credentials
+        .insert("TOKEN".to_owned(), "an-os-secret-zq9".to_owned());
+    if earlier
+        .put("one", &serde_json::to_vec(&record).expect("a record"))
+        .is_err()
+    {
+        // No credential store here (a container with no session bus): the sealed files above are the test.
+        eprintln!("NOT RUN: the operating system's store does not answer here");
+        return;
+    }
+    let accounts = Accounts::open_probing(
+        &config_of("[secrets]\naccounts = \"file\"\n"),
+        &dir.0,
+        &no_bus,
+    )
+    .expect("opens");
+    let read = accounts.load("one").expect("reads").expect("still held");
+    assert_eq!(
+        read.credentials.get("TOKEN").map(String::as_str),
+        Some("an-os-secret-zq9")
+    );
+    assert!(
+        earlier.get("one").expect("asks").is_none(),
+        "the earlier copy is gone"
+    );
+    assert!(holds_secret_files_in(&dir.0));
+    accounts.forget_credentials("one").expect("forgotten");
+}
+
+#[test]
+fn an_entry_that_keeps_nothing_it_is_given_cannot_hold_the_accounts() {
+    let dir = Dir::new();
+    let refused = Accounts::open_probing(
+        &config_of("[secrets]\naccounts = \"form\"\n"),
+        &dir.0,
+        &no_bus,
+    )
+    .and_then(|accounts| accounts.save("one", &a_record()));
+    assert!(refused.is_err());
+    let unknown = Accounts::open_probing(
+        &config_of("[secrets]\naccounts = \"ghost\"\n"),
+        &dir.0,
+        &no_bus,
+    );
+    assert!(unknown.is_err());
 }
 
 #[test]
@@ -609,6 +705,11 @@ fn an_unreachable_os_store_names_auto_and_file() {
 
 fn holds_files_in(home: &std::path::Path) -> bool {
     store::holds_files(&home.join("accounts"))
+}
+
+/// Whether the home's folder for sealed secrets holds one.
+fn holds_secret_files_in(home: &std::path::Path) -> bool {
+    store::holds_files(&home.join("secrets"))
 }
 
 #[test]

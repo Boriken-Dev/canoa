@@ -357,8 +357,7 @@ pub(crate) fn inputs_of(
 }
 
 pub(crate) fn accounts_of(cfg: Cfg<'_>) -> Result<Arc<Accounts>, Failed> {
-    Accounts::open(cfg.config.account_store, cfg.home.dir())
-        .map_err(|error| Failed::run(error.to_string()))
+    Accounts::open(cfg.config, cfg.home.dir()).map_err(|error| Failed::run(error.to_string()))
 }
 
 fn state_of(accounts: &Accounts, account: &AccountConfig) -> (String, u64, Option<String>) {

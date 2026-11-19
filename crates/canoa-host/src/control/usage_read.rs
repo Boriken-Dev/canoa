@@ -42,7 +42,7 @@ pub(super) fn call(
     let row = if let Some((_, held)) = held {
         held
     } else {
-        let store = crate::accounts::Accounts::open(config.account_store, accounts.home_dir())
+        let store = crate::accounts::Accounts::open(&config, accounts.home_dir())
             .map_err(|error| (REFUSED, error.to_string()))?;
         let row = crate::options::usage_of(&config, name, &store).map_err(|why| (REFUSED, why))?;
         if let Ok(mut held) = ASKED.lock() {

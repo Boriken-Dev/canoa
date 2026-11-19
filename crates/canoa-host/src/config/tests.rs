@@ -2187,23 +2187,15 @@ fn host_shell_is_a_program_name_and_defaults_to_the_persons_own() {
 }
 
 #[test]
-fn account_store_is_auto_unless_the_file_says_otherwise() {
-    let store = |text: &str| parse(text).expect("parses").account_store;
-    assert_eq!(store(""), AccountStore::Auto);
+fn the_secrets_table_is_carried_for_who_keeps_the_accounts_and_the_old_account_store_key_is_gone() {
+    assert_eq!(parse("").expect("parses").secrets, None);
+    let config = parse("[secrets]\naccounts = \"file\"\n").expect("parses");
     assert_eq!(
-        store("[host]\naccount_store = \"auto\"\n"),
-        AccountStore::Auto
+        config.secrets,
+        Some(serde_json::json!({"accounts": "file"}))
     );
-    assert_eq!(store("[host]\naccount_store = \"os\"\n"), AccountStore::Os);
-    assert_eq!(
-        store("[host]\naccount_store = \"file\"\n"),
-        AccountStore::File
-    );
-    let refused = parse("[host]\naccount_store = \"vault\"\n").expect_err("refused");
-    assert!(
-        refused.to_string().contains("auto, os or file"),
-        "{refused}"
-    );
+    let refused = parse("[host]\naccount_store = \"file\"\n").expect_err("refused");
+    assert!(refused.to_string().contains("does not know"), "{refused}");
 }
 
 #[test]

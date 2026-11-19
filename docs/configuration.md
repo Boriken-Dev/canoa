@@ -875,6 +875,7 @@ default = "form"          # who answers a name nothing else names
 store = "system"          # where Remember keeps it; "none" takes the choice away
 keep = "session"          # what the form offers first
 max_wait = 240            # the most seconds an agent's question waits for you (never more than the question lasts)
+accounts = "auto"         # who keeps the credentials of your accounts and your mail passwords: the system store when it answers, else sealed files, or a setup of yours that keeps what it is given
 
 [secrets.names]
 github_token = "work"     # this name is answered by the entry below
@@ -907,6 +908,8 @@ The vault is never unlocked for you: until the key is given, a request for a nam
 The **Secrets** section of the app lists what Canoa holds: each secret's provider and name, its value hidden until you press Show, and how long it is kept. Forget takes one out (of the system store too, when it was kept there), and Set a secret asks for a value in a form only the app and the host can read.
 
 An agent can say how long it can wait for your answer; Canoa never waits longer than `max_wait`, and when you are not connected at all it tells the agent so at once instead of waiting. A question nobody answered in time disappears from your screen.
+
+The credentials of your agents' accounts and your mail passwords are kept the same way, as secrets named `accounts/…` in the provider `accounts` names, so they are in the Secrets section too and can be kept in any setup that keeps what it is given. A host that kept them before (in the operating system's store under its own name, or in sealed files) moves each account into the new place the first time it is used, and takes the old copy away only once the new one reads back the same. `[host] account_store` is gone: `account_store = "file"` is now `accounts = "file"` in `[secrets]`.
 
 A value that comes with an end of its own (a token that expires) is kept no longer than that end, whatever you chose. Nothing is written to a log.
 

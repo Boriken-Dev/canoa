@@ -16,7 +16,7 @@ use super::files::{Files, UploadLimits};
 use super::speech::Speech;
 use super::speech_offers::{self, Lend};
 use super::{Caller, NOT_FOUND, REFUSED};
-use crate::config::{AccountStore, Layers};
+use crate::config::Layers;
 
 fn dir(name: &str) -> PathBuf {
     static NEXT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
@@ -88,7 +88,7 @@ fn standin(
     (base, received)
 }
 
-/// A host's home with a canoa.cfg holding `extra`, `account_store = "file"` and the accounts `accounts` lists as
+/// A host's home with a canoa.cfg holding `extra`, `[secrets] accounts = "file"` and the accounts `accounts` lists as
 /// `(name, harness, kind, extra settings)`, and a credential for the first of them when `key` names one.
 struct Home {
     root: PathBuf,
@@ -99,7 +99,7 @@ struct Home {
 fn home(name: &str, accounts: &[(&str, &str, &str, &str)], key: Option<&str>, extra: &str) -> Home {
     let root = dir(name);
     let cfg = root.join("canoa.cfg");
-    let mut text = String::from("[host]\naccount_store = \"file\"\n\n");
+    let mut text = String::from("[secrets]\naccounts = \"file\"\n\n");
     for (account, harness, kind, settings) in accounts {
         text.push_str(&format!(
             "[host.accounts.{account}]\nharness = \"{harness}\"\nkind = \"{kind}\"\nid = \"id-{account}\"\n{settings}\n"
@@ -108,7 +108,14 @@ fn home(name: &str, accounts: &[(&str, &str, &str, &str)], key: Option<&str>, ex
     text.push_str(extra);
     fs::write(&cfg, text).expect("canoa.cfg");
     if let (Some(key), Some((account, ..))) = (key, accounts.first()) {
-        let store = crate::accounts::Accounts::open(AccountStore::File, &root).expect("a store");
+        let files = crate::config::Config::from_str_in(
+            "[secrets]
+accounts = \"file\"
+",
+            &root,
+        )
+        .expect("a config");
+        let store = crate::accounts::Accounts::open(&files, &root).expect("a store");
         let mut credentials = Credentials::new();
         credentials.insert("api_key".to_owned(), key.to_owned());
         store

@@ -339,7 +339,6 @@ naming one is refused with what each side says.
 
 ```toml
 [host]
-account_store = "auto"          # the default: the operating system credential store when there is one, else sealed files; "os" or "file" to insist
 shell = "git-bash"              # the shell a terminal starts and every agent is told to use: an id `shell/list` gives (git-bash, wsl, msys2, bash, zsh, pwsh, powershell, canoa-git-bash, canoa-pwsh) or a program; absent, your own ($SHELL, else pwsh or powershell on Windows)
 
 # One agent's own shell, in place of [host] shell. Each harness is told as its documentation allows; the host's log says when one cannot be.
@@ -388,7 +387,7 @@ canoa accounts remove work                                       # forgets the s
   quoting the value. It rests in the operating system's credential store (Windows Credential Manager, macOS Keychain,
   Secret Service), and a typed key is read from the terminal without echo, never from the command line. A host with no
   such store, a Linux service with no session bus for one, keeps a file per account in the host's directory instead,
-  sealed to a key beside it, with nothing to set: `account_store = "auto"` is the default, probes the operating system's
+  sealed to a key beside it, with nothing to set: `[secrets] accounts = "auto"` is the default, probes the operating system's
   store once and falls back to files when it does not answer. That keeps a copied file closed and nothing from anyone who
   can read the directory, so the host logs it as a weakening with the reason, and `canoa accounts list` prints the same
   note. Once files hold an account, `auto` stays on files, so a store that answers later does not hide them. `"file"`

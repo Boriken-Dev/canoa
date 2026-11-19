@@ -59,9 +59,8 @@ pub(super) fn call(accounts: &Accounts, caller: &Caller, params: &Value) -> Resu
                 ..crate::options::Asking::default()
             };
             if let Some(account) = account {
-                let store =
-                    crate::accounts::Accounts::open(config.account_store, accounts.home_dir())
-                        .map_err(|error| (REFUSED, error.to_string()))?;
+                let store = crate::accounts::Accounts::open(&config, accounts.home_dir())
+                    .map_err(|error| (REFUSED, error.to_string()))?;
                 asking.account = Some((account.to_owned(), store));
             }
             crate::options::entry_with(&config, name, &asking)

@@ -1417,6 +1417,9 @@ impl Serving {
             secrets::catalog::Catalog::of(config, options.state_dir.as_deref()),
             secrets::settings::source_of(options.config_file.clone()),
         );
+        if let Some(home) = &options.state_dir {
+            secrets.vault().set_home(home);
+        }
         // Turning the key change off is every method's to do: WebCrypto has none and takes only `false`, and ends a session at
         // its limit.
         let mut builder =
@@ -1454,11 +1457,11 @@ impl Serving {
                     what: "accounts need the host's directory to keep their state in".to_owned(),
                 });
             };
-            Some(Accounts::open(config.account_store, home).map_err(|error| {
-                ServeError::Accounts {
+            Some(
+                Accounts::open(config, home).map_err(|error| ServeError::Accounts {
                     what: error.to_string(),
-                }
-            })?)
+                })?,
+            )
         };
         // The mailboxes the mail tools use, which the control channel's `mail/*` methods change while sessions run.
         let mail_boxes = Arc::new(crate::mail::Mailboxes::from_config(

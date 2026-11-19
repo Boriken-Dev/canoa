@@ -40,7 +40,7 @@ impl Fixture {
         std::fs::write(
             &config,
             format!(
-                "[host]\naccount_store = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\naccount_settings = {{ renew_poll_ms = 100 }}\n",
+                "[secrets]\naccounts = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\naccount_settings = {{ renew_poll_ms = 100 }}\n",
                 quoted(&claude.to_string_lossy())
             ),
         )
@@ -739,7 +739,7 @@ fn an_entrys_own_setting_sources_win_over_that_default() {
     assert!(!sources.is_empty());
 }
 
-/// A host with no session bus keeps an account in sealed files by itself, with `account_store` left at its default.
+/// A host with no session bus keeps an account in sealed files by itself, with `[secrets] accounts` left at its default.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_host_with_no_session_bus_signs_an_account_in_and_keeps_it_in_files() {
@@ -748,14 +748,14 @@ fn a_host_with_no_session_bus_signs_an_account_in_and_keeps_it_in_files() {
     std::fs::write(
         &fixture.config,
         cfg.replace(
-            "[host]
-account_store = \"file\"
+            "[secrets]
+accounts = \"file\"
 ",
             "[host]
 ",
         ),
     )
-    .expect("canoa.cfg without account_store");
+    .expect("canoa.cfg without accounts");
     let added = fixture.canoa_on(
         &[
             "accounts",
@@ -774,7 +774,7 @@ account_store = \"file\"
     let out = text(&listed.stdout);
     assert!(out.contains("work claude claude-login signed in"), "{out}");
     assert!(
-        out.contains("non-default: host.account_store is auto and "),
+        out.contains("non-default: [secrets] accounts is auto and "),
         "{out}"
     );
     let sealed = std::fs::read_dir(fixture.home().join("accounts"))

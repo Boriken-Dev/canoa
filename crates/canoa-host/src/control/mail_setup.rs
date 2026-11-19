@@ -94,8 +94,7 @@ impl MailSetup {
     }
 
     fn store(&self, config: &Config) -> Result<Arc<Accounts>, Refusal> {
-        Accounts::open(config.account_store, &self.home)
-            .map_err(|error| (REFUSED, error.to_string()))
+        Accounts::open(config, &self.home).map_err(|error| (REFUSED, error.to_string()))
     }
 
     /// The mail tools' mailboxes, made again from what canoa.cfg names now.

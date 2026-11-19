@@ -61,6 +61,72 @@ fn failed(what: &str, error: impl fmt::Display) -> StoreError {
     StoreError(format!("{what}: {error}"))
 }
 
+/// A store that took over from others: what it lacks it looks for in the stores it replaced, and moves what it finds there into
+/// itself, so an account kept before the move still works, and is no longer where it was. A removal clears every place.
+pub(crate) struct Migrating {
+    current: Box<dyn SecretStore>,
+    legacy: Vec<Box<dyn SecretStore>>,
+}
+
+impl fmt::Debug for Migrating {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Migrating")
+            .field("current", &self.current)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Migrating {
+    /// `current`, with the `legacy` stores it replaced, in the order they are looked in.
+    pub(crate) fn new(current: Box<dyn SecretStore>, legacy: Vec<Box<dyn SecretStore>>) -> Self {
+        Self { current, legacy }
+    }
+}
+
+impl SecretStore for Migrating {
+    fn describe(&self) -> &'static str {
+        self.current.describe()
+    }
+
+    fn get(&self, id: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        if let Some(found) = self.current.get(id)? {
+            return Ok(Some(found));
+        }
+        for old in &self.legacy {
+            // A store that cannot answer (no credential store here) or holds a file that is not ours has nothing to move.
+            let Ok(Some(mut bytes)) = old.get(id) else {
+                continue;
+            };
+            self.current.put(id, &bytes)?;
+            // Removed from the old place only once the new one gives back the same bytes.
+            let mut again = self.current.get(id)?.unwrap_or_default();
+            let same = again == bytes;
+            again.zeroize();
+            if !same {
+                bytes.zeroize();
+                return Err(StoreError(
+                    "an account moved to its new store did not read back the same: the old copy is kept".into(),
+                ));
+            }
+            let _ = old.remove(id);
+            return Ok(Some(bytes));
+        }
+        Ok(None)
+    }
+
+    fn put(&self, id: &str, bytes: &[u8]) -> Result<(), StoreError> {
+        self.current.put(id, bytes)
+    }
+
+    fn remove(&self, id: &str) -> Result<(), StoreError> {
+        self.current.remove(id)?;
+        for old in &self.legacy {
+            let _ = old.remove(id);
+        }
+        Ok(())
+    }
+}
+
 /// Bytes kept by account id.
 pub(crate) trait SecretStore: Send + Sync + fmt::Debug {
     /// What the store is called in a message.
@@ -160,6 +226,7 @@ pub(crate) fn probe(service: &str) -> Result<(), StoreError> {
 }
 
 /// Whether `dir` holds an account the file store sealed.
+#[cfg(test)]
 pub(crate) fn holds_files(dir: &Path) -> bool {
     fs::read_dir(dir).is_ok_and(|entries| {
         entries
@@ -249,7 +316,7 @@ impl KeyringStore {
     pub(crate) fn entry(&self, user: &str) -> Result<Entry, StoreError> {
         use_platform_store().map_err(|StoreError(why)| {
             StoreError(format!(
-                "{why}; [host] account_store = \"auto\" uses sealed files when there is none, and \"file\" always does"
+                "{why}; [secrets] accounts = \"auto\" uses sealed files when there is none, and \"file\" always does"
             ))
         })?;
         self.entry_raw(user)

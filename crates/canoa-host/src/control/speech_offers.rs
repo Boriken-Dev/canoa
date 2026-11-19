@@ -187,11 +187,10 @@ impl<'a> Lend<'a> {
         self.usable(&config, name)?;
         let (_, home) = self.accounts.ok_or("this host keeps no accounts")?;
         let account = &config.accounts[name];
-        let store =
-            crate::accounts::Accounts::open(config.account_store, home).map_err(|error| {
-                tracing::warn!("the account store could not be opened for speech: {error}");
-                "the host's account store could not be used".to_owned()
-            })?;
+        let store = crate::accounts::Accounts::open(&config, home).map_err(|error| {
+            tracing::warn!("the account store could not be opened for speech: {error}");
+            "the host's account store could not be used".to_owned()
+        })?;
         let record = store
             .load(&account.id)
             .map_err(|error| {

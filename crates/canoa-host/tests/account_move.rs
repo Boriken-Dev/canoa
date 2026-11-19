@@ -158,7 +158,7 @@ fn a_conversation_follows_the_person_to_another_account_by_the_providers_own_exp
     std::fs::write(
         scratch.0.join("canoa.cfg"),
         format!(
-            "[host]\naccount_store = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\nlisten = \"127.0.0.1:0\"\n",
+            "[secrets]\naccounts = \"file\"\n\n[host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\nlisten = \"127.0.0.1:0\"\n",
             quoted(&claude.to_string_lossy())
         ),
     )

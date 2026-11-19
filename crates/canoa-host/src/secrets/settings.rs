@@ -3,6 +3,7 @@
 //! ```toml
 //! [secrets]
 //! default = "form"           # the entry that answers a name no `names` line gives (default `form`)
+//! accounts = "auto"          # who keeps the accounts' credentials and mail passwords: auto, or an entry that keeps (default auto)
 //! store = "system"           # the entry "remember" keeps a typed secret in (default `system`)
 //! keep = "session"           # what the form offers first: once, session, close, 15m, 1h, 8h, 1d
 //! max_wait = 240             # the most seconds a request waits for the person, whatever the agent asks (default 240, and never
@@ -31,7 +32,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
-use super::builtin::{FORM, SYSTEM};
+use super::builtin::{FILE, FORM, SYSTEM};
 
 /// How long a secret is kept in memory, or where.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,8 +137,10 @@ pub(crate) struct Settings {
     pub(crate) max_wait: u64,
     /// The entry that answers each name given a line.
     pub(crate) names: BTreeMap<String, String>,
-    /// The entries, `form` and `system` included.
+    /// The entries, `form`, `system` and `file` included.
     pub(crate) entries: BTreeMap<String, Entry>,
+    /// Who keeps the accounts' credentials and the mail accounts' passwords: `auto`, or an entry that keeps what it is given.
+    pub(crate) accounts: String,
 }
 
 impl Default for Settings {
@@ -154,11 +157,12 @@ fn defaults() -> Settings {
         max_wait: DEFAULT_WAIT,
         names: BTreeMap::new(),
         entries: implicit(),
+        accounts: AUTO.to_owned(),
     }
 }
 
 fn implicit() -> BTreeMap<String, Entry> {
-    [FORM, SYSTEM]
+    [FORM, SYSTEM, FILE]
         .into_iter()
         .map(|id| {
             (
@@ -173,6 +177,9 @@ fn implicit() -> BTreeMap<String, Entry> {
         })
         .collect()
 }
+
+/// What `[secrets] accounts` says when the person names nobody: the operating system's store when it answers, else sealed files.
+pub(crate) const AUTO: &str = "auto";
 
 /// How many seconds a request waits for the person unless `[secrets] max_wait` says otherwise.
 pub(crate) const DEFAULT_WAIT: u64 = 240;
@@ -207,6 +214,7 @@ impl Settings {
                         .filter(|keep| *keep != Keep::Store)
                         .ok_or("[secrets] keep is once, session, close, 15m, 1h, 8h, 1d or ttl:SECONDS")?;
                 }
+                "accounts" => settings.accounts = text(value, "accounts")?,
                 "max_wait" => {
                     settings.max_wait = value
                         .as_u64()
@@ -253,6 +261,12 @@ impl Settings {
                     "{what} names {name}, which is no provider of [secrets.providers]"
                 ));
             }
+        }
+        if settings.accounts != AUTO && !settings.entries.contains_key(&settings.accounts) {
+            return Err(format!(
+                "[secrets] accounts names {}, which is no provider of [secrets.providers]",
+                settings.accounts
+            ));
         }
         for (entry_name, entry) in &settings.entries {
             for (setting, taken) in &entry.from {

@@ -53,8 +53,9 @@ pub struct Config {
     pub protected_paths: Option<Vec<String>>,
     /// `[host.accounts]`, by name, in the file's order: the accounts a harness entry may offer.
     pub accounts: IndexMap<String, AccountConfig>,
-    /// Where the accounts' credentials are kept: `[host] account_store`.
-    pub account_store: AccountStore,
+    /// `[secrets]` as the file has it, which the secret providers read: who keeps the accounts' credentials and the mail accounts'
+    /// passwords is among it (`accounts`).
+    pub secrets: Option<serde_json::Value>,
     /// `[host] shell`: the program a terminal starts, with no arguments; `None` leaves it to the person's own (`$SHELL`, else
     /// `pwsh` or `powershell` on Windows).
     pub shell: Option<String>,
@@ -887,21 +888,6 @@ struct RawStore {
     tools: Option<bool>,
 }
 
-/// Where the credentials of `[host.accounts]` are kept, never in canoa.cfg.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum AccountStore {
-    /// The operating system's credential store when it answers, sealed files when there is none (a Linux service with no
-    /// session bus), and files for good once they hold an account; the host says which and why.
-    #[default]
-    Auto,
-    /// Only the operating system's credential store (Windows Credential Manager, macOS Keychain, Secret Service); a host
-    /// without one cannot keep an account.
-    Os,
-    /// A file per account in the host's home, sealed to a key beside it: a weakening the host logs.
-    File,
-}
-
 /// One `[host.accounts.NAME]`: which login an entry may run a session on. It holds no credential.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -1592,6 +1578,9 @@ struct RawFile {
     /// `[profiles.NAME]`: the named presets of a session's own values.
     #[serde(default)]
     profiles: IndexMap<String, toml::Value>,
+    /// `[secrets]`: the secret providers' table, which they read; the host keeps it for who keeps the accounts' credentials.
+    #[serde(default)]
+    secrets: Option<toml::Table>,
 }
 
 /// `[permissions]`: the app reads the modes and the rules, so only the key the host passes on is named.
@@ -1625,7 +1614,6 @@ struct RawHost {
     profiles: IndexMap<String, toml::Table>,
     #[serde(default)]
     accounts: IndexMap<String, RawAccount>,
-    account_store: Option<String>,
     shell: Option<String>,
     web: Option<RawWeb>,
     control: Option<RawControl>,
@@ -2257,6 +2245,9 @@ impl Config {
     }
 
     fn from_raw(raw: RawFile, base: &Path) -> Result<Self, ConfigError> {
+        let secrets = raw
+            .secrets
+            .and_then(|table| serde_json::to_value(table).ok());
         let limit_phrases = raw.usage.and_then(|usage| usage.limit_phrases);
         let protected_paths = raw
             .permissions
@@ -2295,6 +2286,7 @@ impl Config {
                 remote_agents,
                 local_profiles,
                 skill_pins,
+                secrets,
                 ..Self::default()
             });
         };
@@ -2316,17 +2308,6 @@ impl Config {
             profile.protected.clone_from(&protected_paths);
             profiles.insert(name, profile);
         }
-        let account_store = match host.account_store.as_deref() {
-            None | Some("auto") => AccountStore::Auto,
-            Some("os") => AccountStore::Os,
-            Some("file") => AccountStore::File,
-            Some(_) => {
-                return Err(ConfigError::Invalid {
-                    entry: None,
-                    what: "account_store is auto, os or file".to_owned(),
-                });
-            }
-        };
         if host.shell.as_deref().is_some_and(|shell| {
             shell.is_empty() || shell.contains(' ') || shell.chars().any(char::is_control)
         }) {
@@ -2826,7 +2807,7 @@ impl Config {
             limit_phrases,
             protected_paths,
             accounts,
-            account_store,
+            secrets,
             shell: host.shell,
             local_agents,
             remote_agents,

@@ -35,7 +35,7 @@ impl Dir {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(&dir).expect("a directory");
-        fs::write(dir.join("canoa.cfg"), "[host]\naccount_store = \"file\"\n").expect("writes");
+        fs::write(dir.join("canoa.cfg"), "[secrets]\naccounts = \"file\"\n").expect("writes");
         Self(dir)
     }
 

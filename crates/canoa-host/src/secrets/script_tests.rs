@@ -270,8 +270,8 @@ fn the_bundled_library_is_offered_as_a_built_in_provider_with_the_settings_it_de
     let catalog = Catalog::built_in_in(&home.0);
     let listed = catalog.list();
     let ids: Vec<&str> = listed.iter().map(|each| each.id.as_str()).collect();
-    assert_eq!(ids, ["form", "system", "bitwarden"], "{ids:?}");
-    let bitwarden = &listed[2];
+    assert_eq!(ids, ["file", "form", "system", "bitwarden"], "{ids:?}");
+    let bitwarden = &listed[3];
     assert_eq!(bitwarden.origin, "built-in");
     assert_eq!(bitwarden.info.title, "Bitwarden");
     assert!(bitwarden.info.can_list && !bitwarden.info.can_store && !bitwarden.info.needs_person);

@@ -481,7 +481,7 @@ fn accounts_are_listed_and_a_sign_in_that_needs_a_typed_secret_is_refused_as_a_j
     let (config, home) = (scratch.0.join("canoa.cfg"), scratch.0.join("home"));
     std::fs::write(
         &config,
-        "[host]\naccount_store = \"file\"\n[host.agents.c]\nharness = \"claude\"\nexecutable = \"no-such-claude-for-the-test\"\n[host.accounts.work]\nharness = \"claude\"\nkind = \"harness-login\"\nid = \"0b7d\"\n",
+        "[secrets]\naccounts = \"file\"\n[host.agents.c]\nharness = \"claude\"\nexecutable = \"no-such-claude-for-the-test\"\n[host.accounts.work]\nharness = \"claude\"\nkind = \"harness-login\"\nid = \"0b7d\"\n",
     )
     .expect("written");
     let listed = to_end(start(&json!({

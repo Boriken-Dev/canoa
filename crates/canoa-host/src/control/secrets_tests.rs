@@ -186,8 +186,14 @@ fn the_list_names_where_each_secret_is_kept_and_what_it_is_called_and_never_what
         .iter()
         .filter_map(|provider| provider["id"].as_str())
         .collect();
-    assert_eq!(ids, ["form", "system"]);
-    assert_eq!(providers["result"]["entries"][0]["name"], "form");
+    assert_eq!(ids, ["file", "form", "system"]);
+    let names: Vec<&str> = providers["result"]["entries"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .filter_map(|entry| entry["name"].as_str())
+        .collect();
+    assert_eq!(names, ["file", "form", "system"]);
     assert!(!providers.to_string().contains("zq9"));
 }
 

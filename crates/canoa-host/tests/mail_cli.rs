@@ -27,7 +27,7 @@ impl Fixture {
     fn new() -> Self {
         let scratch = Scratch::new();
         let config = scratch.0.join("canoa.cfg");
-        std::fs::write(&config, "[host]\naccount_store = \"file\"\n").expect("canoa.cfg");
+        std::fs::write(&config, "[secrets]\naccounts = \"file\"\n").expect("canoa.cfg");
         Self { scratch, config }
     }
 

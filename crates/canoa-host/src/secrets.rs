@@ -16,9 +16,10 @@
 )]
 
 pub(crate) mod ask;
-mod builtin;
+pub(crate) mod builtin;
 mod bundled;
 pub(crate) mod catalog;
+pub(crate) mod handle;
 mod http;
 mod layers;
 mod link;

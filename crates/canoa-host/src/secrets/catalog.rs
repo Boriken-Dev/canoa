@@ -285,11 +285,12 @@ mod tests {
         let catalog = Catalog::built_in();
         let listed = catalog.list();
         let ids: Vec<&str> = listed.iter().map(|each| each.id.as_str()).collect();
-        assert_eq!(ids, ["form", "system"]);
+        assert_eq!(ids, ["file", "form", "system"]);
         assert!(listed.iter().all(|each| each.origin == BUILT_IN));
-        let system = &listed[1];
+        let system = &listed[2];
         assert!(system.info.can_store && system.info.can_list && !system.info.needs_person);
-        assert!(listed[0].info.needs_person);
+        assert!(listed[1].info.needs_person);
+        assert!(listed[0].info.can_store && !listed[0].info.can_list);
         // The system provider's settings are a schema with a form, which an application draws without knowing the provider.
         assert!(
             system

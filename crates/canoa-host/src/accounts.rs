@@ -41,14 +41,14 @@ use coqui_acp_api::{
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize as _;
 
-use crate::config::{AccountConfig, AccountStore, Settings};
+use crate::config::{AccountConfig, Config, Settings};
 use crate::gateway::Ticket;
 use crate::provider::map_of;
 use matching::Runs;
 
 pub(crate) use gate::Gated;
 use spawner::Recording;
-use store::{FileStore, KeyringStore, SecretStore, StoreError};
+use store::{FileStore, KeyringStore, Migrating, SecretStore, StoreError};
 pub(crate) use watch::Watcher;
 
 /// The `_meta` key a client names an account under in `initialize`, and the host reports the account under in its answer.
@@ -218,54 +218,75 @@ fn io_error(path: &Path, error: &std::io::Error) -> StoreError {
 }
 
 impl Accounts {
-    /// The accounts under `home` (the directory `accounts/` of it), kept in `choice`. The file store is a weakening, and
-    /// is logged as one, and is what [`Accounts::note`] says.
+    /// The accounts under `home` (the directory `accounts/` of it), their credentials kept by the secret provider `[secrets] accounts`
+    /// names: the operating system's store when it answers and sealed files when there is none (`auto`, the default), or the entry the
+    /// person chose. What an earlier host kept in the operating system's store under the home's own service, or in sealed files in
+    /// `accounts/`, is moved into the provider the first time it is read. The sealed files are a weakening, logged as one.
     ///
     /// # Errors
     ///
-    /// The directory could not be made private to this user.
-    pub(crate) fn open(choice: AccountStore, home: &Path) -> Result<Arc<Self>, StoreError> {
-        Self::open_probing(choice, home, &store::probe)
+    /// The directory could not be made private to this user, or `[secrets]` cannot be read.
+    pub(crate) fn open(config: &Config, home: &Path) -> Result<Arc<Self>, StoreError> {
+        Self::open_probing(config, home, &|service| store::probe(service))
     }
 
     /// As [`Accounts::open`], asking `probe` whether the operating system's store answers for `auto`.
     pub(crate) fn open_probing(
-        choice: AccountStore,
+        config: &Config,
         home: &Path,
         probe: &dyn Fn(&str) -> Result<(), StoreError>,
     ) -> Result<Arc<Self>, StoreError> {
+        use crate::secrets::builtin::{FILE, SYSTEM, default_service};
+        use crate::secrets::settings::{AUTO, Settings as SecretSettings};
+
         let dir = home.join("accounts");
-        let service = store::service_for(home);
-        let (store, note): (Box<dyn SecretStore>, Option<String>) = match choice {
-            AccountStore::Os => (Box::new(KeyringStore::new(service)), None),
-            AccountStore::File => (
-                Box::new(FileStore::new(dir.clone())),
-                Some(file_note("host.account_store is file, default auto", &dir)),
-            ),
-            AccountStore::Auto => {
-                // Accounts already sealed in files stay there: the operating system's store may answer now and hold none
-                // of them.
-                let why = if store::holds_files(&dir) {
-                    Some("accounts are already kept in files".to_owned())
-                } else {
-                    probe(&service).err().map(|error| error.to_string())
-                };
-                match why {
-                    None => (Box::new(KeyringStore::new(service)), None),
-                    Some(why) => (
-                        Box::new(FileStore::new(dir.clone())),
-                        Some(file_note(
-                            &format!("host.account_store is auto and {why}"),
-                            &dir,
-                        )),
-                    ),
-                }
+        let files = home.join("secrets");
+        let settings = SecretSettings::read(config.secrets.as_ref()).map_err(StoreError)?;
+        let (entry, note) = if settings.accounts == AUTO {
+            match probe(&default_service()) {
+                Ok(()) => (SYSTEM.to_owned(), None),
+                Err(why) => (
+                    FILE.to_owned(),
+                    Some(file_note(
+                        &format!("[secrets] accounts is auto and {why}"),
+                        &files,
+                    )),
+                ),
             }
+        } else if settings.accounts == FILE {
+            (
+                FILE.to_owned(),
+                Some(file_note(
+                    "[secrets] accounts is file, default auto",
+                    &files,
+                )),
+            )
+        } else {
+            (settings.accounts.clone(), None)
         };
+        // An entry of a provider the host carries needs no library to be loaded.
+        let provider = settings
+            .entries
+            .get(&entry)
+            .map(|each| each.provider.as_str());
+        let catalog = if matches!(provider, Some(SYSTEM | FILE)) {
+            crate::secrets::catalog::Catalog::built_in()
+        } else {
+            crate::secrets::catalog::Catalog::of(config, Some(home))
+        };
+        let vault = crate::secrets::vault::Vault::standalone(catalog, config.secrets.clone(), home);
+        let service = store::service_for(home);
+        let store = Migrating::new(
+            Box::new(crate::secrets::handle::HandleStore::new(vault, entry)),
+            vec![
+                Box::new(KeyringStore::new(service)),
+                Box::new(FileStore::new(dir.clone())),
+            ],
+        );
         if let Some(note) = &note {
             tracing::info!("{note}");
         }
-        Self::with_note(dir, store, note)
+        Self::with_note(dir, Box::new(store), note)
     }
 
     /// Why the credentials rest in files, when that is not what the person asked for by default; `None` for the operating

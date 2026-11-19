@@ -1856,7 +1856,7 @@ fn options(args: &OptionsArgs, front: &dyn Front) -> Result<(), Failed> {
         };
         if let Some(account) = &args.account {
             let home = home_of(front)?;
-            let store = crate::accounts::Accounts::open(config.account_store, home.dir())
+            let store = crate::accounts::Accounts::open(&config, home.dir())
                 .map_err(|error| Failed::run(error.to_string()))?;
             asking.account = Some((account.clone(), store));
         }

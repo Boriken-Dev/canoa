@@ -12,6 +12,7 @@
 )]
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -21,7 +22,7 @@ use coqui_acp_api::guatiao::library::Object;
 use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
-use super::builtin::FORM;
+use super::builtin::{FILE, FORM};
 use super::catalog::{Catalog, Listed};
 use super::settings::{Entry, Keep, Settings};
 
@@ -95,6 +96,8 @@ pub(crate) struct Vault {
     cache: Mutex<HashMap<String, Cached>>,
     clock: Clock,
     spawners: Mutex<Spawners>,
+    /// The host's home, where an entry of sealed files with no folder of its own keeps them.
+    home: Mutex<Option<PathBuf>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -130,7 +133,25 @@ impl Vault {
             cache: Mutex::new(HashMap::new()),
             clock,
             spawners: Mutex::new(Arc::new(super::spawner::spawner)),
+            home: Mutex::new(None),
         })
+    }
+
+    /// A vault of the host's `catalog` that reads `[secrets]` from `section` (as it was when asked for), with the host's `home`: what a
+    /// kind that keeps its secrets here, and runs outside the host's serving, holds.
+    pub(crate) fn standalone(catalog: Catalog, section: Option<Value>, home: &Path) -> Arc<Self> {
+        let vault = Self::with_clock(
+            catalog,
+            Arc::new(move || Ok(section.clone())),
+            system_clock(),
+        );
+        vault.set_home(home);
+        vault
+    }
+
+    /// Tells the vault where the host's home is.
+    pub(crate) fn set_home(&self, home: &Path) {
+        *lock(&self.home) = Some(home.to_path_buf());
     }
 
     /// Hands providers `spawners` in place of this machine's: a test's stand-in for the programs they run.
@@ -304,6 +325,15 @@ impl Vault {
         depth: usize,
     ) -> Option<Arc<dyn SecretProvider>> {
         let mut config = entry.config.clone();
+        if entry.provider == FILE
+            && !config.contains_key("directory")
+            && let Some(home) = lock(&self.home).as_ref()
+        {
+            config.insert(
+                "directory".to_owned(),
+                Value::String(home.join("secrets").to_string_lossy().into_owned()),
+            );
+        }
         let allowed = catalog.secret_sourced_settings(&entry.provider);
         for (setting, taken) in &entry.from {
             if !allowed.contains(setting) {
@@ -457,6 +487,19 @@ impl Vault {
         let settings = Settings::read(Some(section))?;
         let catalog = self.catalog();
         let listed = catalog.list();
+        if settings.accounts != super::settings::AUTO {
+            let keeps = settings
+                .entries
+                .get(&settings.accounts)
+                .and_then(|entry| catalog.info(&entry.provider))
+                .is_some_and(|info| info.can_store);
+            if !keeps {
+                return Err(format!(
+                    "[secrets] accounts names {}, which keeps nothing it is given",
+                    settings.accounts
+                ));
+            }
+        }
         for (name, entry) in &settings.entries {
             if entry.provider == name.as_str() && entry.config.is_empty() && entry.from.is_empty() {
                 continue;
@@ -500,6 +543,74 @@ impl Vault {
                 .instance(&entry.provider, &entry.config)
                 .map_err(|why| format!("{name}: {why}"))?;
         }
+        Ok(())
+    }
+
+    /// The entry `entry_name` made, for a read or a write of another kind's: its provider, its settings and any secret they are taken from.
+    fn provider_of(&self, entry_name: &str) -> Result<Arc<dyn SecretProvider>, String> {
+        let settings = self.settings();
+        let entry = settings
+            .entries
+            .get(entry_name)
+            .ok_or_else(|| format!("there is no provider entry {entry_name}"))?;
+        let catalog = self.catalog();
+        self.instance(&catalog, &settings, entry, 0)
+            .ok_or_else(|| format!("the provider entry {entry_name} cannot be reached"))
+    }
+
+    /// What the entry `entry` holds under `name`, asked of the provider now and never of the cache, for a kind that keeps its secrets
+    /// here. `None` when it holds nothing; the provider's words, which hold no value, when it cannot answer.
+    ///
+    /// # Errors
+    ///
+    /// Why the provider could not be asked or could not answer.
+    pub(crate) fn get_in(
+        &self,
+        entry: &str,
+        name: &str,
+    ) -> Result<Option<Zeroizing<String>>, String> {
+        if let Some(why) = name_problem(name) {
+            return Err(why);
+        }
+        let held = self
+            .provider_of(entry)?
+            .get(Named::new(name), self.spawner())
+            .map_err(|error| error.message().to_owned())?;
+        Ok(held
+            .value
+            .map(|value| Zeroizing::new(value.expose().clone())))
+    }
+
+    /// Keeps `value` as `name` in the entry `entry`, for a kind that keeps its secrets here.
+    ///
+    /// # Errors
+    ///
+    /// Why the provider could not keep it.
+    pub(crate) fn put_in(&self, entry: &str, name: &str, value: &str) -> Result<(), String> {
+        if let Some(why) = name_problem(name) {
+            return Err(why);
+        }
+        self.provider_of(entry)?
+            .put(Keeping::new(name, value), self.spawner())
+            .map_err(|error| error.message().to_owned())?;
+        // What the cache held of that name is not what the provider holds now.
+        lock(&self.cache).remove(name);
+        Ok(())
+    }
+
+    /// Forgets `name` in the entry `entry`; not having it is no error.
+    ///
+    /// # Errors
+    ///
+    /// Why the provider could not forget it.
+    pub(crate) fn forget_in(&self, entry: &str, name: &str) -> Result<(), String> {
+        if let Some(why) = name_problem(name) {
+            return Err(why);
+        }
+        self.provider_of(entry)?
+            .forget(Named::new(name), self.spawner())
+            .map_err(|error| error.message().to_owned())?;
+        lock(&self.cache).remove(name);
         Ok(())
     }
 

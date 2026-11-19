@@ -19,15 +19,28 @@ use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
 use guatiao_intake::Form;
 
-use crate::accounts::store::{KeyringStore, SecretStore};
+use crate::accounts::store::{FileStore, KeyringStore, SecretStore};
 
 /// The id of the form provider, and of the entry that is there with no configuration.
 pub(crate) const FORM: &str = "form";
 /// The id of the system store provider, and of the entry that is there with no configuration.
 pub(crate) const SYSTEM: &str = "system";
 
+/// The id of the sealed-files provider, and of the entry that is there with no configuration.
+pub(crate) const FILE: &str = "file";
+
 /// The service the system provider keeps its entries under unless the host or the person names another.
 pub(crate) const DEFAULT_SERVICE: &str = "dev.boriken.canoa.secrets";
+
+/// [`DEFAULT_SERVICE`], except in this crate's own tests, which each process gives a service of its own so that no test reads or
+/// writes what the person keeps in the operating system's store.
+pub(crate) fn default_service() -> String {
+    if cfg!(test) {
+        format!("{DEFAULT_SERVICE}.test.{}", std::process::id())
+    } else {
+        DEFAULT_SERVICE.to_owned()
+    }
+}
 
 /// The person's form: it holds nothing, so a secret it is to answer is typed in the app, which the host asks itself.
 #[derive(Default, Provider)]
@@ -97,7 +110,7 @@ impl From<SystemSettings> for SystemSecrets {
         let service = settings
             .service
             .filter(|service| !service.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_SERVICE.to_owned());
+            .unwrap_or_else(default_service);
         Self::over(Box::new(KeyringStore::new(service)))
     }
 }
@@ -193,10 +206,98 @@ impl SecretProvider for SystemSecrets {
     }
 }
 
+/// What the sealed-files provider is configured with.
+#[derive(ToValue, FromValue, Schema, Form, Debug, Clone, Default)]
+#[form(section(id = "files", label = "Sealed files"))]
+#[non_exhaustive]
+pub(crate) struct FileSettings {
+    /// The folder the files are kept in, with the key that seals them. The host's own folder for secrets when this is left out.
+    #[schema(section = "files", title = "Folder")]
+    pub(crate) directory: Option<String>,
+}
+
+/// A file for each secret in a folder, sealed to a key beside it: for a computer with no credential store (a service with no
+/// session bus). It protects against a copied file and not against anyone who can read the folder, which is why the operating
+/// system's store is the default. It cannot say what it holds: a file is named by a digest of the secret's name.
+#[derive(Provider)]
+#[provider(SecretProvider, id = "file", config = FileSettings, form = FileSettings, crate = ::coqui_acp_api::guatiao)]
+pub(crate) struct FileSecrets {
+    store: Option<FileStore>,
+}
+
+impl From<FileSettings> for FileSecrets {
+    fn from(settings: FileSettings) -> Self {
+        Self {
+            store: settings
+                .directory
+                .filter(|directory| !directory.trim().is_empty())
+                .map(FileStore::new),
+        }
+    }
+}
+
+impl FileSecrets {
+    fn store(&self) -> Result<&FileStore, ProviderError> {
+        self.store.as_ref().ok_or_else(|| {
+            unavailable("this host has no folder to keep sealed files in: name one as `directory`")
+        })
+    }
+}
+
+impl SecretProvider for FileSecrets {
+    fn describe(&self) -> Result<ProviderInfo, ProviderError> {
+        let mut info = ProviderInfo::new("Sealed files");
+        info.description = Some(
+            "A file for each secret in a folder of this computer, sealed to a key beside it: for a computer with no credential store."
+                .to_owned(),
+        );
+        info.can_store = true;
+        Ok(info)
+    }
+
+    fn names(&self, _: Object<dyn ProcessSpawner>) -> Result<Names, ProviderError> {
+        Err(unsupported(
+            "a sealed file is named by a digest, so it cannot say what it holds",
+        ))
+    }
+
+    fn get(&self, request: Named, _: Object<dyn ProcessSpawner>) -> Result<Held, ProviderError> {
+        check(&request.name)?;
+        let Some(mut bytes) = self
+            .store()?
+            .get(&request.name)
+            .map_err(|why| failed(&why))?
+        else {
+            return Ok(Held::none());
+        };
+        let held = String::from_utf8(bytes.clone()).map(Held::of);
+        zeroize::Zeroize::zeroize(&mut bytes);
+        held.map_err(|_| internal("the stored value is not text"))
+    }
+
+    fn put(&self, request: Keeping, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
+        check(&request.name)?;
+        let value = request.value.expose();
+        if value.len() > canoa::secret_provider::MAX_VALUE {
+            return Err(bad_value("the value is longer than a secret may be"));
+        }
+        self.store()?
+            .put(&request.name, value.as_bytes())
+            .map_err(|why| failed(&why))
+    }
+
+    fn forget(&self, request: Named, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
+        check(&request.name)?;
+        self.store()?
+            .remove(&request.name)
+            .map_err(|why| failed(&why))
+    }
+}
+
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-secret-providers",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [FormProvider, SystemSecrets]
+    providers = [FormProvider, SystemSecrets, FileSecrets]
 );
 
 #[cfg(test)]

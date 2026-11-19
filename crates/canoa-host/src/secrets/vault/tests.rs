@@ -470,3 +470,51 @@ fn a_change_of_canoa_cfg_applies_at_the_next_request() {
     *lock(&section) = json!({"surprise": 1});
     assert_eq!(recalled(&vault, "s2", "other"), None);
 }
+
+#[test]
+fn an_accounts_credentials_are_a_named_secret_the_table_lists_and_removing_the_account_forgets() {
+    use crate::accounts::{Accounts, Record};
+    use crate::secrets::handle::HandleStore;
+
+    let tag = "accounts";
+    let rig = rig(json!({
+        "providers": {"kept": {"provider": "keeper", "tag": tag}},
+        "accounts": "kept"
+    }));
+    let dir = std::env::temp_dir().join(format!("canoa-accounts-handle-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let accounts = Accounts::with_store(
+        dir.clone(),
+        Box::new(HandleStore::new(Arc::clone(&rig.vault), "kept")),
+    )
+    .expect("opens");
+    let mut record = Record::default();
+    record.revision = 7;
+    record
+        .credentials
+        .insert("API_KEY".to_owned(), VALUE.to_owned());
+    accounts.save("acc-1", &record).expect("kept");
+    // The key is a secret of the chosen provider, under a name, which the Secrets table lists without its value.
+    let rows = rig.vault.rows();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(
+        (rows[0].provider.as_str(), rows[0].name.as_str()),
+        ("kept", "accounts/acc-1")
+    );
+    assert!(!format!("{rows:?}").contains(VALUE));
+    // The account's session reads it back from the provider.
+    let read = accounts.load("acc-1").expect("reads").expect("held");
+    assert_eq!(read.revision, 7);
+    assert_eq!(
+        read.credentials.get("API_KEY").map(String::as_str),
+        Some(VALUE)
+    );
+    // The person can ask to see it, as any secret of the table.
+    let shown = rig.vault.reveal("kept", "accounts/acc-1").expect("shown");
+    assert!(shown.contains(VALUE));
+    // Removing the account forgets it.
+    accounts.forget_credentials("acc-1").expect("forgotten");
+    assert!(rig.vault.rows().is_empty());
+    assert!(accounts.load("acc-1").expect("reads").is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
