@@ -27,7 +27,7 @@ import { Provider } from 'guatiao/provide';
 import * as kinds from './kinds.js';
 import { dataOf } from './model.js';
 
-/** @typedef {import('guatiao/kinds').ObjectHandle<typeof kinds.ProcessSpawner>} Spawner the host's, which the provider destroys */
+/** @typedef {import('./model.js').Spawner} Spawner the host's, which the provider destroys */
 
 /** The longest name of a secret, in bytes. */
 export const MAX_NAME = 256;

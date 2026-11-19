@@ -106,7 +106,7 @@ export class ProfileItem extends Provider {
  * @returns {object}
  */
 export function effect({ env = [], args = [], settings = [], network, notes = [] }) {
-  return dataOf({ env, args, settings, network, notes });
+  return /** @type {object} */ (dataOf({ env, args, settings, network, notes }));
 }
 
 /**
@@ -160,7 +160,11 @@ export class EnvProfileItem extends ProfileItem {
   }
 }
 
-/** The entries of the list `name`, each an object with a `pattern` and an optional `identity`. */
+/**
+ * The entries of the list `name`, each an object with a `pattern` and an optional `identity`.
+ * @param {Record<string, unknown>} values
+ * @param {string} name
+ */
 function certificateHosts(values, name) {
   const list = values[name];
   if (list === undefined || list === null) return [];
@@ -174,6 +178,7 @@ function certificateHosts(values, name) {
   });
 }
 
+/** @type {Record<string, string>} */
 const NETWORK_NOTES = {
   none: 'gives its programs no proxy',
   proxy: 'gives its programs the proxy it names and uses it for the host\'s own requests for the session',
@@ -196,7 +201,7 @@ export class NetworkProfileItem extends ProfileItem {
     if (!NETWORK_MODES.includes(mode)) {
       throw new BadValue(`the network mode ${JSON.stringify(mode)} is none of ${JSON.stringify(NETWORK_MODES)}`);
     }
-    const network = dataOf({
+    const network = /** @type {{mode: string, url?: string, command: string[], bypass?: string[], intercept: {pattern: string}[]}} */ (dataOf({
       mode,
       url: textOf(values, 'url'),
       command: wordsOf(values, 'command'),
@@ -204,7 +209,7 @@ export class NetworkProfileItem extends ProfileItem {
       user: textOf(values, 'user'),
       password_variable: textOf(values, 'password_variable'),
       intercept: certificateHosts(values, 'client_certificate_hosts'),
-    });
+    }));
     if ((mode === 'proxy' || mode === 'pac') && !network.url) throw new BadValue(`the network mode ${mode} needs an address`);
     if (mode === 'command' && !network.command[0]) throw new BadValue('the network mode command needs a program');
     const notes = [NETWORK_NOTES[mode]];

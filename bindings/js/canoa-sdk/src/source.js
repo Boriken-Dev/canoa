@@ -27,7 +27,8 @@ import { Provider } from 'guatiao/provide';
 import * as kinds from './kinds.js';
 import { dataOf } from './model.js';
 
-/** @typedef {import('guatiao/kinds').ObjectHandle<typeof kinds.ProcessSpawner>} Spawner the host's, which the source destroys */
+/** @typedef {import('./model.js').Spawner} Spawner the host's, which the source destroys */
+/** @typedef {import('./model.js').Process} Process a program the spawner started */
 
 /** The most bytes of a catalog a source may answer with. */
 export const MAX_BYTES = 4 * 1024 * 1024;
@@ -229,12 +230,19 @@ function tail() {
   };
 }
 
-/** Whether `path` names a place whatever folder the program runs in. */
+/**
+ * Whether `path` names a place whatever folder the program runs in.
+ * @param {string} path
+ */
 function absolute(path) {
   return path.startsWith('/') || path.startsWith('\\') || /^[A-Za-z]:[\\/]/.test(path);
 }
 
-/** The seconds a program may run, from the form's field: a whole number, as a number or as text. */
+/**
+ * The seconds a program may run, from the form's field: a whole number, as a number or as text.
+ * @param {unknown} value
+ * @returns {number}
+ */
 function secondsOf(value) {
   const wrong = new Internal('the time it may run is a whole number of seconds');
   if (value === undefined || value === null) return DEFAULT_SECONDS;
@@ -296,17 +304,23 @@ export class CommandCatalogSource extends CatalogSource {
     }
   }
 
-  /** The program of `fields` run through `spawner`: the catalog it printed, or why it did not produce one. */
+  /**
+   * The program of `fields` run through `spawner`: the catalog it printed, or why it did not produce one.
+   * @param {Record<string, unknown>} fields
+   * @param {Spawner} spawner
+   */
   #run(fields, spawner) {
-    const words = Array.isArray(fields.command) ? fields.command.filter((word) => typeof word === 'string') : [];
+    const words = Array.isArray(fields.command) ? fields.command.filter((/** @type {unknown} */ word) => typeof word === 'string') : [];
     if (words.length === 0 || words[0] === '') throw new Internal('the command is a program, then its arguments');
     const [program, ...args] = words;
     const seconds = secondsOf(fields.timeout);
     const dir = typeof fields.cwd === 'string' && fields.cwd !== '' ? fields.cwd : undefined;
     const file = typeof fields.file === 'string' && fields.file !== '' ? fields.file : undefined;
 
+    /** @type {{program: string, args: string[], error_output: string, cwd?: string}} */
     const spec = { program, args, error_output: 'separate' };
     if (dir !== undefined) spec.cwd = dir;
+    /** @type {Process | undefined} */
     let process;
     try {
       try {
@@ -314,9 +328,10 @@ export class CommandCatalogSource extends CatalogSource {
       } catch (error) {
         throw new Internal(`${program} could not start: ${error instanceof Error ? error.message : 'refused'}`);
       }
+      const running = process;
       // The program has no input: it reads the end at once.
       try {
-        process.closeInput();
+        running.closeInput();
       } catch {
         // a program that has already ended
       }
@@ -324,13 +339,13 @@ export class CommandCatalogSource extends CatalogSource {
       const printed = head();
       const said = tail();
       const ended =
-        drain((buffer, wait) => process.read(buffer, wait), deadline, printed.take) &&
-        drain((buffer, wait) => process.readError(buffer, wait), deadline, said.take);
-      const exit = ended ? process.wait(BigInt(Math.max(1, deadline - Date.now()))) : null;
-      const why = (what) => (said.text() === '' ? what : `${what}:
+        drain((buffer, wait) => running.read(buffer, wait), deadline, printed.take) &&
+        drain((buffer, wait) => running.readError(buffer, wait), deadline, said.take);
+      const exit = ended ? running.wait(BigInt(Math.max(1, deadline - Date.now()))) : null;
+      const why = (/** @type {string} */ what) => (said.text() === '' ? what : `${what}:
 ${said.text()}`);
       if (exit === null || exit.running) {
-        process.kill();
+        running.kill();
         throw new Internal(why(`${program} was stopped after ${seconds} s`));
       }
       if (exit.code !== 0) throw new Internal(why(`${program} ended with exit code ${exit.code}`));

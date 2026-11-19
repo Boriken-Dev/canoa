@@ -32,5 +32,6 @@ nothing else, so a library imports the SDK by a relative path to where it is und
 | `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab` | `canoa-sdk/panel` |
 
 The examples in `examples/providers/js` are loaded by `crates/canoa-host/tests/script_providers.rs`. See `AGENTS.md` for the API.
-Development: `npm install --no-save <guatiao>/bindings/node/guatiao typescript @types/node`, then `npm run typecheck`;
+Development: `npm install` (TypeScript is a dev dependency), then `GUATIAO_NODE=<guatiao>/bindings/node/guatiao npm test`, which typechecks the SDK and the
+examples in `examples/providers/js` and writes the `.d.ts` files to a folder it removes afterwards (`npm run typecheck` is the check alone, `npm run types` writes `types/`);
 after a kind's description changes, `GUATIAO_NODE=<guatiao>/bindings/node/guatiao node tools/write_kinds.mjs`.

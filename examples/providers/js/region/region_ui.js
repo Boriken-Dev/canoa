@@ -47,6 +47,10 @@ export class TeamSource extends CatalogSource {
     properties: { team: { type: 'string', title: 'Team name' } },
   };
 
+  /**
+   * @param {{kind: string, label: string, fields: string}} request
+   * @param {import('../../../../bindings/js/canoa-sdk/src/model.js').Spawner} spawner
+   */
   read(request, spawner) {
     release(spawner);
     const { team } = fieldsOf(request);

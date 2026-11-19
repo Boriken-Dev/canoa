@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2023",
+    "lib": ["ES2023", "ESNext.Disposable", "DOM"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "allowJs": true,

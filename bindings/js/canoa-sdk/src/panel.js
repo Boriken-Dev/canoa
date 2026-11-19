@@ -54,12 +54,12 @@ export class PanelTab extends Provider {
 
 /** A shell on the host: the one `shell` names, or the host's own choice. */
 export class TerminalPanelTab extends PanelTab {
-  static shows = 'terminal';
+  /** @type {'terminal' | 'log'} */ static shows = 'terminal';
 }
 
 /** A log: override `lines()` to answer every line the log holds so far, oldest first; `tail` answers the latest of them. */
 export class LogPanelTab extends PanelTab {
-  static shows = 'log';
+  /** @type {'terminal' | 'log'} */ static shows = 'log';
 
   /**
    * Every line the log holds, oldest first, with no line break.

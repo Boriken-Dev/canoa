@@ -14,23 +14,74 @@
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
   "exports": {
-    ".": { "types": "./types/index.d.ts", "import": "./src/index.js" },
-    "./vendor": { "types": "./types/vendor.d.ts", "import": "./src/vendor.js" },
-    "./store": { "types": "./types/store.d.ts", "import": "./src/store.js" },
-    "./speech": { "types": "./types/speech.d.ts", "import": "./src/speech.js" },
-    "./secret": { "types": "./types/secret.d.ts", "import": "./src/secret.js" },
-    "./profile": { "types": "./types/profile.d.ts", "import": "./src/profile.js" },
-    "./source": { "types": "./types/source.d.ts", "import": "./src/source.js" },
-    "./section": { "types": "./types/section.d.ts", "import": "./src/section.js" },
-    "./panel": { "types": "./types/panel.d.ts", "import": "./src/panel.js" },
-    "./forms": { "types": "./types/forms.d.ts", "import": "./src/forms.js" },
-    "./kinds": { "types": "./types/kinds.d.ts", "import": "./src/kinds.js" }
+    ".": {
+      "types": "./types/index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./vendor": {
+      "types": "./types/vendor.d.ts",
+      "import": "./src/vendor.js"
+    },
+    "./store": {
+      "types": "./types/store.d.ts",
+      "import": "./src/store.js"
+    },
+    "./speech": {
+      "types": "./types/speech.d.ts",
+      "import": "./src/speech.js"
+    },
+    "./secret": {
+      "types": "./types/secret.d.ts",
+      "import": "./src/secret.js"
+    },
+    "./profile": {
+      "types": "./types/profile.d.ts",
+      "import": "./src/profile.js"
+    },
+    "./source": {
+      "types": "./types/source.d.ts",
+      "import": "./src/source.js"
+    },
+    "./section": {
+      "types": "./types/section.d.ts",
+      "import": "./src/section.js"
+    },
+    "./panel": {
+      "types": "./types/panel.d.ts",
+      "import": "./src/panel.js"
+    },
+    "./forms": {
+      "types": "./types/forms.d.ts",
+      "import": "./src/forms.js"
+    },
+    "./kinds": {
+      "types": "./types/kinds.d.ts",
+      "import": "./src/kinds.js"
+    }
   },
-  "files": ["src", "types", "README.md", "AGENTS.md"],
-  "engines": { "node": ">=22" },
+  "files": [
+    "src",
+    "types",
+    "README.md",
+    "AGENTS.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "types": "tsc -p tsconfig.types.json && node --input-type=module -e \"import { copyFileSync } from 'node:fs'; copyFileSync('src/kinds.d.ts', 'types/kinds.d.ts')\"",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "types": "node tools/typecheck.mjs --types types",
+    "typecheck": "node tools/typecheck.mjs",
+    "test": "node tools/typecheck.mjs --types"
   },
-  "peerDependencies": { "guatiao": "*" }
+  "peerDependencies": {
+    "guatiao": "*"
+  },
+  "peerDependenciesMeta": {
+    "guatiao": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
 }
