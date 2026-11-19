@@ -503,9 +503,10 @@ fn an_entry_is_offered_the_accounts_the_person_picks_and_the_host_says_it_must_s
         [
             ("Claude", "claude"),
             ("Codex", "codex"),
-            ("OpenCode", "opencode")
+            ("OpenCode", "opencode"),
+            ("Pi", "pi")
         ],
-        "the entry canoa.cfg has, then the built-in sources it has not named"
+        "the entry canoa.cfg has, then every built-in source it has not named that runs a harness"
     );
     assert_eq!(entries["entries"][0]["accounts"], json!([]));
 
