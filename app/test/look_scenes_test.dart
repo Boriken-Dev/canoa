@@ -24,6 +24,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/catalog_standin.dart';
+import 'fixtures/vendor_looks_fixture.dart';
 import 'fixtures/fake_accounts.dart';
 import 'fixtures/settings_fixture.dart';
 import 'fixtures/store_fixtures.dart';
@@ -68,10 +69,10 @@ const _looks = [
   (LookId.canoa, Brightness.light),
   (LookId.terminal, Brightness.dark),
   (LookId.terminal, Brightness.light),
-  (LookId.claude, Brightness.dark),
-  (LookId.claude, Brightness.light),
-  (LookId.chatgpt, Brightness.dark),
-  (LookId.chatgpt, Brightness.light),
+  (claudeLook, Brightness.dark),
+  (claudeLook, Brightness.light),
+  (chatgptLook, Brightness.dark),
+  (chatgptLook, Brightness.light),
 ];
 
 void main() {

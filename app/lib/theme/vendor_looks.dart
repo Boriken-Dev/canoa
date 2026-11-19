@@ -5,12 +5,11 @@ import 'look.dart';
 /// The conversation tokens a look sets apart from the shell's.
 typedef ChatTokens = ({Color user, Color notice, Color added, Color removed, Color code});
 
-/// The families the host lists (`looks/list`): one document per vendor crate, each with colour tokens for both brightnesses. The app
-/// draws Claude's and ChatGPT's families from them and keeps Canoa's own look and the terminal's built in, so until a host answers
-/// (and for a host that lists no such family) those families draw in Canoa's look.
+/// The families the host lists (`looks/list`): one document per agent that carries a look, each with colour tokens for both
+/// brightnesses. The app keeps Canoa's own look and the terminal's built in and draws every other family from these, so until a host
+/// answers (and for a host that lists no such family) a family a config names draws in Canoa's look.
 ///
-/// A token the document lacks, or holds in a form this app does not read, takes the Canoa look's value; a name the app does not know
-/// is ignored.
+/// A token the document lacks, or holds in a form this app does not read, takes the Canoa look's value.
 final class VendorLooks extends ChangeNotifier {
   final Map<LookId, _Document> _documents = {};
   // One look per family and brightness until the answer changes: a theme compares its look by identity.
@@ -25,18 +24,21 @@ final class VendorLooks extends ChangeNotifier {
   /// Whether the host has answered, whatever it listed.
   bool get answered => _answered;
 
+  /// The families the host listed, in the order it listed them, each with its label.
+  List<LookId> get families => [for (final document in _documents.values) document.id];
+
   /// Whether the host listed [id]'s family.
   bool has(LookId id) => _documents.containsKey(id);
 
   /// Why a host-supplied family draws in Canoa's look instead, or null when it does not (or [id] is built in).
   String? fallbackReason(LookId id) {
-    if (id == LookId.canoa || id == LookId.terminal || has(id)) return null;
-    if (_problem != null) return "${id.label} comes from the host, which could not be asked ($_problem). Canoa's look is shown.";
-    if (!_answered) return "${id.label} comes from the host, which has not answered yet. Canoa's look is shown until it does.";
+    if (id.isBuiltIn || has(id)) return null;
+    if (_problem != null) return "The ${id.label} family comes from the host, which could not be asked ($_problem). Canoa's look is shown.";
+    if (!_answered) return "The ${id.label} family comes from the host, which has not answered yet. Canoa's look is shown until it does.";
     return "This host lists no ${id.label} family. Canoa's look is shown.";
   }
 
-  /// The provider whose conversations [id]'s family belongs to, as the host's document names it ("claude", "codex"), or null.
+  /// The provider whose conversations [id]'s family belongs to, as the host's document names it, or null.
   String? vendorOf(LookId id) => _documents[id]?.vendor;
 
   /// The family whose vendor is [vendor], among those the host listed.
@@ -152,9 +154,10 @@ final class _Document {
     if (item is! Map) return null;
     final id = item['id'];
     final vendor = item['vendor'];
-    final look = id is String ? LookId.named(id) : null;
+    final label = item['label'];
+    final look = id is String ? LookId.named(id, label: label is String ? label : null) : null;
     // Canoa's and the terminal's looks are built in: a host does not replace them.
-    if (look == null || look == LookId.canoa || look == LookId.terminal || vendor is! String) return null;
+    if (look == null || look.isBuiltIn || vendor is! String) return null;
     return _Document(look, vendor, _Tokens.parse(item['light']), _Tokens.parse(item['dark']));
   }
 }

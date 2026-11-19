@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
+import 'fixtures/vendor_looks_fixture.dart';
 
 LookId _shown(WidgetTester tester) =>
     tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!.extension<CanoaLook>()!.id;
@@ -18,9 +19,9 @@ void main() {
     test('Claude and Codex pick theirs, any other agent and a missing one keep the chosen family', () {
       LookId pick(String? provider, {bool follow = true, bool inConversations = true}) =>
           familyFor(chosen: LookId.terminal, follow: follow, inConversations: inConversations, provider: provider);
-      expect(pick('Claude'), LookId.claude);
-      expect(pick('claude'), LookId.claude);
-      expect(pick('Codex'), LookId.chatgpt);
+      expect(pick('Claude'), claudeLook);
+      expect(pick('claude'), claudeLook);
+      expect(pick('Codex'), chatgptLook);
       expect(pick('Grok'), LookId.terminal);
       expect(pick(null), LookId.terminal);
       expect(pick('Claude', follow: false), LookId.terminal, reason: 'off by default');
@@ -29,15 +30,15 @@ void main() {
 
     test('the setting is off by default and survives a write and a read', () {
       expect(const CanoaConfig().followProvider, isFalse);
-      final on = const CanoaConfig().copyWith(look: LookId.chatgpt, followProvider: true);
+      final on = const CanoaConfig().copyWith(look: chatgptLook, followProvider: true);
       final back = CanoaConfig.parse(on.encode());
-      expect((back.look, back.followProvider), (LookId.chatgpt, true));
+      expect((back.look, back.followProvider), (chatgptLook, true));
     });
 
     test('the four families differ in more than a colour: the shape of a control too', () {
-      final radii = {for (final id in LookId.values) id: lookFor(id, Brightness.dark).controlRadius};
-      expect(radii[LookId.chatgpt], greaterThan(radii[LookId.canoa]!));
-      expect({for (final id in LookId.values) lookFor(id, Brightness.dark).accent}.length, LookId.values.length);
+      final radii = {for (final id in allLooks) id: lookFor(id, Brightness.dark).controlRadius};
+      expect(radii[chatgptLook], greaterThan(radii[LookId.canoa]!));
+      expect({for (final id in allLooks) lookFor(id, Brightness.dark).accent}.length, allLooks.length);
     });
   });
 
@@ -52,19 +53,19 @@ void main() {
 
       store.select(claude.id);
       await tester.pump();
-      expect(_shown(tester), LookId.claude);
+      expect(_shown(tester), claudeLook);
 
       // Another conversation's own turn in the background changes nothing.
       store.rename(grok, 'Two, renamed');
       await tester.pump();
-      expect(_shown(tester), LookId.claude);
+      expect(_shown(tester), claudeLook);
 
       layout.select('settings');
       await tester.pump();
       expect(_shown(tester), LookId.terminal, reason: 'a page that is not the conversations keeps the fallback');
       layout.select(ShellLayout.conversations);
       await tester.pump();
-      expect(_shown(tester), LookId.claude);
+      expect(_shown(tester), claudeLook);
     });
 
     testWidgets('with the setting off the chosen family stays whatever agent is shown', (tester) async {

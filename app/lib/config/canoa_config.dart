@@ -1509,7 +1509,7 @@ final class CanoaConfig {
     final lookName = appearance['look'] ?? LookId.canoa.name;
     final look = lookName is String ? LookId.named(lookName) : null;
     if (look == null) {
-      throw FormatException('canoa.cfg: appearance.look must be one of ${LookId.values.map((id) => id.name).join(', ')}');
+      throw const FormatException('canoa.cfg: appearance.look must be the id of a look family: lower-case letters, digits, hyphens and underscores');
     }
     final brightness = appearance['brightness'] ?? 'dark';
     if (brightness is! String || !{'light', 'dark', 'system'}.contains(brightness)) {

@@ -5,22 +5,49 @@ import 'package:flutter/material.dart';
 
 import 'vendor_looks.dart';
 
-/// The looks a person can choose, named for how they look.
-enum LookId {
-  canoa('Canoa'),
-  terminal('Terminal'),
-  claude('Claude'),
-  chatgpt('ChatGPT');
+/// The id of a look family. Canoa's own look and the terminal's are built in; every other is a family the host lists (`looks/list`,
+/// from the agents it loaded) or one a config names that it does not, which draws as Canoa's look and is kept as written.
+@immutable
+final class LookId {
+  /// The family [name], which a person reads as [label] (the id when none is given).
+  const LookId(this.name, [String? label]) : label = label ?? name;
 
-  const LookId(this.label);
-  final String label;
+  static const canoa = LookId('canoa', 'Canoa');
+  static const terminal = LookId('terminal', 'Terminal');
 
-  static LookId? named(String name) {
-    for (final look in values) {
+  /// The families the app carries itself, in the order a person is offered them.
+  static const builtIn = [canoa, terminal];
+
+  static final RegExp _word = RegExp(r'^[a-z0-9][a-z0-9_-]{0,63}$');
+
+  /// The family called [name], with [label] for a person to read when it is not built in (the id when none is given); null when
+  /// [name] is no id.
+  static LookId? named(String name, {String? label}) {
+    for (final look in builtIn) {
       if (look.name == name) return look;
     }
-    return null;
+    if (!_word.hasMatch(name)) return null;
+    final text = label?.trim();
+    return LookId(name, text == null || text.isEmpty ? null : text);
   }
+
+  /// What the config and the host's documents call it.
+  final String name;
+
+  /// What a person reads for it.
+  final String label;
+
+  /// Whether the app carries this family itself, so no host has to list it.
+  bool get isBuiltIn => builtIn.contains(this);
+
+  @override
+  bool operator ==(Object other) => other is LookId && other.name == name;
+
+  @override
+  int get hashCode => name.hashCode;
+
+  @override
+  String toString() => 'LookId($name)';
 }
 
 /// The tokens every surface draws with, in one look and brightness: the shell (rail, bar, selection), the pages (settings, the
@@ -141,16 +168,14 @@ final _terminalLight = CanoaLook(
   radius: 2, controlRadius: 2, railWidth: 220,
 );
 
-/// [id]'s tokens in [brightness]. Canoa's and the terminal's are built in; Claude's and ChatGPT's come from the host
-/// ([vendorLooks]) and, until it lists them, draw as Canoa's look does.
+/// [id]'s tokens in [brightness]. Canoa's and the terminal's are built in; every other family comes from the host ([vendorLooks])
+/// and, until it lists it, draws as Canoa's look does.
 CanoaLook lookFor(LookId id, Brightness brightness) {
   final dark = brightness == Brightness.dark;
   final canoa = dark ? _canoaDark : _canoaLight;
-  return switch (id) {
-    LookId.canoa => canoa,
-    LookId.terminal => dark ? _terminalDark : _terminalLight,
-    LookId.claude || LookId.chatgpt => vendorLooks.shell(id, brightness, canoa) ?? canoa,
-  };
+  if (id == LookId.canoa) return canoa;
+  if (id == LookId.terminal) return dark ? _terminalDark : _terminalLight;
+  return vendorLooks.shell(id, brightness, canoa) ?? canoa;
 }
 
 /// The conversation's colours and sizes in each look: bubbles on a warm page, or a terminal's monospace lines.
@@ -163,11 +188,11 @@ ChatLook chatLookFor(LookId id, Brightness brightness, ColorScheme scheme, {Chat
   final ChatTokens terminalTokens = dark
       ? (user: const Color(0xFF0A0B0A), notice: const Color(0xFF161A16), added: const Color(0xFF173A1C), removed: const Color(0xFF45201F), code: const Color(0xFF111311))
       : (user: const Color(0xFFF8F9F6), notice: const Color(0xFFE6E9E2), added: const Color(0xFFD4EED4), removed: const Color(0xFFF4D5D3), code: const Color(0xFFEDEFEA));
-  final (:user, :notice, :added, :removed, :code) = switch (id) {
-    LookId.canoa => canoa,
-    LookId.terminal => terminalTokens,
-    LookId.claude || LookId.chatgpt => vendorLooks.chat(id, brightness, canoa),
-  };
+  final (:user, :notice, :added, :removed, :code) = id == LookId.canoa
+      ? canoa
+      : id == LookId.terminal
+      ? terminalTokens
+      : vendorLooks.chat(id, brightness, canoa);
   final terminal = id == LookId.terminal;
   return ChatLook(
     bg: shell.page,

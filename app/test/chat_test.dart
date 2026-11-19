@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'fixtures/settings_fixture.dart';
+import 'fixtures/vendor_looks_fixture.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
 
 /// Text is drawn a little differently on each platform, by a fraction of a percent here, and a broken layout moves far more than that.
@@ -467,8 +468,13 @@ void main() {
       expect(read.themeMode, ThemeMode.light);
       expect(const CanoaConfig().look, LookId.canoa, reason: 'a file from before looks did not exist reads as it did');
       expect(CanoaConfig.parse('[desktop]\nstart_hidden = true\n').look, LookId.canoa);
-      for (final unknown in ['neon', 'bubbles', 'document']) {
-        expect(() => CanoaConfig.parse('[appearance]\nlook = "$unknown"\n'), throwsFormatException);
+      for (final unlisted in ['neon', 'bubbles', 'document']) {
+        final read = CanoaConfig.parse('[appearance]\nlook = "$unlisted"\n');
+        expect(read.look.name, unlisted, reason: 'a family only a host can list is kept as the config names it');
+        expect(CanoaConfig.parse(read.encode()).look.name, unlisted);
+      }
+      for (final notAnId in ['Neon', 'a b', '']) {
+        expect(() => CanoaConfig.parse('[appearance]\nlook = "$notAnId"\n'), throwsFormatException);
       }
       expect(() => CanoaConfig.parse('[appearance]\nbrightness = "dim"\n'), throwsFormatException);
       expect(() => CanoaConfig.parse('[appearance]\nsomething = 1\n'), throwsFormatException);
@@ -560,7 +566,7 @@ void main() {
       agent.everything();
       await _settle(tester);
       final entries = session.messages.length;
-      for (final look in LookId.values) {
+      for (final look in allLooks) {
         for (final brightness in ['dark', 'light']) {
           await tester.pumpWidget(CanoaApp(key: const ValueKey('app'), store: store, config: CanoaConfig(look: look, brightness: brightness, density: ChatDensity.verbose)));
           await tester.pumpAndSettle();
@@ -574,7 +580,7 @@ void main() {
       }
     });
 
-    for (final look in LookId.values) {
+    for (final look in allLooks) {
       for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
         testWidgets('${look.name} draws at $label width with nothing overflowing', (tester) async {
           await tester.binding.setSurfaceSize(size);

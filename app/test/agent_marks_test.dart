@@ -9,12 +9,12 @@ import 'package:canoa/sources/agent_marks.dart';
 import 'package:canoa/sources/source_icons.dart';
 import 'package:canoa/sources/sources.dart';
 import 'package:canoa/sources/svg_path.dart';
-import 'package:canoa/theme/look.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart';
+import 'fixtures/vendor_looks_fixture.dart';
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
 const _known = ['claude', 'codex', 'antigravity', 'grok', 'opencode', 'pi'];
@@ -136,7 +136,7 @@ void main() {
     expect(await inks('pi', const Color(0xFFABCDEF)), {0xF09082, 0x4D9ABF, 0xF1BE58});
   });
 
-  for (final look in LookId.values) {
+  for (final look in allLooks) {
     testWidgets('the source picker shows each provider\'s mark in the ${look.label} look', (tester) async {
       await pumpApp(tester, SessionStore(), config: CanoaConfig(look: look, agents: [scripted]), size: const Size(900, 640));
       await newSession(tester);

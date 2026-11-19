@@ -6,13 +6,15 @@ import 'package:canoa/theme/look.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/vendor_looks_fixture.dart';
+
 double _contrast(Color a, Color b) {
   final (hi, lo) = (a.computeLuminance(), b.computeLuminance());
   return ((hi > lo ? hi : lo) + 0.05) / ((hi > lo ? lo : hi) + 0.05);
 }
 
 void main() {
-  final combos = [for (final id in LookId.values) for (final brightness in Brightness.values) (id, brightness)];
+  final combos = [for (final id in allLooks) for (final brightness in Brightness.values) (id, brightness)];
 
   group('tokens', () {
     for (final (id, brightness) in combos) {

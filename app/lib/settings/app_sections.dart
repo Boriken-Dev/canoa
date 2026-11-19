@@ -220,6 +220,16 @@ class _GeneralSectionState extends State<GeneralSection> {
   );
 }
 
+/// The families a person can choose: the built-in ones, those the host lists, and the one the config names when the host lists no
+/// such family, so a choice made elsewhere is kept and shown rather than lost.
+List<LookId> _families(LookId chosen) {
+  final families = [...LookId.builtIn];
+  for (final listed in [...vendorLooks.families, chosen]) {
+    if (!families.contains(listed)) families.add(listed);
+  }
+  return families;
+}
+
 /// Look, brightness and the detail of the agent's work, with a preview of the choice.
 class AppearanceSection extends StatelessWidget {
   const AppearanceSection({super.key, required this.controller});
@@ -237,10 +247,10 @@ class AppearanceSection extends StatelessWidget {
           ChoiceRow<LookId>(
             title: 'Family',
             configKey: const ['appearance', 'look'],
-            description: 'Canoa\'s own, a terminal\'s lines, or a look in the spirit of Claude or ChatGPT; brightness is set apart',
+            description: 'Canoa\'s own, a terminal\'s lines, or a look an agent this host runs brings; brightness is set apart',
             fieldKey: const Key('settings-look'),
             value: config.look,
-            choices: [for (final look in LookId.values) (look, look.label)],
+            choices: [for (final look in _families(config.look)) (look, look.label)],
             onChanged: (v) => controller.change((c) => c.copyWith(look: v)),
           ),
           if (fallback != null)
@@ -251,7 +261,7 @@ class AppearanceSection extends StatelessWidget {
           SwitchRow(
             title: 'Follow the selected agent',
             configKey: const ['appearance', 'follow_provider'],
-            description: 'A Claude conversation draws in the Claude family and a Codex one in ChatGPT\'s; any other agent, and every page but the conversations, use the family above',
+            description: 'A conversation with an agent that brings a look draws in it; any other agent, and every page but the conversations, use the family above',
             value: config.followProvider,
             onChanged: (v) => controller.change((c) => c.copyWith(followProvider: v)),
           ),
