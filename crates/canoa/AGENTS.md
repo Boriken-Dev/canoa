@@ -146,7 +146,7 @@ pub fn unsupported(why) / unavailable(why) / bad_value(why) / internal(why) -> P
 - **`GONE` is "cannot answer now"** (locked, signed out, not installed). The reason holds no value; the host then asks the person for the secret itself.
 - **Written in a script.** A library in Python or JavaScript subclasses the Canoa SDK's `SecretProvider` (`bindings/python/canoa-sdk`, `bindings/js/canoa-sdk`): `get` is the one slot it must write; `title`, `can_list`, `can_store` and `needs_person` make `describe`; `names`, `put` and `forget` refuse with `UNSUPPORTED` until it overrides them; a slot receives the spawner as its last argument and the provider destroys it. `FormSecretProvider` is the person's form and `SystemStoreSecretProvider` a provider over a store of keys and texts the subclass supplies (`read`, `write`, `remove`), with the index of names such a store needs. A request and an answer cross as plain data: `{name}`, `{name, value}`, `{value, expires_in}` (`{}` for nothing held), `{names}`. The kind reaches a source of JavaScript in the host's one document of descriptions (`descriptions.rs`).
 
-Each kind's description is `include/canoa.<kind>.kinds.json` and every model's schema `include/canoa.<kind>.schemas.json`, checked current by `tests/script_kinds.rs` for `agent_vendor` (`vendor`), `store_extension` and `catalog_source` (`store`), `secret_provider` (`secret`), `profile_item` (`profile-item`), `settings_section` (`settings-section`) and `panel_tab` (`panel-tab`); regenerate with `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab --test script_kinds`. A library written in Python or JavaScript is built against them with the Canoa SDK (`bindings/python/canoa-sdk`, `bindings/js/canoa-sdk`), one base class per kind.
+Each kind's description is `include/canoa.<kind>.kinds.json` and every model's schema `include/canoa.<kind>.schemas.json`, checked current by `tests/script_kinds.rs` for `agent_vendor` (`vendor`), `store_extension`, `model_store` and `catalog_source` (`store`), `secret_provider` (`secret`), `profile_item` (`profile-item`), `settings_section` (`settings-section`) and `panel_tab` (`panel-tab`); regenerate with `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,usage --test script_kinds`. A library written in Python or JavaScript is built against them with the Canoa SDK (`bindings/python/canoa-sdk`, `bindings/js/canoa-sdk`), one base class per kind.
 
 ## `canoa::settings_section` (feature `settings-section`)
 
@@ -412,7 +412,45 @@ pub fn ours(peer: SocketAddr, local: SocketAddr) -> bool;
 
 ## `store_extension` (`canoa::store::extension`, feature `store`)
 
-A Guatiao kind that adds types to the Store: `describe() -> ExtensionInfo { title, publisher, types: Vec<ExtensionType { id, title, icon?, stores, catalogs?: CatalogWords { noun, plural, lists } }> }`. A type that gives `catalogs` words reads catalogs: Store settings lists `[store.<id>.catalogs]` for it and offers the `catalog_source` providers that serve it. `stores` names `program_store` providers the same library offers; the host lists and installs them as any store. `ExtensionType::problem` says why an id, title or icon is refused (`RESERVED_TYPES` are the Store's own, `extensions` among them). `KIND` and `KIND_VERSIONS` name the kind and the versions this host offers, which a catalog's extension names in its `needs`. `icon` is the name of one of the application's icons (an unknown name draws the default), or a picture the extension ships as a `data:image/png;base64,...` or `data:image/webp;base64,...` address of at most `MAX_ICON_TEXT` (64 KiB) characters; the application checks its size and dimensions again before it draws it.
+A Guatiao kind that adds types to the Store: `describe() -> ExtensionInfo { title, publisher, types: Vec<ExtensionType { id, title, icon?, stores, catalogs?: CatalogWords { noun, plural, lists } }> }`. A type that gives `catalogs` words reads catalogs: Store settings lists `[store.<id>.catalogs]` for it and offers the `catalog_source` providers that serve it. `stores` names `program_store` providers the same library offers; the host lists and installs them as any store. `models` names the `model_store` provider the same library offers that lists the models the type's programs run (below); the Store then shows a page of them after the type's own. `ExtensionType::problem` says why an id, title or icon is refused (`RESERVED_TYPES` are the Store's own, `extensions` among them). `KIND` and `KIND_VERSIONS` name the kind and the versions this host offers, which a catalog's extension names in its `needs`. `icon` is the name of one of the application's icons (an unknown name draws the default), or a picture the extension ships as a `data:image/png;base64,...` or `data:image/webp;base64,...` address of at most `MAX_ICON_TEXT` (64 KiB) characters; the application checks its size and dimensions again before it draws it.
+
+## `model_store` (`canoa::store::models`, feature `store`)
+
+A Guatiao kind for the models a Store type lists, moved and set up by the library that knows them. The host and the application name no model: a type's `ExtensionType::models` names the provider, and a build without the library lists none. Every method is required, synchronous and handed the host's `spawner` (the person's own reach: `spawn` starts a program as the person, `read_file` reads any absolute path, nothing is written), which the provider destroys.
+
+```rust
+#[guatiao::kind(name = "model_store")]
+pub trait ModelStore: Send + Sync {
+    fn describe(&self) -> Result<ModelStoreInfo, ProviderError>;
+    fn list(&self, query: ModelQuery, spawner: Object<dyn ProcessSpawner>) -> Result<ModelList, ProviderError>;
+    fn act(&self, request: ModelAct, spawner: Object<dyn ProcessSpawner>) -> Result<ModelActed, ProviderError>;
+    fn keep(&self, request: ModelKeep, spawner: Object<dyn ProcessSpawner>) -> Result<ModelKept, ProviderError>;
+    fn service(&self, query: ServiceQuery, spawner: Object<dyn ProcessSpawner>) -> Result<ServiceReport, ProviderError>;
+}
+pub const KIND: &str = "model_store";   pub const KIND_VERSIONS: [&str; 1] = ["1"];   pub const RESERVED_TABLES: [&str; 29] = [...];   pub const MOST_OUTPUT: usize = 8 MiB;
+// Every model is #[non_exhaustive] with `new` (or Default) and public fields; `include/canoa.model_store.{kinds,schemas}.json` describe them.
+pub struct ModelStoreInfo { pub title, pub catalog, pub publisher, pub missing: String, pub settings: Option<ModelSettings>, pub speech: Option<SpeechService> }   // new(title, catalog, publisher, missing); problem()
+pub struct ModelSettings { pub table: String, pub help: Option<String>, pub schema: Value, pub form: Option<Value> }   // asking::<S: Schema + Screen>(table)
+pub struct SpeechService { pub title, pub summary: String, pub license: Option<String>, pub location, pub route: String, pub local_file: bool }
+pub struct ModelQuery { pub program: Option<String>, pub home: Option<String> }
+pub struct ModelList { pub models: Vec<ModelRow>, pub unavailable: Option<String> }
+pub struct ModelRow { pub id: String, pub by: Option<String>, pub summary: String, pub tags: Vec<String>, pub on: bool, pub state: Option<String>,
+    pub facts: Vec<Fact>, pub actions: Vec<RowAction>, pub sections: Vec<Section>, pub speech: Option<SpeechUse> }   // new(id, summary)
+pub struct RowAction { pub title, pub confirm, pub label: String, pub steps: Vec<String> }
+pub struct Section { pub title: String, pub facts: Vec<Fact>, pub paragraphs: Vec<String>, pub settings: bool }
+pub struct Fact { pub label, pub value: String }   pub struct SpeechUse { pub text: String, pub caution: Option<String> }
+pub struct ModelAct { pub program: Option<String>, pub home: Option<String>, pub model: String, pub action: String }   pub struct ModelActed { pub note: Option<String> }
+pub struct ModelKeep { pub home: Option<String>, pub model: String, pub values: String }   pub struct ModelKept { pub values: String, pub note: Option<String> }
+pub struct ServiceQuery { pub home: Option<String>, pub models: bool }   pub struct ServiceReport { pub address: Option<String>, pub models: Vec<ServedModel>, pub unavailable: Option<String> }
+pub struct Finished { pub code: Option<i64>, pub out: String, pub err: String }
+pub fn run(spawner: &Object<dyn ProcessSpawner>, program: &str, args: &[String], limit: Duration) -> Result<Finished, ProviderError>;   // to its end, or killed with its tree at `limit` (GONE)
+```
+
+- `describe`: the same on every call, with nothing run. `title` names the page in the plural, `catalog` is what its filter calls the rows' source and `publisher` who they are by when a row names no one; `missing` is the page's words when the program is not found. `settings` is what a row keeps: a guatiao schema of an object and an optional guatiao-intake form (see "The form a provider asks for"), drawn by the application's one renderer, and `table`, the table of canoa.cfg that is the library's own (1 to 32 of `a-z`, `0-9`, `_`, none of `RESERVED_TABLES`); the host writes a row's values to `[<table>.models."<id>"]`, which the library may read back (a gateway's `GatewayInfo::table`). `speech` says the type's service can be the person's speech-to-text: `route` is the path below its address that takes a recording and `local_file` that the recording is written to a file on this computer and its name posted. `ModelStoreInfo::problem` says why a store is refused.
+- `list`: the rows now, never changing anything. `query.program` is the program the type's `program_store`s found (the host's own verified copy first, then the first copy found on the computer), none when there is none, which the provider answers as `unavailable`; `query.home` is the person's home. A row's `actions` are what it can do, `+` doing the first: its confirmation (`title`, `confirm`, the button's `label`) and the `steps` the host's `store/model` is asked for in order. A `Section` with `settings` draws the form of the type's settings after its paragraphs. A row with `speech` may be made the person's speech-to-text. A refusal is in the program's own words.
+- `act`: one action of a row to its end, through `spawner` (`run` does it, with a limit): `BAD_VALUE` for a name or an action that is none, the program's refusal as it said it.
+- `keep`: settles a row's values (`values` is a JSON object keyed by the schema's members, already checked against it, a member left empty absent) and answers what the host writes, `{}` taking the row's settings away; a library holds a number to what its model allows and says so in `note`.
+- `service`: where the service that runs the models is now: `address` when it is up, and with `query.models` the models that can transcribe; `unavailable` says in the offer's words why a recording cannot be taken.
 
 ## `catalog_source` (`canoa::store::source`, feature `store`)
 
@@ -642,7 +680,7 @@ pub const WAV_HEADER_LEN: usize = 44;
   is, with a `Content-Length`. The answer's `text` is the transcript and each other member that is a string, number or boolean (`language`,
   `duration`) is front matter; arrays and objects are not. A plain-text answer is the text. A status outside 2xx is an error with the first
   300 bytes of its body. It answers no partial text and uses no voice profile.
-  With `request = LocalFile` (`"local_file"` in a table; for a server on the same computer that opens the recording itself, such as Foundry Local's
+  With `request = LocalFile` (`"local_file"` in a table; for a server on the same computer that opens the recording itself, such as a local model server's
   `/v1/audio/transcriptions`) `finish` instead writes the recording as a WAV to a new file in the temporary folder (mode 0600 on Unix), `POST`s
   `application/json` `{"model", "filename"}` with the file's absolute path (the key as `Authorization: Bearer` when set; no language or prompt, which
   that route was not measured to take) and removes the file when the call ends, whatever the answer. The answer is read as above, without its `id`.

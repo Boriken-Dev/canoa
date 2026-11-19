@@ -1,4 +1,4 @@
-//! The description of the kinds a library written in Python or JavaScript may serve (`agent_vendor`, `store_extension`,
+//! The description of the kinds a library written in Python or JavaScript may serve (`agent_vendor`, `store_extension`, `model_store`,
 //! `secret_provider`, `profile_item`, `catalog_source`, `settings_section`, `panel_tab` and `usage_reader`), and their models' schemas: what such a
 //! library is built against. Regenerate the files with
 //! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,usage --test script_kinds`.
@@ -27,6 +27,11 @@ use canoa::profile_item::{
 use canoa::secret_provider::{Held, Keeping, Named, Names, ProviderInfo, SecretProviderVtable};
 use canoa::settings_section::{SectionInfo, SettingsSectionVtable, Stored};
 use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtensionVtable};
+use canoa::store::models::{
+    Fact, ModelAct, ModelActed, ModelKeep, ModelKept, ModelList, ModelQuery, ModelRow,
+    ModelSettings, ModelStoreInfo, ModelStoreVtable, RowAction, Section, ServedModel, ServiceQuery,
+    ServiceReport, SpeechService, SpeechUse,
+};
 use canoa::store::source::{CatalogSourceProviderVtable, ReadRequest, SourceInfo};
 use canoa::usage_reader::{
     Failure, ProcessMembersVtable, ReaderInfo, Reading, Retry, UsageReaderVtable,
@@ -141,6 +146,46 @@ fn the_committed_extension_schemas_are_what_this_build_describes() {
         &schemas(vec![
             ("ExtensionInfo", schema_of::<ExtensionInfo>()),
             ("ExtensionType", schema_of::<ExtensionType>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_model_store_description_is_what_this_build_describes() {
+    // The spawner every call but `describe` is handed is described beside it, as the other kinds that name it do.
+    committed(
+        "include/canoa.model_store.kinds.json",
+        &document(&format!(
+            "{},{},{}",
+            ModelStoreVtable::description(),
+            ProcessSpawnerVtable::description(),
+            SpawnedProcessVtable::description()
+        )),
+    );
+}
+
+#[test]
+fn the_committed_model_store_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.model_store.schemas.json",
+        &schemas(vec![
+            ("ModelStoreInfo", schema_of::<ModelStoreInfo>()),
+            ("ModelSettings", schema_of::<ModelSettings>()),
+            ("SpeechService", schema_of::<SpeechService>()),
+            ("ModelQuery", schema_of::<ModelQuery>()),
+            ("ModelList", schema_of::<ModelList>()),
+            ("ModelRow", schema_of::<ModelRow>()),
+            ("RowAction", schema_of::<RowAction>()),
+            ("Section", schema_of::<Section>()),
+            ("Fact", schema_of::<Fact>()),
+            ("SpeechUse", schema_of::<SpeechUse>()),
+            ("ModelAct", schema_of::<ModelAct>()),
+            ("ModelActed", schema_of::<ModelActed>()),
+            ("ModelKeep", schema_of::<ModelKeep>()),
+            ("ModelKept", schema_of::<ModelKept>()),
+            ("ServiceQuery", schema_of::<ServiceQuery>()),
+            ("ServiceReport", schema_of::<ServiceReport>()),
+            ("ServedModel", schema_of::<ServedModel>()),
         ]),
     );
 }

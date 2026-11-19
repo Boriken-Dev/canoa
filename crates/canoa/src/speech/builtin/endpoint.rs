@@ -3,7 +3,7 @@
 //! It makes the call OpenAI-compatible servers answer, `POST` of a `multipart/form-data` body with the audio as a WAV
 //! `file`, a `model`, and the hints it can express (`language`, and the vocabulary as `prompt`); the answer is JSON with a
 //! `text`, and every other member of it that is a text, number or boolean (`language`, `duration`) becomes front matter.
-//! A server on the same computer that reads the recording from a file (Foundry Local's) is called with
+//! A server on the same computer that reads the recording from a file (a model server's own folder) is called with
 //! [`EndpointRequest::LocalFile`] instead: the audio is written to a temporary WAV file, its path is posted as JSON, and the
 //! file is removed when the call ends.
 //!

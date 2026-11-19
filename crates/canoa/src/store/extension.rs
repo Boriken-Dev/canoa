@@ -58,6 +58,9 @@ pub struct ExtensionType {
     /// What its catalogs are called, when the type reads catalogs: the Store then offers it a list of them and, to add one, the
     /// `catalog_source` providers that serve the type.
     pub catalogs: Option<CatalogWords>,
+    /// The `model_store` provider the same library offers that lists the models this type's programs run: the Store then adds a
+    /// page of them after the type's own.
+    pub models: Option<String>,
 }
 
 /// What a Store type calls its catalogs, in its own words.
@@ -117,6 +120,7 @@ impl ExtensionType {
             icon: None,
             stores: stores.into_iter().map(Into::into).collect(),
             catalogs: None,
+            models: None,
         }
     }
 

@@ -21,6 +21,7 @@ use coqui_acp_api::{Environment, LoginAnswer, LoginForm, ProcessSpawner};
 pub mod engine;
 pub mod exec;
 pub mod extension;
+pub mod models;
 pub mod protect;
 mod provider;
 pub mod recipe;

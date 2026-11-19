@@ -64,6 +64,13 @@
                 "lists"
               ],
               "description": "What its catalogs are called, when the type reads catalogs: the Store then offers it a list of them and, to add one, the `catalog_source` providers that serve the type."
+            },
+            "models": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The `model_store` provider the same library offers that lists the models this type's programs run: the Store then adds a page of them after the type's own."
             }
           },
           "additionalProperties": false,
@@ -135,6 +142,13 @@
           "lists"
         ],
         "description": "What its catalogs are called, when the type reads catalogs: the Store then offers it a list of them and, to add one, the `catalog_source` providers that serve the type."
+      },
+      "models": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The `model_store` provider the same library offers that lists the models this type's programs run: the Store then adds a page of them after the type's own."
       }
     },
     "additionalProperties": false,
