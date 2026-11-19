@@ -8,8 +8,10 @@ import { Retry, UsageReader, UsageReading, bucket, failed, reading } from '../..
 
 /** One agent's reading: the models its `session/new` answer listed. */
 class Listed extends UsageReading {
+  /** @type {{id: string, name: string}[]} */
   #models = [];
 
+  /** @param {string} result */
   opened(result) {
     let answer;
     try {
@@ -19,10 +21,14 @@ class Listed extends UsageReading {
     }
     const listed = answer?.models?.availableModels;
     this.#models = Array.isArray(listed)
-      ? listed.filter((model) => typeof model?.modelId === 'string').map((model) => ({ id: model.modelId, name: model.name }))
+      ? listed.filter((/** @type {any} */ model) => typeof model?.modelId === 'string').map((/** @type {any} */ model) => ({ id: model.modelId, name: model.name }))
       : [];
   }
 
+  /**
+   * @param {number} root
+   * @param {boolean} _tree
+   */
   read(root, _tree) {
     if (this.#models.length === 0) return failed('the agent has listed no model yet', Retry.NOT_YET);
     // The agent's own process is always among its members; a table with none says the process is gone.
@@ -43,6 +49,7 @@ export class ListedUsage extends UsageReader {
   static settle_ms = 100;
   static cache_ms = 100;
 
+  /** @param {import('../../../../bindings/js/canoa-sdk/src/usage.js').Members} members */
   open(members) {
     return new Listed(members);
   }

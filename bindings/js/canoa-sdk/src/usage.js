@@ -42,6 +42,7 @@ export const Retry = Object.freeze({
  * Unix seconds and makes the refill a fixed window.
  * @param {string} id starts with the reader's `bucket_prefix`
  * @param {{label?: string, models?: string[], unit?: string, used?: number, limit?: number, remaining?: number, resets_at?: number, status?: string, observed_at?: number, evidence?: string}} [fields]
+ * @returns {unknown}
  */
 export function bucket(id, fields = {}) {
   const { models, resets_at: resetsAt, ...rest } = fields;
@@ -59,7 +60,7 @@ export function bucket(id, fields = {}) {
 
 /**
  * A complete reading of `buckets`.
- * @param {object[]} buckets
+ * @param {unknown[]} buckets
  */
 export function reading(buckets) {
   return { buckets };
@@ -159,13 +160,13 @@ export class UsageReading {
    * looked through from the first try; otherwise look at the process itself first and widen when nothing is there.
    * @param {number} _root
    * @param {boolean} _tree
-   * @returns {{buckets: object[], failure?: {why: string, retry: string}}} `reading(...)` or `failed(...)`
+   * @returns {{buckets: unknown[], failure?: {why: string, retry: string}}} `reading(...)` or `failed(...)`
    */
   read(_root, _tree) {
     throw new Unsupported('read is not implemented');
   }
 
   [Symbol.dispose]() {
-    this.members?.destroy?.();
+    /** @type {any} */ (this.members)?.destroy?.();
   }
 }
