@@ -5,6 +5,10 @@
 
 extern crate alloc;
 
+mod usage;
+
+pub use usage::AgyUsage;
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 
@@ -130,7 +134,7 @@ canoa::store_provider!(
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-antigravity",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [AgyVendor, GeminiVendor, AgyStore]
+    providers = [AgyVendor, GeminiVendor, AgyStore, AgyUsage]
 );
 
 /// Antigravity.
