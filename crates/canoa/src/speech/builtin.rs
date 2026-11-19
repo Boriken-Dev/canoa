@@ -1,22 +1,18 @@
-//! The two providers that ship with the kind. Each is an ordinary `speech_provider`: it declares its settings and the form
-//! that shows them, so a host offers it the way it offers one a person wrote in another language.
-//!
-//! - [`command`]: a program the person names. Audio goes to its standard input as a WAV stream or as raw PCM, and its
-//!   standard output is the text.
-//! - [`endpoint`]: an HTTP speech-to-text endpoint and model the person names, in the shape of the `audio/transcriptions`
-//!   call that OpenAI-compatible servers answer.
+//! The speech-to-text provider that ships with the kind: [`endpoint`], an HTTP speech-to-text endpoint and model the person
+//! names, in the shape of the `audio/transcriptions` call that OpenAI-compatible servers answer. It is an ordinary
+//! `speech_provider`: it declares its settings and the form that shows them, so a host offers it the way it offers one a person
+//! wrote in another language. The program-running provider is a script of the Canoa SDK, which `canoa-host` carries.
 //!
 //! The speech-output providers, which turn text into audio, are [`say_command`], [`say_endpoint`], [`say_piper`] and
 //! [`say_system`]; [`spoken`] is what the ones that run a program share.
 //!
-//! Neither limits which program or address the person may name: both run as the person, and what they name is theirs.
+//! None limits which program or address the person may name: they run as the person, and what they name is theirs.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
     reason = "a provider that runs a program and calls a server names what it uses from std"
 )]
 
-pub mod command;
 pub mod endpoint;
 pub mod say_command;
 pub mod say_endpoint;
@@ -24,7 +20,6 @@ pub mod say_piper;
 pub mod say_system;
 pub mod spoken;
 
-pub use command::{CommandSettings, CommandSpeech};
 pub use endpoint::{EndpointRequest, EndpointSettings, EndpointSpeech};
 pub use say_command::{CommandSay, CommandSaySettings, SayInput, SayOutput};
 pub use say_endpoint::{EndpointSay, EndpointSaySettings};

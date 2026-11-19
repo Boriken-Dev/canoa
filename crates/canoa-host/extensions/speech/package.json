@@ -1,0 +1,9 @@
+{
+  "name": "canoa_speech",
+  "version": "1.0.0",
+  "description": "The speech provider that ships with the host: a program the person names, audio in and text out",
+  "license": "MPL-2.0",
+  "private": true,
+  "type": "module",
+  "exports": "./speech.js"
+}

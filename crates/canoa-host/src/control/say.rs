@@ -29,13 +29,14 @@ use canoa::speech::output::{
     READ_TIMED_OUT, SayRequest, SpeechOutput, SpeechUtterance, VoiceQuery,
 };
 use coqui_acp_api::ProcessSpawner as _;
-use coqui_acp_api::guatiao::library::Object;
+use coqui_acp_api::guatiao::library::{Object, Registry};
 use coqui_acp_api::guatiao::{Alloc, FromValue, ToValue};
 use serde_json::{Map, Value, json};
 
 use super::files::Files;
 use super::speech::{form_of, members_of, schema_of, secrets_of, text_list, valid_name};
 use super::{Caller, Grant, NOT_FOUND, REFUSED, allow, bad, text_param};
+use crate::speech_scripts::{self, ORIGIN_KEYS};
 
 type Outcome = Result<Value, (i32, String)>;
 
@@ -133,11 +134,134 @@ fn kind(id: &str) -> Option<&'static Kind> {
     KINDS.iter().find(|kind| kind.id == id)
 }
 
+/// One kind of provider a table may name, wherever its code is: the host's own, or a registry the table's `library` or `source`
+/// names.
+#[derive(Clone)]
+struct Resolved {
+    id: String,
+    title: String,
+    description: String,
+    schema: Value,
+    form: Value,
+    how: How,
+}
+
+#[derive(Clone)]
+enum How {
+    Native(&'static Kind),
+    Script {
+        registry: Arc<Registry>,
+        key: String,
+    },
+}
+
+impl Resolved {
+    fn native(kind: &'static Kind) -> Result<Self, String> {
+        Ok(Self {
+            id: kind.id.to_owned(),
+            title: kind.title.to_owned(),
+            description: kind.description.to_owned(),
+            schema: (kind.schema)()?,
+            form: (kind.form)()?,
+            how: How::Native(kind),
+        })
+    }
+
+    fn scripted(registry: &Arc<Registry>) -> Vec<Self> {
+        speech_scripts::described::<dyn SpeechOutput>(registry)
+            .into_iter()
+            .map(|each| Self {
+                id: each.id,
+                title: each.title,
+                description: each.description,
+                schema: each.schema,
+                form: each.form,
+                how: How::Script {
+                    registry: Arc::clone(registry),
+                    key: each.key,
+                },
+            })
+            .collect()
+    }
+
+    /// A provider of this kind with `settings`, and the registry that has to stay loaded while it or what it opens is used.
+    fn build(&self, settings: &Value) -> Result<(Provider, Option<Arc<Registry>>), String> {
+        match &self.how {
+            How::Native(kind) => Ok(((kind.build)(settings)?, None)),
+            How::Script { registry, key } => {
+                let offer = registry
+                    .offer::<dyn SpeechOutput>(key)
+                    .ok_or_else(|| format!("the provider {} is gone", self.id))?
+                    .map_err(|_| format!("{} is not a speech output provider", self.id))?;
+                let provider: Provider = if offer.builds_instances() {
+                    let value = speech_scripts::to_guatiao(settings)?;
+                    Arc::new(
+                        offer
+                            .instantiate(&value)
+                            .map_err(|error| error.to_string())?,
+                    )
+                } else if settings.as_object().is_none_or(Map::is_empty) {
+                    offer
+                        .shared()
+                        .ok_or_else(|| format!("{} needs settings", self.id))?
+                } else {
+                    return Err(format!("{} takes no settings", self.id));
+                };
+                Ok((provider, Some(Arc::clone(registry))))
+            }
+        }
+    }
+}
+
+/// Where canoa.cfg's relative paths are taken from.
+fn base_of(files: &Files) -> &std::path::Path {
+    files
+        .config_file()
+        .and_then(std::path::Path::parent)
+        .unwrap_or_else(|| std::path::Path::new("."))
+}
+
+/// The kind of provider `id` is for a table that names `origin` (the registry its `library` or `source` loads): the registry's own,
+/// else one the host carries.
+fn resolve(id: &str, origin: Option<&Arc<Registry>>) -> Result<Resolved, String> {
+    if let Some(registry) = origin {
+        return Resolved::scripted(registry)
+            .into_iter()
+            .find(|each| each.id == id)
+            .ok_or_else(|| format!("the library or source it names has no provider {id}"));
+    }
+    kind(id)
+        .ok_or_else(|| format!("this host has no provider {id}"))
+        .and_then(Resolved::native)
+}
+
+/// The kind of provider a table names, its origin loaded.
+fn resolve_table(
+    files: &Files,
+    table: &Value,
+) -> Result<(Resolved, Option<Arc<Registry>>), String> {
+    let id = table
+        .get("provider")
+        .and_then(Value::as_str)
+        .ok_or("it names no provider")?;
+    let origin = speech_scripts::registry_of(table, base_of(files))?;
+    resolve(id, origin.as_ref()).map(|resolved| (resolved, origin))
+}
+
+/// A provider made from a table.
+struct Built {
+    provider: Provider,
+    /// What keeps its code loaded: dropped after the provider.
+    code: Option<Arc<Registry>>,
+}
+
 /// One utterance a client has open.
 struct Open {
     owner: String,
     utterance: Arc<Object<dyn SpeechUtterance>>,
     last: Instant,
+    /// The code the utterance runs in, kept loaded until it ends: dropped after the utterance.
+    _code: Option<Arc<Registry>>,
 }
 
 /// A list of voices, kept for a while.
@@ -242,15 +366,15 @@ impl Say {
 
     /// What one table says, built: its kind and the provider, or why it cannot be. A Piper table that names no program or no folder
     /// of voices has the Store's copy and the folder of voices it installed.
-    fn built(&self, table: &Value) -> Result<(&'static Kind, Provider), String> {
-        let id = table
-            .get("provider")
-            .and_then(Value::as_str)
-            .ok_or("it names no provider")?;
-        let kind = kind(id).ok_or_else(|| format!("this host has no provider {id}"))?;
+    fn built(&self, files: &Files, table: &Value) -> Result<(Resolved, Built), String> {
+        let (resolved, origin) = resolve_table(files, table)?;
+        let id = resolved.id.as_str();
         let mut settings = table.clone();
         if let Some(map) = settings.as_object_mut() {
             map.remove("provider");
+            for key in ORIGIN_KEYS {
+                map.remove(key);
+            }
             if id == "speech_say_piper" {
                 let empty = |map: &Map<String, Value>, key: &str| {
                     map.get(key)
@@ -279,7 +403,12 @@ impl Say {
                 }
             }
         }
-        (kind.build)(&settings).map(|provider| (kind, provider))
+        let (provider, code) = resolved.build(&settings)?;
+        let built = Built {
+            provider,
+            code: code.or(origin),
+        };
+        Ok((resolved, built))
     }
 
     fn spawner() -> Object<dyn coqui_acp_api::ProcessSpawner> {
@@ -299,15 +428,9 @@ impl Say {
         {
             return Err((NOT_FOUND, format!("this host has no voice provider {only}")));
         }
-        let mut types = Vec::new();
+        let mut kinds = Vec::new();
         for kind in &KINDS {
-            types.push(json!({
-                "id": kind.id,
-                "title": kind.title,
-                "description": kind.description,
-                "schema": (kind.schema)().map_err(|why| (REFUSED, why))?,
-                "form": (kind.form)().map_err(|why| (REFUSED, why))?,
-            }));
+            kinds.push(Resolved::native(kind).map_err(|why| (REFUSED, why))?);
         }
         let in_file = tables(files)?;
         let mut listed = Vec::new();
@@ -315,23 +438,61 @@ impl Say {
             if only.is_some_and(|only| only != name) {
                 continue;
             }
-            listed.push(self.entry(name, table, in_file.contains_key(name), language)?);
+            listed.push(self.entry(
+                files,
+                name,
+                table,
+                in_file.contains_key(name),
+                language,
+                &mut kinds,
+            )?);
         }
+        let mut seen = BTreeSet::new();
+        let types: Vec<Value> = kinds
+            .iter()
+            .filter(|kind| seen.insert(kind.id.clone()))
+            .map(|kind| {
+                json!({
+                    "id": kind.id,
+                    "title": kind.title,
+                    "description": kind.description,
+                    "schema": kind.schema,
+                    "form": kind.form,
+                })
+            })
+            .collect();
         Ok(json!({"types": types, "providers": listed}))
     }
 
-    fn entry(&self, name: &str, table: &Value, written: bool, language: Option<&str>) -> Outcome {
+    fn entry(
+        &self,
+        files: &Files,
+        name: &str,
+        table: &Value,
+        written: bool,
+        language: Option<&str>,
+        kinds: &mut Vec<Resolved>,
+    ) -> Outcome {
         let mut entry =
             json!({"name": name, "provider": table.get("provider"), "builtin": !written});
-        let found = table.get("provider").and_then(Value::as_str).and_then(kind);
-        let secrets = match found {
-            Some(kind) => secrets_of(&(kind.schema)().map_err(|why| (REFUSED, why))?),
-            None => BTreeSet::new(),
+        let found = resolve_table(files, table);
+        let secrets = match &found {
+            Ok((resolved, _)) => secrets_of(&resolved.schema),
+            Err(_) => BTreeSet::new(),
         };
+        if let Ok((resolved, _)) = &found
+            && matches!(resolved.how, How::Script { .. })
+        {
+            // A kind a table's own library or source adds is listed with the host's, so a settings screen can draw it.
+            kinds.push(resolved.clone());
+        }
         let mut settings = Map::new();
         let mut set = Vec::new();
         if let Some(map) = table.as_object() {
-            for (key, value) in map.iter().filter(|(key, _)| *key != "provider") {
+            for (key, value) in map
+                .iter()
+                .filter(|(key, _)| *key != "provider" && !ORIGIN_KEYS.contains(&key.as_str()))
+            {
                 if secrets.contains(key) {
                     set.push(key.clone());
                 } else {
@@ -341,13 +502,14 @@ impl Say {
         }
         entry["settings"] = Value::Object(settings);
         entry["secrets_set"] = json!(set);
-        let (_, provider) = match self.built(table) {
-            Ok(built) => built,
+        let made = match self.built(files, table) {
+            Ok((_, made)) => made,
             Err(why) => {
                 entry["problem"] = json!(why);
                 return Ok(entry);
             }
         };
+        let provider = &made.provider;
         match provider.describe() {
             Ok(info) => {
                 let described = json_of(&info)?;
@@ -362,7 +524,7 @@ impl Say {
                 return Ok(entry);
             }
         }
-        match self.voices_of(name, table, &provider, language) {
+        match self.voices_of(name, table, provider, language) {
             Ok(voices) => entry["voices"] = voices,
             Err(why) => {
                 entry["voices"] = json!([]);
@@ -423,9 +585,10 @@ impl Say {
         let table = all
             .get(name)
             .ok_or_else(|| (NOT_FOUND, format!("this host has no voice provider {name}")))?;
-        let (_, provider) = self
-            .built(table)
+        let (_, made) = self
+            .built(files, table)
             .map_err(|why| (REFUSED, format!("{name}: {why}")))?;
+        let (provider, code) = (&made.provider, made.code.clone());
         let mut request = SayRequest::new(text);
         request.voice = text_param(params, "voice")?.map(str::to_owned);
         request.model = text_param(params, "model")?.map(str::to_owned);
@@ -467,6 +630,7 @@ impl Say {
                 owner,
                 utterance: Arc::new(utterance),
                 last: Instant::now(),
+                _code: code,
             },
         );
         Ok(json!({
@@ -586,16 +750,22 @@ impl Say {
             return Ok(json!({"name": name, "removed": true}));
         }
         let id = text_param(params, "provider")?.ok_or_else(|| bad("provider is needed"))?;
-        let kind =
-            kind(id).ok_or_else(|| (NOT_FOUND, format!("this host has no provider {id}")))?;
+        // A provider of a table that names a library or a source of its own is found in that registry, so editing its settings keeps it.
+        let existing = tables(files)?
+            .get(name)
+            .filter(|table| table.get("provider").and_then(Value::as_str) == Some(id))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let origin =
+            speech_scripts::registry_of(&existing, base_of(files)).map_err(|why| (REFUSED, why))?;
+        let kind = resolve(id, origin.as_ref()).map_err(|why| (NOT_FOUND, why))?;
         let settings = match params.get("settings") {
             None | Some(Value::Null) => Map::new(),
             Some(Value::Object(map)) => map.clone(),
             Some(_) => return Err(bad("settings is an object")),
         };
-        let schema = (kind.schema)().map_err(|why| (REFUSED, why))?;
-        let members = members_of(&schema);
-        let secrets = secrets_of(&schema);
+        let members = members_of(&kind.schema);
+        let secrets = secrets_of(&kind.schema);
         if let Some(unknown) = settings.keys().find(|key| !members.contains(*key)) {
             return Err(bad(&format!("{unknown} is not a setting of {id}")));
         }
@@ -612,6 +782,12 @@ impl Say {
                 }
             }
             if before.get("provider").and_then(Value::as_str) == Some(id) {
+                // Where its code comes from stays when its settings are edited.
+                for key in ORIGIN_KEYS {
+                    if let Some(kept) = before.get(key) {
+                        table.insert(key.to_owned(), kept.clone());
+                    }
+                }
                 for key in &secrets {
                     if !table.contains_key(key)
                         && !clear.contains(key)
@@ -622,7 +798,7 @@ impl Say {
                 }
             }
             let table = Value::Object(table);
-            self.built(&table)
+            self.built(files, &table)
                 .map_err(|why| format!("those settings cannot be used: {why}"))?;
             map.insert(name.to_owned(), table);
             Ok(Value::Object(map))

@@ -17,12 +17,9 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use canoa::speech::builtin::command::{CommandInput, MAX_OUTPUT};
-use canoa::speech::builtin::{
-    CommandSettings, CommandSpeech, EndpointRequest, EndpointSettings, EndpointSpeech, wav_header,
-};
+use canoa::speech::builtin::{EndpointRequest, EndpointSettings, EndpointSpeech, wav_header};
 use canoa::speech::{
     AudioFormat, Heard, Hints, OPUS, OpenRequest, SpeechInfo, SpeechProvider, SpeechProviderVtable,
     SpeechSession, SpeechSessionVtable, Transcript, VoiceProfile,
@@ -89,7 +86,6 @@ fn the_committed_schemas_are_what_this_build_describes() {
         ("SpeechInfo", schema_of::<SpeechInfo>()),
         ("Heard", schema_of::<Heard>()),
         ("Transcript", schema_of::<Transcript>()),
-        ("CommandSettings", schema_of::<CommandSettings>()),
         ("EndpointSettings", schema_of::<EndpointSettings>()),
     ];
     let document: serde_json::Map<String, Json> = schemas
@@ -155,24 +151,6 @@ fn the_models_round_trip_through_a_value() {
     assert_eq!(OpenRequest::from_value(&value).expect("read back"), request);
 }
 
-fn standin() -> String {
-    let mut path = std::env::current_exe().expect("this test's path");
-    path.pop();
-    if path.ends_with("deps") {
-        path.pop();
-    }
-    path.push("examples");
-    path.push(format!("speech_standin{}", std::env::consts::EXE_SUFFIX));
-    assert!(path.exists(), "build the examples: {}", path.display());
-    path.to_string_lossy().into_owned()
-}
-
-fn command(args: &[&str]) -> CommandSpeech {
-    let mut settings = CommandSettings::new(standin());
-    settings.args = args.iter().map(|arg| (*arg).to_owned()).collect();
-    CommandSpeech::from(settings)
-}
-
 fn pcm_second() -> Vec<u8> {
     vec![0_u8; 32_000]
 }
@@ -188,162 +166,8 @@ fn open(provider: &impl SpeechProvider) -> Object<dyn SpeechSession> {
 }
 
 #[test]
-fn a_command_answers_its_text_for_any_audio() {
-    let session = open(&command(&["fixed"]));
-    for _ in 0..3 {
-        session.push(&pcm_second()).expect("a chunk is taken");
-    }
-    assert_eq!(
-        session.finish().expect("answers").text,
-        "the quick brown fox"
-    );
-}
-
-#[test]
-fn a_command_gets_a_wav_stream_or_the_samples_alone() {
-    let wav = open(&command(&["echo", "a", "b"]));
-    wav.push(&pcm_second()).expect("taken");
-    assert_eq!(
-        wav.finish().expect("answers").text,
-        "a b bytes=32044 riff=true"
-    );
-
-    let mut settings = CommandSettings::new(standin());
-    settings.args = vec!["echo".to_owned()];
-    settings.input = CommandInput::Pcm;
-    let session = open(&CommandSpeech::from(settings));
-    session.push(&pcm_second()).expect("taken");
-    assert_eq!(
-        session.finish().expect("answers").text,
-        "bytes=32000 riff=false"
-    );
-}
-
-#[test]
-fn a_command_is_told_the_hints_in_its_arguments_and_its_environment() {
-    let mut request = OpenRequest::new(AudioFormat::pcm(16_000));
-    request.hints.language = Some("es".to_owned());
-    request.hints.vocabulary = vec!["Canoa".to_owned(), "Guatiao".to_owned()];
-    let mut profile = VoiceProfile::default();
-    profile.voice = Some("female".to_owned());
-    request.hints.profile = Some(profile);
-    let session = open_with(&command(&["env"]), request.clone());
-    assert_eq!(
-        session.finish().expect("answers").text,
-        "LANGUAGE=es;VOCABULARY=Canoa, Guatiao;ACCENT=;VOICE=female"
-    );
-    let session = open_with(
-        &command(&["echo", "{language}/{rate}/{channels}/{voice}"]),
-        request,
-    );
-    assert!(
-        session
-            .finish()
-            .expect("answers")
-            .text
-            .starts_with("es/16000/1/female bytes=44")
-    );
-}
-
-#[test]
-fn a_language_code_is_the_primary_subtag_and_a_fallback_stands_in_for_a_language_nobody_said() {
-    let mut said = OpenRequest::new(AudioFormat::pcm(16_000));
-    said.hints.language = Some("es-PR".to_owned());
-    let session = open_with(&command(&["echo", "{language_code|auto}"]), said);
-    assert!(session.finish().expect("answers").text.starts_with("es "));
-
-    let unsaid = OpenRequest::new(AudioFormat::pcm(16_000));
-    let session = open_with(&command(&["echo", "{language_code|auto}"]), unsaid);
-    assert!(session.finish().expect("answers").text.starts_with("auto "));
-}
-
-#[test]
-fn a_command_that_shows_text_while_the_person_speaks_answers_partials() {
-    let mut settings = CommandSettings::new(standin());
-    settings.args = vec!["grow".to_owned()];
-    settings.partials = true;
-    let session = open(&CommandSpeech::from(settings));
-    session.push(&pcm_second()).expect("taken");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let partial = loop {
-        if let Some(text) = session.push(&[]).expect("taken").partial {
-            break text;
-        }
-        assert!(Instant::now() < deadline, "no partial text came");
-        thread::sleep(Duration::from_millis(20));
-    };
-    assert!(partial.starts_with("1024 "), "{partial}");
-    let last = session.finish().expect("answers");
-    assert!(last.text.ends_with("32044"), "{}", last.text);
-}
-
-#[test]
-fn a_command_that_fails_says_why() {
-    let session = open(&command(&["fail"]));
-    let said = session
-        .finish()
-        .expect_err("the command failed")
-        .message
-        .to_string();
-    assert!(
-        said.contains("exited with 3") && said.contains("boom"),
-        "{said}"
-    );
-}
-
-#[test]
-fn a_command_that_cannot_start_is_refused_at_open() {
-    let request = OpenRequest::new(AudioFormat::pcm(16_000));
-    let provider = CommandSpeech::from(CommandSettings::new("a-program-that-is-not-here"));
-    let error = provider
-        .open(request.clone(), spawner())
-        .err()
-        .expect("refused");
-    assert!(error.message.to_string().contains("could not start"));
-    let provider = CommandSpeech::from(CommandSettings::new(" "));
-    assert!(provider.open(request, spawner()).is_err());
-}
-
-#[test]
-fn a_command_that_does_not_finish_is_stopped() {
-    let mut settings = CommandSettings::new(standin());
-    settings.args = vec!["hang".to_owned()];
-    settings.timeout_seconds = 1;
-    let session = open(&CommandSpeech::from(settings));
-    let started = Instant::now();
-    let error = session.finish().expect_err("it did not finish");
-    assert!(error.message.to_string().contains("did not finish"));
-    assert!(started.elapsed() < Duration::from_secs(10));
-}
-
-#[test]
-fn a_cancelled_recording_ends_its_program() {
-    let session = open(&command(&["hang"]));
-    let started = Instant::now();
-    session.cancel().expect("cancelled");
-    assert!(
-        session.finish().is_err(),
-        "a cancelled recording answers nothing"
-    );
-    assert!(started.elapsed() < Duration::from_secs(10));
-}
-
-#[test]
-fn a_command_s_output_is_kept_only_up_to_a_bound() {
-    let answer = open(&command(&["flood"])).finish().expect("answers");
-    assert_eq!(answer.text.len(), MAX_OUTPUT);
-    assert!(answer.front_matter.to_string().contains("output_truncated"));
-}
-
-#[test]
 fn a_provider_refuses_a_format_it_does_not_read_and_says_which_it_does() {
     let request = OpenRequest::new(AudioFormat::new(OPUS, 48_000));
-    let error = command(&["fixed"])
-        .open(request.clone(), spawner())
-        .err()
-        .expect("refused");
-    assert_eq!(error.status, Status::GUATIAO_ERR_UNSUPPORTED);
-    assert!(error.message.to_string().contains("pcm_s16le"));
     let endpoint = EndpointSpeech::from(EndpointSettings::new("http://127.0.0.1:1/"));
     assert_eq!(
         endpoint
@@ -357,9 +181,6 @@ fn a_provider_refuses_a_format_it_does_not_read_and_says_which_it_does() {
 
 #[test]
 fn each_provider_describes_itself_and_what_it_uses() {
-    let info = command(&["fixed"]).describe().expect("described");
-    assert_eq!(info.encodings, ["pcm_s16le"]);
-    assert!(info.hints.contains(&"profile".to_owned()) && !info.partials);
     let info = EndpointSpeech::from(EndpointSettings::new("http://127.0.0.1:1/"))
         .describe()
         .expect("described");

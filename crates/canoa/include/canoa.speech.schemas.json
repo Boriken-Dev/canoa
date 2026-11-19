@@ -288,64 +288,6 @@
       "text"
     ]
   },
-  "CommandSettings": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "properties": {
-      "program": {
-        "type": "string",
-        "title": "Program",
-        "description": "The program to run: a name found on the search path, or a path.",
-        "x-section": "command"
-      },
-      "args": {
-        "type": "array",
-        "items": {
-          "type": "string"
-        },
-        "title": "Arguments",
-        "description": "Its arguments, one per entry.",
-        "x-section": "command",
-        "default": []
-      },
-      "input": {
-        "type": "string",
-        "enum": [
-          "wav",
-          "pcm"
-        ],
-        "x-enum-labels": {
-          "wav": "A WAV stream: a header whose sizes say \"until the end\" and then the samples. What `ffmpeg -i -` and most command line recognizers read.",
-          "pcm": "The samples alone, 16-bit little-endian, at the rate and channels the recording opened with."
-        },
-        "title": "Audio on standard input",
-        "description": "How it wants the audio.",
-        "x-section": "command",
-        "default": "wav"
-      },
-      "partials": {
-        "type": "boolean",
-        "title": "Show text while speaking",
-        "description": "Whether each change in its output while the person speaks is shown as it appears; off, the text comes when they stop.",
-        "x-section": "command",
-        "default": false
-      },
-      "timeout_seconds": {
-        "type": "integer",
-        "minimum": 0,
-        "maximum": 4294967295,
-        "title": "Time to finish",
-        "description": "How long it may take after the audio ends, in seconds, before it is stopped.",
-        "x-section": "command",
-        "x-advanced": true,
-        "default": 120
-      }
-    },
-    "additionalProperties": false,
-    "required": [
-      "program"
-    ]
-  },
   "EndpointSettings": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",

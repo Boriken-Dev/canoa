@@ -481,7 +481,7 @@ impl SourcePreset {
 A Guatiao kind, not ACP: a provider that turns a stream of audio into text. The app captures audio wherever it runs, the host passes
 it on in chunks, and the provider owns what is specific to it (a program, an endpoint, a model). Needs `guatiao` and `coqui-acp-api`'s `ProcessSpawner`. The files an outside
 library is built against: `include/canoa.speech.kinds.json` (the two kinds and the two spawner kinds they name) and `include/canoa.speech.schemas.json` (every model, and
-the two built-in providers' settings), both checked current by `tests/speech_kinds.rs`.
+the built-in provider's settings), both checked current by `tests/speech_kinds.rs`.
 
 ```rust
 #[guatiao::kind(name = "speech_provider")]
@@ -540,13 +540,11 @@ Helpers: `unsupported_format(format, takes)`, `bad_value(why)` and `internal(why
 
 ### `canoa::speech::builtin` (feature `speech-builtin`)
 
-Needs `guatiao-intake`, `serde_json` and `network` (the endpoint's call is made through `Network::current()`; the command's program is the spawner's). Two providers, ids `speech_command` and `speech_endpoint`, both reading `pcm_s16le` and
-neither limiting which program or address the person names (they run as the person). Nothing is downloaded by Canoa.
+Needs `guatiao-intake`, `serde_json` and `network` (the endpoint's call is made through `Network::current()`). One provider, id `speech_endpoint`, reading `pcm_s16le` and
+not limiting which address the person names (it runs as the person). Nothing is downloaded by Canoa. The provider that runs a program (`speech_command`) is not here: it is
+a script of the Canoa SDK that `canoa-host` carries, `bindings/js/canoa-sdk`'s `CommandSpeech`.
 
 ```rust
-pub struct CommandSettings { pub program: String, pub args: Vec<String>, pub input: CommandInput, pub partials: bool, pub timeout_seconds: u32 }
-pub enum CommandInput { Wav /* default */, Pcm }
-pub struct CommandSpeech;      // From<CommandSettings>; the `speech_command` provider
 pub struct EndpointSettings { pub url: String, pub model: Option<String>, pub api_key: Option<Secret<String>>, pub request: EndpointRequest, pub max_seconds: u32, pub timeout_seconds: u32 }
 pub enum EndpointRequest { Multipart /* default */, LocalFile }
 pub struct EndpointSpeech;     // From<EndpointSettings>; the `speech_endpoint` provider
@@ -554,15 +552,8 @@ pub fn wav_header(format: &AudioFormat, data_len: Option<u32>) -> [u8; 44];   //
 pub const WAV_HEADER_LEN: usize = 44;
 ```
 
-`CommandSettings::new(program)` and `EndpointSettings::new(url)` set the defaults: WAV input, no partials, 120 s to finish; 300 s of audio, 120 s to answer.
+`EndpointSettings::new(url)` sets the defaults: 300 s of audio, 120 s to answer.
 
-- Command: the program starts at `open`, through the spawner; its standard input gets a streaming WAV header and then each chunk as it arrives (or the samples
-  alone with `Pcm`), written in place, so a program that stops reading slows `push` down and one that exits early is not an error until
-  `finish`. Standard output is read as it is written and kept up to `command::MAX_OUTPUT` (4 MiB; more is dropped and
-  `front_matter.output_truncated` is true); the text is that output, trimmed. With `partials`, each change in it is a `Heard.partial`. After
-  the audio ends the program has `timeout_seconds` before it is killed; a non-zero exit is an error carrying the end of its standard error.
-  `args` may name `{language}`, `{language_code}` (its primary subtag in lower case), `{vocabulary}`, `{accent}`, `{voice}`, `{rate}` and `{channels}`, each as `{name|fallback}` to say what stands in for an empty one, and each hint present is also the
-  variable `CANOA_SPEECH_LANGUAGE`, `_VOCABULARY` (comma-separated), `_ACCENT` or `_VOICE`. `cancel` kills the program and its tree through the spawner.
 - Endpoint: audio is kept as it arrives, once, up to `max_seconds` (a longer recording is `BAD_VALUE` at the push that passes it), and
   `finish` makes one `POST` of `multipart/form-data` with `model`, `response_format=json`, `language` (the tag's primary subtag), `prompt`
   (the vocabulary, comma-separated) and `file` (a WAV, `audio.wav`), with the key as `Authorization: Bearer`. The body is read where the audio

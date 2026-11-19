@@ -100,6 +100,9 @@ impl Hosted {
         setup: impl FnOnce(&std::path::Path) -> String,
         more: &[&str],
     ) -> Self {
+        // The scripts that ship in the host (the speech provider that runs a program, the profile items, the catalog sources) run in the
+        // JavaScript source the program carries, as `canoa` does.
+        canoa_host::bundle_js!();
         let config = scratch.0.join("canoa.cfg");
         std::fs::write(&config, setup(&scratch.0)).expect("written");
         let (sender, receiver) = mpsc::channel();

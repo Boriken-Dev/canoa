@@ -22,6 +22,8 @@ class ProgramStore extends Provider {         // store.js: info() (the StoreInfo
 }
 class SpeechProvider extends Provider {       // speech.js: static title, encodings, description, partials, max_seconds, hints; open(request, spawner)
 }
+class CommandSpeech extends SpeechProvider    // a program the person names: audio on its input (a WAV stream or the samples), text on its output; id `speech_command`
+wavHeader(format); fill(arg, values); languageCode(tag); MAX_OUTPUT; PCM_S16LE
 class SpeechOutput extends Provider {         // speech.js: info() (the OutputInfo), voices, say
 }
 class SecretProvider extends Provider {       // secret.js: static title, description, can_store, can_list, needs_person; get(request, spawner); names, put, forget refuse with Unsupported

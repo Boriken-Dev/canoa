@@ -680,9 +680,14 @@ max_uploads = 256                                   # files one key may keep upl
 | *(none)* | `history/export`, `history/move`, `history/portable`, `history/importable`, `history/import`, `history/imported`: **owner only**; no grant names them |
 
 **Speech providers** (`[speech.NAME]`, grants `voice` and `voice.setup`) turn audio a client captured into text on this host, so a page and every platform
-reach one. A table names a kind, `provider = "speech_command"` (a program that reads the audio on its standard input and writes text) or `"speech_endpoint"`
-(an HTTP speech-to-text address and model), and that kind's settings (`canoa::speech::builtin`'s `CommandSettings` and `EndpointSettings`), which are read
-when a method is called, so a change in the file applies at once. `speech/providers` answers each kind's JSON Schema and its guatiao-intake form, so a
+reach one. A table names a kind, `provider = "speech_command"` (a program that reads the audio on its standard input and writes text: a script of the Canoa SDK,
+`CommandSpeech`, that ships in the host and runs in its JavaScript source) or `"speech_endpoint"` (an HTTP speech-to-text address and model, `canoa::speech::builtin`'s
+`EndpointSettings`), and that kind's settings, which are read when a method is called, so a change in the file applies at once. A table may instead name where its
+provider's code comes from, as an entry of canoa.cfg does: `library` (a Guatiao library file) or `source` (a Guatiao source file, or `bundled:js` for the host's own QuickJS,
+with `source_settings` such as `dirs`, and `import_search`; relative paths are taken from canoa.cfg's folder), and `provider` is then an id that registry offers: the
+`[say.NAME]` tables of text to speech take the same keys. Those keys are the host's, not settings of the provider: `speech/providers` lists the table's `settings`
+without them and `speech/configure` keeps them when the settings are saved. A library or source runs as this host does, so naming one is the person's, in canoa.cfg; a
+table naming both, or an origin without the provider, is listed with `problem`. `speech/providers` answers each kind's JSON Schema and its guatiao-intake form, so a
 settings screen draws them as it draws any provider's, and every table with what the provider says of itself or why it cannot be built; a setting the schema marks
 a secret (an endpoint's key) is never answered, only listed in `secrets_set`. The table is not a section `config/set` or `config/get` reaches, because it names
 programs and holds keys: `speech/configure` writes it (a setting the schema does not name is refused; a secret left out or empty keeps what the table had,

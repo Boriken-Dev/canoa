@@ -1824,6 +1824,10 @@ mod speech;
 mod speech_lend_tests;
 mod speech_offers;
 #[cfg(test)]
+mod speech_origin_tests;
+#[cfg(test)]
+mod speech_script_tests;
+#[cfg(test)]
 mod speech_tests;
 mod state;
 #[cfg(test)]

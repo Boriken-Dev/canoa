@@ -1,6 +1,7 @@
 //! `speech/*`: speech providers the host runs for a client that captures audio but cannot recognize it, which is every page and
 //! every platform without a service of its own. A provider is a `[speech.NAME]` table of canoa.cfg, naming one of the kinds this
-//! host has (`provider = "speech_command"` or `"speech_endpoint"`) and its settings, checked against that kind's schema.
+//! host has (`provider = "speech_endpoint"`, or `"speech_command"`, which ships in the host as a script) and its settings, checked
+//! against that kind's schema. A table that names a `library` or a `source` takes its provider from that registry instead.
 //!
 //! The tables are read when a method is called, so a change in the file takes effect at once. They are not a section `config/set`
 //! edits: a table names a program to run or an address audio goes to, and may hold a key, so `speech/configure` writes them under
@@ -16,18 +17,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use canoa::speech::builtin::{CommandSettings, CommandSpeech, EndpointSettings, EndpointSpeech};
+use canoa::speech::builtin::{EndpointSettings, EndpointSpeech};
 use canoa::speech::{
     AudioFormat, OpenRequest, PCM_S16LE, SpeechProvider, SpeechSession, VoiceProfile,
 };
 use coqui_acp_api::ProcessSpawner as _;
-use coqui_acp_api::guatiao::library::Object;
+use coqui_acp_api::guatiao::library::{Object, Registry};
 use coqui_acp_api::guatiao::{Alloc, FromValue};
 use serde_json::{Map, Value, json};
 
 use super::files::Files;
 use super::speech_offers::{self, HOST_KEYS, Lend};
 use super::{BAD_PARAMS, Caller, Grant, NOT_FOUND, REFUSED, allow, bad, text_param};
+use crate::speech_scripts;
 
 type Outcome = Result<Value, (i32, String)>;
 
@@ -73,27 +75,140 @@ where
 
 pub(super) use crate::forms::{form_of, members_of, schema_of, secrets_of};
 
-const KINDS: [Kind; 2] = [
-    Kind {
-        id: "speech_command",
-        title: "Command",
-        description: "Runs a program that reads audio and writes text",
-        build: kind_of::<CommandSettings, CommandSpeech>,
-        schema: schema_of::<CommandSettings>,
-        form: form_of::<CommandSettings>,
-    },
-    Kind {
-        id: "speech_endpoint",
-        title: "Endpoint",
-        description: "Sends the audio to a speech-to-text address and model you name",
-        build: kind_of::<EndpointSettings, EndpointSpeech>,
-        schema: schema_of::<EndpointSettings>,
-        form: form_of::<EndpointSettings>,
-    },
-];
+const KINDS: [Kind; 1] = [Kind {
+    id: "speech_endpoint",
+    title: "Endpoint",
+    description: "Sends the audio to a speech-to-text address and model you name",
+    build: kind_of::<EndpointSettings, EndpointSpeech>,
+    schema: schema_of::<EndpointSettings>,
+    form: form_of::<EndpointSettings>,
+}];
 
 fn kind(id: &str) -> Option<&'static Kind> {
     KINDS.iter().find(|kind| kind.id == id)
+}
+
+/// One kind of provider a table may name, wherever its code is: the host's own, a script that ships in it, or a registry the table
+/// names.
+#[derive(Clone)]
+struct Resolved {
+    id: String,
+    title: String,
+    description: String,
+    schema: Value,
+    form: Value,
+    how: How,
+}
+
+/// A provider built, and the registry that has to stay loaded while it or what it opens is used.
+type Made = (Arc<dyn SpeechProvider>, Option<Arc<Registry>>);
+
+#[derive(Clone)]
+enum How {
+    Native(&'static Kind),
+    Script {
+        registry: Arc<Registry>,
+        key: String,
+    },
+}
+
+impl Resolved {
+    fn native(kind: &'static Kind) -> Result<Self, String> {
+        Ok(Self {
+            id: kind.id.to_owned(),
+            title: kind.title.to_owned(),
+            description: kind.description.to_owned(),
+            schema: (kind.schema)()?,
+            form: (kind.form)()?,
+            how: How::Native(kind),
+        })
+    }
+
+    fn scripted(registry: &Arc<Registry>) -> Vec<Self> {
+        speech_scripts::described::<dyn SpeechProvider>(registry)
+            .into_iter()
+            .map(|each| Self {
+                id: each.id,
+                title: each.title,
+                description: each.description,
+                schema: each.schema,
+                form: each.form,
+                how: How::Script {
+                    registry: Arc::clone(registry),
+                    key: each.key,
+                },
+            })
+            .collect()
+    }
+
+    /// A provider of this kind with `settings`, and the registry that has to stay loaded while it or what it opens is used.
+    fn build(&self, settings: &Value) -> Result<Made, String> {
+        match &self.how {
+            How::Native(kind) => Ok(((kind.build)(settings)?, None)),
+            How::Script { registry, key } => {
+                let offer = registry
+                    .offer::<dyn SpeechProvider>(key)
+                    .ok_or_else(|| format!("the provider {} is gone", self.id))?
+                    .map_err(|_| format!("{} is not a speech provider", self.id))?;
+                let provider: Arc<dyn SpeechProvider> = if offer.builds_instances() {
+                    let value = speech_scripts::to_guatiao(settings)?;
+                    Arc::new(
+                        offer
+                            .instantiate(&value)
+                            .map_err(|error| error.to_string())?,
+                    )
+                } else if settings.as_object().is_none_or(Map::is_empty) {
+                    offer
+                        .shared()
+                        .ok_or_else(|| format!("{} needs settings", self.id))?
+                } else {
+                    return Err(format!("{} takes no settings", self.id));
+                };
+                Ok((provider, Some(Arc::clone(registry))))
+            }
+        }
+    }
+}
+
+/// Where canoa.cfg's relative paths are taken from.
+fn base_of(files: &Files) -> &std::path::Path {
+    files
+        .config_file()
+        .and_then(std::path::Path::parent)
+        .unwrap_or_else(|| std::path::Path::new("."))
+}
+
+/// The kind of provider `id` is for a table that names `origin` (the registry its `library` or `source` loads): the registry's own,
+/// else one the host carries, else one of the scripts that ship in it.
+fn resolve(id: &str, origin: Option<&Arc<Registry>>) -> Result<Resolved, String> {
+    if let Some(registry) = origin {
+        return Resolved::scripted(registry)
+            .into_iter()
+            .find(|each| each.id == id)
+            .ok_or_else(|| format!("the library or source it names has no provider {id}"));
+    }
+    if let Some(kind) = kind(id) {
+        return Resolved::native(kind);
+    }
+    speech_scripts::bundled()
+        .map(|registry| Resolved::scripted(&registry))
+        .unwrap_or_default()
+        .into_iter()
+        .find(|each| each.id == id)
+        .ok_or_else(|| format!("this host has no provider {id}"))
+}
+
+/// The kind of provider a table names, its origin loaded.
+fn resolve_table(
+    files: &Files,
+    table: &Value,
+) -> Result<(Resolved, Option<Arc<Registry>>), String> {
+    let id = table
+        .get("provider")
+        .and_then(Value::as_str)
+        .ok_or("it names no provider")?;
+    let origin = speech_scripts::registry_of(table, base_of(files))?;
+    resolve(id, origin.as_ref()).map(|resolved| (resolved, origin))
 }
 
 /// One recording a client has open.
@@ -101,6 +216,8 @@ struct Open {
     owner: String,
     session: Arc<Object<dyn SpeechSession>>,
     last: Instant,
+    /// The code the session runs in, kept loaded until it ends: dropped after the session.
+    _code: Option<Arc<Registry>>,
 }
 
 /// The recordings the host has open for clients.
@@ -134,18 +251,32 @@ fn tables(files: &Files) -> Result<Map<String, Value>, (i32, String)> {
 
 /// What one table says, built: its kind and the provider, or why it cannot be. With `with_key`, the key of the account the table
 /// names is read and given to the provider; without it the account is only checked, which is all a listing needs.
-fn built(
+fn built(files: &Files, table: &Value, lend: &Lend<'_>, with_key: bool) -> Result<Built, String> {
+    let (resolved, origin) = resolve_table(files, table)?;
+    make(resolved, origin, table, lend, with_key)
+}
+
+/// `built`, for a kind already resolved.
+fn make(
+    resolved: Resolved,
+    origin: Option<Arc<Registry>>,
     table: &Value,
     lend: &Lend<'_>,
     with_key: bool,
-) -> Result<(&'static Kind, Arc<dyn SpeechProvider>), String> {
-    let id = table
-        .get("provider")
-        .and_then(Value::as_str)
-        .ok_or("it names no provider")?;
-    let kind = kind(id).ok_or_else(|| format!("this host has no provider {id}"))?;
+) -> Result<Built, String> {
     let settings = lend.settings(table, with_key)?;
-    (kind.build)(&settings).map(|provider| (kind, provider))
+    let (provider, code) = resolved.build(&settings)?;
+    Ok(Built {
+        provider,
+        code: code.or(origin),
+    })
+}
+
+/// A provider made from a table.
+struct Built {
+    provider: Arc<dyn SpeechProvider>,
+    /// What keeps its code loaded: dropped after the provider.
+    code: Option<Arc<Registry>>,
 }
 
 impl Speech {
@@ -208,8 +339,9 @@ impl Speech {
             )
         })?;
         let table = &speech_offers::with_model(table, params)?;
-        let (_, provider) =
-            built(table, lend, true).map_err(|why| (REFUSED, format!("{name}: {why}")))?;
+        let made =
+            built(files, table, lend, true).map_err(|why| (REFUSED, format!("{name}: {why}")))?;
+        let (provider, code) = (&made.provider, made.code.clone());
         let request = request_of(params)?;
         let owner = caller.owner().to_owned();
         let stale = {
@@ -243,6 +375,7 @@ impl Speech {
                 owner,
                 session: Arc::new(session),
                 last: Instant::now(),
+                _code: code,
             },
         );
         Ok(json!({"session": id, "partials": info.partials}))
@@ -370,23 +503,25 @@ fn request_of(params: &Value) -> Result<OpenRequest, (i32, String)> {
 /// `speech/providers`: the kinds this host has, each with the schema and the form its settings are drawn with, and the providers
 /// canoa.cfg defines, each with what it says of itself. A setting that is a secret is never answered, only that it is set.
 fn providers(files: &Files, lend: &Lend<'_>) -> Outcome {
-    let mut types = Vec::new();
+    let mut kinds: Vec<Resolved> = match speech_scripts::bundled() {
+        Ok(registry) => Resolved::scripted(&registry),
+        Err(why) => {
+            tracing::warn!(
+                "the speech providers that ship in the host as scripts are not offered: {why}"
+            );
+            Vec::new()
+        }
+    };
     for kind in &KINDS {
-        types.push(json!({
-            "id": kind.id,
-            "title": kind.title,
-            "description": kind.description,
-            "schema": (kind.schema)().map_err(|why| (REFUSED, why))?,
-            "form": (kind.form)().map_err(|why| (REFUSED, why))?,
-        }));
+        kinds.push(Resolved::native(kind).map_err(|why| (REFUSED, why))?);
     }
     let mut listed = Vec::new();
     for (name, table) in tables(files)? {
         let mut entry = json!({"name": name, "provider": table.get("provider")});
-        let kind = table.get("provider").and_then(Value::as_str).and_then(kind);
-        let secrets = match kind {
-            Some(kind) => secrets_of(&(kind.schema)().map_err(|why| (REFUSED, why))?),
-            None => BTreeSet::new(),
+        let found = resolve_table(files, &table);
+        let secrets = match &found {
+            Ok((resolved, _)) => secrets_of(&resolved.schema),
+            Err(_) => BTreeSet::new(),
         };
         let mut settings = Map::new();
         let mut set = Vec::new();
@@ -413,8 +548,15 @@ fn providers(files: &Files, lend: &Lend<'_>) -> Outcome {
             .unwrap_or(Value::Null);
         entry["settings"] = Value::Object(settings);
         entry["secrets_set"] = json!(set);
-        match built(&table, lend, false) {
-            Ok((_, provider)) => match provider.describe() {
+        let made = found.and_then(|(resolved, origin)| {
+            // A kind a table's own library or source adds is listed with the host's, so a settings screen can draw it.
+            if table.get("library").is_some() || table.get("source").is_some() {
+                kinds.push(resolved.clone());
+            }
+            make(resolved, origin, &table, lend, false)
+        });
+        match made.map(|built| built.provider) {
+            Ok(provider) => match provider.describe() {
                 Ok(info) => {
                     entry["title"] = json!(info.title);
                     entry["description"] = json!(info.description);
@@ -432,6 +574,20 @@ fn providers(files: &Files, lend: &Lend<'_>) -> Outcome {
         }
         listed.push(entry);
     }
+    let mut seen = BTreeSet::new();
+    let types: Vec<Value> = kinds
+        .iter()
+        .filter(|kind| seen.insert(kind.id.clone()))
+        .map(|kind| {
+            json!({
+                "id": kind.id,
+                "title": kind.title,
+                "description": kind.description,
+                "schema": kind.schema,
+                "form": kind.form,
+            })
+        })
+        .collect();
     Ok(json!({"types": types, "providers": listed}))
 }
 
@@ -458,15 +614,22 @@ fn configure(files: &Files, lend: &Lend<'_>, params: &Value) -> Outcome {
         return Ok(json!({"name": name, "removed": true}));
     }
     let id = text_param(params, "provider")?.ok_or_else(|| bad("provider is needed"))?;
-    let kind = kind(id).ok_or_else(|| (NOT_FOUND, format!("this host has no provider {id}")))?;
+    // A provider of a table that names a library or a source of its own is found in that registry, so editing its settings keeps it.
+    let existing = tables(files)?
+        .get(name)
+        .filter(|table| table.get("provider").and_then(Value::as_str) == Some(id))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let origin =
+        speech_scripts::registry_of(&existing, base_of(files)).map_err(|why| (REFUSED, why))?;
+    let kind = resolve(id, origin.as_ref()).map_err(|why| (NOT_FOUND, why))?;
     let settings = match params.get("settings") {
         None | Some(Value::Null) => Map::new(),
         Some(Value::Object(map)) => map.clone(),
         Some(_) => return Err(bad("settings is an object")),
     };
-    let schema = (kind.schema)().map_err(|why| (REFUSED, why))?;
-    let members = members_of(&schema);
-    let secrets = secrets_of(&schema);
+    let members = members_of(&kind.schema);
+    let secrets = secrets_of(&kind.schema);
     if let Some(unknown) = settings.keys().find(|key| !members.contains(*key)) {
         return Err(bad(&format!("{unknown} is not a setting of {id}")));
     }
@@ -499,7 +662,7 @@ fn configure(files: &Files, lend: &Lend<'_>, params: &Value) -> Outcome {
             }
         }
         let table = Value::Object(table);
-        built(&table, lend, false)
+        built(files, &table, lend, false)
             .map_err(|why| format!("those settings cannot be used: {why}"))?;
         map.insert(name.to_owned(), table);
         Ok(Value::Object(map))

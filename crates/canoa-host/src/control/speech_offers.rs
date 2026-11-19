@@ -61,7 +61,16 @@ pub(super) const SERVICE_KEY: &str = "service";
 pub(super) const ADDRESS_KEY: &str = "service_address";
 
 /// Every key of a provider's table that is the host's and not a setting of its kind.
-pub(super) const HOST_KEYS: [&str; 4] = [OFFER_KEY, ACCOUNT_KEY, SERVICE_KEY, ADDRESS_KEY];
+pub(super) const HOST_KEYS: [&str; 8] = [
+    OFFER_KEY,
+    ACCOUNT_KEY,
+    SERVICE_KEY,
+    ADDRESS_KEY,
+    "library",
+    "source",
+    "source_settings",
+    "import_search",
+];
 
 /// What a provider that calls Foundry Local says when its service is not up.
 const NO_SERVICE: &str =

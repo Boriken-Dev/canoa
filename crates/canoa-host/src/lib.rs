@@ -49,6 +49,7 @@ pub mod shells;
 mod site;
 mod sources;
 pub mod spawn;
+mod speech_scripts;
 pub mod store;
 mod terminal;
 pub mod tool;
