@@ -26,10 +26,12 @@ use crate::account::{self, KIND, Settings};
 use crate::child::Launch;
 use crate::engines::{Engines, default_engine};
 use crate::gateway::{Running, Ticket};
+use crate::model_store::FoundryModels;
 
 /// The vendor of what runs the model, as a session's identity variables name an account's provider.
 const VENDOR: &str = "microsoft-foundry";
-/// The table of canoa.cfg that holds this library's own settings: `windows` maps a model variant's id to the window it is run with.
+/// The table of canoa.cfg that holds this library's own settings: `models` maps a model variant's id to what is kept for it, and
+/// `window` there is the window it is run with.
 pub const TABLE: &str = "foundry";
 /// The file in the host's home that the gateways record their requests in.
 pub const GATEWAY_LOG: &str = "foundry-gateway.log";
@@ -237,8 +239,9 @@ impl FoundryGateway {
 /// The window canoa.cfg's table sets for `model`: a whole number of tokens of at least 1; anything else is left out.
 fn window_of(table: &Value, model: &str) -> Option<u64> {
     table
-        .get("windows")?
+        .get("models")?
         .get(model)?
+        .get("window")?
         .as_u64()
         .filter(|tokens| *tokens >= 1)
 }
@@ -315,6 +318,7 @@ impl StoreExtension for FoundryExtension {
     fn describe(&self) -> Result<ExtensionInfo, ProviderError> {
         let mut local = ExtensionType::new(STORE_TYPE, "Foundry Local", ["foundry_store"]);
         local.icon = Some("memory".to_owned());
+        local.models = Some("foundry_models".to_owned());
         Ok(ExtensionInfo::new(
             "Foundry Local",
             "Boriken Dev",
@@ -332,7 +336,8 @@ coqui_acp_api::guatiao::local_providers!(
         FoundryAccounts,
         FoundryGateway,
         FoundryStore,
-        FoundryExtension
+        FoundryExtension,
+        FoundryModels
     ]
 );
 
@@ -664,8 +669,7 @@ mod tests {
             asked.table = table.to_string();
             asked
         };
-        let table =
-            json!({"windows": {"local-model": 16384, "other": 999, "zero": 0, "text": "big"}});
+        let table = json!({"models": {"local-model": {"window": 16384}, "other": {"window": 999}, "zero": {"window": 0}, "text": {"window": "big"}, "bare": {}}});
         let _held = [
             gateway.open(with("a", "local-model", &table), spawner()),
             gateway.open(with("b", "plain", &table), spawner()),

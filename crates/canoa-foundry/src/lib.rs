@@ -22,6 +22,7 @@ mod engine;
 mod engines;
 mod error;
 mod gateway;
+mod model_store;
 pub mod models;
 pub mod openai;
 mod providers;
@@ -40,6 +41,7 @@ pub use engine::{
 };
 pub use engines::run_helper;
 pub use error::ApiError;
+pub use model_store::{FoundryModels, ModelSetting};
 pub use providers::{
     FoundryAccounts, FoundryExtension, FoundryGateway, FoundryStore, GATEWAY_LOG, OWN_MODELS,
     STORE_TYPE, TABLE, WINDOW_COPIES, library,

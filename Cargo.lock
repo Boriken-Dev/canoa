@@ -830,6 +830,8 @@ dependencies = [
  "coqui-acp-harness",
  "foundry-local-sdk",
  "getrandom 0.4.3",
+ "guatiao",
+ "guatiao-intake",
  "guatiao-serde",
  "serde_json",
  "tokio",

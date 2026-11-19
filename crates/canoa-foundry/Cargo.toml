@@ -24,6 +24,8 @@ sdk = ["dep:foundry-local-sdk", "dep:tokio"]
 [dependencies]
 canoa = { workspace = true, features = ["store", "gateway", "loopback"] }
 coqui-acp-api.workspace = true
+guatiao.workspace = true
+guatiao-intake.workspace = true
 guatiao-serde.workspace = true
 getrandom.workspace = true
 serde_json.workspace = true
