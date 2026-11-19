@@ -1,4 +1,4 @@
-# coqui-transport-guatiao/. at 2dde3b53b3a4d695c906f21db386efd655406bf5, with what it inherits written out.
+# coqui-transport-guatiao/. at 4dc07e03893c693a70d711df6d475b65c595e0e3, with what it inherits written out.
 example = [{ name = "pipe_library", crate-type = ["cdylib"], required-features = ["pipe"] }]
 test = [{ name = "macro", required-features = ["contract"] }, { name = "pipe", required-features = ["pipe", "contract"] }, { name = "library", required-features = ["pipe", "contract"] }, { name = "websocket", required-features = ["websocket", "contract"] }]
 [package]
@@ -28,14 +28,14 @@ websocket = ["dep:coqui-transport-web", "coqui-transport-web/websocket", "dep:ur
 [dependencies]
 [dependencies.guatiao]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 features = ["provider"]
 [dependencies.guatiao-channel]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 [dependencies.guatiao-builder]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 [dependencies.coqui-builder]
 git = "https://github.com/Boriken-Dev/coqui-builder"
 rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
@@ -61,11 +61,11 @@ serde_json = "1"
 tempfile = "3"
 [dev-dependencies.guatiao]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 features = ["provider", "load"]
 [dev-dependencies.guatiao-serde]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 features = ["json"]
 [lints]
 [lints.rust]

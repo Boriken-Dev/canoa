@@ -5,13 +5,17 @@
 //! What every context is given before a library runs: the script behind
 //! the `guatiao` modules, and a `console`.
 
+use crate::bytes;
 use rquickjs::function::Rest;
-use rquickjs::{Coerced, Constructor, Ctx, Function, Object, Result, Symbol, Value};
+use rquickjs::{Coerced, Constructor, Ctx, Function, Object, Result, Symbol, TypedArray, Value};
 
 const CORE: &str = include_str!("prelude/core.js");
 
 /// The name the script stores its object under, as `Symbol.for` spells it.
 const KEY: &str = "guatiao.core";
+
+/// Where `install` leaves the natives for the script to take.
+const NATIVE: &str = "guatiao.native";
 
 /// The most items of a list, and bytes of a buffer, a script may make a
 /// value of or ask a host for: what a runtime's memory limit could hold,
@@ -65,7 +69,24 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> Result<()> {
     if globals.contains_key(key(ctx)?)? {
         return Ok(());
     }
-    ctx.eval::<(), _>(CORE)?;
+    // What the script cannot do itself, handed over under a key the script
+    // takes it from and deletes before any library runs.
+    let native = Object::new(ctx.clone())?;
+    native.set(
+        "decode",
+        Function::new(ctx.clone(), |array: TypedArray<'_, u8>| -> String {
+            String::from_utf8_lossy(&bytes::of_array(&array)).into_owned()
+        })?,
+    )?;
+    native.set(
+        "yieldCalls",
+        Function::new(ctx.clone(), || guatiao_bridge::yield_calls() as f64)?,
+    )?;
+    let native_key = Symbol::new_global(ctx.clone(), NATIVE)?;
+    globals.set(native_key.clone(), native)?;
+    let evaluated = ctx.eval::<(), _>(CORE);
+    globals.remove(native_key)?;
+    evaluated?;
     console(ctx, &globals)
 }
 
