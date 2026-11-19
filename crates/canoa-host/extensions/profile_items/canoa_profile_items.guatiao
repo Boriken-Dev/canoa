@@ -1,0 +1,6 @@
+# What the JavaScript source reads before running anything: the library's id, the kinds its providers serve and where its code is.
+# The entry module and the version are the package's: `package.json` beside this file.
+type = "js"
+name = "canoa_profile_items"
+kinds = ["profile_item"]
+paths = ["."]

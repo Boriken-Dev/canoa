@@ -1,277 +1,141 @@
-//! The `catalog_source` providers this host offers: the two built in (`read` and `command`) and those the extensions of canoa.cfg
-//! add, all found the same way, through a Guatiao registry.
+//! The `catalog_source` providers this host offers: the two that ship with it (`read` and `command`, scripts written with the Canoa
+//! SDK) and those the extensions of canoa.cfg add, all found the same way, through a Guatiao registry.
 //!
 //! `read` names a place the Store type reads itself (a git source, an address or a file), so the host's own reader for the type does
-//! the reading and the provider only describes the form. `command` runs a program the person named and takes what it prints.
+//! the reading and the provider only describes the form. `command` runs a program the person named and takes what it prints. Both
+//! run through the spawner each `read` is handed: the person's own reach, with no other way to start a program or open a file.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
-    reason = "files, processes and clocks are std's"
+    reason = "files and processes are std's"
 )]
 
-use std::io::Read as _;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, OnceLock};
 
-use canoa::store::recipe::{bad_value_error, internal_error};
 use canoa::store::source::{CatalogSourceProvider, KIND, ReadRequest, SourceInfo};
-use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
-use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
-use guatiao_intake::Form;
-use serde_json::{Map, Value};
+use coqui_acp_api::guatiao::{Secret, Status};
+use coqui_acp_api::{
+    FileInfo, HarnessNotice, ProcessSpawner, SecretBytes, SpawnSpec, SpawnedProcess, SpawnerInfo,
+};
+use coqui_acp_harness::LocalSpawner;
 
-use super::catalogs::READ;
+use crate::scripts::Bundle;
 
-/// The most bytes of a catalog a source answers with.
-pub(crate) const MAX_BYTES: usize = 4 * 1024 * 1024;
-/// How long `command` lets a program run, unless the form says otherwise, in seconds.
-const DEFAULT_SECONDS: u64 = 60;
-/// How much of what a failed program printed on its error stream is kept for the reason.
-const TAIL_BYTES: usize = 2 * 1024;
+/// The sources that ship in the host, with the SDK modules they import.
+static BUNDLE: Bundle = Bundle {
+    name: "catalog-sources",
+    libraries: &["catalog_sources"],
+    files: &[
+        (
+            "catalog_sources/sources.js",
+            include_str!("../../extensions/catalog_sources/sources.js"),
+        ),
+        (
+            "catalog_sources/package.json",
+            include_str!("../../extensions/catalog_sources/package.json"),
+        ),
+        (
+            "catalog_sources/canoa_catalog_sources.guatiao",
+            include_str!("../../extensions/catalog_sources/canoa_catalog_sources.guatiao"),
+        ),
+        (
+            "catalog_sources/sdk/source.js",
+            include_str!("../../../../bindings/js/canoa-sdk/src/source.js"),
+        ),
+        (
+            "catalog_sources/sdk/kinds.js",
+            include_str!("../../../../bindings/js/canoa-sdk/src/kinds.js"),
+        ),
+        (
+            "catalog_sources/sdk/model.js",
+            include_str!("../../../../bindings/js/canoa-sdk/src/model.js"),
+        ),
+    ],
+};
 
-/// What the `read` source asks for.
-#[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code, reason = "only its description is read")]
-pub struct ReadValues {
-    /// Overlays and extensions: <repository>@<ref>#<file>. Skills: owner/repo, a git URL or a folder. MCP servers: the registry's address.
-    #[schema(title = "Source")]
-    pub source: String,
+/// The spawner a source's `read` is handed: this machine's, with the person's own reach, so a source runs a program as the person
+/// and reads a file anywhere their account can. It writes and removes nothing.
+struct Reach(LocalSpawner);
+
+fn refused(status: Status, why: impl AsRef<str>) -> ProviderError {
+    ProviderError::new(status, why.as_ref())
 }
 
-const fn default_seconds() -> u64 {
-    DEFAULT_SECONDS
-}
-
-/// What the `command` source asks for.
-#[derive(ToValue, FromValue, Schema, Form, Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code, reason = "only its description is read")]
-pub struct CommandValues {
-    /// The program first, then each argument.
-    #[schema(title = "Program and arguments")]
-    pub command: Vec<String>,
-    /// Where it runs; the host's own folder when empty.
-    #[schema(title = "Folder")]
-    pub cwd: Option<String>,
-    /// A file it writes, in its folder, to take instead of what it prints.
-    #[schema(title = "Output file")]
-    pub file: Option<String>,
-    /// How long it may run.
-    #[map(default = default_seconds())]
-    #[schema(title = "Seconds it may run")]
-    #[form(unit = "s")]
-    pub timeout: u64,
-}
-
-/// The `read` provider: a place the Store type reads itself.
-#[derive(Default, Provider)]
-#[provider(CatalogSourceProvider, id = "read", crate = ::coqui_acp_api::guatiao)]
-pub struct ReadSource;
-
-impl CatalogSourceProvider for ReadSource {
-    fn describe(&self) -> Result<SourceInfo, ProviderError> {
-        let mut info = SourceInfo::new(READ, "Read an address or a file");
-        info.help = Some(
-            "A git repository, a web address or a file on this computer, in the form the type reads.".to_owned(),
-        );
-        info.asking::<ReadValues>()
+impl ProcessSpawner for Reach {
+    fn describe(&self) -> Result<SpawnerInfo, ProviderError> {
+        self.0.describe()
     }
 
-    /// A file on this computer. A git source or an address is read by the Store type's own reader, which keeps what it fetched
-    /// by commit and checks it, so it never asks this provider.
-    fn read(
+    fn spawn(&self, spec: SpawnSpec) -> Result<Object<dyn SpawnedProcess>, ProviderError> {
+        self.0.spawn(spec)
+    }
+
+    fn write_file(
         &self,
-        request: ReadRequest,
-        _spawner: Object<dyn ProcessSpawner>,
-    ) -> Result<String, ProviderError> {
-        let fields = fields_of(&request)?;
-        let source = fields
-            .get("source")
-            .and_then(Value::as_str)
-            .ok_or_else(|| bad_value_error("the source is needed"))?;
-        let bytes = std::fs::read(source)
-            .map_err(|error| internal_error(format!("{source} cannot be read: {error}")))?;
-        text_of(bytes)
-    }
-}
-
-/// The `command` provider: a program the person named, run on each refresh, whose standard output (or a file it writes) is the
-/// catalog.
-#[derive(Default, Provider)]
-#[provider(CatalogSourceProvider, id = "command", crate = ::coqui_acp_api::guatiao)]
-pub struct CommandSource;
-
-impl CatalogSourceProvider for CommandSource {
-    fn describe(&self) -> Result<SourceInfo, ProviderError> {
-        let mut info = SourceInfo::new("command", "Run a program");
-        info.help = Some(
-            "A program and its arguments, run each time the catalog is refreshed, as you, with your environment. What it prints is \
-             the catalog, in the form the type reads: an overlay or extension catalog file, a JSON list of skills, or a registry's \
-             list of MCP servers."
-                .to_owned(),
-        );
-        // It serves every type: what it prints is read in the form the type documents.
-        info.asking::<CommandValues>()
+        _path: &str,
+        _bytes: Secret<SecretBytes>,
+        _private: bool,
+    ) -> Result<(), ProviderError> {
+        Err(refused(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            "a catalog source keeps no file",
+        ))
     }
 
-    fn read(
-        &self,
-        request: ReadRequest,
-        _spawner: Object<dyn ProcessSpawner>,
-    ) -> Result<String, ProviderError> {
-        let fields = fields_of(&request)?;
-        run(&fields).map_err(internal_error)
+    fn read_file(&self, path: &str, max_bytes: u64) -> Result<Secret<SecretBytes>, ProviderError> {
+        let path = std::path::Path::new(path);
+        if !path.is_absolute() {
+            return Err(refused(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                "a file is read by its absolute path",
+            ));
+        }
+        let meta = std::fs::metadata(path).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => refused(Status::GUATIAO_ERR_NOT_FOUND, "no such file"),
+            _ => refused(Status::GUATIAO_ERR_INTERNAL, error.to_string()),
+        })?;
+        if !meta.is_file() {
+            return Err(refused(Status::GUATIAO_ERR_NOT_FOUND, "not a file"));
+        }
+        if meta.len() > max_bytes {
+            return Err(refused(
+                Status::GUATIAO_ERR_BAD_VALUE,
+                format!("the file is longer than {max_bytes} bytes"),
+            ));
+        }
+        std::fs::read(path)
+            .map(|bytes| Secret::new(SecretBytes::new(bytes)))
+            .map_err(|error| refused(Status::GUATIAO_ERR_INTERNAL, error.to_string()))
     }
-}
 
-fn fields_of(request: &ReadRequest) -> Result<Map<String, Value>, ProviderError> {
-    match serde_json::from_str::<Value>(&request.fields) {
-        Ok(Value::Object(fields)) => Ok(fields),
-        _ => Err(bad_value_error("the fields are a JSON object")),
-    }
-}
-
-fn text_of(bytes: Vec<u8>) -> Result<String, ProviderError> {
-    if bytes.len() > MAX_BYTES {
-        return Err(internal_error(format!(
-            "the catalog holds {} bytes, more than the {MAX_BYTES} this host reads",
-            bytes.len()
-        )));
-    }
-    String::from_utf8(bytes).map_err(|_| internal_error("the catalog is not text"))
-}
-
-/// Runs the program of `fields` and answers with the catalog, or why it did not produce one: what the program printed on its
-/// error stream, last, when it failed.
-fn run(fields: &Map<String, Value>) -> Result<String, String> {
-    let words: Vec<&str> = fields
-        .get("command")
-        .and_then(Value::as_array)
-        .map(|list| list.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default();
-    let Some((program, args)) = words
-        .split_first()
-        .filter(|(program, _)| !program.is_empty())
-    else {
-        return Err("the command is a program, then its arguments".to_owned());
-    };
-    let seconds = match fields.get("timeout") {
-        None | Some(Value::Null) => DEFAULT_SECONDS,
-        Some(Value::Number(number)) => number
-            .as_u64()
-            .ok_or("the time it may run is a whole number of seconds")?,
-        Some(Value::String(text)) => text
-            .trim()
-            .parse()
-            .map_err(|_| "the time it may run is a whole number of seconds".to_owned())?,
-        Some(_) => return Err("the time it may run is a whole number of seconds".to_owned()),
-    };
-    let dir = fields
-        .get("cwd")
-        .and_then(Value::as_str)
-        .filter(|dir| !dir.is_empty());
-    let file = fields
-        .get("file")
-        .and_then(Value::as_str)
-        .filter(|file| !file.is_empty());
-
-    let mut command = crate::spawn::Command::new(program);
-    command.args(args);
-    if let Some(dir) = dir {
-        command.current_dir(dir);
-    }
-    command
-        .stdin(crate::spawn::Stdio::Null)
-        .stdout(crate::spawn::Stdio::Piped)
-        .stderr(crate::spawn::Stdio::Piped)
-        .own_group();
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("{program} could not start: {error}"))?;
-    let out = child.stdout.take().map(|mut stream| {
-        std::thread::spawn(move || {
-            let mut kept = Vec::new();
-            // One byte past the most, so a catalog that is too long is known to be.
-            let _ = (&mut stream)
-                .take(MAX_BYTES as u64 + 1)
-                .read_to_end(&mut kept);
-            // Keep reading and dropping, or a program that prints on would wait for ever on a full pipe.
-            let _ = std::io::copy(&mut stream, &mut std::io::sink());
-            kept
-        })
-    });
-    let err = child.stderr.take().map(|mut stream| {
-        std::thread::spawn(move || {
-            let mut kept: Vec<u8> = Vec::new();
-            let mut chunk = [0_u8; 4096];
-            while let Ok(read) = stream.read(&mut chunk) {
-                if read == 0 {
-                    break;
-                }
-                kept.extend_from_slice(&chunk[..read]);
-                if kept.len() > TAIL_BYTES {
-                    kept.drain(..kept.len() - TAIL_BYTES);
-                }
+    fn file_info(&self, path: &str) -> Result<Option<FileInfo>, ProviderError> {
+        match std::fs::metadata(path) {
+            Ok(meta) if meta.is_file() => {
+                let modified_ms = meta
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |since| {
+                        i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+                    });
+                Ok(Some(FileInfo::new(meta.len(), modified_ms)))
             }
-            String::from_utf8_lossy(&kept).trim().to_owned()
-        })
-    });
-    let started = Instant::now();
-    let limit = Duration::from_secs(seconds);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if started.elapsed() < limit => {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            _ => break None,
-        }
-    };
-    match status {
-        Some(_) => child.end_group_after_exit(),
-        None => {
-            let _ = child.kill();
-            child.end_group();
-            let _ = child.wait();
+            _ => Ok(None),
         }
     }
-    let printed = out.and_then(|each| each.join().ok()).unwrap_or_default();
-    let tail = err.and_then(|each| each.join().ok()).unwrap_or_default();
-    let why = |what: String| {
-        if tail.is_empty() {
-            what
-        } else {
-            format!("{what}:\n{tail}")
-        }
-    };
-    match status {
-        None => Err(why(format!("{program} was stopped after {seconds} s"))),
-        Some(status) if !status.success() => Err(why(format!("{program} ended with {status}"))),
-        Some(_) => {
-            let bytes = match file {
-                Some(file) => {
-                    let path = dir.map_or_else(
-                        || std::path::PathBuf::from(file),
-                        |dir| std::path::Path::new(dir).join(file),
-                    );
-                    std::fs::read(&path)
-                        .map_err(|error| format!("{} cannot be read: {error}", path.display()))?
-                }
-                None => printed,
-            };
-            if bytes.is_empty() {
-                return Err(why(format!("{program} printed no catalog")));
-            }
-            text_of(bytes).map_err(|error| error.to_string())
-        }
+
+    fn remove_file(&self, _path: &str) -> Result<(), ProviderError> {
+        Err(refused(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            "a catalog source removes no file",
+        ))
+    }
+
+    fn notice(&self, notice: HarnessNotice) -> Result<(), ProviderError> {
+        self.0.notice(notice)
     }
 }
-
-coqui_acp_api::guatiao::local_providers!(
-    id = "canoa-catalog-sources",
-    version = env!("CARGO_PKG_VERSION"),
-    providers = [ReadSource, CommandSource]
-);
 
 /// One provider this host offers.
 #[derive(Clone)]
@@ -297,21 +161,22 @@ impl core::fmt::Debug for Sources {
 }
 
 impl Sources {
-    /// The providers built into this binary.
+    /// The providers that ship with this host: scripts it carries, found like any extension's. The registry is made once.
     pub(crate) fn built_in() -> Self {
-        let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
-        let loaded = registry
-            .register_local("canoa-catalog-sources", library)
-            .map(|loading| loading.loaded().is_some());
-        let mut sources = Self::default();
-        if loaded.is_ok_and(|loaded| loaded) {
-            if let Err(why) = sources.add(None, Arc::new(registry)) {
-                tracing::warn!("the built-in catalog sources were refused: {why}");
+        static MADE: OnceLock<Sources> = OnceLock::new();
+        MADE.get_or_init(|| {
+            let mut sources = Self::default();
+            match BUNDLE.registry(&crate::scripts::root()) {
+                Ok(registry) => {
+                    if let Err(why) = sources.add(None, Arc::new(registry)) {
+                        tracing::warn!("the built-in catalog sources were refused: {why}");
+                    }
+                }
+                Err(why) => tracing::warn!("the built-in catalog sources are not offered: {why}"),
             }
-        } else {
-            tracing::warn!("the built-in catalog sources were not accepted");
-        }
-        sources
+            sources
+        })
+        .clone()
     }
 
     /// Takes every `catalog_source` provider of `registry`, brought by the extension `extension` or built in. Nothing is taken
@@ -393,7 +258,7 @@ impl Sources {
             .map_err(|_| format!("{id} is not a catalog_source"))?
             .default_instance()
             .ok_or_else(|| format!("{id} needs settings"))?
-            .read(request, crate::secrets::spawner::spawner())
+            .read(request, Reach(LocalSpawner::new()).into_object())
             .map_err(|error| error.to_string())
     }
 }

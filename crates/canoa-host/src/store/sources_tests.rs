@@ -322,3 +322,53 @@ fn the_read_source_reads_a_file_on_this_computer() {
     let _ = std::fs::remove_file(&file);
     let _ = std::fs::remove_dir(&dir);
 }
+
+#[test]
+fn the_read_source_says_a_file_is_missing_or_is_not_text_or_is_longer_than_the_host_reads() {
+    let dir = std::env::temp_dir().join(format!("canoa-source-bad-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let read = |file: &std::path::Path| {
+        Sources::built_in().read(
+            "read",
+            ReadRequest::new(
+                "overlays",
+                "x",
+                json!({"source": file.to_string_lossy()}).to_string(),
+            ),
+        )
+    };
+    let missing = read(&dir.join("nothing.toml")).expect_err("no such file");
+    assert!(missing.contains("cannot be read"), "{missing}");
+    let binary = dir.join("binary.toml");
+    std::fs::write(&binary, [0x6e_u8, 0xff, 0xfe, 0x61]).expect("file");
+    let not_text = read(&binary).expect_err("not text");
+    assert!(not_text.contains("is not text"), "{not_text}");
+    let long = dir.join("long.toml");
+    std::fs::write(&long, vec![b'a'; 4 * 1024 * 1024 + 2]).expect("file");
+    let too_long = read(&long).expect_err("too long");
+    assert!(too_long.contains("cannot be read"), "{too_long}");
+    // A folder is no file, and a relative name is no place: the person names where a file is.
+    assert!(read(&dir).is_err());
+    assert!(read(std::path::Path::new("relative.toml")).is_err());
+    for file in ["binary.toml", "long.toml"] {
+        let _ = std::fs::remove_file(dir.join(file));
+    }
+    let _ = std::fs::remove_dir(&dir);
+}
+
+#[test]
+fn a_program_that_prints_what_is_not_text_or_nothing_is_refused_with_its_name() {
+    let dir = std::env::temp_dir().join(format!("canoa-source-binary-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    std::fs::write(dir.join("out.bin"), [0xff_u8, 0xfe]).expect("file");
+    let folder = dir.to_string_lossy().into_owned();
+    let not_text =
+        run(json!({"command": say("x"), "cwd": folder, "file": "out.bin"})).expect_err("binary");
+    assert!(not_text.contains("is not text"), "{not_text}");
+    std::fs::write(dir.join("out.bin"), "").expect("empty");
+    let nothing =
+        run(json!({"command": say("x"), "cwd": folder, "file": "out.bin"})).expect_err("empty");
+    assert!(nothing.contains("printed no catalog"), "{nothing}");
+    let _ = std::fs::remove_file(dir.join("out.bin"));
+    let _ = std::fs::remove_dir(&dir);
+}

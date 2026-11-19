@@ -40,6 +40,7 @@ pub mod profile;
 pub mod provider;
 mod replace;
 mod scope;
+mod scripts;
 mod secrets;
 pub mod serve;
 mod settings_sections;

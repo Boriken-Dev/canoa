@@ -1,6 +1,6 @@
 //! The profile items this host offers: each is a provider of the `profile_item` kind, the ones Canoa carries (the model, the effort,
-//! the mode, the starting instructions, the access) and the bundled ones (a proxy, an identity) registered the way an extension's
-//! are, and those the libraries of canoa.cfg's entries and extensions add. Nothing here names an item the host does not find in a
+//! the mode, the starting instructions, the access) and the bundled ones (a proxy, an identity, written as scripts) registered the way an
+//! extension's are, and those the libraries of canoa.cfg's entries and extensions add. Nothing here names an item the host does not find in a
 //! registry: a profile's values for an item no provider offers are kept and reported as not applied.
 //!
 //! A profile holds, for each item, a JSON object of the values the person gave the members of its schema. A session starts by asking each
@@ -315,18 +315,13 @@ impl ItemCatalog {
     /// earlier one took, or that cannot be described, is left out and logged.
     pub(crate) fn from_registries(registries: Vec<(String, Registry)>) -> Self {
         let mut found: Vec<(String, Registry)> = Vec::new();
-        for (origin, name, library) in [
-            (BUILT_IN, "canoa-profile-items", library as Library),
-            (
-                BUNDLED,
-                "canoa-profile-extras",
-                super::extras::library as Library,
-            ),
-        ] {
-            match registry_of(name, library) {
-                Ok(registry) => found.push((origin.to_owned(), registry)),
-                Err(why) => tracing::warn!("the {origin} profile items are not offered: {why}"),
-            }
+        match registry_of("canoa-profile-items", library as Library) {
+            Ok(registry) => found.push((BUILT_IN.to_owned(), registry)),
+            Err(why) => tracing::warn!("the built-in profile items are not offered: {why}"),
+        }
+        match super::bundled::registry() {
+            Ok(registry) => found.push((BUNDLED.to_owned(), registry)),
+            Err(why) => tracing::warn!("the bundled profile items are not offered: {why}"),
         }
         found.extend(registries);
         let mut entries: Vec<Entry> = Vec::new();

@@ -1,0 +1,9 @@
+{
+  "name": "canoa_profile_items",
+  "version": "1.0.0",
+  "description": "The profile items that ship with the host: who the session's programs say they are, and how they reach the network",
+  "license": "MPL-2.0",
+  "private": true,
+  "type": "module",
+  "exports": "./items.js"
+}

@@ -1,0 +1,9 @@
+{
+  "name": "canoa_catalog_sources",
+  "version": "1.0.0",
+  "description": "The catalog sources that ship with the host: a program the person names, and a place the Store type reads",
+  "license": "MPL-2.0",
+  "private": true,
+  "type": "module",
+  "exports": "./sources.js"
+}
