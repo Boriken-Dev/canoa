@@ -98,7 +98,7 @@ impl AgentVendor for ClaudeVendor {
         &self,
         request: SkillsRequest,
     ) -> Result<Option<SkillsDelivery>, ProviderError> {
-        drop(request);
+        let _ = request;
         Ok(Some(delivery::skills_delivery()))
     }
 

@@ -749,7 +749,7 @@ pub trait AgentVendor: Send + Sync {
         &self,
         request: SkillsRequest,
     ) -> Result<Option<SkillsDelivery>, ProviderError> {
-        drop(request);
+        let _ = request;
         Ok(None)
     }
 
