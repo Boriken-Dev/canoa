@@ -355,7 +355,7 @@ impl<'a> Run<'a> {
     }
 
     /// Runs a command that only reads, such as a program asked its version, as [`Run::exec`] does, and again when the spawner could
-    /// not start it, up to [`READ_ATTEMPTS`] runs in all: a program that ends before Windows has put it in a job object is refused
+    /// not start it, up to three runs in all: a program that ends before Windows has put it in a job object is refused
     /// as one that could not be contained, though it ran, and asking it again changes nothing.
     ///
     /// # Errors
