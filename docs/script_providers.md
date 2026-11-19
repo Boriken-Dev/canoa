@@ -8,7 +8,7 @@ A script is shared between hosts as the files it is.
 | Kind | What it is | JavaScript and Python base classes |
 | --- | --- | --- |
 | `agent_vendor` | who an agent is and how Canoa shows it | `AgentVendor` |
-| `store_extension`, `program_store` | a Store type, and a program the Store installs | `StoreExtension`, `ProgramStore` |
+| `store_extension`, `program_store`, `model_store` | a Store type, a program the Store installs, and the models it lists | `StoreExtension`, `ProgramStore`, `ModelStore` |
 | `secret_provider` | somewhere a secret comes from | `SecretProvider`, `FormSecretProvider`, `SystemStoreSecretProvider` |
 | `profile_item` | one thing a profile may set | `ProfileItem`, `SettingProfileItem`, `EnvProfileItem`, `NetworkProfileItem` |
 | `catalog_source` | where a Store type's catalog comes from | `CatalogSource`, `CommandCatalogSource`, `ReadCatalogSource` |

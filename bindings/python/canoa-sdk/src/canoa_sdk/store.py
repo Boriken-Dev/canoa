@@ -1,4 +1,5 @@
-"""The Store's kinds: `store_extension`, which adds types to the Store, and `program_store`, which knows one program.
+"""The Store's kinds: `store_extension`, which adds types to the Store, `program_store`, which knows one program, and
+`model_store`, which lists the models a type's programs run.
 
 ```python
 class Notes(StoreExtension):
@@ -7,7 +8,8 @@ class Notes(StoreExtension):
     types = [ExtensionType("notes", "Notes", stores=["notes_program"])]
 ```
 
-`stores` names `program_store` providers the same library offers; the host lists and installs them as any store.
+`stores` names `program_store` providers the same library offers; the host lists and installs them as any store. A type's `models`
+names the `model_store` provider that lists its models, which the Store shows as a page of their own.
 """
 
 from __future__ import annotations
@@ -23,19 +25,21 @@ from . import kinds
 from ._model import Model
 from ._provider import WithForm, abstract
 
-__all__ = ["ExtensionInfo", "ExtensionType", "ProgramStore", "StoreExtension"]
+__all__ = ["ExtensionInfo", "ExtensionType", "ModelStore", "ProgramStore", "StoreExtension"]
 
 
 @dataclass
 class ExtensionType(Model):
     """One type an extension adds: a word of lower-case letters and digits (1 to 32, none the Store has itself), its title in the
     plural, an icon (the name of one of the application's, or a small `data:image/png;base64,` or `data:image/webp;base64,`
-    address) and the ids of the `program_store` providers that serve it."""
+    address), the ids of the `program_store` providers that serve it and, when its programs run models, the id of the `model_store`
+    provider that lists them."""
 
     id: str
     title: str
     stores: List[str] = field(default_factory=list)
     icon: Optional[str] = None
+    models: Optional[str] = None
 
 
 @dataclass
@@ -100,3 +104,37 @@ class ProgramStore(WithForm, provide.Provider, kinds.ProgramStore, abstract=True
         prompter: Taken[kinds.InstallPrompter],
     ) -> ValueAnswer:
         raise Unsupported("apply is not implemented")
+
+
+class ModelStore(WithForm, provide.Provider, kinds.ModelStore, abstract=True):
+    """The models of a Store type: what the Store lists, moves and sets up for the programs of the type's `program_store`.
+
+    Override `info()` (the `ModelStoreInfo` as a map: `title`, `catalog`, `publisher`, `missing`, and `settings` and `speech` when the
+    type keeps a setting per model or its service can transcribe) and the four slots `list`, `act`, `keep` and `service`, as
+    `canoa.model_store.kinds.json` describes them. Every one is required and synchronous; a slot takes the host's `spawner`, which the
+    provider owns and destroys, and runs the type's program through it. A slot the provider has nothing to answer refuses with
+    `Unsupported`, with its reason.
+    """
+
+    def info(self) -> Dict[str, Any]:
+        """The `ModelStoreInfo` this provider answers `describe` with."""
+        raise NotImplementedError("a ModelStore says its info()")
+
+    def describe(self) -> ValueAnswer:
+        return self.info()
+
+    @abstract
+    def list(self, query: Ref, spawner: Taken[kinds.ProcessSpawner]) -> ValueAnswer:
+        raise Unsupported("list is not implemented")
+
+    @abstract
+    def act(self, request: Ref, spawner: Taken[kinds.ProcessSpawner]) -> ValueAnswer:
+        raise Unsupported("act is not implemented")
+
+    @abstract
+    def keep(self, request: Ref, spawner: Taken[kinds.ProcessSpawner]) -> ValueAnswer:
+        raise Unsupported("keep is not implemented")
+
+    @abstract
+    def service(self, query: Ref, spawner: Taken[kinds.ProcessSpawner]) -> ValueAnswer:
+        raise Unsupported("service is not implemented")

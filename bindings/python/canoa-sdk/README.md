@@ -23,7 +23,7 @@ examples in `examples/providers/python` are loaded by `crates/canoa-host/tests/s
 | Kind | Base class | Module |
 | --- | --- | --- |
 | `agent_vendor` | `AgentVendor` | `canoa_sdk.vendor` |
-| `store_extension`, `program_store` | `StoreExtension`, `ProgramStore` | `canoa_sdk.store` |
+| `store_extension`, `program_store`, `model_store` | `StoreExtension`, `ProgramStore`, `ModelStore` | `canoa_sdk.store` |
 | `speech_provider`, `speech_output` | `SpeechProvider`, `SpeechOutput` | `canoa_sdk.speech` |
 | `secret_provider` | `SecretProvider`, `FormSecretProvider`, `SystemStoreSecretProvider` | `canoa_sdk.secret` |
 | `profile_item` | `ProfileItem`, `SettingProfileItem`, `EnvProfileItem`, `NetworkProfileItem` | `canoa_sdk.profile` |

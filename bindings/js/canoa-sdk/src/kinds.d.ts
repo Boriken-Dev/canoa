@@ -254,6 +254,63 @@ export interface SpawnedProcessRemote extends k.RemoteBase<typeof SpawnedProcess
 export declare const SpawnedProcess: k.DescribedKind<SpawnedProcess, SpawnedProcessRemote, true>;
 
 /**
+ * The models of a Store type, and what the person does with each.
+ *
+ * Every method is required and synchronous, and every object a method is handed is the provider's to destroy. A provider with no
+ * settings refuses `keep`, and one with no speech service refuses `service`, `UNSUPPORTED` with
+ * its reason; the host asks neither unless `describe` offers it.
+ *
+ * The `model_store` kind: what a provider of it implements.
+ */
+export interface ModelStore {
+  /** What this store is. The same answer on every call, with nothing run. */
+  describe(): unknown;
+  /**
+   * The rows now. Never changes anything; a program that cannot answer is a refusal with its own words, and a program the host
+   * found no copy of is the list's `unavailable`.
+   */
+  list(query: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): unknown;
+  /**
+   * One action on one row, to its end: the provider runs its program through `spawner`, within the time its own action takes,
+   * and ends it when it is over. A program's refusal is a refusal here, in the program's words.
+   */
+  act(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): unknown;
+  /** Settles the settings of one row; the host keeps what it answers. */
+  keep(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): unknown;
+  /** Where the service that runs the models is now, and which of them can transcribe. */
+  service(query: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): unknown;
+}
+
+/** A caller's handle on a `model_store` table: a method per slot. */
+export interface ModelStoreRemote extends k.RemoteBase<typeof ModelStore> {
+  /** What this store is. The same answer on every call, with nothing run. */
+  describe(): g.Value;
+  /**
+   * The rows now. Never changes anything; a program that cannot answer is a refusal with its own words, and a program the host
+   * found no copy of is the list's `unavailable`.
+   */
+  list(query: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): g.Value;
+  /**
+   * One action on one row, to its end: the provider runs its program through `spawner`, within the time its own action takes,
+   * and ends it when it is over. A program's refusal is a refusal here, in the program's words.
+   */
+  act(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): g.Value;
+  /** Settles the settings of one row; the host keeps what it answers. */
+  keep(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): g.Value;
+  /** Where the service that runs the models is now, and which of them can transcribe. */
+  service(query: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): g.Value;
+}
+
+/**
+ * The models of a Store type, and what the person does with each.
+ *
+ * Every method is required and synchronous, and every object a method is handed is the provider's to destroy. A provider with no
+ * settings refuses `keep`, and one with no speech service refuses `service`, `UNSUPPORTED` with
+ * its reason; the host asks neither unless `describe` offers it.
+ */
+export declare const ModelStore: k.DescribedKind<ModelStore, ModelStoreRemote, false>;
+
+/**
  * A kind of tab.
  *
  * `describe` answers the same on every call with nothing run. `tail` is asked only of a [`Shows::Log`] kind.

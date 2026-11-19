@@ -19,6 +19,7 @@ class StoreExtension extends Provider {       // store.js
   static title; static publisher; static types = [];   // {id, title, stores?, icon?}
 }
 class ProgramStore extends Provider {         // store.js: info() (the StoreInfo), program, latest, plan, apply
+class ModelStore extends Provider {           // store.js: lists, moves and sets up the models of a type's programs; info() (the ModelStoreInfo), list, act, keep, service (each takes the host's spawner)
 }
 class SpeechProvider extends Provider {       // speech.js: static title, encodings, description, partials, max_seconds, hints; open(request, spawner)
 }

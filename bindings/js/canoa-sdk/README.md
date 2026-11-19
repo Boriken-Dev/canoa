@@ -23,7 +23,7 @@ nothing else, so a library imports the SDK by a relative path to where it is und
 | Kind | Base class | Module |
 | --- | --- | --- |
 | `agent_vendor` | `AgentVendor` | `canoa-sdk/vendor` |
-| `store_extension`, `program_store` | `StoreExtension`, `ProgramStore` | `canoa-sdk/store` |
+| `store_extension`, `program_store`, `model_store` | `StoreExtension`, `ProgramStore`, `ModelStore` | `canoa-sdk/store` |
 | `speech_provider`, `speech_output` | `SpeechProvider`, `SpeechOutput` | `canoa-sdk/speech` |
 | `secret_provider` | `SecretProvider`, `FormSecretProvider`, `SystemStoreSecretProvider` | `canoa-sdk/secret` |
 | `profile_item` | `ProfileItem`, `SettingProfileItem`, `EnvProfileItem`, `NetworkProfileItem` | `canoa-sdk/profile` |

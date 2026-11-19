@@ -252,6 +252,106 @@ const described = kindsOf({
       ]
     },
     {
+      "name": "model_store",
+      "floor_hash": 2161844408,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "list",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "query",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "act",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "keep",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "service",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "query",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        }
+      ]
+    },
+    {
       "name": "panel_tab",
       "floor_hash": 1639328444,
       "object": false,
@@ -1214,6 +1314,15 @@ export const ProcessSpawner = described["process_spawner"];
  * Destroying it kills the whole tree, as [`kill`](Self::kill) does.
  */
 export const SpawnedProcess = described["spawned_process"];
+
+/**
+ * The models of a Store type, and what the person does with each.
+ *
+ * Every method is required and synchronous, and every object a method is handed is the provider's to destroy. A provider with no
+ * settings refuses `keep`, and one with no speech service refuses `service`, `UNSUPPORTED` with
+ * its reason; the host asks neither unless `describe` offers it.
+ */
+export const ModelStore = described["model_store"];
 
 /**
  * A kind of tab.

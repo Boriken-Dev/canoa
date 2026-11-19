@@ -183,6 +183,49 @@ class CatalogSource(KindProtocol, Protocol, kind="catalog_source", floor_hash=21
         ...
 
 
+class ModelStore(KindProtocol, Protocol, kind="model_store", floor_hash=2161844408):
+    """The models of a Store type, and what the person does with each.
+
+    Every method is required and synchronous, and every object a method is handed is the provider's to destroy. A provider with no
+    settings refuses `keep`, and one with no speech service refuses `service`, `UNSUPPORTED` with
+    its reason; the host asks neither unless `describe` offers it.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What this store is. The same answer on every call, with nothing run."""
+        ...
+
+    @required
+    @fallible
+    def list(self, query: Ref, spawner: Taken[ProcessSpawner]) -> ValueAnswer:
+        """The rows now. Never changes anything; a program that cannot answer is a refusal with its own words, and a program the host
+        found no copy of is the list's `unavailable`.
+        """
+        ...
+
+    @required
+    @fallible
+    def act(self, request: Ref, spawner: Taken[ProcessSpawner]) -> ValueAnswer:
+        """One action on one row, to its end: the provider runs its program through `spawner`, within the time its own action takes,
+        and ends it when it is over. A program's refusal is a refusal here, in the program's words.
+        """
+        ...
+
+    @required
+    @fallible
+    def keep(self, request: Ref, spawner: Taken[ProcessSpawner]) -> ValueAnswer:
+        """Settles the settings of one row; the host keeps what it answers."""
+        ...
+
+    @required
+    @fallible
+    def service(self, query: Ref, spawner: Taken[ProcessSpawner]) -> ValueAnswer:
+        """Where the service that runs the models is now, and which of them can transcribe."""
+        ...
+
+
 class PanelTab(KindProtocol, Protocol, kind="panel_tab", floor_hash=1639328444):
     """A kind of tab.
 
@@ -712,4 +755,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=192835
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "CatalogSource", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "CatalogSource", "ModelStore", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]

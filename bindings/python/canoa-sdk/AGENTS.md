@@ -25,6 +25,7 @@ class StoreExtension:     # canoa_sdk.store: adds types to the Store
     title: str; publisher: str; types: Sequence[ExtensionType] = ()
     def info(self) -> ExtensionInfo
 class ProgramStore:       # canoa_sdk.store: knows one program; abstract slots program, latest, plan, apply
+class ModelStore:         # canoa_sdk.store: lists, moves and sets up the models of a type's programs; info() (the ModelStoreInfo), abstract slots list, act, keep, service (each takes the host's spawner)
     def info(self) -> dict                                   # the StoreInfo
 class SpeechProvider:     # canoa_sdk.speech: audio in, text out; abstract slot open(request, spawner) -> SpeechSession
     title: str; encodings: Sequence[str]; description = max_seconds = None; partials = False; hints = ()
