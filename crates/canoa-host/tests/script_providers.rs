@@ -347,6 +347,145 @@ mod with_source {
         drop(link);
         hosted.stop();
     }
+
+    /// What the host does with an account maker an extension offers: Codex lists the kind and its way to sign in, `canoa accounts
+    /// add` signs an account in through the library (the key typed into the form, resting in the store alone), and a session on the
+    /// account starts a Codex stand-in given the address the account holds and a key.
+    pub fn check_account_maker(source: &Path, settings: &str) {
+        use std::io::Write as _;
+        use std::process::Stdio;
+
+        use canoa_host::ACCOUNT_META;
+
+        use crate::support::{Host, Scratch, cwd, host_binary, with_link};
+
+        const KEY: &str = "sk-standin-gateway";
+        let scratch = Scratch::new();
+        let program = scratch
+            .0
+            .join(format!("codex{}", std::env::consts::EXE_SUFFIX));
+        std::fs::copy(example("harness_standin", false), &program).expect("the stand-in");
+        let config = scratch.0.join("canoa.cfg");
+        std::fs::write(
+            &config,
+            format!(
+                "[secrets]\naccounts = \"file\"\n\n\
+                 [host.agents.Codex]\nharness = \"codex\"\nexecutable = {}\n\n\
+                 [host.extensions.examples]\nsource = {}\nprovider = \"standin_gateway_accounts\"\n\
+                 [host.extensions.examples.source_settings]\n{settings}",
+                quoted(&program.to_string_lossy()),
+                quoted(&source.to_string_lossy()),
+            ),
+        )
+        .expect("canoa.cfg");
+        let home = scratch.0.join("home");
+        let canoa = |args: &[&str], input: &str| {
+            let mut child = std::process::Command::new(host_binary())
+                .args(args)
+                .arg("--config")
+                .arg(&config)
+                .env("COQUI_AGENTIC_PEER_HOME", &home)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("canoa runs");
+            let mut stdin = child.stdin.take().expect("its input");
+            let _ = stdin.write_all(input.as_bytes());
+            drop(stdin);
+            let done = child.wait_with_output().expect("canoa ends");
+            (
+                done.status.success(),
+                format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&done.stdout),
+                    String::from_utf8_lossy(&done.stderr)
+                ),
+            )
+        };
+        // The kind the library makes is in Codex's catalog: asked for no method, the command lists them.
+        let (_, listed) = canoa(&["accounts", "add", "gw", "--harness", "codex"], "");
+        assert!(listed.contains("standin-key"), "{listed}");
+        let address = "http://127.0.0.1:9/v1";
+        let (made, said) = canoa(
+            &[
+                "accounts",
+                "add",
+                "gw",
+                "--harness",
+                "codex",
+                "--method",
+                "standin-key",
+                "--input",
+                &format!("base_url={address}"),
+            ],
+            &format!("{KEY}\n"),
+        );
+        assert!(
+            made && said.contains("added gw (standin-gateway)"),
+            "{said}"
+        );
+        let text = std::fs::read_to_string(&config).expect("canoa.cfg");
+        assert!(
+            text.contains(address) && !text.contains(KEY),
+            "the address is the account's setting and the key rests in the store alone: {text}"
+        );
+        std::fs::write(
+            &config,
+            text.replace(
+                "[host.agents.Codex]\n",
+                "[host.agents.Codex]\naccounts = [\"gw\"]\n",
+            ),
+        )
+        .expect("the entry offers the account");
+        let record = scratch.0.join("record.jsonl");
+        let config_text = std::fs::read_to_string(&config).expect("canoa.cfg");
+        let env = vec![("STANDIN_RECORD", record.clone().into_os_string())];
+        let (host, log) = Host::start_logged(scratch, &config_text, 1, &env);
+        let client = crate::support::key();
+        host.pair(&client);
+        let dir = cwd(&host.scratch);
+        let answer = with_link(host.url("Codex"), &client, host.peer, |rpc| {
+            let answer = rpc
+                .request(
+                    "initialize",
+                    json!({"protocolVersion": 1, "clientCapabilities": {}, "_meta": {ACCOUNT_META: "gw"}}),
+                )
+                .expect("initialized on the account");
+            rpc.request("session/new", json!({"cwd": dir, "mcpServers": []}))
+                .expect("a session opens");
+            answer
+        })
+        .expect("served");
+        assert_eq!(
+            answer["_meta"][ACCOUNT_META],
+            json!({"name": "gw", "kind": "standin-gateway"}),
+            "{answer}"
+        );
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let started = loop {
+            let started: Vec<Value> = std::fs::read_to_string(&record)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|line| serde_json::from_str(line).ok())
+                .collect();
+            if !started.is_empty() || std::time::Instant::now() >= until {
+                break started;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        let codex = started
+            .iter()
+            .find(|each| each["args"].to_string().contains("app-server"))
+            .unwrap_or_else(|| panic!("Codex started: {started:?}"));
+        assert!(
+            codex["args"].to_string().contains(address),
+            "Codex was given the account's address: {codex}"
+        );
+        let logged = std::fs::read_to_string(&log).unwrap_or_default();
+        assert!(!logged.contains(KEY), "{logged}");
+        drop(host);
+    }
 }
 
 #[cfg(canoa_test_python)]
@@ -355,7 +494,8 @@ mod python {
     use std::process::Command;
 
     use super::with_source::{
-        build_source, check, check_usage, checkout, config, list, repository, usage_config,
+        build_source, check, check_account_maker, check_usage, checkout, config, list, repository,
+        usage_config,
     };
 
     const PROBE: &str = "import sys; print(sys.executable); print(sys.base_prefix)";
@@ -393,6 +533,38 @@ mod python {
             list(&[prefix]),
         );
         check(config(&source, "notes_extension_notes", &settings));
+    }
+
+    #[test]
+    fn an_account_maker_written_in_python_and_named_by_an_extension_is_offered_to_codex_and_runs_it()
+     {
+        let named = env!("CANOA_TEST_PYTHON");
+        let output = Command::new(named)
+            .args(["-I", "-c", PROBE])
+            .output()
+            .unwrap_or_else(|error| panic!("CANOA_TEST_PYTHON={named} does not run: {error}"));
+        assert!(output.status.success(), "CANOA_TEST_PYTHON={named} failed");
+        let text = String::from_utf8(output.stdout).expect("UTF-8");
+        let mut lines = text.lines();
+        let executable = lines.next().expect("an executable").to_owned();
+        let prefix = PathBuf::from(lines.next().expect("a prefix"));
+        let source = build_source(
+            "guatiao-source-py",
+            "guatiao_source_py",
+            &[("PYO3_PYTHON", executable)],
+        );
+        let examples = repository().join("examples/providers/python");
+        // The account provider's kind is coqui-acp's, which its own Python folder carries.
+        let settings = format!(
+            "dirs = {}\npaths = {}\nimport_dirs = {}\n",
+            list(&[examples.join("gateway")]),
+            list(&[
+                checkout("guatiao").join("bindings/python/guatiao/src"),
+                checkout("coqui-acp-api").join("crates/coqui-acp-api/python"),
+            ]),
+            list(&[prefix]),
+        );
+        check_account_maker(&source, &settings);
     }
 
     #[test]

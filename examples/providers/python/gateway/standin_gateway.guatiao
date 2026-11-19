@@ -1,0 +1,4 @@
+type = "python"
+module = "standin_gateway"
+kinds = ["account_provider"]
+paths = ["."]
