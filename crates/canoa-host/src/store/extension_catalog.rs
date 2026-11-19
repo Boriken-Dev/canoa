@@ -2,6 +2,9 @@
 //! extensions the host can install. Each `[extensions.NAME]` is pinned, so nothing of it is kept before what was fetched has
 //! the digest the entry gives. The format is Canoa's own and is written down in `docs/configuration.md`.
 //!
+//! An entry is a native library the host loads (`load` names the file in the pinned folder) or a package of scripts (`runtime`
+//! names the language: the folder is the library, it needs no build and is the same on every platform).
+//!
 //! Reading is static and total: a file that cannot be read is refused whole, an entry that is not valid is refused alone, and an
 //! informational field that is not valid is left out.
 
@@ -80,6 +83,33 @@ pub(crate) enum Digest {
     File(String),
 }
 
+/// The language a package of scripts is written in, which says what runs it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Runtime {
+    /// JavaScript, run by the QuickJS the host carries.
+    Js,
+    /// Python, run by a source of Python the person has set up: the host carries none.
+    Python,
+}
+
+impl Runtime {
+    /// The word a catalog writes.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Js => "js",
+            Self::Python => "python",
+        }
+    }
+
+    fn of(text: &str) -> Option<Self> {
+        match text {
+            "js" => Some(Self::Js),
+            "python" => Some(Self::Python),
+            _ => None,
+        }
+    }
+}
+
 /// What an extension needs of the host.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Needs {
@@ -147,8 +177,10 @@ pub(crate) struct Entry {
     pub(crate) name: String,
     pub(crate) source: Source,
     pub(crate) digest: Digest,
-    /// For a tree, the library file in it the host loads.
+    /// For a tree, the library file in it the host loads; none for a package of scripts.
     pub(crate) load: Option<String>,
+    /// For a tree that is a package of scripts, the language they are written in.
+    pub(crate) runtime: Option<Runtime>,
     pub(crate) provider: String,
     pub(crate) needs: Needs,
     pub(crate) description: Option<String>,
@@ -174,12 +206,13 @@ pub(crate) struct Base<'a> {
     pub(crate) path: &'a str,
 }
 
-const KEYS: [&str; 9] = [
+const KEYS: [&str; 10] = [
     "source",
     "ref",
     "pin",
     "sha256",
     "load",
+    "runtime",
     "provider",
     "needs",
     "description",
@@ -488,6 +521,15 @@ fn finish(
     parts: (String, Option<String>, Needs),
 ) -> Result<Entry, Refusal> {
     let (provider, load, needs) = parts;
+    let runtime = match fields.get("runtime") {
+        None => None,
+        Some(Value::String(text)) => Some(Runtime::of(text).ok_or(Refusal::InvalidEntry)?),
+        Some(_) => return Err(Refusal::InvalidEntry),
+    };
+    // A package of scripts is a folder the host reads whole: it names no library file, and a lone file is no package.
+    if runtime.is_some() && (load.is_some() || matches!(source, Source::Url(_))) {
+        return Err(Refusal::InvalidEntry);
+    }
     let digest = match &source {
         Source::Url(_) => {
             if load.is_some() || fields.contains_key("pin") {
@@ -517,6 +559,7 @@ fn finish(
         source,
         digest,
         load,
+        runtime,
         provider,
         needs,
         description: fields
@@ -611,7 +654,8 @@ impl Entry {
         }
     }
 
-    /// What the index gives beside the origin: the provider, the digest, the file to load and what the entry needs.
+    /// What the index gives beside the origin: the provider, the digest, the file to load or the language of the scripts, and what
+    /// the entry needs.
     pub(crate) fn extension_json(&self) -> Value {
         let mut out = Map::new();
         out.insert("provider".into(), json!(self.provider));
@@ -621,6 +665,9 @@ impl Entry {
         };
         if let Some(load) = &self.load {
             out.insert("load".into(), json!(load));
+        }
+        if let Some(runtime) = self.runtime {
+            out.insert("runtime".into(), json!(runtime.as_str()));
         }
         out.insert("needs".into(), self.needs.json());
         Value::Object(out)
@@ -656,7 +703,7 @@ impl Entry {
             _ => return Err(Refusal::InvalidSource),
         };
         let mut fields = Map::new();
-        for key in ["pin", "sha256", "load", "provider", "needs"] {
+        for key in ["pin", "sha256", "load", "runtime", "provider", "needs"] {
             if let Some(value) = listed.get(key) {
                 fields.insert(key.into(), value.clone());
             }

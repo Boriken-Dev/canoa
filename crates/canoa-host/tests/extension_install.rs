@@ -198,3 +198,192 @@ fn a_library_that_changed_after_it_was_installed_is_not_loaded() {
     drop(link);
     hosted.stop();
 }
+
+// A package of scripts: a folder with a manifest and JavaScript modules, the same bytes on every platform and no build. It is
+// installed as a library is, and the host runs it with the QuickJS built into the program, which this test process carries.
+
+/// The SDK's modules a package imports, copied beside it so the package is the whole of what is shipped.
+const SDK: [&str; 4] = ["store.js", "profile.js", "kinds.js", "model.js"];
+
+const PACKAGE_MODULE: &str = "\
+import { StoreExtension } from './sdk/store.js';
+import { EnvProfileItem } from './sdk/profile.js';
+
+export class Notes extends StoreExtension {
+  static title = 'Team notes';
+  static publisher = 'Example publisher';
+  static types = [{ id: 'notes', title: 'Notes', icon: 'extension' }];
+}
+
+export class Region extends EnvProfileItem {
+  static item = 'region';
+  static title = 'Region';
+  static values = { type: 'object', properties: { name: { type: 'string', title: 'Name' } }, required: ['name'] };
+  static variables = { name: ['REGION'] };
+}
+";
+
+/// A catalog repository on `main` that lists the package, which it holds as a folder: its pin is the digest of that folder, which a
+/// host recomputes over what it fetched.
+fn script_catalog(scratch: &Scratch) -> PathBuf {
+    let repo = scratch.0.join("script_catalog");
+    let folder = repo.join("pkg").join("team_notes");
+    std::fs::create_dir_all(folder.join("sdk")).expect("a folder");
+    git(&repo, &["init", "--quiet", "-b", "main"]);
+    let sdk = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bindings/js/canoa-sdk/src");
+    for file in SDK {
+        std::fs::copy(sdk.join(file), folder.join("sdk").join(file)).expect("an SDK module");
+    }
+    std::fs::write(folder.join("team_notes.js"), PACKAGE_MODULE).expect("the module");
+    std::fs::write(
+        folder.join("team_notes.guatiao"),
+        "type = \"js\"\nname = \"team_notes\"\nkinds = [\"store_extension\", \"profile_item\"]\npaths = [\".\"]\n",
+    )
+    .expect("the manifest");
+    std::fs::write(
+        folder.join("package.json"),
+        "{\"name\": \"team_notes\", \"version\": \"1.0.0\", \"type\": \"module\", \"exports\": \"./team_notes.js\"}\n",
+    )
+    .expect("the package");
+    let pin = coqui_aos::tree_digest(&coqui_aos::StdFs, &folder, &coqui_aos::Settings::default())
+        .expect("a digest")
+        .digest
+        .to_string();
+    std::fs::write(
+        repo.join("extensions.toml"),
+        format!(
+            "[extensions.team_notes]\nsource = \"./pkg/team_notes\"\npin = \"{pin}\"\nruntime = \"js\"\n\
+             provider = \"team_notes_notes\"\nneeds = {{ kind = \"store_extension\", version = \"1\" }}\n"
+        ),
+    )
+    .expect("the catalog");
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "--quiet", "-m", "the catalog"]);
+    repo
+}
+
+/// Installs the package through a host that carries QuickJS and stops it, giving its scratch directory back and the digest the
+/// host recorded.
+fn script_installed(repo: &Path, scratch: Scratch) -> (Scratch, String) {
+    canoa_host::bundle_js!();
+    let hosted = host(scratch, repo);
+    let link = hosted.local.open("@control").expect("a link");
+    let (plan, _) = ask(
+        &link,
+        1,
+        "extension/plan",
+        json!({"catalog": "team", "name": "team_notes"}),
+    )
+    .expect("a plan");
+    assert_eq!(plan["action"], "install", "{plan}");
+    let (applied, _) = ask(&link, 2, "extension/apply", json!({"plan": plan})).expect("applied");
+    assert_eq!(applied["installed"], true, "{applied}");
+    let config = std::fs::read_to_string(hosted.scratch.0.join("canoa.cfg")).expect("canoa.cfg");
+    assert!(config.contains("source = \"bundled:js\""), "{config}");
+    let pin = config
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("pin = \""))
+        .and_then(|rest| rest.strip_suffix('"'))
+        .expect("the recorded digest")
+        .to_owned();
+    drop(link);
+    hosted.stop();
+    let linked::Hosted { scratch, ended, .. } = hosted;
+    ended.join().expect("it returned").expect("it ended well");
+    (scratch, pin)
+}
+
+/// What a host that loaded the package lists of it: the Store type it adds and the profile item it offers.
+fn script_listed(hosted: &Hosted) {
+    let link = hosted.local.open("@control").expect("a link");
+    let (types, _) = ask(&link, 1, "store/extensions", json!({})).expect("the types");
+    let notes = types["types"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .find(|each| each["id"] == "notes")
+        .unwrap_or_else(|| panic!("the package's type is listed: {types}"));
+    assert_eq!(notes["extension"], "team_notes");
+    assert_eq!(notes["extension_title"], "Team notes");
+    let (items, _) = ask(&link, 2, "profile_items/list", json!({})).expect("the items");
+    let region = items["items"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .find(|each| each["id"] == "region")
+        .unwrap_or_else(|| panic!("the package's item is listed: {items}"));
+    assert_eq!(region["origin"], "team_notes");
+    drop(link);
+}
+
+#[test]
+fn a_package_of_scripts_installed_from_a_catalog_is_listed_by_the_host_when_it_starts_again() {
+    let scratch = Scratch::new();
+    let repo = script_catalog(&scratch);
+    let (scratch, _) = script_installed(&repo, scratch);
+    let kept = scratch.0.join("home").join("extensions").join("team_notes");
+    assert!(
+        kept.join("team_notes.guatiao").is_file() && kept.join("sdk").join("store.js").is_file()
+    );
+    let hosted = host(scratch, &repo);
+    script_listed(&hosted);
+    hosted.stop();
+}
+
+#[test]
+fn a_second_host_given_the_same_catalog_entry_ends_with_the_same_package() {
+    let first = Scratch::new();
+    let repo = script_catalog(&first);
+    let (first, first_pin) = script_installed(&repo, first);
+    // Another host, in a home of its own, is told the same catalog; it fetches the package itself and checks the same digest.
+    let (second, second_pin) = script_installed(&repo, Scratch::new());
+    assert_eq!(
+        first_pin, second_pin,
+        "both recorded the digest the catalog gave"
+    );
+    let folder = |scratch: &Scratch| scratch.0.join("home").join("extensions").join("team_notes");
+    let digest = |scratch: &Scratch| {
+        coqui_aos::tree_digest(
+            &coqui_aos::StdFs,
+            &folder(scratch),
+            &coqui_aos::Settings::default(),
+        )
+        .expect("a digest")
+        .digest
+        .to_string()
+    };
+    assert_eq!(digest(&first), digest(&second));
+    assert_eq!(digest(&first), first_pin);
+    for scratch in [first, second] {
+        let hosted = host(scratch, &repo);
+        script_listed(&hosted);
+        hosted.stop();
+    }
+}
+
+#[test]
+fn a_script_that_changed_after_it_was_installed_is_not_loaded() {
+    let scratch = Scratch::new();
+    let repo = script_catalog(&scratch);
+    let (scratch, _) = script_installed(&repo, scratch);
+    let module = scratch
+        .0
+        .join("home")
+        .join("extensions")
+        .join("team_notes")
+        .join("team_notes.js");
+    let mut text = std::fs::read_to_string(&module).expect("the module");
+    text.push_str("// changed\n");
+    std::fs::write(&module, text).expect("changed");
+    let hosted = host(scratch, &repo);
+    let link = hosted.local.open("@control").expect("a link");
+    let (types, _) = ask(&link, 1, "store/extensions", json!({})).expect("the types");
+    assert!(
+        types["types"]
+            .as_array()
+            .is_some_and(|types| types.iter().all(|each| each["id"] != "notes")),
+        "the host checked the digest it recorded before it ran any of the script: {types}"
+    );
+    drop(link);
+    hosted.stop();
+}

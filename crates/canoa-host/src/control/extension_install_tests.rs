@@ -19,6 +19,9 @@ use crate::store::index::StoreIndex;
 use crate::store::tools::{Reply, ToolsLimits, Transport};
 
 const LIBRARY: &str = "library bytes the host loads";
+const SCRIPT_MANIFEST: &str =
+    "type = \"js\"\nname = \"notes_extension\"\nkinds = [\"store_extension\"]\npaths = [\".\"]\n";
+const SCRIPT_PACKAGE: &str = "{\"name\": \"notes_extension\", \"version\": \"1.0.0\", \"type\": \"module\", \"exports\": \"./notes.js\"}\n";
 
 /// A transport that serves fixed bytes by URL, and says 404 to any other.
 #[derive(Debug)]
@@ -73,6 +76,8 @@ struct Rig {
     config: PathBuf,
     /// The pin of the `pack` folder of the catalog.
     pin: String,
+    /// The pin of its `scripts` folder, a package of scripts.
+    scripts_pin: String,
 }
 
 fn rig(served: &[(&str, &[u8])]) -> Rig {
@@ -88,9 +93,15 @@ fn rig_with(served: &[(&str, &[u8])], library: &str) -> Rig {
         &[
             ("ext/pack/lib.bin", library),
             ("ext/pack/notes/readme.txt", "what it is"),
+            ("ext/scripts/notes.guatiao", SCRIPT_MANIFEST),
+            ("ext/scripts/package.json", SCRIPT_PACKAGE),
+            ("ext/scripts/notes.js", "export const notes = 1;\n"),
+            ("ext/bare/readme.txt", "no manifest here"),
         ],
     );
     let pin = tree_digest(&upstream.join("ext").join("pack"));
+    let scripts_pin = tree_digest(&upstream.join("ext").join("scripts"));
+    let bare_pin = tree_digest(&upstream.join("ext").join("bare"));
     let wrong = format!("sha256:{}", "ab".repeat(32));
     let catalog = format!(
         "[extensions.pack]\nsource = \"./ext/pack\"\npin = \"{pin}\"\nload = \"lib.bin\"\nprovider = \"p\"\n\n\
@@ -104,7 +115,10 @@ fn rig_with(served: &[(&str, &[u8])], library: &str) -> Rig {
          [extensions.tampered]\nsource = \"https://downloads.example/files/tampered.lib\"\nsha256 = \"{}\"\nprovider = \"q\"\n\n\
          [extensions.abs]\nsource = \"{}#ext/pack\"\nref = \"main\"\npin = \"{pin}\"\nload = \"lib.bin\"\nprovider = \"p\"\n\n\
          [extensions.plain]\nsource = \"http://downloads.example/files/plain.lib\"\nsha256 = \"{}\"\nprovider = \"q\"\n\n\
-         [extensions.signed]\nsource = \"https://user:pw@downloads.example/files/signed.lib?sig=1\"\nsha256 = \"{}\"\nprovider = \"q\"\n",
+         [extensions.signed]\nsource = \"https://user:pw@downloads.example/files/signed.lib?sig=1\"\nsha256 = \"{}\"\nprovider = \"q\"\n\n\
+         [extensions.scripts]\nsource = \"./ext/scripts\"\npin = \"{scripts_pin}\"\nruntime = \"js\"\nprovider = \"notes_extension_notes\"\n\n\
+         [extensions.scripts_py]\nsource = \"./ext/scripts\"\npin = \"{scripts_pin}\"\nruntime = \"python\"\nprovider = \"p\"\n\n\
+         [extensions.bare]\nsource = \"./ext/bare\"\npin = \"{bare_pin}\"\nruntime = \"js\"\nprovider = \"p\"\n",
         sha256_of(b"file bytes"),
         sha256_of(b"the bytes the catalog meant"),
         url(&upstream),
@@ -162,6 +176,7 @@ fn rig_with(served: &[(&str, &[u8])], library: &str) -> Rig {
         home,
         config,
         pin,
+        scripts_pin,
     }
 }
 
@@ -547,7 +562,7 @@ fn the_catalogs_are_listed_to_a_key_that_reads_overlays_and_none_until_the_table
     assert_eq!(result["sources"][0]["id"], "extensions:team", "{listed}");
     assert_eq!(result["sources"][0]["label"], "team");
     let entries = result["entries"].as_array().expect("entries");
-    assert_eq!(entries.len(), 10, "{listed}");
+    assert_eq!(entries.len(), 13, "{listed}");
     let pack = entries
         .iter()
         .find(|entry| entry["name"] == "pack")
@@ -627,5 +642,106 @@ fn nothing_the_person_chose_to_reach_is_refused_a_local_catalog_a_local_source_h
     let mut kept = rig.kept();
     kept.sort();
     assert_eq!(kept, ["abs", "plain", "signed"]);
+    let _ = std::fs::remove_dir_all(&rig.tmp);
+}
+
+#[test]
+fn a_package_of_scripts_is_kept_as_its_folder_and_named_in_canoa_cfg_by_the_source_the_host_carries()
+ {
+    let rig = rig(&[]);
+    let plan = rig.plan("scripts");
+    let notices = plan["result"]["notices"].to_string();
+    assert!(
+        notices.contains("package of scripts") && notices.contains("every platform"),
+        "{notices}"
+    );
+    assert!(
+        plan["result"]["changes"]
+            .to_string()
+            .contains("package's folder")
+    );
+    let applied = rig.apply(&plan);
+    assert_eq!(applied["result"]["installed"], true, "{applied}");
+    let folder = rig.home.join("scripts");
+    assert!(folder.join("notes.guatiao").is_file() && folder.join("notes.js").is_file());
+    assert_eq!(
+        tree_digest(&folder),
+        rig.scripts_pin,
+        "what is kept is what was pinned"
+    );
+    let host = rig.host();
+    let table = &host["extensions"]["scripts"];
+    assert_eq!(table["source"], "bundled:js", "{host}");
+    assert_eq!(
+        table["library"],
+        Value::Null,
+        "a package is no library file: {host}"
+    );
+    assert_eq!(table["provider"], "notes_extension_notes");
+    assert_eq!(table["pin"], rig.scripts_pin);
+    assert_eq!(
+        PathBuf::from(table["root"].as_str().expect("a root")),
+        folder
+    );
+    assert_eq!(
+        PathBuf::from(
+            table["source_settings"]["dirs"][0]
+                .as_str()
+                .expect("a folder")
+        ),
+        folder
+    );
+    // The host reads what it wrote back as a source whose folder it checks against the pin before loading anything.
+    let loaded = crate::config::Config::load(&rig.config).expect("canoa.cfg reads");
+    let extension = loaded
+        .extensions
+        .iter()
+        .find(|each| each.name == "scripts")
+        .expect("named");
+    assert!(matches!(
+        extension.origin,
+        crate::config::Origin::Source { .. }
+    ));
+    assert_eq!(super::stores::verify_extension(extension), Ok(()));
+    std::fs::write(folder.join("notes.js"), "export const notes = 2;\n").expect("changed");
+    assert!(
+        super::stores::verify_extension(extension).is_err_and(|why| why.contains("tree digest")),
+        "a script that changed after it was installed is not loaded"
+    );
+    let removed = ask(
+        &rig.control,
+        &Caller::Owner,
+        "extension/remove",
+        json!({"name": "scripts"}),
+    );
+    assert_eq!(removed["result"]["files_removed"], true, "{removed}");
+    assert!(!folder.exists());
+    assert_eq!(rig.host(), Value::Null);
+    let _ = std::fs::remove_dir_all(&rig.tmp);
+}
+
+#[test]
+fn a_package_in_python_or_with_no_manifest_is_refused_with_its_reason() {
+    let rig = rig(&[]);
+    let python = rig.plan("scripts_py");
+    assert!(
+        python["error"]["message"]
+            .as_str()
+            .is_some_and(|why| why.contains("Python") && why.contains("carries no Python")),
+        "{python}"
+    );
+    let bare = rig.apply(&rig.plan("bare"));
+    assert!(
+        bare["error"]["message"]
+            .as_str()
+            .is_some_and(|why| why.contains("no manifest")),
+        "{bare}"
+    );
+    assert!(
+        rig.kept().is_empty(),
+        "nothing is left behind: {:?}",
+        rig.kept()
+    );
+    assert_eq!(rig.host(), Value::Null);
     let _ = std::fs::remove_dir_all(&rig.tmp);
 }

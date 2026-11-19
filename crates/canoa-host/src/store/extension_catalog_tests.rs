@@ -400,3 +400,59 @@ fn nothing_is_refused_for_where_a_source_is_or_what_it_needs_to_be_reached() {
     let table = json!({"source": "https://example.org/x.git", "ref": "release/1.0", "pin": pin(), "load": "l", "provider": "p"});
     assert!(entry_of("x", &table, &base()).is_ok());
 }
+
+#[test]
+fn a_package_of_scripts_is_a_pinned_folder_with_a_runtime_and_no_library_file() {
+    use super::extension_catalog::Runtime;
+
+    let pin = pin();
+    let text = format!(
+        "[extensions.notes]\nsource = \"./notes\"\npin = \"{pin}\"\nruntime = \"js\"\nprovider = \"notes_extension_notes\"\n\
+         needs = {{ kind = \"store_extension\", version = \"1\" }}\n\n\
+         [extensions.py]\nsource = \"./py\"\npin = \"{pin}\"\nruntime = \"python\"\nprovider = \"p\"\n"
+    );
+    let read = read(&text, &base()).expect("a catalog");
+    assert!(read.refused.is_empty(), "{:?}", read.refused);
+    let notes = &read.entries["notes"];
+    assert_eq!(notes.runtime, Some(Runtime::Js));
+    assert_eq!(notes.load, None);
+    assert_eq!(notes.needs.platforms, None, "it runs on every platform");
+    assert_eq!(read.entries["py"].runtime, Some(Runtime::Python));
+    // The index keeps the runtime, so what the host installs is read again with it.
+    let index = json!({"origin": notes.origin_json(), "extension": notes.extension_json()});
+    assert_eq!(index["extension"]["runtime"], "js");
+    let again = Entry::from_index("notes", &index).expect("read again");
+    assert_eq!(again.runtime, Some(Runtime::Js));
+    assert_eq!(again.load, None);
+}
+
+#[test]
+fn a_package_of_scripts_names_no_library_file_takes_no_lone_file_and_is_written_in_a_language_the_host_knows()
+ {
+    let (pin, sha) = (pin(), sha());
+    let refused = |extra: &str, source: &str, digest: String| {
+        let table =
+            format!("source = \"{source}\"\n{digest}\nprovider = \"p\"\nruntime = \"js\"\n{extra}");
+        let value: Value = toml::from_str(&table).expect("TOML");
+        entry_of("x", &value, &base()).expect_err("refused")
+    };
+    let tree = format!("pin = \"{pin}\"");
+    assert_eq!(
+        refused("load = \"l.js\"\n", "./x", tree.clone()),
+        Refusal::InvalidEntry
+    );
+    assert_eq!(
+        refused(
+            "",
+            "https://example.org/pkg.js",
+            format!("sha256 = \"{sha}\"")
+        ),
+        Refusal::InvalidEntry
+    );
+    let table = format!("source = \"./x\"\npin = \"{pin}\"\nprovider = \"p\"\nruntime = \"lua\"\n");
+    let value: Value = toml::from_str(&table).expect("TOML");
+    assert_eq!(entry_of("x", &value, &base()), Err(Refusal::InvalidEntry));
+    let table = format!("source = \"./x\"\npin = \"{pin}\"\nprovider = \"p\"\nruntime = 3\n");
+    let value: Value = toml::from_str(&table).expect("TOML");
+    assert_eq!(entry_of("x", &value, &base()), Err(Refusal::InvalidEntry));
+}

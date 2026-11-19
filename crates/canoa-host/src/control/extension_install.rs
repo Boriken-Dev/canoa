@@ -6,6 +6,10 @@
 //! digest and the provider. The host reads the entry from its own index of the catalogs it was told to use: a client names the
 //! catalog and the extension, never the source or the digest. The key needs the `hosting` grant, which already names the libraries
 //! the host loads through `[host.extensions]`.
+//!
+//! An extension is a native library (one per platform, named by `load`) or a package of scripts (`runtime = "js"`: a folder with a
+//! manifest, the same on every platform, run by the QuickJS the host carries). Both are pinned by the digest of the folder, kept in
+//! `<home>/extensions/<name>/`, and checked against it each time the host loads them.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -24,7 +28,7 @@ use sha2::{Digest as _, Sha256};
 
 use super::overlays::{OverlayLimits, Trust};
 use super::{Caller, Control, DENIED, Grant, REFUSED, bad};
-use crate::store::extension_catalog::{Digest, Entry, Source, Unfit};
+use crate::store::extension_catalog::{Digest, Entry, Runtime, Source, Unfit};
 use crate::store::index::{Answer, Row, parse_extension_sources};
 use crate::store::tools::{HttpTransport, LocalTools, Transport};
 
@@ -256,7 +260,17 @@ impl Control {
                 },
             ));
         }
-        if matches!(entry.digest, Digest::Tree(_)) && entry.load.is_none() {
+        if entry.runtime == Some(Runtime::Python) {
+            return Err((
+                REFUSED,
+                "this package is written in Python, and the host carries no Python of its own: name its folder in canoa.cfg under a source of Python you have set up, or use a package written in JavaScript"
+                    .to_owned(),
+            ));
+        }
+        if matches!(entry.digest, Digest::Tree(_))
+            && entry.load.is_none()
+            && entry.runtime.is_none()
+        {
             return Err((
                 REFUSED,
                 "this host loads an extension from one library file: the entry names none (`load`)"
@@ -270,10 +284,11 @@ impl Control {
         };
         let token = hex(&Sha256::digest(
             format!(
-                "{catalog}\n{name}\n{}\n{}\n{digest}\n{}",
+                "{catalog}\n{name}\n{}\n{}\n{digest}\n{}\n{}",
                 entry.provider,
                 source_shown(&entry.source),
-                entry.load.as_deref().unwrap_or_default()
+                entry.load.as_deref().unwrap_or_default(),
+                entry.runtime.map_or("", Runtime::as_str)
             )
             .as_bytes(),
         ));
@@ -327,10 +342,17 @@ impl Control {
         };
         let folder = home.join(&name);
         let mut notices = vec![
-            format!(
-                "An extension is code the host loads into its own process: it runs with your access, as the host does. Install one only when you trust where it comes from. This one asks to be loaded as provider {}.",
-                entry.provider
-            ),
+            if entry.runtime.is_some() {
+                format!(
+                    "A package of scripts is code the host runs in its own process, in the JavaScript engine it carries: its providers answer for you whenever the host asks, and may be handed a way to run a program or read a file. Install one only when you trust where it comes from. It needs no build and is the same on every platform. This one asks to be loaded as provider {}.",
+                    entry.provider
+                )
+            } else {
+                format!(
+                    "An extension is code the host loads into its own process: it runs with your access, as the host does. Install one only when you trust where it comes from. This one asks to be loaded as provider {}.",
+                    entry.provider
+                )
+            },
             format!(
                 "Nothing is kept unless what is fetched has {digest_text}, the digest the catalog {catalog} gave. A tree's digest is the one Canoa uses for an overlay's pin, over the files of the folder."
             ),
@@ -386,7 +408,11 @@ impl Control {
                 {
                     "kind": "canoa_cfg",
                     "target": format!("[host.extensions.{name}]"),
-                    "detail": "Names the library, its provider and the digest the host checks each time it loads it.",
+                    "detail": if entry.runtime.is_some() {
+                        "Names the package's folder, its provider and the digest the host checks each time it loads it."
+                    } else {
+                        "Names the library, its provider and the digest the host checks each time it loads it."
+                    },
                     "undone_by_uninstall": true,
                 },
             ],
@@ -459,6 +485,14 @@ impl Control {
         }
         let library = target.join(&library_name);
         let table = match &wanted.entry.digest {
+            // A package of scripts is a folder QuickJS, built into the host, reads libraries from.
+            Digest::Tree(pin) if wanted.entry.runtime.is_some() => json!({
+                "source": crate::provider::BUNDLED_JS,
+                "source_settings": {"dirs": [target.display().to_string()]},
+                "provider": wanted.entry.provider,
+                "pin": pin,
+                "root": target.display().to_string(),
+            }),
             Digest::Tree(pin) => json!({
                 "library": library.display().to_string(),
                 "provider": wanted.entry.provider,
@@ -538,7 +572,20 @@ impl Control {
                         ),
                     ));
                 }
-                if !tree.files.contains_key(&load) {
+                if wanted.entry.runtime.is_some() {
+                    // The source of scripts reads manifests: a folder with none holds no library.
+                    if !tree
+                        .files
+                        .keys()
+                        .any(|path| !path.contains('/') && path.ends_with(".guatiao"))
+                    {
+                        return Err((
+                            REFUSED,
+                            "the package holds no manifest (a file ending in .guatiao) at its root"
+                                .to_owned(),
+                        ));
+                    }
+                } else if !tree.files.contains_key(&load) {
                     return Err((REFUSED, format!("the source holds no file {load} to load")));
                 }
                 for (path, bytes) in &tree.files {
@@ -615,7 +662,7 @@ impl Control {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         let current = self.files.host_get()?;
-        let library = current
+        let table = current
             .pointer("/value/extensions")
             .and_then(|table| table.get(&name))
             .ok_or_else(|| {
@@ -623,8 +670,11 @@ impl Control {
                     REFUSED,
                     format!("there is no extension {name} in canoa.cfg"),
                 )
-            })?
+            })?;
+        // A library is a file in its folder, a package of scripts is its folder.
+        let library = table
             .get("library")
+            .or_else(|| table.get("root"))
             .and_then(Value::as_str)
             .map(PathBuf::from);
         self.change_extensions(|extensions| {
