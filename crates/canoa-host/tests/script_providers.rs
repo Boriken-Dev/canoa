@@ -282,7 +282,8 @@ mod python {
     const PROBE: &str = "import sys; print(sys.executable); print(sys.base_prefix)";
 
     #[test]
-    fn a_library_of_providers_written_with_the_python_sdk_is_offered_and_its_sources_answer_a_catalog() {
+    fn a_library_of_providers_written_with_the_python_sdk_is_offered_and_its_sources_answer_a_catalog()
+     {
         let named = env!("CANOA_TEST_PYTHON");
         let output = Command::new(named)
             .args(["-I", "-c", PROBE])
@@ -321,7 +322,8 @@ mod javascript {
     use super::with_source::{build_source, check, config, list, repository};
 
     #[test]
-    fn a_library_of_providers_written_with_the_javascript_sdk_is_offered_and_its_sources_answer_a_catalog() {
+    fn a_library_of_providers_written_with_the_javascript_sdk_is_offered_and_its_sources_answer_a_catalog()
+     {
         let source = build_source("guatiao-source-js", "guatiao_source_js", &[]);
         let examples = repository().join("examples/providers/js");
         let settings = format!(
