@@ -339,44 +339,6 @@ fn a_value_a_provider_says_is_already_over_is_not_given() {
 }
 
 #[test]
-fn a_provider_that_is_locked_gives_nothing_until_the_secret_that_opens_it_is_held() {
-    let tag = "locked";
-    let rig = rig(json!({
-        "names": {"token": "mgr"},
-        "providers": {"mgr": {"provider": "manager", "tag": tag, "unlock": {"from": "form", "name": "mgr_key"},
-            "key": "open-sesame", "values": "{\"token\": \"zq9-not-a-real-secret-7f3a\"}"}}
-    }));
-    // The key the manager is opened with is a setting that names another secret, which is not held: the manager is not even asked.
-    assert_eq!(recalled(&rig.vault, "s1", "token"), None);
-    assert_eq!(calls(tag), 0);
-    rig.vault
-        .remember(None, "mgr_key", b"wrong", "close")
-        .unwrap();
-    assert_eq!(
-        recalled(&rig.vault, "s1", "token"),
-        None,
-        "locked: a wrong key opens nothing"
-    );
-    assert_eq!(calls(tag), 1);
-    rig.vault
-        .remember(None, "mgr_key", b"open-sesame", "close")
-        .unwrap();
-    assert_eq!(recalled(&rig.vault, "s1", "token").as_deref(), Some(VALUE));
-}
-
-#[test]
-fn a_setting_that_names_a_secret_through_a_loop_of_providers_is_not_followed_for_ever() {
-    let rig = rig(json!({
-        "names": {"token": "a"},
-        "providers": {
-            "a": {"provider": "manager", "tag": "loop-a", "unlock": {"from": "b", "name": "x"}},
-            "b": {"provider": "manager", "tag": "loop-b", "unlock": {"from": "a", "name": "y"}}
-        }
-    }));
-    assert_eq!(recalled(&rig.vault, "s1", "token"), None);
-}
-
-#[test]
 fn remember_keeps_a_secret_in_the_provider_that_keeps_and_it_is_read_from_there_afterwards() {
     let tag = "keeps";
     let rig = rig(json!({

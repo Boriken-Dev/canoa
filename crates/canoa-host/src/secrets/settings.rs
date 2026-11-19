@@ -15,7 +15,9 @@
 //! provider = "bitwarden"     # the id of a secret_provider
 //! keep = "close"             # how long a value this entry gave is kept in memory (default session)
 //! command = "bw"             # every other key is the provider's own setting
-//! session = { from = "form", name = "bw_session" }   # a setting taken from another secret, never asked for
+//!
+//! [secrets.providers.work_vault.from]   # a setting of the provider's that is another secret, never asked for
+//! session = { entry = "form", name = "bw_session" }
 //! ```
 //!
 //! The entries `form` and `system` are there without being written.
@@ -99,6 +101,15 @@ impl Keep {
     }
 }
 
+/// A secret another entry gives, which a setting of a provider is made of.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Taken {
+    /// The entry that gives it.
+    pub(crate) entry: String,
+    /// The secret's name.
+    pub(crate) name: String,
+}
+
 /// One provider the person set up, or one the host has without being told.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Entry {
@@ -106,8 +117,10 @@ pub(crate) struct Entry {
     pub(crate) provider: String,
     /// How long a value it gave is kept in memory.
     pub(crate) keep: Keep,
-    /// The provider's own settings, with a setting that names another secret still as `{from, name}`.
+    /// The provider's own settings: plain data, never a secret.
     pub(crate) config: Map<String, Value>,
+    /// The settings of the provider that are another secret (a field its schema marks `x-from-secret`), by the setting's name.
+    pub(crate) from: BTreeMap<String, Taken>,
 }
 
 /// What `[secrets]` says.
@@ -154,6 +167,7 @@ fn implicit() -> BTreeMap<String, Entry> {
                     provider: id.to_owned(),
                     keep: Keep::Session,
                     config: Map::new(),
+                    from: BTreeMap::new(),
                 },
             )
         })
@@ -164,7 +178,7 @@ fn implicit() -> BTreeMap<String, Entry> {
 pub(crate) const DEFAULT_WAIT: u64 = 240;
 
 /// The keys of an entry's table that are the host's and not the provider's own settings.
-const HOST_KEYS: [&str; 2] = ["provider", "keep"];
+const HOST_KEYS: [&str; 3] = ["provider", "keep", "from"];
 
 /// The longest name an entry or a secret may be given.
 const MAX_ENTRY: usize = 64;
@@ -240,6 +254,16 @@ impl Settings {
                 ));
             }
         }
+        for (entry_name, entry) in &settings.entries {
+            for (setting, taken) in &entry.from {
+                if !settings.entries.contains_key(&taken.entry) {
+                    return Err(format!(
+                        "[secrets.providers.{entry_name}.from] {setting} names {}, which is no provider of [secrets.providers]",
+                        taken.entry
+                    ));
+                }
+            }
+        }
         Ok(settings)
     }
 
@@ -288,15 +312,51 @@ fn entry(name: &str, table: &Value) -> Result<Entry, String> {
                 )
             })?,
     };
-    let config = table
+    let config: Map<String, Value> = table
         .iter()
         .filter(|(key, _)| !HOST_KEYS.contains(&key.as_str()))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
+    let mut from = BTreeMap::new();
+    if let Some(taken) = table.get("from") {
+        let taken = taken
+            .as_object()
+            .ok_or_else(|| format!("[secrets.providers.{name}.from] is a table"))?;
+        for (setting, source) in taken {
+            if config.contains_key(setting) {
+                return Err(format!(
+                    "[secrets.providers.{name}] gives {setting} twice: as a setting and in from"
+                ));
+            }
+            let part = |key: &str| {
+                source
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .filter(|text| !text.is_empty())
+                    .map(str::to_owned)
+            };
+            let (Some(entry), Some(secret)) = (part("entry"), part("name")) else {
+                return Err(format!(
+                    "[secrets.providers.{name}.from] {setting} is a table of an entry and a name"
+                ));
+            };
+            if let Some(why) = canoa::secret_provider::name_problem(&secret) {
+                return Err(format!("[secrets.providers.{name}.from] {setting}: {why}"));
+            }
+            from.insert(
+                setting.clone(),
+                Taken {
+                    entry,
+                    name: secret,
+                },
+            );
+        }
+    }
     Ok(Entry {
         provider,
         keep,
         config,
+        from,
     })
 }
 

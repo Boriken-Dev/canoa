@@ -883,19 +883,20 @@ github_token = "work"     # this name is answered by the entry below
 provider = "bitwarden"
 keep = "close"            # what this entry gives stays until Canoa closes, or less if it says so itself
 command = "bw"
-session = { from = "form", name = "bw_session" }   # the key that opens the vault is a secret you gave Canoa, never written here
+[secrets.providers.work.from]
+session = { entry = "form", name = "bw_session" }   # the key that opens the vault is a secret you gave Canoa, never written here
 ```
 
-**Bitwarden** is a provider written as a Python library, so it needs no build and is shared between computers as the files it is. It reads an item of your vault by name through Bitwarden's own `bw` command, so `bw` has to be installed and signed in (`bw login`). Add the library as an extension, point a name or the default at it and give the key `bw unlock --raw` prints as the secret `bw_session`:
+**Bitwarden** is a provider that ships in Canoa, written as a script that Canoa runs itself, so there is nothing to build. It reads an item of your vault by name through Bitwarden's own `bw` command, which the Store installs if you have none (Store, Secret providers), so `bw` has to be signed in (`bw login`). Point a name or the default at it and take the key `bw unlock --raw` prints from another provider, such as the form, as the secret `bw_session`:
 
 ```toml
-[host.extensions.bitwarden]
-source = "guatiao_source_py.dll"          # Guatiao's Python source, built for the Python you have
-provider = "bitwarden"                    # it adds no Store type, so this only names its provider
-[host.extensions.bitwarden.source_settings]
-dirs = ["extensions/bitwarden"]           # the folder of canoa_bitwarden.py
-paths = ["path/to/guatiao/bindings/python/guatiao/src"]
+[secrets.providers.work]
+provider = "bitwarden"
+[secrets.providers.work.from]
+session = { entry = "form", name = "bw_session" }   # the key is a secret you gave Canoa, so it is not written here
 ```
+
+A script of your own is added as an extension that names the JavaScript Canoa carries: `source = "bundled:js"`, with `source_settings` of `dirs` (the folders of its `*.guatiao` manifests) and `kinds` (the description of the kind it serves, `canoa.secret.kinds.json`).
 
 The vault is never unlocked for you: until the key is given, a request for a name Bitwarden answers falls back to asking you, and a wrong or expired key does the same. The key goes to `bw` in its environment, never on a command line.
 

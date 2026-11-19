@@ -1118,10 +1118,10 @@ impl Control {
                 }
                 Some(
                     method @ ("secrets/providers" | "secrets/list" | "secrets/reveal"
-                    | "secrets/forget"),
+                    | "secrets/forget" | "secrets/configure"),
                 ) => allow(caller, Grant::Secrets)
                     .and_then(|()| self.vault())
-                    .and_then(|vault| secrets::call(&vault, method, &params)),
+                    .and_then(|vault| secrets::call(&vault, &self.files, method, &params)),
                 Some(method @ ("usage/summary" | "usage/limits")) => {
                     allow(caller, Grant::Usage).and_then(|()| self.usage_call(method, &params))
                 }

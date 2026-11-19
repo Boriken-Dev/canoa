@@ -16,7 +16,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use canoa::secret_provider::{Keeping, Named, SecretProvider, name_problem};
-use serde_json::{Map, Value, json};
+use coqui_acp_api::ProcessSpawner;
+use coqui_acp_api::guatiao::library::Object;
+use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use super::builtin::FORM;
@@ -84,11 +86,15 @@ impl Row {
     }
 }
 
+/// Makes the spawner a provider is handed for one call.
+type Spawners = Arc<dyn Fn() -> Object<dyn ProcessSpawner> + Send + Sync>;
+
 pub(crate) struct Vault {
     catalog: Mutex<Arc<Catalog>>,
     source: Mutex<Source>,
     cache: Mutex<HashMap<String, Cached>>,
     clock: Clock,
+    spawners: Mutex<Spawners>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -123,7 +129,21 @@ impl Vault {
             source: Mutex::new(source),
             cache: Mutex::new(HashMap::new()),
             clock,
+            spawners: Mutex::new(Arc::new(super::spawner::spawner)),
         })
+    }
+
+    /// Hands providers `spawners` in place of this machine's: a test's stand-in for the programs they run.
+    #[cfg(test)]
+    pub(crate) fn with_spawners(self: &Arc<Self>, spawners: Spawners) -> Arc<Self> {
+        *lock(&self.spawners) = spawners;
+        Arc::clone(self)
+    }
+
+    /// The spawner for one call of a provider, which owns and destroys it.
+    fn spawner(&self) -> Object<dyn ProcessSpawner> {
+        let make = Arc::clone(&lock(&self.spawners));
+        make()
     }
 
     /// Gives the vault the providers this host offers and where `[secrets]` is.
@@ -253,7 +273,7 @@ impl Vault {
             return None;
         }
         let provider = self.instance(&catalog, settings, entry, depth)?;
-        match provider.get(Named::new(name), super::spawner::spawner()) {
+        match provider.get(Named::new(name), self.spawner()) {
             Ok(held) => {
                 if held.expires_in == Some(0) {
                     return None;
@@ -283,30 +303,33 @@ impl Vault {
         entry: &Entry,
         depth: usize,
     ) -> Option<Arc<dyn SecretProvider>> {
-        let mut config = Map::new();
-        for (key, value) in &entry.config {
-            let resolved = match reference(value) {
-                Some((from, name)) => {
-                    if depth >= MAX_DEPTH {
-                        tracing::info!("a setting names a secret through too many providers");
-                        return None;
-                    }
-                    let held = self
-                        .cached(None, name)
-                        .map(|value| Answer {
-                            value,
-                            expires_in: None,
-                        })
-                        .or_else(|| self.ask_entry(settings, from, name, depth + 1));
-                    let Some(held) = held else {
-                        tracing::info!(setting = key, "a setting names a secret that is not held");
-                        return None;
-                    };
-                    Value::String(held.value.to_string())
-                }
-                None => value.clone(),
+        let mut config = entry.config.clone();
+        let allowed = catalog.secret_sourced_settings(&entry.provider);
+        for (setting, taken) in &entry.from {
+            if !allowed.contains(setting) {
+                tracing::info!(
+                    provider = entry.provider,
+                    setting,
+                    "a setting is taken from a secret that its provider does not take that way"
+                );
+                return None;
+            }
+            if depth >= MAX_DEPTH {
+                tracing::info!("a setting names a secret through too many providers");
+                return None;
+            }
+            let held = self
+                .cached(None, &taken.name)
+                .map(|value| Answer {
+                    value,
+                    expires_in: None,
+                })
+                .or_else(|| self.ask_entry(settings, &taken.entry, &taken.name, depth + 1));
+            let Some(held) = held else {
+                tracing::info!(setting, "a setting names a secret that is not held");
+                return None;
             };
-            config.insert(key.clone(), resolved);
+            config.insert(setting.clone(), Value::String(held.value.to_string()));
         }
         match catalog.instance(&entry.provider, &config) {
             Ok(provider) => Some(provider),
@@ -404,7 +427,7 @@ impl Vault {
                 .instance(&catalog, &settings, &entry, 0)
                 .ok_or("the provider that keeps secrets cannot be reached")?;
             provider
-                .put(Keeping::new(name, value), super::spawner::spawner())
+                .put(Keeping::new(name, value), self.spawner())
                 .map_err(|error| error.message().to_owned())?;
             // What the store holds is read from it from now on, so no copy of an older value stays in memory.
             lock(&self.cache).remove(name);
@@ -420,6 +443,64 @@ impl Vault {
         lock(&self.cache).retain(
             |_, cached| !matches!(&cached.scope, Scope::Session(owner) if owner == session),
         );
+    }
+
+    /// Why `section`, a `[secrets]` someone means to write, cannot be used, or `Ok` when it can: it must read as the section does, and
+    /// every entry must name a provider this host offers, give only settings that provider declares, keep a secret in none of them
+    /// (a setting its schema marks secret is taken from another secret with `from`, and only when the schema marks it `x-from-secret`)
+    /// and make an instance with the plain ones.
+    ///
+    /// # Errors
+    ///
+    /// The first thing wrong, naming the entry and the setting.
+    pub(crate) fn check_section(&self, section: &Value) -> Result<(), String> {
+        let settings = Settings::read(Some(section))?;
+        let catalog = self.catalog();
+        let listed = catalog.list();
+        for (name, entry) in &settings.entries {
+            if entry.provider == name.as_str() && entry.config.is_empty() && entry.from.is_empty() {
+                continue;
+            }
+            let Some(provider) = listed.iter().find(|each| each.id == entry.provider) else {
+                return Err(format!(
+                    "{name}: this host has no secret provider {}",
+                    entry.provider
+                ));
+            };
+            let members = provider
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.get("properties"))
+                .and_then(Value::as_object);
+            let is_secret = |member: &str| {
+                members
+                    .and_then(|members| members.get(member))
+                    .is_some_and(|field| {
+                        field.get("writeOnly") == Some(&Value::Bool(true))
+                            || field.get("x-sensitive") == Some(&Value::Bool(true))
+                    })
+            };
+            for setting in entry.config.keys() {
+                if is_secret(setting) {
+                    return Err(format!(
+                        "{name}: {setting} is a secret, so it is not written to canoa.cfg: take it from another provider with `from`"
+                    ));
+                }
+            }
+            let allowed = catalog.secret_sourced_settings(&entry.provider);
+            for setting in entry.from.keys() {
+                if !allowed.contains(setting) {
+                    return Err(format!(
+                        "{name}: {} does not take {setting} from another provider",
+                        entry.provider
+                    ));
+                }
+            }
+            catalog
+                .instance(&entry.provider, &entry.config)
+                .map_err(|why| format!("{name}: {why}"))?;
+        }
+        Ok(())
     }
 
     /// The providers this host offers.
@@ -462,7 +543,7 @@ impl Vault {
             let Some(provider) = self.instance(&catalog, &settings, entry, 0) else {
                 continue;
             };
-            let Ok(names) = provider.names(super::spawner::spawner()) else {
+            let Ok(names) = provider.names(self.spawner()) else {
                 continue;
             };
             for name in names.names {
@@ -521,7 +602,7 @@ impl Vault {
                 .instance(&catalog, &settings, entry, 0)
                 .ok_or("that provider cannot be reached")?;
             instance
-                .put(Keeping::new(name, text), super::spawner::spawner())
+                .put(Keeping::new(name, text), self.spawner())
                 .map_err(|error| error.message().to_owned())?;
             lock(&self.cache).remove(name);
             return Ok(());
@@ -557,18 +638,12 @@ impl Vault {
             && let Some(instance) = self.instance(&catalog, &settings, entry, 0)
         {
             instance
-                .forget(Named::new(name), super::spawner::spawner())
+                .forget(Named::new(name), self.spawner())
                 .map_err(|error| error.message().to_owned())?;
             forgot = true;
         }
         Ok(forgot)
     }
-}
-
-/// The secret a setting names: `{"from": entry, "name": secret}` and nothing else in the table.
-fn reference(value: &Value) -> Option<(&str, &str)> {
-    let table = value.as_object().filter(|table| table.len() == 2)?;
-    Some((table.get("from")?.as_str()?, table.get("name")?.as_str()?))
 }
 
 impl core::fmt::Debug for Vault {

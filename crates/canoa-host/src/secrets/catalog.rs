@@ -235,6 +235,24 @@ impl Catalog {
             .collect()
     }
 
+    /// The settings of provider `id` that may be another secret: the fields its schema marks `x-from-secret`.
+    pub(crate) fn secret_sourced_settings(&self, id: &str) -> Vec<String> {
+        self.offered
+            .iter()
+            .find(|offered| offered.id == id)
+            .and_then(|offered| offered.schema.as_ref())
+            .and_then(|schema| schema.get("properties"))
+            .and_then(Value::as_object)
+            .map(|fields| {
+                fields
+                    .iter()
+                    .filter(|(_, field)| field.get("x-from-secret") == Some(&Value::Bool(true)))
+                    .map(|(key, _)| key.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// What provider `id` says of itself.
     pub(crate) fn info(&self, id: &str) -> Option<&ProviderInfo> {
         self.offered

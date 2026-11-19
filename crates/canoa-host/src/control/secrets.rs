@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
 
+use super::files::Files;
 use super::{BAD_PARAMS, NOT_FOUND, REFUSED, error_line, text_param};
 use crate::secrets::ask::{Asker, METHOD};
 use crate::secrets::vault::Vault;
@@ -38,13 +39,93 @@ fn target(params: &Value) -> Result<(&str, &str), (i32, String)> {
     Ok((provider, name))
 }
 
-/// `secrets/providers`, `secrets/list`, `secrets/reveal` and `secrets/forget`.
-pub(crate) fn call(vault: &Arc<Vault>, method: &str, params: &Value) -> Outcome {
+/// The section of canoa.cfg these methods write.
+const SECTION: &str = "secrets";
+
+/// `secrets/configure` `{"name", "provider", "settings"?, "from"?, "keep"?}` sets up the entry `name` of `[secrets.providers]`, or
+/// `{"name", "remove": true}` takes it away. A setting is plain data; one the provider's schema marks secret is never written, and
+/// is given instead as `from`: `{setting: {"entry", "name"}}`, the secret another entry gives (the form, for one the person types).
+fn configure(vault: &Arc<Vault>, files: &Files, params: &Value) -> Outcome {
+    let name = text_param(params, "name")?
+        .filter(|text| !text.is_empty())
+        .ok_or((BAD_PARAMS, "name is text".to_owned()))?;
+    let remove = params.get("remove") == Some(&Value::Bool(true));
+    let table = if remove {
+        None
+    } else {
+        let provider = text_param(params, "provider")?
+            .filter(|text| !text.is_empty())
+            .ok_or((BAD_PARAMS, "provider is text".to_owned()))?;
+        let mut table = serde_json::Map::new();
+        table.insert("provider".to_owned(), json!(provider));
+        if let Some(keep) = text_param(params, "keep")? {
+            table.insert("keep".to_owned(), json!(keep));
+        }
+        match params.get("settings") {
+            None | Some(Value::Null) => {}
+            Some(Value::Object(settings)) => {
+                for (key, value) in settings {
+                    table.insert(key.clone(), value.clone());
+                }
+            }
+            Some(_) => return Err((BAD_PARAMS, "settings is an object".to_owned())),
+        }
+        match params.get("from") {
+            None | Some(Value::Null) => {}
+            Some(from @ Value::Object(_)) => {
+                table.insert("from".to_owned(), from.clone());
+            }
+            Some(_) => return Err((BAD_PARAMS, "from is an object".to_owned())),
+        }
+        Some(Value::Object(table))
+    };
+    files.hidden_update(SECTION, |current| {
+        let mut section = current.as_object().cloned().unwrap_or_default();
+        let mut providers = section
+            .get("providers")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        match table {
+            Some(table) => {
+                providers.insert(name.to_owned(), table);
+            }
+            None => {
+                if providers.remove(name).is_none() {
+                    return Err(format!("there is no provider entry {name} to remove"));
+                }
+            }
+        }
+        if providers.is_empty() {
+            section.remove("providers");
+        } else {
+            section.insert("providers".to_owned(), Value::Object(providers));
+        }
+        let next = Value::Object(section);
+        vault
+            .check_section(&next)
+            .map_err(|why| format!("those settings cannot be used: {why}"))?;
+        Ok(if next.as_object().is_some_and(serde_json::Map::is_empty) {
+            Value::Null
+        } else {
+            next
+        })
+    })?;
+    Ok(json!({"name": name, "saved": !remove, "removed": remove}))
+}
+
+/// `secrets/providers`, `secrets/list`, `secrets/reveal`, `secrets/forget` and `secrets/configure`.
+pub(crate) fn call(vault: &Arc<Vault>, files: &Files, method: &str, params: &Value) -> Outcome {
     match method {
+        "secrets/configure" => configure(vault, files, params),
         "secrets/providers" => Ok(json!({
             "providers": vault.providers().iter().map(|listed| listed.json()).collect::<Vec<_>>(),
             "entries": vault.entries().into_iter().map(|(name, entry)| json!({
                 "name": name, "provider": entry.provider, "keep": entry.keep.id(),
+                "settings": entry.config,
+                "from": entry.from.iter().map(|(setting, taken)| (
+                    setting.clone(), json!({"entry": taken.entry, "name": taken.name}),
+                )).collect::<serde_json::Map<String, Value>>(),
             })).collect::<Vec<_>>(),
         })),
         "secrets/list" => Ok(json!({

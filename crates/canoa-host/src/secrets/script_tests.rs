@@ -480,3 +480,209 @@ fn it_keeps_nothing_and_forgets_nothing() {
         coqui_acp_api::guatiao::Status::GUATIAO_ERR_UNSUPPORTED
     );
 }
+
+/// A shared buffer a subscriber writes its lines to, so a test can read what the host logged.
+#[derive(Clone, Default)]
+struct Log(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for Log {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Log {
+    type Writer = Log;
+    fn make_writer(&'a self) -> Log {
+        self.clone()
+    }
+}
+
+/// A vault whose `[secrets]` is `section`, over the bundled providers, with the stand-in for `bw` as the only program anything runs.
+fn vault(home: &Home, section: Value) -> (Arc<super::vault::Vault>, Arc<Mutex<Vec<Call>>>) {
+    let (standin, calls) = StandIn::new();
+    let shared = Arc::new(standin);
+    let vault = super::vault::Vault::with_clock(
+        Catalog::built_in_in(&home.0),
+        Arc::new(move || Ok(Some(section.clone()))),
+        Arc::new(|| 1_000_000),
+    );
+    let vault = vault.with_spawners(Arc::new(move || {
+        StandIn {
+            calls: Arc::clone(&shared.calls),
+        }
+        .into_object()
+    }));
+    (vault, calls)
+}
+
+fn recalled(vault: &super::vault::Vault, name: &str) -> Option<String> {
+    vault
+        .recall("s1", name)
+        .map(|value| String::from_utf8(value.to_vec()).expect("text"))
+}
+
+#[test]
+fn a_vault_opens_bitwarden_with_a_key_taken_from_another_provider_and_logs_no_value() {
+    let home = Home::new("from");
+    let (vault, calls) = vault(
+        &home,
+        json!({
+            "names": {"github": "bw", "ghost": "bw"},
+            "providers": {"bw": {
+                "provider": "bitwarden", "keep": "close", "command": "bw",
+                "from": {"session": {"entry": "form", "name": "bw_session"}}
+            }}
+        }),
+    );
+    let log = Log::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(log.clone())
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .finish();
+    tracing::subscriber::with_default(subscriber, || {
+        // Locked: the key is not held, so the vault is not even opened and the person is asked for the secret itself.
+        assert_eq!(recalled(&vault, "github"), None);
+        assert!(calls.lock().unwrap().is_empty(), "bw was run without a key");
+        // A wrong key is the provider's `GONE`, which the host reads as nothing held.
+        vault
+            .remember(None, "bw_session", b"not-the-key-zq9", "close")
+            .unwrap();
+        assert_eq!(recalled(&vault, "github"), None);
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        // The right key, which another provider (the form) gave, opens it; an item that is not there is no value.
+        vault
+            .remember(None, "bw_session", GOOD_KEY.as_bytes(), "close")
+            .unwrap();
+        assert_eq!(recalled(&vault, "github").as_deref(), Some(VALUE));
+        assert_eq!(recalled(&vault, "ghost"), None);
+    });
+    let logged = String::from_utf8(log.0.lock().unwrap().clone()).expect("text");
+    assert!(!logged.is_empty(), "the host logs what it could not do");
+    for secret in [VALUE, GOOD_KEY, "not-the-key-zq9"] {
+        assert!(!logged.contains(secret), "the log holds a value: {logged}");
+    }
+    let rows = vault.rows();
+    let row = rows
+        .iter()
+        .find(|row| row.name == "github")
+        .expect("what the script gave is in the table");
+    assert_eq!(row.provider, "bw");
+    assert_eq!(row.expires_in, None);
+    // The key went to bw in its environment, never on a command line.
+    for call in calls.lock().unwrap().iter() {
+        assert!(call.session_in_env && !call.key_on_command_line, "{call:?}");
+    }
+}
+
+#[test]
+fn a_setting_is_taken_from_a_secret_only_when_its_provider_says_it_may_be() {
+    let home = Home::new("from_refused");
+    let (vault, calls) = vault(
+        &home,
+        json!({
+            "names": {"github": "bw"},
+            "providers": {"bw": {
+                "provider": "bitwarden", "command": "bw",
+                "from": {"part": {"entry": "form", "name": "which_part"}}
+            }}
+        }),
+    );
+    vault
+        .remember(None, "which_part", b"username", "close")
+        .unwrap();
+    // `part` is a setting but not one that may be a secret, so the provider is not made and not asked.
+    assert_eq!(recalled(&vault, "github"), None);
+    assert!(calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_setting_that_names_a_secret_through_a_loop_of_providers_is_not_followed_for_ever() {
+    let home = Home::new("loop");
+    let (vault, calls) = vault(
+        &home,
+        json!({
+            "names": {"github": "a"},
+            "providers": {
+                "a": {"provider": "bitwarden", "from": {"session": {"entry": "b", "name": "x"}}},
+                "b": {"provider": "bitwarden", "from": {"session": {"entry": "a", "name": "y"}}}
+            }
+        }),
+    );
+    assert_eq!(recalled(&vault, "github"), None);
+    assert!(calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn an_entry_gives_a_setting_once_and_names_only_entries_that_exist() {
+    use super::settings::Settings;
+
+    let read = |section: Value| Settings::read(Some(&section));
+    let twice = read(json!({"providers": {"bw": {
+        "provider": "bitwarden", "session": "x",
+        "from": {"session": {"entry": "form", "name": "n"}}
+    }}}));
+    assert!(twice.is_err_and(|why| why.contains("twice")));
+    let ghost = read(json!({"providers": {"bw": {
+        "provider": "bitwarden", "from": {"session": {"entry": "ghost", "name": "n"}}
+    }}}));
+    assert!(ghost.is_err_and(|why| why.contains("ghost")));
+    let shapeless = read(json!({"providers": {"bw": {
+        "provider": "bitwarden", "from": {"session": "form"}
+    }}}));
+    assert!(shapeless.is_err());
+    let fine = read(json!({"providers": {"bw": {
+        "provider": "bitwarden", "from": {"session": {"entry": "form", "name": "n"}}
+    }}}))
+    .expect("an entry taking its key from the form");
+    assert_eq!(fine.entries["bw"].from["session"].name, "n");
+    assert!(
+        fine.entries["bw"].config.is_empty(),
+        "from is not a setting"
+    );
+}
+
+/// The real process spawner and a real program standing in for `bw` (`tests/bw_standin.py`, run by the interpreter `CANOA_TEST_PYTHON`
+/// names): what the provider asks of a spawner is what a spawner really does with a child's pipes, environment and exit status.
+#[cfg(canoa_test_python)]
+#[test]
+fn end_to_end_the_provider_runs_a_real_program_through_the_real_spawner() {
+    let home = Home::new("e2e");
+    let standin = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("extensions/bitwarden/tests/bw_standin.py");
+    let section = json!({
+        "names": {"github": "bw", "ghost": "bw"},
+        "providers": {"bw": {
+            "provider": "bitwarden", "keep": "close",
+            "command": env!("CANOA_TEST_PYTHON"), "arguments": [standin.to_string_lossy()],
+            "from": {"session": {"entry": "form", "name": "bw_session"}}
+        }}
+    });
+    let vault = super::vault::Vault::with_clock(
+        Catalog::built_in_in(&home.0),
+        Arc::new(move || Ok(Some(section.clone()))),
+        Arc::new(|| 1_000_000),
+    );
+    assert_eq!(recalled(&vault, "github"), None, "locked");
+    vault
+        .remember(None, "bw_session", b"not-the-key-zq9", "close")
+        .unwrap();
+    assert_eq!(recalled(&vault, "github"), None, "a wrong key");
+    vault
+        .remember(None, "bw_session", GOOD_KEY.as_bytes(), "close")
+        .unwrap();
+    assert_eq!(recalled(&vault, "github").as_deref(), Some(VALUE));
+    assert_eq!(recalled(&vault, "ghost"), None);
+}
+
+#[cfg(not(canoa_test_python))]
+#[test]
+#[ignore = "NOT RUN: set CANOA_TEST_PYTHON to a Python 3 that runs the stand-in for bw"]
+fn end_to_end_the_provider_runs_a_real_program_through_the_real_spawner() {
+    panic!("CANOA_TEST_PYTHON names no Python");
+}

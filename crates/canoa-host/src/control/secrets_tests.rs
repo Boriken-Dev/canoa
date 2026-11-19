@@ -34,6 +34,11 @@ impl Drop for Rig {
 }
 
 fn rig(name: &str) -> Rig {
+    rig_in(name, false).0
+}
+
+/// A rig, and where its canoa.cfg is when it has one for the vault to read `[secrets]` from and `secrets/configure` to write.
+fn rig_in(name: &str, with_config: bool) -> (Rig, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!(
         "canoa-secrets-control-{name}-{}",
         std::process::id()
@@ -47,7 +52,8 @@ fn rig(name: &str) -> Rig {
         &store,
         BridgeCommand::new(std::path::Path::new("canoa"), &[]),
     );
-    let control = Control::open(
+    let config = dir.join("canoa.cfg");
+    let mut control = Control::open(
         None,
         DEFAULT_MAX_RECORDS,
         DEFAULT_MAX_RECORD_BYTES,
@@ -55,7 +61,21 @@ fn rig(name: &str) -> Rig {
     )
     .expect("opens")
     .with_sealer(Sealer::new(Arc::clone(&hub), Duration::from_secs(20)));
-    Rig { control, hub, dir }
+    if with_config {
+        std::fs::write(&config, "").expect("a canoa.cfg");
+        control = control.with_files(Files::new(
+            None,
+            Vec::new(),
+            Some(config.clone()),
+            None,
+            UploadLimits::default(),
+        ));
+        hub.vault().configure(
+            crate::secrets::catalog::Catalog::built_in_in(&dir),
+            crate::secrets::settings::source_of(Some(config.clone())),
+        );
+    }
+    (Rig { control, hub, dir }, config)
 }
 
 fn ask(control: &Control, caller: &Caller, method: &str, params: Value) -> Value {
@@ -82,6 +102,7 @@ fn a_key_with_no_secrets_grant_reaches_none_of_the_methods_and_the_owner_all_of_
         "secrets/list",
         "secrets/reveal",
         "secrets/forget",
+        "secrets/configure",
     ] {
         let answer = ask(
             &rig.control,
@@ -384,4 +405,127 @@ fn a_set_with_nothing_to_seal_the_answer_with_is_refused_before_anything_is_aske
         client.receive(Some(Duration::from_millis(50))),
         Err(_) | Ok(None)
     ));
+}
+
+#[test]
+fn a_provider_entry_is_set_up_with_plain_settings_and_a_secret_taken_from_another_provider() {
+    let (rig, config) = rig_in("configure", true);
+    let set = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/configure",
+        json!({"name": "work", "provider": "bitwarden", "keep": "close",
+            "settings": {"command": "bw", "part": "password"},
+            "from": {"session": {"entry": "form", "name": "bw_session"}}}),
+    );
+    assert_eq!(set["result"]["saved"], true, "{set}");
+    let text = std::fs::read_to_string(&config).expect("canoa.cfg");
+    assert!(text.contains("[secrets.providers.work]"), "{text}");
+    assert!(text.contains("provider = \"bitwarden\""), "{text}");
+    assert!(text.contains("name = \"bw_session\""), "{text}");
+    let listed = ask(&rig.control, &Caller::Owner, "secrets/providers", json!({}));
+    let entries = listed["result"]["entries"].as_array().expect("entries");
+    let work = entries
+        .iter()
+        .find(|entry| entry["name"] == "work")
+        .expect("the entry is listed");
+    assert_eq!(work["provider"], "bitwarden");
+    assert_eq!(work["settings"]["command"], "bw");
+    assert_eq!(
+        work["from"]["session"],
+        json!({"entry": "form", "name": "bw_session"})
+    );
+}
+
+#[test]
+fn a_secret_is_never_written_to_canoa_cfg_and_only_a_setting_that_may_be_taken_from_a_secret_is() {
+    let (rig, config) = rig_in("configure_refused", true);
+    let typed = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/configure",
+        json!({"name": "work", "provider": "bitwarden",
+            "settings": {"session": "typed-key-zq9-made-up"}}),
+    );
+    let why = typed["error"]["message"].as_str().expect("refused");
+    assert!(why.contains("is a secret"), "{why}");
+    assert!(
+        !why.contains("typed-key-zq9"),
+        "the refusal repeats the value"
+    );
+    let plain = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/configure",
+        json!({"name": "work", "provider": "bitwarden",
+            "from": {"part": {"entry": "form", "name": "which"}}}),
+    );
+    assert!(
+        plain["error"]["message"]
+            .as_str()
+            .is_some_and(|why| why.contains("does not take part")),
+        "{plain}"
+    );
+    let ghost = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/configure",
+        json!({"name": "work", "provider": "ghost"}),
+    );
+    assert!(ghost["error"].is_object(), "{ghost}");
+    let unknown = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/configure",
+        json!({"name": "work", "provider": "bitwarden", "settings": {"surprise": 1}}),
+    );
+    assert!(unknown["error"].is_object(), "{unknown}");
+    let after = std::fs::read_to_string(&config).expect("canoa.cfg");
+    assert!(
+        !after.contains("secrets") && !after.contains("typed-key"),
+        "nothing was written: {after}"
+    );
+}
+
+#[test]
+fn an_entry_is_removed_unless_a_name_or_the_default_still_points_at_it() {
+    let (rig, config) = rig_in("configure_remove", true);
+    for (name, entry) in [("work", "work"), ("other", "other")] {
+        let set = ask(
+            &rig.control,
+            &Caller::Owner,
+            "secrets/configure",
+            json!({"name": entry, "provider": "bitwarden"}),
+        );
+        assert_eq!(set["result"]["saved"], true, "{name}: {set}");
+    }
+    std::fs::write(
+        &config,
+        format!(
+            "{}\n[secrets.names]\ngithub = \"work\"\n",
+            std::fs::read_to_string(&config).expect("canoa.cfg")
+        ),
+    )
+    .expect("a name points at work");
+    let kept = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/configure",
+        json!({"name": "work", "remove": true}),
+    );
+    assert!(kept["error"].is_object(), "{kept}");
+    let removed = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/configure",
+        json!({"name": "other", "remove": true}),
+    );
+    assert_eq!(removed["result"]["removed"], true, "{removed}");
+    let missing = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/configure",
+        json!({"name": "other", "remove": true}),
+    );
+    assert!(missing["error"].is_object(), "{missing}");
 }
