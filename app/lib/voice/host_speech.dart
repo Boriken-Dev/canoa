@@ -187,7 +187,15 @@ Map<String, Object?> _map(Object? value) => value is Map ? value.cast<String, Ob
 /// written back through the host's control channel (`speech/*`). The providers run on the host, so a page and a platform with no
 /// speech service of its own dictate through them.
 final class HostSpeechCatalog extends ChangeNotifier {
-  HostSpeechCatalog(this._control, {this.capture, this.grants, this.programs});
+  HostSpeechCatalog(this._control, {this.capture, this.grants, this.programs, this.wait = const Duration(seconds: 30), this.finishWait = const Duration(minutes: 3)});
+
+  /// How long the host may take to answer a dictation's call before the dictation says it did not; opening a recording, a chunk of
+  /// audio and a listing are answered at once, so a host that is silent for this long is not coming back.
+  final Duration wait;
+
+  /// How long `speech/finish` may take: the provider turns the whole recording into text there, and its own limit (a command's
+  /// `timeout_seconds`) ends it with a reason of its own before this does.
+  final Duration finishWait;
 
   final HostControl _control;
 
@@ -227,10 +235,10 @@ final class HostSpeechCatalog extends ChangeNotifier {
   List<SpeechBackend> _backends = const [];
 
   /// The host's own answer to [method], or a [SpeechFailure] saying why not.
-  Future<Map<String, Object?>> call(String method, Map<String, Object?> params) async {
+  Future<Map<String, Object?>> call(String method, Map<String, Object?> params, {Duration? within}) async {
     try {
       final client = await _control.ready(wait: false);
-      final result = await client.call(method, params, null, const Duration(minutes: 3));
+      final result = await client.call(method, params, null, within ?? const Duration(minutes: 3));
       return _map(result);
     } on ControlFailed catch (error) {
       throw SpeechFailure(error.message);
@@ -244,12 +252,12 @@ final class HostSpeechCatalog extends ChangeNotifier {
   /// Reads the providers again.
   Future<void> refresh() async {
     try {
-      final answer = await call('speech/providers', const {});
+      final answer = await call('speech/providers', const {}, within: wait);
       _types = [for (final kind in (answer['types'] as List? ?? const [])) ?SpeechKind.parse(kind)];
       _providers = [for (final provider in (answer['providers'] as List? ?? const [])) ?HostSpeechProvider.parse(provider)];
       _problem = null;
       try {
-        final offered = await call('speech/offers', const {});
+        final offered = await call('speech/offers', const {}, within: wait);
         _offers = [for (final offer in (offered['offers'] as List? ?? const [])) ?SpeechOffer.parse(offer)];
       } on SpeechFailure {
         // A host that makes no offers (an older one) still has its providers.
@@ -384,7 +392,7 @@ final class HostSpeech implements SpeechBackend {
       const rate = 16000;
       // The model is asked for only when the host lists it, so a choice made for another service is never sent to this one.
       final asked = model != null && provider.models.any((each) => each.id == model) ? model : null;
-      final opened = await _catalog.call('speech/open', {'provider': provider.name, 'rate': rate, 'language': ?language, 'model': ?asked, ..._profileParams(profile)});
+      final opened = await _catalog.call('speech/open', {'provider': provider.name, 'rate': rate, 'language': ?language, 'model': ?asked, ..._profileParams(profile)}, within: _catalog.wait);
       final session = opened['session'] as String;
       _session = session;
       if (_ending) {
@@ -408,13 +416,14 @@ final class HostSpeech implements SpeechBackend {
       );
       // `stop` and `cancel` end the audio; the recording is finished or cancelled after the last chunk is taken.
       await _ended.future;
-      await _audio?.cancel();
+      // A microphone that does not let go within a moment is not waited for: the recording is finished with what it sent.
+      await _audio?.cancel().timeout(const Duration(seconds: 5), onTimeout: () {});
       _audio = null;
       await _sending;
       if (_cancelled) {
         await _cancelSession(session);
       } else {
-        final finished = await _catalog.call('speech/finish', {'session': session});
+        final finished = await _catalog.call('speech/finish', {'session': session}, within: _catalog.finishWait);
         out.add(Transcript(finished['text'] as String? ?? '', isFinal: true, frontMatter: _map(finished['front_matter'])));
       }
     } on SpeechFailure catch (failure) {
@@ -433,7 +442,7 @@ final class HostSpeech implements SpeechBackend {
   Future<void> _push(String session, Uint8List part, StreamController<Transcript> out) async {
     if (_cancelled || out.isClosed) return;
     try {
-      final heard = await _catalog.call('speech/push', {'session': session, 'audio': base64Encode(part)});
+      final heard = await _catalog.call('speech/push', {'session': session, 'audio': base64Encode(part)}, within: _catalog.wait);
       final partial = heard['partial'];
       if (partial is String && !out.isClosed) out.add(Transcript(partial, isFinal: false));
     } on SpeechFailure catch (failure) {
@@ -445,7 +454,7 @@ final class HostSpeech implements SpeechBackend {
 
   Future<void> _cancelSession(String session) async {
     try {
-      await _catalog.call('speech/cancel', {'session': session});
+      await _catalog.call('speech/cancel', {'session': session}, within: _catalog.wait);
     } on SpeechFailure {
       // The host has already ended it.
     }

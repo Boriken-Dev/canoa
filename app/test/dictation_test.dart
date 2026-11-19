@@ -25,6 +25,9 @@ final class _Service implements SpeechBackend {
   int started = 0, stopped = 0, cancelled = 0;
   Object? failOnStop;
 
+  /// A service that takes Stop (or Cancel) and never says anything again, as a provider that hung does.
+  bool hangOnStop = false, hangOnCancel = false;
+
   @override
   String get id => 'stand-in';
   @override
@@ -53,6 +56,7 @@ final class _Service implements SpeechBackend {
   @override
   Future<void> stop() async {
     stopped++;
+    if (hangOnStop) return;
     if (failOnStop != null) out!.addError(failOnStop!);
     if (finalText.isNotEmpty && failOnStop == null) out!.add(Transcript(finalText, isFinal: true));
     await out!.close();
@@ -61,6 +65,7 @@ final class _Service implements SpeechBackend {
   @override
   Future<void> cancel() async {
     cancelled++;
+    if (hangOnCancel) return;
     await out!.close();
   }
 }
@@ -76,9 +81,13 @@ final class _Rig {
 }
 
 Future<_Rig> _pump(WidgetTester tester,
-    {_Service? service, SpeechBackend? Function()? backend, VoiceSettings voice = const VoiceSettings(backend: 'stand-in'), void Function(String id)? acknowledge}) async {
+    {_Service? service,
+    SpeechBackend? Function()? backend,
+    VoiceSettings voice = const VoiceSettings(backend: 'stand-in'),
+    void Function(String id)? acknowledge,
+    Future<void> Function()? ready}) async {
   final stand = service ?? _Service();
-  final dictation = Dictation(backend: backend ?? () => stand, voice: () => voice, acknowledge: acknowledge);
+  final dictation = Dictation(backend: backend ?? () => stand, voice: () => voice, acknowledge: acknowledge, ready: ready);
   final store = SessionStore();
   final session = store.createDraft()..agent = 'Desk';
   final input = TextEditingController();
@@ -113,6 +122,14 @@ Future<void> _begin(WidgetTester tester, {bool accept = true}) async {
   }
   await tester.pump();
   await tester.pump();
+}
+
+/// Lets [time] pass for the timers the test's own zone holds and for the stream work that needs real time.
+Future<void> _wait(WidgetTester tester, Duration time) async {
+  for (var i = 0; i < 10; i++) {
+    await tester.pump(time ~/ 10);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+  }
 }
 
 void main() {
@@ -293,7 +310,7 @@ void main() {
     expect(find.byKey(const Key('dictate')), findsOneWidget);
   });
 
-  testWidgets('Stop with no speech puts nothing in the message', (tester) async {
+  testWidgets('Stop with no speech puts nothing in the message and says nothing was heard', (tester) async {
     final rig = await _pump(tester, service: _Service(finalText: ''));
     rig.input.text = 'draft';
     await _begin(tester);
@@ -301,7 +318,66 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(rig.input.text, 'draft');
+    expect(rig.dictation.state, DictationState.error, reason: 'a dictation that ends with no words must not look like nothing happened');
+    expect(find.textContaining('Nothing was heard'), findsOneWidget);
+  });
+
+  testWidgets('a service that never answers Stop ends with its name and the wait, and the microphone can be tried again', (tester) async {
+    final rig = await _pump(tester, service: _Service()..hangOnStop = true..hangOnCancel = true);
+    rig.input.text = 'draft';
+    await _begin(tester);
+    await tester.tap(find.byKey(const Key('dictate-stop')));
+    await tester.pump();
+    expect(find.byKey(const Key('dictate-transcribing')), findsOneWidget);
+    await tester.pump(const Duration(minutes: 5));
+    expect(rig.dictation.state, DictationState.error, reason: 'the composer must not wait on a service for ever');
+    expect(find.textContaining('Stand-in did not answer within 4 minutes'), findsOneWidget);
+    expect(rig.service.cancelled, 1, reason: 'the service is told to give up');
+    expect(rig.input.text, 'draft');
+    await tester.tap(find.byKey(const Key('dictate-dismiss')));
+    await tester.pump();
+    await _begin(tester);
+    expect(rig.dictation.state, DictationState.listening);
+    expect(rig.service.started, 2);
+    await tester.tap(find.byKey(const Key('dictate-cancel')));
+    await tester.pump(const Duration(seconds: 10));
+  });
+
+  testWidgets('Cancel is there while a service finishes, and a service that never closes does not block the next dictation', (tester) async {
+    final rig = await _pump(tester, service: _Service()..hangOnStop = true..hangOnCancel = true);
+    rig.input.text = 'draft';
+    await _begin(tester);
+    await tester.tap(find.byKey(const Key('dictate-stop')));
+    await tester.pump();
+    expect(find.byKey(const Key('dictate-transcribing')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('dictate-cancel')));
+    await tester.pump(const Duration(seconds: 6));
     expect(rig.dictation.state, DictationState.idle);
+    expect(rig.input.text, 'draft');
+    await tester.tap(find.byKey(const Key('dictate')));
+    await tester.pump(const Duration(seconds: 3));
+    expect(rig.service.started, 2, reason: 'the first capture never closed; the second must not wait for it');
+    expect(rig.dictation.state, DictationState.listening);
+    await tester.tap(find.byKey(const Key('dictate-cancel')));
+    await tester.pump(const Duration(seconds: 10));
+  });
+
+  testWidgets('a press shows it is starting while the host lists its providers, Cancel ends it, and a list that never comes says why', (tester) async {
+    final never = Completer<void>();
+    final rig = await _pump(tester, ready: () => never.future, voice: const VoiceSettings(backend: 'stand-in', acknowledged: {'stand-in'}));
+    await tester.tap(find.byKey(const Key('dictate')));
+    await tester.pump();
+    expect(find.byKey(const Key('dictate-starting')), findsOneWidget, reason: 'a press must show something at once');
+    await tester.tap(find.byKey(const Key('dictate-cancel')));
+    await tester.pump();
+    expect(rig.dictation.state, DictationState.idle);
+    expect(rig.service.started, 0);
+
+    await tester.tap(find.byKey(const Key('dictate')));
+    await tester.pump(const Duration(seconds: 25));
+    expect(rig.dictation.state, DictationState.error);
+    expect(find.textContaining('did not list its speech providers within 20 seconds'), findsOneWidget);
+    expect(rig.service.started, 0);
   });
 
   testWidgets('a service that fails ends the capture and says why in words, and the microphone can be tried again', (tester) async {
@@ -387,6 +463,35 @@ void main() {
     expect(find.textContaining('no speech here'), findsOneWidget);
     expect(rig.input.text, isEmpty);
   });
+
+  testWidgets('through the host: a host that takes the recording and never opens it ends the dictation with why', (tester) async {
+    final link = _Link()..silent.add('speech/open');
+    final catalog = HostSpeechCatalog(HostControl.dialing(() async => link), capture: _Tone(), wait: const Duration(milliseconds: 150));
+    await tester.runAsync(catalog.refresh);
+    final rig = await _pump(tester, backend: () => catalog.backends.single);
+    await _begin(tester);
+    await _wait(tester, const Duration(seconds: 1));
+    expect(rig.dictation.state, DictationState.error, reason: 'a host that never opens the recording must not leave the microphone showing for ever');
+    expect(find.textContaining('The host did not answer in time.'), findsOneWidget);
+    expect(link.pushed, 0);
+  });
+
+  testWidgets('through the host: a provider that never finishes ends the dictation with why, and the recording is dropped', (tester) async {
+    final link = _Link()..silent.add('speech/finish');
+    final catalog = HostSpeechCatalog(HostControl.dialing(() async => link), capture: _Tone(), finishWait: const Duration(milliseconds: 150));
+    await tester.runAsync(catalog.refresh);
+    final rig = await _pump(tester, backend: () => catalog.backends.single);
+    await _begin(tester);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('dictate-stop')));
+    await tester.pump();
+    await _wait(tester, const Duration(seconds: 1));
+    expect(rig.dictation.state, DictationState.error);
+    expect(find.textContaining('The host did not answer in time.'), findsOneWidget);
+    expect(link.cancelled, 1, reason: 'the host is told to drop the recording');
+    expect(rig.input.text, isEmpty);
+  });
 }
 
 /// A capture that plays two chunks and then waits for the listener to cancel it, as a microphone does.
@@ -410,12 +515,16 @@ final class _Link implements HostLink {
   int pushed = 0, finished = 0, cancelled = 0;
   bool refuseOpen = false;
 
+  /// The methods this host takes and never answers, as one whose provider hung does.
+  final silent = <String>{};
+
   @override
   Stream<String> get messages => _out.stream;
 
   @override
   Future<void> send(String message) async {
     final request = jsonDecode(message) as Map<String, Object?>;
+    if (silent.contains(request['method'])) return;
     final Object result;
     switch (request['method']) {
       case 'speech/providers':
