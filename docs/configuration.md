@@ -909,7 +909,7 @@ The **Secrets** section of the app lists what Canoa holds: each secret's provide
 
 An agent can say how long it can wait for your answer; Canoa never waits longer than `max_wait`, and when you are not connected at all it tells the agent so at once instead of waiting. A question nobody answered in time disappears from your screen.
 
-The credentials of your agents' accounts and your mail passwords are kept the same way, as secrets named `accounts/…` in the provider `accounts` names, so they are in the Secrets section too and can be kept in any setup that keeps what it is given. A host that kept them before (in the operating system's store under its own name, or in sealed files) moves each account into the new place the first time it is used, and takes the old copy away only once the new one reads back the same. `[host] account_store` is gone: `account_store = "file"` is now `accounts = "file"` in `[secrets]`.
+The credentials of your agents' accounts and your mail passwords are kept the same way, as secrets named `accounts/…` in the provider `accounts` names, so they are in the Secrets section too (each home's system store is its own: two homes never see each other's) and can be kept in any setup that keeps what it is given. A host that kept them before (in the operating system's store under its own name, or in sealed files) moves each account into the new place the first time it is used, and takes the old copy away only once the new one reads back the same. `[host] account_store` is gone: `account_store = "file"` is now `accounts = "file"` in `[secrets]`.
 
 A value that comes with an end of its own (a token that expires) is kept no longer than that end, whatever you chose. Nothing is written to a log.
 

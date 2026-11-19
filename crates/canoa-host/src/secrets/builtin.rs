@@ -29,7 +29,8 @@ pub(crate) const SYSTEM: &str = "system";
 /// The id of the sealed-files provider, and of the entry that is there with no configuration.
 pub(crate) const FILE: &str = "file";
 
-/// The service the system provider keeps its entries under unless the host or the person names another.
+/// The service the system provider keeps its entries under when it has no home to name one after (a vault made with none); a vault
+/// with a home gives it the service of that home, and the person may name another.
 pub(crate) const DEFAULT_SERVICE: &str = "dev.boriken.canoa.secrets";
 
 /// [`DEFAULT_SERVICE`], except in this crate's own tests, which each process gives a service of its own so that no test reads or

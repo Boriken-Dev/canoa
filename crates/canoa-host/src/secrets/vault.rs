@@ -22,7 +22,7 @@ use coqui_acp_api::guatiao::library::Object;
 use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
-use super::builtin::{FILE, FORM};
+use super::builtin::{FILE, FORM, SYSTEM};
 use super::catalog::{Catalog, Listed};
 use super::settings::{Entry, Keep, Settings};
 
@@ -332,6 +332,17 @@ impl Vault {
             config.insert(
                 "directory".to_owned(),
                 Value::String(home.join("secrets").to_string_lossy().into_owned()),
+            );
+        }
+        // The operating system's store is kept per home, under the service the accounts' store always had, so two homes of one
+        // user never share a secret and one home's list never shows another's.
+        if entry.provider == SYSTEM
+            && !config.contains_key("service")
+            && let Some(home) = lock(&self.home).as_ref()
+        {
+            config.insert(
+                "service".to_owned(),
+                Value::String(crate::accounts::store::service_for(home)),
             );
         }
         let allowed = catalog.secret_sourced_settings(&entry.provider);

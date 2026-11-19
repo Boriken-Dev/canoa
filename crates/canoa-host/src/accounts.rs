@@ -236,14 +236,14 @@ impl Accounts {
         home: &Path,
         probe: &dyn Fn(&str) -> Result<(), StoreError>,
     ) -> Result<Arc<Self>, StoreError> {
-        use crate::secrets::builtin::{FILE, SYSTEM, default_service};
+        use crate::secrets::builtin::{FILE, SYSTEM};
         use crate::secrets::settings::{AUTO, Settings as SecretSettings};
 
         let dir = home.join("accounts");
         let files = home.join("secrets");
         let settings = SecretSettings::read(config.secrets.as_ref()).map_err(StoreError)?;
         let (entry, note) = if settings.accounts == AUTO {
-            match probe(&default_service()) {
+            match probe(&store::service_for(home)) {
                 Ok(()) => (SYSTEM.to_owned(), None),
                 Err(why) => (
                     FILE.to_owned(),

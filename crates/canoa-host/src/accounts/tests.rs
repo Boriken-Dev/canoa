@@ -670,6 +670,81 @@ fn an_account_the_operating_systems_store_held_under_the_homes_own_service_is_mo
     accounts.forget_credentials("one").expect("forgotten");
 }
 
+/// Two homes of one user, the same account id in both: each keeps its own value and lists only its own secrets, since the operating
+/// system's store is kept under a service of the home. The entries are made under services of these homes alone and removed.
+#[test]
+fn two_homes_with_the_same_account_id_keep_separate_values_and_list_only_their_own() {
+    use crate::secrets::catalog::Catalog;
+    use crate::secrets::vault::Vault;
+
+    let first = Dir::new();
+    let second = Dir::new();
+    let text = "[secrets]\naccounts = \"system\"\n";
+    let open =
+        |home: &Dir| Accounts::open_probing(&config_of(text), &home.0, &|_| Ok(())).expect("opens");
+    let (a, b) = (open(&first), open(&second));
+    let record = |revision: u64, token: &str| {
+        let mut record = a_record();
+        record.revision = revision;
+        record
+            .credentials
+            .insert("TOKEN".to_owned(), token.to_owned());
+        record
+    };
+    if a.save("alone-a", &record(1, "first-home-zq9")).is_err() {
+        eprintln!("NOT RUN: the operating system's store does not answer here");
+        return;
+    }
+    a.save("same", &record(1, "first-home-zq9")).expect("saved");
+    b.save("alone-b", &record(2, "second-home-zq9"))
+        .expect("saved");
+    b.save("same", &record(2, "second-home-zq9"))
+        .expect("saved");
+    let token = |accounts: &Accounts| {
+        accounts
+            .load("same")
+            .expect("reads")
+            .expect("held")
+            .credentials
+            .get("TOKEN")
+            .cloned()
+    };
+    assert_eq!(token(&a).as_deref(), Some("first-home-zq9"));
+    assert_eq!(token(&b).as_deref(), Some("second-home-zq9"));
+    let listed = |home: &Dir| {
+        let vault = Vault::standalone(Catalog::built_in(), config_of(text).secrets, &home.0);
+        let mut names: Vec<String> = vault
+            .rows()
+            .into_iter()
+            .filter(|row| row.provider == "system")
+            .map(|row| row.name)
+            .collect();
+        names.sort();
+        names
+    };
+    assert_eq!(listed(&first), ["accounts/alone-a", "accounts/same"]);
+    assert_eq!(listed(&second), ["accounts/alone-b", "accounts/same"]);
+    for (accounts, ids) in [(&a, ["alone-a", "same"]), (&b, ["alone-b", "same"])] {
+        for id in ids {
+            accounts.forget_credentials(id).expect("forgotten");
+        }
+    }
+    assert!(listed(&first).is_empty() && listed(&second).is_empty());
+}
+
+#[test]
+fn the_sealed_files_are_under_the_home_of_the_host_that_keeps_them() {
+    let first = Dir::new();
+    let second = Dir::new();
+    let text = "[secrets]\naccounts = \"file\"\n";
+    let a = Accounts::open_probing(&config_of(text), &first.0, &no_bus).expect("opens");
+    let b = Accounts::open_probing(&config_of(text), &second.0, &no_bus).expect("opens");
+    a.save("same", &a_record()).expect("saved");
+    assert!(holds_secret_files_in(&first.0));
+    assert!(!holds_secret_files_in(&second.0));
+    assert!(b.load("same").expect("reads").is_none());
+}
+
 #[test]
 fn an_entry_that_keeps_nothing_it_is_given_cannot_hold_the_accounts() {
     let dir = Dir::new();
