@@ -39,6 +39,10 @@ panel-tab = ["dep:coqui-acp-api", "dep:guatiao"]
 speech = ["dep:guatiao", "dep:coqui-acp-api"]
 # The two providers that ship with it: a program the person names, and a speech-to-text HTTP endpoint the person names.
 speech-builtin = ["speech", "network", "dep:guatiao-intake", "dep:serde_json"]
+# The loopback HTTP server a host gives an agent: tools, or a local model's API, to a program of this user holding a bearer.
+loopback = ["dep:httparse", "dep:serde_json", "dep:sha2", "dep:rustix"]
+# The `model_gateway` kind: a local model served to an agent, over the OpenAI or Anthropic API, for the session of an account.
+gateway = ["dep:coqui-acp-api"]
 # How Canoa reaches the network: the system's proxy, proxy login, certificate verifier and client certificates, with the person's overrides.
 network = ["dep:coqui-syshttp", "dep:ureq", "dep:rustls", "dep:tracing"]
 
@@ -53,9 +57,13 @@ rustls = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
+httparse = { workspace = true, optional = true }
 
 # Proxy login with the logon session (Negotiate and NTLM through SSPI) needs no library on Windows; elsewhere it needs the system's GSSAPI
 # library to build, so it is left out.
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { workspace = true, features = ["process", "net"], optional = true }
+
 [target.'cfg(windows)'.dependencies]
 coqui-syshttp = { workspace = true, features = ["negotiate"], optional = true }
 

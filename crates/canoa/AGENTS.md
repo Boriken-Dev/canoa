@@ -329,6 +329,42 @@ Returns the text.
 - `verified()` is only for a trusted host integration after it has proven identity.
 - The registry is in memory.
 
+## `model_gateway` (`canoa::gateway`, feature `gateway`)
+
+A model that runs on this computer, served to an agent the way a cloud endpoint is. A library offers it beside the `account_provider` that makes accounts of the kind it serves.
+
+```rust
+pub const KIND: &str = "model_gateway";
+#[non_exhaustive] pub struct GatewayInfo { pub kind: String, pub vendor: String, pub table: Option<String> }   // the account kind it serves; the vendor of what runs the model (AGENTS_ACCOUNT_PROVIDER); the table of canoa.cfg handed to `open` each time
+impl GatewayInfo { pub fn new(kind, vendor) -> Self; }
+#[non_exhaustive] pub struct GatewayRequest { pub account: String, pub settings: String, pub table: String, pub home: Option<String>, pub helper: Vec<String> }   // settings and table: JSON objects in text; home: the host's home folder; helper: the program and arguments that start the host's own helper command (empty: none)
+impl GatewayRequest { pub fn new(account) -> Self; }
+pub trait ModelGateway {   // kind `model_gateway`
+    fn describe(&self) -> Result<GatewayInfo, ProviderError>;   // the same on every call, with nothing run
+    fn open(&self, request: GatewayRequest, spawner: Object<dyn ProcessSpawner>) -> Result<Object<dyn GatewayLease>, ProviderError>;   // a bearer on the gateway of request.account, started when no session holds one; the refusal says what the person can act on
+}
+pub trait GatewayLease {   // object kind `gateway_lease`; destroying it ends the session's access, and the last one for an account ends its gateway
+    fn address(&self) -> Result<String, ProviderError>;   // http://127.0.0.1:PORT, no path
+    fn bearer(&self) -> Result<String, ProviderError>;    // good for this session alone, and for a program of this user
+}
+```
+
+## `canoa::loopback` (feature `loopback`)
+
+The loopback HTTP server behind what the host gives an agent (its tools over MCP, a model's API): one request a connection, a request served only when its connection comes from a process of this user (checked where the kernel can say: Linux), with a bearer minted for one session, a `Host` that names this socket and no `Origin`.
+
+```rust
+pub trait Service { type Caller: Caller; const NAME: &'static str; const MAX_PER_CALLER: usize; const WATCHES_CLIENT: bool; fn caller(&self, token: &str) -> Option<Arc<Self::Caller>>; fn body_limit(&self) -> usize; fn route(&self, method: &str, path: &str) -> Route; fn respond(self: &Arc<Self>, caller: &Arc<Self::Caller>, request: &Request<'_>) -> Reply; /* answer: a JSON message, for the default respond */ }
+pub trait Caller { fn calls(&self) -> &AtomicUsize; }
+pub enum Route { Serve, NotFound, Method(&'static str) }
+pub struct Request<'a> { pub method, pub path, pub body, pub closed: &'a Closed }   // closed.on_close(hook): runs when the client hangs up (WATCHES_CLIENT)
+pub enum Reply { Answer(Answer), Whole { code, reason, headers, body }, Stream { headers, run: Streaming } }
+pub enum Answer { Json(Value), Accepted, Unavailable }
+pub struct Listener;   // Listener::start(&service) -> io::Result<Listener>; .addr(); stopped when dropped
+pub fn digest(token: &str) -> [u8; 32];   // the key a table of bearers uses: a token is never kept
+pub fn ours(peer: SocketAddr, local: SocketAddr) -> bool;
+```
+
 ## `store_extension` (`canoa::store::extension`, feature `store`)
 
 A Guatiao kind that adds types to the Store: `describe() -> ExtensionInfo { title, publisher, types: Vec<ExtensionType { id, title, icon?, stores, catalogs?: CatalogWords { noun, plural, lists } }> }`. A type that gives `catalogs` words reads catalogs: Store settings lists `[store.<id>.catalogs]` for it and offers the `catalog_source` providers that serve it. `stores` names `program_store` providers the same library offers; the host lists and installs them as any store. `ExtensionType::problem` says why an id, title or icon is refused (`RESERVED_TYPES` are the Store's own, `extensions` among them). `KIND` and `KIND_VERSIONS` name the kind and the versions this host offers, which a catalog's extension names in its `needs`. `icon` is the name of one of the application's icons (an unknown name draws the default), or a picture the extension ships as a `data:image/png;base64,...` or `data:image/webp;base64,...` address of at most `MAX_ICON_TEXT` (64 KiB) characters; the application checks its size and dimensions again before it draws it.

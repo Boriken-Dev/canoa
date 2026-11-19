@@ -5,6 +5,12 @@
 
 extern crate alloc;
 
+#[cfg(feature = "gateway")]
+#[cfg_attr(docsrs, doc(cfg(feature = "gateway")))]
+pub mod gateway;
+#[cfg(feature = "loopback")]
+#[cfg_attr(docsrs, doc(cfg(feature = "loopback")))]
+pub mod loopback;
 #[cfg(feature = "panel-tab")]
 #[cfg_attr(docsrs, doc(cfg(feature = "panel-tab")))]
 pub mod panel_tab;
