@@ -5,7 +5,9 @@
     reason = "files are std's"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 use coqui_acp_api::guatiao::library::Registry;
 
