@@ -15,7 +15,7 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use foundry_local_sdk::{
     ChatCompletionRequestMessage, ChatCompletionTools, ChatToolChoice, FoundryLocalConfig,
@@ -23,7 +23,7 @@ use foundry_local_sdk::{
 };
 use serde_json::Value;
 
-use crate::{Engine, EngineError, ModelInfo};
+use crate::{Cancel, Engine, EngineError, ModelInfo};
 
 /// What the engine runs and where its native library is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -333,7 +333,7 @@ impl Engine for SdkEngine {
         vec![self.info()]
     }
 
-    fn chat(&self, request: &Value) -> Result<Value, EngineError> {
+    fn chat(&self, request: &Value, cancel: &Cancel) -> Result<Value, EngineError> {
         let messages: Vec<ChatCompletionRequestMessage> =
             serde_json::from_value(request.get("messages").cloned().unwrap_or(Value::Null))
                 .map_err(|error| {
@@ -369,14 +369,29 @@ impl Engine for SdkEngine {
             }
             None => {}
         }
-        let _one = self
-            .one_at_a_time
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let answer = self
+        let _one = crate::engine::lock_unless_cancelled(&self.one_at_a_time, cancel)?;
+        // The call runs as a task of its own so that cancelling can end it: a dropped call tells the native request to stop, and the
+        // model is free for the next one.
+        let task = self
             .runtime
-            .block_on(client.complete_chat(&messages, tools.as_deref()))
-            .map_err(failed)?;
+            .spawn(async move { client.complete_chat(&messages, tools.as_deref()).await });
+        let abort = task.abort_handle();
+        cancel.on_cancel(move || abort.abort());
+        let answer = match self.runtime.block_on(task) {
+            Ok(answer) => answer,
+            Err(_) if cancel.is_cancelled() => return Err(EngineError::Cancelled),
+            Err(error) => return Err(failed(error)),
+        };
+        let answer = answer.map_err(|error| {
+            let why = error.to_string();
+            if cancel.is_cancelled() {
+                EngineError::Cancelled
+            } else if crate::is_cut_tool_call(&why) {
+                EngineError::CutToolCall(why)
+            } else {
+                EngineError::Failed(why)
+            }
+        })?;
         serde_json::to_value(answer).map_err(failed)
     }
 }
@@ -437,7 +452,10 @@ mod live_models {
             engine.load().expect("loads");
             assert!(engine.model().is_ok(), "round {round}");
             let answer = engine
-                .chat(&serde_json::json!({"max_tokens": 16, "messages": [{"role": "user", "content": "/no_think Say OK."}]}))
+                .chat(
+                &serde_json::json!({"max_tokens": 16, "messages": [{"role": "user", "content": "/no_think Say OK."}]}),
+                &Cancel::new(),
+            )
                 .expect("answers");
             assert!(answer["choices"][0]["message"]["content"].is_string());
         }

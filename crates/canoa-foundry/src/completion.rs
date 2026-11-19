@@ -68,6 +68,10 @@ pub struct Usage {
     pub output: u64,
 }
 
+/// What an answer says when a tool call was cut off by its token allowance and dropped.
+const CUT_NOTE: &str =
+    "\n\n[The model's tool call was cut off by the token limit and was dropped.]";
+
 /// What a model answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -105,6 +109,21 @@ fn split_thinking(content: &str) -> (Option<String>, String) {
 }
 
 impl Completion {
+    /// The answer to a request whose tool call the token allowance cut off: it stopped for length, nothing was called, and it
+    /// says that the call was dropped.
+    #[must_use]
+    pub fn cut_off(model: impl Into<String>) -> Self {
+        Self {
+            id: "local".to_string(),
+            model: model.into(),
+            text: CUT_NOTE.trim_start().to_string(),
+            thinking: None,
+            tool_calls: Vec::new(),
+            finish: Finish::Length,
+            usage: Usage::default(),
+        }
+    }
+
     /// Reads the first choice of a chat completion response.
     ///
     /// # Errors
@@ -160,6 +179,19 @@ impl Completion {
             _ if !tool_calls.is_empty() => Finish::ToolCalls,
             _ => Finish::Stop,
         };
+        let mut text = text;
+        if finish == Finish::Length {
+            // A call the allowance cut in the middle cannot be run: it is dropped, and the answer says so.
+            let before = tool_calls.len();
+            tool_calls.retain(|call| {
+                call.arguments.trim().is_empty()
+                    || serde_json::from_str::<Value>(&call.arguments)
+                        .is_ok_and(|value| value.is_object())
+            });
+            if tool_calls.len() < before {
+                text.push_str(CUT_NOTE);
+            }
+        }
         let count = |key: &str| {
             response
                 .pointer(&alloc::format!("/usage/{key}"))
@@ -245,6 +277,40 @@ mod tests {
         assert_eq!(done.tool_calls[0].id, "call_0");
         assert_eq!(done.finish, Finish::ToolCalls);
         assert_eq!(done.tool_calls[0].input(), json!({}));
+    }
+
+    #[test]
+    fn a_tool_call_the_length_cut_in_the_middle_is_dropped_with_a_note_and_a_whole_one_is_kept() {
+        let cut = json!({"choices": [{"finish_reason": "length", "message": {"content": "reading", "tool_calls": [
+            {"id": "a", "function": {"name": "read", "arguments": "{\"path\": \"no"}},
+            {"id": "b", "function": {"name": "read", "arguments": "{\"path\": \"ok\"}"}}]}}]});
+        let done = Completion::from_chat(&cut).expect("reads");
+        assert_eq!(done.finish, Finish::Length);
+        assert_eq!(done.tool_calls.len(), 1);
+        assert_eq!(done.tool_calls[0].id, "b");
+        assert!(done.text.starts_with("reading"), "{}", done.text);
+        assert!(
+            done.text.contains("cut off by the token limit"),
+            "{}",
+            done.text
+        );
+        // Nothing was cut when the model stopped by itself, whatever the arguments are: the tool refuses them by name.
+        let stopped = json!({"choices": [{"finish_reason": "tool_calls", "message": {"content": "", "tool_calls": [
+            {"id": "a", "function": {"name": "read", "arguments": "{oops"}}]}}]});
+        assert_eq!(
+            Completion::from_chat(&stopped)
+                .expect("reads")
+                .tool_calls
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn an_answer_cut_off_is_a_stop_for_length_with_no_calls() {
+        let done = Completion::cut_off("m");
+        assert_eq!((done.finish, done.tool_calls.len()), (Finish::Length, 0));
+        assert!(done.text.starts_with("[The model's tool call was cut off"));
     }
 
     #[test]

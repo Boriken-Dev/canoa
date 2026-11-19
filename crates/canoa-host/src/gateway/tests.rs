@@ -5,7 +5,7 @@ use std::net::TcpStream;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use canoa_foundry::{Engine, EngineError, ModelInfo};
+use canoa_foundry::{Cancel, Engine, EngineError, ModelInfo};
 use serde_json::{Value, json};
 
 use super::{Running, Ticket};
@@ -47,7 +47,7 @@ impl Engine for Stub {
         vec![self.model.clone()]
     }
 
-    fn chat(&self, request: &Value) -> Result<Value, EngineError> {
+    fn chat(&self, request: &Value, _cancel: &Cancel) -> Result<Value, EngineError> {
         self.seen
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -650,4 +650,146 @@ fn every_request_is_logged_with_how_it_ended_and_never_what_was_said() {
     drop(ticket);
     drop(running);
     std::fs::remove_dir_all(&dir).expect("removes");
+}
+
+/// A model that is working for as long as nobody cancels it, and says that it was stopped.
+struct Held {
+    started: std::sync::atomic::AtomicBool,
+    stopped: std::sync::atomic::AtomicBool,
+}
+
+impl Engine for Held {
+    fn model(&self) -> Result<ModelInfo, EngineError> {
+        Ok(ModelInfo::new("local-model").tools(true))
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        vec![ModelInfo::new("local-model").tools(true)]
+    }
+
+    fn chat(&self, _request: &Value, cancel: &Cancel) -> Result<Value, EngineError> {
+        self.started
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        while !cancel.is_cancelled() && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if cancel.is_cancelled() {
+            self.stopped
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        Err(EngineError::Cancelled)
+    }
+}
+
+/// Sends `ask` to a model that never answers and hangs up once it is working; says whether the engine was told to stop.
+fn hang_up_on(held: &Arc<Held>, ask: &Value) -> bool {
+    let running = Running::start_with(
+        Arc::clone(held) as Arc<dyn Engine>,
+        Duration::from_secs(10),
+        None,
+    )
+    .expect("starts");
+    let ticket = running.mint().expect("mints");
+    let port = running.listener.addr().port();
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connects");
+    let payload = ask.to_string();
+    stream
+        .write_all(
+            format!(
+                "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
+                ticket.bearer(),
+                payload.len()
+            )
+            .as_bytes(),
+        )
+        .expect("writes");
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while !held.started.load(std::sync::atomic::Ordering::SeqCst) {
+        assert!(
+            std::time::Instant::now() < until,
+            "the model was never asked"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    drop(stream);
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while !held.stopped.load(std::sync::atomic::Ordering::SeqCst) {
+        if std::time::Instant::now() >= until {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    true
+}
+
+#[test]
+fn a_client_that_hangs_up_on_a_whole_answer_stops_the_models_work_for_it() {
+    let held = Arc::new(Held {
+        started: false.into(),
+        stopped: false.into(),
+    });
+    let ask = json!({"messages": [{"role": "user", "content": "hi"}]});
+    assert!(hang_up_on(&held, &ask), "the engine was never cancelled");
+}
+
+#[test]
+fn a_client_that_hangs_up_on_a_stream_stops_the_models_work_for_it() {
+    let held = Arc::new(Held {
+        started: false.into(),
+        stopped: false.into(),
+    });
+    let ask = json!({"stream": true, "messages": [{"role": "user", "content": "hi"}]});
+    assert!(hang_up_on(&held, &ask), "the engine was never cancelled");
+}
+
+fn cut_stub() -> Stub {
+    let mut stub = Stub::new(Value::Null);
+    stub.answer = Err(EngineError::CutToolCall(
+        "Inference failed: ThrowInvalidToolCallWithoutRecovery Tool-call output was interrupted before the batch could be committed".to_owned(),
+    ));
+    stub
+}
+
+#[test]
+fn a_tool_call_the_token_limit_cut_is_a_stop_for_length_in_each_api_and_not_an_error() {
+    let up = up(cut_stub(), Duration::from_secs(10));
+    let messages = json!({"max_tokens": 8, "messages": [{"role": "user", "content": "read it"}]});
+    let got = post(&up, "/v1/messages", &messages);
+    assert_eq!(got.status, 200, "{}", got.body);
+    assert_eq!(got.json()["stop_reason"], "max_tokens");
+    assert!(
+        got.body.contains("cut off by the token limit"),
+        "{}",
+        got.body
+    );
+    let chat = json!({"messages": [{"role": "user", "content": "read it"}]});
+    let got = post(&up, "/v1/chat/completions", &chat);
+    assert_eq!(got.status, 200, "{}", got.body);
+    assert_eq!(got.json()["choices"][0]["finish_reason"], "length");
+    let responses = json!({"input": "read it"});
+    let got = post(&up, "/v1/responses", &responses);
+    assert_eq!(got.status, 200, "{}", got.body);
+    assert_eq!(got.json()["status"], "incomplete");
+    assert_eq!(
+        got.json()["incomplete_details"]["reason"],
+        "max_output_tokens"
+    );
+}
+
+#[test]
+fn a_stream_whose_tool_call_the_token_limit_cut_ends_as_a_length_stop_too() {
+    let up = up(cut_stub(), Duration::from_secs(10));
+    let messages = json!({"stream": true, "max_tokens": 8, "messages": [{"role": "user", "content": "read it"}]});
+    let got = post(&up, "/v1/messages", &messages);
+    assert!(
+        got.body.contains("\"stop_reason\":\"max_tokens\""),
+        "{}",
+        got.body
+    );
+    assert!(!got.body.contains("event: error"), "{}", got.body);
+    let responses = json!({"stream": true, "input": "read it"});
+    let got = post(&up, "/v1/responses", &responses);
+    assert!(got.body.contains("response.incomplete"), "{}", got.body);
+    assert!(!got.body.contains("response.failed"), "{}", got.body);
 }

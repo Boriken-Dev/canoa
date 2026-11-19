@@ -56,7 +56,11 @@ impl Engine for Local {
         vec![ModelInfo::new("local-model").tools(true)]
     }
 
-    fn chat(&self, _request: &serde_json::Value) -> Result<serde_json::Value, EngineError> {
+    fn chat(
+        &self,
+        _request: &serde_json::Value,
+        _cancel: &canoa_foundry::Cancel,
+    ) -> Result<serde_json::Value, EngineError> {
         Err(EngineError::Failed("not asked here".to_owned()))
     }
 }

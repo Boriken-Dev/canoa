@@ -18,8 +18,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use canoa_foundry::{
-    ApiError, Completion, Engine, EngineError, KEEP_ALIVE, ModelInfo, Translated, anthropic,
-    openai, responses,
+    ApiError, Cancel, Completion, Engine, EngineError, KEEP_ALIVE, ModelInfo, Translated,
+    anthropic, openai, responses,
 };
 use serde_json::Value;
 
@@ -50,6 +50,8 @@ impl Caller for Session {
 fn engine_error(error: &EngineError) -> ApiError {
     match error {
         EngineError::NotLoaded(_) | EngineError::Refused(_) => ApiError::invalid(error.to_string()),
+        // No one is waiting for it.
+        EngineError::Cancelled => ApiError::upstream("the request was cancelled"),
         EngineError::Failed(_) => ApiError::upstream(error.to_string()),
         _ => ApiError::upstream(error.to_string()),
     }
@@ -120,11 +122,25 @@ impl Gateway {
         }
     }
 
-    fn run(&self, made: &Translated) -> Result<Completion, ApiError> {
-        let answer = self.engine.chat(&made.chat).map_err(|error| {
-            tracing::warn!("the local model did not answer: {error}");
-            engine_error(&error)
-        })?;
+    fn run(&self, made: &Translated, cancel: &Cancel) -> Result<Completion, ApiError> {
+        let answer = match self.engine.chat(&made.chat, cancel) {
+            Ok(answer) => answer,
+            // A tool call the answer's allowance cut off is a stop for length, which the harness knows how to meet; Foundry Local
+            // reports it as a failed request.
+            Err(EngineError::CutToolCall(why)) => {
+                tracing::warn!("the model's tool call was cut off by the token limit: {why}");
+                let model = self.engine.model().map(|m| m.id).unwrap_or_default();
+                return Ok(Completion::cut_off(model));
+            }
+            Err(EngineError::Cancelled) => {
+                tracing::info!("the client went away, and the model's work for it was stopped");
+                return Err(engine_error(&EngineError::Cancelled));
+            }
+            Err(error) => {
+                tracing::warn!("the local model did not answer: {error}");
+                return Err(engine_error(&error));
+            }
+        };
         let mut done = Completion::from_chat(&answer)?;
         if let Ok(model) = self.engine.model() {
             done.model = model.id;
@@ -138,9 +154,14 @@ impl Gateway {
         Self::error(api, error)
     }
 
-    fn complete(self: &Arc<Self>, api: Api, body: &[u8], mut track: Track) -> Reply {
-        let request = match serde_json::from_slice::<Value>(body) {
-            Ok(request) if request.is_object() => request,
+    fn complete(self: &Arc<Self>, api: Api, request: &Request<'_>, mut track: Track) -> Reply {
+        let body = request.body;
+        // The client hanging up ends the model's work for it: a model that goes on answering no one holds every request behind it.
+        let cancel = Cancel::new();
+        let hung_up = cancel.clone();
+        request.closed.on_close(move || hung_up.cancel());
+        let asked = match serde_json::from_slice::<Value>(body) {
+            Ok(asked) if asked.is_object() => asked,
             _ => {
                 return self.fail(
                     api,
@@ -150,10 +171,10 @@ impl Gateway {
             }
         };
         track.asked(
-            request.get("model").and_then(Value::as_str).unwrap_or(""),
-            request.get("stream").and_then(Value::as_bool) == Some(true),
+            asked.get("model").and_then(Value::as_str).unwrap_or(""),
+            asked.get("stream").and_then(Value::as_bool) == Some(true),
         );
-        let made = match self.translate(api, &request) {
+        let made = match self.translate(api, &asked) {
             Ok(made) => made,
             Err(error) => return self.fail(api, track, &error),
         };
@@ -163,7 +184,7 @@ impl Gateway {
             made.chat.get("max_tokens").and_then(Value::as_u64),
         );
         if !made.stream {
-            return match self.run(&made) {
+            return match self.run(&made, &cancel) {
                 Ok(done) => {
                     track.answered(done.usage.input, done.usage.output);
                     track.finish(&self.log, 200, None, None);
@@ -183,11 +204,13 @@ impl Gateway {
         headers
             .extend(openai::dropped_note(&made.dropped).map(|note| format!("{DROPPED}: {note}")));
         let gateway = Arc::clone(self);
-        let usage = openai::wants_usage(&request);
-        let input = anthropic::count_tokens(&request);
+        let usage = openai::wants_usage(&asked);
+        let input = anthropic::count_tokens(&asked);
         Reply::Stream {
             headers,
-            run: Box::new(move |out| gateway.stream(api, &made, (usage, input), track, out)),
+            run: Box::new(move |out| {
+                gateway.stream(api, &made, (usage, input), &cancel, track, out)
+            }),
         }
     }
 
@@ -198,6 +221,7 @@ impl Gateway {
         api: Api,
         made: &Translated,
         (usage, input): (bool, u64),
+        cancel: &Cancel,
         mut track: Track,
         out: &mut (dyn Write + Send),
     ) -> std::io::Result<()> {
@@ -235,12 +259,14 @@ impl Gateway {
                             .and_then(|()| out.flush())
                             .is_err()
                         {
+                            // The client is not there: nothing else will tell the model.
+                            cancel.cancel();
                             return;
                         }
                     }
                 }
             });
-            let outcome = self.run(made);
+            let outcome = self.run(made, cancel);
             finished.store(true, Ordering::SeqCst);
             outcome
         });
@@ -293,6 +319,8 @@ impl Service for Gateway {
     const NAME: &'static str = "canoa-foundry";
     /// A turn of an agent asks for a title, a count and the answer at once; the model takes them one by one.
     const MAX_PER_CALLER: usize = 8;
+    /// An answer takes minutes, and a client that gave up on it ends the model's work for it.
+    const WATCHES_CLIENT: bool = true;
 
     fn caller(&self, token: &str) -> Option<Arc<Session>> {
         self.sessions().get(&loopback::digest(token)).cloned()
@@ -325,9 +353,9 @@ impl Service for Gateway {
     fn respond(self: &Arc<Self>, _caller: &Arc<Session>, request: &Request<'_>) -> Reply {
         let track = Track::new(request.path);
         match request.path {
-            "/v1/chat/completions" => self.complete(Api::Chat, request.body, track),
-            "/v1/responses" => self.complete(Api::Responses, request.body, track),
-            "/v1/messages" => self.complete(Api::Messages, request.body, track),
+            "/v1/chat/completions" => self.complete(Api::Chat, request, track),
+            "/v1/responses" => self.complete(Api::Responses, request, track),
+            "/v1/messages" => self.complete(Api::Messages, request, track),
             "/v1/messages/count_tokens" => match serde_json::from_slice::<Value>(request.body) {
                 Ok(body) if body.is_object() => {
                     track.finish(&self.log, 200, None, None);

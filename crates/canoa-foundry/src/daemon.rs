@@ -11,13 +11,13 @@
 
 use std::io::Read as _;
 use std::path::Path;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use canoa::network::Network;
 use serde_json::Value;
 
-use crate::{Engine, EngineError, ModelInfo, running_endpoint};
+use crate::{Cancel, Engine, EngineError, ModelInfo, is_cut_tool_call, running_endpoint};
 
 /// What the engine serves and where.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,10 +54,31 @@ impl DaemonConfig {
 /// How long one answer may take: a local model on a large prompt is slow, and the person stops one by ending the session.
 const ANSWER_LIMIT: Duration = Duration::from_secs(30 * 60);
 
+/// An agent for one conversation with the service, and whether it opens its own sockets.
+///
+/// A request has an agent of its own so that cancelling it shuts its connection down and no one else's:
+/// [`ureq::Agent::shutdown`] ends every connection of the agent it is called on, and it reaches only the sockets ureq opened. The
+/// service is on this computer, so the connection goes straight to it unless the host's network says otherwise; one that goes
+/// through a proxy is the network's agent, whose connections only it can close.
+fn new_agent(base: &str) -> Result<(ureq::Agent, bool), EngineError> {
+    let settings = ureq::Agent::config_builder()
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .timeout_global(Some(ANSWER_LIMIT))
+        .build();
+    let network = Network::current();
+    if network.goes_direct(base) {
+        return Ok((ureq::Agent::new_with_config(settings), true));
+    }
+    network
+        .agent(settings)
+        .map(|agent| (agent, false))
+        .map_err(|error| EngineError::Failed(error.to_string()))
+}
+
 /// A model run by the Foundry Local service.
 #[derive(Debug)]
 pub struct DaemonEngine {
-    agent: ureq::Agent,
     base: String,
     info: ModelInfo,
     /// One request at a time: the service answers one, and a second on a model is not what it was measured with.
@@ -82,14 +103,7 @@ impl DaemonEngine {
             })?
             .trim_end_matches('/')
             .to_owned();
-        let settings = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(ANSWER_LIMIT))
-            .build();
-        let agent = Network::current()
-            .agent(settings)
-            .map_err(|error| EngineError::Failed(error.to_string()))?;
+        let (agent, _) = new_agent(&base)?;
         let listed = agent
             .get(format!("{base}/v1/models"))
             .config()
@@ -132,7 +146,6 @@ impl DaemonEngine {
             info = info.context(context);
         }
         Ok(Self {
-            agent,
             base,
             info,
             one_at_a_time: Mutex::new(()),
@@ -156,11 +169,48 @@ fn reason(body: &str) -> String {
 }
 
 impl DaemonEngine {
+    /// One chat request, ended when `cancel` is cancelled. An agent of ours has its connection shut down by the cancel, which ends
+    /// the call; through a proxy the call goes on in a thread of its own that nobody waits for, since only the network's agent can
+    /// close it.
+    fn post_until_cancelled(
+        &self,
+        agent: &ureq::Agent,
+        own: bool,
+        request: &Value,
+        cancel: &Cancel,
+    ) -> Result<(u16, String), EngineError> {
+        if own {
+            return Self::post(&self.base, agent, request);
+        }
+        let (sent, answer) = std::sync::mpsc::channel();
+        let (base, agent, request) = (self.base.clone(), agent.clone(), request.clone());
+        std::thread::spawn(move || {
+            let _ = sent.send(Self::post(&base, &agent, &request));
+        });
+        loop {
+            match answer.recv_timeout(Duration::from_millis(100)) {
+                Ok(done) => return done,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) if cancel.is_cancelled() => {
+                    return Err(EngineError::Cancelled);
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(EngineError::Failed(
+                        "the request to the service ended without an answer".to_owned(),
+                    ));
+                }
+            }
+        }
+    }
+
     /// One chat request: the status and the body of what the service answered.
-    fn post(&self, request: &Value) -> Result<(u16, String), EngineError> {
-        let response = self
-            .agent
-            .post(format!("{}/v1/chat/completions", self.base))
+    fn post(
+        base: &str,
+        agent: &ureq::Agent,
+        request: &Value,
+    ) -> Result<(u16, String), EngineError> {
+        let response = agent
+            .post(format!("{base}/v1/chat/completions"))
             .header("Content-Type", "application/json")
             .send(request.to_string())
             .map_err(|error| {
@@ -211,17 +261,30 @@ impl Engine for DaemonEngine {
         vec![self.info.clone()]
     }
 
-    fn chat(&self, request: &Value) -> Result<Value, EngineError> {
+    fn chat(&self, request: &Value, cancel: &Cancel) -> Result<Value, EngineError> {
         let mut request = request.clone();
         if let Some(object) = request.as_object_mut() {
             object.insert("model".into(), self.info.id.clone().into());
             object.insert("stream".into(), false.into());
         }
-        let _one = self
-            .one_at_a_time
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let (mut status, mut body) = self.post(&request)?;
+        let _one = crate::engine::lock_unless_cancelled(&self.one_at_a_time, cancel)?;
+        // Cancelling closes the connection to the service, which is what tells it the answer is not wanted: its model is then free
+        // for the next request. The agent is this request's own, so no other request is touched.
+        let (agent, own) = new_agent(&self.base)?;
+        if own {
+            let victim = agent.clone();
+            cancel.on_cancel(move || victim.shutdown());
+        }
+        let gone = |error: EngineError| {
+            if cancel.is_cancelled() {
+                EngineError::Cancelled
+            } else {
+                error
+            }
+        };
+        let (mut status, mut body) = self
+            .post_until_cancelled(&agent, own, &request, cancel)
+            .map_err(gone)?;
         // The service refuses a request whose prompt and allowed answer together exceed the model's window, and agents ask for
         // far more than that (Claude Code asks for 64000): the answer is allowed what the window leaves, and the request is
         // made again once.
@@ -230,7 +293,9 @@ impl Engine for DaemonEngine {
             && let Some(object) = request.as_object_mut()
         {
             object.insert("max_tokens".into(), left.into());
-            (status, body) = self.post(&request)?;
+            (status, body) = self
+                .post_until_cancelled(&agent, own, &request, cancel)
+                .map_err(gone)?;
         }
         if (200..300).contains(&status) {
             return serde_json::from_str(&body)
@@ -239,6 +304,10 @@ impl Engine for DaemonEngine {
         let why = reason(&body);
         if why.to_ascii_lowercase().contains("not loaded") {
             return Err(EngineError::NotLoaded(self.info.id.clone()));
+        }
+        // A tool call cut by the answer's token allowance is an answer that stopped for length, not a refusal of the request.
+        if is_cut_tool_call(&why) {
+            return Err(EngineError::CutToolCall(why));
         }
         // What the service refuses about this request is said back as the service said it: retrying it changes nothing.
         Err(EngineError::Refused(format!(
@@ -340,7 +409,7 @@ mod tests {
         let engine = open(&address).expect("opens");
         let _ = seen.recv().expect("the listing");
         let request = serde_json::json!({"model": "gpt-x", "stream": true, "messages": [{"role": "user", "content": "hi"}]});
-        let said = engine.chat(&request).expect("answers");
+        let said = engine.chat(&request, &Cancel::new()).expect("answers");
         assert_eq!(said["choices"][0]["message"]["content"], "hi");
         let sent = seen.recv().expect("the chat");
         assert!(sent.starts_with("POST /v1/chat/completions"), "{sent}");
@@ -361,10 +430,10 @@ mod tests {
         let engine = open(&address).expect("opens");
         let ask = serde_json::json!({"messages": []});
         assert_eq!(
-            engine.chat(&ask),
+            engine.chat(&ask, &Cancel::new()),
             Err(EngineError::NotLoaded("local-model".to_owned()))
         );
-        let refused = engine.chat(&ask).expect_err("refused");
+        let refused = engine.chat(&ask, &Cancel::new()).expect_err("refused");
         assert!(matches!(refused, EngineError::Refused(_)), "{refused:?}");
         assert!(
             refused
@@ -372,7 +441,7 @@ mod tests {
                 .contains("structured tool calling requires")
         );
         // The service has no more answers: its listener is gone.
-        let gone = engine.chat(&ask).expect_err("gone");
+        let gone = engine.chat(&ask, &Cancel::new()).expect_err("gone");
         assert!(matches!(gone, EngineError::Failed(_)), "{gone:?}");
     }
 
@@ -392,7 +461,10 @@ mod tests {
         let engine = open(&address).expect("opens");
         let _ = seen.recv().expect("the listing");
         let said = engine
-            .chat(&serde_json::json!({"max_tokens": 64000, "messages": []}))
+            .chat(
+                &serde_json::json!({"max_tokens": 64000, "messages": []}),
+                &Cancel::new(),
+            )
             .expect("answers on the second try");
         assert_eq!(said["choices"][0]["message"]["content"], "ok");
         let _first = seen.recv().expect("the first");
@@ -400,6 +472,84 @@ mod tests {
         let (_, sent) = second.split_once("\r\n\r\n").expect("body");
         let body: Value = serde_json::from_str(sent).expect("JSON");
         assert_eq!(body["max_tokens"], 40960 - 3001 - 64);
+    }
+
+    #[test]
+    fn a_tool_call_the_services_answer_ran_out_of_tokens_on_is_told_apart_from_a_refusal() {
+        let cut = r#"{"error":{"message":"Inference failed: chat_session.cc:1005 ThrowInvalidToolCallWithoutRecovery Model emitted an invalid tool call: Tool-call output was interrupted before the batch could be committed"}}"#;
+        let (address, _) = serve(vec![
+            (200, r#"{"data":[{"id":"local-model"}]}"#.to_owned()),
+            (500, cut.to_owned()),
+        ]);
+        let engine = open(&address).expect("opens");
+        let cut = engine
+            .chat(&serde_json::json!({"messages": []}), &Cancel::new())
+            .expect_err("cut");
+        assert!(matches!(cut, EngineError::CutToolCall(_)), "{cut:?}");
+    }
+
+    /// A service that takes a request and then says nothing, and tells when the connection it holds is closed.
+    fn hang() -> (String, std::sync::mpsc::Receiver<&'static str>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("binds");
+        let address = format!(
+            "http://127.0.0.1:{}",
+            listener.local_addr().expect("addr").port()
+        );
+        let (said, heard) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let listing = r#"{"data":[{"id":"local-model"}]}"#;
+            let (mut stream, _) = listener.accept().expect("the listing");
+            let _ = read_request(&mut stream);
+            let _ = stream.write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{listing}",
+                    listing.len()
+                )
+                .as_bytes(),
+            );
+            drop(stream);
+            let (mut stream, _) = listener.accept().expect("the chat");
+            let _ = read_request(&mut stream);
+            let _ = said.send("asked");
+            // Nothing is ever answered: a read that ends is the client closing its side.
+            let mut byte = [0_u8; 1];
+            let _ = stream.read(&mut byte);
+            let _ = said.send("closed");
+        });
+        (address, heard)
+    }
+
+    #[test]
+    fn a_request_that_is_cancelled_closes_its_connection_to_the_service_and_ends() {
+        let (address, heard) = hang();
+        let engine = std::sync::Arc::new(open(&address).expect("opens"));
+        let cancel = Cancel::new();
+        let asking = {
+            let (engine, cancel) = (std::sync::Arc::clone(&engine), cancel.clone());
+            std::thread::spawn(move || engine.chat(&serde_json::json!({"messages": []}), &cancel))
+        };
+        assert_eq!(heard.recv_timeout(Duration::from_secs(10)), Ok("asked"));
+        cancel.cancel();
+        let ended = asking.join().expect("the call ends");
+        assert_eq!(ended, Err(EngineError::Cancelled));
+        assert_eq!(
+            heard.recv_timeout(Duration::from_secs(10)),
+            Ok("closed"),
+            "the service saw the connection close"
+        );
+    }
+
+    #[test]
+    fn a_request_cancelled_while_it_waits_for_the_model_never_reaches_the_service() {
+        let (address, _) = serve(vec![(200, r#"{"data":[{"id":"local-model"}]}"#.to_owned())]);
+        let engine = open(&address).expect("opens");
+        let _busy = engine.one_at_a_time.lock().expect("the model is taken");
+        let cancel = Cancel::new();
+        cancel.cancel();
+        assert_eq!(
+            engine.chat(&serde_json::json!({"messages": []}), &cancel),
+            Err(EngineError::Cancelled)
+        );
     }
 
     #[test]

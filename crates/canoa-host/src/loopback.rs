@@ -51,6 +51,9 @@ pub(crate) trait Service: Send + Sync + 'static {
     /// Calls one bearer may have under way at once; past it a call is answered 429. A call that has shown a bearer is counted
     /// here and no longer against the unproven connections, so one session's long waits cannot crowd out another's.
     const MAX_PER_CALLER: usize;
+    /// Whether a request that takes long watches for its client to hang up, so that [`Request::closed`] runs what the service
+    /// registered. It costs a thread for each request, so only a server whose answers take minutes asks for it.
+    const WATCHES_CLIENT: bool = false;
 
     /// What the bearer `token` opens, if anything. The table is to be keyed by [`digest`], so no comparison of the secret itself
     /// is timed.
@@ -104,6 +107,106 @@ pub(crate) struct Request<'a> {
     /// The path, with no query.
     pub(crate) path: &'a str,
     pub(crate) body: &'a [u8],
+    /// Runs what is registered with it when the client's end of the connection closes while the request is answered; nothing
+    /// unless the service says [`Service::WATCHES_CLIENT`].
+    pub(crate) closed: &'a Closed,
+}
+
+/// What a client's hanging up runs, while its request is answered.
+#[derive(Default)]
+pub(crate) struct Closed {
+    state: std::sync::Mutex<ClosedState>,
+}
+
+#[derive(Default)]
+struct ClosedState {
+    closed: bool,
+    over: bool,
+    hooks: Vec<Box<dyn FnOnce() + Send>>,
+}
+
+impl Closed {
+    fn state(&self) -> std::sync::MutexGuard<'_, ClosedState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Has `hook` run when the client hangs up, at once when it already has. It runs on the watching thread and only signals.
+    pub(crate) fn on_close(&self, hook: impl FnOnce() + Send + 'static) {
+        let mut state = self.state();
+        if state.closed {
+            drop(state);
+            hook();
+        } else if !state.over {
+            state.hooks.push(Box::new(hook));
+        }
+    }
+
+    /// The client's end closed.
+    fn close(&self) {
+        let hooks = {
+            let mut state = self.state();
+            if state.over {
+                return;
+            }
+            state.closed = true;
+            std::mem::take(&mut state.hooks)
+        };
+        for hook in hooks {
+            hook();
+        }
+    }
+
+    /// The request was answered: a close from now on is the server's own.
+    fn finish(&self) {
+        let mut state = self.state();
+        state.over = true;
+        state.hooks.clear();
+    }
+}
+
+/// Watches the client's end of `stream` for as long as it lives. A client that has sent its whole request sends nothing more, so
+/// a read that returns is the client closing (or resetting) the connection, and the answer waits for no one.
+struct Watch {
+    closed: Arc<Closed>,
+}
+
+impl Watch {
+    fn start(stream: &TcpStream, watched: bool) -> Self {
+        let closed = Arc::new(Closed::default());
+        if watched && let Ok(mut reader) = stream.try_clone() {
+            let tell = Arc::clone(&closed);
+            let _ = std::thread::Builder::new()
+                .name("canoa-client-watch".to_owned())
+                .spawn(move || {
+                    // Whatever else it sends is not read as a request: this connection serves one.
+                    let _ = reader.set_read_timeout(None);
+                    let mut chunk = [0_u8; 256];
+                    loop {
+                        match reader.read(&mut chunk) {
+                            Ok(read) if read > 0 => {}
+                            Err(error)
+                                if matches!(
+                                    error.kind(),
+                                    ErrorKind::Interrupted
+                                        | ErrorKind::WouldBlock
+                                        | ErrorKind::TimedOut
+                                ) => {}
+                            _ => break,
+                        }
+                    }
+                    tell.close();
+                });
+        }
+        Self { closed }
+    }
+}
+
+impl Drop for Watch {
+    fn drop(&mut self) {
+        self.closed.finish();
+    }
 }
 
 /// What a request is answered with.
@@ -459,10 +562,13 @@ fn request<S: Service>(
     while buffer.len() < end {
         read_more(stream, &mut buffer, body_by)?;
     }
+    // Held until the answer, a stream included, has been written: its end tells the watcher the close is no one's news.
+    let watch = Watch::start(stream, S::WATCHES_CLIENT);
     let request = Request {
         method: &head.method,
         path,
         body: &buffer[body_start..end],
+        closed: &watch.closed,
     };
     Ok(match service.respond(&caller, &request) {
         Reply::Answer(Answer::Json(answer)) => json_reply(&answer),

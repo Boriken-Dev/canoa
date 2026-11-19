@@ -27,7 +27,10 @@ mod translate;
 pub mod window;
 
 pub use completion::{Completion, Finish, ToolCall, Usage};
-pub use engine::{Engine, EngineError, ModelInfo, running_endpoint};
+pub use engine::{
+    Cancel, Engine, EngineError, ModelInfo, is_cut_tool_call, lock_unless_cancelled,
+    running_endpoint,
+};
 pub use error::ApiError;
 pub use translate::Translated;
 

@@ -358,6 +358,15 @@ impl Network {
         self.git_tls
     }
 
+    /// Whether a request to `url` goes straight to its host, with no proxy between: what a caller needs to know to close the
+    /// connection itself, since only an agent that opens its own sockets can.
+    pub fn goes_direct(&self, url: &str) -> bool {
+        matches!(
+            self.resolver.lookup(url).as_deref(),
+            Ok([] | [Route::Direct, ..])
+        )
+    }
+
     /// A `ureq` agent with `config`'s timeouts, redirects and limits that sends through this
     /// network's proxy, logs in to it, verifies servers and answers certificate requests as it
     /// says. The proxy and TLS settings of `config` are not used.
