@@ -73,12 +73,15 @@ fn spawner() -> Object<dyn ProcessSpawner> {
     LocalSpawner::new().into_object()
 }
 
+/// The request line and `Authorization` header of each request a stand-in gateway was sent.
+type Requests = Arc<Mutex<Vec<(String, String)>>>;
+
 /// A gateway on loopback: it answers `/v1/models` with the models it was given when the request carries `Bearer CANARY`, 401 when
 /// it does not, and records each request line and its `Authorization` header.
-fn stand_in(models: &[&str]) -> (String, Arc<Mutex<Vec<(String, String)>>>) {
+fn stand_in(models: &[&str]) -> (String, Requests) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("binds");
     let address = format!("http://{}", listener.local_addr().expect("an address"));
-    let seen: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+    let seen: Requests = Arc::default();
     let record = Arc::clone(&seen);
     let models: Vec<String> = models.iter().map(|m| (*m).to_owned()).collect();
     std::thread::spawn(move || {

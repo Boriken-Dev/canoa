@@ -858,6 +858,7 @@ dependencies = [
  "canoa-codex",
  "canoa-foundry",
  "canoa-grok",
+ "canoa-litellm",
  "canoa-opencode",
  "canoa-pi",
  "clap",
@@ -944,6 +945,21 @@ dependencies = [
  "win-msgbox",
  "windows-permissions",
  "zip",
+]
+
+[[package]]
+name = "canoa-litellm"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+ "coqui-acp-harness",
+ "getrandom 0.4.3",
+ "guatiao-serde",
+ "percent-encoding",
+ "serde_json",
+ "sha2 0.11.1",
+ "time",
 ]
 
 [[package]]

@@ -33,6 +33,14 @@ pub struct Reply {
     pub body: Value,
 }
 
+impl Reply {
+    /// An answer with this status and body.
+    #[must_use]
+    pub const fn new(status: u16, body: Value) -> Self {
+        Self { status, body }
+    }
+}
+
 /// An agent for one request: no redirect, no error for a status, [`WAIT`] at most, through the person's network.
 ///
 /// # Errors

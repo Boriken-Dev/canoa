@@ -48,6 +48,7 @@ canoa-antigravity.workspace = true
 canoa-claude.workspace = true
 canoa-codex.workspace = true
 canoa-foundry.workspace = true
+canoa-litellm.workspace = true
 canoa-grok.workspace = true
 canoa-opencode.workspace = true
 canoa-pi.workspace = true

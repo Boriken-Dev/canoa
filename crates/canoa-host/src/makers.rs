@@ -167,6 +167,8 @@ pub(crate) fn makes(kind: &str) -> bool {
 }
 
 #[cfg(test)]
+mod litellm_tests;
+#[cfg(test)]
 mod tests;
 
 #[cfg(test)]

@@ -124,6 +124,11 @@ pub(crate) const INCLUDED: &[Included] = &[
         helper: Some(canoa_foundry::run_helper),
     },
     Included {
+        name: canoa_litellm::LIBRARY,
+        library: canoa_litellm::library,
+        helper: None,
+    },
+    Included {
         name: canoa::api_gateway::LIBRARY,
         library: canoa::api_gateway::library,
         helper: None,
