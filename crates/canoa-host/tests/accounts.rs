@@ -97,12 +97,14 @@ impl Fixture {
         self.canoa_on(args, input, false)
     }
 
-    /// As [`Fixture::canoa`]; `busless` leaves the process no session bus, as a service has none.
+    /// As [`Fixture::canoa`]; `busless` leaves the process no session bus, as a service has none, and the real credential
+    /// store, which it cannot reach: the tests' in-memory store would answer for it and end with the process.
     fn canoa_on(&self, args: &[&str], input: Option<&str>, busless: bool) -> Output {
         let mut command = Command::new(host_binary());
         if busless {
             command
                 .env_remove("DBUS_SESSION_BUS_ADDRESS")
+                .env_remove("CANOA_CREDENTIAL_STORE")
                 .env("XDG_RUNTIME_DIR", &self.scratch.0);
         }
         let mut child = command
