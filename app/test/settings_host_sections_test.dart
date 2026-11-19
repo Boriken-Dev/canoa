@@ -229,6 +229,21 @@ void main() {
     expect(find.byKey(const Key('settings-section-appearance')), findsOneWidget);
   });
 
+  testWidgets('a secret the host could not ask its provider for is said in the section and the other values still show', (tester) async {
+    final host = _Host();
+    host.held['region'] = {'name': 'eu-west'};
+    final sections = HostSections((method, params) async {
+      final answer = await host.call(method, params);
+      if (method == 'settings/section_get' && answer is Map) return {...answer, 'secrets_problem': 'the provider entry work_vault cannot be reached'};
+      return answer;
+    });
+    await sections.load();
+    await openSettings(tester, hostSections: sections, section: 'region');
+    expect(find.byKey(const Key('section-region-secrets-problem')), findsOneWidget);
+    expect(find.textContaining('work_vault cannot be reached'), findsOneWidget);
+    expect(tester.widget<TextField>(find.byKey(const Key('section-region-field-name'))).controller?.text, 'eu-west');
+  });
+
   testWidgets('a host that refuses the values says why in the section', (tester) async {
     final host = _Host()..listed = [...builtInSectionsJson(), _region];
     final sections = HostSections((method, params) async {

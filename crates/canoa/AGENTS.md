@@ -169,7 +169,7 @@ impl SectionInfo { pub fn new(id, title) -> Self; pub fn taking<S: Schema + Scre
 
 - `id` is a word of lower-case letters, digits and `_` (1 to 32). With no `under` the section is a page of its own in Settings' list under the heading `group` (`DEFAULT_GROUP` when none); with `under` naming one of the application's sections (or another provider's), it is a titled group inside that page. An `under` that names no section the application has makes it a page of its own.
 - `schema` is a guatiao schema of an object and `form` the guatiao-intake form that shows it, built from a type with `taking::<S>()` (`Schema` and `Form` derives); the application draws them with the renderer every such form is drawn with. A member the schema marks sensitive is never answered in clear: the host names it as set instead.
-- `Stored::Config` values are written by the host into `[settings.ID]` after it checked them; `read` and `write` are then not asked and answer nothing. `Stored::Provider` values are the provider's: the host calls `read` to show them and `write` with the checked values to keep them.
+- `Stored::Config` values are written by the host into `[settings.ID]` after it checked them, except a member the schema marks sensitive, which the host keeps as the named secret `settings/ID/MEMBER` of the secret providers (the system store by default) and never writes to the file; `read` and `write` are then not asked and answer nothing. `Stored::Provider` values are the provider's: the host calls `read` to show them and `write` with the checked values to keep them.
 - `SectionInfo::problem` says why a description cannot be used (a bad id, no title, a section under itself, an empty group, a form its schema does not fit).
 
 ## `canoa::panel_tab` (feature `panel-tab`)

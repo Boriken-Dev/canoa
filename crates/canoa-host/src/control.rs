@@ -764,6 +764,11 @@ impl Control {
         }
     }
 
+    /// The host's home, where the secrets of a Settings section are kept under; none for a host that manages no accounts.
+    fn section_home(&self) -> Option<&std::path::Path> {
+        self.accounts.as_ref().map(|accounts| accounts.home_dir())
+    }
+
     fn accounts(&self) -> Result<&accounts::Accounts, (i32, String)> {
         self.accounts
             .as_ref()
@@ -940,6 +945,7 @@ impl Control {
                     settings_sections::get(
                         &crate::settings_sections::SectionCatalog::of(&config),
                         &self.files,
+                        &settings_sections::Keeper::new(&config, self.section_home()),
                         &params,
                     )
                 }),
@@ -949,6 +955,7 @@ impl Control {
                     settings_sections::set(
                         &crate::settings_sections::SectionCatalog::of(&config),
                         &self.files,
+                        &settings_sections::Keeper::new(&config, self.section_home()),
                         &params,
                     )
                 }),

@@ -179,6 +179,59 @@ fn file_note(why: &str, dir: &Path) -> String {
     )
 }
 
+/// Who keeps what this host keeps for other kinds (the accounts' credentials, the mail accounts' passwords and the secret values of
+/// Settings' sections): the entry `[secrets] accounts` names, or for `auto` the operating system's store when it answers (`probe` asks)
+/// and sealed files when there is none. Gives the vault that asks it, the entry's name and, for sealed files, why they are in use.
+///
+/// # Errors
+///
+/// `[secrets]` cannot be read.
+pub(crate) fn keeping(
+    config: &Config,
+    home: &Path,
+    probe: &dyn Fn(&str) -> Result<(), StoreError>,
+) -> Result<(Arc<crate::secrets::vault::Vault>, String, Option<String>), StoreError> {
+    use crate::secrets::builtin::{FILE, SYSTEM};
+    use crate::secrets::settings::{AUTO, Settings as SecretSettings};
+
+    let files = home.join("secrets");
+    let settings = SecretSettings::read(config.secrets.as_ref()).map_err(StoreError)?;
+    let (entry, note) = if settings.accounts == AUTO {
+        match probe(&store::service_for(home)) {
+            Ok(()) => (SYSTEM.to_owned(), None),
+            Err(why) => (
+                FILE.to_owned(),
+                Some(file_note(
+                    &format!("[secrets] accounts is auto and {why}"),
+                    &files,
+                )),
+            ),
+        }
+    } else if settings.accounts == FILE {
+        (
+            FILE.to_owned(),
+            Some(file_note(
+                "[secrets] accounts is file, default auto",
+                &files,
+            )),
+        )
+    } else {
+        (settings.accounts.clone(), None)
+    };
+    // An entry of a provider the host carries needs no library to be loaded.
+    let provider = settings
+        .entries
+        .get(&entry)
+        .map(|each| each.provider.as_str());
+    let catalog = if matches!(provider, Some(SYSTEM | FILE)) {
+        crate::secrets::catalog::Catalog::built_in()
+    } else {
+        crate::secrets::catalog::Catalog::of(config, Some(home))
+    };
+    let vault = crate::secrets::vault::Vault::standalone(catalog, config.secrets.clone(), home);
+    Ok((vault, entry, note))
+}
+
 impl fmt::Debug for Accounts {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Accounts")
@@ -236,45 +289,8 @@ impl Accounts {
         home: &Path,
         probe: &dyn Fn(&str) -> Result<(), StoreError>,
     ) -> Result<Arc<Self>, StoreError> {
-        use crate::secrets::builtin::{FILE, SYSTEM};
-        use crate::secrets::settings::{AUTO, Settings as SecretSettings};
-
         let dir = home.join("accounts");
-        let files = home.join("secrets");
-        let settings = SecretSettings::read(config.secrets.as_ref()).map_err(StoreError)?;
-        let (entry, note) = if settings.accounts == AUTO {
-            match probe(&store::service_for(home)) {
-                Ok(()) => (SYSTEM.to_owned(), None),
-                Err(why) => (
-                    FILE.to_owned(),
-                    Some(file_note(
-                        &format!("[secrets] accounts is auto and {why}"),
-                        &files,
-                    )),
-                ),
-            }
-        } else if settings.accounts == FILE {
-            (
-                FILE.to_owned(),
-                Some(file_note(
-                    "[secrets] accounts is file, default auto",
-                    &files,
-                )),
-            )
-        } else {
-            (settings.accounts.clone(), None)
-        };
-        // An entry of a provider the host carries needs no library to be loaded.
-        let provider = settings
-            .entries
-            .get(&entry)
-            .map(|each| each.provider.as_str());
-        let catalog = if matches!(provider, Some(SYSTEM | FILE)) {
-            crate::secrets::catalog::Catalog::built_in()
-        } else {
-            crate::secrets::catalog::Catalog::of(config, Some(home))
-        };
-        let vault = crate::secrets::vault::Vault::standalone(catalog, config.secrets.clone(), home);
+        let (vault, entry, note) = keeping(config, home, probe)?;
         let service = store::service_for(home);
         let store = Migrating::new(
             Box::new(crate::secrets::handle::HandleStore::new(vault, entry)),

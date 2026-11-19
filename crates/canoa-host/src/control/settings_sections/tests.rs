@@ -3,7 +3,9 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 
+use super::Keeper;
 use super::{get, list, set};
+use crate::config::Config;
 use crate::control::files::{Files, UploadLimits};
 use crate::settings_sections::SectionCatalog;
 use crate::settings_sections::standin::with_extension;
@@ -25,6 +27,12 @@ fn files(tmp: &std::path::Path) -> Files {
         Some(tmp.join("uploads")),
         UploadLimits::default(),
     )
+}
+
+/// A configuration that keeps what the host keeps for other kinds in sealed files under `tmp`, so no test touches the operating
+/// system's store.
+fn sealed(tmp: &std::path::Path) -> Config {
+    Config::from_str_in("[secrets]\naccounts = \"file\"\n", tmp).expect("a configuration")
 }
 
 fn row<'a>(answer: &'a Value, id: &str) -> &'a Value {
@@ -134,22 +142,45 @@ fn the_apps_fixture_is_what_this_build_lists() {
 fn a_section_kept_in_canoa_cfg_round_trips_and_keeps_its_secret_unless_it_is_cleared() {
     let tmp = dir("config");
     let files = files(&tmp);
+    let config = sealed(&tmp);
+    let keeper = Keeper::new(&config, Some(&tmp));
     let catalog = with_extension();
-    let none = get(&catalog, &files, &json!({"id": "region"})).expect("read");
+    let none = get(&catalog, &files, &keeper, &json!({"id": "region"})).expect("read");
     assert_eq!(none["values"], json!({}));
     set(
         &catalog,
         &files,
+        &keeper,
         &json!({"id": "region", "values": {"name": "eu", "tier": "fast", "token": "s3cret"}}),
     )
     .expect("saved");
-    let read = get(&catalog, &files, &json!({"id": "region"})).expect("read");
+    let read = get(&catalog, &files, &keeper, &json!({"id": "region"})).expect("read");
     assert_eq!(read["values"], json!({"name": "eu", "tier": "fast"}));
     assert_eq!(read["secrets_set"], json!(["token"]), "{read}");
     let text = fs::read_to_string(tmp.join("canoa.cfg")).expect("the file");
     assert!(
-        text.contains("[settings.region]") && text.contains("s3cret"),
-        "{text}"
+        text.contains("[settings.region]") && text.contains("eu") && !text.contains("s3cret"),
+        "the file holds the section's values and not its secret: {text}"
+    );
+    assert!(!text.contains("token"), "{text}");
+    assert_eq!(
+        keeper
+            .get("region", "token")
+            .expect("asked")
+            .as_deref()
+            .map(String::as_str),
+        Some("s3cret"),
+        "the secret is the named secret settings/region/token"
+    );
+    assert!(
+        !tmp.join("secrets").exists()
+            || fs::read_dir(tmp.join("secrets"))
+                .expect("the folder")
+                .all(|entry| !fs::read(entry.expect("an entry").path())
+                    .expect("a file")
+                    .windows(6)
+                    .any(|window| window == b"s3cret")),
+        "the sealed file does not hold it in clear"
     );
     crate::config::Config::from_str_in(&text, std::path::Path::new("."))
         .expect("the host still reads a canoa.cfg that holds a section's values");
@@ -157,23 +188,26 @@ fn a_section_kept_in_canoa_cfg_round_trips_and_keeps_its_secret_unless_it_is_cle
     set(
         &catalog,
         &files,
+        &keeper,
         &json!({"id": "region", "values": {"name": "us", "tier": "standard", "token": ""}}),
     )
     .expect("saved");
-    let read = get(&catalog, &files, &json!({"id": "region"})).expect("read");
+    let read = get(&catalog, &files, &keeper, &json!({"id": "region"})).expect("read");
     assert_eq!(read["values"]["name"], "us");
     assert_eq!(read["secrets_set"], json!(["token"]));
     set(
         &catalog,
         &files,
+        &keeper,
         &json!({"id": "region", "values": {"name": "us"}, "clear": ["token"]}),
     )
     .expect("saved");
-    let read = get(&catalog, &files, &json!({"id": "region"})).expect("read");
+    let read = get(&catalog, &files, &keeper, &json!({"id": "region"})).expect("read");
     assert_eq!(read["secrets_set"], json!([]), "{read}");
+    assert_eq!(keeper.get("region", "token").expect("asked"), None);
     // The values stay in the file when the extension goes, and come back with it.
     let gone = SectionCatalog::from_registries(Vec::new());
-    assert!(get(&gone, &files, &json!({"id": "region"})).is_err());
+    assert!(get(&gone, &files, &keeper, &json!({"id": "region"})).is_err());
     assert!(
         fs::read_to_string(tmp.join("canoa.cfg"))
             .expect("the file")
@@ -183,17 +217,128 @@ fn a_section_kept_in_canoa_cfg_round_trips_and_keeps_its_secret_unless_it_is_cle
 }
 
 #[test]
+fn a_secret_an_earlier_host_kept_in_canoa_cfg_is_moved_to_a_named_secret_once() {
+    let tmp = dir("legacy");
+    let files = files(&tmp);
+    fs::write(
+        tmp.join("canoa.cfg"),
+        "[settings.region]\nname = \"eu\"\ntoken = \"old-token\"\n\n[other]\nkeep = 1\n",
+    )
+    .expect("written");
+    let config = sealed(&tmp);
+    let keeper = Keeper::new(&config, Some(&tmp));
+    let catalog = with_extension();
+    let read = get(&catalog, &files, &keeper, &json!({"id": "region"})).expect("read");
+    assert_eq!(read["values"], json!({"name": "eu"}), "{read}");
+    assert_eq!(read["secrets_set"], json!(["token"]), "{read}");
+    assert!(read.get("secrets_problem").is_none(), "{read}");
+    let text = fs::read_to_string(tmp.join("canoa.cfg")).expect("the file");
+    assert!(
+        !text.contains("old-token") && !text.contains("token"),
+        "{text}"
+    );
+    assert!(
+        text.contains("name = \"eu\"") && text.contains("[other]"),
+        "{text}"
+    );
+    assert_eq!(
+        keeper
+            .get("region", "token")
+            .expect("asked")
+            .as_deref()
+            .map(String::as_str),
+        Some("old-token")
+    );
+    // Asked again, nothing is left to move and the secret is still there.
+    let again = get(&catalog, &files, &keeper, &json!({"id": "region"})).expect("read");
+    assert_eq!(again, read);
+    // Saving what the form showed, the secret left empty, keeps it.
+    set(
+        &catalog,
+        &files,
+        &keeper,
+        &json!({"id": "region", "values": {"name": "us", "token": ""}}),
+    )
+    .expect("saved");
+    assert_eq!(
+        keeper
+            .get("region", "token")
+            .expect("asked")
+            .as_deref()
+            .map(String::as_str),
+        Some("old-token")
+    );
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn a_secret_that_cannot_be_moved_stays_where_it_was_and_the_form_says_why() {
+    let tmp = dir("stuck");
+    let files = files(&tmp);
+    let original = "[settings.region]\nname = \"eu\"\ntoken = \"old-token\"\n";
+    fs::write(tmp.join("canoa.cfg"), original).expect("written");
+    // `[secrets] accounts` names an entry that is no provider: nothing can keep a secret.
+    let config = Config::from_str_in("[secrets]\naccounts = \"missing\"\n", &tmp).expect("config");
+    let keeper = Keeper::new(&config, Some(&tmp));
+    let catalog = with_extension();
+    let read = get(&catalog, &files, &keeper, &json!({"id": "region"})).expect("read");
+    assert!(
+        read["secrets_problem"]
+            .as_str()
+            .is_some_and(|why| why.contains("missing")),
+        "{read}"
+    );
+    assert_eq!(read["values"], json!({"name": "eu"}));
+    assert_eq!(
+        fs::read_to_string(tmp.join("canoa.cfg")).expect("the file"),
+        original
+    );
+    // Saving the section is refused rather than dropping the secret from the file.
+    let error = set(
+        &catalog,
+        &files,
+        &keeper,
+        &json!({"id": "region", "values": {"name": "us"}}),
+    )
+    .expect_err("refused");
+    assert!(error.1.contains("missing"), "{}", error.1);
+    assert_eq!(
+        fs::read_to_string(tmp.join("canoa.cfg")).expect("the file"),
+        original
+    );
+    // A host with no home keeps no secret.
+    fs::write(tmp.join("canoa.cfg"), "").expect("emptied");
+    let homeless = Keeper::new(&config, None);
+    let error = set(
+        &catalog,
+        &files,
+        &homeless,
+        &json!({"id": "region", "values": {"name": "us", "token": "x"}}),
+    )
+    .expect_err("refused");
+    assert!(
+        error.1.contains("token") && error.1.contains("no home"),
+        "{}",
+        error.1
+    );
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn a_section_kept_by_its_provider_is_read_and_written_through_it() {
     let tmp = dir("provider");
     let files = files(&tmp);
+    let config = sealed(&tmp);
+    let keeper = Keeper::new(&config, Some(&tmp));
     let catalog = with_extension();
     set(
         &catalog,
         &files,
+        &keeper,
         &json!({"id": "cache", "values": {"entries": 40}}),
     )
     .expect("saved");
-    let read = get(&catalog, &files, &json!({"id": "cache"})).expect("read");
+    let read = get(&catalog, &files, &keeper, &json!({"id": "cache"})).expect("read");
     assert_eq!(read["values"], json!({"entries": 40}));
     assert!(
         !fs::read_to_string(tmp.join("canoa.cfg"))
@@ -208,6 +353,8 @@ fn a_section_kept_by_its_provider_is_read_and_written_through_it() {
 fn values_that_do_not_fit_the_schema_or_name_no_section_are_refused() {
     let tmp = dir("refused");
     let files = files(&tmp);
+    let config = sealed(&tmp);
+    let keeper = Keeper::new(&config, Some(&tmp));
     let catalog = with_extension();
     for (params, why) in [
         (json!({"id": "region", "values": {"tier": "fast"}}), "name"),
@@ -225,7 +372,7 @@ fn values_that_do_not_fit_the_schema_or_name_no_section_are_refused() {
             "no settings section",
         ),
     ] {
-        let error = set(&catalog, &files, &params).expect_err("refused");
+        let error = set(&catalog, &files, &keeper, &params).expect_err("refused");
         assert!(error.1.contains(why), "{params}: {}", error.1);
     }
     assert_eq!(

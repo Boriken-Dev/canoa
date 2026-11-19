@@ -79,8 +79,9 @@ final class HostSection {
   }
 }
 
-/// The values a section holds, a secret left out and named in [secretsSet] instead.
-typedef SectionValues = ({Map<String, Object?> values, Set<String> secretsSet});
+/// The values a section holds, a secret left out and named in [secretsSet] instead. The host keeps a secret as a named secret of the
+/// secret providers; [secretsProblem] says why one could not be asked, and then it is not named.
+typedef SectionValues = ({Map<String, Object?> values, Set<String> secretsSet, String? secretsProblem});
 
 /// The sections the host lists, and the values of each.
 final class HostSections extends ChangeNotifier {
@@ -142,6 +143,7 @@ final class HostSections extends ChangeNotifier {
     return (
       values: map['values'] is Map ? (map['values'] as Map).cast<String, Object?>() : const <String, Object?>{},
       secretsSet: {if (map['secrets_set'] is List) for (final each in map['secrets_set'] as List) if (each is String) each},
+      secretsProblem: map['secrets_problem'] is String ? map['secrets_problem'] as String : null,
     );
   }
 
@@ -175,6 +177,7 @@ class HostSectionForm extends StatefulWidget {
 class _HostSectionFormState extends State<HostSectionForm> {
   Map<String, Object?>? _values;
   Set<String> _secretsSet = const {};
+  String? _secretsProblem;
   final _typed = <String, Object?>{};
   final _cleared = <String>{};
   String? _problem;
@@ -196,6 +199,7 @@ class _HostSectionFormState extends State<HostSectionForm> {
       setState(() {
         _values = held.values;
         _secretsSet = held.secretsSet;
+        _secretsProblem = held.secretsProblem;
         _typed
           ..clear()
           ..addAll(held.values);
@@ -272,6 +276,11 @@ class _HostSectionFormState extends State<HostSectionForm> {
         Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(section.help!, style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant))),
       if (_problem case final problem?)
         Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(problem, key: Key('section-$_id-problem'), style: TextStyle(color: scheme.error))),
+      if (_secretsProblem case final problem?)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text('A secret of this section could not be asked of its secret provider: $problem', key: Key('section-$_id-secrets-problem'), style: TextStyle(color: scheme.error)),
+        ),
       fields,
     ]);
     if (!widget.asGroup) return body;
