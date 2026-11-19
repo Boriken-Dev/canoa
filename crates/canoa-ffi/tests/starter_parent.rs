@@ -18,6 +18,8 @@ use canoa_ffi::exports::{
 };
 use serde_json::{Value, json};
 
+mod common;
+
 const WAIT: Duration = Duration::from_secs(30);
 
 fn example(name: &str) -> PathBuf {
@@ -97,6 +99,7 @@ fn parent_of(pid: u32) -> (u32, String) {
 
 #[test]
 fn every_process_the_host_starts_is_a_child_of_its_process_starter_and_never_of_the_application() {
+    common::memory_credentials();
     let me = std::process::id();
     let scratch = std::env::temp_dir().join(format!("canoa-parent-{me}"));
     std::fs::create_dir_all(&scratch).expect("a directory");

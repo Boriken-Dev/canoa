@@ -191,3 +191,26 @@ fn an_empty_password_and_a_refused_address_leave_nothing_behind() {
     );
     assert!(!contains(&fixture.everything(), PASSWORD));
 }
+
+/// With `CANOA_CREDENTIAL_STORE=memory`, which `Scratch` sets for every test, a canoa.cfg that leaves `[secrets]` at its default
+/// keeps the password in the process's memory: the next process does not have it, and nothing rests in a file or in the operating
+/// system's store.
+#[test]
+fn a_password_kept_while_the_credential_store_is_in_memory_ends_with_the_process() {
+    let fixture = Fixture::new();
+    std::fs::write(&fixture.config, "").expect("canoa.cfg");
+    let added = fixture.add("work", &format!("{PASSWORD}\n"));
+    assert!(added.status.success(), "{}", text(&added.stderr));
+    assert!(
+        !contains(&fixture.everything(), PASSWORD),
+        "the password is in no file"
+    );
+    let listed = fixture.canoa(&["mail", "list", "--format", "json"], "");
+    assert!(listed.status.success(), "{}", text(&listed.stderr));
+    let row: Value = serde_json::from_str(text(&listed.stdout).lines().next().expect("a row"))
+        .expect("one JSON object per line");
+    assert_ne!(
+        row["state"], "password stored",
+        "the password outlived the process that was given it"
+    );
+}

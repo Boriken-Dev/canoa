@@ -28,6 +28,8 @@ use coqui_acp::secret::{
 use data_encoding::{BASE64, BASE64_NOPAD, BASE64URL, BASE64URL_NOPAD, HEXLOWER, HEXUPPER};
 use serde_json::{Value, json};
 
+mod common;
+
 const WAIT: Duration = Duration::from_secs(30);
 /// Made up, with characters base64 and percent-encoding treat differently, and that a command line prints as they are.
 const PASSWORD: &str = "Tr0ub4dor.3/x+y=?qZ_9";
@@ -37,6 +39,7 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new() -> Self {
+        common::memory_credentials();
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "canoa-ffi-secret-{}-{}",

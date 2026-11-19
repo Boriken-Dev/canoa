@@ -52,7 +52,19 @@ pub fn key() -> Identity {
     Identity::generate(method()).expect("a key")
 }
 
+/// Keeps every credential a host of these tests stores in its memory (`CANOA_CREDENTIAL_STORE`) and out of the operating system's
+/// store, which nothing here is about. The hosts a test starts inherit it, and one it runs in its own process reads it. Done once,
+/// before the first host or directory of the run.
+pub fn memory_credentials() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: std's own readers of the environment take the lock this takes; nothing else here reads it from C.
+        unsafe { std::env::set_var("CANOA_CREDENTIAL_STORE", "memory") };
+    });
+}
+
 pub fn host_binary() -> &'static str {
+    memory_credentials();
     env!("CARGO_BIN_EXE_canoa")
 }
 
@@ -87,6 +99,7 @@ pub struct Scratch(pub PathBuf);
 
 impl Scratch {
     pub fn new() -> Self {
+        memory_credentials();
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let stamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)

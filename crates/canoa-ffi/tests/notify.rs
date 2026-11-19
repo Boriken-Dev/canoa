@@ -18,6 +18,8 @@ use canoa_ffi::exports::{
 };
 use serde_json::{Value, json};
 
+mod common;
+
 const WAIT: Duration = Duration::from_secs(30);
 const PORT: i64 = 4242;
 
@@ -123,6 +125,7 @@ fn read_link(link: u64) -> Value {
 
 #[test]
 fn a_link_with_a_port_posts_its_number_when_it_has_something_to_read_and_when_it_ends() {
+    common::memory_credentials();
     // Before a table, and with tables that are not Dart's, no link may name a port.
     let (agent, entry) = (example("stdio_agent"), example("child_entry"));
     assert!(

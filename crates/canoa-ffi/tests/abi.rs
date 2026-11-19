@@ -20,6 +20,8 @@ use canoa_ffi::exports::{
 };
 use serde_json::{Value, json};
 
+mod common;
+
 /// How long a job may take to say what a test waits for: it starts a host process, which a loaded machine runs slowly.
 const WAIT: Duration = Duration::from_secs(90);
 
@@ -27,6 +29,7 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new() -> Self {
+        common::memory_credentials();
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "canoa-ffi-test-{}-{}",
