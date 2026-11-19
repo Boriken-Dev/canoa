@@ -155,13 +155,16 @@ mod with_source {
         let hosted = Hosted::start_with_setup(|_| config, &[]);
         let link = hosted.local.open("@control").expect("a link");
         let (types, _) = ask(&link, 1, "store/extensions", json!({})).expect("the types");
-        assert_eq!(
-            types["types"][0]["id"], "notes",
-            "the extension's type is listed: {types}"
-        );
-        assert_eq!(types["types"][0]["extension_title"], "Notes");
-        assert_eq!(types["types"][0]["publisher"], "Example publisher");
-        assert_eq!(types["types"][0]["icon"], "extension");
+        // The host's own extension lists its types too (Secret providers): this one is found by what it adds.
+        let notes = types["types"]
+            .as_array()
+            .expect("types")
+            .iter()
+            .find(|each| each["id"] == "notes")
+            .unwrap_or_else(|| panic!("the extension's type is listed: {types}"));
+        assert_eq!(notes["extension_title"], "Notes");
+        assert_eq!(notes["publisher"], "Example publisher");
+        assert_eq!(notes["icon"], "extension");
         let (listed, _) = ask(&link, 2, "providers/list", json!({})).expect("the agents");
         let quill = listed["providers"]
             .as_array()
