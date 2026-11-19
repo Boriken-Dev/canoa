@@ -191,7 +191,8 @@ impl Footprint {
         let Ok(bytes) = fs::read(path) else { return };
         let digest = Sha256::digest(&bytes);
         let key = format!("profile:{}", path.display());
-        self.items.insert(key.clone(), format!("{digest:x}"));
+        self.items
+            .insert(key.clone(), data_encoding::HEXLOWER.encode(&digest));
         if meta.len() <= PROFILE_TEXT_LIMIT {
             let text = String::from_utf8_lossy(&bytes);
             self.texts
@@ -264,7 +265,7 @@ impl Footprint {
                     let digest = Sha256::digest(&raw.bytes);
                     self.items.insert(
                         format!("reg:HKCU\\{path}\\{name}"),
-                        format!("{}:{digest:x}", raw.ty),
+                        format!("{}:{}", raw.ty, data_encoding::HEXLOWER.encode(&digest)),
                     );
                     values.insert(name, raw);
                 }

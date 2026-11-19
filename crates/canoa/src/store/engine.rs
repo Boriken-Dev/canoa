@@ -461,6 +461,10 @@ fn token_of(
         };
         let _ = write!(text, "|{}|{}|{check}", part.download.url, part.path);
     }
-    let digest = Sha256::digest(text.as_bytes());
-    format!("{digest:x}")
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .fold(String::new(), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
 }

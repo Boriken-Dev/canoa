@@ -615,14 +615,11 @@ impl Programs {
         if plan.token.is_empty() && plan.action == Action::Uninstall {
             let mut nonce = [0u8; 16];
             getrandom::fill(&mut nonce).map_err(|e| StoreError::Contract(e.to_string()))?;
-            plan.token = format!(
-                "{:x}",
-                Sha256::digest(
-                    [provider.as_bytes(), b"|uninstall|", &nonce]
-                        .concat()
-                        .as_slice()
-                )
-            );
+            plan.token = data_encoding::HEXLOWER.encode(&Sha256::digest(
+                [provider.as_bytes(), b"|uninstall|", &nonce]
+                    .concat()
+                    .as_slice(),
+            ));
         }
         if let Some(owner) = keep
             && !plan.token.is_empty()

@@ -434,7 +434,7 @@ fn a_recorded_file_that_changed_is_found_before_a_launch() {
     fs::write(&exe, b"the bytes that were checked").expect("file");
     let digest = {
         use sha2::{Digest, Sha256};
-        format!("{:x}", Sha256::digest(b"the bytes that were checked"))
+        data_encoding::HEXLOWER.encode(&Sha256::digest(b"the bytes that were checked"))
     };
     let record = canoa_host::store::shelf::FileRecord {
         path: "echo.bin".to_owned(),

@@ -56,7 +56,7 @@ pub(crate) fn verify_extension(extension: &crate::config::Extension) -> Result<(
         (ExtensionCheck::File { sha256 }, Origin::Library(path)) => {
             let bytes = std::fs::read(path)
                 .map_err(|error| format!("{} cannot be read: {error}", path.display()))?;
-            let got = format!("{:x}", sha2::Sha256::digest(&bytes));
+            let got = data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(&bytes));
             if got.eq_ignore_ascii_case(sha256) {
                 Ok(())
             } else {

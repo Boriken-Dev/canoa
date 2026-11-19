@@ -40,7 +40,7 @@ fn exe(name: &str) -> String {
 }
 
 fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    data_encoding::HEXLOWER.encode(&Sha256::digest(bytes))
 }
 
 fn version_of(line: &str) -> Option<String> {

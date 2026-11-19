@@ -48,11 +48,11 @@ fn windows() -> bool {
 }
 
 fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    data_encoding::HEXLOWER.encode(&Sha256::digest(bytes))
 }
 
 fn sha512(bytes: &[u8]) -> String {
-    format!("{:x}", Sha512::digest(bytes))
+    data_encoding::HEXLOWER.encode(&Sha512::digest(bytes))
 }
 
 fn tar_gz(entries: &[(&str, Vec<u8>, u32)]) -> Vec<u8> {

@@ -26,7 +26,7 @@ use coqui_acp_harness::LocalSpawner;
 use sha2::{Digest, Sha256};
 
 fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    data_encoding::HEXLOWER.encode(&Sha256::digest(bytes))
 }
 
 fn leak(text: String) -> &'static str {

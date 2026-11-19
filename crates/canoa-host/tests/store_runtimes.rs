@@ -60,7 +60,7 @@ fn standin() -> PathBuf {
 }
 
 fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    data_encoding::HEXLOWER.encode(&Sha256::digest(bytes))
 }
 
 fn here() -> Platform {

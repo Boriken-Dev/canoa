@@ -38,7 +38,7 @@ impl Drop for Dir {
 }
 
 fn sha(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    data_encoding::HEXLOWER.encode(&Sha256::digest(bytes))
 }
 
 /// A loopback server answering by path: `(status, location, body)`.

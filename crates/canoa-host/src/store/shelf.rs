@@ -327,7 +327,10 @@ impl ProgramDir {
         };
         let kept = fs::read_to_string(self.digest_path())
             .map_err(|_| ShelfError::Refused("current.json has no digest on record".to_owned()))?;
-        if !format!("{:x}", sha2::Sha256::digest(&bytes)).eq_ignore_ascii_case(kept.trim()) {
+        if !data_encoding::HEXLOWER
+            .encode(&sha2::Sha256::digest(&bytes))
+            .eq_ignore_ascii_case(kept.trim())
+        {
             return Err(ShelfError::Refused(
                 "current.json is not the one this host wrote".to_owned(),
             ));
@@ -578,7 +581,10 @@ impl Locked<'_> {
         if let Some(parent) = digest.parent() {
             make_private(parent)?;
         }
-        fs::write(&digest, format!("{:x}", sha2::Sha256::digest(&bytes)))?;
+        fs::write(
+            &digest,
+            data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(&bytes)),
+        )?;
         Ok(())
     }
 
@@ -702,7 +708,7 @@ fn digest_of(path: &Path) -> Result<String, ShelfError> {
     if fs::symlink_metadata(path)?.file_type().is_symlink() {
         let target = fs::read_link(path)?;
         let text = format!("link:{}", target.to_string_lossy());
-        return Ok(format!("{:x}", sha2::Sha256::digest(text.as_bytes())));
+        return Ok(data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(text.as_bytes())));
     }
     let mut file = File::open(path)?;
     let mut hash = sha2::Sha256::new();
@@ -714,7 +720,7 @@ fn digest_of(path: &Path) -> Result<String, ShelfError> {
         }
         hash.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(data_encoding::HEXLOWER.encode(&hash.finalize()))
 }
 
 /// Adds a record for every file under `dir` that `records` does not name, so the whole copy is recorded, and not only what was

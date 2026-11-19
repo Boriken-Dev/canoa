@@ -920,7 +920,15 @@ fn unpack_zip(
                 &format!("a bad zip entry: {e}"),
             )
         })?;
-        let name = entry.name().to_owned();
+        let name = entry
+            .name()
+            .map_err(|e| {
+                refused(
+                    Status::GUATIAO_ERR_BAD_VALUE,
+                    &format!("a bad zip entry name: {e}"),
+                )
+            })?
+            .into_owned();
         let link = entry
             .unix_mode()
             .is_some_and(|mode| mode & 0o170_000 == 0o120_000);

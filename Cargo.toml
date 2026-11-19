@@ -14,7 +14,7 @@ repository = "https://github.com/Boriken-Dev/canoa"
 clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "env"] }
 # canoa.cfg: typed through serde, its entries kept in the document's order.
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
-toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display", "preserve_order"] }
+toml = { version = "1", default-features = false, features = ["parse", "serde", "display", "preserve_order"] }
 # canoa.cfg in any format its first line names: found, layered and read through anycfg, which is not published yet.
 anycfg = { git = "https://github.com/jose-pr/anycfg-rs", rev = "bf71f7097a550037972a0651e8bd35747b8dcd11" }
 # canoa.cfg in YAML.
@@ -34,7 +34,7 @@ coqui-peer-tls = { version = "=0.0.0-alpha.1", default-features = false, feature
 # The portal's one-time codes are a library it loads from a path too (its tests build it); the QR code of a setup link, as an inline
 # SVG with no image codecs.
 coqui-access-totp-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
-qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
+qrcode = { version = "0.15", default-features = false, features = ["svg"] }
 # The password and certificate providers are libraries the portal loads from a path (its tests build them).
 coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
 coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
@@ -54,7 +54,7 @@ coqui-syshttp = { git = "https://github.com/Boriken-Dev/coqui-syshttp", rev = "5
 # Archives a store unpacks: tar and gzip for Codex and Node, zip for Node on Windows; deflate by flate2's pure Rust backend.
 tar = { version = "0.4", default-features = false }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 # Diagnostics; the subscriber is the binary's.
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter", "ansi"] }
@@ -115,7 +115,7 @@ aes-gcm = { version = "0.11", default-features = false, features = ["aes", "allo
 zeroize = "1"
 time = { version = "0.3", default-features = false, features = ["parsing"] }
 rpassword = "7"
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 rustix = { version = "1.1", default-features = false, features = ["std"] }
 # This computer's addresses, for what the host says of itself to a browser; already in the graph through mdns-sd.
 if-addrs = "0.15"
@@ -132,7 +132,7 @@ rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"]
 rustls-native-certs = "0.8"
 windows-permissions = "0.2"
 win-msgbox = "0.2"
-object = { version = "0.40", default-features = false, features = ["read_core", "pe", "std"] }
+object = { version = "0.41", default-features = false, features = ["read_core", "pe", "std"] }
 # The member crates themselves.
 canoa = { path = "crates/canoa" }
 canoa-host = { path = "crates/canoa-host" }

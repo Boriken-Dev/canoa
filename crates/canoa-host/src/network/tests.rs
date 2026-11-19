@@ -98,7 +98,7 @@ pub(crate) fn through(world: &World) -> Arc<Network> {
 }
 
 fn sha(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    data_encoding::HEXLOWER.encode(&Sha256::digest(bytes))
 }
 
 #[test]

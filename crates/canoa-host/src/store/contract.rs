@@ -1144,9 +1144,9 @@ fn markers(text: &str) -> Vec<(usize, usize, String, String)> {
 fn digest(kind: &str, bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256, Sha512};
     if kind == "sha512" {
-        format!("{:x}", Sha512::digest(bytes))
+        data_encoding::HEXLOWER.encode(&Sha512::digest(bytes))
     } else {
-        format!("{:x}", Sha256::digest(bytes))
+        data_encoding::HEXLOWER.encode(&Sha256::digest(bytes))
     }
 }
 
