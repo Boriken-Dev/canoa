@@ -116,6 +116,122 @@ fn an_account_a_gateway_serves_lists_the_models_of_the_gateway_through_the_same_
     assert!(choices.models[0].is_default && !choices.models[1].is_default);
 }
 
+/// A gateway whose lease lists the models its account's id names: `shared` and one of its own for each account.
+struct PerAccount;
+
+struct OfItsOwn(String);
+
+impl GatewayLease for OfItsOwn {
+    fn address(&self) -> Result<String, ProviderError> {
+        Ok("http://127.0.0.1:1".to_owned())
+    }
+
+    fn bearer(&self) -> Result<String, ProviderError> {
+        Ok("a-bearer".to_owned())
+    }
+
+    fn models(&self) -> Result<ModelListing, ProviderError> {
+        let mut shared = ModelInfo::new("shared");
+        shared.is_default = true;
+        shared.efforts = vec!["low".to_owned()];
+        Ok(ModelListing::of(vec![
+            ModelInfo::new(format!("only-{}", self.0)),
+            shared,
+        ]))
+    }
+}
+
+impl ModelGateway for PerAccount {
+    fn describe(&self) -> Result<GatewayInfo, ProviderError> {
+        Ok(GatewayInfo::new(KIND, "stand-in"))
+    }
+
+    fn open(
+        &self,
+        request: GatewayRequest,
+        _spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<Object<dyn GatewayLease>, ProviderError> {
+        Ok(OfItsOwn(request.account).into_object())
+    }
+}
+
+#[test]
+fn the_models_of_a_pool_show_each_model_once_with_every_account_that_lists_it() {
+    let dir = Dir::new();
+    let root = dir.0.join("accounts");
+    let store = Accounts::with_store(root.clone(), Box::new(FileStore::new(root))).expect("opens");
+    store.gateways().serving(vec![
+        Offer::new(
+            Arc::new(PerAccount),
+            "foundry_accounts",
+            Arc::new(FoundryAccounts),
+        )
+        .expect("an offer"),
+    ]);
+    for id in ["id-a", "id-b"] {
+        store
+            .store_login(id, &Credentials::new(), None)
+            .expect("an account that holds no credential");
+    }
+    let config = Config::from_str_in(
+        "[host.agents.Claude]\nharness = \"claude\"\naccounts = [\"both\"]\n\
+         [host.accounts.a]\nharness = \"claude\"\nkind = \"foundry-local\"\nid = \"id-a\"\n\
+         settings = { model = \"shared\" }\n\
+         [host.accounts.b]\nharness = \"claude\"\nkind = \"foundry-local\"\nid = \"id-b\"\n\
+         settings = { model = \"shared\" }\n\
+         [host.pools.both]\nstandard = \"anthropic-api\"\naccounts = [\"a\", \"b\"]\n",
+        std::path::Path::new(""),
+    )
+    .expect("parses");
+    let asking = |account: &str| Asking {
+        account: Some((account.to_owned(), Arc::clone(&store))),
+        ..Asking::default()
+    };
+    let pool = entry_with(&config, "Claude", &asking("both")).expect("an entry");
+    assert!(pool.known, "{pool:?}");
+    let ids: Vec<&str> = pool.models.iter().map(|model| model.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        ["only-id-a", "shared", "only-id-b"],
+        "each model once, in the order first met"
+    );
+    assert_eq!(
+        pool.model_accounts,
+        [vec!["a"], vec!["a", "b"], vec!["b"]],
+        "{pool:?}"
+    );
+    let json = pool.to_json();
+    assert_eq!(
+        json["models"][1]["accounts"],
+        serde_json::json!(["a", "b"]),
+        "{json}"
+    );
+    assert_eq!(
+        json["models"][1]["efforts"],
+        serde_json::json!(["low"]),
+        "{json}"
+    );
+    assert_eq!(
+        json["accounts"],
+        serde_json::json!([{"name": "a", "listed": true}, {"name": "b", "listed": true}])
+    );
+    // A model is refused for the pool as it is for an account, naming the pool and listing what its accounts list.
+    let why = pool
+        .refuses("the pool \"both\"", "nothing")
+        .expect("not listed");
+    assert!(
+        why.contains("\"nothing\"") && why.contains("both") && why.contains("only-id-b"),
+        "{why}"
+    );
+    // One account of it lists its own models only.
+    let one = entry_with(&config, "Claude", &asking("a")).expect("an entry");
+    assert!(
+        one.model_accounts.is_empty() && one.members.is_empty(),
+        "{one:?}"
+    );
+    assert_eq!(one.models.len(), 2);
+}
+
 /// An account another harness's provider made is listed by that provider, which knows what its kind is: Pi's own account
 /// provider keeps no account of an Anthropic API key.
 #[test]

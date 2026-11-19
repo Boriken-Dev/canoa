@@ -277,6 +277,172 @@ fn a_start_names_the_account_and_a_model_it_lists_and_any_other_is_refused_namin
     .expect("served");
 }
 
+/// A fixture whose Claude entry offers the pool `both`, of the accounts `work` and `work2`, which are logins the stand-in made.
+fn with_a_pool(accounts: &str) -> Fixture {
+    let fixture = Fixture::unlisted();
+    let added = fixture.canoa(
+        &[
+            "accounts",
+            "add",
+            "work2",
+            "--harness",
+            "claude",
+            "--method",
+            "subscription",
+        ],
+        Some("123456\n"),
+    );
+    assert!(added.status.success(), "{}", text(&added.stderr));
+    let cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
+    std::fs::write(
+        &fixture.config,
+        format!(
+            "{}\n[host.pools.both]\nstandard = \"claude-code\"\naccounts = [\"work\", \"work2\"]\n",
+            cfg.replace(
+                "account_settings = { renew_poll_ms = 100 }",
+                &format!("accounts = [{accounts}]\naccount_settings = {{ renew_poll_ms = 100 }}"),
+            )
+        ),
+    )
+    .expect("the entry offers the pool");
+    fixture
+}
+
+fn initialize_on(
+    rpc: &support::Rpc<'_, coqui_transport_web::websocket::Channel>,
+    account: &str,
+    model: Option<&str>,
+) -> Result<Value, Value> {
+    let mut meta = json!({ ACCOUNT_META: account });
+    if let Some(model) = model {
+        meta[MODEL_META] = json!(model);
+    }
+    rpc.request(
+        "initialize",
+        json!({"protocolVersion": 1, "clientCapabilities": {}, "_meta": meta}),
+    )
+}
+
+#[test]
+fn a_session_on_a_pool_runs_on_the_first_of_its_accounts_that_is_free_and_says_which() {
+    let fixture = with_a_pool("\"both\"");
+    let (host, _log, _record, _cfg) = fixture.serve();
+    let client = support::key();
+    host.pair(&client);
+    let url = host.url("Claude").to_owned();
+    let on = |answer: &Value| {
+        (
+            answer["_meta"][ACCOUNT_META]["name"]
+                .as_str()
+                .map(str::to_owned),
+            answer["_meta"][ACCOUNT_META]["pool"]
+                .as_str()
+                .map(str::to_owned),
+        )
+    };
+    with_link(&url, &client, host.peer, |first| {
+        let one = initialize_on(first, "both", None).expect("the pool starts");
+        assert_eq!(
+            on(&one),
+            (Some("work".to_owned()), Some("both".to_owned())),
+            "{one}"
+        );
+        // The first account is held by the first connection, so the next takes the pool's other.
+        with_link(&url, &client, host.peer, |second| {
+            let two = initialize_on(second, "both", None).expect("the pool's other account");
+            assert_eq!(
+                on(&two),
+                (Some("work2".to_owned()), Some("both".to_owned())),
+                "{two}"
+            );
+            // With both held nothing is left, and the refusal says why for each.
+            let none = with_link(&url, &client, host.peer, |third| {
+                initialize_on(third, "both", None).expect_err("none left")
+            })
+            .expect("served");
+            assert_eq!(none["code"], -32602, "{none}");
+            let why = none["message"].as_str().expect("a reason");
+            assert!(
+                why.contains("both")
+                    && why.contains("work")
+                    && why.contains("work2")
+                    && why.contains("holds"),
+                "{why}"
+            );
+        })
+        .expect("served");
+    })
+    .expect("served");
+    // A start that names no account runs on the entry's first, which is the pool.
+    with_link(&url, &client, host.peer, |rpc| {
+        let answer = rpc
+            .request(
+                "initialize",
+                json!({"protocolVersion": 1, "clientCapabilities": {}}),
+            )
+            .expect("the entry's first");
+        assert_eq!(on(&answer).1.as_deref(), Some("both"), "{answer}");
+    })
+    .expect("served");
+}
+
+#[test]
+fn a_session_on_a_pool_names_a_model_and_only_an_account_that_lists_it_takes_it() {
+    let fixture = with_a_pool("\"both\"");
+    let (host, _log, _record, _cfg) = fixture.serve();
+    let client = support::key();
+    host.pair(&client);
+    let url = host.url("Claude").to_owned();
+    let listed = with_link(&url, &client, host.peer, |rpc| {
+        initialize_on(rpc, "both", Some("standin-small")).expect("a model they list")
+    })
+    .expect("served");
+    assert_eq!(listed["_meta"][ACCOUNT_META]["pool"], "both", "{listed}");
+    let refused = with_link(&url, &client, host.peer, |rpc| {
+        initialize_on(rpc, "both", Some("no-such-model")).expect_err("no account lists it")
+    })
+    .expect("served");
+    let why = refused["message"].as_str().expect("a reason");
+    assert!(
+        why.contains("both")
+            && why.contains("no-such-model")
+            && why.contains("work2")
+            && why.contains("standin-small"),
+        "{why}"
+    );
+}
+
+#[test]
+fn the_hosts_any_pool_holds_the_accounts_the_entry_offers_and_a_pool_it_does_not_name_is_not_chosen()
+ {
+    let fixture = with_a_pool("\"work\", \"work2\"");
+    let (host, _log, _record, _cfg) = fixture.serve();
+    let client = support::key();
+    host.pair(&client);
+    let url = host.url("Claude").to_owned();
+    // The entry names the accounts and not the pool: the host's own pool of their standard is there for a key with no grant, and
+    // the person's pool, which the entry does not name, is not.
+    let any = with_link(&url, &client, host.peer, |rpc| {
+        initialize_on(rpc, "any-claude-code", None).expect("the host's own pool")
+    })
+    .expect("served");
+    assert_eq!(
+        any["_meta"][ACCOUNT_META]["pool"], "any-claude-code",
+        "{any}"
+    );
+    assert_eq!(any["_meta"][ACCOUNT_META]["name"], "work", "{any}");
+    let other = with_link(&url, &client, host.peer, |rpc| {
+        initialize_on(rpc, "both", None).expect_err("the entry does not name that pool")
+    })
+    .expect("served");
+    assert!(
+        other["message"]
+            .as_str()
+            .is_some_and(|why| why.contains("does not offer")),
+        "{other}"
+    );
+}
+
 #[test]
 fn signing_in_makes_an_account_whose_credential_is_in_the_store_and_not_in_canoa_cfg() {
     let fixture = Fixture::bare();

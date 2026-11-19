@@ -2272,6 +2272,87 @@ accounts = [\"work\", \"local\"]
     assert_eq!(accounts, &["work", "local"]);
 }
 
+const TWO_ACCOUNTS: &str = "[host.accounts.one]
+harness = \"claude\"
+kind = \"anthropic-api-key\"
+id = \"id-one\"
+[host.accounts.two]
+harness = \"claude\"
+kind = \"anthropic-api-key\"
+id = \"id-two\"
+";
+
+#[test]
+fn a_pool_names_a_standard_and_the_accounts_it_holds_and_an_entry_may_offer_it() {
+    let config = parse(&format!(
+        "{TWO_ACCOUNTS}[host.pools.keys]
+standard = \"anthropic-api\"
+accounts = [\"two\", \"one\", \"local\"]
+[host.pools.empty]
+standard = \"openai-api\"
+[host.agents.Claude]
+harness = \"claude\"
+accounts = [\"keys\", \"any-anthropic-api\", \"one\"]
+"
+    ))
+    .expect("parses");
+    let keys = &config.pools["keys"];
+    assert_eq!(keys.standard, "anthropic-api");
+    assert_eq!(
+        keys.accounts,
+        ["two", "one", "local"],
+        "the order is the pool's"
+    );
+    assert!(config.pools["empty"].accounts.is_empty());
+    let order: Vec<&String> = config.pools.keys().collect();
+    assert_eq!(order, ["keys", "empty"], "the file's order");
+    let EntryKind::Harness { accounts, .. } = &config.entry("Claude").expect("there").kind else {
+        panic!("a harness entry");
+    };
+    assert_eq!(accounts, &["keys", "any-anthropic-api", "one"]);
+}
+
+#[test]
+fn a_pool_that_names_what_does_not_exist_or_is_taken_is_refused_by_name() {
+    let refused = |extra: &str| {
+        parse(&format!("{TWO_ACCOUNTS}{extra}"))
+            .expect_err("refused")
+            .to_string()
+    };
+    // A member is an account the file holds, or the automatic local one.
+    let why = refused("[host.pools.p]\nstandard = \"anthropic-api\"\naccounts = [\"nobody\"]\n");
+    assert!(why.contains("pool p") && why.contains("nobody"), "{why}");
+    let why =
+        refused("[host.pools.p]\nstandard = \"anthropic-api\"\naccounts = [\"one\", \"one\"]\n");
+    assert!(why.contains("twice"), "{why}");
+    // A pool and an account do not share a name, and nor do a name and the host's own pools.
+    let why = refused("[host.pools.one]\nstandard = \"anthropic-api\"\n");
+    assert!(why.contains("pool one") && why.contains("account"), "{why}");
+    let why = refused("[host.pools.local]\nstandard = \"anthropic-api\"\n");
+    assert!(why.contains("pool local"), "{why}");
+    let why = refused("[host.pools.any-openai-api]\nstandard = \"openai-api\"\n");
+    assert!(why.contains("taken"), "{why}");
+    let taken = parse(
+        "[host.accounts.any-openai-api]\nharness = \"codex\"\nkind = \"codex-api-key\"\nid = \"id-a\"\n",
+    )
+    .expect_err("an account may not take the host's pool's name");
+    assert!(taken.to_string().contains("taken"), "{taken}");
+    // The standard is any id the standards vocabulary allows, and the file has to say it.
+    let why = refused("[host.pools.p]\n");
+    assert!(why.contains("standard is missing"), "{why}");
+    let why = refused("[host.pools.p]\nstandard = \"Not A Standard\"\n");
+    assert!(why.contains("standard"), "{why}");
+    let why = refused("[host.pools.p]\nstandard = \"anthropic-api\"\napi_key = \"sk-secret\"\n");
+    assert!(!why.contains("sk-secret"), "{why}");
+    // An entry names an account, a pool, or the host's own pool of some standard, and nothing else.
+    let why = refused("[host.agents.Claude]\nharness = \"claude\"\naccounts = [\"nothing\"]\n");
+    assert!(why.contains("pool"), "{why}");
+    parse(&format!(
+        "{TWO_ACCOUNTS}[host.agents.Claude]\nharness = \"claude\"\naccounts = [\"any-codex\"]\n"
+    ))
+    .expect("the host's own pool of a standard is named without being in the file");
+}
+
 #[test]
 fn a_shared_entrys_permission_window_is_off_unless_set_and_needs_shared() {
     let config = parse(

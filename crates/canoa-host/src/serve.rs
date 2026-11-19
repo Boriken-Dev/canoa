@@ -1744,9 +1744,29 @@ impl Serving {
                         let others = other_accounts(config, harness, &listed, &provider);
                         if !listed.is_empty() || !others.is_empty() {
                             let unfit = unfit_accounts(config, harness, &provider);
+                            let pools = match provider.catalog() {
+                                Some(catalog) => crate::pools::for_entry(
+                                    config,
+                                    &Catalogs::with(
+                                        config,
+                                        harness,
+                                        (catalog, provider.listing()),
+                                        provider.local_account().is_some(),
+                                    ),
+                                    harness,
+                                    offered,
+                                )
+                                .map_err(refused)?,
+                                None => Vec::new(),
+                            };
+                            let default_pool = offered
+                                .first()
+                                .filter(|first| crate::pools::is_pool(config, first))
+                                .cloned();
                             provider = provider
                                 .offering(host, listed, others)
                                 .with_unfit(unfit)
+                                .with_pools(pools, default_pool)
                                 .with_config(Arc::new(config.clone()));
                         }
                     }
@@ -2878,15 +2898,15 @@ fn give_agent_flow<C: Channel>(
         .is_some_and(|grants| grants.contains(&control::Grant::Accounts));
     // What the client asks of the start (the model it names) is checked against the account before anything starts.
     let settled;
-    let first = match agent {
+    let (first, pool) = match agent {
         Agent::Harness(harness) => match harness.settle(first, any_account) {
-            Ok(message) => {
-                settled = message;
-                settled.as_slice()
+            Ok(done) => {
+                settled = done;
+                (settled.first.as_slice(), settled.pool.as_deref())
             }
             Err(why) => return turn_away(channel, first, (&served.name, peer), why),
         },
-        Agent::Program { .. } => first,
+        Agent::Program { .. } => (first, None),
     };
     // A task's connection records what its agent spends as the child of the session that started it.
     let child_scope;
@@ -3053,7 +3073,7 @@ fn give_agent_flow<C: Channel>(
                 shared,
                 served,
                 channel,
-                (peer, first, any_account),
+                (peer, first, any_account, pool),
                 options,
                 scope,
                 (
@@ -3405,7 +3425,7 @@ pub(crate) fn harness_settings(
 /// Whether an offered account's credential reaches the agent in its environment, for a kind that names the model's address:
 /// the login kinds keep theirs in a file, and every other kind with an address is a key or a token. An account another
 /// provider made, that provides an API standard, is a key whatever its kind says of where it rests.
-fn keeps_key_in_environment(listed: &[kind::Offered], runs: &str) -> bool {
+pub(crate) fn keeps_key_in_environment(listed: &[kind::Offered], runs: &str) -> bool {
     listed.iter().any(|(_, account, info)| {
         let borrowed = account.harness != runs
             && info
@@ -3433,7 +3453,12 @@ pub(crate) fn offered_accounts(
     let catalog = provider
         .catalog()
         .ok_or_else(|| "the provider did not list the accounts it takes".to_owned())?;
-    let catalogs = Catalogs::with(config, harness, catalog, provider.listing());
+    let catalogs = Catalogs::with(
+        config,
+        harness,
+        (catalog, provider.listing()),
+        provider.local_account().is_some(),
+    );
     let mut listed = Vec::new();
     for name in names {
         if name == coqui_acp_api::LOCAL_ACCOUNT {
@@ -3476,7 +3501,22 @@ pub(crate) fn entry_accounts(
     provider: &kind::Harness,
 ) -> Result<Option<Vec<kind::Offered>>, String> {
     if !names.is_empty() {
-        return offered_accounts(config, harness, names, provider).map(Some);
+        // A pool the entry names offers the accounts it holds that can run here.
+        let accounts = match provider.catalog() {
+            Some(catalog) => crate::pools::expand(
+                config,
+                &Catalogs::with(
+                    config,
+                    harness,
+                    (catalog, provider.listing()),
+                    provider.local_account().is_some(),
+                ),
+                harness,
+                names,
+            )?,
+            None => names.to_vec(),
+        };
+        return offered_accounts(config, harness, &accounts, provider).map(Some);
     }
     Ok(provider.local_account().map(|local| vec![local]))
 }
@@ -3493,7 +3533,12 @@ pub(crate) fn other_accounts(
     let Some(catalog) = provider.catalog() else {
         return Vec::new();
     };
-    let catalogs = Catalogs::with(config, harness, catalog, provider.listing());
+    let catalogs = Catalogs::with(
+        config,
+        harness,
+        (catalog, provider.listing()),
+        provider.local_account().is_some(),
+    );
     let mut others = Vec::new();
     for (name, account) in &config.accounts {
         if listed.iter().any(|(each, ..)| each == name) {
@@ -3527,7 +3572,12 @@ pub(crate) fn unfit_accounts(
     let Some(catalog) = provider.catalog() else {
         return Vec::new();
     };
-    let catalogs = Catalogs::with(config, harness, catalog, provider.listing());
+    let catalogs = Catalogs::with(
+        config,
+        harness,
+        (catalog, provider.listing()),
+        provider.local_account().is_some(),
+    );
     config
         .accounts
         .iter()
@@ -3571,7 +3621,7 @@ fn give_harness<C: Channel>(
     shared: &Shared,
     served: &Served,
     channel: &C,
-    (peer, first, any_account): (&PeerId, &[u8], bool),
+    (peer, first, any_account, pool): (&PeerId, &[u8], bool, Option<&str>),
     harness: &kind::Harness,
     scope: &Scope,
     (connection, conn, link, store, kb, tools): Joined<'_>,
@@ -3609,7 +3659,14 @@ fn give_harness<C: Channel>(
     );
     let gated = Gated::new(
         channel,
-        account.as_ref().map(Held::report),
+        account.as_ref().map(|held| {
+            let mut report = held.report();
+            // The client sees which pool its account was taken from.
+            if let (Some(pool), Some(map)) = (pool, report.as_object_mut()) {
+                map.insert("pool".to_owned(), serde_json::Value::from(pool));
+            }
+            report
+        }),
         account.as_ref().is_some_and(Held::rotates),
     );
     // Usage is reported under the account that ran the connection, whichever entry offered it.

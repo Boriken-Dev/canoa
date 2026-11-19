@@ -66,6 +66,7 @@ fn entries_of(config: &Config, portal: bool) -> Vec<Value> {
                 "open": entry.peers.is_none(),
                 "accepts": catalogs.accepts(harness),
                 "usable": matching::usable(config, &catalogs, harness),
+                "pools": pools_of(config, &catalogs, harness, accounts),
             })),
             _ => None,
         })
@@ -76,10 +77,37 @@ fn entries_of(config: &Config, portal: bool) -> Vec<Value> {
                 "name": name, "harness": harness, "accounts": [], "open": portal,
                 "accepts": catalogs.accepts(harness),
                 "usable": matching::usable(config, &catalogs, harness),
+                "pools": pools_of(config, &catalogs, harness, &[]),
             }));
         }
     }
     entries
+}
+
+/// The pools an entry of `harness` offers, as `accounts/entries` says them: each with its standard, whether the host made it,
+/// whether the entry names it, and its accounts, each saying whether the entry offers it by itself. An entry that names a pool its
+/// harness cannot take has none listed here and does not start.
+fn pools_of(
+    config: &Config,
+    catalogs: &Catalogs<'_>,
+    harness: &str,
+    names: &[String],
+) -> Vec<Value> {
+    crate::pools::for_entry(config, catalogs, harness, names)
+        .unwrap_or_default()
+        .iter()
+        .map(|pool| {
+            json!({
+                "name": pool.name,
+                "standard": pool.standard,
+                "automatic": pool.automatic,
+                "listed": pool.listed,
+                "accounts": pool.members.iter()
+                    .map(|member| json!({"name": member.name, "listed": member.listed}))
+                    .collect::<Vec<_>>(),
+            })
+        })
+        .collect()
 }
 
 /// The keys an entry made by an offer starts with. A built-in source keeps what it was (its title, the profile it is
@@ -254,6 +282,15 @@ fn offer(
     let harness = harness.as_str();
     let mut catalogs = None;
     for (index, name) in names.iter().enumerate() {
+        if crate::pools::is_pool(config, name) {
+            if names[..index].contains(name) {
+                return Err((BAD_PARAMS, format!("{name} is listed twice")));
+            }
+            let catalogs = catalogs.get_or_insert_with(|| Catalogs::new(config));
+            crate::pools::expand(config, catalogs, harness, core::slice::from_ref(name))
+                .map_err(|why| (REFUSED, format!("{entry} runs {harness}: {why}")))?;
+            continue;
+        }
         let account = config
             .accounts
             .get(name)
@@ -435,6 +472,9 @@ impl Accounts {
             }
             "accounts/entries" => Ok(json!({"entries": entries_of(&config, self.portal)})),
             "accounts/offer" => offer(&self.layers.own, &config, self.portal, params),
+            "pools/list" => Ok(super::pools::list(&config)),
+            "pools/set" => super::pools::set(&self.layers.own, &config, params),
+            "pools/remove" => super::pools::remove(&self.layers.own, &config, params),
             _ => Err((super::NO_METHOD, "this host has no such method".to_owned())),
         }
     }

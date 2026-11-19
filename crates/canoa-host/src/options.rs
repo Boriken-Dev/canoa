@@ -331,7 +331,28 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
                             Ok(listed) => listed.unwrap_or_default(),
                             Err(why) => return Some(Choices::failed(why)),
                         };
-                    if !listed.iter().any(|(each, ..)| each == account) && !asking.any_account {
+                    let pools = match built.catalog() {
+                        Some(catalog) => {
+                            let catalogs = crate::accounts::matching::Catalogs::with(
+                                config,
+                                harness,
+                                (catalog, built.listing()),
+                                built.local_account().is_some(),
+                            );
+                            match crate::pools::for_entry(config, &catalogs, harness, accounts) {
+                                Ok(pools) => pools,
+                                Err(why) => return Some(Choices::failed(why)),
+                            }
+                        }
+                        None => Vec::new(),
+                    };
+                    let pooled = pools
+                        .iter()
+                        .any(|pool| pool.name == *account && pool.open_to(asking.any_account));
+                    if !pooled
+                        && !listed.iter().any(|(each, ..)| each == account)
+                        && !asking.any_account
+                    {
                         return Some(Choices::failed(format!(
                             "{name} does not offer the account {account}"
                         )));
@@ -342,8 +363,14 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
                         Vec::new()
                     };
                     let unfit = crate::serve::unfit_accounts(config, harness, &built);
-                    built = built.offering(store, listed, others).with_unfit(unfit);
-                    as_account(config, &built, account, asking.any_account)
+                    built = built
+                        .offering(store, listed, others)
+                        .with_unfit(unfit)
+                        .with_pools(pools, None);
+                    match built.pool_named(account, asking.any_account) {
+                        Some(pool) => pool_choices(config, &built, pool, asking.any_account),
+                        None => as_account(config, &built, account, asking.any_account),
+                    }
                 }
                 None => as_local(&built),
             };
@@ -410,6 +437,47 @@ pub(crate) fn as_account(
         (connection.spawner, keeper),
         Who::Held(&held, owner.map(|(provider, _)| provider)),
     )
+}
+
+/// What a pool lists: the models any of its accounts a connection may use lists, each once, with the accounts that list it. A
+/// member that could not list says why, and the pool is known when any member is.
+pub(crate) fn pool_choices(
+    config: &Config,
+    built: &kind::Harness,
+    pool: &crate::pools::EntryPool,
+    any: bool,
+) -> Choices {
+    let mut merged = Choices::unknown("no account of the pool listed its models");
+    let mut models: Vec<ModelInfo> = Vec::new();
+    let mut of: Vec<Vec<String>> = Vec::new();
+    for member in pool.usable(any) {
+        let one = as_account(config, built, &member.name, any);
+        let why = (!one.known).then(|| {
+            one.unknown_because
+                .clone()
+                .unwrap_or_else(|| "it lists no models before a session".to_owned())
+        });
+        if one.known && !merged.known {
+            merged = Choices {
+                models: Vec::new(),
+                members: Vec::new(),
+                ..one.clone()
+            };
+        }
+        for model in one.models {
+            match models.iter().position(|seen| seen.id == model.id) {
+                Some(at) => of[at].push(member.name.clone()),
+                None => {
+                    of.push(vec![member.name.clone()]);
+                    models.push(model);
+                }
+            }
+        }
+        merged.members.push((member.name.clone(), why));
+    }
+    merged.models = models;
+    merged.model_accounts = of;
+    merged
 }
 
 /// What a program speaking ACP lists in a session of its own, asked once per version of the program.

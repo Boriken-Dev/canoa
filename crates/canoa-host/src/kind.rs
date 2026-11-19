@@ -27,6 +27,7 @@ use coqui_acp_api::{
 use crate::accounts::matching::Runs;
 use crate::accounts::{ACCOUNT_META, Accounts, Held, Watcher};
 use crate::config::{AccountConfig, Config, Origin, Settings, cache_lifetime_named};
+use crate::pools::EntryPool;
 use crate::provider::{ProviderError, map_of, open};
 
 mod settle;
@@ -113,6 +114,10 @@ struct Offer {
     sources: (u64, u64),
     /// canoa.cfg as the host read it when it started: what lists the models of an account another provider made.
     config: Option<Arc<Config>>,
+    /// The pools the entry offers, which a connection may name where it names an account.
+    pools: Vec<EntryPool>,
+    /// The pool the entry's first `accounts` name stands for, which a connection that names no account runs on.
+    default_pool: Option<String>,
 }
 
 /// What one connection runs on: the account it chose, and what the provider is handed for it.
@@ -327,8 +332,33 @@ impl Harness {
             unfit: Vec::new(),
             sources: (host.source(), host.source()),
             config: None,
+            pools: Vec::new(),
+            default_pool: None,
         });
         self
+    }
+
+    /// This harness offering `pools`, the first named by `default_pool` being what a connection that names no account runs on.
+    pub(crate) fn with_pools(
+        mut self,
+        pools: Vec<EntryPool>,
+        default_pool: Option<String>,
+    ) -> Self {
+        if let Some(offer) = &mut self.accounts {
+            offer.pools = pools;
+            offer.default_pool = default_pool;
+        }
+        self
+    }
+
+    /// The pool `name` as this entry offers it to a connection: the entry's own, the host's `any-<standard>`, or with a grant for
+    /// accounts (`any`) any other the harness accepts.
+    pub(crate) fn pool_named(&self, name: &str, any: bool) -> Option<&EntryPool> {
+        self.accounts
+            .as_ref()?
+            .pools
+            .iter()
+            .find(|pool| pool.name == name && pool.open_to(any))
     }
 
     /// This harness knowing canoa.cfg as the host read it, which a connection's start is checked against.

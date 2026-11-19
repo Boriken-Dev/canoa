@@ -19,6 +19,8 @@ use crate::config::{AccountConfig, Config};
 struct Known {
     catalog: AccountCatalog,
     listing: AccountCatalog,
+    /// Whether the provider offers the harness's own login as the automatic `local` account.
+    local: bool,
 }
 
 /// The account catalogs of the providers canoa.cfg's accounts and entries name, each read once.
@@ -41,8 +43,8 @@ impl<'a> Catalogs<'a> {
     pub(crate) fn with(
         config: &'a Config,
         harness: &str,
-        catalog: &AccountCatalog,
-        listing: &AccountCatalog,
+        (catalog, listing): (&AccountCatalog, &AccountCatalog),
+        local: bool,
     ) -> Self {
         let catalogs = Self::new(config);
         catalogs.known.borrow_mut().insert(
@@ -50,6 +52,7 @@ impl<'a> Catalogs<'a> {
             Some(Known {
                 catalog: catalog.clone(),
                 listing: listing.clone(),
+                local,
             }),
         );
         catalogs
@@ -64,6 +67,7 @@ impl<'a> Catalogs<'a> {
                 Some(Known {
                     catalog: provider.catalog().cloned()?,
                     listing: provider.listing().clone(),
+                    local: provider.local_account().is_some(),
                 })
             })
             .clone()
@@ -85,6 +89,39 @@ impl<'a> Catalogs<'a> {
             .listing
             .kind(&account.kind)
             .cloned()
+    }
+
+    /// Every harness whose accounts this host can make or run: the bundled agents' and those canoa.cfg's entries run.
+    pub(crate) fn harnesses(&self) -> Vec<String> {
+        let mut found: Vec<String> = crate::bundled::harness_sources()
+            .map(|(_, harness)| harness.to_owned())
+            .collect();
+        for entry in &self.config.entries {
+            if let crate::config::EntryKind::Harness { harness, .. } = &entry.kind
+                && !found.contains(harness)
+            {
+                found.push(harness.clone());
+            }
+        }
+        found
+    }
+
+    /// The standard the login `harness` has where it runs provides, when its provider offers that login as the account `local`.
+    /// A harness lists first what it was made for, but a harness also takes the APIs others do, so the login is the first standard
+    /// it accepts that no other harness accepts: one only its own login makes. `None` when it has no such login.
+    pub(crate) fn login_standard(&self, harness: &str) -> Option<String> {
+        if !self.known(harness)?.local {
+            return None;
+        }
+        let others: Vec<Vec<String>> = self
+            .harnesses()
+            .iter()
+            .filter(|other| other.as_str() != harness)
+            .map(|other| self.accepts(other))
+            .collect();
+        self.accepts(harness)
+            .into_iter()
+            .find(|standard| others.iter().all(|taken| !taken.contains(standard)))
     }
 
     /// The standards the provider `harness` accepts, most preferred first.

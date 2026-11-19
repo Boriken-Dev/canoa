@@ -572,6 +572,200 @@ fn an_entry_is_offered_the_accounts_the_person_picks_and_the_host_says_it_must_s
 }
 
 #[test]
+fn a_pool_is_made_edited_and_removed_over_the_link_and_an_entry_offers_it() {
+    let host = host();
+    let link = host.local.open("@control").expect("a link");
+    let mut app = app_of(&host);
+    for name in ["one", "two"] {
+        let (_, added) = app.drive(
+            &link,
+            1,
+            "accounts/add",
+            &json!({"name": name, "harness": "claude", "method": "api-key"}),
+            &Typed::Fills(&[("api_key", KEY)]),
+        );
+        added.expect("a key account");
+    }
+    let (_, login) = app.drive(
+        &link,
+        2,
+        "accounts/add",
+        &json!({"name": "login", "harness": "claude", "method": "subscription"}),
+        &Typed::Fills(&[("code", "123456")]),
+    );
+    login.expect("a login");
+
+    // The host lists its own pool of each standard before the person has made one: nothing is written for them.
+    let before = plain_call(&link, 3, "pools/list", json!({})).expect("listed");
+    let pools = before["pools"].as_array().expect("pools");
+    let any = pools
+        .iter()
+        .find(|pool| pool["name"] == "any-anthropic-api")
+        .expect("the host's own pool");
+    assert_eq!(any["automatic"], true, "{any}");
+    assert_eq!(any["accounts"], json!(["one", "two"]), "{any}");
+    assert!(
+        pools.iter().all(|pool| pool["automatic"] == true),
+        "{before}"
+    );
+    assert!(
+        !config_text(&host).contains("[host.pools"),
+        "{}",
+        config_text(&host)
+    );
+
+    // Made: the accounts are the pool's in the order given, and the file says so.
+    let made = plain_call(
+        &link,
+        4,
+        "pools/set",
+        json!({"name": "keys", "standard": "anthropic-api", "accounts": ["two", "one"]}),
+    )
+    .expect("made");
+    assert_eq!(made["restart"], true);
+    let cfg = config_text(&host);
+    assert!(
+        cfg.contains(
+            "[host.pools.keys]\nstandard = \"anthropic-api\"\naccounts = [\"two\", \"one\"]\n"
+        ),
+        "{cfg}"
+    );
+    let listed = plain_call(&link, 5, "pools/list", json!({})).expect("listed");
+    assert_eq!(listed["pools"][0]["name"], "keys", "{listed}");
+    assert_eq!(
+        listed["pools"][0]["accounts"],
+        json!(["two", "one"]),
+        "{listed}"
+    );
+    assert_eq!(listed["pools"][0]["automatic"], false, "{listed}");
+
+    // An account that does not provide the standard is refused, naming the account, its kind's standards and the pool's.
+    let bad = plain_call(
+        &link,
+        6,
+        "pools/set",
+        json!({"name": "keys", "standard": "anthropic-api", "accounts": ["one", "login"]}),
+    )
+    .expect_err("a login is not an API key");
+    assert!(
+        bad.contains("login")
+            && bad.contains("claude-login")
+            && bad.contains("claude-code")
+            && bad.contains("anthropic-api"),
+        "{bad}"
+    );
+    assert!(
+        config_text(&host).contains("accounts = [\"two\", \"one\"]"),
+        "a refused edit changes nothing"
+    );
+    // A pool takes no account's name, nor the host's own pools'; an account the host lacks is not found.
+    for (name, why) in [("one", "account"), ("any-codex", "taken")] {
+        let refused = plain_call(
+            &link,
+            7,
+            "pools/set",
+            json!({"name": name, "standard": "anthropic-api", "accounts": []}),
+        )
+        .expect_err("taken");
+        assert!(refused.contains(why), "{refused}");
+    }
+    let missing = plain_call(
+        &link,
+        8,
+        "pools/set",
+        json!({"name": "ghosts", "standard": "anthropic-api", "accounts": ["nobody"]}),
+    )
+    .expect_err("no such account");
+    assert!(missing.contains("-32003"), "{missing}");
+
+    // Edited: the same name takes the new accounts and the file holds one table for it.
+    plain_call(
+        &link,
+        9,
+        "pools/set",
+        json!({"name": "keys", "standard": "anthropic-api", "accounts": ["one"]}),
+    )
+    .expect("edited");
+    let cfg = config_text(&host);
+    assert_eq!(cfg.matches("[host.pools.keys]").count(), 1, "{cfg}");
+    assert!(cfg.contains("accounts = [\"one\"]\n"), "{cfg}");
+
+    // An entry offers the pool by name, beside accounts, and the host says which pools each entry offers.
+    plain_call(
+        &link,
+        10,
+        "accounts/offer",
+        json!({"entry": "Claude", "accounts": ["keys", "login"]}),
+    )
+    .expect("a pool is offered like an account");
+    let entries = plain_call(&link, 11, "accounts/entries", json!({})).expect("entries");
+    let claude = &entries["entries"][0];
+    assert_eq!(claude["accounts"], json!(["keys", "login"]), "{claude}");
+    let offered = claude["pools"].as_array().expect("pools");
+    let keys = offered
+        .iter()
+        .find(|pool| pool["name"] == "keys")
+        .expect("keys");
+    assert_eq!(keys["listed"], true, "{keys}");
+    assert_eq!(
+        keys["accounts"],
+        json!([{"name": "one", "listed": true}]),
+        "{keys}"
+    );
+    // A pool of another harness's standard is no choice for this entry.
+    let other = plain_call(
+        &link,
+        12,
+        "pools/set",
+        json!({"name": "chatgpt", "standard": "codex", "accounts": ["local"]}),
+    )
+    .expect("made");
+    assert_eq!(other["pool"]["standard"], "codex");
+    let refused = plain_call(
+        &link,
+        13,
+        "accounts/offer",
+        json!({"entry": "Claude", "accounts": ["chatgpt"]}),
+    )
+    .expect_err("Claude takes no Codex login");
+    assert!(
+        refused.contains("codex") && refused.contains("claude"),
+        "{refused}"
+    );
+
+    // An entry that offers a pool, or a pool that holds an account, keeps them from being removed.
+    let held = plain_call(&link, 14, "pools/remove", json!({"name": "keys"})).expect_err("offered");
+    assert!(held.contains("offers keys"), "{held}");
+    let member =
+        plain_call(&link, 15, "accounts/remove", json!({"name": "one"})).expect_err("held");
+    assert!(member.contains("pool keys holds one"), "{member}");
+    plain_call(
+        &link,
+        16,
+        "accounts/offer",
+        json!({"entry": "Claude", "accounts": []}),
+    )
+    .expect("taken off");
+    plain_call(&link, 17, "pools/remove", json!({"name": "keys"})).expect("removed");
+    plain_call(&link, 18, "pools/remove", json!({"name": "chatgpt"})).expect("removed");
+    let cfg = config_text(&host);
+    assert!(!cfg.contains("[host.pools"), "{cfg}");
+    let gone = plain_call(&link, 19, "pools/remove", json!({"name": "keys"})).expect_err("gone");
+    assert!(gone.contains("-32003"), "{gone}");
+    let own = plain_call(
+        &link,
+        20,
+        "pools/remove",
+        json!({"name": "any-anthropic-api"}),
+    )
+    .expect_err("not a file's");
+    assert!(own.contains("host's own"), "{own}");
+    plain_call(&link, 21, "accounts/remove", json!({"name": "one"}))
+        .expect("free once the pool is gone");
+    host.stop();
+}
+
+#[test]
 fn an_account_says_what_it_provides_an_entry_what_it_accepts_and_an_offer_follows_them() {
     let host = host();
     let link = host.local.open("@control").expect("a link");

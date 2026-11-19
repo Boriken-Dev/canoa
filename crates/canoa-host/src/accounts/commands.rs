@@ -712,6 +712,16 @@ pub(crate) fn remove_with(cfg: Cfg<'_>, name: &str) -> Result<(), Failed> {
             entry.name
         )));
     }
+    if let Some((held, _)) = cfg
+        .config
+        .pools
+        .iter()
+        .find(|(_, pool)| pool.accounts.iter().any(|member| member == name))
+    {
+        return Err(Failed::usage(format!(
+            "pool {held} holds {name}: take it out of that pool's accounts first"
+        )));
+    }
     let accounts = accounts_of(cfg)?;
     let lease = accounts.exclusive(&account.id).map_err(refused)?;
     let before = read_cfg(cfg.config_path)?;
@@ -1115,6 +1125,67 @@ pub(crate) fn set_offered(
         None => {}
     }
     write_cfg(path, &kept.concat())
+}
+
+/// Writes the pool `name` as `[host.pools.NAME]` in the file at `path`, in the file's own format, replacing the one it has.
+pub(crate) fn set_pool(
+    path: &Path,
+    name: &str,
+    pool: &crate::config::PoolConfig,
+) -> Result<(), Failed> {
+    let _one = config_writes();
+    let text = read_cfg(path)?;
+    let format = format_of(path, &text)?;
+    let mut table = toml::Table::new();
+    table.insert(
+        "standard".into(),
+        toml::Value::String(pool.standard.clone()),
+    );
+    table.insert(
+        "accounts".into(),
+        toml::Value::Array(
+            pool.accounts
+                .iter()
+                .map(|member| toml::Value::String(member.clone()))
+                .collect(),
+        ),
+    );
+    let block = format!(
+        "[host.pools.{name}]\nstandard = {}\naccounts = [{}]\n",
+        quote(&pool.standard),
+        pool.accounts
+            .iter()
+            .map(|member| quote(member))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let kept = if format == "toml" {
+        without_table(&text, &format!("[host.pools.{name}]"))
+    } else {
+        text.clone()
+    };
+    write_cfg(
+        path,
+        &with_table(path, &kept, &["host", "pools"], name, (&block, table))?,
+    )
+}
+
+/// `text` with the table whose header line is `header` taken out, and the blank line before it; unchanged when it has none.
+fn without_table(text: &str, header: &str) -> String {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let Some(start) = lines.iter().position(|line| line.trim() == header) else {
+        return text.to_owned();
+    };
+    let end = lines[start + 1..]
+        .iter()
+        .position(|line| line.trim_start().starts_with('['))
+        .map_or(lines.len(), |offset| start + 1 + offset);
+    let mut kept: Vec<&str> = lines[..start].to_vec();
+    if kept.last().is_some_and(|line| line.trim().is_empty()) {
+        kept.pop();
+    }
+    kept.extend(&lines[end..]);
+    kept.concat()
 }
 
 /// Takes the block `add` wrote for `name` out of the file. An account written some other way is for its writer to remove.

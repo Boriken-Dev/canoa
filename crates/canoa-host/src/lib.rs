@@ -33,6 +33,7 @@ mod pair_run;
 mod panel_tabs;
 pub mod peers;
 pub mod pipe;
+mod pools;
 #[cfg(all(unix, feature = "portal"))]
 pub mod portal;
 pub mod portal_link;
@@ -65,7 +66,7 @@ pub use config::{
     AccountConfig, CACHE_LIFETIMES, Config, ConfigError, ControlConfig, DEFAULT_PRESET,
     DelegateConfig, ENTRIES, Entry, EntryKind, Extension, ExtensionCheck, HarnessOptions,
     INSTALLED_DIR_VARIABLE, KbConfig, Layers, Listen, Loadout, MailAccount, MailAuth, MailBackend,
-    MailConfig, NativeConfig, NetworkConfig, Origin, Preset, ResolvedLoadout, Settings,
+    MailConfig, NativeConfig, NetworkConfig, Origin, PoolConfig, Preset, ResolvedLoadout, Settings,
     StoreConfig, TransportListen, UnknownLoadout, UnknownPreset, WebConfig, WebMode,
     cache_lifetime_name, cache_lifetime_named, merge_into,
 };

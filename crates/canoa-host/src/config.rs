@@ -53,6 +53,10 @@ pub struct Config {
     pub protected_paths: Option<Vec<String>>,
     /// `[host.accounts]`, by name, in the file's order: the accounts a harness entry may offer.
     pub accounts: IndexMap<String, AccountConfig>,
+    /// `[host.pools]`, by name, in the file's order: sets of accounts that provide one standard, which an entry may offer and a
+    /// session may run on whichever account of them has usage left. The host adds an `any-<standard>` pool of its own for each
+    /// standard an account provides; those are in no file.
+    pub pools: IndexMap<String, PoolConfig>,
     /// `[secrets]` as the file has it, which the secret providers read: who keeps the accounts' credentials and the mail accounts'
     /// passwords is among it (`accounts`).
     pub secrets: Option<serde_json::Value>,
@@ -915,6 +919,17 @@ impl AccountConfig {
     }
 }
 
+/// One `[host.pools.NAME]`: accounts that provide one standard, as one choice for a session. Which kinds provide the standard is
+/// the account providers' to say, so a member is checked against it where the providers are known (`pools`), not here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PoolConfig {
+    /// The credential standard every member provides: any id `coqui_acp_api::standard::is_standard` accepts.
+    pub standard: String,
+    /// The members, by name in `[host.accounts]` (or the automatic `local`), in the order the pool takes them.
+    pub accounts: Vec<String>,
+}
+
 /// `[host.web]`: the web app on a listener of its own, beside the entries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -1610,6 +1625,8 @@ struct RawHost {
     profiles: IndexMap<String, toml::Table>,
     #[serde(default)]
     accounts: IndexMap<String, RawAccount>,
+    #[serde(default)]
+    pools: IndexMap<String, RawPool>,
     shell: Option<String>,
     web: Option<RawWeb>,
     control: Option<RawControl>,
@@ -2053,6 +2070,15 @@ struct RawAccount {
     rest: toml::Table,
 }
 
+/// `[host.pools.NAME]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPool {
+    standard: Option<String>,
+    #[serde(default)]
+    accounts: Vec<String>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawWeb {
@@ -2351,6 +2377,14 @@ impl Config {
                     ),
                 });
             }
+            if crate::pools::automatic_standard(&name).is_some() {
+                return Err(ConfigError::Invalid {
+                    entry: None,
+                    what: format!(
+                        "account {name}: that name is taken by the pool the host makes of every account that provides that standard"
+                    ),
+                });
+            }
             let account = account_of(&name, raw)?;
             if accounts
                 .values()
@@ -2362,6 +2396,11 @@ impl Config {
                 });
             }
             accounts.insert(name, account);
+        }
+        let mut pools = IndexMap::new();
+        for (name, raw) in host.pools {
+            let pool = pool_of(&name, raw, &accounts)?;
+            pools.insert(name, pool);
         }
         let mut entries = Vec::new();
         for (name, agent) in host.agents {
@@ -2432,10 +2471,14 @@ impl Config {
             }
             let offered_accounts = agent.accounts.unwrap_or_default();
             for (index, account) in offered_accounts.iter().enumerate() {
-                if account != coqui_acp_api::LOCAL_ACCOUNT && !accounts.contains_key(account) {
+                if account != coqui_acp_api::LOCAL_ACCOUNT
+                    && !accounts.contains_key(account)
+                    && !pools.contains_key(account)
+                    && crate::pools::automatic_standard(account).is_none()
+                {
                     return Err(invalid(
                         &name,
-                        "accounts names an account [host.accounts] does not hold",
+                        "accounts names an account [host.accounts] does not hold, or a pool [host.pools] does not hold",
                     ));
                 }
                 if offered_accounts[..index].contains(account) {
@@ -2821,6 +2864,7 @@ impl Config {
             limit_phrases,
             protected_paths,
             accounts,
+            pools,
             secrets,
             shell: host.shell,
             local_agents,
@@ -3949,6 +3993,54 @@ fn account_of(name: &str, raw: RawAccount) -> Result<AccountConfig, ConfigError>
         kind: text(raw.kind, "kind")?,
         id,
         settings,
+    })
+}
+
+/// One `[host.pools.NAME]`. A pool is a name for a set of accounts, so it may not be another account's or the host's own
+/// `any-<standard>` pools', and its members are accounts that exist; that they provide its standard is for [`crate::pools`] to
+/// check, which knows the kinds.
+fn pool_of(
+    name: &str,
+    raw: RawPool,
+    accounts: &IndexMap<String, AccountConfig>,
+) -> Result<PoolConfig, ConfigError> {
+    check_name(name)?;
+    let refused = |what: String| ConfigError::Invalid {
+        entry: None,
+        what: format!("pool {name}: {what}"),
+    };
+    if name == coqui_acp_api::LOCAL_ACCOUNT || accounts.contains_key(name) {
+        return Err(refused(
+            "that name is an account's, and a pool and an account do not share one".to_owned(),
+        ));
+    }
+    if crate::pools::automatic_standard(name).is_some() {
+        return Err(refused(
+            "that name is taken by the pool the host makes of every account that provides that standard".to_owned(),
+        ));
+    }
+    let standard = match raw.standard {
+        Some(standard) if coqui_acp_api::standard::is_standard(&standard) => standard,
+        Some(_) => {
+            return Err(refused(
+                "standard is a credential standard's id: lower-case letters, digits and single hyphens".to_owned(),
+            ));
+        }
+        None => return Err(refused("standard is missing".to_owned())),
+    };
+    for (index, account) in raw.accounts.iter().enumerate() {
+        if account != coqui_acp_api::LOCAL_ACCOUNT && !accounts.contains_key(account) {
+            return Err(refused(format!(
+                "accounts names {account}, which [host.accounts] does not hold"
+            )));
+        }
+        if raw.accounts[..index].contains(account) {
+            return Err(refused(format!("accounts names {account} twice")));
+        }
+    }
+    Ok(PoolConfig {
+        standard,
+        accounts: raw.accounts,
     })
 }
 
