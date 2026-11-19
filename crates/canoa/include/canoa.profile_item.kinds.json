@@ -1,0 +1,38 @@
+{
+  "kinds": [
+    {
+      "name": "profile_item",
+      "floor_hash": 2386280575,
+      "object": false,
+      "doc": "One thing a profile may set.\n\n`describe` answers the same on every call with nothing run. `apply` runs when a session starts, with the values the profile holds\nfor the item already read against its schema; it must change nothing outside the effect it answers with.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What this item is and the form it asks for."
+        },
+        {
+          "name": "apply",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What the values do to a session."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "SectionInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The id the section is found by and, for [`Stored::Config`], the key its values have in `[settings]`: a word of lower-case letters, digits and `_`, 1 to 32."
+      },
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "help": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A line saying what it holds, shown above its form."
+      },
+      "icon": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The name of one of the application's icons; a name it does not know draws the default."
+      },
+      "group": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The heading it sits under in the list of sections, for a section of its own; [`DEFAULT_GROUP`] when none."
+      },
+      "under": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The id of an existing section this is a group in, instead of a section of its own."
+      },
+      "keywords": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Words the search over Settings finds it by, besides its title."
+      },
+      "stored": {
+        "type": "string",
+        "enum": [
+          "config",
+          "provider"
+        ],
+        "x-enum-labels": {
+          "config": "In the table `[settings.ID]` of the host's canoa.cfg, which the host writes after checking the values against the schema.",
+          "provider": "With the provider: the host calls [`SettingsSection::read`] and [`SettingsSection::write`]."
+        },
+        "description": "Where its values are kept."
+      },
+      "schema": {
+        "description": "The values it takes, as a guatiao schema of an object whose members are what its form asks for. A member the schema marks sensitive is never answered in clear."
+      },
+      "form": {
+        "description": "How the schema is shown, a guatiao-intake form document; none shows the form the schema implies."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title",
+      "stored"
+    ]
+  },
+  "Stored": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "config",
+      "provider"
+    ],
+    "x-enum-labels": {
+      "config": "In the table `[settings.ID]` of the host's canoa.cfg, which the host writes after checking the values against the schema.",
+      "provider": "With the provider: the host calls [`SettingsSection::read`] and [`SettingsSection::write`]."
+    },
+    "properties": {}
+  }
+}

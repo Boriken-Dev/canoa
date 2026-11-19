@@ -1,0 +1,38 @@
+{
+  "kinds": [
+    {
+      "name": "panel_tab",
+      "floor_hash": 1639328444,
+      "object": false,
+      "doc": "A kind of tab.\n\n`describe` answers the same on every call with nothing run. `tail` is asked only of a [`Shows::Log`] kind.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What this kind of tab is."
+        },
+        {
+          "name": "tail",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "text"
+          },
+          "doc": "The latest lines of the log, oldest first, each ended by a newline; empty for a kind that shows no log."
+        }
+      ]
+    }
+  ]
+}

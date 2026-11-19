@@ -1,0 +1,84 @@
+{
+  "TabInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The id the kind is found by: a word of lower-case letters, digits and `_`, 1 to 32."
+      },
+      "title": {
+        "type": "string",
+        "description": "Its name for people, as the new-tab menu and a tab say it."
+      },
+      "help": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A line saying what it is."
+      },
+      "icon": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The name of one of the application's icons; a name it does not know draws the default."
+      },
+      "shows": {
+        "type": "string",
+        "enum": [
+          "terminal",
+          "log"
+        ],
+        "x-enum-labels": {
+          "terminal": "A shell on the host: the one named by [`TabInfo::shell`], or the host's own choice.",
+          "log": "Lines of text the provider keeps, which [`PanelTab::tail`] answers and the application shows as they come."
+        },
+        "description": "What a tab of this kind shows."
+      },
+      "shell": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "For [`Shows::Terminal`]: the id of the shell the host lists that a new tab runs; none for the host's own choice."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title",
+      "shows"
+    ]
+  },
+  "TailRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "lines": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "description": "At most [`MAX_TAIL_LINES`]."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "lines"
+    ]
+  },
+  "Shows": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "terminal",
+      "log"
+    ],
+    "x-enum-labels": {
+      "terminal": "A shell on the host: the one named by [`TabInfo::shell`], or the host's own choice.",
+      "log": "Lines of text the provider keeps, which [`PanelTab::tail`] answers and the application shows as they come."
+    },
+    "properties": {}
+  }
+}

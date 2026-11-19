@@ -10,7 +10,8 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use coqui_acp_api::guatiao::library::ProviderError;
+use coqui_acp_api::ProcessSpawner;
+use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Schema, ToValue, Value};
 use guatiao_intake::Screen;
 
@@ -130,11 +131,20 @@ impl ReadRequest {
 ///
 /// `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
 /// catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
+///
+/// A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
+/// person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
+/// its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
+/// even when it refuses.
 #[coqui_acp_api::guatiao::kind(name = "catalog_source", crate = ::coqui_acp_api::guatiao)]
 pub trait CatalogSourceProvider: Send + Sync {
     /// What this provider is. The same answer on every call, with nothing run.
     fn describe(&self) -> Result<SourceInfo, ProviderError>;
 
     /// The catalog's text.
-    fn read(&self, request: ReadRequest) -> Result<String, ProviderError>;
+    fn read(
+        &self,
+        request: ReadRequest,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<String, ProviderError>;
 }

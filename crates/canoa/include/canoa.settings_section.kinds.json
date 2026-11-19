@@ -1,0 +1,45 @@
+{
+  "kinds": [
+    {
+      "name": "settings_section",
+      "floor_hash": 3110564773,
+      "object": false,
+      "doc": "A page of Settings, or a group on one.\n\n`describe` answers the same on every call with nothing run. `read` and `write` are asked only for a [`Stored::Provider`]\nsection; a [`Stored::Config`] section answers them with nothing.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What this section is and the form it asks for."
+        },
+        {
+          "name": "read",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "text"
+          },
+          "doc": "What the section holds now, as a JSON object keyed by the schema's member names. A sensitive member is left out."
+        },
+        {
+          "name": "write",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "values",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "Keeps `values`, a JSON object keyed by the schema's member names that the host has already checked against the schema. A\nsensitive member the person left empty is absent, so what was kept stays."
+        }
+      ]
+    }
+  ]
+}

@@ -74,7 +74,7 @@ required-features = ["store"]
 
 [[test]]
 name = "script_kinds"
-required-features = ["store", "vendor", "secret"]
+required-features = ["store", "vendor", "secret", "profile-item", "settings-section", "panel-tab"]
 
 [[test]]
 name = "speech_kinds"

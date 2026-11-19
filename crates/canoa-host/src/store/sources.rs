@@ -15,7 +15,8 @@ use std::time::{Duration, Instant};
 
 use canoa::store::recipe::{bad_value_error, internal_error};
 use canoa::store::source::{CatalogSourceProvider, KIND, ReadRequest, SourceInfo};
-use coqui_acp_api::guatiao::library::{ProviderError, Registry};
+use coqui_acp_api::ProcessSpawner;
+use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
 use guatiao_intake::Form;
 use serde_json::{Map, Value};
@@ -78,7 +79,11 @@ impl CatalogSourceProvider for ReadSource {
 
     /// A file on this computer. A git source or an address is read by the Store type's own reader, which keeps what it fetched
     /// by commit and checks it, so it never asks this provider.
-    fn read(&self, request: ReadRequest) -> Result<String, ProviderError> {
+    fn read(
+        &self,
+        request: ReadRequest,
+        _spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<String, ProviderError> {
         let fields = fields_of(&request)?;
         let source = fields
             .get("source")
@@ -109,7 +114,11 @@ impl CatalogSourceProvider for CommandSource {
         info.asking::<CommandValues>()
     }
 
-    fn read(&self, request: ReadRequest) -> Result<String, ProviderError> {
+    fn read(
+        &self,
+        request: ReadRequest,
+        _spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<String, ProviderError> {
         let fields = fields_of(&request)?;
         run(&fields).map_err(internal_error)
     }
@@ -384,7 +393,7 @@ impl Sources {
             .map_err(|_| format!("{id} is not a catalog_source"))?
             .default_instance()
             .ok_or_else(|| format!("{id} needs settings"))?
-            .read(request)
+            .read(request, crate::secrets::spawner::spawner())
             .map_err(|error| error.to_string())
     }
 }

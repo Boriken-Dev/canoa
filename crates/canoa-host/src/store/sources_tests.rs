@@ -2,7 +2,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use canoa::store::source::{CatalogSourceProvider, ReadRequest, SourceInfo};
-use coqui_acp_api::guatiao::library::{ProviderError, Registry};
+use coqui_acp_api::ProcessSpawner;
+use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, ToValue};
 use guatiao_intake::Form;
 use serde_json::json;
@@ -35,7 +36,11 @@ impl CatalogSourceProvider for Standin {
         info.asking::<TeamValues>()
     }
 
-    fn read(&self, request: ReadRequest) -> Result<String, ProviderError> {
+    fn read(
+        &self,
+        request: ReadRequest,
+        _spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<String, ProviderError> {
         if STANDIN_FAILS.load(Ordering::SeqCst) {
             return Err(canoa::store::recipe::internal_error("the stand-in is down"));
         }
@@ -56,7 +61,11 @@ impl CatalogSourceProvider for Everywhere {
         Ok(SourceInfo::new("everywhere", "Every type"))
     }
 
-    fn read(&self, request: ReadRequest) -> Result<String, ProviderError> {
+    fn read(
+        &self,
+        request: ReadRequest,
+        _spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<String, ProviderError> {
         if STANDIN_FAILS.load(Ordering::SeqCst) {
             return Err(canoa::store::recipe::internal_error("the stand-in is down"));
         }
@@ -79,7 +88,11 @@ impl CatalogSourceProvider for Lister {
         Ok(info)
     }
 
-    fn read(&self, request: ReadRequest) -> Result<String, ProviderError> {
+    fn read(
+        &self,
+        request: ReadRequest,
+        _spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<String, ProviderError> {
         if STANDIN_FAILS.load(Ordering::SeqCst) {
             return Err(canoa::store::recipe::internal_error("the stand-in is down"));
         }

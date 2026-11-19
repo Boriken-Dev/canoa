@@ -14,11 +14,13 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use canoa::panel_tab::PanelTabVtable;
+use canoa::profile_item::ProfileItemVtable;
 use canoa::secret_provider::SecretProviderVtable;
 use canoa::settings_section::SettingsSectionVtable;
 use canoa::speech::output::{SpeechOutputVtable, SpeechUtteranceVtable};
 use canoa::speech::{SpeechProviderVtable, SpeechSessionVtable};
 use canoa::store::extension::StoreExtensionVtable;
+use canoa::store::source::CatalogSourceProviderVtable;
 use canoa::store::{InstallPrompterVtable, InstallToolsVtable, ProgramStoreVtable};
 use canoa::vendor::AgentVendorVtable;
 use coqui_acp_api::{
@@ -35,6 +37,8 @@ pub(crate) fn document() -> String {
         AgentVendorVtable::description(),
         StoreExtensionVtable::description(),
         SecretProviderVtable::description(),
+        ProfileItemVtable::description(),
+        CatalogSourceProviderVtable::description(),
         SettingsSectionVtable::description(),
         PanelTabVtable::description(),
         ProgramStoreVtable::description(),
@@ -123,6 +127,8 @@ mod tests {
             "agent_vendor",
             "store_extension",
             "secret_provider",
+            "profile_item",
+            "catalog_source",
             "settings_section",
             "panel_tab",
             "acp_harness",

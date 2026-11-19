@@ -1,0 +1,344 @@
+{
+  "ItemInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The id the profile keeps its values under: a word of lower-case letters, digits and `_`, 1 to 32."
+      },
+      "title": {
+        "type": "string",
+        "description": "Its name for people."
+      },
+      "help": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A line saying what it sets."
+      },
+      "harnesses": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The ids of the harnesses it applies to, as the standard registry of harnesses names them (`claude-code`, the value of `AGENTS_HARNESS`); none means every harness.",
+        "default": []
+      },
+      "schema": {
+        "description": "The values it takes, as a guatiao schema of an object whose members are what its form asks for; none for an item that takes no values. A member the schema marks sensitive is never shown in clear."
+      },
+      "form": {
+        "description": "How the schema is shown, a guatiao-intake form document (sections, widgets, `visibleWhen`); none shows the form the schema implies."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title"
+    ]
+  },
+  "ApplyRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "harness": {
+        "type": "string",
+        "description": "The id of the harness the session runs, as [`ItemInfo::harnesses`] names it; empty when it has none, so an item may differ by harness."
+      },
+      "values": {
+        "type": "string",
+        "description": "What the profile holds for the item, as a JSON object keyed by the schema's member names; a member left empty is absent."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "harness",
+      "values"
+    ]
+  },
+  "ItemEffect": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "env": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Its name."
+            },
+            "value": {
+              "type": "string",
+              "description": "Its value."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "value"
+          ]
+        },
+        "description": "Variables the session's programs are given. A variable the profile's own environment already sets keeps that value, and the report says so.",
+        "default": []
+      },
+      "args": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Arguments added to the command line of a program the host starts.",
+        "default": []
+      },
+      "settings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "The setting's key."
+            },
+            "value": {
+              "type": "string",
+              "description": "Its value, as text (`true` or `false` for a yes or no)."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "key",
+            "value"
+          ]
+        },
+        "description": "Values of the session's own settings.",
+        "default": []
+      },
+      "network": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "One of [`NETWORK_MODES`]."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The proxy's address for `proxy`, or the PAC script's location for `pac`."
+          },
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "For `command`: the program and its arguments, in which `{listen}` stands for the loopback address `host:port` the host tells it to listen on.",
+            "default": []
+          },
+          "bypass": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Hosts that go direct, in the `NO_PROXY` form; empty keeps what the network chooses.",
+            "default": []
+          },
+          "user": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A user name for the proxy, for `proxy` and `pac`."
+          },
+          "password_variable": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name of the host's environment variable that holds that user's password; the password itself is never in a profile."
+          },
+          "intercept": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pattern": {
+                  "type": "string",
+                  "title": "Hosts",
+                  "description": "A host name (`api.example.com`), a name and everything under it (`*.example.com`), an address, or any other regular expression, matched whole and without regard to case against the destination as the program names it (a name, or an address): `.*` matches every destination, `(api|auth)[.]example[.]com` two."
+                },
+                "identity": {
+                  "type": "string",
+                  "title": "Certificate",
+                  "description": "`system` presents what the operating system's keystores choose by the authorities the server names, as a browser would; or the thumbprint (SHA-256, in hex) of one certificate the host lists as available.",
+                  "default": "system"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "pattern"
+              ]
+            },
+            "description": "The destinations whose TLS the host's proxy for the session ends, so as to present a client certificate to them, in order: the first entry whose pattern matches a destination says which certificate it gets. Only `system` and `pac`, which run that proxy, take it; every destination no entry matches stays a tunnel the program's own TLS runs through.",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "mode"
+        ],
+        "description": "The network its programs use."
+      },
+      "notes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What the report says of it, a line each, in the person's words.",
+        "default": []
+      }
+    },
+    "additionalProperties": false
+  },
+  "Variable": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Its name."
+      },
+      "value": {
+        "type": "string",
+        "description": "Its value."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "value"
+    ]
+  },
+  "Setting": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "key": {
+        "type": "string",
+        "description": "The setting's key."
+      },
+      "value": {
+        "type": "string",
+        "description": "Its value, as text (`true` or `false` for a yes or no)."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "key",
+      "value"
+    ]
+  },
+  "NetworkEffect": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "mode": {
+        "type": "string",
+        "description": "One of [`NETWORK_MODES`]."
+      },
+      "url": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The proxy's address for `proxy`, or the PAC script's location for `pac`."
+      },
+      "command": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "For `command`: the program and its arguments, in which `{listen}` stands for the loopback address `host:port` the host tells it to listen on.",
+        "default": []
+      },
+      "bypass": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Hosts that go direct, in the `NO_PROXY` form; empty keeps what the network chooses.",
+        "default": []
+      },
+      "user": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "A user name for the proxy, for `proxy` and `pac`."
+      },
+      "password_variable": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The name of the host's environment variable that holds that user's password; the password itself is never in a profile."
+      },
+      "intercept": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "title": "Hosts",
+              "description": "A host name (`api.example.com`), a name and everything under it (`*.example.com`), an address, or any other regular expression, matched whole and without regard to case against the destination as the program names it (a name, or an address): `.*` matches every destination, `(api|auth)[.]example[.]com` two."
+            },
+            "identity": {
+              "type": "string",
+              "title": "Certificate",
+              "description": "`system` presents what the operating system's keystores choose by the authorities the server names, as a browser would; or the thumbprint (SHA-256, in hex) of one certificate the host lists as available.",
+              "default": "system"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "pattern"
+          ]
+        },
+        "description": "The destinations whose TLS the host's proxy for the session ends, so as to present a client certificate to them, in order: the first entry whose pattern matches a destination says which certificate it gets. Only `system` and `pac`, which run that proxy, take it; every destination no entry matches stays a tunnel the program's own TLS runs through.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "mode"
+    ]
+  },
+  "ClientCertificateHost": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "pattern": {
+        "type": "string",
+        "title": "Hosts",
+        "description": "A host name (`api.example.com`), a name and everything under it (`*.example.com`), an address, or any other regular expression, matched whole and without regard to case against the destination as the program names it (a name, or an address): `.*` matches every destination, `(api|auth)[.]example[.]com` two."
+      },
+      "identity": {
+        "type": "string",
+        "title": "Certificate",
+        "description": "`system` presents what the operating system's keystores choose by the authorities the server names, as a browser would; or the thumbprint (SHA-256, in hex) of one certificate the host lists as available.",
+        "default": "system"
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "pattern"
+    ]
+  }
+}

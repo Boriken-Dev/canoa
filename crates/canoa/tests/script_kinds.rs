@@ -1,7 +1,15 @@
-//! The description of the `agent_vendor`, `store_extension` and `secret_provider` kinds, and their models' schemas: what a library
-//! written in Python or JavaScript is built against. Regenerate the files with
-//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret --test script_kinds`.
-#![cfg(all(feature = "store", feature = "vendor", feature = "secret"))]
+//! The description of the kinds a library written in Python or JavaScript may serve (`agent_vendor`, `store_extension`,
+//! `secret_provider`, `profile_item`, `catalog_source`, `settings_section` and `panel_tab`), and their models' schemas: what such a
+//! library is built against. Regenerate the files with
+//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab --test script_kinds`.
+#![cfg(all(
+    feature = "store",
+    feature = "vendor",
+    feature = "secret",
+    feature = "profile-item",
+    feature = "settings-section",
+    feature = "panel-tab"
+))]
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -10,14 +18,21 @@
 
 use std::path::PathBuf;
 
+use canoa::panel_tab::{PanelTabVtable, Shows, TabInfo, TailRequest};
+use canoa::profile_item::{
+    ApplyRequest, ClientCertificateHost, ItemEffect, ItemInfo, NetworkEffect, ProfileItemVtable,
+    Setting, Variable,
+};
 use canoa::secret_provider::{Held, Keeping, Named, Names, ProviderInfo, SecretProviderVtable};
+use canoa::settings_section::{SectionInfo, SettingsSectionVtable, Stored};
 use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtensionVtable};
+use canoa::store::source::{CatalogSourceProviderVtable, ReadRequest, SourceInfo};
 use canoa::vendor::{
     AccessTarget, AgentVendorVtable, DeliveredFile, EntrySettingsRequest, GatewayRoute,
     HistoryAnswer, HistoryRequest, HookCommand, HookSupport, HookSupportRequest, HooksDelivery,
     HooksRequest, LoginFile, ModeTitle, PluginDelivery, SessionFile, SessionListing,
     SessionsRequest, ShellAdvice, ShellRequest, SkillsDelivery, SkillsRequest, StandardTitle,
-    Variable, VendorInfo,
+    Variable as VendorVariable, VendorInfo,
 };
 use coqui_acp_api::guatiao::Schema;
 use coqui_acp_api::{ProcessSpawnerVtable, SpawnedProcessVtable};
@@ -81,7 +96,7 @@ fn the_committed_vendor_schemas_are_what_this_build_describes() {
             ("VendorInfo", schema_of::<VendorInfo>()),
             ("StandardTitle", schema_of::<StandardTitle>()),
             ("ModeTitle", schema_of::<ModeTitle>()),
-            ("Variable", schema_of::<Variable>()),
+            ("Variable", schema_of::<VendorVariable>()),
             ("LoginFile", schema_of::<LoginFile>()),
             ("ShellRequest", schema_of::<ShellRequest>()),
             ("ShellAdvice", schema_of::<ShellAdvice>()),
@@ -149,6 +164,97 @@ fn the_committed_secret_schemas_are_what_this_build_describes() {
             ("Keeping", schema_of::<Keeping>()),
             ("Held", schema_of::<Held>()),
             ("Names", schema_of::<Names>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_profile_item_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.profile_item.kinds.json",
+        &document(&ProfileItemVtable::description()),
+    );
+}
+
+#[test]
+fn the_committed_profile_item_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.profile_item.schemas.json",
+        &schemas(vec![
+            ("ItemInfo", schema_of::<ItemInfo>()),
+            ("ApplyRequest", schema_of::<ApplyRequest>()),
+            ("ItemEffect", schema_of::<ItemEffect>()),
+            ("Variable", schema_of::<Variable>()),
+            ("Setting", schema_of::<Setting>()),
+            ("NetworkEffect", schema_of::<NetworkEffect>()),
+            (
+                "ClientCertificateHost",
+                schema_of::<ClientCertificateHost>(),
+            ),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_catalog_source_description_is_what_this_build_describes() {
+    // The spawner a source's `read` is handed is described beside it, as the other kinds that name it do.
+    committed(
+        "include/canoa.catalog_source.kinds.json",
+        &document(&format!(
+            "{},{},{}",
+            CatalogSourceProviderVtable::description(),
+            ProcessSpawnerVtable::description(),
+            SpawnedProcessVtable::description()
+        )),
+    );
+}
+
+#[test]
+fn the_committed_catalog_source_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.catalog_source.schemas.json",
+        &schemas(vec![
+            ("SourceInfo", schema_of::<SourceInfo>()),
+            ("ReadRequest", schema_of::<ReadRequest>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_settings_section_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.settings_section.kinds.json",
+        &document(&SettingsSectionVtable::description()),
+    );
+}
+
+#[test]
+fn the_committed_settings_section_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.settings_section.schemas.json",
+        &schemas(vec![
+            ("SectionInfo", schema_of::<SectionInfo>()),
+            ("Stored", schema_of::<Stored>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_panel_tab_description_is_what_this_build_describes() {
+    committed(
+        "include/canoa.panel_tab.kinds.json",
+        &document(&PanelTabVtable::description()),
+    );
+}
+
+#[test]
+fn the_committed_panel_tab_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.panel_tab.schemas.json",
+        &schemas(vec![
+            ("TabInfo", schema_of::<TabInfo>()),
+            ("TailRequest", schema_of::<TailRequest>()),
+            ("Shows", schema_of::<Shows>()),
         ]),
     );
 }
