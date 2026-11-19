@@ -18,7 +18,7 @@ use crate::provider::add_bundled_js;
 
 /// A set of libraries and the files they are made of.
 pub(crate) struct Bundle {
-    /// The name of the folder under `bundled/` they are kept in, which the host's version follows.
+    /// The name of the folder under `bundled/` they are kept in; the host's version and a digest of the files follow it.
     pub(crate) name: &'static str,
     /// The folders of the libraries, relative to the bundle's: each holds a manifest.
     pub(crate) libraries: &'static [&'static str],
