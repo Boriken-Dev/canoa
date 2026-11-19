@@ -83,10 +83,13 @@ fn an_extension_adds_a_type_the_host_lists_and_installs_from() {
         &config,
         identity,
         home.store().expect("a store"),
-        &ServeOptions::new(host_binary()).with_programs(
-            Arc::new(programs(shelf, scratch.0.join("user"))),
-            vec!["echo_store".to_owned()],
-        ),
+        &ServeOptions::new(host_binary())
+            .with_programs(
+                Arc::new(programs(shelf, scratch.0.join("user"))),
+                vec!["echo_store".to_owned()],
+            )
+            // A host serves its home, where the scripts that ship in it are kept: never the person's own.
+            .with_state_dir(home.dir()),
     )
     .expect("it binds");
     let local = serving.local();
