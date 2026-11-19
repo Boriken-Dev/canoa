@@ -422,8 +422,8 @@ the service's address (`endpoint`; the running service's own is read from `~/.fo
 canoa accounts add local --harness claude --method foundry-local --input model=qwen3-14b-generic-gpu:2
 ```
 
-- **Loading a model is the person's.** Load it first, from the Store's Foundry models page (Foundry Local itself is in its
-  Runtimes) or with `foundry model load qwen3-14b-generic-gpu:2`, and unload it when done, since it holds gigabytes other work
+- **Loading a model is the person's.** Load it first, from the Store's Foundry models page (Foundry Local itself is in the
+  Store's Foundry Local type) or with `foundry model load qwen3-14b-generic-gpu:2`, and unload it when done, since it holds gigabytes other work
   needs. The gateway never loads or unloads one; a session on a model that is not loaded is refused with that said.
 - **A gateway per session.** When a session starts on the account the host listens on loopback (a port of the system's choosing)
   and hands the harness an address and a bearer minted for that session, through the harness's own account kind: a gateway
@@ -443,8 +443,8 @@ canoa accounts add local --harness claude --method foundry-local --input model=q
 - **`engine`** is `service` (the default: the model lives in the Foundry Local service) or `sdk` (the model lives in a process
   of the host's own, through Foundry Local's Rust SDK, which needs a build with the `foundry` feature and `library`, a copy of its
   native library made outside the installed package: Windows does not let a program outside the package load one from it).
-- **The `sdk` engine runs in its own process.** The host starts `canoa foundry-engine` (the program it starts its other commands
-  with) for the account, which opens the SDK, loads the model and answers over its standard input and output. The native library
+- **The `sdk` engine runs in its own process.** The gateway starts `canoa helper canoa-foundry` (the program the host starts its
+  other commands with) through the host's spawner for the account, which opens the SDK, loads the model and answers over its standard input and output. The native library
   crashes on some models and prompts (a segmentation fault on a prompt of about two thousand tokens was measured on
   `gpt-oss-20b-generic-gpu:1`), and a crash there ends only that process: the request under way fails with how it ended, and the
   next request starts the process again, which loads the model again (seconds to a minute). A process that has not stopped its
