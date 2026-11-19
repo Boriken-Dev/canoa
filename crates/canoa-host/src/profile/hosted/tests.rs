@@ -5,6 +5,9 @@ use coqui_aos as aos;
 use super::*;
 use crate::config::Config;
 
+/// Where Codex looks for the skills of a directory it is given, which its description says.
+const AGENT_SKILLS: &str = ".agents/skills";
+
 /// A directory of the test's own, removed afterwards.
 struct Temp(PathBuf);
 
@@ -3561,4 +3564,42 @@ fn a_network_that_cannot_be_made_is_refused_in_the_report_and_the_session_still_
         "refused",
         "{report}"
     );
+}
+
+#[test]
+fn a_session_requests_meta_is_merged_with_what_an_agent_adds_key_by_key_and_list_by_list() {
+    let mut meta = json!({"a": {"list": [1], "keep": "mine"}, "b": 1});
+    merge_json(
+        &mut meta,
+        &json!({"a": {"list": [2], "keep": "theirs", "new": true}, "c": 2}),
+    );
+    assert_eq!(
+        meta,
+        json!({"a": {"list": [1, 2], "keep": "mine", "new": true}, "b": 1, "c": 2})
+    );
+}
+
+#[test]
+fn an_agents_plugin_meta_names_the_folder_it_was_written_to() {
+    let dir = std::env::temp_dir().join(format!("canoa-plugin-meta-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a directory");
+    let written = Written(dir.clone());
+    let plugin = canoa::vendor::PluginDelivery::new(
+        "inner/plug",
+        r#"{"x": {"plugins": [{"path": "{path}"}, {"path": "elsewhere"}]}}"#,
+    );
+    let meta = plugin_meta(&plugin, &written).expect("a meta");
+    let path = meta["x"]["plugins"][0]["path"].as_str().expect("text");
+    assert!(path.ends_with("plug") && path.contains("inner"), "{path}");
+    assert_eq!(meta["x"]["plugins"][1]["path"], "elsewhere");
+    let own = canoa::vendor::PluginDelivery::new("", r#"{"p": "{path}"}"#);
+    assert_eq!(
+        plugin_meta(&own, &written).expect("a meta")["p"],
+        dir.to_string_lossy().as_ref()
+    );
+    assert!(
+        plugin_meta(&canoa::vendor::PluginDelivery::new("", "[]"), &written).is_err(),
+        "not an object"
+    );
+    drop(written);
 }

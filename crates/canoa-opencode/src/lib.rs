@@ -16,7 +16,7 @@ use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_HOMEBREW, MANAGER_NATIVE, MANAGER_NPM,
     MANAGER_UNKNOWN, Platform, StoreInfo, Updatable,
 };
-use canoa::vendor::{AgentVendor, StandardTitle, VendorInfo};
+use canoa::vendor::{AccessTarget, AgentVendor, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
 use canoa::store::recipe::{
@@ -59,6 +59,10 @@ impl AgentVendor for OpenCodeVendor {
         info.names = vec!["OpenCode".to_owned()];
         info.mark = Some(MARK.to_owned());
         Ok(info)
+    }
+
+    fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {
+        Ok(Some(AccessTarget::new("opencode", true)))
     }
 
     fn context_not_taken(&self) -> Result<Option<String>, ProviderError> {

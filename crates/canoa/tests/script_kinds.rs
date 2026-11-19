@@ -13,9 +13,10 @@ use std::path::PathBuf;
 use canoa::secret_provider::{Held, Keeping, Named, Names, ProviderInfo, SecretProviderVtable};
 use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtensionVtable};
 use canoa::vendor::{
-    AgentVendorVtable, HistoryAnswer, HistoryRequest, LoginFile, ModeTitle, SessionFile,
-    SessionListing, SessionsRequest, ShellAdvice, ShellRequest, StandardTitle, Variable,
-    VendorInfo,
+    AccessTarget, AgentVendorVtable, DeliveredFile, HistoryAnswer, HistoryRequest, HookCommand,
+    HookSupport, HookSupportRequest, HooksDelivery, HooksRequest, LoginFile, ModeTitle,
+    PluginDelivery, SessionFile, SessionListing, SessionsRequest, ShellAdvice, ShellRequest,
+    SkillsDelivery, SkillsRequest, StandardTitle, Variable, VendorInfo,
 };
 use coqui_acp_api::guatiao::Schema;
 use coqui_acp_api::{ProcessSpawnerVtable, SpawnedProcessVtable};
@@ -88,6 +89,16 @@ fn the_committed_vendor_schemas_are_what_this_build_describes() {
             ("SessionListing", schema_of::<SessionListing>()),
             ("HistoryRequest", schema_of::<HistoryRequest>()),
             ("HistoryAnswer", schema_of::<HistoryAnswer>()),
+            ("DeliveredFile", schema_of::<DeliveredFile>()),
+            ("PluginDelivery", schema_of::<PluginDelivery>()),
+            ("SkillsRequest", schema_of::<SkillsRequest>()),
+            ("SkillsDelivery", schema_of::<SkillsDelivery>()),
+            ("HookCommand", schema_of::<HookCommand>()),
+            ("HooksRequest", schema_of::<HooksRequest>()),
+            ("HooksDelivery", schema_of::<HooksDelivery>()),
+            ("HookSupportRequest", schema_of::<HookSupportRequest>()),
+            ("HookSupport", schema_of::<HookSupport>()),
+            ("AccessTarget", schema_of::<AccessTarget>()),
         ]),
     );
 }

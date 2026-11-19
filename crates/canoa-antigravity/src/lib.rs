@@ -14,7 +14,9 @@ use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_NATIVE, MANAGER_UNKNOWN, Platform,
     StoreInfo, Updatable,
 };
-use canoa::vendor::{AgentVendor, ModeTitle, StandardTitle, VendorInfo};
+use canoa::vendor::{
+    AccessTarget, AgentVendor, ModeTitle, SkillsDelivery, SkillsRequest, StandardTitle, VendorInfo,
+};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
 use canoa::store::recipe::{
@@ -60,6 +62,24 @@ impl AgentVendor for AgyVendor {
         info.mark = Some(MARK.to_owned());
         info.look = None;
         Ok(info)
+    }
+
+    fn skills_delivery(
+        &self,
+        request: SkillsRequest,
+    ) -> Result<Option<SkillsDelivery>, ProviderError> {
+        Ok(request.additional_directories.then(|| {
+            let mut delivery = SkillsDelivery::new(
+                ".agents/skills",
+                "a directory of skills Antigravity reads, through ACP additionalDirectories",
+            );
+            delivery.directory = true;
+            delivery
+        }))
+    }
+
+    fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {
+        Ok(Some(AccessTarget::new("antigravity", true)))
     }
 
     fn skills_not_taken(&self) -> Result<Option<String>, ProviderError> {

@@ -16,7 +16,7 @@ The `agent_vendor` kind: who an agent is, how Canoa shows it and what Canoa does
 pub const KIND: &str = "agent_vendor";
 pub const MAX_DOCUMENT_TEXT: usize = 65536;                                    // the most characters a mark or a look may take
 #[non_exhaustive] pub struct VendorInfo { pub agent: String, pub title: String, pub program: Option<String>, pub vendor: Option<String>,
-    pub aos: Option<String>, pub model_variable: Option<String>, pub standards: Vec<StandardTitle>, pub names: Vec<String>,
+    pub aos: Option<String>, pub model_variable: Option<String>, pub tool_name: Option<String>, pub standards: Vec<StandardTitle>, pub names: Vec<String>,
     pub markers: Vec<String>, pub modes: Vec<ModeTitle>, pub mark: Option<String>, pub look: Option<String> }   // ToValue, FromValue, Schema, Clone, Debug, Eq
 VendorInfo::new(agent, title); .problem() -> Option<String>                      // why the description cannot be used
 #[non_exhaustive] pub struct StandardTitle { pub id: String, pub title: String }  // StandardTitle::new(id, title)
@@ -29,17 +29,26 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
     fn shell_advice(&self, shell: ShellRequest) -> Result<ShellAdvice, ProviderError>;           // how the agent is told to use a shell: variables, or why it cannot be; default `NO_SHELL_SETTING`
     fn context_not_taken(&self) -> Result<Option<String>, ProviderError>;                        // why it takes no starting instructions, when it does not
     fn skills_not_taken(&self) -> Result<Option<String>, ProviderError>;                         // why it takes no profile skills, when it does not
+    fn mcp_not_taken(&self) -> Result<Option<String>, ProviderError>;                            // why it starts none of the MCP servers it is given, when it starts none
+    fn mcp_note(&self) -> Result<Option<String>, ProviderError>;                                 // what the report adds to a server it is given (`{name}`), when it does something with it
+    fn skills_delivery(&self, request: SkillsRequest) -> Result<Option<SkillsDelivery>, ProviderError>;   // how it is given a profile's skills (a folder, files beside them, a plugin loaded through the request's `_meta`, an additional directory); default: it cannot be
+    fn hooks_delivery(&self, request: HooksRequest) -> Result<Option<HooksDelivery>, ProviderError>;      // the files of a plugin whose hooks run the host's forwarder for the moments ACP does not show; default: its own hooks cannot be given
+    fn hook_support(&self, request: HookSupportRequest) -> Result<Option<HookSupport>, ProviderError>;    // what its own hooks do for `cd`, `pre-compact` and a `session-start` after a `compact` or `clear`; default: nothing said
+    fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError>;                      // the table of words (by registry id) for the access, and whether a program the host starts is given it at launch; default none
     fn sessions(&self, request: SessionsRequest) -> Result<Option<SessionListing>, ProviderError>;   // the sessions its program kept on this computer (None: cannot be brought in)
     fn session_history(&self, request: HistoryRequest) -> Result<HistoryAnswer, ProviderError>;     // one session file's text as a standard session history; default refuses UNSUPPORTED
 }
 // Plain data, `non_exhaustive` with `new`: Variable { name, value }, LoginFile { key, file }, ShellRequest { path, name, family: bash|zsh|powershell|cmd|other, wsl, windows },
 // ShellAdvice { env, notice } (`cannot(why)`, `sets(name, value)`), SessionsRequest { home?, limit, peek }, SessionFile { id, path, bytes, updated_ms, title?, cwd? },
 // SessionListing { home?, max_bytes, files (newest first; the newest `peek` carry title and cwd) }, HistoryRequest { text, session }, HistoryAnswer { history, title? }.
+// SkillsRequest { additional_directories }, SkillsDelivery { folder, files, plugin?, directory, how (`{name}`) }, PluginDelivery { folder, meta (JSON merged into the request's `_meta`; a string `PLUGIN_PATH` is the folder's path) },
+// DeliveredFile { path, text }, HooksRequest { commands: [HookCommand { kind: start|pre-compact|batch, command }], timeout_seconds }, HooksDelivery { files, plugin },
+// HookSupportRequest { event, reason? }, HookSupport { fires, text } (`fires`, `cannot`), AccessTarget { harness, at_launch }.
 // `canoa::vendor::sessions` holds what a crate listing session files needs: `tidy`, `folders`, `files`, `found`, `window_lines`, `json_lines`, `listing`.
 ```
 
 - `agent`: 1 to 64 lower-case letters, digits, `-` and `_`: the id of the agent's `acp_harness` provider when it has one (`claude`), else its source's name in lower case. Every other provider and source of the agent names it this way.
-- `title` is the name for people (`Claude`), `program` the program's (`Claude Code`; absent: the title). `vendor` stamps a session (`AGENTS_VENDOR`, `anthropic`); `aos` is the id in the standard registry of harnesses (`claude-code`); `model_variable` is where the running model is read from (`ANTHROPIC_MODEL`). Each may be absent.
+- `title` is the name for people (`Claude`), `program` the program's (`Claude Code`; absent: the title). `vendor` stamps a session (`AGENTS_VENDOR`, `anthropic`); `aos` is the id in the standard registry of harnesses (`claude-code`); `model_variable` is where the running model is read from (`ANTHROPIC_MODEL`); `tool_name` is where the agent puts a tool's own name in a tool call's `_meta`, a JSON pointer below it (`/claudeCode/toolName`). Each may be absent.
 - `standards` are the credential standards that are the vendor's own, each with its name. `names` are the `agentInfo.name` values the agent reports; `markers` are the `initialize` `_meta` keys that are `true` for an agent that reports no name. `modes` are the modes it is known to offer before it has run.
 - `mark` is SVG text: a square `viewBox` and `path` elements with a `d` and an optional `#RRGGBB` `fill` (on the path or the root); a path with none, or `currentColor`, takes the text's colour. `look` is a JSON document with an `id`, a `label`, the agent's `vendor` (its `agent` id) and, for `light` and `dark`, colour tokens, as `looks/list` serves it. Both are at most `MAX_DOCUMENT_TEXT` characters.
 

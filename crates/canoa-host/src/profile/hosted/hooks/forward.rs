@@ -1,4 +1,4 @@
-//! What a harness's own hooks tell the host: Claude Code runs `canoa hook-forward` for the moments ACP does not show
+//! What an agent's own hooks tell the host: the agent runs `canoa hook-forward` for the moments ACP does not show
 //! (compaction, a working directory that changed), and the host, which stays the one place that runs an overlay's hooks,
 //! runs them and answers.
 //!
@@ -27,6 +27,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
+use canoa::vendor::{HookCommand, HooksRequest, PluginDelivery};
 use serde_json::{Map, Value, json};
 
 use super::super::Written;
@@ -353,7 +354,7 @@ fn handle(stream: &TcpStream, shared: &Shared) {
     let _ = writer.write_all(&out);
 }
 
-/// The characters a path may hold to be put inside double quotes in a command Claude Code runs through a shell.
+/// The characters a path may hold to be put inside double quotes in a command an agent runs through a shell.
 fn quotable(text: &str) -> bool {
     !text
         .chars()
@@ -393,48 +394,18 @@ pub(super) fn command_for(
     Some(parts.join(" "))
 }
 
-/// The `hooks` object of the plugin for the kinds in `commands`.
-pub(super) fn hooks_json(commands: &[(Kind, String)]) -> Value {
-    let event = |kind: Kind| match kind {
-        Kind::Start => "SessionStart",
-        Kind::PreCompact => "PreCompact",
-        Kind::Batch => "PostToolBatch",
-    };
-    let mut hooks = Map::new();
-    for (kind, command) in commands {
-        hooks.insert(
-            event(*kind).to_owned(),
-            json!([{"hooks": [{
-                "type": "command",
-                "shell": "bash",
-                "command": command,
-                "timeout": ANSWER_LIMIT.as_secs() + 5,
-            }]}]),
-        );
-    }
-    json!({ "hooks": hooks })
-}
-
-/// Writes the session's plugin under `under`: the channel file and, made from the directory's own name, the hooks that run
-/// the forwarder. `None` when a command cannot be quoted.
+/// Writes the session's plugin under `under`: the channel file and what the agent whose registry id is `harness` makes of the
+/// commands that run the forwarder. `None` when a command cannot be quoted; an error when the agent has no hooks to give.
 pub(super) fn write_plugin(
     under: &Path,
     program: &str,
     before: &[String],
     kinds: &[(Kind, bool)],
     channel: Vec<u8>,
-) -> std::io::Result<Option<Written>> {
+    harness: Option<&str>,
+) -> std::io::Result<Option<(Written, PluginDelivery)>> {
     let mut files = BTreeMap::new();
     files.insert(CHANNEL_FILE.to_owned(), channel);
-    files.insert(
-        ".claude-plugin/plugin.json".to_owned(),
-        serde_json::to_vec(&json!({
-            "name": "canoa-hooks",
-            "version": "0.0.0",
-            "description": "Reports compaction and working directory changes to the host that runs this session",
-        }))
-        .unwrap_or_default(),
-    );
     let written = Written::create(under, &files)?;
     let at = written.root().join(CHANNEL_FILE);
     let mut commands = Vec::new();
@@ -442,13 +413,18 @@ pub(super) fn write_plugin(
         let Some(command) = command_for(program, before, &at, *kind, *refuse) else {
             return Ok(None);
         };
-        commands.push((*kind, command));
+        commands.push(HookCommand::new(kind.as_str(), command));
     }
-    written.add(
-        "hooks/hooks.json",
-        &serde_json::to_vec(&hooks_json(&commands)).unwrap_or_default(),
-    )?;
-    Ok(Some(written))
+    let request = HooksRequest::new(commands, ANSWER_LIMIT.as_secs());
+    let delivery = harness
+        .and_then(|aos| crate::vendors::behave_aos(aos, |vendor| vendor.hooks_delivery(request)))
+        .and_then(Result::ok)
+        .flatten()
+        .ok_or_else(|| std::io::Error::other("the agent gives no hooks"))?;
+    for file in &delivery.files {
+        written.add(&file.path, file.text.as_bytes())?;
+    }
+    Ok(Some((written, delivery.plugin)))
 }
 
 /// What `canoa hook-forward` does: reads the harness's payload from standard input, reports its named fields to the host

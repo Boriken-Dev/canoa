@@ -88,7 +88,7 @@ pub(in crate::profile::hosted) struct Book {
     /// Where a harness's own hooks report to this connection, once a session has asked for it.
     forward: Option<Forward>,
     /// The plugins of hooks written for each session, by Canoa's id for it: removed with it.
-    plugins: BTreeMap<String, Vec<Written>>,
+    plugins: BTreeMap<String, Vec<(Written, serde_json::Value)>>,
 }
 
 impl Book {
@@ -171,9 +171,11 @@ fn blocks_of(context: &[(String, String)], event: &str) -> Vec<Value> {
         .collect()
 }
 
-fn tool_of(call: &Value) -> Tool {
-    let name = call
-        .pointer("/_meta/claudeCode/toolName")
+/// The tool of a tool call: the name the agent keeps in the call's `_meta` at `pointer` (its description's) when it has one, else the
+/// call's title.
+fn tool_of(call: &Value, pointer: Option<&str>) -> Tool {
+    let name = pointer
+        .and_then(|pointer| call.get("_meta")?.pointer(pointer))
         .and_then(Value::as_str)
         .or_else(|| call.get("title").and_then(Value::as_str))
         .unwrap_or("tool");
@@ -219,6 +221,11 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             hold.book.sessions.insert(agent.to_owned(), session.clone());
         }
         session
+    }
+
+    /// Where the harness keeps a tool's own name in a tool call's `_meta`, from its description.
+    fn tool_name_pointer(&self) -> Option<&'static str> {
+        crate::vendors::by_aos(&self.harness_label())?.tool_name
     }
 
     /// The harness as the profile's report names it.
@@ -640,7 +647,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                         .plugins
                         .entry(id)
                         .or_default()
-                        .push(native.written),
+                        .push((native.written, native.meta)),
                     None => {
                         if let Some(forward) = &hold.book.forward {
                             forward.revoke_secret(&native.secret);
@@ -676,7 +683,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             .get("toolCall")
             .or_else(|| params.pointer("/subject/toolCall"))
             .filter(|call| call.is_object());
-        let tool = tool_of(call.unwrap_or(&Value::Null));
+        let tool = tool_of(call.unwrap_or(&Value::Null), self.tool_name_pointer());
         let fired = self.fire(
             HookEvent::PreTool,
             &session,
@@ -766,13 +773,14 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         let call = update.get("toolCallId").and_then(Value::as_str)?.to_owned();
         let kind = update.get("sessionUpdate").and_then(Value::as_str)?;
         let key = (agent.clone(), call);
+        let pointer = self.tool_name_pointer();
         let mut hold = self.hold();
         match kind {
             "tool_call" => {
                 if hold.book.tools.len() >= MAX_TRACKED {
                     hold.book.tools.clear();
                 }
-                hold.book.tools.insert(key, tool_of(update));
+                hold.book.tools.insert(key, tool_of(update, pointer));
                 None
             }
             "tool_call_update" => {
@@ -785,7 +793,7 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                     .book
                     .tools
                     .remove(&key)
-                    .unwrap_or_else(|| tool_of(update));
+                    .unwrap_or_else(|| tool_of(update, pointer));
                 if tool.kind == "other"
                     && let Some(kind) = update.get("kind").and_then(Value::as_str)
                 {

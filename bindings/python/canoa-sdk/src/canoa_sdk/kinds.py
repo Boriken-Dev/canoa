@@ -451,7 +451,7 @@ class StoreExtension(KindProtocol, Protocol, kind="store_extension", floor_hash=
         ...
 
 
-class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=757122965):
+class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=137759391):
     """Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with
     nothing run and no connection opened; every other method has a default that says the agent has nothing to add.
     """
@@ -491,6 +491,48 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=757122
     @fallible
     def skills_not_taken(self) -> ValueAnswer:
         """Why the agent does not take the skills of a profile, in words, when it does not. The default: it does not say."""
+        ...
+
+    @fallible
+    def mcp_not_taken(self) -> ValueAnswer:
+        """Why the agent starts none of the MCP servers a session request gives it, in words, when it starts none. The default: it
+        starts them as ACP says.
+        """
+        ...
+
+    @fallible
+    def mcp_note(self) -> ValueAnswer:
+        """What the report adds to an MCP server the agent is given, in words, where the agent does something with it that the person
+        should know; `{name}` is the server's name. The default: nothing.
+        """
+        ...
+
+    @fallible
+    def skills_delivery(self, request: Ref) -> ValueAnswer:
+        """How the agent is given the skills of a profile, for an agent that says what it takes in `request`; `None` when it cannot be.
+        The default: it cannot.
+        """
+        ...
+
+    @fallible
+    def hooks_delivery(self, request: Ref) -> ValueAnswer:
+        """How the agent runs hooks that report to the host: the moments of `request` that only the agent's own hooks show, as the
+        files of a plugin. `None` when the agent's own hooks cannot be given. The default: they cannot.
+        """
+        ...
+
+    @fallible
+    def hook_support(self, request: Ref) -> ValueAnswer:
+        """What the agent's own hooks do for an event ACP does not show; `None` when the agent says nothing of it, which the host
+        reports as an event no hook of the agent's reaches. The default: nothing.
+        """
+        ...
+
+    @fallible
+    def access_target(self) -> ValueAnswer:
+        """The table of words that says what became of the access a profile sets, for the agent the host starts or serves; `None` for an
+        agent no table covers, which is started as its entry says. The default: none.
+        """
         ...
 
     @fallible

@@ -2,7 +2,7 @@
   "kinds": [
     {
       "name": "agent_vendor",
-      "floor_hash": 757122965,
+      "floor_hash": 137759391,
       "object": false,
       "doc": "Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with\nnothing run and no connection opened; every other method has a default that says the agent has nothing to add.",
       "slots": [
@@ -83,6 +83,84 @@
             "type": "value"
           },
           "doc": "Why the agent does not take the skills of a profile, in words, when it does not. The default: it does not say."
+        },
+        {
+          "name": "mcp_not_taken",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Why the agent starts none of the MCP servers a session request gives it, in words, when it starts none. The default: it\nstarts them as ACP says."
+        },
+        {
+          "name": "mcp_note",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What the report adds to an MCP server the agent is given, in words, where the agent does something with it that the person\nshould know; `{name}` is the server's name. The default: nothing."
+        },
+        {
+          "name": "skills_delivery",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "How the agent is given the skills of a profile, for an agent that says what it takes in `request`; `None` when it cannot be.\nThe default: it cannot."
+        },
+        {
+          "name": "hooks_delivery",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "How the agent runs hooks that report to the host: the moments of `request` that only the agent's own hooks show, as the\nfiles of a plugin. `None` when the agent's own hooks cannot be given. The default: they cannot."
+        },
+        {
+          "name": "hook_support",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "What the agent's own hooks do for an event ACP does not show; `None` when the agent says nothing of it, which the host\nreports as an event no hook of the agent's reaches. The default: nothing."
+        },
+        {
+          "name": "access_target",
+          "required": false,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The table of words that says what became of the access a profile sets, for the agent the host starts or serves; `None` for an\nagent no table covers, which is started as its entry says. The default: none."
         },
         {
           "name": "sessions",

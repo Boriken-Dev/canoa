@@ -39,6 +39,13 @@
         ],
         "description": "The variable the running model is read from in the agent's environment (`ANTHROPIC_MODEL`)."
       },
+      "tool_name": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Where the agent puts a tool's own name in a tool call's `_meta`, as a JSON pointer below `_meta` (`/claudeCode/toolName`); absent for an agent whose tool call title is the name."
+      },
       "standards": {
         "type": "array",
         "items": {
@@ -458,6 +465,296 @@
     "additionalProperties": false,
     "required": [
       "history"
+    ]
+  },
+  "DeliveredFile": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "The file's path below the folder."
+      },
+      "text": {
+        "type": "string",
+        "description": "Its text."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "path",
+      "text"
+    ]
+  },
+  "PluginDelivery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "folder": {
+        "type": "string",
+        "description": "The plugin's folder below the folder the host wrote, `/`-separated; empty for that folder itself."
+      },
+      "meta": {
+        "type": "string",
+        "description": "What the session request's `_meta` gains, as a JSON object: it is merged into the request's, objects key by key and lists by appending. A string that is exactly [`PLUGIN_PATH`] becomes the folder's absolute path."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "folder",
+      "meta"
+    ]
+  },
+  "SkillsRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "additional_directories": {
+        "type": "boolean",
+        "description": "Whether the agent's `initialize` says it takes ACP's `additionalDirectories`."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "additional_directories"
+    ]
+  },
+  "SkillsDelivery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "folder": {
+        "type": "string",
+        "description": "The folder, below the one the host writes, that holds a skill's own folder: a skill `name` is written at `<folder>/<name>/...`."
+      },
+      "files": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "The file's path below the folder."
+            },
+            "text": {
+              "type": "string",
+              "description": "Its text."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "text"
+          ]
+        },
+        "description": "The files written beside the skills, such as a plugin's manifest.",
+        "default": []
+      },
+      "plugin": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "The plugin's folder below the folder the host wrote, `/`-separated; empty for that folder itself."
+          },
+          "meta": {
+            "type": "string",
+            "description": "What the session request's `_meta` gains, as a JSON object: it is merged into the request's, objects key by key and lists by appending. A string that is exactly [`PLUGIN_PATH`] becomes the folder's absolute path."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "folder",
+          "meta"
+        ],
+        "description": "The folder the agent loads as a plugin, when it takes skills in one."
+      },
+      "directory": {
+        "type": "boolean",
+        "description": "Whether the folder the host wrote is given to the session as an additional directory.",
+        "default": false
+      },
+      "how": {
+        "type": "string",
+        "description": "What the report says of each skill, in words; `{name}` is the skill's name."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "folder",
+      "how"
+    ]
+  },
+  "HookCommand": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "description": "What it reports: one of [`HOOK_KINDS`]. `start`: a session started again or was compacted into or cleared; `pre-compact`: a compaction is about to run, which the command's failure stops; `batch`: a batch of tool calls ended."
+      },
+      "command": {
+        "type": "string",
+        "description": "The command line, quoted for a POSIX shell, that reports it to the host."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "kind",
+      "command"
+    ]
+  },
+  "HooksRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "commands": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "What it reports: one of [`HOOK_KINDS`]. `start`: a session started again or was compacted into or cleared; `pre-compact`: a compaction is about to run, which the command's failure stops; `batch`: a batch of tool calls ended."
+            },
+            "command": {
+              "type": "string",
+              "description": "The command line, quoted for a POSIX shell, that reports it to the host."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "command"
+          ]
+        },
+        "description": "One command for each moment to be reported."
+      },
+      "timeout_seconds": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The longest, in seconds, the host may take to answer one."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "commands",
+      "timeout_seconds"
+    ]
+  },
+  "HooksDelivery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "files": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "The file's path below the folder."
+            },
+            "text": {
+              "type": "string",
+              "description": "Its text."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "text"
+          ]
+        },
+        "description": "The files written, below the folder the host made for the session."
+      },
+      "plugin": {
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "The plugin's folder below the folder the host wrote, `/`-separated; empty for that folder itself."
+          },
+          "meta": {
+            "type": "string",
+            "description": "What the session request's `_meta` gains, as a JSON object: it is merged into the request's, objects key by key and lists by appending. A string that is exactly [`PLUGIN_PATH`] becomes the folder's absolute path."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "folder",
+          "meta"
+        ],
+        "description": "How the session request loads them."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "files",
+      "plugin"
+    ]
+  },
+  "HookSupportRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "event": {
+        "type": "string",
+        "description": "The event: `cd` (the working directory changed), `pre-compact` or `session-start`."
+      },
+      "reason": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "For `session-start`, why a session starts that ACP does not show: `compact` or `clear`."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "event"
+    ]
+  },
+  "HookSupport": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "fires": {
+        "type": "boolean",
+        "description": "Whether the event fires."
+      },
+      "text": {
+        "type": "string",
+        "description": "How it fires, or why it cannot, in words."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "fires",
+      "text"
+    ]
+  },
+  "AccessTarget": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "harness": {
+        "type": "string",
+        "description": "The agent's id in the standard registry of harnesses, which names its table of words."
+      },
+      "at_launch": {
+        "type": "boolean",
+        "description": "Whether a program the host starts itself is given the access in its arguments, variables and session `_meta`; false when the agent takes it in each session's request."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "harness",
+      "at_launch"
     ]
   }
 }

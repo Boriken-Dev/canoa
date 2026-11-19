@@ -84,6 +84,9 @@ pub struct VendorInfo {
     pub aos: Option<String>,
     /// The variable the running model is read from in the agent's environment (`ANTHROPIC_MODEL`).
     pub model_variable: Option<String>,
+    /// Where the agent puts a tool's own name in a tool call's `_meta`, as a JSON pointer below `_meta` (`/claudeCode/toolName`);
+    /// absent for an agent whose tool call title is the name.
+    pub tool_name: Option<String>,
     /// The credential standards that are the vendor's own, with their names for people.
     #[map(default)]
     pub standards: Vec<StandardTitle>,
@@ -114,6 +117,7 @@ impl VendorInfo {
             vendor: None,
             aos: None,
             model_variable: None,
+            tool_name: None,
             standards: Vec::new(),
             names: Vec::new(),
             markers: Vec::new(),
@@ -405,6 +409,250 @@ impl HistoryAnswer {
     }
 }
 
+/// A file an agent asks the host to write, at a plain relative path (`/`-separated, no `.` or `..`) below the folder it is written in.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct DeliveredFile {
+    /// The file's path below the folder.
+    pub path: String,
+    /// Its text.
+    pub text: String,
+}
+
+impl DeliveredFile {
+    /// The file `path` holding `text`.
+    #[must_use]
+    pub fn new(path: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            text: text.into(),
+        }
+    }
+}
+
+/// The placeholder in a [`PluginDelivery::meta`] that the host replaces with the folder's absolute path.
+pub const PLUGIN_PATH: &str = "{path}";
+
+/// A folder the host wrote that an agent loads as a plugin, and how a session request says so.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct PluginDelivery {
+    /// The plugin's folder below the folder the host wrote, `/`-separated; empty for that folder itself.
+    pub folder: String,
+    /// What the session request's `_meta` gains, as a JSON object: it is merged into the request's, objects key by key and lists
+    /// by appending. A string that is exactly [`PLUGIN_PATH`] becomes the folder's absolute path.
+    pub meta: String,
+}
+
+impl PluginDelivery {
+    /// The plugin in `folder`, loaded by a session whose `_meta` gains `meta`.
+    #[must_use]
+    pub fn new(folder: impl Into<String>, meta: impl Into<String>) -> Self {
+        Self {
+            folder: folder.into(),
+            meta: meta.into(),
+        }
+    }
+}
+
+/// What an agent said it takes, when the host asks how it takes skills.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct SkillsRequest {
+    /// Whether the agent's `initialize` says it takes ACP's `additionalDirectories`.
+    pub additional_directories: bool,
+}
+
+impl SkillsRequest {
+    /// A request for an agent that takes `additional_directories` or not.
+    #[must_use]
+    pub const fn new(additional_directories: bool) -> Self {
+        Self {
+            additional_directories,
+        }
+    }
+}
+
+/// How an agent is given the skills of a profile.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct SkillsDelivery {
+    /// The folder, below the one the host writes, that holds a skill's own folder: a skill `name` is written at
+    /// `<folder>/<name>/...`.
+    pub folder: String,
+    /// The files written beside the skills, such as a plugin's manifest.
+    #[map(default)]
+    pub files: Vec<DeliveredFile>,
+    /// The folder the agent loads as a plugin, when it takes skills in one.
+    pub plugin: Option<PluginDelivery>,
+    /// Whether the folder the host wrote is given to the session as an additional directory.
+    #[map(default)]
+    pub directory: bool,
+    /// What the report says of each skill, in words; `{name}` is the skill's name.
+    pub how: String,
+}
+
+impl SkillsDelivery {
+    /// Skills written under `folder` and reported as `how`, given to the agent by neither a plugin nor a directory yet.
+    #[must_use]
+    pub fn new(folder: impl Into<String>, how: impl Into<String>) -> Self {
+        Self {
+            folder: folder.into(),
+            files: Vec::new(),
+            plugin: None,
+            directory: false,
+            how: how.into(),
+        }
+    }
+}
+
+/// The moments of a session that only an agent's own hooks show the host.
+pub const HOOK_KINDS: [&str; 3] = ["start", "pre-compact", "batch"];
+
+/// One command an agent's hook runs.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct HookCommand {
+    /// What it reports: one of [`HOOK_KINDS`]. `start`: a session started again or was compacted into or cleared; `pre-compact`:
+    /// a compaction is about to run, which the command's failure stops; `batch`: a batch of tool calls ended.
+    pub kind: String,
+    /// The command line, quoted for a POSIX shell, that reports it to the host.
+    pub command: String,
+}
+
+impl HookCommand {
+    /// The command `command` for the moment `kind`.
+    #[must_use]
+    pub fn new(kind: impl Into<String>, command: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            command: command.into(),
+        }
+    }
+}
+
+/// The hooks the host asks an agent to run.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct HooksRequest {
+    /// One command for each moment to be reported.
+    pub commands: Vec<HookCommand>,
+    /// The longest, in seconds, the host may take to answer one.
+    pub timeout_seconds: u64,
+}
+
+impl HooksRequest {
+    /// A request for `commands`, each given `timeout_seconds` to answer.
+    #[must_use]
+    pub const fn new(commands: Vec<HookCommand>, timeout_seconds: u64) -> Self {
+        Self {
+            commands,
+            timeout_seconds,
+        }
+    }
+}
+
+/// How an agent is given hooks that report to the host: the files of a plugin, and how a session request loads it.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct HooksDelivery {
+    /// The files written, below the folder the host made for the session.
+    pub files: Vec<DeliveredFile>,
+    /// How the session request loads them.
+    pub plugin: PluginDelivery,
+}
+
+impl HooksDelivery {
+    /// Hooks written as `files` and loaded as `plugin`.
+    #[must_use]
+    pub const fn new(files: Vec<DeliveredFile>, plugin: PluginDelivery) -> Self {
+        Self { files, plugin }
+    }
+}
+
+/// An event only an agent's own hooks can show, as the host asks whether they do.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct HookSupportRequest {
+    /// The event: `cd` (the working directory changed), `pre-compact` or `session-start`.
+    pub event: String,
+    /// For `session-start`, why a session starts that ACP does not show: `compact` or `clear`.
+    pub reason: Option<String>,
+}
+
+impl HookSupportRequest {
+    /// A request about `event`, and for a start `reason`.
+    #[must_use]
+    pub fn new(event: impl Into<String>, reason: Option<String>) -> Self {
+        Self {
+            event: event.into(),
+            reason,
+        }
+    }
+}
+
+/// What an agent's own hooks do for one event.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct HookSupport {
+    /// Whether the event fires.
+    pub fires: bool,
+    /// How it fires, or why it cannot, in words.
+    pub text: String,
+}
+
+impl HookSupport {
+    /// An event that fires, as `text` says.
+    #[must_use]
+    pub fn fires(text: impl Into<String>) -> Self {
+        Self {
+            fires: true,
+            text: text.into(),
+        }
+    }
+
+    /// An event that cannot fire, for `text`.
+    #[must_use]
+    pub fn cannot(text: impl Into<String>) -> Self {
+        Self {
+            fires: false,
+            text: text.into(),
+        }
+    }
+}
+
+/// How the table of words for the access (sandbox, network, approvals) reaches an agent.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct AccessTarget {
+    /// The agent's id in the standard registry of harnesses, which names its table of words.
+    pub harness: String,
+    /// Whether a program the host starts itself is given the access in its arguments, variables and session `_meta`; false when
+    /// the agent takes it in each session's request.
+    pub at_launch: bool,
+}
+
+impl AccessTarget {
+    /// The table of `harness`, applied when the program starts (`at_launch`) or when each session does.
+    #[must_use]
+    pub fn new(harness: impl Into<String>, at_launch: bool) -> Self {
+        Self {
+            harness: harness.into(),
+            at_launch,
+        }
+    }
+}
+
 /// What a shell is said to do for an agent that has no word of its own.
 pub const NO_SHELL_SETTING: &str = "this agent documents no setting for its shell";
 
@@ -446,6 +694,54 @@ pub trait AgentVendor: Send + Sync {
         Ok(None)
     }
 
+    /// Why the agent starts none of the MCP servers a session request gives it, in words, when it starts none. The default: it
+    /// starts them as ACP says.
+    fn mcp_not_taken(&self) -> Result<Option<String>, ProviderError> {
+        Ok(None)
+    }
+
+    /// What the report adds to an MCP server the agent is given, in words, where the agent does something with it that the person
+    /// should know; `{name}` is the server's name. The default: nothing.
+    fn mcp_note(&self) -> Result<Option<String>, ProviderError> {
+        Ok(None)
+    }
+
+    /// How the agent is given the skills of a profile, for an agent that says what it takes in `request`; `None` when it cannot be.
+    /// The default: it cannot.
+    fn skills_delivery(
+        &self,
+        request: SkillsRequest,
+    ) -> Result<Option<SkillsDelivery>, ProviderError> {
+        drop(request);
+        Ok(None)
+    }
+
+    /// How the agent runs hooks that report to the host: the moments of `request` that only the agent's own hooks show, as the
+    /// files of a plugin. `None` when the agent's own hooks cannot be given. The default: they cannot.
+    fn hooks_delivery(
+        &self,
+        request: HooksRequest,
+    ) -> Result<Option<HooksDelivery>, ProviderError> {
+        drop(request);
+        Ok(None)
+    }
+
+    /// What the agent's own hooks do for an event ACP does not show; `None` when the agent says nothing of it, which the host
+    /// reports as an event no hook of the agent's reaches. The default: nothing.
+    fn hook_support(
+        &self,
+        request: HookSupportRequest,
+    ) -> Result<Option<HookSupport>, ProviderError> {
+        drop(request);
+        Ok(None)
+    }
+
+    /// The table of words that says what became of the access a profile sets, for the agent the host starts or serves; `None` for an
+    /// agent no table covers, which is started as its entry says. The default: none.
+    fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {
+        Ok(None)
+    }
+
     /// The sessions the agent's own program kept on this computer, found and read as the program lays them out; `None` for an agent
     /// whose sessions Canoa cannot bring in.
     fn sessions(&self, request: SessionsRequest) -> Result<Option<SessionListing>, ProviderError> {
@@ -484,6 +780,27 @@ mod tests {
         assert_eq!(plain.login_file("k".to_owned()).expect("answers"), None);
         assert_eq!(plain.context_not_taken().expect("answers"), None);
         assert_eq!(plain.skills_not_taken().expect("answers"), None);
+        assert_eq!(
+            plain
+                .skills_delivery(SkillsRequest::new(true))
+                .expect("answers"),
+            None
+        );
+        assert_eq!(
+            plain
+                .hooks_delivery(HooksRequest::new(Vec::new(), 1))
+                .expect("answers"),
+            None
+        );
+        assert_eq!(
+            plain
+                .hook_support(HookSupportRequest::new("cd", None))
+                .expect("answers"),
+            None
+        );
+        assert_eq!(plain.access_target().expect("answers"), None);
+        assert_eq!(plain.mcp_not_taken().expect("answers"), None);
+        assert_eq!(plain.mcp_note().expect("answers"), None);
         assert_eq!(
             plain
                 .sessions(SessionsRequest::new(10, 10))

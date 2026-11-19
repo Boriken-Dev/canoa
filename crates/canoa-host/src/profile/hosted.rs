@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
+use canoa::vendor::SkillsRequest;
 use coqui_acp_harness::Target;
 use coqui_aos::{self as aos, Limit, OverlayTree, Settings, StdFs};
 use coqui_transport::{Channel, Failure};
@@ -88,10 +89,6 @@ fn skill_limits() -> Settings {
 fn same_digest(a: &str, b: &str) -> bool {
     matches!((aos::Digest::parse(a), aos::Digest::parse(b)), (Ok(a), Ok(b)) if a == b)
 }
-/// The plugin Claude Code is given a profile's skills in.
-const CLAUDE_PLUGIN: &str = "canoa-profile";
-/// Where Codex and Antigravity read skills inside each directory they are given as `additionalDirectories`.
-const AGENT_SKILLS: &str = ".agents/skills";
 /// The session requests a profile's parts go with.
 const SESSION_METHODS: [&str; 3] = ["session/new", "session/load", "session/resume"];
 /// `initialize` and session requests a connection may have waiting for the agent's answer.
@@ -829,13 +826,9 @@ impl Connection {
         let launched_as = starting_with
             .who
             .harness
-            .and_then(Target::from_harness)
-            .filter(|target| {
-                matches!(
-                    target,
-                    Target::Grok | Target::Antigravity | Target::OpenCode
-                )
-            });
+            .and_then(access_table)
+            .filter(|(_, at_launch)| *at_launch)
+            .map(|(target, _)| target);
         let mut launch_args = Vec::new();
         if let Some(target) = launched_as {
             let words = effective.access.resolved().translate(target);
@@ -1677,6 +1670,14 @@ fn not_taken(
     crate::vendors::behave(known.agent, ask)?.ok().flatten()
 }
 
+/// What the agent whose registry id is `harness` says of the MCP servers it is given: why it starts none, and what it does with one.
+fn mcp_words(harness: Option<&str>) -> (Option<String>, Option<String>) {
+    (
+        not_taken(harness, |vendor| vendor.mcp_not_taken()),
+        not_taken(harness, |vendor| vendor.mcp_note()),
+    )
+}
+
 fn context_not_taken(harness: Option<&str>) -> String {
     not_taken(harness, |vendor| vendor.context_not_taken())
         .unwrap_or_else(|| "the agent does not say it takes a system prompt".to_owned())
@@ -1752,7 +1753,9 @@ impl Written {
 
     fn path(&self, below: &str) -> String {
         let mut path = self.0.clone();
-        path.extend(below.split('/'));
+        if !below.is_empty() {
+            path.extend(below.split('/'));
+        }
         path.to_string_lossy().into_owned()
     }
 }
@@ -2338,14 +2341,15 @@ fn parts_with(
     let mut meta = None;
     let mut directories = Vec::new();
     if !usable.is_empty() {
-        let prefix = match harness {
-            Some("claude-code") => Some(format!("{CLAUDE_PLUGIN}/skills")),
-            Some("codex" | "antigravity") if takes.additional_directories() => {
-                Some(AGENT_SKILLS.to_owned())
-            }
-            _ => None,
-        };
-        match prefix {
+        let delivery = harness
+            .and_then(|aos| {
+                crate::vendors::behave_aos(aos, |vendor| {
+                    vendor.skills_delivery(SkillsRequest::new(takes.additional_directories()))
+                })
+            })
+            .and_then(Result::ok)
+            .flatten();
+        match delivery {
             None => {
                 for (name, layer, _) in &usable {
                     items.push(Item::new(
@@ -2356,59 +2360,55 @@ fn parts_with(
                     ));
                 }
             }
-            Some(prefix) => {
+            Some(delivery) => {
                 for (name, _, files) in &usable {
                     for (path, data) in files {
-                        written_files.insert(format!("{prefix}/{name}/{path}"), data.clone());
+                        written_files
+                            .insert(format!("{}/{name}/{path}", delivery.folder), data.clone());
                     }
                 }
-                let claude = harness == Some("claude-code");
-                if claude {
-                    written_files.insert(
-                        format!("{CLAUDE_PLUGIN}/.claude-plugin/plugin.json"),
-                        serde_json::to_vec(&json!({
-                            "name": CLAUDE_PLUGIN,
-                            "version": "0.0.0",
-                            "description": "The skills of the host's profile for this session",
-                        }))
-                        .unwrap_or_default(),
-                    );
+                for file in &delivery.files {
+                    written_files.insert(file.path.clone(), file.text.clone().into_bytes());
                 }
                 match connection
                     .private()
                     .and_then(|under| Written::create(under, &written_files))
                 {
                     Ok(done) => {
-                        for (name, layer, _) in &usable {
-                            let how = if claude {
-                                format!(
-                                    "the Claude plugin {CLAUDE_PLUGIN}, through the adapter's _meta, as {CLAUDE_PLUGIN}:{name}"
-                                )
-                            } else {
-                                let agent = if harness == Some("antigravity") {
-                                    "Antigravity"
-                                } else {
-                                    "Codex"
-                                };
-                                format!(
-                                    "a directory of skills {agent} reads, through ACP additionalDirectories"
-                                )
-                            };
-                            items.push(Item::new(
-                                format!("skills.{name}"),
-                                layer,
-                                State::Applied,
-                                how,
-                            ));
+                        let given = delivery
+                            .plugin
+                            .as_ref()
+                            .map(|plugin| plugin_meta(plugin, &done))
+                            .transpose();
+                        match given {
+                            Ok(given) => {
+                                for (name, layer, _) in &usable {
+                                    items.push(Item::new(
+                                        format!("skills.{name}"),
+                                        layer,
+                                        State::Applied,
+                                        delivery.how.replace("{name}", name),
+                                    ));
+                                }
+                                meta = given;
+                                if delivery.directory {
+                                    directories.push(done.0.to_string_lossy().into_owned());
+                                }
+                                written = Some(done);
+                            }
+                            Err(why) => {
+                                for (name, layer, _) in &usable {
+                                    items.push(Item::new(
+                                        format!("skills.{name}"),
+                                        layer,
+                                        State::Refused,
+                                        format!(
+                                            "the agent's delivery of them is not usable ({why})"
+                                        ),
+                                    ));
+                                }
+                            }
                         }
-                        if claude {
-                            meta = Some(json!({"claudeCode": {"options": {"plugins": [
-                                {"type": "local", "path": done.path(CLAUDE_PLUGIN)}
-                            ]}}}));
-                        } else {
-                            directories.push(done.0.to_string_lossy().into_owned());
-                        }
-                        written = Some(done);
                     }
                     Err(error) => {
                         for (name, layer, _) in &usable {
@@ -2434,6 +2434,7 @@ fn parts_with(
     let mut servers = Vec::new();
     let mut approvable = Vec::new();
     let mut names = Vec::new();
+    let (mcp_skipped, mcp_note) = mcp_words(harness);
     for (name, sourced) in &effective.mcp {
         names.push(name.clone());
         let ready = ready_mcp(name, sourced, &effective, &after, lookup);
@@ -2449,7 +2450,7 @@ fn parts_with(
             Item::new(key, &ready.layer, State::Refused, why.clone())
         } else if !allowed {
             if !connection.host.off_mcp.contains(name)
-                && harness != Some("pi")
+                && mcp_skipped.is_none()
                 && takes.mcp(ready.transport)
                 && let Some(server) = acp_server(&ready, takes.version)
             {
@@ -2473,13 +2474,8 @@ fn parts_with(
                 State::Off,
                 "not allowed by the host's configuration: allow_mcp names it at this digest",
             )
-        } else if harness == Some("pi") {
-            Item::new(
-                key,
-                &ready.layer,
-                State::Unsupported,
-                "pi-acp accepts mcpServers and starts none of them",
-            )
+        } else if let Some(why) = &mcp_skipped {
+            Item::new(key, &ready.layer, State::Unsupported, why.clone())
         } else if !takes.mcp(ready.transport) {
             Item::new(
                 key,
@@ -2493,10 +2489,8 @@ fn parts_with(
         } else if let Some(server) = acp_server(&ready, takes.version) {
             servers.push(server);
             let mut said = vec!["ACP mcpServers".to_owned()];
-            if harness == Some("codex") {
-                said.push(format!(
-                    "Codex skips it if its own configuration names a server {name}"
-                ));
+            if let Some(note) = &mcp_note {
+                said.push(note.replace("{name}", name));
             }
             if !ready.withheld.is_empty() {
                 said.push(format!("left out: {}", ready.withheld.join(", ")));
@@ -2595,15 +2589,24 @@ fn parts_with(
     }
 }
 
-/// Which table of words says what became of the access: the translators this host runs, by the name they report, and the
-/// program the host started with the access (`launched`). An agent that is neither was started as its entry says.
+/// The table of words for the agent whose registry id is `aos`, as its description says, and whether a program the host starts
+/// itself is given the access when it starts (and not in each session's request).
+fn access_table(aos: &str) -> Option<(Target, bool)> {
+    let target = crate::vendors::behave_aos(aos, |vendor| vendor.access_target())?.ok()??;
+    Some((Target::from_harness(&target.harness)?, target.at_launch))
+}
+
+/// Which table of words says what became of the access: the one of the agent that reports itself as `reported` when it takes the
+/// access in each session's request, else the program the host started with the access (`launched`). An agent that is neither was
+/// started as its entry says.
 fn access_target(reported: Option<&str>, launched: Option<Target>) -> Option<Target> {
-    match reported {
-        Some("coqui-acp-claude") => Some(Target::Claude),
-        Some("coqui-acp-codex") => Some(Target::Codex),
-        Some("coqui-acp-pi") => Some(Target::Pi),
-        _ => launched,
-    }
+    let described = reported
+        .and_then(|name| crate::vendors::behave_name(name, |vendor| vendor.access_target()))
+        .and_then(Result::ok)
+        .flatten()
+        .filter(|target| !target.at_launch)
+        .and_then(|target| Target::from_harness(&target.harness));
+    described.or(launched)
 }
 
 /// What became of each part of the access a layer above the built-in one set, as `Item`s: the words it was turned into, or why
@@ -2733,24 +2736,61 @@ fn add_parts(params: &mut Map<String, Value>, parts: &Parts) -> Result<(), Strin
     Ok(())
 }
 
-/// Puts the profile's `_meta` in the request's, keeping the plugins the host has already added for the session's hooks.
+/// Puts the profile's `_meta` in the request's, keeping what the host has already added for the session, such as the plugin of its
+/// hooks: objects are merged key by key and lists appended, the profile's first.
 fn merge_meta(params: &mut Map<String, Value>, meta: &Value) {
     let mut merged = meta.clone();
-    let held = params
-        .get("_meta")
-        .and_then(|held| held.pointer("/claudeCode/options/plugins"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if let Some(plugins) = merged
-        .pointer_mut("/claudeCode/options/plugins")
-        .and_then(Value::as_array_mut)
-    {
-        plugins.extend(held);
-    } else if !held.is_empty() {
-        merged["claudeCode"] = json!({"options": {"plugins": held}});
+    if let Some(held) = params.get("_meta") {
+        merge_json(&mut merged, held);
     }
     params.insert("_meta".to_owned(), merged);
+}
+
+/// Adds what `from` holds to `into`: an object's keys are merged, a list is appended to, and any other value `into` has stays.
+pub(in crate::profile::hosted) fn merge_json(into: &mut Value, from: &Value) {
+    match (into, from) {
+        (Value::Object(into), Value::Object(from)) => {
+            for (key, value) in from {
+                match into.get_mut(key) {
+                    Some(held) => merge_json(held, value),
+                    None => {
+                        into.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+        (Value::Array(into), Value::Array(from)) => into.extend(from.iter().cloned()),
+        _ => {}
+    }
+}
+
+/// What a session request's `_meta` gains to load the plugin an agent asked for, written under `written`: the agent's own text with
+/// its path placeholder replaced by the plugin's folder.
+///
+/// # Errors
+///
+/// Why the agent's text is not a JSON object.
+pub(in crate::profile::hosted) fn plugin_meta(
+    plugin: &canoa::vendor::PluginDelivery,
+    written: &Written,
+) -> Result<Value, String> {
+    fn place(value: &mut Value, path: &str) {
+        match value {
+            Value::String(text) if text == canoa::vendor::PLUGIN_PATH => {
+                path.clone_into(text);
+            }
+            Value::Array(list) => list.iter_mut().for_each(|each| place(each, path)),
+            Value::Object(map) => map.values_mut().for_each(|each| place(each, path)),
+            _ => {}
+        }
+    }
+    let mut meta: Value =
+        serde_json::from_str(&plugin.meta).map_err(|_| "its _meta is not JSON".to_owned())?;
+    if !meta.is_object() {
+        return Err("its _meta is not an object".to_owned());
+    }
+    place(&mut meta, &written.path(&plugin.folder));
+    Ok(meta)
 }
 
 /// The report with the servers the person allowed for this session shown as applied.

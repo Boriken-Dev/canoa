@@ -23,6 +23,8 @@ pub(crate) struct Vendor {
     pub(crate) aos: Option<&'static str>,
     /// The variable its running model is read from.
     pub(crate) model_variable: Option<&'static str>,
+    /// Where it puts a tool's own name in a tool call's `_meta`, as a JSON pointer below `_meta`.
+    pub(crate) tool_name: Option<&'static str>,
     /// The credential standards that are the vendor's own.
     pub(crate) standards: Vec<&'static str>,
     /// The names it reports in `initialize`.
@@ -41,6 +43,7 @@ impl Vendor {
             vendor: info.vendor.as_deref().map(keep),
             aos: info.aos.as_deref().map(keep),
             model_variable: info.model_variable.as_deref().map(keep),
+            tool_name: info.tool_name.as_deref().map(keep),
             standards: info.standards.iter().map(|each| keep(&each.id)).collect(),
             names: info.names.iter().map(|name| keep(name)).collect(),
         }
@@ -116,6 +119,19 @@ pub(crate) fn resolve(name: &str) -> Option<Vendor> {
             || each.vendor == Some(name)
             || each.standards.contains(&name)
     })
+}
+
+/// Runs `f` on the `agent_vendor` provider of the bundled agent whose id in the standard registry of harnesses is `aos`; `None`
+/// when no bundled agent has that id.
+pub(crate) fn behave_aos<T>(aos: &str, f: impl FnOnce(&dyn AgentVendor) -> T) -> Option<T> {
+    let known = by_aos(aos)?;
+    behave(known.agent, f)
+}
+
+/// Runs `f` on the `agent_vendor` provider of the bundled agent that reports itself as `name` in `initialize`.
+pub(crate) fn behave_name<T>(name: &str, f: impl FnOnce(&dyn AgentVendor) -> T) -> Option<T> {
+    let known = by_name(name)?;
+    behave(known.agent, f)
 }
 
 static BUNDLED_PROVIDERS: OnceLock<Option<Registry>> = OnceLock::new();

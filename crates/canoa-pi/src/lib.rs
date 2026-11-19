@@ -20,7 +20,9 @@ use canoa::store::{
     Check, Download, InstallTools, LatestReport, Launch, MANAGER_NATIVE, MANAGER_NPM,
     MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
 };
-use canoa::vendor::{AgentVendor, ModeTitle, ShellAdvice, ShellRequest, StandardTitle, VendorInfo};
+use canoa::vendor::{
+    AccessTarget, AgentVendor, ModeTitle, ShellAdvice, ShellRequest, StandardTitle, VendorInfo,
+};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, Value};
 
@@ -84,6 +86,16 @@ impl AgentVendor for PiVendor {
         Ok(Some(
             "pi-acp passes Pi no --skill; Pi reads skills only from its own and the project's directories".to_owned(),
         ))
+    }
+
+    fn mcp_not_taken(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(
+            "pi-acp accepts mcpServers and starts none of them".to_owned(),
+        ))
+    }
+
+    fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {
+        Ok(Some(AccessTarget::new("pi", false)))
     }
 
     fn shell_advice(&self, shell: ShellRequest) -> Result<ShellAdvice, ProviderError> {

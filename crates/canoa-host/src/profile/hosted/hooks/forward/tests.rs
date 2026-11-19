@@ -440,11 +440,6 @@ fn a_command_is_written_only_for_paths_that_quote_safely() {
         command_for(program, &["--x\n".to_owned()], channel, Kind::Start, false),
         None
     );
-    let hooks = hooks_json(&[(Kind::PreCompact, command.clone())]);
-    assert_eq!(
-        hooks["hooks"]["PreCompact"][0]["hooks"][0]["shell"], "bash",
-        "the command is written for bash"
-    );
     // The secret is not in what the command line shows.
     let dir = Dir::new("cmd");
     let (host, path) = opened(&dir);

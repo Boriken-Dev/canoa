@@ -10,10 +10,10 @@ use coqui_transport::Channel;
 use serde_json::{Map, Value, json};
 
 use super::super::forward::{Forward, Forwarded, Kind, Verdict, write_plugin};
-use super::super::native::is_claude;
+use super::super::native::gives_hooks;
 use super::SessionHooks;
 use crate::profile::hosted::hooks::report_item;
-use crate::profile::hosted::{Hosted, Written};
+use crate::profile::hosted::{Hosted, Written, merge_json, plugin_meta};
 
 /// A directory compared as the harness and the client may each have spelled it: separators and, on Windows, case.
 fn plain(dir: &str) -> String {
@@ -32,11 +32,13 @@ fn plain(dir: &str) -> String {
 pub(super) struct Enrolled {
     pub(super) secret: String,
     pub(super) written: Written,
+    /// What the session request's `_meta` gains to load the plugin.
+    pub(super) meta: Value,
 }
 
 /// What came of giving a session a plugin of the harness's own hooks.
 pub(super) enum Plugin {
-    /// No overlay listens for what the harness's hooks show, or the harness is not Claude Code.
+    /// No overlay listens for what the harness's hooks show, or the harness has no hooks to give.
     Nothing,
     Added(Enrolled),
     /// The session already holds one, from the request that opened it: it is given again, with its secret.
@@ -48,31 +50,17 @@ pub(super) enum Plugin {
     },
 }
 
-/// Adds the plugin at `path` to the session request's Claude Code plugins.
-fn add_plugin(params: &mut Map<String, Value>, path: &str) {
+/// Adds what the agent's hooks plugin needs to the session request's `_meta`.
+fn add_plugin(params: &mut Map<String, Value>, gained: &Value) {
     let meta = params.entry("_meta").or_insert_with(|| json!({}));
     if !meta.is_object() {
         *meta = json!({});
     }
-    let options = &mut meta["claudeCode"];
-    if !options.is_object() {
-        *options = json!({});
-    }
-    let options = &mut options["options"];
-    if !options.is_object() {
-        *options = json!({});
-    }
-    let plugins = &mut options["plugins"];
-    if !plugins.is_array() {
-        *plugins = json!([]);
-    }
-    if let Some(plugins) = plugins.as_array_mut() {
-        plugins.push(json!({"type": "local", "path": path}));
-    }
+    merge_json(meta, gained);
 }
 
 impl<C: Channel + ?Sized> Hosted<'_, C> {
-    /// Gives a session a plugin of Claude Code hooks that report to this host, when an overlay listens for what only
+    /// Gives a session a plugin of the agent's hooks that report to this host, when an overlay listens for what only
     /// they show, and adds it to the session request's plugins. When one is needed and cannot be made the answer says why,
     /// and whether an overlay's guard needs it, which the caller must not let fail open.
     pub(super) fn native_plugin(
@@ -80,7 +68,8 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
         params: &mut Map<String, Value>,
         session: &SessionHooks,
     ) -> Plugin {
-        if !is_claude(Some(&self.harness_label())) {
+        let label = self.harness_label();
+        if !gives_hooks(Some(&label)) {
             return Plugin::Nothing;
         }
         let (kinds, guarded) = self.connection.hooks.native(&session.allowed);
@@ -100,10 +89,10 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
             .plugins
             .get(&session.id)
             .and_then(|held| held.first())
-            .map(|held| held.root().to_string_lossy().into_owned());
-        if let Some(path) = kept {
+            .map(|(_, meta)| meta.clone());
+        if let Some(meta) = kept {
             drop(hold);
-            add_plugin(params, &path);
+            add_plugin(params, &meta);
             return Plugin::Kept;
         }
         if hold.book.forward.is_none() {
@@ -132,10 +121,11 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                 &before,
                 &kinds,
                 channel,
+                Some(&label),
             )
         });
-        let written = match made {
-            Ok(Some(written)) => written,
+        let (written, plugin) = match made {
+            Ok(Some(made)) => made,
             Ok(None) => {
                 forward.revoke_secret(&secret);
                 return failed(
@@ -147,10 +137,20 @@ impl<C: Channel + ?Sized> Hosted<'_, C> {
                 return failed(format!("the plugin could not be written ({error})"));
             }
         };
-        let path = written.root().to_string_lossy().into_owned();
+        let meta = match plugin_meta(&plugin, &written) {
+            Ok(meta) => meta,
+            Err(why) => {
+                forward.revoke_secret(&secret);
+                return failed(format!("the agent's hooks plugin is not usable ({why})"));
+            }
+        };
         drop(hold);
-        add_plugin(params, &path);
-        Plugin::Added(Enrolled { secret, written })
+        add_plugin(params, &meta);
+        Plugin::Added(Enrolled {
+            secret,
+            written,
+            meta,
+        })
     }
 
     /// A request that ended before the agent had it: the channel and plugin made for it end too.

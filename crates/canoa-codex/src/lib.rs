@@ -8,6 +8,7 @@
 extern crate alloc;
 
 mod behaviour;
+mod delivery;
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -21,8 +22,9 @@ use canoa::store::{
     MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
 };
 use canoa::vendor::{
-    AgentVendor, HistoryAnswer, HistoryRequest, LoginFile, ModeTitle, SessionListing,
-    SessionsRequest, ShellAdvice, ShellRequest, StandardTitle, Variable, VendorInfo,
+    AccessTarget, AgentVendor, HistoryAnswer, HistoryRequest, HookSupport, HookSupportRequest,
+    LoginFile, ModeTitle, SessionListing, SessionsRequest, ShellAdvice, ShellRequest,
+    SkillsDelivery, SkillsRequest, StandardTitle, Variable, VendorInfo,
 };
 use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
@@ -83,6 +85,30 @@ impl AgentVendor for CodexVendor {
         Ok(Some(
             "the adapter does not say it takes more directories, where Codex would read them"
                 .to_owned(),
+        ))
+    }
+
+    fn skills_delivery(
+        &self,
+        request: SkillsRequest,
+    ) -> Result<Option<SkillsDelivery>, ProviderError> {
+        Ok(delivery::skills_delivery(&request))
+    }
+
+    fn hook_support(
+        &self,
+        request: HookSupportRequest,
+    ) -> Result<Option<HookSupport>, ProviderError> {
+        Ok(delivery::hook_support(&request))
+    }
+
+    fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {
+        Ok(Some(AccessTarget::new("codex", false)))
+    }
+
+    fn mcp_note(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some(
+            "Codex skips it if its own configuration names a server {name}".to_owned(),
         ))
     }
 

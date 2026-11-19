@@ -7,6 +7,7 @@
 extern crate alloc;
 
 mod behaviour;
+mod delivery;
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -20,8 +21,9 @@ use canoa::store::{
     MANAGER_UNKNOWN, MANAGER_WINGET, Platform, Serves, StoreInfo, Updatable,
 };
 use canoa::vendor::{
-    AgentVendor, HistoryAnswer, HistoryRequest, LoginFile, ModeTitle, SessionListing,
-    SessionsRequest, ShellAdvice, ShellRequest, StandardTitle, Variable, VendorInfo,
+    AccessTarget, AgentVendor, HistoryAnswer, HistoryRequest, HookSupport, HookSupportRequest,
+    HooksDelivery, HooksRequest, LoginFile, ModeTitle, SessionListing, SessionsRequest,
+    ShellAdvice, ShellRequest, SkillsDelivery, SkillsRequest, StandardTitle, Variable, VendorInfo,
 };
 use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
@@ -57,6 +59,7 @@ impl AgentVendor for ClaudeVendor {
         info.vendor = Some("anthropic".to_owned());
         info.aos = Some("claude-code".to_owned());
         info.model_variable = Some("ANTHROPIC_MODEL".to_owned());
+        info.tool_name = Some("/claudeCode/toolName".to_owned());
         info.standards = vec![
             StandardTitle::new("claude-code", "Claude Code"),
             StandardTitle::new("anthropic-api", "Anthropic API"),
@@ -87,6 +90,32 @@ impl AgentVendor for ClaudeVendor {
 
     fn shell_advice(&self, shell: ShellRequest) -> Result<ShellAdvice, ProviderError> {
         Ok(behaviour::shell_advice(&shell))
+    }
+
+    fn skills_delivery(
+        &self,
+        request: SkillsRequest,
+    ) -> Result<Option<SkillsDelivery>, ProviderError> {
+        drop(request);
+        Ok(Some(delivery::skills_delivery()))
+    }
+
+    fn hooks_delivery(
+        &self,
+        request: HooksRequest,
+    ) -> Result<Option<HooksDelivery>, ProviderError> {
+        Ok(Some(delivery::hooks_delivery(&request)))
+    }
+
+    fn hook_support(
+        &self,
+        request: HookSupportRequest,
+    ) -> Result<Option<HookSupport>, ProviderError> {
+        Ok(delivery::hook_support(&request))
+    }
+
+    fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {
+        Ok(Some(AccessTarget::new("claude-code", false)))
     }
 
     fn sessions(&self, request: SessionsRequest) -> Result<Option<SessionListing>, ProviderError> {

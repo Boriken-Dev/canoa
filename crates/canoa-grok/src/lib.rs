@@ -14,7 +14,7 @@ use canoa::store::{
     Check, Download, InstallTools, LatestReport, MANAGER_NATIVE, MANAGER_UNKNOWN, MANAGER_WINGET,
     Platform, StoreInfo, Updatable,
 };
-use canoa::vendor::{AgentVendor, StandardTitle, VendorInfo};
+use canoa::vendor::{AccessTarget, AgentVendor, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
 use canoa::store::recipe::{
@@ -54,6 +54,10 @@ impl AgentVendor for GrokVendor {
         info.mark = Some(MARK.to_owned());
         info.look = None;
         Ok(info)
+    }
+
+    fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {
+        Ok(Some(AccessTarget::new("grok", true)))
     }
 }
 
