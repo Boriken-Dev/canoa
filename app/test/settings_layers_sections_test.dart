@@ -7,7 +7,9 @@ import 'package:canoa/config/config_layers.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/desktop/hosting_panel.dart';
+import 'package:canoa/loadout/loadout_controller.dart';
 import 'package:canoa/sources/sources.dart';
+import 'package:canoa/store/store_catalogs.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -138,22 +140,27 @@ void main() {
     expect(h.last.warnPermille, 900);
   });
 
-  testWidgets('Catalogs', (tester) async {
+  testWidgets('A Store type\'s catalogs and the limits', (tester) async {
     const mine = 'https://example.org/mine.git@main#catalog.toml';
     const theirs = 'https://example.org/theirs.git@main#catalog.toml';
-    final config = _layered(
+    var stored = _layered(
       own: {'store': {'overlays': {'catalogs': {'team': mine}}, 'catalog_max_bytes': 2000}},
       system: {'store': {'overlays': {'catalogs': {'team': theirs, 'more': theirs}}, 'catalog_max_bytes': 1000}},
     );
-    final h = await openSettings(tester, config: config, section: 'catalogs');
+    await tester.binding.setSurfaceSize(const Size(1000, 2600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = LoadoutController(config: stored, home: null, save: (changed) async => stored = changed);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(MaterialApp(home: StoreSettingsPage(controller: controller, type: 'overlays')));
+    await tester.pumpAndSettle();
     expect(_from, findsOneWidget, reason: 'the catalog only the system names');
     expect(_overrides, findsNWidgets(2), reason: 'a catalog and a limit');
     await tester.ensureVisible(_reset.first);
     await tester.tap(_reset.first);
     await tester.pumpAndSettle();
-    expect((h.last.catalogTable('overlays') as Map)['team'], theirs);
+    expect((stored.catalogTable('overlays') as Map)['team'], theirs);
     await _resetOne(tester);
-    expect((h.last.tables['store'] as Map)['catalog_max_bytes'], 1000);
+    expect((stored.tables['store'] as Map)['catalog_max_bytes'], 1000);
   });
 
   testWidgets('Hosting', (tester) async {

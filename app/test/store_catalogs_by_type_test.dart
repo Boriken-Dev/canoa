@@ -4,6 +4,8 @@
 @Timeout(Duration(minutes: 2))
 library;
 
+import 'dart:io';
+
 import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/config/catalog_specs.dart';
 import 'package:canoa/loadout/loadout_controller.dart';
@@ -11,6 +13,8 @@ import 'package:canoa/store/catalog_types.dart';
 import 'package:canoa/store/store_catalogs.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
 const _everywhere = {
   'id': 'read',
@@ -117,6 +121,8 @@ plugins = "https://example.invalid/plugins.git@main#extensions.toml"
 ''';
 
 void main() {
+  setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/store_catalogs_by_type_test.dart')));
+
   group('canoa.cfg: one shape for every type', () {
     final config = CanoaConfig.parse(_file);
 
@@ -255,6 +261,26 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
       expect(stored.catalogSpecs('mcps').keys, ['corp']);
       expect(stored.catalogSpecs('extensions').keys, ['plugins']);
       expect(shown(tester), hasLength(2));
+    });
+
+    testWidgets('Skills settings drawn: its sources, the form that adds one and the limits', (tester) async {
+      await open(tester, 'skills');
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/store_type_settings_desktop.png'));
+    });
+
+    testWidgets('the limits on what a catalog is read as are on every type\'s page, written to [store], and one set back to its default is not written', (tester) async {
+      for (final type in const ['overlays', 'skills', 'mcps', 'extensions']) {
+        await open(tester, type);
+        expect(find.byKey(const Key('limit-catalog_max_bytes')), findsOneWidget, reason: type);
+      }
+      await open(tester, 'skills');
+      await tester.enterText(find.byKey(const Key('limit-catalog_max_depth')), '90');
+      await tester.pumpAndSettle();
+      expect(stored.store.catalogMaxDepth, 90);
+      expect((stored.tables['store'] as Map)['catalog_max_depth'], 90);
+      await tester.enterText(find.byKey(const Key('limit-catalog_max_depth')), '64');
+      await tester.pumpAndSettle();
+      expect((stored.tables['store'] as Map).containsKey('catalog_max_depth'), isFalse, reason: 'back to its default, so not written');
     });
 
     testWidgets('the official MCP registry is always listed first and has no Remove', (tester) async {

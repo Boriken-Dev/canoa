@@ -276,7 +276,7 @@ void appTests() {
 
   testWidgets('a key without hosting has no Extensions page', (tester) async {
     await _app(tester, hosting: false);
-    expect(find.byKey(const Key('settings-nav-catalogs')), findsOneWidget);
+    expect(find.byKey(const Key('settings-nav-store')), findsOneWidget);
     expect(find.byKey(const Key('settings-nav-extensions')), findsNothing);
   });
 }

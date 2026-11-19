@@ -125,6 +125,11 @@ void main() {
         await tester.pumpAndSettle();
       });
 
+      testWidgets('Store: no catalog list here, the way to each type\'s own settings', (tester) async {
+        await open(tester, section: 'store');
+        await golden(tester, 'store');
+      });
+
       testWidgets('Voice with no speech service here', (tester) async {
         await open(tester, section: 'voice');
         await golden(tester, 'voice_none');

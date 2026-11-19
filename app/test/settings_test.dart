@@ -159,15 +159,15 @@ void main() {
   group('the page', () {
     testWidgets('lists the sections in groups, opens the first, and has no Save, Cancel or Quit', (tester) async {
       await openSettings(tester);
-      for (final group in const ['App', 'Agents', 'Overlays', 'About']) {
+      for (final group in const ['App', 'Agents', 'Store', 'About']) {
         expect(find.text(group), findsWidgets);
       }
-      for (final id in const ['general', 'appearance', 'notifications', 'shortcuts', 'sources', 'profiles', 'mcp', 'permissions', 'usage', 'catalogs', 'about']) {
+      for (final id in const ['general', 'appearance', 'notifications', 'shortcuts', 'sources', 'profiles', 'mcp', 'permissions', 'usage', 'store', 'about']) {
         expect(find.byKey(Key('settings-nav-$id')), findsOneWidget, reason: id);
       }
       expect(find.byKey(const Key('settings-nav-hosting')), findsNothing, reason: 'this app runs no host here');
       expect(find.byKey(const Key('settings-section-general')), findsOneWidget);
-      for (final id in const ['general', 'appearance', 'notifications', 'shortcuts', 'sources', 'profiles', 'mcp', 'permissions', 'usage', 'catalogs', 'about']) {
+      for (final id in const ['general', 'appearance', 'notifications', 'shortcuts', 'sources', 'profiles', 'mcp', 'permissions', 'usage', 'store', 'about']) {
         await goTo(tester, id);
         expect(find.byKey(Key('settings-section-$id')), findsOneWidget, reason: id);
         for (final word in const ['Save', 'Cancel', 'Quit Canoa']) {
@@ -486,51 +486,26 @@ void main() {
     });
   });
 
-  group('Catalogs', () {
-    testWidgets('lists, adds and removes catalogs, and names what a bad one is', (tester) async {
-      final h = await openSettings(tester, config: every, section: 'catalogs');
-      expect(find.text('https://example.invalid/catalog.git@main#catalog.json'), findsOneWidget);
-      await tester.enterText(find.byKey(const Key('catalog-label')), 'extra');
-      await tester.enterText(find.byKey(const Key('catalog-spec')), 'not a source');
-      await tester.tap(find.byKey(const Key('catalog-add')));
-      await tester.pumpAndSettle();
-      expect(h.applied, isEmpty);
-      expect(find.textContaining('catalogs.extra'), findsOneWidget);
-      await tester.enterText(find.byKey(const Key('catalog-spec')), 'https://example.invalid/more.git@main#more.json');
-      await tester.tap(find.byKey(const Key('catalog-add')));
-      await tester.pumpAndSettle();
-      expect(h.last.catalogs.keys, ['main', 'extra']);
-      expect(changedTables(every, h.last), {'store'});
-
-      await tester.tap(find.byKey(const Key('catalog-remove-main')));
-      await tester.pumpAndSettle();
-      expect(h.last.catalogs.keys, ['extra']);
-      expect(CanoaConfig.parse(h.last.encode()).catalogs.keys, ['extra']);
+  group('Store', () {
+    testWidgets('Settings lists no catalogs: they are each Store type\'s, and the section opens the Store', (tester) async {
+      var opened = 0;
+      await openSettings(tester, config: every, section: 'store', onLoadout: () => opened++);
+      expect(find.text('https://example.invalid/catalog.git@main#catalog.json'), findsNothing);
+      for (final key in const ['catalog-main', 'catalog-label', 'catalog-spec', 'catalog-add', 'limit-catalog_max_bytes']) {
+        expect(find.byKey(Key(key)), findsNothing, reason: key);
+      }
+      expect(find.byKey(const Key('settings-nav-catalogs')), findsNothing);
+      await tester.tap(find.byKey(const Key('settings-open-store')));
+      expect(opened, 1);
     });
 
-    testWidgets('the default catalog is listed first, and removing it writes false to the person\'s own file', (tester) async {
-      final h = await openSettings(tester, config: CanoaConfig.parse('[store.overlays.catalogs]\nmine = "https://example.invalid/m.git@main#c.toml"\n'), section: 'catalogs');
-      expect(find.byKey(const Key('catalog-boriken')), findsOneWidget);
-      expect(find.text(defaultCatalogSpec), findsOneWidget);
-      await tester.tap(find.byKey(const Key('catalog-remove-boriken')));
-      await tester.pumpAndSettle();
-      expect(h.last.catalogs.keys, ['mine']);
-      expect(h.last.catalogTable('overlays'), {'boriken': false, 'mine': 'https://example.invalid/m.git@main#c.toml'});
-      expect(CanoaConfig.parse(h.last.encode()).catalogs.keys, ['mine'], reason: 'it stays removed when the file is read again');
-    });
-
-    testWidgets('the limits are numbers written to [store], and one set back to its default is not written', (tester) async {
-      final h = await openSettings(tester, config: every, section: 'catalogs', size: const Size(1100, 2600));
-      expect(find.widgetWithText(TextField, '100000'), findsOneWidget);
-      await tester.enterText(find.byKey(const Key('limit-catalog_max_depth')), '90');
-      await tester.pumpAndSettle();
-      expect(h.last.store.catalogMaxDepth, 90);
-      expect((tomlOf(h.last)['store'] as Map)..remove('overlays'), {'catalog_max_bytes': 100000, 'catalog_max_depth': 90});
-      await tester.enterText(find.byKey(const Key('limit-catalog_max_bytes')), '${4 * 1024 * 1024}');
-      await tester.enterText(find.byKey(const Key('limit-catalog_max_depth')), '64');
-      await tester.pumpAndSettle();
-      expect((tomlOf(h.last)['store'] as Map).keys, ['overlays'], reason: 'the limits are back to their defaults and so not written');
-      expect(changedTables(every, h.last), {'store'});
+    testWidgets('searching for catalogs, sources or registries finds the Store section', (tester) async {
+      await openSettings(tester);
+      for (final word in const ['catalog', 'registries', 'skills']) {
+        await tester.enterText(find.byKey(const Key('settings-search')), word);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('settings-nav-store')), findsOneWidget, reason: word);
+      }
     });
   });
 

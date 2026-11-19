@@ -1061,9 +1061,9 @@ repository of overlays (`https://github.com/example/overlays.git@main#overlays`)
 
 Canoa offers one catalog of its own, first, with nothing configured: `boriken`, Boriken Dev's overlays
 (`https://github.com/Boriken-Dev/agent-overlays.git@main#catalog.toml`). It is fetched like any catalog, by the host,
-so a desktop app and a served page list the same. Yours add beside it. To remove it, use Remove in Settings, Catalogs, or
+so a desktop app and a served page list the same. Yours add beside it. To remove it, use Remove on the Overlays settings page in the Store, or
 set `boriken = false` in your own canoa.cfg: that is kept across restarts and never edits a lower layer. Giving the label
-`boriken` a source of yours replaces it, and Settings, Add, or the Store's own offer brings it back.
+`boriken` a source of yours replaces it, and the Overlays settings page's Add, or the Store's own offer brings it back.
 
 ```toml
 [store.overlays.catalogs]
@@ -1158,7 +1158,7 @@ What has been run, by platform:
 - **Linux (Fedora 44 under WSLg, arm64)**: tray_manager draws the icon as a StatusNotifier item, which passes no clicks on, so **Open Canoa** in its menu opens the chat. The app looks for a StatusNotifier host on the session bus (`org.kde.StatusNotifierWatcher`). With one, closing the window hides it, and picking Open Canoa from the menu over D-Bus, as a panel does, brings it back. WSLg's desktop has none, so there the app shows no icon, and closing the window minimizes it instead of hiding it where nothing could bring it back; WSLg does not report the window as minimized.
 - **macOS**: not run.
 
-The Settings action brings up the main window and opens Settings, a page (Ctrl+, from anywhere in the app) with a list of sections at its left: App (General, Appearance, Notifications, Shortcuts), Agents (Sources, Profiles, MCP servers, Permissions, Usage) and Overlays (Catalogs), then About, and a search over their keywords. A value applies as it is changed and is written at once to the same canoa.cfg file, not an unrelated preferences database; there is no Save or Cancel, and every section keeps the tables it does not edit. A value kept only on this computer is marked. Quitting is the tray's and the menu's, not Settings'. A system-hosted web application cannot overwrite its deployment canoa.cfg.
+The Settings action brings up the main window and opens Settings, a page (Ctrl+, from anywhere in the app) with a list of sections at its left: App (General, Appearance, Notifications, Shortcuts), Agents (Sources, Profiles, MCP servers, Permissions, Usage) and Store (Store, Extensions), then About, and a search over their keywords. A value applies as it is changed and is written at once to the same canoa.cfg file, not an unrelated preferences database; there is no Save or Cancel, and every section keeps the tables it does not edit. A value kept only on this computer is marked. Quitting is the tray's and the menu's, not Settings'. A system-hosted web application cannot overwrite its deployment canoa.cfg.
 
 Where the host grants the key `usage`, the app also has a Usage section of its own (its selector icon, with an index of All accounts and each account under its provider). Its Limits view shows each account's allowances as the host last heard them: how much is left, a bar, the reset, the pace and when the figure was read, with a warning in words once a reading is half an hour old. An account that several hosts report under the same identity is one allowance, the newest reading; Host, Provider and Account filters share the index's selection. The section holds the `[usage] warn_permille` choice, so Settings does not list Usage then. Accounts are still managed in Settings.
 

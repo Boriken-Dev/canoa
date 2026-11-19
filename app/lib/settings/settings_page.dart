@@ -69,7 +69,7 @@ const _sections = [
   SettingsSection(id: 'mail', group: 'Agents', title: 'Mail', icon: Icons.mail_outline, keywords: 'email exchange outlook ews mailbox inbox messages password account add remove test sign in'),
   SettingsSection(id: 'shells', group: 'Agents', title: 'Shells', icon: Icons.terminal, keywords: 'bash git bash powershell pwsh wsl msys2 terminal shell command windows'),
   SettingsSection(id: 'usage', group: 'Agents', title: 'Usage', icon: Icons.speed, keywords: 'limit warn percent quota'),
-  SettingsSection(id: 'catalogs', group: 'Overlays', title: 'Catalogs', icon: Icons.storefront_outlined, keywords: 'store limits catalog sources icons size'),
+  SettingsSection(id: 'store', group: 'Store', title: 'Store', icon: Icons.storefront_outlined, keywords: 'catalog catalogs sources registries overlays skills mcp servers types limits icons size'),
   SettingsSection(id: 'extensions', group: 'Store', title: 'Extensions', icon: Icons.extension_outlined, keywords: 'store types runtimes add library provider host restart'),
   SettingsSection(id: 'about', group: 'About', title: 'About', icon: Icons.info_outline, keywords: 'version canoa boriken licence'),
 ];
@@ -359,7 +359,7 @@ class SettingsPageState extends State<SettingsPage> {
       'accounts' => AccountsSection(controller: widget.accounts!),
       'mail' => MailSection(key: const Key('settings-mail'), controller: widget.mail!),
       'usage' => UsageWarning(controller: controller),
-      'catalogs' => CatalogsSection(controller: controller),
+      'store' => StoreSection(key: const Key('settings-store'), onStore: widget.onLoadout),
       'extensions' => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!),
       'shells' => ShellsSection(key: const Key('settings-shells'), settings: widget.shells!),
       _ => AboutSection(version: widget.version),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../config/canoa_config.dart';
 import 'setting_layers.dart';
 
 /// The row every Settings section is made of: a title and a one-line description on the left, the control on the right.
@@ -19,6 +20,7 @@ class SettingsRow extends StatelessWidget {
     this.leading,
     this.configKey,
     this.onLayerReset,
+    this.layerConfig,
   });
 
   final String title;
@@ -49,6 +51,10 @@ class SettingsRow extends StatelessWidget {
   /// What Reset does when the row keeps something besides the value (a text field); by default it only takes the key out.
   final VoidCallback? onLayerReset;
 
+  /// The configuration [configKey] is looked up in when the row is not under Settings' own page, such as a Store type's settings
+  /// (its [onLayerReset] then writes the way that page does).
+  final CanoaConfig? layerConfig;
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
@@ -58,7 +64,7 @@ class SettingsRow extends StatelessWidget {
       Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, children: [
         Text(title, style: text.bodyLarge),
         if (machine) const MachineBadge(),
-        if (configKey case final key?) SettingNote(configKey: key, onReset: onLayerReset),
+        if (configKey case final key?) SettingNote(configKey: key, config: layerConfig, onReset: onLayerReset),
       ]),
       if (description != null) Padding(padding: const EdgeInsets.only(top: 2), child: Text(description!, style: text.bodySmall?.copyWith(color: muted))),
     ]);

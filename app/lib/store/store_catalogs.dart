@@ -2,14 +2,19 @@ import 'dart:async';
 
 import 'package:coqui_aos/coqui_aos.dart' as aos;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 
 import '../config/canoa_config.dart';
 import '../config/catalog_specs.dart';
 import '../forms/schema_fields.dart';
 import '../loadout/loadout_controller.dart';
+import '../settings/setting_layers.dart' show SettingNote;
+import '../settings/settings_row.dart';
+import '../theme/look.dart';
 import 'catalog_types.dart';
 import 'overlay_page.dart' show oneLine;
 import 'store.dart';
+import 'store_settings.dart';
 
 /// Store settings of one type: the catalogs that type reads, added, listed with what each said and removed. What the type calls them
 /// and the forms that add one are the host's to say (`store/catalogs`), so a type an extension adds has them too. Where the limits
@@ -70,10 +75,95 @@ class StoreSettingsPage extends StatelessWidget {
           AddCatalogForm(controller: c, type: type, words: words),
           if (extras.isNotEmpty) ...[const SizedBox(height: 24), ...extras],
           const SizedBox(height: 16),
-          for (final nonDefault in c.config.store.nonDefaults) Text('[store] $nonDefault', style: text.bodySmall),
+          StoreLimits(controller: c),
         ]),
       );
     },
+  );
+}
+
+/// How much of a catalog and of an icon the Store reads, which every type's catalogs share: whole numbers written to `[store]`, with the
+/// default beside each, and one set back to its default is not written.
+class StoreLimits extends StatelessWidget {
+  const StoreLimits({super.key, required this.controller});
+
+  final LoadoutController controller;
+
+  static const _limits = [
+    ('catalog_max_bytes', 'Largest catalog', 'Bytes read from one catalog file'),
+    ('catalog_max_depth', 'Deepest nesting', 'Levels of nesting in a catalog'),
+    ('catalog_max_entries', 'Most entries', 'Entries one catalog may list'),
+    ('catalog_max_icons', 'Most icons', 'Distinct icon files read for one catalog'),
+    ('icon_max_bytes', 'Largest icon', 'Bytes of one icon file'),
+    ('icon_max_width', 'Widest icon', 'Pixels'),
+    ('icon_max_height', 'Tallest icon', 'Pixels'),
+    ('contents_ttl_seconds', 'Contents kept for', 'Seconds what was read of every entry stays current; 0 reads again at every refresh'),
+  ];
+
+  static int _value(StoreSettings s, String key) => switch (key) {
+    'catalog_max_bytes' => s.catalogMaxBytes,
+    'catalog_max_depth' => s.catalogMaxDepth,
+    'catalog_max_entries' => s.catalogMaxEntries,
+    'catalog_max_icons' => s.catalogMaxIcons,
+    'icon_max_bytes' => s.iconMaxBytes,
+    'icon_max_width' => s.iconMaxWidth,
+    'contents_ttl_seconds' => s.contentsTtlSeconds,
+    _ => s.iconMaxHeight,
+  };
+
+  @override
+  Widget build(BuildContext context) => SettingsGroup(title: 'Limits', children: [
+    for (final (key, title, description) in _limits)
+      SettingsRow(
+        title: title,
+        description: '$description. Default ${_value(const StoreSettings(), key)}',
+        configKey: ['store', key],
+        layerConfig: controller.config,
+        onLayerReset: () => unawaited(controller.apply(controller.config.resetKey(['store', key]))),
+        control: _LimitField(
+          key: Key('limit-$key'),
+          value: _value(controller.config.store, key),
+          onChanged: (n) => unawaited(controller.apply(controller.config.withStore(controller.config.store.withLimit(key, n)))),
+        ),
+      ),
+  ]);
+}
+
+/// A whole number, 0 or more, applied as it is typed once it reads as one.
+class _LimitField extends StatefulWidget {
+  const _LimitField({super.key, required this.value, required this.onChanged});
+
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  @override
+  State<_LimitField> createState() => _LimitFieldState();
+}
+
+class _LimitFieldState extends State<_LimitField> {
+  late final _text = TextEditingController(text: '${widget.value}');
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 140,
+    child: TextField(
+      controller: _text,
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      textAlign: TextAlign.end,
+      style: const TextStyle(fontFamily: CanoaLook.monospaceFont),
+      decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
+      onChanged: (text) {
+        final n = int.tryParse(text);
+        if (n != null) widget.onChanged(n);
+      },
+    ),
   );
 }
 
@@ -96,11 +186,18 @@ class CatalogRowTile extends StatelessWidget {
       key: Key('store-catalog-${row.label}'),
       contentPadding: EdgeInsets.zero,
       title: Text(row.label),
-      subtitle: Text([
-        if (row.shown.isNotEmpty) row.shown,
-        if (provider != null && provider != readProvider) 'Read by ${titled ?? provider}',
-        ?row.problem,
-      ].map(oneLine).join('\n')),
+      subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text([
+          if (row.shown.isNotEmpty) row.shown,
+          if (provider != null && provider != readProvider) 'Read by ${titled ?? provider}',
+          ?row.problem,
+        ].map(oneLine).join('\n')),
+        SettingNote(
+          configKey: ['store', type, 'catalogs', row.label],
+          config: c.config,
+          onReset: () => unawaited(c.apply(c.config.resetKey(['store', type, 'catalogs', row.label]))),
+        ),
+      ]),
       trailing: row.fixed
           ? null
           : TextButton(
