@@ -779,8 +779,9 @@ accounts = \"file\"
         out.contains("non-default: [secrets] accounts is auto and "),
         "{out}"
     );
-    let sealed = std::fs::read_dir(fixture.home().join("accounts"))
-        .expect("accounts directory")
+    // The `file` secret provider keeps what it seals in the home's `secrets` directory.
+    let sealed = std::fs::read_dir(fixture.home().join("secrets"))
+        .expect("secrets directory")
         .flatten()
         .any(|entry| entry.file_name().to_string_lossy().ends_with(".sealed"));
     assert!(sealed, "the account is in a sealed file");
