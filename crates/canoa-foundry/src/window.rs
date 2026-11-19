@@ -267,6 +267,85 @@ fn link_tree(from: &Path, to: &Path, top: bool) -> Result<(), WindowError> {
     Ok(())
 }
 
+/// The file in a mirrored folder that says what it was linked from, so that a folder already right is not made again.
+pub const MIRROR_MARKER: &str = "canoa-mirror.json";
+
+/// The tool-call markers to register a model with when its own package publishes none, as `(opening, closing)`: Foundry Local
+/// refuses a request that carries tools to a model with no markers ("structured tool calling requires model-published opening and
+/// closing tool markers"), though the model writes calls in a fixed form. Only models whose form is known are here; `None` for
+/// every other, which is registered as it is.
+#[must_use]
+pub fn tool_markers(id: &str) -> Option<(&'static str, &'static str)> {
+    let name = id.rsplit_once(':').map_or(id, |(name, _)| name);
+    name.to_ascii_lowercase()
+        .starts_with("qwen3.5-")
+        .then_some(("<tool_call>", "</tool_call>"))
+}
+
+fn mirror_marker(source: &Path) -> Value {
+    let config = fs::metadata(source.join(CONFIG)).ok();
+    json!({
+        "source": source.to_string_lossy(),
+        "config_len": config.as_ref().map(fs::Metadata::len),
+        "config_modified": config
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|since| since.as_secs()),
+    })
+}
+
+/// Links the model `id` that Foundry Local downloaded into `from` into `to`, at the same place under it
+/// (`<publisher>/<name>-<n>/v<n>`), and returns where. `to` is a models folder of Canoa's own: the SDK keeps its catalog of
+/// registered models in the models folder it is given, so a folder of its own keeps Foundry Local's cache as the person left it.
+/// The weights are linked and never copied. A folder already linked from the same files is reused.
+///
+/// # Errors
+///
+/// The model is not downloaded in `from`, a folder at the place that is not one Canoa linked, the weights cannot be linked
+/// (`to` is on another drive than `from`), or the disk refuses.
+pub fn mirror(from: &Path, to: &Path, id: &str) -> Result<PathBuf, WindowError> {
+    let source = cached_folder(from, id).ok_or_else(|| {
+        WindowError::Invalid(format!(
+            "{id} is not downloaded in {}: download it with Foundry Local first",
+            from.display()
+        ))
+    })?;
+    let relative = source
+        .strip_prefix(from)
+        .map_err(|error| read_error(&source, error))?;
+    let folder = to.join(relative);
+    let made = mirror_marker(&source);
+    let found = fs::read_to_string(folder.join(MIRROR_MARKER))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    if found.as_ref() == Some(&made) && folder.join(CONFIG).is_file() {
+        return Ok(folder);
+    }
+    if folder.exists() && found.is_none() {
+        return Err(WindowError::Write(format!(
+            "{} exists and is not a folder Canoa linked: it is left as it is",
+            folder.display()
+        )));
+    }
+    let partial = folder.with_extension("partial");
+    if partial.exists() {
+        fs::remove_dir_all(&partial).map_err(|error| write_error(&partial, error))?;
+    }
+    let built = link_tree(&source, &partial, false).and_then(|()| {
+        let file = partial.join(MIRROR_MARKER);
+        fs::write(&file, made.to_string()).map_err(|error| write_error(&file, error))
+    });
+    if let Err(error) = built {
+        let _ = fs::remove_dir_all(&partial);
+        return Err(error);
+    }
+    if folder.exists() {
+        fs::remove_dir_all(&folder).map_err(|error| write_error(&folder, error))?;
+    }
+    fs::rename(&partial, &folder).map_err(|error| write_error(&folder, error))?;
+    Ok(folder)
+}
+
 /// Makes Canoa's own folder for the model cached at `source`, with a window of `wanted` tokens (capped at the model's own
 /// context length), under `base` as [`folder_name`]`(id)`. The cached folder is only read. A folder already made for this
 /// source and window is reused.
@@ -501,5 +580,74 @@ mod tests {
         assert_eq!(cached_folder(&cache, "qwen3-1.7b-generic-gpu"), None);
         assert_eq!(cached_folder(&root.join("missing"), "a:1"), None);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_model_is_linked_into_canoas_own_models_folder_and_foundrys_cache_is_not_written() {
+        let (root, model) = standin("mirror");
+        let cache = root.join("cache");
+        let own = root.join("own");
+        let before = fs::read(model.join(CONFIG)).expect("reads");
+        let linked = mirror(&cache, &own, "qwen3-1.7b-generic-gpu:2").expect("linked");
+        assert_eq!(
+            linked,
+            own.join("Microsoft/qwen3-1.7b-generic-gpu-2/v2"),
+            "the same place under the folder"
+        );
+        for file in [
+            CONFIG,
+            "model.onnx",
+            "tokenizer.json",
+            "genai_config.json.dlverified",
+        ] {
+            assert_eq!(
+                fs::read(linked.join(file)).expect("linked"),
+                fs::read(model.join(file)).expect("original"),
+                "{file}"
+            );
+        }
+        assert_eq!(fs::read(model.join(CONFIG)).expect("reads"), before);
+        assert!(
+            !model.join(MIRROR_MARKER).exists(),
+            "nothing was added to the cache"
+        );
+        // Linked again, it is the same folder, left alone.
+        fs::write(linked.join("kept.txt"), "k").expect("a file");
+        assert_eq!(
+            mirror(&cache, &own, "qwen3-1.7b-generic-gpu:2").expect("reused"),
+            linked
+        );
+        assert!(linked.join("kept.txt").exists(), "not made again");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_folder_canoa_did_not_link_and_a_model_that_is_not_downloaded_are_refused() {
+        let (root, _) = standin("mirror_refused");
+        let cache = root.join("cache");
+        let own = root.join("own");
+        let theirs = own.join("Microsoft/qwen3-1.7b-generic-gpu-2/v2");
+        fs::create_dir_all(&theirs).expect("a folder");
+        fs::write(theirs.join("mine.txt"), "mine").expect("a file");
+        let refused = mirror(&cache, &own, "qwen3-1.7b-generic-gpu:2").expect_err("refused");
+        assert!(matches!(refused, WindowError::Write(_)), "{refused}");
+        assert!(theirs.join("mine.txt").exists(), "left as it was");
+        let missing = mirror(&cache, &own, "other-model:1").expect_err("not downloaded");
+        assert!(matches!(missing, WindowError::Invalid(_)), "{missing}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_markers_are_known_for_the_qwen_3_5_family_and_for_no_other_model() {
+        assert_eq!(
+            tool_markers("qwen3.5-9b-generic-gpu:4"),
+            Some(("<tool_call>", "</tool_call>"))
+        );
+        assert_eq!(
+            tool_markers("Qwen3.5-27b-generic-gpu:1").map(|m| m.0),
+            Some("<tool_call>")
+        );
+        assert_eq!(tool_markers("qwen3-14b-generic-gpu:2"), None);
+        assert_eq!(tool_markers("gpt-oss-20b-generic-gpu:1"), None);
     }
 }

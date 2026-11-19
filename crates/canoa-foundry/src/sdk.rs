@@ -39,6 +39,14 @@ pub struct SdkConfig {
     pub cache: Option<PathBuf>,
     /// The window to run the model with, when it is not the one the model has.
     pub window: Option<SdkWindow>,
+    /// The folder the engine makes Canoa's own copy of a model in when it needs one without a window: to give a model the tool-call
+    /// markers its package lacks. A window's folder is [`SdkWindow::folder`].
+    pub copies: Option<PathBuf>,
+    /// A models folder of Canoa's own. The SDK keeps the models registered with it in a catalog file in the models folder it is
+    /// given, so when this is set that is the folder, the model is linked into it from `cache`, and Foundry Local's own folder is
+    /// not written. When the model cannot be linked there (another drive) the engine uses `cache` itself and says so in
+    /// [`SdkEngine::notes`].
+    pub own_cache: Option<PathBuf>,
 }
 
 impl SdkConfig {
@@ -50,6 +58,8 @@ impl SdkConfig {
             library: None,
             cache: None,
             window: None,
+            own_cache: None,
+            copies: None,
         }
     }
 }
@@ -114,21 +124,32 @@ fn failed(error: impl core::fmt::Display) -> EngineError {
     EngineError::Failed(error.to_string())
 }
 
-/// Makes Canoa's adjusted copy of the downloaded `original` and registers it in the SDK's local catalog, which names the copy's
+/// Makes Canoa's copy of the downloaded `original` in `folder` and registers it in the SDK's local catalog, which names the copy's
 /// folder and leaves Foundry Local's own cache as it is. The registered model carries what the catalog's entry says of the
-/// original (its task, its tool-call markers, what it can read), with the window as its context length.
-async fn register_window(
+/// original (its task, its tool-call markers, what it can read), with the window as its context length: `wanted` tokens, or the
+/// window the model has when `None`. `markers` are the tool-call markers the copy is given when the original has none.
+async fn register_copy(
     manager: &FoundryLocalManager,
     original: &Model,
-    window: &SdkWindow,
+    wanted: Option<u64>,
+    markers: Option<(&str, &str)>,
+    folder: &std::path::Path,
 ) -> Result<(Arc<Model>, crate::window::Adjusted), EngineError> {
     let id = original.id().to_owned();
     let source = original.path().await.map_err(|error| {
         EngineError::Failed(format!(
-            "{id} is not downloaded, so its window cannot be set: {error}"
+            "{id} is not downloaded, so a copy of it cannot be made: {error}"
         ))
     })?;
-    let adjusted = crate::window::adjust(&source, &window.folder, &id, window.tokens)
+    let tokens = match wanted {
+        Some(tokens) => tokens,
+        None => {
+            let own = crate::window::read(&source)
+                .map_err(|error| EngineError::Refused(error.to_string()))?;
+            own.max_length.or(own.limit()).unwrap_or(0)
+        }
+    };
+    let adjusted = crate::window::adjust(&source, folder, &id, tokens)
         .map_err(|error| EngineError::Refused(error.to_string()))?;
     let catalog = manager.local_catalog().map_err(failed)?;
     let mut info = catalog.create_model_info().map_err(failed)?;
@@ -149,6 +170,14 @@ async fn register_window(
         {
             info.set_int_property(key, value).map_err(failed)?;
         }
+    }
+    if let Some((start, end)) = markers {
+        info.set_string_property("tool_call_start", start)
+            .map_err(failed)?;
+        info.set_string_property("tool_call_end", end)
+            .map_err(failed)?;
+        info.set_int_property("supports_tool_calling", 1)
+            .map_err(failed)?;
     }
     info.set_int_property(
         "context_length",
@@ -171,8 +200,10 @@ pub struct SdkEngine {
     // Every client and session of the SDK hangs off the manager, which also registers the execution providers a model needs.
     manager: Arc<FoundryLocalManager>,
     model: Arc<Model>,
-    /// The adjusted copy the model runs from, when a window was set.
+    /// The adjusted copy the model runs from, when a window was set or tool-call markers were added.
     adjusted: Option<crate::window::Adjusted>,
+    /// What the engine did that the person may want to know, or could not do.
+    notes: Vec<String>,
     /// One request at a time: a model answers one, and a second session on it is not what the service was measured with.
     one_at_a_time: Mutex<()>,
     /// Whether [`SdkEngine::load`] loaded the model and it is still loaded.
@@ -227,10 +258,22 @@ impl SdkEngine {
         if let Some(library) = &config.library {
             sdk = sdk.library_path(library.to_string_lossy().into_owned());
         }
-        let cache = config
+        let mut notes = Vec::new();
+        let foundry = config
             .cache
             .clone()
             .or_else(|| std::env::home_dir().and_then(|home| foundry_cache(&home)));
+        let mut cache = foundry.clone();
+        if let (Some(own), Some(foundry)) = (&config.own_cache, &foundry) {
+            match crate::window::mirror(foundry, own, &config.model) {
+                Ok(_) => cache = Some(own.clone()),
+                Err(error @ crate::window::WindowError::NotLinked(_)) => notes.push(format!(
+                    "{} runs from Foundry Local's own models folder, whose catalog file this engine changes while it runs and restores when it ends: {error}",
+                    config.model
+                )),
+                Err(error) => return Err(EngineError::Refused(error.to_string())),
+            }
+        }
         if let Some(cache) = cache {
             sdk = sdk.model_cache_dir(cache.to_string_lossy().into_owned());
         }
@@ -238,26 +281,56 @@ impl SdkEngine {
         let mut model = runtime
             .block_on(manager.catalog().get_model_variant(&config.model))
             .map_err(failed)?;
+        // A model whose package publishes no tool-call markers is refused any request that carries tools, though it writes calls
+        // in a form that is known: its copy is registered with the markers.
+        let markers = crate::window::tool_markers(&config.model).filter(|_| {
+            model
+                .get_string_property("tool_call_start")
+                .ok()
+                .flatten()
+                .is_none_or(|marker| marker.is_empty())
+        });
+        let copies = config
+            .window
+            .as_ref()
+            .map(|window| window.folder.clone())
+            .or_else(|| config.copies.clone());
         let mut adjusted = None;
         let mut registered = None;
-        if let Some(window) = &config.window {
-            let (copy, made) = runtime.block_on(register_window(&manager, &model, window))?;
-            registered = Some(crate::window::registered_id(&config.model, made.window));
-            model = copy;
-            adjusted = Some(made);
+        if config.window.is_some() || markers.is_some() {
+            if let Some(folder) = &copies {
+                let wanted = config.window.as_ref().map(|window| window.tokens);
+                let (copy, made) =
+                    runtime.block_on(register_copy(&manager, &model, wanted, markers, folder))?;
+                registered = Some(crate::window::registered_id(&config.model, made.window));
+                model = copy;
+                adjusted = Some(made);
+            } else {
+                notes.push(format!(
+                    "{} needs tool-call markers to take tools, and this engine has no folder of its own to make the copy that carries them in",
+                    config.model
+                ));
+            }
         }
         Ok(Self {
             runtime,
             manager,
             model,
             adjusted,
+            notes,
             one_at_a_time: Mutex::new(()),
             loaded: AtomicBool::new(false),
             registered,
         })
     }
 
-    /// The adjusted copy this engine runs, when a window was set: where it is, the window it has and the note when the window
+    /// What the engine did that the person may want to know, or could not do: where the model runs from, a copy it could not make.
+    #[must_use]
+    pub fn notes(&self) -> &[String] {
+        &self.notes
+    }
+
+    /// The adjusted copy this engine runs, when a window was set or tool-call markers were added: where it is, the window it has and the note when the window
     /// is less than was asked for.
     #[must_use]
     pub fn adjusted(&self) -> Option<&crate::window::Adjusted> {

@@ -25,6 +25,7 @@ pub mod sdk;
 pub mod store;
 mod translate;
 pub mod window;
+pub mod worker;
 
 pub use completion::{Completion, Finish, ToolCall, Usage};
 pub use engine::{

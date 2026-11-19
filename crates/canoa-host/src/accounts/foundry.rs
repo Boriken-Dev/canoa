@@ -23,19 +23,24 @@ use coqui_acp_api::{
 };
 use coqui_acp_harness::provider::schema;
 
+use crate::cli::Program;
 use crate::config::Settings;
 use crate::gateway::{Running, Ticket};
 use crate::provider::map_of;
+
+mod child;
 
 /// What opens the engine of an account: the real one reads the running service, a test's answers what it is told.
 pub(crate) type Engines =
     Arc<dyn Fn(&Foundry) -> Result<Arc<dyn Engine>, String> + Send + Sync + 'static>;
 
-/// The engine an account's settings ask for: the service the person runs, or the SDK in this process. `copies` is the folder
-/// the SDK engine makes a model's adjusted copy in when the person set it a window.
+/// The engine an account's settings ask for: the service the person runs, or the SDK in a process of the host's own, started with
+/// `program`. `copies` is the folder the SDK engine makes a model's adjusted copies in (a window the person set, or the tool-call
+/// markers a model's package lacks), and `models` the models folder of the host's own that the model is linked into.
 pub(crate) fn default_engine(
     settings: &Foundry,
-    copies: Option<&Path>,
+    (copies, models): (Option<&Path>, Option<&Path>),
+    program: Option<&Program>,
 ) -> Result<Arc<dyn Engine>, String> {
     match settings.engine {
         EngineKind::Service => {
@@ -47,7 +52,7 @@ pub(crate) fn default_engine(
             }
             service_engine(settings)
         }
-        EngineKind::Sdk => sdk_engine(settings, copies),
+        EngineKind::Sdk => sdk_engine(settings, (copies, models), program),
         _ => Err("this build does not know that engine".to_owned()),
     }
 }
@@ -62,42 +67,130 @@ fn service_engine(settings: &Foundry) -> Result<Arc<dyn Engine>, String> {
         .map_err(|error| error.to_string())
 }
 
-#[cfg(feature = "foundry")]
-fn sdk_engine(settings: &Foundry, copies: Option<&Path>) -> Result<Arc<dyn Engine>, String> {
-    use canoa_foundry::sdk::{SdkConfig, SdkEngine, SdkWindow};
-    let mut config = SdkConfig::new(settings.model.clone());
-    config.library = settings.library.as_ref().map(std::path::PathBuf::from);
-    if let Some(tokens) = settings.window {
-        let folder = copies.ok_or_else(|| {
-            format!(
-                "{} has a window of {tokens} tokens, and this host has no folder of its own to keep the adjusted model in",
-                settings.model
-            )
-        })?;
-        config.window = Some(SdkWindow::new(tokens, folder));
+/// The SDK engine, in a process of the host's own. The native library it loads crashes on some models and prompts, and a crash
+/// there is the process's and not the host's.
+fn sdk_engine(
+    settings: &Foundry,
+    (copies, models): (Option<&Path>, Option<&Path>),
+    program: Option<&Program>,
+) -> Result<Arc<dyn Engine>, String> {
+    let program = program.cloned().ok_or_else(|| {
+        "this host has no program of its own to run the model's process with".to_owned()
+    })?;
+    if let Some(tokens) = settings.window
+        && copies.is_none()
+    {
+        return Err(format!(
+            "{} has a window of {tokens} tokens, and this host has no folder of its own to keep the adjusted model in",
+            settings.model
+        ));
     }
-    let engine = SdkEngine::open(&config).map_err(|error| error.to_string())?;
-    if let Some(made) = engine.adjusted() {
-        tracing::info!(
-            "{} runs with a window of {} tokens from {}",
-            settings.model,
-            made.window,
-            made.folder.display()
-        );
-        if let Some(note) = &made.note {
-            tracing::warn!("{}: {note}", settings.model);
-        }
-    }
-    // The model lives in this process, so naming this engine is the person's choice to load it here; it is unloaded with the engine.
-    engine
-        .load()
-        .map_err(|error| format!("{} could not be loaded: {error}", settings.model))?;
-    Ok(Arc::new(engine) as Arc<dyn Engine>)
+    let spec = child::Spec {
+        model: settings.model.clone(),
+        library: settings.library.as_ref().map(PathBuf::from),
+        cache: None,
+        window: settings.window,
+        copies: copies.map(Path::to_path_buf),
+        own_cache: models.map(Path::to_path_buf),
+    };
+    // The model lives in that process, so naming this engine is the person's choice to load it there; it is unloaded when the
+    // engine goes.
+    child::ChildEngine::open(program, spec)
+        .map(|engine| Arc::new(engine) as Arc<dyn Engine>)
+        .map_err(|error| format!("{} could not be loaded: {error}", settings.model))
 }
 
-#[cfg(not(feature = "foundry"))]
-fn sdk_engine(_: &Foundry, _: Option<&Path>) -> Result<Arc<dyn Engine>, String> {
-    Err("this build of canoa runs models through the service only: the sdk engine needs it built with the foundry feature".to_owned())
+/// What `foundry-engine` is started with.
+#[derive(Debug, Clone)]
+pub(crate) struct EngineSpec {
+    pub(crate) model: String,
+    pub(crate) library: Option<PathBuf>,
+    pub(crate) cache: Option<PathBuf>,
+    pub(crate) window: Option<u64>,
+    pub(crate) copies: Option<PathBuf>,
+    pub(crate) own_cache: Option<PathBuf>,
+}
+
+/// Runs the SDK engine for a host that started this process, until the host closes its input: what `foundry-engine` does. The
+/// engine is opened, its model loaded, and the lines of [`canoa_foundry::worker`] served on standard input and output.
+///
+/// # Errors
+///
+/// The host's lines could not be written: it is gone.
+pub(crate) fn serve_engine(spec: EngineSpec) -> std::io::Result<()> {
+    let EngineSpec {
+        model,
+        library,
+        cache,
+        window,
+        copies,
+        own_cache,
+    } = spec;
+    #[cfg(feature = "foundry")]
+    {
+        use canoa_foundry::EngineError;
+        use canoa_foundry::sdk::{SdkConfig, SdkEngine, SdkWindow};
+        let open = || {
+            let mut config = SdkConfig::new(model.clone());
+            config.library = library;
+            config.cache = cache;
+            config.own_cache = own_cache;
+            config.copies.clone_from(&copies);
+            config.window = window
+                .zip(copies)
+                .map(|(tokens, folder)| SdkWindow::new(tokens, folder));
+            let engine = SdkEngine::open(&config)?;
+            for note in engine.notes() {
+                tracing::warn!("{note}");
+            }
+            if let Some(made) = engine.adjusted() {
+                tracing::info!(
+                    "{model} runs with a window of {} tokens from {}",
+                    made.window,
+                    made.folder.display()
+                );
+                if let Some(note) = &made.note {
+                    tracing::warn!("{model}: {note}");
+                }
+            }
+            engine.load().map_err(|error| {
+                EngineError::Failed(format!("{model} could not be loaded: {error}"))
+            })?;
+            Ok(engine)
+        };
+        canoa_foundry::worker::serve(open, std::io::stdin().lock(), std::io::stdout())
+    }
+    #[cfg(not(feature = "foundry"))]
+    {
+        use canoa_foundry::{Cancel, EngineError, ModelInfo};
+        /// What stands in for the engine in a build that has none: it is never opened.
+        struct Unavailable;
+        impl Engine for Unavailable {
+            fn model(&self) -> Result<ModelInfo, EngineError> {
+                Err(EngineError::Failed(String::new()))
+            }
+            fn models(&self) -> Vec<ModelInfo> {
+                Vec::new()
+            }
+            fn chat(
+                &self,
+                _request: &serde_json::Value,
+                _cancel: &Cancel,
+            ) -> Result<serde_json::Value, EngineError> {
+                Err(EngineError::Failed(String::new()))
+            }
+        }
+        let _ = (model, library, cache, window, copies, own_cache);
+        canoa_foundry::worker::serve(
+            || {
+                Err::<Unavailable, _>(EngineError::Failed(
+                    "this build of canoa runs models through the service only: the sdk engine needs it built with the foundry feature".to_owned(),
+                ))
+            },
+            std::io::stdin().lock(),
+            std::io::stdout(),
+        )
+    }
 }
 
 /// The gateways that are up, one per account while a session holds it, and how to make an engine for one.
@@ -108,8 +201,12 @@ pub(crate) struct Gateways {
     log: Option<PathBuf>,
     /// The folder the SDK engine keeps the adjusted copies of models in, one folder for each model.
     copies: Option<PathBuf>,
+    /// The models folder of the host's own that the SDK engine links the model into, so that Foundry Local's is not written.
+    models: Option<PathBuf>,
     /// The canoa.cfg whose `[foundry.windows]` says each model's window, read each time a gateway starts.
     config: OnceLock<PathBuf>,
+    /// The program that runs the SDK engine in a process of its own: the host's, with what goes before a subcommand.
+    program: OnceLock<Program>,
     up: Mutex<BTreeMap<String, Weak<Running>>>,
 }
 
@@ -125,12 +222,16 @@ pub(crate) const GATEWAY_LOG: &str = "foundry-gateway.log";
 /// The folder in the host's home that holds the adjusted copies of models.
 pub(crate) const WINDOW_COPIES: &str = "foundry-windows";
 
+/// The folder in the host's home that is the SDK's models folder: the model it runs is linked into it from Foundry Local's.
+pub(crate) const OWN_MODELS: &str = "foundry-models";
+
 impl Gateways {
     /// Gateways that keep their log and the adjusted copies of models in the host's `home`.
     pub(crate) fn in_home(home: Option<&Path>) -> Self {
         Self {
             log: home.map(|home| home.join(GATEWAY_LOG)),
             copies: home.map(|home| home.join(WINDOW_COPIES)),
+            models: home.map(|home| home.join(OWN_MODELS)),
             ..Self::default()
         }
     }
@@ -138,6 +239,11 @@ impl Gateways {
     /// Reads each model's window from the `[foundry.windows]` of the canoa.cfg at `file` whenever a gateway starts, once.
     pub(crate) fn windows_from(&self, file: PathBuf) {
         let _ = self.config.set(file);
+    }
+
+    /// Names the program that runs the SDK engine in a process of its own, once.
+    pub(crate) fn engine_program(&self, program: Program) {
+        let _ = self.program.set(program);
     }
 
     /// Chooses what opens engines, once; a host that never does opens what each account's settings ask for.
@@ -152,9 +258,16 @@ impl Gateways {
         let running = match up.get(id).and_then(Weak::upgrade) {
             Some(running) => running,
             None => {
-                let copies = self.copies.clone();
+                let (copies, models) = (self.copies.clone(), self.models.clone());
+                let program = self.program.get().cloned();
                 let engines = self.engines.get().cloned().unwrap_or_else(|| {
-                    Arc::new(move |settings: &Foundry| default_engine(settings, copies.as_deref()))
+                    Arc::new(move |settings: &Foundry| {
+                        default_engine(
+                            settings,
+                            (copies.as_deref(), models.as_deref()),
+                            program.as_ref(),
+                        )
+                    })
                 });
                 let mut settings = settings.clone();
                 settings.window = self.config.get().and_then(|file| {

@@ -107,7 +107,8 @@ impl Program {
 const AFTER_HELP: &str = "\
 Environment:
   CANOA_CONFIG             canoa.cfg to read, below --config and above the platform's default
-  CANOA_LOG                what to log on standard error, as a tracing filter (default: info)
+  CANOA_LOG                                | Command::FoundryEngine { .. }
+what to log on standard error, as a tracing filter (default: info)
   COQUI_AGENTIC_PEER_HOME  the directory of this host's identity and trust store (default: .canoa in the user's home folder)
   NO_COLOR                 no colour in the log
 
@@ -326,6 +327,30 @@ enum Command {
         /// Its arguments.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<std::ffi::OsString>,
+    },
+    /// Run Foundry Local's SDK engine for a host, on standard input and output: opens it, loads the model, and answers the lines the
+    /// host writes until its input closes. The host starts it so that a crash of the native library is this process's.
+    #[command(hide = true, name = "foundry-engine")]
+    FoundryEngine {
+        /// The model variant to run, as Foundry Local lists it.
+        #[arg(long)]
+        model: String,
+        /// The native library, a file or the directory that holds it.
+        #[arg(long)]
+        library: Option<PathBuf>,
+        /// The folder the downloaded models are in; Foundry Local's own when it has one.
+        #[arg(long)]
+        cache: Option<PathBuf>,
+        /// The window to run the model with, in tokens.
+        #[arg(long, requires = "copies")]
+        window: Option<u64>,
+        /// The folder the copies of the model it needs are made in: one with a window set, or with the tool-call markers its
+        /// package lacks.
+        #[arg(long)]
+        copies: Option<PathBuf>,
+        /// A models folder of the host's own, which the model is linked into so that Foundry Local's own is not written.
+        #[arg(long)]
+        own_cache: Option<PathBuf>,
     },
     /// Serve the host's delegation tools as an MCP server on standard input and output, for an agent that takes no HTTP MCP
     /// server: what the host adds to a session's MCP servers. Relays each request to the host's loopback tool server, at
@@ -2090,6 +2115,22 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         Command::Native { action } => native(action, front),
         Command::NativeHost { origin, .. } => native_host(&origin, front),
         Command::McpBridge => mcp_bridge(),
+        Command::FoundryEngine {
+            model,
+            library,
+            cache,
+            window,
+            copies,
+            own_cache,
+        } => crate::accounts::foundry::serve_engine(crate::accounts::foundry::EngineSpec {
+            model,
+            library,
+            cache,
+            window,
+            copies,
+            own_cache,
+        })
+        .map_err(Failed::run),
         Command::HookForward {
             channel,
             refuse,

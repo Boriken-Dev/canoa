@@ -308,6 +308,11 @@ impl Accounts {
         self.gateways.windows_from(file);
     }
 
+    /// Names the program that runs a Foundry Local account's SDK engine in a process of its own.
+    pub(crate) fn engine_program(&self, program: crate::cli::Program) {
+        self.gateways.engine_program(program);
+    }
+
     /// The gateways of Foundry Local accounts.
     #[cfg(test)]
     pub(crate) fn gateways(&self) -> &foundry::Gateways {
