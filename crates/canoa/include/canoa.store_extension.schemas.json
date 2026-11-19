@@ -37,6 +37,33 @@
                 "type": "string"
               },
               "description": "The `program_store` providers the type lists, in order."
+            },
+            "catalogs": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "noun": {
+                  "type": "string",
+                  "description": "What one is called: `catalog`, `source`, `registry`."
+                },
+                "plural": {
+                  "type": "string",
+                  "description": "The same in the plural."
+                },
+                "lists": {
+                  "type": "string",
+                  "description": "What the type lists, in the plural: `overlays`, `skills`."
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "noun",
+                "plural",
+                "lists"
+              ],
+              "description": "What its catalogs are called, when the type reads catalogs: the Store then offers it a list of them and, to add one, the `catalog_source` providers that serve the type."
             }
           },
           "additionalProperties": false,
@@ -81,6 +108,33 @@
           "type": "string"
         },
         "description": "The `program_store` providers the type lists, in order."
+      },
+      "catalogs": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "noun": {
+            "type": "string",
+            "description": "What one is called: `catalog`, `source`, `registry`."
+          },
+          "plural": {
+            "type": "string",
+            "description": "The same in the plural."
+          },
+          "lists": {
+            "type": "string",
+            "description": "What the type lists, in the plural: `overlays`, `skills`."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "noun",
+          "plural",
+          "lists"
+        ],
+        "description": "What its catalogs are called, when the type reads catalogs: the Store then offers it a list of them and, to add one, the `catalog_source` providers that serve the type."
       }
     },
     "additionalProperties": false,
