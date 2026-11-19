@@ -150,17 +150,35 @@ final class AgentProvider {
   }
 }
 
+/// A reader of an agent's own quota the host offers: the id a host entry's `usage` names, and where it comes from (`bundled`, or the
+/// entry or extension whose library or source offers it).
+final class UsageReaderOffer {
+  const UsageReaderOffer(this.id, this.origin);
+
+  final String id;
+  final String origin;
+
+  static UsageReaderOffer? parse(Object? json) {
+    if (json is! Map || json['id'] is! String || (json['id'] as String).isEmpty) return null;
+    return UsageReaderOffer(json['id'] as String, json['origin'] is String ? json['origin'] as String : '');
+  }
+}
+
 /// The agents the host has loaded (`providers/list`): where the app learns which agents there are, what each is called, which
 /// vendor and credential standards are its own, and what its mark looks like. Until a host answers, none is known, so nothing is
 /// listed, named or drawn for an agent.
 final class ProviderCatalog extends ChangeNotifier {
   List<AgentProvider> _providers = const [];
+  List<UsageReaderOffer> _usageReaders = const [];
   bool _answered = false;
   String? _problem;
   int _revision = 0;
 
   /// The agents in the order the host listed them.
   List<AgentProvider> get providers => _providers;
+
+  /// The readers of an agent's own quota the host offers, bundled first: the values an agent entry's `usage` may take there.
+  List<UsageReaderOffer> get usageReaders => _usageReaders;
 
   /// The agents that run a harness provider in the host, which are the ones an account can be added to.
   List<AgentProvider> get withAccounts => [for (final each in _providers) if (each.accounts != null) each];
@@ -178,14 +196,17 @@ final class ProviderCatalog extends ChangeNotifier {
   void adopt(Object? answer) {
     final list = answer is Map ? answer['providers'] : null;
     _providers = [if (list is List) for (final each in list) ?AgentProvider.parse(each)];
+    final readers = answer is Map ? answer['usage_readers'] : null;
+    _usageReaders = [if (readers is List) for (final each in readers) ?UsageReaderOffer.parse(each)];
     _answered = true;
     _problem = null;
     _changed();
   }
 
   /// Takes the agents as they were parsed, as [adopt] does from the host's answer.
-  void replace(List<AgentProvider> providers) {
+  void replace(List<AgentProvider> providers, {List<UsageReaderOffer> usageReaders = const []}) {
     _providers = List.of(providers);
+    _usageReaders = List.of(usageReaders);
     _answered = true;
     _problem = null;
     _changed();
@@ -200,6 +221,7 @@ final class ProviderCatalog extends ChangeNotifier {
   /// Forgets what the host said, as before it has answered.
   void clear() {
     _providers = const [];
+    _usageReaders = const [];
     _answered = false;
     _problem = null;
     _changed();

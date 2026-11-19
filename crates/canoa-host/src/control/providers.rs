@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 
+use canoa::usage_reader::UsageReader;
 use canoa::vendor::{AgentVendor, VendorInfo};
 use coqui_acp_api::guatiao::library::Registry;
 use coqui_acp_api::{AccountProvider, AcpHarness};
@@ -36,7 +37,31 @@ pub(crate) fn list(config: &Config) -> Value {
         .iter()
         .map(|(origin, registry)| (origin.as_str(), registry))
         .collect();
-    json!({ "providers": rows_of(&loaded, bundled::ALL) })
+    json!({
+        "providers": rows_of(&loaded, bundled::ALL),
+        "usage_readers": usage_readers_of(&loaded),
+    })
+}
+
+/// The `usage_reader` providers `registries` offer, each `{id, origin}` (`origin` as a row's): the ids an agent entry's `usage` may
+/// name, bundled first. An id is listed once, as the first registry that offers it, which is the one the host reads through.
+pub(crate) fn usage_readers_of(registries: &[(&str, &Registry)]) -> Vec<Value> {
+    let mut readers: Vec<Value> = Vec::new();
+    for (origin, registry) in registries {
+        for offer in registry.offers::<dyn UsageReader>() {
+            let Some(info) = offer
+                .default_instance()
+                .and_then(|reader| reader.describe().ok())
+                .filter(|info| info.problem().is_none())
+            else {
+                continue;
+            };
+            if readers.iter().all(|each| each["id"] != info.id.as_str()) {
+                readers.push(json!({ "id": info.id, "origin": origin }));
+            }
+        }
+    }
+    readers
 }
 
 /// The loaded registries of `config`: the bundled agents' and each entry's and extension's own.

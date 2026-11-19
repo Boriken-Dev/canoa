@@ -427,5 +427,11 @@
       "launch": null,
       "origin": "bundled"
     }
+  ],
+  "usage_readers": [
+    {
+      "id": "antigravity",
+      "origin": "bundled"
+    }
   ]
 }

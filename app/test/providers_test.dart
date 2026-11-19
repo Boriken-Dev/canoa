@@ -99,6 +99,23 @@ void main() {
     expect(usageFor(parseCommand('agy acp')!), isNull);
   });
 
+  test("the readers of an agent's quota are the ones the host offers, bundled and a library's, and none before it answers", () {
+    expect(providerCatalog.usageReaders.map((each) => (each.id, each.origin)), [('antigravity', 'bundled')]);
+    providerCatalog.adopt({
+      'providers': const <Object?>[],
+      'usage_readers': [
+        {'id': 'antigravity', 'origin': 'bundled'},
+        {'id': 'team_meter', 'origin': 'team_ext'},
+        {'origin': 'no id'},
+      ],
+    });
+    expect(providerCatalog.usageReaders.map((each) => (each.id, each.origin)), [('antigravity', 'bundled'), ('team_meter', 'team_ext')]);
+    providerCatalog.adopt({'providers': const <Object?>[]});
+    expect(providerCatalog.usageReaders, isEmpty, reason: 'a host that offers none');
+    providerCatalog.clear();
+    expect(providerCatalog.usageReaders, isEmpty);
+  });
+
   test("which sources can bring in earlier sessions is the host's word, not a list of names", () {
     expect(providerCatalog.byId('claude')!.imports, isTrue);
     expect(providerCatalog.byId('codex')!.imports, isTrue);

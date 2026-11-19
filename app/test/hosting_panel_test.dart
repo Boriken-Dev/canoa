@@ -6,6 +6,7 @@ import 'package:canoa/config/canoa_config.dart';
 import 'package:canoa/desktop/host_supervisor.dart';
 import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/desktop/hosting_panel.dart';
+import 'package:canoa/providers/provider_catalog.dart' show providerCatalog;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -134,6 +135,43 @@ void main() {
       'working_roots': ['/home/me/src'],
     });
     expect(find.text('mine'), findsOneWidget);
+  });
+
+  testWidgets("an agent is given the reader of its quota from the ones the host offers, and is offered none by a host that lists none", (tester) async {
+    addTearDown(providerCatalog.clear);
+    providerCatalog.clear();
+    final bare = _Harness();
+    await bare.show(tester);
+    await tester.tap(find.text('Add an agent'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('usage-reader')), findsNothing);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    providerCatalog.adopt({
+      'providers': const <Object?>[],
+      'usage_readers': [
+        {'id': 'antigravity', 'origin': 'bundled'},
+        {'id': 'team_meter', 'origin': 'team_ext'},
+      ],
+    });
+    final host = _Harness();
+    await host.show(tester);
+    await tester.tap(find.text('Add an agent'));
+    await tester.pumpAndSettle();
+    final fields = find.descendant(of: find.byType(AlertDialog).last, matching: find.byType(TextField));
+    await tester.enterText(fields.at(0), 'mine');
+    await tester.enterText(fields.at(1), 'node agent.mjs');
+    await tester.tap(find.byKey(const Key('usage-reader')));
+    await tester.pumpAndSettle();
+    expect(find.text('As its command says'), findsWidgets);
+    expect(find.text('antigravity'), findsOneWidget);
+    await tester.tap(find.text('team_meter (team_ext)').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add'));
+    await tester.pumpAndSettle();
+    final entry = (host.saved.single.host!['agents'] as Map)['mine'] as Map;
+    expect(entry['usage'], 'team_meter');
   });
 
   testWidgets('an agent may be kept to a folder on a share, but not to a device or a bare server', (tester) async {

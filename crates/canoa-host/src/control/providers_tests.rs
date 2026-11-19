@@ -1,4 +1,5 @@
 use canoa::preset::SourcePreset;
+use canoa::usage_reader::{ProcessMembers, ReaderInfo, UsageReader, UsageReading};
 use canoa::vendor::{AgentVendor, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
@@ -9,7 +10,7 @@ use coqui_acp_api::{
 };
 use serde_json::Value;
 
-use super::providers::{bundled_registry, rows_of};
+use super::providers::{bundled_registry, rows_of, usage_readers_of};
 use crate::bundled::{self, Bundle};
 
 /// An agent no crate of Canoa's names: a vendor description and an account provider, offered by a library of its own.
@@ -92,10 +93,27 @@ mod standin {
         }
     }
 
+    #[derive(Default, Debug, Provider)]
+    #[provider(UsageReader, id = "zed_usage", crate = ::coqui_acp_api::guatiao)]
+    pub(super) struct ZedUsage;
+
+    impl UsageReader for ZedUsage {
+        fn describe(&self) -> Result<ReaderInfo, ProviderError> {
+            Ok(ReaderInfo::new("zed", "zed:"))
+        }
+
+        fn open(
+            &self,
+            _: Object<dyn ProcessMembers>,
+        ) -> Result<Object<dyn UsageReading>, ProviderError> {
+            Err(unsupported())
+        }
+    }
+
     coqui_acp_api::guatiao::local_providers!(
         id = "zed",
         version = "0.0.0",
-        providers = [ZedVendor, ZedAccounts]
+        providers = [ZedVendor, ZedAccounts, ZedUsage]
     );
 }
 
@@ -212,6 +230,29 @@ fn an_agent_a_library_adds_is_listed_with_its_kinds_like_a_bundled_one() {
 }
 
 #[test]
+fn the_usage_readers_offered_are_listed_bundled_first_then_a_librarys_own() {
+    let bundled_only = bundled_registry(bundled::ALL).expect("the libraries are accepted");
+    assert_eq!(
+        usage_readers_of(&[("bundled", &bundled_only)]),
+        [serde_json::json!({ "id": "antigravity", "origin": "bundled" })]
+    );
+    let library = bundled_registry(&[zed()]).expect("the library is accepted");
+    let again = bundled_registry(bundled::ALL).expect("the libraries are accepted");
+    assert_eq!(
+        usage_readers_of(&[
+            ("bundled", &bundled_only),
+            ("zed_ext", &library),
+            ("other", &again)
+        ]),
+        [
+            serde_json::json!({ "id": "antigravity", "origin": "bundled" }),
+            serde_json::json!({ "id": "zed", "origin": "zed_ext" }),
+        ],
+        "an id some registry has already offered is listed once, as the first"
+    );
+}
+
+#[test]
 fn the_control_method_lists_only_the_loaded_agents_to_a_reader_of_the_config() {
     let control = super::Control::open(
         None,
@@ -245,6 +286,10 @@ fn the_control_method_lists_only_the_loaded_agents_to_a_reader_of_the_config() {
             "gemini"
         ]
     );
+    assert_eq!(
+        answer["result"]["usage_readers"][0]["id"], "antigravity",
+        "{answer}"
+    );
     let other = super::Caller::Peer {
         id: "sha256:bb".to_owned(),
         grants: [super::Grant::LedgerRead].into_iter().collect(),
@@ -256,7 +301,11 @@ fn the_control_method_lists_only_the_loaded_agents_to_a_reader_of_the_config() {
 
 #[test]
 fn the_apps_fixture_is_what_this_build_lists() {
-    let listed = serde_json::json!({ "providers": rows(bundled::ALL) });
+    let registry = bundled_registry(bundled::ALL).expect("the libraries are accepted");
+    let listed = serde_json::json!({
+        "providers": rows(bundled::ALL),
+        "usage_readers": usage_readers_of(&[("bundled", &registry)]),
+    });
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../app/test/fixtures/providers_list.json");
     if std::env::var_os("CANOA_WRITE_PROVIDERS").is_some() {

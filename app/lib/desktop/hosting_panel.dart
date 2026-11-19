@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../acp/agent_commands.dart';
 import '../acp/share_path.dart';
 import '../config/canoa_config.dart';
+import '../providers/provider_catalog.dart' show providerCatalog;
 import '../settings/setting_layers.dart' show SettingNote;
 import '../theme/look.dart';
 import 'host_supervisor.dart';
@@ -89,7 +90,7 @@ class _HostingPanelState extends State<HostingPanel> {
           args: added.command.args,
           listen: '127.0.0.1:$port',
           workingRoots: [if (added.root.isNotEmpty) added.root],
-          usage: usageFor(added.command),
+          usage: added.usage ?? usageFor(added.command),
         ),
       );
     });
@@ -448,10 +449,13 @@ class _Status extends StatelessWidget {
 }
 
 final class _NewAgent {
-  const _NewAgent(this.name, this.command, this.root);
+  const _NewAgent(this.name, this.command, this.root, this.usage);
   final String name;
   final AgentCommand command;
   final String root;
+
+  /// The reader of its quota the person chose from the ones the host offers, or null to leave it to the command.
+  final String? usage;
 }
 
 class _AddAgentDialog extends StatefulWidget {
@@ -465,6 +469,7 @@ class _AddAgentDialogState extends State<_AddAgentDialog> {
   final command = TextEditingController();
   final root = TextEditingController();
   String? error;
+  String? usage;
 
   @override
   void dispose() {
@@ -485,7 +490,7 @@ class _AddAgentDialogState extends State<_AddAgentDialog> {
         ? 'The workspace must be a whole path.'
         : null;
     if (problem != null) return setState(() => error = problem);
-    Navigator.pop(context, _NewAgent(name.text.trim(), parsed!, folder));
+    Navigator.pop(context, _NewAgent(name.text.trim(), parsed!, folder, usage));
   }
 
   @override
@@ -515,6 +520,22 @@ class _AddAgentDialogState extends State<_AddAgentDialog> {
             controller: root,
             decoration: const InputDecoration(labelText: 'Only in this workspace (optional)', hintText: 'a whole path'),
           ),
+          // What the host offers is what can be chosen: its bundled agents' readers and the ones its libraries and sources add.
+          if (providerCatalog.usageReaders.isNotEmpty)
+            DropdownButtonFormField<String?>(
+              key: const Key('usage-reader'),
+              initialValue: usage,
+              decoration: const InputDecoration(labelText: 'Read its quota with'),
+              items: [
+                const DropdownMenuItem<String?>(value: null, child: Text('As its command says')),
+                for (final reader in providerCatalog.usageReaders)
+                  DropdownMenuItem<String?>(
+                    value: reader.id,
+                    child: Text(reader.origin.isEmpty || reader.origin == 'bundled' ? reader.id : '${reader.id} (${reader.origin})'),
+                  ),
+              ],
+              onChanged: (value) => setState(() => usage = value),
+            ),
           if (error != null)
             Padding(
               padding: const EdgeInsets.only(top: 12),

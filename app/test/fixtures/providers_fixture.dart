@@ -13,11 +13,16 @@ List<AgentProvider> bundledProviders() => [
   for (final each in bundledProvidersJson()['providers']! as List) ?AgentProvider.parse(each),
 ];
 
+/// The readers of an agent's quota a host with every bundled agent offers.
+List<UsageReaderOffer> bundledUsageReaders() => [
+  for (final each in bundledProvidersJson()['usage_readers']! as List) ?UsageReaderOffer.parse(each),
+];
+
 /// The bundled agents of [ids] only, as a host built without the others would list them.
 List<AgentProvider> providersOf(Iterable<String> ids) => [for (final each in bundledProviders()) if (ids.contains(each.id)) each];
 
 /// Gives the app the agents a host with every bundled agent lists, as an app connected to one has them.
-void listBundledProviders() => providerCatalog.replace(bundledProviders());
+void listBundledProviders() => providerCatalog.replace(bundledProviders(), usageReaders: bundledUsageReaders());
 
 /// An agent no crate of Canoa's names, with an account provider of its own: what a library that adds one lists.
 AgentProvider extraProvider() => AgentProvider.parse({
