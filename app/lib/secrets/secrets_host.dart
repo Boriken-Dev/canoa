@@ -7,6 +7,7 @@ import '../acp/link_secret.dart';
 import '../accounts/accounts_host.dart' show SignInAsk, openSealedAsk;
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
+import '../forms/schema_fields.dart' show SecretSource;
 
 /// One secret the host holds or keeps, as the table shows it: where it is kept, what it is called and how long it has left. Never its value.
 final class SecretRow {
@@ -48,13 +49,69 @@ final class SecretKeep {
   final String id, label;
 }
 
+/// A provider the host offers, with the settings its entries take: a JSON Schema and the guatiao-intake form that says how to draw it.
+final class SecretProviderInfo {
+  const SecretProviderInfo({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.origin,
+    required this.canStore,
+    required this.needsPerson,
+    required this.schema,
+    required this.form,
+  });
+
+  final String id, title, origin;
+  final String? description;
+  final bool canStore, needsPerson;
+  final Map<String, Object?> schema, form;
+
+  /// Whether an entry of it has anything to set up.
+  bool get hasSettings => schema['properties'] is Map && (schema['properties']! as Map).isNotEmpty;
+
+  static SecretProviderInfo? parse(Object? json) {
+    if (json is! Map || json['id'] is! String) return null;
+    Map<String, Object?> map(Object? value) => value is Map ? value.cast<String, Object?>() : const {};
+    return SecretProviderInfo(
+      id: json['id']! as String,
+      title: json['title'] is String ? json['title']! as String : json['id']! as String,
+      description: json['description'] as String?,
+      origin: json['origin'] is String ? json['origin']! as String : '',
+      canStore: json['can_store'] == true,
+      needsPerson: json['needs_person'] == true,
+      schema: map(json['schema']),
+      form: map(json['form']),
+    );
+  }
+}
+
 /// A provider entry of the host's `[secrets.providers]`, or one it has without being told, and what its provider can do.
 final class SecretEntry {
-  const SecretEntry({required this.name, required this.provider, required this.title, required this.canStore, required this.canList, required this.needsPerson, this.keep});
+  const SecretEntry({
+    required this.name,
+    required this.provider,
+    required this.title,
+    required this.canStore,
+    required this.canList,
+    required this.needsPerson,
+    this.keep,
+    this.settings = const {},
+    this.from = const {},
+  });
 
   final String name, provider, title;
   final bool canStore, canList, needsPerson;
   final String? keep;
+
+  /// The provider's own settings as the entry holds them: plain data, never a secret.
+  final Map<String, Object?> settings;
+
+  /// The settings that are another entry's secret, by the setting's name.
+  final Map<String, SecretSource> from;
+
+  /// Whether the person set it up (it has a name of their own), and not one the host has without being told.
+  bool get setUp => name != provider;
 
   /// Whether a value can be set in it by hand: it keeps what it is given, or it is asked in the app and kept in memory.
   bool get acceptsValues => canStore || needsPerson;
@@ -137,6 +194,16 @@ abstract interface class SecretsHost {
   /// The provider entries and what each can do.
   Future<List<SecretEntry>> entries();
 
+  /// The providers this host offers and the settings an entry of each takes.
+  Future<List<SecretProviderInfo>> providers();
+
+  /// Sets up the entry [name] of [provider]. The settings are plain data; a secret one is given in [from] instead, as the secret another
+  /// entry holds, and the host never writes a secret down.
+  Future<void> configure({required String name, required String provider, Map<String, Object?> settings = const {}, Map<String, SecretSource> from = const {}});
+
+  /// Takes the entry [name] away.
+  Future<void> removeEntry(String name);
+
   /// The value of [name] in [provider]'s entry, for the person who asked to see it.
   Future<String> reveal(String provider, String name);
 
@@ -194,8 +261,37 @@ final class ControlSecretsHost implements SecretsHost {
               canList: titles[each['provider']]?['can_list'] == true,
               needsPerson: titles[each['provider']]?['needs_person'] == true,
               keep: each['keep'] as String?,
+              settings: each['settings'] is Map ? (each['settings']! as Map).cast<String, Object?>() : const {},
+              from: {
+                if (each['from'] case final Map<Object?, Object?> taken)
+                  for (final source in taken.entries)
+                    if (source.key is String && source.value is Map && (source.value! as Map)['entry'] is String && (source.value! as Map)['name'] is String)
+                      source.key! as String: SecretSource((source.value! as Map)['entry']! as String, (source.value! as Map)['name']! as String),
+              },
             ),
     ];
+  }
+
+  @override
+  Future<List<SecretProviderInfo>> providers() async {
+    final result = await _call('secrets/providers', const {});
+    final map = result is Map ? result : const {};
+    return [if (map['providers'] case final List<Object?> providers) for (final each in providers) ?SecretProviderInfo.parse(each)];
+  }
+
+  @override
+  Future<void> configure({required String name, required String provider, Map<String, Object?> settings = const {}, Map<String, SecretSource> from = const {}}) async {
+    await _call('secrets/configure', {
+      'name': name,
+      'provider': provider,
+      'settings': settings,
+      'from': {for (final each in from.entries) each.key: {'entry': each.value.entry, 'name': each.value.name}},
+    });
+  }
+
+  @override
+  Future<void> removeEntry(String name) async {
+    await _call('secrets/configure', {'name': name, 'remove': true});
   }
 
   @override

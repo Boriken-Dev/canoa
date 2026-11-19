@@ -1,7 +1,8 @@
 /// The rows of a form a provider describes with a guatiao schema (a JSON Schema whose members name their `x-section`, `x-order` and
-/// `x-advanced`, and mark a secret `x-sensitive` or `writeOnly`) and a guatiao-intake form document (sections, and for a member its
-/// widget, placeholder, unit and `visibleWhen`). Speech providers, profile items and catalog sources all describe their values this
-/// way, so one renderer draws them all and knows nothing of the provider behind it.
+/// `x-advanced`, and mark a secret `x-sensitive` or `writeOnly`, or, for a secret another provider may give, `x-from-secret`) and a
+/// guatiao-intake form document (sections, and for a member its widget, placeholder, unit and `visibleWhen`). Speech providers,
+/// profile items, catalog sources and secret providers all describe their values this way, so one renderer draws them all and knows
+/// nothing of the provider behind it.
 library;
 
 import 'package:flutter/material.dart';
@@ -26,6 +27,9 @@ String _typeOf(Map<String, Object?> field) {
 }
 
 bool _secret(Map<String, Object?> field) => field['writeOnly'] == true || field['x-sensitive'] == true;
+
+/// Whether the member is another secret, taken from a provider's entry rather than typed or written down.
+bool _fromSecret(Map<String, Object?> field) => field['x-from-secret'] == true;
 
 String _titleOf(Map<String, Object?> schema, String key) {
   final title = _map(schemaProperties(schema)[key])['title'];
@@ -76,6 +80,27 @@ class SchemaChoice {
   final String? detail;
 }
 
+/// A setting that is another secret: the entry that gives it and the secret's name there. A member its schema marks `x-from-secret` is
+/// drawn as a choice of this, since such a setting is never typed into the form or written down.
+final class SecretSource {
+  const SecretSource(this.entry, this.name);
+
+  final String entry, name;
+
+  @override
+  bool operator ==(Object other) => other is SecretSource && other.entry == entry && other.name == name;
+
+  @override
+  int get hashCode => Object.hash(entry, name);
+}
+
+/// An entry that can give a secret to a setting, as the form names it to the person.
+final class SecretSourceChoice {
+  const SecretSourceChoice(this.entry, this.label);
+
+  final String entry, label;
+}
+
 /// Whether the member [key] is shown for [values]: its form hint's `visibleWhen` names another member and what it must hold.
 bool schemaVisible(Map<String, Object?> schema, Map<String, Object?> form, Map<String, Object?> values, String key) {
   final when = _map(_map(form['fields'])[key])['visibleWhen'];
@@ -92,7 +117,7 @@ Map<String, Object?> collectSchemaValues(Map<String, Object?> schema, Map<String
   final out = <String, Object?>{};
   final properties = schemaProperties(schema);
   for (final key in properties.keys) {
-    if (!schemaVisible(schema, form, values, key)) continue;
+    if (!schemaVisible(schema, form, values, key) || _fromSecret(_map(properties[key]))) continue;
     final value = values[key];
     if (value == null || (value is String && value.isEmpty && !_secret(_map(properties[key])))) continue;
     final entry = _entrySchema(_map(properties[key]));
@@ -116,9 +141,9 @@ String? schemaProblem(Map<String, Object?> schema, Map<String, Object?> form, Ma
   final properties = schemaProperties(schema);
   final required = schemaRequired(schema);
   for (final key in properties.keys) {
-    if (!schemaVisible(schema, form, values, key)) continue;
-    final value = values[key];
     final field = _map(properties[key]);
+    if (!schemaVisible(schema, form, values, key) || _fromSecret(field)) continue;
+    final value = values[key];
     if (value == null || (value is String && value.trim().isEmpty && !_secret(field))) {
       if (required.contains(key) && field['default'] == null) return '${_titleOf(schema, key)} is needed';
       continue;
@@ -142,8 +167,10 @@ String? schemaProblem(Map<String, Object?> schema, Map<String, Object?> form, Ma
 ///
 /// The widget keeps what is typed; [onValues] is told the members' values at every change, and the caller reads what is to be kept
 /// with [collectSchemaValues]. A secret the host already holds is not shown ([secretsSet] names it); the row says it is set, and a
-/// button asks to take it out ([cleared] and [onClear]). Keys are `<idPrefix>-field-<member>`, `<idPrefix>-clear-<member>` and
-/// `<idPrefix>-advanced`.
+/// button asks to take it out ([cleared] and [onClear]). A member marked `x-from-secret` is a choice of the entry in [sourceChoices]
+/// that gives it and the secret's name there ([sources], [onSource]), never a box to type it in. Keys are `<idPrefix>-field-<member>`,
+/// `<idPrefix>-clear-<member>`, `<idPrefix>-advanced`, and for a secret's source `<idPrefix>-from-<member>` and
+/// `<idPrefix>-from-name-<member>`.
 class SchemaFields extends StatefulWidget {
   const SchemaFields({
     super.key,
@@ -160,6 +187,10 @@ class SchemaFields extends StatefulWidget {
     this.keys = const {},
     this.choices = const {},
     this.compact = false,
+    this.sources = const {},
+    this.sourceChoices = const [],
+    this.onSource,
+    this.sourceNamePrefix = '',
   });
 
   final Map<String, Object?> schema;
@@ -189,12 +220,25 @@ class SchemaFields extends StatefulWidget {
   /// Draws each member as a labelled control side by side, as the entry of a list is, instead of one settings row each.
   final bool compact;
 
+  /// Where each member marked `x-from-secret` comes from now.
+  final Map<String, SecretSource> sources;
+
+  /// The entries that may give such a member.
+  final List<SecretSourceChoice> sourceChoices;
+
+  /// Told where a member marked `x-from-secret` now comes from: null when it is not set.
+  final void Function(String key, SecretSource? source)? onSource;
+
+  /// What the name of a secret starts with when an entry is first chosen for a member: `<prefix>_<member>`.
+  final String sourceNamePrefix;
+
   @override
   State<SchemaFields> createState() => _SchemaFieldsState();
 }
 
 class _SchemaFieldsState extends State<SchemaFields> {
   late final Map<String, Object?> _values = {...widget.values};
+  late final Map<String, SecretSource?> _from = {...widget.sources};
   final _typed = <String, TextEditingController>{};
 
   Map<String, Object?> get _properties => schemaProperties(widget.schema);
@@ -218,8 +262,49 @@ class _SchemaFieldsState extends State<SchemaFields> {
     widget.onValues({..._values});
   }
 
+  /// The choice of where a secret member comes from: not set, or an entry and the name of the secret there.
+  Widget _sourceControl(String key) {
+    final id = widget.idPrefix;
+    final source = _from[key];
+    final fallback = widget.sourceNamePrefix.isEmpty ? key : '${widget.sourceNamePrefix}_$key';
+    final entries = [for (final choice in widget.sourceChoices) choice.entry];
+    final chosen = source != null && entries.contains(source.entry) ? source.entry : null;
+    void told(SecretSource? now) {
+      _from[key] = now;
+      widget.onSource?.call(key, now);
+    }
+
+    return SizedBox(
+      width: 280,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        DropdownButton<String?>(
+          key: Key('$id-from-$key'),
+          isExpanded: true,
+          value: chosen,
+          hint: const Text('Not set'),
+          items: [
+            const DropdownMenuItem<String?>(value: null, child: Text('Not set')),
+            for (final choice in widget.sourceChoices) DropdownMenuItem<String?>(value: choice.entry, child: Text(choice.label)),
+          ],
+          onChanged: (entry) => setState(() {
+            if (entry == null) return told(null);
+            told(SecretSource(entry, _controller('$key/name', source?.name ?? fallback).text.trim()));
+          }),
+        ),
+        if (chosen != null)
+          TextField(
+            key: Key('$id-from-name-$key'),
+            controller: _controller('$key/name', source?.name ?? fallback),
+            decoration: const InputDecoration(isDense: true, labelText: 'Secret name', helperText: 'What it is called in that provider'),
+            onChanged: (text) => told(SecretSource(chosen, text.trim())),
+          ),
+      ]),
+    );
+  }
+
   Widget _control(String key) {
     final field = _field(key);
+    if (_fromSecret(field)) return _sourceControl(key);
     final hints = _hints(key);
     final type = _typeOf(field);
     final unit = hints['unit'] is String ? hints['unit']! as String : null;
@@ -414,6 +499,117 @@ class _SchemaFieldsState extends State<SchemaFields> {
           title: const Text('Advanced'),
           children: [for (final key in advanced) _row(key)],
         ),
+    ]);
+  }
+}
+
+/// One provider's settings as a form with a save button: [SchemaFields] over [schema] and [form], the values the host holds, and what
+/// [onSave] is given when it is pressed: what was set, the secrets to take out, and where each member marked `x-from-secret` comes
+/// from. [onSave] answers why it could not save, or null. Keys are `<keyPrefix>-save`, `<keyPrefix>-save-error` and the fields' (above),
+/// so a screen with two forms names them apart.
+class SchemaSettingsForm extends StatefulWidget {
+  const SchemaSettingsForm({
+    super.key,
+    required this.schema,
+    required this.form,
+    required this.name,
+    required this.onSave,
+    this.values = const {},
+    this.secretsSet = const {},
+    this.sources = const {},
+    this.choices = const [],
+    this.saveLabel,
+    this.keyPrefix = 'speech',
+  });
+
+  final Map<String, Object?> schema, form;
+
+  /// The name the provider is saved under; it starts the name a secret is given by default.
+  final String name;
+
+  /// What each setting is now.
+  final Map<String, Object?> values;
+
+  /// The secret settings that are set already, which the form never shows.
+  final Set<String> secretsSet;
+
+  /// Where each setting marked `x-from-secret` comes from now.
+  final Map<String, SecretSource> sources;
+
+  /// The entries that may give such a setting.
+  final List<SecretSourceChoice> choices;
+  final String? saveLabel;
+  final String keyPrefix;
+  final Future<String?> Function(Map<String, Object?> settings, List<String> cleared, Map<String, SecretSource> from) onSave;
+
+  @override
+  State<SchemaSettingsForm> createState() => _SchemaSettingsFormState();
+}
+
+class _SchemaSettingsFormState extends State<SchemaSettingsForm> {
+  late final Map<String, Object?> _values = {...widget.values};
+  late final Map<String, SecretSource?> _from = {...widget.sources};
+  final _cleared = <String>{};
+  String? _problem;
+  bool _saving = false;
+
+  Future<void> _save() async {
+    final settings = collectSchemaValues(widget.schema, widget.form, _values);
+    final properties = schemaProperties(widget.schema);
+    final from = <String, SecretSource>{
+      for (final key in properties.keys)
+        if (_fromSecret(_map(properties[key])) && schemaVisible(widget.schema, widget.form, _values, key))
+          if (_from[key] case final source? when source.entry.isNotEmpty && source.name.isNotEmpty) key: source,
+    };
+    setState(() {
+      _saving = true;
+      _problem = null;
+    });
+    try {
+      final problem = await widget.onSave(settings, _cleared.toList(), from);
+      if (mounted) {
+        setState(() {
+          _problem = problem;
+          if (problem == null) _cleared.clear();
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final prefix = widget.keyPrefix;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SchemaFields(
+        schema: widget.schema,
+        form: widget.form,
+        values: _values,
+        idPrefix: prefix,
+        secretsSet: widget.secretsSet,
+        cleared: _cleared,
+        sources: widget.sources,
+        sourceChoices: widget.choices,
+        sourceNamePrefix: widget.name,
+        onValues: (values) => _values
+          ..clear()
+          ..addAll(values),
+        onClear: (key, {required clear}) => setState(() => clear ? _cleared.add(key) : _cleared.remove(key)),
+        onSource: (key, source) => _from[key] = source,
+      ),
+      if (_problem case final problem?)
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Text(problem, key: Key('$prefix-save-error'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        ),
+      Align(
+        alignment: Alignment.centerRight,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: FilledButton(key: Key('$prefix-save'), onPressed: _saving ? null : _save, child: Text(widget.saveLabel ?? 'Save')),
+        ),
+      ),
     ]);
   }
 }

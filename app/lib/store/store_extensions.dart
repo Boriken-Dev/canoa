@@ -66,6 +66,7 @@ ExtensionStoreType programsStoreType({
   StoreMarkImage? image,
   required ProgramStores programs,
   required String catalog,
+  Future<void> Function(BuildContext context)? afterInstall,
 }) => ExtensionStoreType(
   id: id,
   label: label,
@@ -85,7 +86,11 @@ ExtensionStoreType programsStoreType({
             ? 'Installed${status.version == null ? '' : ' ${status.version!}'}${status.hasManaged ? '' : ' (found on this computer)'}'
             : 'Not installed',
         installed: status.installed,
-        install: (context) => runProgramAction(context, programs, status, status.hasManaged ? 'update' : 'install'),
+        install: (context) async {
+          final done = await runProgramAction(context, programs, status, status.hasManaged ? 'update' : 'install');
+          // What a program was installed for may need setting up next, as a secret provider's does.
+          if (done && afterInstall != null && context.mounted) await afterInstall(context);
+        },
         remove: status.hasManaged ? (context) => runProgramAction(context, programs, status, 'uninstall') : null,
       ),
   ],
@@ -100,6 +105,7 @@ class StoreExtensions extends ChangeNotifier {
     bool Function()? mayInstall,
     Future<bool> Function()? restart,
     Future<void> Function()? saved,
+    this.afterInstall,
   }) : _control = control,
        _open = open {
     _runtimes = ProgramStores(control: control, open: open, kind: 'runtimes');
@@ -110,6 +116,9 @@ class StoreExtensions extends ChangeNotifier {
 
   final Future<ControlClient> Function() _control;
   final Future<ControlClient> Function() _open;
+
+  /// What is done once a program of the type [id] was installed: the Secret providers type opens the provider's setup.
+  final Future<void> Function(BuildContext context, String type)? afterInstall;
   late final ProgramStores _runtimes;
   late final FoundryModels _foundry;
   late final ExtensionCatalogs _catalogs;
@@ -161,6 +170,7 @@ class StoreExtensions extends ChangeNotifier {
           image: extensionImage(each['icon']),
           programs: programs,
           catalog: each['extension_title'] is String ? each['extension_title'] as String : 'An extension',
+          afterInstall: afterInstall == null ? null : (context) => afterInstall!(context, id),
         ));
         if (each['extension'] is String) (by[each['extension'] as String] ??= []).add(each['title'] as String);
         _held.add(programs);

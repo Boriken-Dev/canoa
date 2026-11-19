@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../desktop/control_client.dart';
+import '../forms/schema_fields.dart' show SecretSource;
 import 'secrets_host.dart';
 
 /// The secrets table's state: what the host holds, which value the person asked to see, and what is running. A value is held here only
@@ -15,6 +16,7 @@ class SecretsController extends ChangeNotifier {
   List<SecretRow> rows = const [];
   List<SecretKeep> keeps = const [];
   List<SecretEntry> entries = const [];
+  List<SecretProviderInfo> providers = const [];
   bool loading = false;
 
   /// Why the last call failed, in the host's words, which never hold a value.
@@ -30,6 +32,7 @@ class SecretsController extends ChangeNotifier {
     try {
       final listing = await host.list();
       final entries = await host.entries();
+      providers = await host.providers();
       rows = listing.rows;
       keeps = listing.keeps;
       this.entries = entries;
@@ -86,6 +89,32 @@ class SecretsController extends ChangeNotifier {
 
     run.addListener(ended);
     return run;
+  }
+
+  /// Sets up the entry [name] of [provider] and reads the list again. The host's reason when it will not, or null when it did.
+  Future<String?> configure({required String name, required String provider, Map<String, Object?> settings = const {}, Map<String, SecretSource> from = const {}}) async {
+    try {
+      await host.configure(name: name, provider: provider, settings: settings, from: from);
+    } on ControlFailed catch (error) {
+      return error.message;
+    } on Object catch (error) {
+      return '$error';
+    }
+    await refresh();
+    return null;
+  }
+
+  /// Takes the entry [name] away, and reads the list again.
+  Future<void> removeEntry(String name) async {
+    try {
+      await host.removeEntry(name);
+      problem = null;
+    } on ControlFailed catch (error) {
+      problem = error.message;
+    } on Object catch (error) {
+      problem = '$error';
+    }
+    await refresh();
   }
 
   /// The entries a value can be set in by hand.

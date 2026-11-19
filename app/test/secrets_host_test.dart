@@ -20,6 +20,7 @@ import 'package:canoa/desktop/host_tool_io.dart';
 import 'package:canoa/secrets/secrets_controller.dart';
 import 'package:canoa/secrets/secrets_host.dart';
 import 'package:canoa/session_store.dart';
+import 'package:canoa/forms/schema_fields.dart' show SecretSource;
 import 'package:canoa_native/canoa_native.dart';
 import 'package:coqui_acp/secret.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -171,6 +172,38 @@ void main() {
 
       await listening.cancel();
       await client.close();
+      await supervisor.stop();
+    });
+
+    test('a provider is set up, listed and taken away through the real host, with its key taken from the form and no secret written to canoa.cfg', () async {
+      final agent = exampleBinary('stdio_agent');
+      if (agent == null) fail(exampleMissing('stdio_agent')!);
+      await File(cfg).writeAsString('${const CanoaConfig().encode()}\n[host.agents.Scripted]\nprogram = ${jsonEncode(agent)}\nargs = ["--scripted"]\nlisten = "127.0.0.1:0"\n');
+      final supervisor = HostSupervisor(tool);
+      await supervisor.apply(configPath: cfg);
+      await _until(() => supervisor.phase == HostPhase.running, 'the host to run');
+      final host = ControlSecretsHost(HostControl(supervisor));
+
+      // The host offers Bitwarden with the form it describes, and says the key may be another provider's secret.
+      final bitwarden = (await host.providers()).singleWhere((each) => each.id == 'bitwarden');
+      final session = (bitwarden.schema['properties']! as Map)['session']! as Map;
+      expect((session['writeOnly'], session['x-from-secret']), (true, true));
+      expect(bitwarden.hasSettings, isTrue);
+
+      await host.configure(name: 'vault', provider: 'bitwarden', settings: {'command': 'bw'}, from: {'session': const SecretSource('form', 'bw_session')});
+      final vault = (await host.entries()).singleWhere((each) => each.name == 'vault');
+      expect(vault.settings, {'command': 'bw'});
+      expect(vault.from, {'session': const SecretSource('form', 'bw_session')});
+      final written = await File(cfg).readAsString();
+      expect(written, contains('[secrets.providers.vault]'));
+
+      // A secret typed into the settings is refused, and nothing of it reaches the file.
+      const typed = 'typed-key-zq9-not-real';
+      await expectLater(host.configure(name: 'bad', provider: 'bitwarden', settings: {'session': typed}), throwsA(isA<ControlFailed>()));
+      expect(await File(cfg).readAsString(), isNot(contains(typed)));
+
+      await host.removeEntry('vault');
+      expect((await host.entries()).any((each) => each.name == 'vault'), isFalse);
       await supervisor.stop();
     });
   });

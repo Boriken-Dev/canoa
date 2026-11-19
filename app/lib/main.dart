@@ -121,6 +121,7 @@ import 'profile/effective_setup.dart';
 import 'profile/report.dart';
 import 'secrets/secrets_controller.dart';
 import 'secrets/secrets_host.dart';
+import 'secrets/provider_setup.dart';
 import 'secrets/secrets_section.dart';
 import 'settings/extension_settings.dart';
 import 'settings/shell_settings.dart';
@@ -1845,7 +1846,17 @@ class _CanoaAppState extends State<CanoaApp> {
           mayInstall: () => _grants?.may(HostGrants.hosting) ?? false,
           restart: _restartForExtensions,
           saved: _extensionsSaved,
+          afterInstall: _secretProviderInstalled,
         )..addListener(_extensionsChanged));
+
+  /// A program of the Secret providers type was installed: its provider is set up next, in the form the host describes.
+  Future<void> _secretProviderInstalled(BuildContext context, String type) async {
+    final secrets = _secretsHeld;
+    if (type != 'secrets' || secrets == null || !(_grants?.may(HostGrants.secrets) ?? false)) return;
+    await secrets.refresh();
+    if (!context.mounted) return;
+    await showSecretProviderSetup(context, secrets);
+  }
 
   void _extensionsChanged() {
     if (mounted) setState(() {});

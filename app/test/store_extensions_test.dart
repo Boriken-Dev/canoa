@@ -132,6 +132,43 @@ void main() {
     await _settle(tester);
     extensions.dispose();
   });
+  testWidgets('a program installed in a type that asks for it is followed by that type\'s setup', (tester) async {
+    final host = FakeStoreHost([
+      FakeStore('bitwarden_store', title: 'Bitwarden', extensionType: 'secrets'),
+    ])
+      ..extensionTypes = [
+        {'id': 'secrets', 'title': 'Secret providers', 'icon': 'lock', 'stores': ['bitwarden_store'], 'extension': 'built-in', 'extension_title': 'Canoa'},
+      ];
+    final shared = host.client();
+    final setUp = <String>[];
+    final extensions = StoreExtensions(
+      control: () async => shared,
+      open: () async => host.client(),
+      afterInstall: (context, type) async => setUp.add(type),
+    );
+    await extensions.ensure();
+    final view = StoreView('secrets');
+    await tester.binding.setSurfaceSize(const Size(900, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExtensionBody(type: extensions.types.last, view: view))));
+    await _settle(tester);
+    expect(extensions.types.last.label, 'Secret providers');
+
+    await tester.tap(find.byKey(const Key('store-entry-install-Canoa-Bitwarden')));
+    await _settle(tester);
+    expect(find.byKey(const Key('plan-dialog')), findsOneWidget);
+    expect(setUp, isEmpty, reason: 'nothing is set up before the program is installed');
+    await tester.tap(find.byKey(const Key('plan-confirm')));
+    for (var i = 0; i < 40 && find.byKey(const Key('program-done')).evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.byKey(const Key('program-done')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('program-close')));
+    await _settle(tester);
+    expect(setUp, ['secrets']);
+    extensions.dispose();
+  });
+
 }
 
 /// Lets the scripted host answer and the page draw it: a few short frames, since the banner and a running install never settle.

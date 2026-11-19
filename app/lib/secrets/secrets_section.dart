@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretRequestCard;
 import 'package:flutter/material.dart';
 
+import 'provider_setup.dart';
 import 'secrets_controller.dart';
 import 'secrets_host.dart';
 
@@ -82,6 +83,51 @@ class _SecretsPageState extends State<SecretsPage> {
     if (sure ?? false) await _secrets.forget(row);
   }
 
+  Future<void> _addProvider() async {
+    await showSecretProviderSetup(context, _secrets);
+    if (mounted) unawaited(_secrets.refresh());
+  }
+
+  Future<void> _editProvider(SecretEntry entry) async {
+    await showSecretProviderSetup(context, _secrets, editing: entry);
+    if (mounted) unawaited(_secrets.refresh());
+  }
+
+  Future<void> _removeProvider(SecretEntry entry) async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const Key('secret-provider-remove-confirm'),
+        title: Text('Remove ${entry.name}?'),
+        content: const Text('Canoa stops using this setup. What it kept for you in its own store stays there.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep it')),
+          FilledButton(key: const Key('secret-provider-remove-yes'), onPressed: () => Navigator.pop(context, true), child: const Text('Remove it')),
+        ],
+      ),
+    );
+    if (sure ?? false) await _secrets.removeEntry(entry.name);
+  }
+
+  /// The providers the person set up, each to change or take away.
+  Widget _providers(ThemeData theme, ColorScheme scheme) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Wrap(spacing: 8, runSpacing: 8, children: [
+        for (final entry in _secrets.entries)
+          if (entry.setUp)
+            InputChip(
+              key: Key('secret-provider ${entry.name}'),
+              avatar: const Icon(Icons.lock_outline, size: 16),
+              label: Text('${entry.name}: ${entry.title}'),
+              onPressed: () => unawaited(_editProvider(entry)),
+              onDeleted: () => unawaited(_removeProvider(entry)),
+              deleteButtonTooltipMessage: 'Remove this setup',
+            ),
+      ]),
+    );
+  }
+
   Future<void> _set() async {
     await showDialog<void>(context: context, builder: (_) => SetSecretDialog(controller: _secrets));
     if (mounted) unawaited(_secrets.refresh());
@@ -98,6 +144,8 @@ class _SecretsPageState extends State<SecretsPage> {
         Row(children: [
           Expanded(child: Text('Secrets', style: theme.textTheme.titleLarge)),
           IconButton(key: const Key('secrets-refresh'), tooltip: 'Read the list again', icon: const Icon(Icons.refresh), onPressed: () => unawaited(_secrets.refresh())),
+          OutlinedButton.icon(key: const Key('secret-add-provider'), onPressed: _addProvider, icon: const Icon(Icons.add_moderator_outlined), label: const Text('Set up a provider')),
+          const SizedBox(width: 8),
           FilledButton.icon(key: const Key('secret-set'), onPressed: _set, icon: const Icon(Icons.add), label: const Text('Set a secret')),
         ]),
         const SizedBox(height: 4),
@@ -106,6 +154,7 @@ class _SecretsPageState extends State<SecretsPage> {
           style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 12),
+        if (_secrets.entries.any((entry) => entry.setUp)) _providers(theme, scheme),
         if (_secrets.problem case final problem?) Padding(padding: const EdgeInsets.only(bottom: 8), child: SelectableText(problem, key: const Key('secrets-problem'), style: TextStyle(color: scheme.error))),
         if (_secrets.loading && _secrets.rows.isEmpty) const LinearProgressIndicator(),
         if (!_secrets.loading && _secrets.rows.isEmpty && _secrets.problem == null)
@@ -166,17 +215,20 @@ class _SecretsPageState extends State<SecretsPage> {
 
 /// Sets a secret by hand: which provider entry and what name, then the host's own form, sealed, for the value.
 class SetSecretDialog extends StatefulWidget {
-  const SetSecretDialog({super.key, required this.controller});
+  const SetSecretDialog({super.key, required this.controller, this.initialEntry, this.initialName});
 
   final SecretsController controller;
+
+  /// The entry and the name to start from, for a secret another setup is waiting for.
+  final String? initialEntry, initialName;
 
   @override
   State<SetSecretDialog> createState() => _SetSecretDialogState();
 }
 
 class _SetSecretDialogState extends State<SetSecretDialog> {
-  final _name = TextEditingController();
-  String? _entry;
+  late final _name = TextEditingController(text: widget.initialName ?? '');
+  late String? _entry = widget.initialEntry;
   SecretSet? _run;
 
   List<SecretEntry> get _entries => widget.controller.settable;

@@ -5,6 +5,7 @@ import 'package:canoa/desktop/control_client.dart';
 import 'package:canoa/secrets/secrets_controller.dart';
 import 'package:canoa/secrets/secrets_host.dart';
 import 'package:canoa/secrets/secrets_section.dart';
+import 'package:canoa/forms/schema_fields.dart' show SecretSource;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -17,7 +18,10 @@ class _FakeSecrets implements SecretsHost {
   final revealed = <String>[];
   final forgotten = <String>[];
   final sets = <SecretSet>[];
+  final configured = <({String name, String provider, Map<String, Object?> settings, Map<String, SecretSource> from})>[];
+  final removed = <String>[];
   Object? failWith;
+  String? configureFails;
 
   @override
   Future<SecretsListing> list() async {
@@ -29,8 +33,58 @@ class _FakeSecrets implements SecretsHost {
   Future<List<SecretEntry>> entries() async => const [
     SecretEntry(name: 'form', provider: 'form', title: 'Form', canStore: false, canList: false, needsPerson: true),
     SecretEntry(name: 'system', provider: 'system', title: 'System store', canStore: true, canList: true, needsPerson: false),
-    SecretEntry(name: 'work', provider: 'bitwarden', title: 'Bitwarden', canStore: false, canList: true, needsPerson: false),
+    SecretEntry(
+      name: 'work',
+      provider: 'bitwarden',
+      title: 'Bitwarden',
+      canStore: false,
+      canList: true,
+      needsPerson: false,
+      settings: {'command': 'bw'},
+      from: {'session': SecretSource('form', 'bw_session')},
+    ),
   ];
+
+  @override
+  Future<List<SecretProviderInfo>> providers() async => [
+    const SecretProviderInfo(id: 'form', title: 'Form', description: null, origin: 'built-in', canStore: false, needsPerson: true, schema: {}, form: {}),
+    SecretProviderInfo(
+      id: 'bitwarden',
+      title: 'Bitwarden',
+      description: 'Your Bitwarden vault, read through its bw command.',
+      origin: 'built-in',
+      canStore: false,
+      needsPerson: false,
+      schema: {
+        'type': 'object',
+        'properties': {
+          'command': {'type': 'string', 'default': 'bw', 'title': 'Command', 'x-section': 'vault'},
+          'session': {
+            'type': 'string',
+            'writeOnly': true,
+            'x-sensitive': true,
+            'x-from-secret': true,
+            'title': 'Session key',
+            'x-section': 'vault',
+          },
+          'part': {'type': 'string', 'enum': ['password', 'username'], 'default': 'password', 'title': 'Part of an item', 'x-section': 'vault'},
+        },
+      },
+      form: {
+        'sections': [{'id': 'vault', 'title': 'Bitwarden'}],
+        'fields': {'command': {'placeholder': 'bw'}},
+      },
+    ),
+  ];
+
+  @override
+  Future<void> configure({required String name, required String provider, Map<String, Object?> settings = const {}, Map<String, SecretSource> from = const {}}) async {
+    if (configureFails case final why?) throw ControlFailed(-32002, why);
+    configured.add((name: name, provider: provider, settings: settings, from: from));
+  }
+
+  @override
+  Future<void> removeEntry(String name) async => removed.add(name);
 
   @override
   Future<String> reveal(String provider, String name) async {
@@ -65,6 +119,63 @@ Future<(SecretsController, _FakeSecrets)> _page(WidgetTester tester, List<Secret
 }
 
 void main() {
+  testWidgets('a provider is set up from the form the host describes, and a secret setting is a choice of where it comes from, never a box to type it in', (tester) async {
+    final (_, host) = await _page(tester, const []);
+    await tester.tap(find.byKey(const Key('secret-add-provider')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('secret-provider-dialog')), findsOneWidget);
+    expect(find.byKey(const Key('secret-provider-field-command')), findsOneWidget);
+    expect(find.byKey(const Key('secret-provider-field-session')), findsNothing, reason: 'the key is taken from a provider, never typed here');
+    expect(find.byKey(const Key('secret-provider-from-session')), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('secret-provider-name')), 'vault');
+    await tester.enterText(find.byKey(const Key('secret-provider-field-command')), r'C:\tools\bw.exe');
+    await tester.tap(find.byKey(const Key('secret-provider-from-session')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('form: you type it when asked').last);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(const Key('secret-provider-from-name-session'))).controller!.text, 'vault_session');
+    await tester.enterText(find.byKey(const Key('secret-provider-from-name-session')), 'bw_session');
+    await tester.tap(find.byKey(const Key('secret-provider-save')));
+    await tester.pumpAndSettle();
+    expect(host.configured, hasLength(1));
+    final saved = host.configured.single;
+    expect((saved.name, saved.provider), ('vault', 'bitwarden'));
+    expect(saved.settings, {'command': r'C:\tools\bw.exe'});
+    expect(saved.from, {'session': const SecretSource('form', 'bw_session')});
+    // The key is typed by the person, so the form that asks for it opens, on the name the setup waits for.
+    expect(find.byKey(const Key('secret-set-dialog')), findsOneWidget);
+    expect(tester.widget<TextField>(find.byKey(const Key('secret-set-name'))).controller!.text, 'bw_session');
+  });
+
+  testWidgets('a refusal of the host is shown in the form and the dialog stays', (tester) async {
+    final (_, host) = await _page(tester, const []);
+    host.configureFails = 'those settings cannot be used: nope';
+    await tester.tap(find.byKey(const Key('secret-add-provider')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('secret-provider-save')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('secret-provider-save-error')), findsOneWidget);
+    expect(find.textContaining('nope'), findsOneWidget);
+    expect(find.byKey(const Key('secret-provider-dialog')), findsOneWidget);
+  });
+
+  testWidgets('a setup that was made is listed, changed from what it holds, and removed after a yes', (tester) async {
+    final (_, host) = await _page(tester, const []);
+    expect(find.byKey(const Key('secret-provider work')), findsOneWidget);
+    expect(find.byKey(const Key('secret-provider form')), findsNothing, reason: 'the form and the system store are there without being set up');
+    await tester.tap(find.byKey(const Key('secret-provider work')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(const Key('secret-provider-field-command'))).controller!.text, 'bw');
+    expect(tester.widget<TextField>(find.byKey(const Key('secret-provider-from-name-session'))).controller!.text, 'bw_session');
+    await tester.tap(find.byKey(const Key('secret-provider-cancel')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Remove this setup'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('secret-provider-remove-yes')));
+    await tester.pumpAndSettle();
+    expect(host.removed, ['work']);
+  });
+
   testWidgets('the table lists each secret by provider and name with its value hidden and how long it is kept, and holds no value', (tester) async {
     final (_, host) = await _page(tester, const [
       SecretRow(provider: 'form', name: 'api_key', kept: 'process'),

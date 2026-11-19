@@ -5,8 +5,8 @@ import 'host_speech.dart';
 import 'speech_backend.dart';
 
 /// Draws the settings of one speech provider from the document the host serves for its kind (a schema and a form, drawn by
-/// [SchemaFields]). Saving writes the host's canoa.cfg through `speech/configure`.
-class ProviderSettingsForm extends StatefulWidget {
+/// [SchemaSettingsForm]). Saving writes the host's canoa.cfg through `speech/configure`.
+class ProviderSettingsForm extends StatelessWidget {
   const ProviderSettingsForm({super.key, required this.catalog, required this.kind, required this.name, this.provider, this.saveLabel, this.onSaved});
 
   final HostSpeechCatalog catalog;
@@ -25,69 +25,21 @@ class ProviderSettingsForm extends StatefulWidget {
   final VoidCallback? onSaved;
 
   @override
-  State<ProviderSettingsForm> createState() => _ProviderSettingsFormState();
-}
-
-class _ProviderSettingsFormState extends State<ProviderSettingsForm> {
-  final _values = <String, Object?>{};
-  final _cleared = <String>{};
-  String? _problem;
-  bool _saving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _values.addAll(widget.provider?.settings ?? const {});
-  }
-
-  Future<void> _save() async {
-    final settings = collectSchemaValues(widget.kind.schema, widget.kind.form, _values);
-    setState(() {
-      _saving = true;
-      _problem = null;
-    });
-    try {
-      await widget.catalog.save(widget.name, widget.kind.id, settings, clear: _cleared.toList());
-      if (mounted) setState(_cleared.clear);
-      widget.onSaved?.call();
-    } on SpeechFailure catch (failure) {
-      if (mounted) setState(() => _problem = failure.message);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SchemaFields(
-        schema: widget.kind.schema,
-        form: widget.kind.form,
-        values: _values,
-        idPrefix: 'speech',
-        secretsSet: widget.provider?.secretsSet.toSet() ?? const {},
-        cleared: _cleared,
-        onValues: (values) => _values
-          ..clear()
-          ..addAll(values),
-        onClear: (key, {required clear}) => setState(() => clear ? _cleared.add(key) : _cleared.remove(key)),
-      ),
-      if (_problem case final problem?)
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Text(problem, key: const Key('speech-save-error'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
-        ),
-      Align(
-        alignment: Alignment.centerRight,
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: FilledButton(
-            key: const Key('speech-save'),
-            onPressed: _saving ? null : _save,
-            child: Text(widget.saveLabel ?? (widget.provider == null ? 'Add' : 'Save')),
-          ),
-        ),
-      ),
-    ]);
-  }
+  Widget build(BuildContext context) => SchemaSettingsForm(
+    schema: kind.schema,
+    form: kind.form,
+    name: name,
+    values: provider?.settings ?? const {},
+    secretsSet: provider?.secretsSet.toSet() ?? const {},
+    saveLabel: saveLabel ?? (provider == null ? 'Add' : 'Save'),
+    onSave: (settings, cleared, from) async {
+      try {
+        await catalog.save(name, kind.id, settings, clear: cleared);
+        onSaved?.call();
+        return null;
+      } on SpeechFailure catch (failure) {
+        return failure.message;
+      }
+    },
+  );
 }
