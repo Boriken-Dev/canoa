@@ -194,7 +194,40 @@ pub(crate) fn fits(
     {
         return Err(format!("{runs} cannot be given a gateway"));
     }
+    // An account that names an address is a key for that address: a harness that takes the standard only at its vendor's own
+    // would send the key there, and refuses.
+    if account
+        .settings
+        .as_ref()
+        .is_some_and(|settings| settings.as_map().contains_key(BASE_URL))
+        && !moves_endpoint(catalog, &info.provides)
+    {
+        return Err(format!(
+            "{runs} takes {} at its vendor's own address and cannot be pointed at the account's",
+            list(
+                catalog
+                    .accepted_by(&info.provides)
+                    .map(|accepted| vec![accepted.standard.as_str()])
+                    .unwrap_or_default()
+            )
+        ));
+    }
     Ok(())
+}
+
+/// The setting of an account that names the address of the API it is a key for: what a harness's slot moves to its own endpoint
+/// setting.
+pub(crate) const BASE_URL: &str = "base_url";
+
+/// Whether `catalog` can point the standard it applies an account that provides `provides` as at an address of the account's: one of
+/// the slots of that standard has a setting for it.
+pub(crate) fn moves_endpoint(catalog: &AccountCatalog, provides: &[String]) -> bool {
+    catalog.accepted_by(provides).is_ok_and(|accepted| {
+        accepted
+            .slots
+            .iter()
+            .any(|slot| slot.base_url_setting.is_some())
+    })
 }
 
 /// The harness a session runs on, and its catalog when the caller has it.

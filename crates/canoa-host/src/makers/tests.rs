@@ -381,3 +381,45 @@ fn an_account_a_maker_made_fits_only_where_a_standard_it_provides_is_accepted_th
         "{why}"
     );
 }
+
+#[test]
+fn a_kind_that_names_an_address_joins_and_fits_only_a_harness_that_can_point_its_standard_at_it() {
+    use crate::accounts::matching::fits;
+    use coqui_acp_api::{Accepted, AcceptedSlot, AccountCatalog};
+    let catalog = |slot: AcceptedSlot| {
+        let mut catalog = AccountCatalog::new();
+        catalog.accepts = vec![Accepted::new(standard::OPENAI_API).slot(slot)];
+        catalog
+    };
+    let moves = catalog(AcceptedSlot::new("api_key", "own-key").base_url("openai_base_url", None));
+    let fixed = catalog(AcceptedSlot::new("api_key", "own-key"));
+    let joined = |catalog: &AccountCatalog| {
+        let mut listing = AccountCatalog::new();
+        extend(&mut listing, "h", Some(catalog));
+        let ids: Vec<String> = listing.kinds.iter().map(|kind| kind.id.clone()).collect();
+        ids
+    };
+    // The bundled gateway and proxy kinds are keys for an address of the person's.
+    for kind in ["api-gateway", "litellm"] {
+        assert!(joined(&moves).iter().any(|id| id == kind), "{kind}");
+        assert!(!joined(&fixed).iter().any(|id| id == kind), "{kind}");
+    }
+    let account = crate::config::AccountConfig {
+        harness: "codex".to_owned(),
+        kind: "litellm".to_owned(),
+        id: "id".to_owned(),
+        settings: Some(crate::config::Settings::new(
+            serde_json::json!({"base_url": "https://llm.example.com"})
+                .as_object()
+                .cloned()
+                .expect("a table"),
+        )),
+    };
+    let info = AccountKindInfo::new("litellm", "L").provides([standard::OPENAI_API]);
+    assert!(fits(&moves, "codex", &account, &info).is_ok());
+    let why = fits(&fixed, "pi", &account, &info).expect_err("it cannot be pointed at the address");
+    assert!(
+        why.contains("pi") && why.contains("openai-api") && why.contains("address"),
+        "{why}"
+    );
+}

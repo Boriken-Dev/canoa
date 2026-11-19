@@ -121,8 +121,8 @@ pub(crate) fn login_provider(method: &str) -> Option<Arc<dyn AccountProvider>> {
 }
 
 /// Adds the kinds and sign-in methods the makers offer to `listing`, the harness `harness`'s own: a kind a gateway serves joins when
-/// the harness can be given a gateway, any other when the harness accepts a standard the kind provides (any it accepts, for a kind whose accounts name their own). `catalog` is what the
-/// harness accepts; a harness that lists none takes none.
+/// the harness can be given a gateway, any other when the harness accepts a standard the kind provides (any it accepts, for a kind whose accounts name their own) and, for a
+/// kind that names an address, can point it there. `catalog` is what the harness accepts; a harness that lists none takes none.
 pub(crate) fn extend(
     listing: &mut AccountCatalog,
     harness: &str,
@@ -136,13 +136,22 @@ pub(crate) fn extend(
             let joins = if crate::gateways::for_kind(&kind.id).is_some() {
                 crate::vendors::gateway_route(harness).is_some()
             } else {
-                // A kind whose accounts name their own standards is open to any harness that accepts one, whichever it is.
+                // A kind whose accounts name their own standards is open to any harness that accepts one, whichever it is. A kind
+                // that names the address of its API (a key for that address) needs a harness that can point the standard at it.
                 let own = crate::accounts::standards::property(kind).is_some();
+                let addressed = kind
+                    .endpoints
+                    .iter()
+                    .any(|slot| slot.purpose == coqui_acp_api::MODEL_API && slot.key.is_some());
                 catalog.is_some_and(|catalog| {
-                    catalog
-                        .accepts
-                        .iter()
-                        .any(|accepted| own || kind.provides.contains(&accepted.standard))
+                    catalog.accepts.iter().any(|accepted| {
+                        (own || kind.provides.contains(&accepted.standard))
+                            && (!addressed
+                                || accepted
+                                    .slots
+                                    .iter()
+                                    .any(|slot| slot.base_url_setting.is_some()))
+                    })
                 })
             };
             if !joins {
