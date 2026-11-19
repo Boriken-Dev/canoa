@@ -18,11 +18,15 @@ List<SpeechBackend> platformSpeechBackends() => [
 /// The operating system's own speech service, through the platform plugin. The plugin is started on the first [start], not
 /// before, so the system asks for the microphone only when the person starts to dictate.
 final class SystemSpeech implements SpeechBackend {
-  SystemSpeech(this.name, {SpeechToText? engine}) : _engine = engine ?? SpeechToText();
+  /// [finishWithin] is how long the system may take, after [stop], to say it has finished before the dictation is ended with a
+  /// reason: a recognizer that never says it is done must not hold the composer.
+  SystemSpeech(this.name, {SpeechToText? engine, this.finishWithin = const Duration(seconds: 10)}) : _engine = engine ?? SpeechToText();
 
   final SpeechToText _engine;
+  final Duration finishWithin;
   final _levels = StreamController<double>.broadcast();
   StreamController<Transcript>? _capture;
+  Timer? _deadline;
   bool _ready = false;
 
   @override
@@ -56,35 +60,44 @@ final class SystemSpeech implements SpeechBackend {
 
   @override
   Stream<Transcript> start({String? device, String? language, String? model, VoiceProfile? profile}) {
+    _deadline?.cancel();
     final capture = StreamController<Transcript>();
     _capture = capture;
     _run(capture, language);
     return capture.stream;
   }
 
+  /// Ends the capture now running, if any: the engine reports one status for whichever listen is current, so it is routed here
+  /// and not to the capture that was current when the engine was first initialized.
+  void _finish() {
+    _deadline?.cancel();
+    _deadline = null;
+    final capture = _capture;
+    _capture = null;
+    if (capture != null && !capture.isClosed) unawaited(capture.close());
+  }
+
+  void _fail(String message) {
+    final capture = _capture;
+    if (capture != null && !capture.isClosed) capture.addError(SpeechFailure(message));
+    _finish();
+  }
+
   Future<void> _run(StreamController<Transcript> capture, String? language) async {
-    void finish() {
-      if (!capture.isClosed) unawaited(capture.close());
-      if (identical(_capture, capture)) _capture = null;
-    }
-
-    void fail(String message) {
-      if (!capture.isClosed) capture.addError(SpeechFailure(message));
-      finish();
-    }
-
     try {
       if (!_ready) {
         _ready = await _engine.initialize(
           onError: (SpeechRecognitionError error) {
-            if (error.permanent) fail(_said(error.errorMsg));
+            if (error.permanent) _fail(_said(error.errorMsg));
           },
           onStatus: (status) {
-            if (status == SpeechToText.doneStatus || status == SpeechToText.notListeningStatus) finish();
+            if (status == SpeechToText.doneStatus || status == SpeechToText.notListeningStatus) _finish();
           },
         );
         if (!_ready) {
-          fail('The system has no speech service ready. Check that the microphone is allowed and speech recognition is on.');
+          if (identical(_capture, capture)) {
+            _fail('The system has no speech service ready. Check that the microphone is allowed and speech recognition is on.');
+          }
           return;
         }
       }
@@ -100,7 +113,7 @@ final class SystemSpeech implements SpeechBackend {
         listenOptions: SpeechListenOptions(listenMode: ListenMode.dictation, partialResults: true, cancelOnError: true, localeId: language),
       );
     } on Object catch (error) {
-      fail('The speech service could not start: ${error.runtimeType}.');
+      if (identical(_capture, capture)) _fail('The speech service could not start: ${error.runtimeType}.');
     }
   }
 
@@ -113,14 +126,21 @@ final class SystemSpeech implements SpeechBackend {
 
   @override
   Future<void> stop() async {
+    final capture = _capture;
+    _deadline?.cancel();
+    _deadline = Timer(finishWithin, () {
+      if (identical(_capture, capture)) _fail('The system speech service did not finish within ${finishWithin.inSeconds} seconds of stopping.');
+    });
     await _engine.stop();
   }
 
   @override
   Future<void> cancel() async {
     final capture = _capture;
+    _deadline?.cancel();
+    _deadline = null;
     await _engine.cancel();
     if (capture != null && !capture.isClosed) await capture.close();
-    _capture = null;
+    if (identical(_capture, capture)) _capture = null;
   }
 }
