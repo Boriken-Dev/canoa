@@ -23,21 +23,21 @@ indexmap = { version = "2", default-features = false, features = ["std", "serde"
 # ACP messages a client sends, read to keep a program launch from reaching the agent.
 serde_json = "1"
 # The portal's sign-in: the operating system's accounts through PAM and NSS (`canoa portal`, feature `portal`).
-coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "a7aa391262a8e3ee78e8dd22d78766decdee95c5" }
-coqui-access-system = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "a7aa391262a8e3ee78e8dd22d78766decdee95c5" }
+coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
+coqui-access-system = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
 # A certificate's claims tied to a directory account by rules (the portal's `matcher`).
-coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "a7aa391262a8e3ee78e8dd22d78766decdee95c5" }
+coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
 # Which methods a sign-in may use, from where, and what it still needs.
-coqui-access-signin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "a7aa391262a8e3ee78e8dd22d78766decdee95c5" }
+coqui-access-signin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
 # A forwarded certificate's subject and fingerprint, shown when it is enrolled.
 coqui-peer-tls = { version = "=0.0.0-alpha.1", default-features = false, features = ["fields"] }
 # The portal's one-time codes are a library it loads from a path too (its tests build it); the QR code of a setup link, as an inline
 # SVG with no image codecs.
-coqui-access-totp-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "a7aa391262a8e3ee78e8dd22d78766decdee95c5" }
+coqui-access-totp-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 # The password and certificate providers are libraries the portal loads from a path (its tests build them).
-coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "a7aa391262a8e3ee78e8dd22d78766decdee95c5" }
-coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "a7aa391262a8e3ee78e8dd22d78766decdee95c5" }
+coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
+coqui-access-password-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
 # The web app's server: requests parsed by tungstenite's own parser, request paths percent-decoded by url's, TLS by
 # coqui-transport-web's rustls; each already in the graph at these versions.
 foundry-local-sdk = "2.4"
@@ -61,29 +61,29 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["s
 # The destination patterns of a profile's proxy item (a regular expression matched whole); already in the graph.
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }
 # Reading overlays: the Agent Overlay Specification, one implementation shared with the other consumers. Not published yet.
-coqui-aos = { git = "https://github.com/Boriken-Dev/coqui-aos", rev = "169125d3bfcb1b2cb1c3b33b297e373f2930c54a" }
+coqui-aos = { git = "https://github.com/Boriken-Dev/coqui-aos", rev = "b766c775b0600cdec6f5695cdaad8dffe64790e9" }
 # The stdio relay and the provider facade, on coqui-acp at one revision. Not published yet.
-coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee1690bfdea215d6b8e726862b4b5666254a7512" }
-coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee1690bfdea215d6b8e726862b4b5666254a7512" }
-coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee1690bfdea215d6b8e726862b4b5666254a7512" }
-coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee1690bfdea215d6b8e726862b4b5666254a7512" }
+coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b315d3249c89aa6fde0a9c08f6c037e4cef31161" }
+coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b315d3249c89aa6fde0a9c08f6c037e4cef31161" }
+coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b315d3249c89aa6fde0a9c08f6c037e4cef31161" }
+coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b315d3249c89aa6fde0a9c08f6c037e4cef31161" }
 # Claude Code, Codex and Pi as ACP agents, run in this process with no Node: their translators and what they share.
-coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee1690bfdea215d6b8e726862b4b5666254a7512", features = ["history"] }
-coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee1690bfdea215d6b8e726862b4b5666254a7512", features = ["history"] }
+coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b315d3249c89aa6fde0a9c08f6c037e4cef31161", features = ["history"] }
+coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b315d3249c89aa6fde0a9c08f6c037e4cef31161", features = ["history"] }
 # The session-history format: the recorder, the reader and the loss report.
-coqui-acp-history = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee1690bfdea215d6b8e726862b4b5666254a7512" }
+coqui-acp-history = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b315d3249c89aa6fde0a9c08f6c037e4cef31161" }
 # The host side of secret prompts: the tools an agent is served and what the person is asked.
-coqui-acp-secrets = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee1690bfdea215d6b8e726862b4b5666254a7512" }
-coqui-acp-pi = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee1690bfdea215d6b8e726862b4b5666254a7512", features = ["history"] }
-coqui-acp-hub = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee1690bfdea215d6b8e726862b4b5666254a7512" }
-coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "ee1690bfdea215d6b8e726862b4b5666254a7512", features = ["antigravity", "kind"] }
+coqui-acp-secrets = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b315d3249c89aa6fde0a9c08f6c037e4cef31161" }
+coqui-acp-pi = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b315d3249c89aa6fde0a9c08f6c037e4cef31161", features = ["history"] }
+coqui-acp-hub = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b315d3249c89aa6fde0a9c08f6c037e4cef31161" }
+coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b315d3249c89aa6fde0a9c08f6c037e4cef31161", features = ["antigravity", "kind"] }
 # The revisions the bridge library (coqui-acp-bridge) builds on at that commit, so the graph holds one of each.
 coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "f45938e8cede85a2a2e00afedea1b4944f7c8a67" }
 coqui-peer = { git = "https://github.com/Boriken-Dev/coqui-peer", rev = "984db3d54b73de10c7892b06fe269a259de2d1c5" }
 # Windows named pipes and Unix sockets, which a host entry may listen on; built on this tree's coqui-peer and coqui-builder.
 coqui-transport-pipe = { git = "https://github.com/Boriken-Dev/coqui-transport-pipe", rev = "76d97671d87372be5d29263a98198a08fea5eaed" }
 # The `transport` kind: an entry may name a transport provider by id (built-in pipe and websocket, or one a library or source loads).
-coqui-transport-guatiao = { git = "https://github.com/Boriken-Dev/coqui-transport-guatiao", rev = "2dde3b53b3a4d695c906f21db386efd655406bf5", features = ["pipe", "websocket"] }
+coqui-transport-guatiao = { git = "https://github.com/Boriken-Dev/coqui-transport-guatiao", rev = "4dc07e03893c693a70d711df6d475b65c595e0e3", features = ["pipe", "websocket"] }
 coqui-peer-webcrypto = { git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto", rev = "9146f55dd9fb9be8d6d96f43e17bc7a057ba0681" }
 # The Noise method, for the example that plays the page's peer; the revision the bridge library (coqui-acp-bridge) builds on.
 coqui-peer-noise = { git = "https://github.com/Boriken-Dev/coqui-peer-noise", rev = "3a5b30689780a6e6291af565ff6abbaae515973c", features = ["pin"] }
@@ -95,15 +95,15 @@ coqui-transport-web = { git = "https://github.com/Boriken-Dev/coqui-transport-we
 # A2A tasks on a link and in process: the host's delegation agent and its task store. On the revisions of coqui-agentic-peer and coqui-transport above.
 coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "43050fc4d078fc0112e4b4a9e329ff028b91d32d", default-features = false, features = ["tasks"] }
 # Loading a provider library; the revision coqui-acp-provider's kinds are built on.
-guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e", features = ["provider", "load"] }
+guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d", features = ["provider", "load"] }
 # A provider's settings, as JSON, made a Guatiao value: only the adapter, no text format.
-guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e", default-features = false }
+guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d", default-features = false }
 # Libraries written in JavaScript, run by QuickJS built into the host: the source, what it is built on and the call mechanism it needs.
-guatiao-source-js = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e" }
-guatiao-bridge = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e", features = ["json"] }
-guatiao-libffi = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e" }
+guatiao-source-js = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d" }
+guatiao-bridge = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d", features = ["json"] }
+guatiao-libffi = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d" }
 # How a provider's settings are shown: the speech providers' forms.
-guatiao-intake = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e", default-features = false, features = ["derive"] }
+guatiao-intake = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d", default-features = false, features = ["derive"] }
 
 # Crates the member crates share.
 tungstenite = { version = "0.30", default-features = false }
