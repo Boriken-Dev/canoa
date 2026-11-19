@@ -229,9 +229,26 @@ fn a_cancelled_recording_ends_its_program() {
 
 #[test]
 fn a_command_s_output_is_kept_only_up_to_a_bound() {
-    let answer = open(&command(&["flood"])).finish().expect("answers");
+    let session = open(&command(&["flood"]));
+    // The script engine runs one call at a time, so reading the answer holds every other speech call: measured alone it takes
+    // about 0.5 s (4 to 7 s when the output is decoded a byte at a time in script).
+    let started = Instant::now();
+    let answer = session.finish().expect("answers");
+    assert!(started.elapsed() < Duration::from_secs(3));
     assert_eq!(answer.text.len(), 4 << 20);
     assert!(answer.front_matter.to_string().contains("output_truncated"));
+}
+
+#[test]
+fn a_command_s_text_that_is_not_ascii_is_read_whole() {
+    let session = open(&command(&["echo", "ñandú", "日本語", "😀"]));
+    assert!(
+        session
+            .finish()
+            .expect("answers")
+            .text
+            .starts_with("ñandú 日本語 😀 bytes=")
+    );
 }
 
 #[test]

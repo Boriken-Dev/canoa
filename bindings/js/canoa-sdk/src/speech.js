@@ -178,6 +178,8 @@ function namedHints(request) {
   return named;
 }
 
+const NOT_ASCII = /[\u0080-￿]/;
+
 /** What one program has printed, up to `MAX_OUTPUT` bytes, and whether more was dropped. */
 class Capture {
   /** @type {Uint8Array[]} */ chunks = [];
@@ -195,6 +197,15 @@ class Capture {
   }
 
   text() {
+    // The engine's `TextDecoder` reads a byte at a time in script, seconds for a 4 MiB answer, and the one runtime serves every
+    // other call meanwhile: text that is all ASCII (a transcript nearly always is) is joined by the engine's own code instead.
+    const parts = [];
+    for (const chunk of this.chunks) {
+      const part = String.fromCharCode.apply(null, chunk);
+      if (NOT_ASCII.test(part)) break;
+      parts.push(part);
+    }
+    if (parts.length === this.chunks.length) return parts.join('').trim();
     const all = new Uint8Array(this.size);
     let at = 0;
     for (const chunk of this.chunks) {
