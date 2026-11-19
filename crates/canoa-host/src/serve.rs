@@ -1657,7 +1657,7 @@ impl Serving {
                     // A cloned repository's own settings can set the endpoint a key is sent to, so an entry that offers an
                     // account whose credential is in the environment loads no settings files unless it says which.
                     if let Some(listed) = &listed
-                        && harness == "claude"
+                        && kind::declares_setting(&registry, harness, "setting_sources")
                         && keeps_key_in_environment(listed, harness)
                     {
                         let named = asks.setting_sources.is_some()
@@ -3273,19 +3273,9 @@ pub(crate) fn harness_settings(
     if !crate::config::is_built_in_harness(harness) {
         return Settings::new(map);
     }
-    if harness == "opencode" {
-        // OpenCode runs through the stdio provider, which takes the program and the limits of a connection and none of the
-        // access, mode or setting-source keys of the three harnesses that translate for their agent.
-        if let Some(executable) = executable {
-            map.insert(
-                "executable".to_owned(),
-                serde_json::Value::String(executable.to_string_lossy().into_owned()),
-            );
-        }
-        map.entry("max_requests".to_owned())
-            .or_insert_with(|| serde_json::Value::from(HARNESS_MAX_REQUESTS));
-        return Settings::new(map);
-    }
+    // A provider that takes none of the access, mode or setting-source keys (one that runs a stdio agent as it is) is given only
+    // the program and the limits of a connection: each key below goes in where the provider's schema declares it.
+    let takes = |key: &str| crate::vendors::bundled_declares(harness, key);
     if let Some(executable) = executable {
         map.insert(
             "executable".to_owned(),
@@ -3301,7 +3291,9 @@ pub(crate) fn harness_settings(
             serde_json::Value::String(path.to_string_lossy().into_owned()),
         );
     }
-    if let Some(sources) = &asks.setting_sources {
+    if let Some(sources) = &asks.setting_sources
+        && takes("setting_sources")
+    {
         map.insert(
             "setting_sources".to_owned(),
             serde_json::Value::from(sources.clone()),
@@ -3315,23 +3307,31 @@ pub(crate) fn harness_settings(
     }
     // The access is the profile's, the same for every harness: this is the built-in layer's, for a session whose entry offers
     // no profile. A session that has one is given its own through `_meta`, which the scope has stripped of a client's.
-    map.entry("access".to_owned())
-        .or_insert_with(|| coqui_acp_harness::Access::STANDARD.to_json());
-    map.insert(
-        "allow_client_access".to_owned(),
-        serde_json::Value::Bool(true),
-    );
+    if takes("access") {
+        map.entry("access".to_owned())
+            .or_insert_with(|| coqui_acp_harness::Access::STANDARD.to_json());
+    }
+    if takes("allow_client_access") {
+        map.insert(
+            "allow_client_access".to_owned(),
+            serde_json::Value::Bool(true),
+        );
+    }
     // Every mode the agent has is offered, Bypass included: the person's own account runs it, and a paired key is theirs.
-    map.entry("allow_bypass".to_owned())
-        .or_insert(serde_json::Value::Bool(true));
-    map.entry("modes".to_owned()).or_insert_with(|| {
-        serde_json::Value::from(
-            coqui_acp_harness::Mode::ALL
-                .iter()
-                .map(|mode| mode.id())
-                .collect::<Vec<_>>(),
-        )
-    });
+    if takes("allow_bypass") {
+        map.entry("allow_bypass".to_owned())
+            .or_insert(serde_json::Value::Bool(true));
+    }
+    if takes("modes") {
+        map.entry("modes".to_owned()).or_insert_with(|| {
+            serde_json::Value::from(
+                coqui_acp_harness::Mode::ALL
+                    .iter()
+                    .map(|mode| mode.id())
+                    .collect::<Vec<_>>(),
+            )
+        });
+    }
     // Requests a connection works on at once: what the host always allowed, not the provider's smaller default.
     map.entry("max_requests".to_owned())
         .or_insert_with(|| serde_json::Value::from(HARNESS_MAX_REQUESTS));
@@ -3811,6 +3811,51 @@ settings = { replay_max_bytes = 4096 }
         for key in ["access", "allow_client_access", "allow_bypass", "modes"] {
             assert!(!map.contains_key(key), "{key} reached the stdio provider");
         }
+    }
+
+    #[test]
+    fn a_harness_whose_provider_declares_the_access_keys_is_given_them() {
+        let config = Config::from_str_in(
+            "[host.agents.c]\nharness = \"claude\"\n",
+            std::path::Path::new("/canoa"),
+        )
+        .expect("parses");
+        let entry = config.entry("c").expect("there");
+        let EntryKind::Harness {
+            harness,
+            executable,
+            options,
+            settings,
+            ..
+        } = &entry.kind
+        else {
+            panic!("a harness");
+        };
+        let map = harness_settings(
+            entry,
+            harness,
+            executable.as_ref(),
+            options,
+            settings.as_ref(),
+        );
+        let map = map.as_map();
+        for key in ["access", "allow_client_access", "allow_bypass", "modes"] {
+            assert!(map.contains_key(key), "{key} did not reach the provider");
+        }
+    }
+
+    #[test]
+    fn a_setting_is_declared_by_the_provider_that_takes_it_and_by_no_other() {
+        assert!(crate::vendors::bundled_declares(
+            "claude",
+            "setting_sources"
+        ));
+        assert!(!crate::vendors::bundled_declares(
+            "codex",
+            "setting_sources"
+        ));
+        assert!(!crate::vendors::bundled_declares("opencode", "modes"));
+        assert!(!crate::vendors::bundled_declares("nobody", "modes"));
     }
 
     #[test]

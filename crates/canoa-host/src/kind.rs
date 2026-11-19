@@ -604,6 +604,21 @@ fn honoured(harness: &dyn AcpHarness, lifetime: CacheLifetime) -> CacheLifetime 
     }
 }
 
+/// Whether the `acp_harness` provider `id` of `registry` declares a setting called `key` in its settings schema. False when the
+/// registry offers no such provider; true when the provider publishes no schema, since its keys are then not known.
+pub(crate) fn declares_setting(registry: &Registry, id: &str, key: &str) -> bool {
+    let Some(Ok(offer)) = registry.offer::<dyn AcpHarness>(id) else {
+        return false;
+    };
+    let Some(schema) = offer
+        .config_schema()
+        .and_then(|schema| inline_refs(schema).ok())
+    else {
+        return true;
+    };
+    SchemaRef::new(&schema).is_some_and(|schema| schema.find(key).is_some())
+}
+
 /// An instance of provider `id`, from the entry's `settings`, which the provider checks against its schema; and where the
 /// settings depart from the schema's defaults.
 pub(crate) fn instance(

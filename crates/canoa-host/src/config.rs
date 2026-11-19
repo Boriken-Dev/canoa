@@ -3150,7 +3150,9 @@ fn harness_options(
     agent: &RawAsks,
     settings: Option<&Settings>,
 ) -> Result<HarnessOptions, ConfigError> {
-    if agent.setting_sources.is_some() && harness != "claude" {
+    if agent.setting_sources.is_some()
+        && !crate::vendors::bundled_declares(harness, "setting_sources")
+    {
         return Err(invalid(
             name,
             &format!("setting_sources is not a setting of harness {harness}"),
