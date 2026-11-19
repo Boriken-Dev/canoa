@@ -268,6 +268,22 @@ impl<'a> Runs<'a> {
         )
     }
 
+    /// The standard the harness applies `account` of the kind `info` as, when another provider made it and the harness accepts one of
+    /// the standards it provides: the first, in the harness's own order of preference.
+    pub(crate) fn standard(
+        &self,
+        account: &AccountConfig,
+        info: &AccountKindInfo,
+    ) -> Option<String> {
+        if !self.borrowed(account) {
+            return None;
+        }
+        self.catalog?
+            .accepted_by(&info.provides)
+            .ok()
+            .map(|accepted| accepted.standard.clone())
+    }
+
     /// Whether the harness applies an account of the kind `info` that another provider made from a private directory of the
     /// account's, as the kind of its own that the standard names does.
     pub(crate) fn directory(&self, account: &AccountConfig, info: &AccountKindInfo) -> bool {

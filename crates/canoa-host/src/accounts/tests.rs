@@ -794,3 +794,93 @@ fn a_preview_names_the_directory_the_settings_and_the_standards_with_no_credenti
             .is_none()
     );
 }
+
+/// An account that names an address and the form of its key for each standard is given each harness the address and the key of the
+/// standard that harness applies it as, and the account's maker is given what the account holds.
+#[test]
+fn a_harness_is_given_the_address_and_the_key_form_the_account_names_for_the_standard_it_applies() {
+    use coqui_acp_api::{Accepted, AcceptedSlot, AccountCatalog, standard};
+    use serde_json::{Value as Json, json};
+
+    let dir = Dir::new();
+    let accounts = accounts(&dir);
+    accounts
+        .store_login("gw", &Credentials::from_iter([("api_key", "k")]), None)
+        .expect("stored");
+    let mut info = AccountKindInfo::new("gateway", "Gateway")
+        .provides([standard::OPENAI_API, standard::ANTHROPIC_API]);
+    info.settings = guatiao_serde::from_serde(json!({
+        "type": "object",
+        "properties": {
+            "base_url": {"type": "string"},
+            "standards": {"type": "array", "items": {"type": "string"}, "x-provides": true},
+            "by_standard": {"type": "object", "x-by-standard": true},
+        },
+    }))
+    .expect("a schema");
+    info.endpoints =
+        vec![coqui_acp_api::EndpointSlot::new(coqui_acp_api::MODEL_API).key("base_url")];
+    let account = AccountConfig {
+        harness: "pi".to_owned(),
+        kind: "gateway".to_owned(),
+        id: "gw".to_owned(),
+        settings: Some(crate::config::Settings::new(
+            json!({
+                "base_url": "https://gw.example/default",
+                "standards": ["openai-api", "anthropic-api"],
+                "by_standard": {
+                    "openai-api": {"base_url": "https://gw.example/v1"},
+                    "anthropic-api": {"base_url": "https://gw.example", "credential": "auth_token"},
+                },
+            })
+            .as_object()
+            .cloned()
+            .expect("a table"),
+        )),
+    };
+    let catalog = |standard: &str, credential: &str| {
+        let mut catalog = AccountCatalog::new();
+        catalog.accepts = vec![
+            Accepted::new(standard)
+                .slot(AcceptedSlot::new(credential, "own-key").base_url("base_url", None)),
+        ];
+        catalog
+    };
+    let run = |harness: &str, catalog: &AccountCatalog| {
+        let runs = Runs {
+            harness,
+            catalog: Some(catalog),
+            makers: None,
+        };
+        let held = accounts
+            .begin("gw", &account, &info, runs, "holder")
+            .expect("held");
+        let grant = held.grant();
+        let settings = guatiao_serde::adapt::from_value::<Json>(&grant.settings).expect("JSON");
+        let keys: Vec<String> = grant.credentials.expose().keys().cloned().collect();
+        let preview = accounts.preview(&account, &info, runs);
+        let previewed = guatiao_serde::adapt::from_value::<Json>(&preview.settings).expect("JSON");
+        assert_eq!(previewed, settings, "a profile is told what the harness is");
+        // The maker is given what the account holds, whichever harness runs it.
+        let maker = held.provider_grant();
+        assert_eq!(
+            maker
+                .credentials
+                .expose()
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+            ["api_key"]
+        );
+        let made = guatiao_serde::adapt::from_value::<Json>(&maker.settings).expect("JSON");
+        assert_eq!(made["base_url"], "https://gw.example/default");
+        assert!(made.get("by_standard").is_some() && made.get("standards").is_none());
+        (settings, keys)
+    };
+    let (settings, keys) = run("codex", &catalog("openai-api", "api_key"));
+    assert_eq!(settings, json!({"base_url": "https://gw.example/v1"}));
+    assert_eq!(keys, ["api_key"]);
+    let (settings, keys) = run("claude", &catalog("anthropic-api", "api_key"));
+    assert_eq!(settings, json!({"base_url": "https://gw.example"}));
+    assert_eq!(keys, ["auth_token"], "the key as a bearer token");
+}

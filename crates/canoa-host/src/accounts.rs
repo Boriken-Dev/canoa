@@ -557,8 +557,13 @@ impl Accounts {
         runs: Runs<'_>,
     ) -> AccountGrant {
         let id = config.id.clone();
+        let applied = applied_as(config, info, runs);
         let mut grant = AccountGrant::new(id.clone(), config.kind.clone())
-            .settings(standards::for_harness(info, config.settings.as_ref()))
+            .settings(standards::for_harness(
+                info,
+                config.settings.as_ref(),
+                &applied,
+            ))
             .provides(info.provides.iter().cloned());
         if config.kind != HARNESS_LOGIN && (info.state_dir || runs.directory(config, info)) {
             grant = grant.state_dir(self.state_dir(&id).to_string_lossy().into_owned());
@@ -577,9 +582,10 @@ impl Accounts {
         holder: &str,
     ) -> Result<Held, Refusal> {
         let id = config.id.clone();
-        let settings = standards::for_harness(info, config.settings.as_ref());
+        let applied = applied_as(config, info, runs);
+        let for_harness = standards::for_harness(info, config.settings.as_ref(), &applied);
         let mut grant = AccountGrant::new(id.clone(), config.kind.clone())
-            .settings(settings)
+            .settings(standards::for_maker(info, config.settings.as_ref()))
             .provides(info.provides.iter().cloned());
         if config.kind == HARNESS_LOGIN {
             let mut held = Held::new(self, name, grant, None, Arc::default(), false);
@@ -639,6 +645,10 @@ impl Accounts {
         held.owner.clone_from(&config.harness);
         held.session = session;
         held.keys = keys;
+        held.credential = applied.credential;
+        if standards::names_per_standard(info) {
+            held.harness_settings = Some(for_harness);
+        }
         if gateway {
             held.kind.clone_from(&config.kind);
         }
@@ -857,6 +867,17 @@ fn instant(text: Option<&str>) -> Option<time::OffsetDateTime> {
 }
 
 /// An account's non-secret settings as the value a provider takes.
+/// What the account `config` says of how `runs` applies it: the address and the credential key for the standard `runs` applies it as.
+fn applied_as(
+    config: &AccountConfig,
+    info: &AccountKindInfo,
+    runs: Runs<'_>,
+) -> standards::Applied {
+    runs.standard(config, info)
+        .map(|standard| standards::applied_as(info, config.settings.as_ref(), &standard))
+        .unwrap_or_default()
+}
+
 fn settings_value(settings: Option<&Settings>) -> Value {
     match settings {
         Some(settings) => Value::from(map_of(settings).unwrap_or_default()),
@@ -882,6 +903,11 @@ pub(crate) struct Held {
     /// The keys of the credentials a harness is given, when the account holds more than the standard it is applied as takes (a
     /// refresh token the account's maker renews with): the maker is given them all, the harness only these.
     keys: Option<BTreeSet<String>>,
+    /// The key the harness is given the account's credential under, when the account names one for the standard it is applied as:
+    /// the maker is given the credential under the key it holds it as.
+    credential: Option<String>,
+    /// The settings the harness is given when they are not the maker's: the account's own for the standard it is applied as.
+    harness_settings: Option<Value>,
 }
 
 impl fmt::Debug for Held {
@@ -914,6 +940,8 @@ impl Held {
             rotates,
             session: None,
             keys: None,
+            credential: None,
+            harness_settings: None,
         }
     }
 
@@ -954,6 +982,23 @@ impl Held {
                 .map(|(key, value)| (key.clone(), value.clone()))
                 .collect();
             grant = grant.credentials(kept);
+        }
+        if let Some(settings) = &self.harness_settings {
+            grant = grant.settings(settings.clone());
+        }
+        if let Some(name) = &self.credential {
+            // The credential the harness is given is the account's key, named as the standard takes it: only when it is the one.
+            let renamed = {
+                let held = grant.credentials.expose();
+                let mut entries = held.iter();
+                match (entries.next(), entries.next()) {
+                    (Some((_, value)), None) => Some((name.clone(), value.clone())),
+                    _ => None,
+                }
+            };
+            if let Some(pair) = renamed {
+                grant = grant.credentials(Credentials::from_iter([pair]));
+            }
         }
         grant
     }

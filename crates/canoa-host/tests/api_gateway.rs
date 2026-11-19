@@ -136,22 +136,36 @@ impl Fixture {
 
     /// Signs in to the account `gw` through `harness`, naming `address` and `standards`, and has both entries offer it.
     fn signed_in(self, harness: &str, address: &str, standards: &str) -> Self {
-        let added = self.canoa(
-            &[
-                "accounts",
-                "add",
-                "gw",
-                "--harness",
-                harness,
-                "--method",
-                "api-gateway",
-                "--input",
-                &format!("base_url={address}"),
-                "--input",
-                &format!("standards={standards}"),
-            ],
-            Some(&format!("{CANARY}\n")),
-        );
+        self.signed_in_with(harness, address, standards, &[])
+    }
+
+    /// As [`Fixture::signed_in`], with more inputs for the sign-in (`NAME=VALUE`).
+    fn signed_in_with(
+        self,
+        harness: &str,
+        address: &str,
+        standards: &str,
+        more: &[(&str, &str)],
+    ) -> Self {
+        let mut args = vec![
+            "accounts".to_owned(),
+            "add".to_owned(),
+            "gw".to_owned(),
+            "--harness".to_owned(),
+            harness.to_owned(),
+            "--method".to_owned(),
+            "api-gateway".to_owned(),
+            "--input".to_owned(),
+            format!("base_url={address}"),
+            "--input".to_owned(),
+            format!("standards={standards}"),
+        ];
+        for (name, value) in more {
+            args.push("--input".to_owned());
+            args.push(format!("{name}={value}"));
+        }
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let added = self.canoa(&args, Some(&format!("{CANARY}\n")));
         assert!(added.status.success(), "{}", text(&added.stderr));
         assert_eq!(text(&added.stdout).trim(), "added gw (api-gateway)");
         let cfg = std::fs::read_to_string(&self.config).expect("canoa.cfg");
@@ -309,4 +323,85 @@ fn it_runs_a_stand_in_of_each_harness_on_the_same_account_and_lists_the_gateways
     assert!(!logged.contains(CANARY), "{logged}");
     let cfg = std::fs::read_to_string(host.scratch.0.join("canoa.cfg")).expect("canoa.cfg");
     assert!(!cfg.contains(CANARY));
+}
+
+#[test]
+fn an_account_that_names_an_address_and_a_key_form_for_each_standard_runs_each_harness_at_its_own()
+{
+    let default = "http://127.0.0.1:3";
+    let openai = "http://127.0.0.1:1/openai/v1";
+    let anthropic = "http://127.0.0.1:2/anthropic";
+    let fixture = Fixture::new().signed_in_with(
+        "codex",
+        default,
+        "openai-api, anthropic-api",
+        &[
+            (
+                "addresses",
+                &format!("openai-api={openai},anthropic-api={anthropic}"),
+            ),
+            ("credentials", "anthropic-api=auth_token"),
+        ],
+    );
+    // The addresses and the key forms are the account's settings, and the key is still in no file.
+    let cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
+    assert!(
+        cfg.contains(openai) && cfg.contains(anthropic) && cfg.contains("auth_token"),
+        "{cfg}"
+    );
+    assert!(!cfg.contains(CANARY), "{cfg}");
+    let record = fixture.record.clone();
+    let env = vec![
+        ("STANDIN_RECORD", record.clone().into_os_string()),
+        ("STANDIN_ENV", "ANTHROPIC_BASE_URL".into()),
+    ];
+    let config = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
+    let (host, log) = Host::start_logged(fixture.scratch, &config, 2, &env);
+    let client = support::key();
+    host.pair(&client);
+    let dir = cwd(&host.scratch);
+    for entry in ["Claude", "Codex"] {
+        with_link(host.url(entry), &client, host.peer, |rpc| {
+            rpc.request(
+                "initialize",
+                json!({"protocolVersion": 1, "clientCapabilities": {}, "_meta": {ACCOUNT_META: "gw"}}),
+            )
+            .expect("initialized on the account");
+            rpc.request("session/new", json!({"cwd": dir, "mcpServers": []}))
+                .expect("a session opens");
+        })
+        .expect("served");
+    }
+    waits_for("both stand-ins started", || records(&record).len() >= 2);
+    let started = records(&record);
+    // Claude Code is sent to the address of the Anthropic API, with the key as the bearer token the account says it takes there.
+    let claude = started
+        .iter()
+        .find(|each| each["env"]["ANTHROPIC_BASE_URL"] == json!(anthropic))
+        .unwrap_or_else(|| panic!("Claude Code was given the Anthropic address: {started:?}"));
+    let names: Vec<&str> = claude["env_names"]
+        .as_array()
+        .expect("names")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(names.contains(&"ANTHROPIC_AUTH_TOKEN"), "{names:?}");
+    assert!(!names.contains(&"ANTHROPIC_API_KEY"), "{names:?}");
+    // Codex is sent to the address of the OpenAI API, and never to the other two.
+    let codex = started
+        .iter()
+        .find(|each| {
+            each["args"]
+                .as_array()
+                .is_some_and(|args| args.iter().any(|arg| arg == "app-server"))
+        })
+        .unwrap_or_else(|| panic!("Codex started: {started:?}"));
+    let args = codex["args"].to_string();
+    assert!(args.contains(openai), "{codex}");
+    assert!(
+        !args.contains(anthropic) && !args.contains(default),
+        "{codex}"
+    );
+    let logged = std::fs::read_to_string(&log).unwrap_or_default();
+    assert!(!logged.contains(CANARY), "{logged}");
 }
