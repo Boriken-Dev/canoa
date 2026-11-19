@@ -62,7 +62,7 @@ paths = ["."]
 
 The module is the library and every class it exports that extends a base class is a provider. A library imports the SDK by a relative
 path, since QuickJS resolves nothing else, so a package carries the SDK modules it imports beside it (`sdk/profile.js`, `sdk/kinds.js`,
-`sdk/model.js`). The same provider in Python:
+`sdk/model.js`; the speech and catalog source classes also `sdk/wait.js`, which lets the host's other calls through while a program runs). The same provider in Python:
 
 ```python
 # region_ui.py
