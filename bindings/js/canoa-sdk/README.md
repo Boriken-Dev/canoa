@@ -26,6 +26,10 @@ nothing else, so a library imports the SDK by a relative path to where it is und
 | `store_extension`, `program_store` | `StoreExtension`, `ProgramStore` | `canoa-sdk/store` |
 | `speech_provider`, `speech_output` | `SpeechProvider`, `SpeechOutput` | `canoa-sdk/speech` |
 | `secret_provider` | `SecretProvider`, `FormSecretProvider`, `SystemStoreSecretProvider` | `canoa-sdk/secret` |
+| `profile_item` | `ProfileItem`, `SettingProfileItem`, `EnvProfileItem`, `NetworkProfileItem` | `canoa-sdk/profile` |
+| `catalog_source` | `CatalogSource`, `CommandCatalogSource`, `ReadCatalogSource` | `canoa-sdk/source` |
+| `settings_section` | `SettingsSection` | `canoa-sdk/section` |
+| `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab` | `canoa-sdk/panel` |
 
 The examples in `examples/providers/js` are loaded by `crates/canoa-host/tests/script_providers.rs`. See `AGENTS.md` for the API.
 Development: `npm install --no-save <guatiao>/bindings/node/guatiao typescript @types/node`, then `npm run typecheck`;

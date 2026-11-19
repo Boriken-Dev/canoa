@@ -26,6 +26,10 @@ examples in `examples/providers/python` are loaded by `crates/canoa-host/tests/s
 | `store_extension`, `program_store` | `StoreExtension`, `ProgramStore` | `canoa_sdk.store` |
 | `speech_provider`, `speech_output` | `SpeechProvider`, `SpeechOutput` | `canoa_sdk.speech` |
 | `secret_provider` | `SecretProvider`, `FormSecretProvider`, `SystemStoreSecretProvider` | `canoa_sdk.secret` |
+| `profile_item` | `ProfileItem`, `SettingProfileItem`, `EnvProfileItem`, `NetworkProfileItem` | `canoa_sdk.profile` |
+| `catalog_source` | `CatalogSource`, `CommandCatalogSource`, `ReadCatalogSource` | `canoa_sdk.source` |
+| `settings_section` | `SettingsSection` | `canoa_sdk.settings` |
+| `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab` | `canoa_sdk.panel` |
 | coqui-acp's `acp_harness`, `agent_provider` | re-exported | `canoa_sdk.acp` |
 
 A provider's settings are the dataclass its `__init__` takes; `canoa_sdk.forms` writes the form that shows them (`ui()` on a field,

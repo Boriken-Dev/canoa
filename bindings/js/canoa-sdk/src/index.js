@@ -17,6 +17,29 @@ export {
   nameOf,
   release,
 } from './secret.js';
+export { LogPanelTab, MAX_TAIL_LINES, PanelTab, TerminalPanelTab } from './panel.js';
+export {
+  EnvProfileItem,
+  NETWORK_MODES,
+  NetworkProfileItem,
+  ProfileItem,
+  SettingProfileItem,
+  effect,
+  textOf,
+  valuesOf,
+  wordsOf,
+} from './profile.js';
+export { MAX_VALUES, SettingsSection } from './section.js';
 export { SpeechOutput, SpeechProvider } from './speech.js';
+export {
+  CatalogSource,
+  CommandCatalogSource,
+  DEFAULT_SECONDS,
+  MAX_BYTES,
+  ReadCatalogSource,
+  TAIL_BYTES,
+  fieldsOf,
+  release as releaseSpawner,
+} from './source.js';
 export { ProgramStore, StoreExtension } from './store.js';
 export { AgentVendor } from './vendor.js';

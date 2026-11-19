@@ -5,59 +5,45 @@ import type * as g from 'guatiao';
 import type * as k from 'guatiao/kinds';
 
 /**
- * A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
- * instance with none to describe the provider before anyone has set it up.
+ * Where a catalog comes from.
  *
- * A provider that runs a program (a password manager's command) starts it through the `spawner` it is handed, which is the host's:
- * every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
- * to start one.
+ * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
+ * catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
  *
- * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
- * reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
- * the person instead.
+ * A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
+ * person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
+ * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
+ * even when it refuses.
  *
- * The `secret_provider` kind: what a provider of it implements.
+ * The `catalog_source` kind: what a provider of it implements.
  */
-export interface SecretProvider {
-  /** What it is and can do. Cheap, and the same on every call. */
+export interface CatalogSource {
+  /** What this provider is. The same answer on every call, with nothing run. */
   describe(): unknown;
-  /** The names it holds, and nothing else. `UNSUPPORTED` when [`ProviderInfo::can_list`] is false. */
-  names(spawner: k.ObjectHandle<typeof ProcessSpawner>): unknown;
-  /** What it holds under `request`'s name: [`Held::none`] when nothing. */
-  get(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): unknown;
-  /** Keeps a value, replacing one of that name. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false. */
-  put(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): void;
-  /** Forgets what it keeps under the name; not having it is no error. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false. */
-  forget(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): void;
+  /** The catalog's text. */
+  read(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): string;
 }
 
-/** A caller's handle on a `secret_provider` table: a method per slot. */
-export interface SecretProviderRemote extends k.RemoteBase<typeof SecretProvider> {
-  /** What it is and can do. Cheap, and the same on every call. */
+/** A caller's handle on a `catalog_source` table: a method per slot. */
+export interface CatalogSourceRemote extends k.RemoteBase<typeof CatalogSource> {
+  /** What this provider is. The same answer on every call, with nothing run. */
   describe(): g.Value;
-  /** The names it holds, and nothing else. `UNSUPPORTED` when [`ProviderInfo::can_list`] is false. */
-  names(spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): g.Value;
-  /** What it holds under `request`'s name: [`Held::none`] when nothing. */
-  get(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): g.Value;
-  /** Keeps a value, replacing one of that name. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false. */
-  put(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): void;
-  /** Forgets what it keeps under the name; not having it is no error. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false. */
-  forget(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): void;
+  /** The catalog's text. */
+  read(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): string;
 }
 
 /**
- * A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
- * instance with none to describe the provider before anyone has set it up.
+ * Where a catalog comes from.
  *
- * A provider that runs a program (a password manager's command) starts it through the `spawner` it is handed, which is the host's:
- * every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
- * to start one.
+ * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
+ * catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
  *
- * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
- * reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
- * the person instead.
+ * A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
+ * person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
+ * its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
+ * even when it refuses.
  */
-export declare const SecretProvider: k.DescribedKind<SecretProvider, SecretProviderRemote, false>;
+export declare const CatalogSource: k.DescribedKind<CatalogSource, CatalogSourceRemote, false>;
 
 /**
  * Starts programs where the host chooses: on this machine, on another over SSH, in a container or
@@ -266,6 +252,162 @@ export interface SpawnedProcessRemote extends k.RemoteBase<typeof SpawnedProcess
  * Destroying it kills the whole tree, as [`kill`](Self::kill) does.
  */
 export declare const SpawnedProcess: k.DescribedKind<SpawnedProcess, SpawnedProcessRemote, true>;
+
+/**
+ * A kind of tab.
+ *
+ * `describe` answers the same on every call with nothing run. `tail` is asked only of a [`Shows::Log`] kind.
+ *
+ * The `panel_tab` kind: what a provider of it implements.
+ */
+export interface PanelTab {
+  /** What this kind of tab is. */
+  describe(): unknown;
+  /** The latest lines of the log, oldest first, each ended by a newline; empty for a kind that shows no log. */
+  tail(request: g.Ref): string;
+}
+
+/** A caller's handle on a `panel_tab` table: a method per slot. */
+export interface PanelTabRemote extends k.RemoteBase<typeof PanelTab> {
+  /** What this kind of tab is. */
+  describe(): g.Value;
+  /** The latest lines of the log, oldest first, each ended by a newline; empty for a kind that shows no log. */
+  tail(request: unknown): string;
+}
+
+/**
+ * A kind of tab.
+ *
+ * `describe` answers the same on every call with nothing run. `tail` is asked only of a [`Shows::Log`] kind.
+ */
+export declare const PanelTab: k.DescribedKind<PanelTab, PanelTabRemote, false>;
+
+/**
+ * One thing a profile may set.
+ *
+ * `describe` answers the same on every call with nothing run. `apply` runs when a session starts, with the values the profile holds
+ * for the item already read against its schema; it must change nothing outside the effect it answers with.
+ *
+ * The `profile_item` kind: what a provider of it implements.
+ */
+export interface ProfileItem {
+  /** What this item is and the form it asks for. */
+  describe(): unknown;
+  /** What the values do to a session. */
+  apply(request: g.Ref): unknown;
+}
+
+/** A caller's handle on a `profile_item` table: a method per slot. */
+export interface ProfileItemRemote extends k.RemoteBase<typeof ProfileItem> {
+  /** What this item is and the form it asks for. */
+  describe(): g.Value;
+  /** What the values do to a session. */
+  apply(request: unknown): g.Value;
+}
+
+/**
+ * One thing a profile may set.
+ *
+ * `describe` answers the same on every call with nothing run. `apply` runs when a session starts, with the values the profile holds
+ * for the item already read against its schema; it must change nothing outside the effect it answers with.
+ */
+export declare const ProfileItem: k.DescribedKind<ProfileItem, ProfileItemRemote, false>;
+
+/**
+ * A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
+ * instance with none to describe the provider before anyone has set it up.
+ *
+ * A provider that runs a program (a password manager's command) starts it through the `spawner` it is handed, which is the host's:
+ * every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
+ * to start one.
+ *
+ * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
+ * reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
+ * the person instead.
+ *
+ * The `secret_provider` kind: what a provider of it implements.
+ */
+export interface SecretProvider {
+  /** What it is and can do. Cheap, and the same on every call. */
+  describe(): unknown;
+  /** The names it holds, and nothing else. `UNSUPPORTED` when [`ProviderInfo::can_list`] is false. */
+  names(spawner: k.ObjectHandle<typeof ProcessSpawner>): unknown;
+  /** What it holds under `request`'s name: [`Held::none`] when nothing. */
+  get(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): unknown;
+  /** Keeps a value, replacing one of that name. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false. */
+  put(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): void;
+  /** Forgets what it keeps under the name; not having it is no error. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false. */
+  forget(request: g.Ref, spawner: k.ObjectHandle<typeof ProcessSpawner>): void;
+}
+
+/** A caller's handle on a `secret_provider` table: a method per slot. */
+export interface SecretProviderRemote extends k.RemoteBase<typeof SecretProvider> {
+  /** What it is and can do. Cheap, and the same on every call. */
+  describe(): g.Value;
+  /** The names it holds, and nothing else. `UNSUPPORTED` when [`ProviderInfo::can_list`] is false. */
+  names(spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): g.Value;
+  /** What it holds under `request`'s name: [`Held::none`] when nothing. */
+  get(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): g.Value;
+  /** Keeps a value, replacing one of that name. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false. */
+  put(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): void;
+  /** Forgets what it keeps under the name; not having it is no error. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false. */
+  forget(request: unknown, spawner: ProcessSpawner | k.ObjectHandle<typeof ProcessSpawner>): void;
+}
+
+/**
+ * A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
+ * instance with none to describe the provider before anyone has set it up.
+ *
+ * A provider that runs a program (a password manager's command) starts it through the `spawner` it is handed, which is the host's:
+ * every program a provider runs starts through it, and the provider destroys it, even when it refuses. A script has no other way
+ * to start one.
+ *
+ * A value is text. A provider that is asked something it cannot do answers `UNSUPPORTED` ([`unsupported`]); one that cannot be
+ * reached or has not been unlocked answers `GONE` ([`unavailable`]) with a reason that holds no value, and the host asks
+ * the person instead.
+ */
+export declare const SecretProvider: k.DescribedKind<SecretProvider, SecretProviderRemote, false>;
+
+/**
+ * A page of Settings, or a group on one.
+ *
+ * `describe` answers the same on every call with nothing run. `read` and `write` are asked only for a [`Stored::Provider`]
+ * section; a [`Stored::Config`] section answers them with nothing.
+ *
+ * The `settings_section` kind: what a provider of it implements.
+ */
+export interface SettingsSection {
+  /** What this section is and the form it asks for. */
+  describe(): unknown;
+  /** What the section holds now, as a JSON object keyed by the schema's member names. A sensitive member is left out. */
+  read(): string;
+  /**
+   * Keeps `values`, a JSON object keyed by the schema's member names that the host has already checked against the schema. A
+   * sensitive member the person left empty is absent, so what was kept stays.
+   */
+  write(values: g.Ref): void;
+}
+
+/** A caller's handle on a `settings_section` table: a method per slot. */
+export interface SettingsSectionRemote extends k.RemoteBase<typeof SettingsSection> {
+  /** What this section is and the form it asks for. */
+  describe(): g.Value;
+  /** What the section holds now, as a JSON object keyed by the schema's member names. A sensitive member is left out. */
+  read(): string;
+  /**
+   * Keeps `values`, a JSON object keyed by the schema's member names that the host has already checked against the schema. A
+   * sensitive member the person left empty is absent, so what was kept stays.
+   */
+  write(values: unknown): void;
+}
+
+/**
+ * A page of Settings, or a group on one.
+ *
+ * `describe` answers the same on every call with nothing run. `read` and `write` are asked only for a [`Stored::Provider`]
+ * section; a [`Stored::Config`] section answers them with nothing.
+ */
+export declare const SettingsSection: k.DescribedKind<SettingsSection, SettingsSectionRemote, false>;
 
 /**
  * A provider of speech to text. One instance is one configuration of one provider.

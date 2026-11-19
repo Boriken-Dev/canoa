@@ -1,5 +1,6 @@
 //! Providers written with the Canoa SDK in Python and in JavaScript, loaded by the host from the examples under `examples/providers`
-//! through Guatiao's sources: an `agent_vendor` the host lists as an agent, and a `store_extension` that adds a Store type. Each
+//! through Guatiao's sources: an `agent_vendor` the host lists as an agent, a `store_extension` that adds a Store type, and one
+//! library that serves a `profile_item`, a `settings_section` and a `panel_tab` the host lists. Each
 //! language builds its source from Cargo's checkout of Guatiao at the workspace's revision: Python against the interpreter
 //! `CANOA_TEST_PYTHON` names (a Python 3.9 or later with its shared library), JavaScript with a C compiler for QuickJS
 //! (`CANOA_TEST_JS` set to anything). Without a variable its test is ignored, and a run counts it as not run.
@@ -193,6 +194,44 @@ mod with_source {
             "{quill}"
         );
         assert_eq!(quill["origin"], "examples");
+        // One library serves a profile item, a page of Settings and a tab of the panel, which the host lists as any extension's.
+        let (items, _) = ask(&link, 3, "profile_items/list", json!({})).expect("the items");
+        let region = items["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .find(|row| row["id"] == "region")
+            .unwrap_or_else(|| panic!("the item is listed: {items}"));
+        assert_eq!(region["origin"], "examples");
+        assert_eq!(region["harnesses"], json!(["claude-code"]));
+        assert_eq!(region["schema"]["required"], json!(["name"]));
+        assert_eq!(region["form"]["fields"]["name"]["placeholder"], "eu-west");
+        let (sections, _) = ask(&link, 4, "settings/sections", json!({})).expect("the sections");
+        let page = sections["sections"]
+            .as_array()
+            .expect("sections")
+            .iter()
+            .find(|row| row["id"] == "region")
+            .unwrap_or_else(|| panic!("the section is listed: {sections}"));
+        assert_eq!(page["title"], "Region");
+        assert_eq!(page["group"], "Team");
+        assert_eq!(page["stored"], "config");
+        let (tabs, _) = ask(&link, 5, "panel_tabs/list", json!({})).expect("the tabs");
+        let builds = tabs["tabs"]
+            .as_array()
+            .expect("tabs")
+            .iter()
+            .find(|row| row["id"] == "builds")
+            .unwrap_or_else(|| panic!("the tab is listed: {tabs}"));
+        assert_eq!(builds["shows"], "log");
+        let (tail, _) = ask(
+            &link,
+            6,
+            "panel_tabs/tail",
+            json!({"id": "builds", "lines": 1}),
+        )
+        .expect("the tail");
+        assert_eq!(tail["text"], "build 42 failed\n");
         drop(link);
         hosted.stop();
     }
@@ -227,7 +266,11 @@ mod python {
         let examples = repository().join("examples/providers/python");
         let settings = format!(
             "dirs = {}\npaths = {}\nimport_dirs = {}\n",
-            list(&[examples.join("vendor"), examples.join("extension")]),
+            list(&[
+                examples.join("vendor"),
+                examples.join("extension"),
+                examples.join("region")
+            ]),
             list(&[
                 checkout("guatiao").join("bindings/python/guatiao/src"),
                 repository().join("bindings/python/canoa-sdk/src"),
@@ -248,7 +291,11 @@ mod javascript {
         let examples = repository().join("examples/providers/js");
         let settings = format!(
             "dirs = {}\n",
-            list(&[examples.join("vendor"), examples.join("extension")]),
+            list(&[
+                examples.join("vendor"),
+                examples.join("extension"),
+                examples.join("region")
+            ]),
         );
         check(config(&source, "notes_extension_notes", &settings));
     }

@@ -1,0 +1,4 @@
+type = "python"
+module = "region_ui"
+kinds = ["profile_item", "catalog_source", "settings_section", "panel_tab"]
+paths = ["."]

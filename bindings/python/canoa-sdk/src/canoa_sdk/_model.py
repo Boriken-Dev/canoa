@@ -29,3 +29,8 @@ class Model:
         """The model as the plain map the host reads."""
         result: Dict[str, Any] = data_of(self)
         return result
+
+
+def present(fields: Dict[str, Any]) -> Dict[str, Any]:
+    """`fields` with the absent (`None`) ones left out, and what remains as plain data: a description a provider answers."""
+    return {key: data_of(value) for key, value in fields.items() if value is not None}

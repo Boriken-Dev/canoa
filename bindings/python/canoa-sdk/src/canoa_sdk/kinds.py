@@ -158,6 +158,70 @@ class ProcessSpawner(KindProtocol, Protocol, kind="process_spawner", floor_hash=
         ...
 
 
+class CatalogSource(KindProtocol, Protocol, kind="catalog_source", floor_hash=2158006965):
+    """Where a catalog comes from.
+
+    `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good
+    catalog it keeps. It runs whenever the catalog is refreshed, so it is as slow as its source.
+
+    A source that runs a program or reads a file does it through the `spawner` `read` is handed, which is the host's and has the
+    person's own reach: `spawn` starts a program as the person, and `read_file` reads a file anywhere the person's account can, by
+    its absolute path (`write_file` and `remove_file` are refused). A script has no other way to do either. The source destroys it,
+    even when it refuses.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What this provider is. The same answer on every call, with nothing run."""
+        ...
+
+    @required
+    @fallible
+    def read(self, request: Ref, spawner: Taken[ProcessSpawner]) -> str:
+        """The catalog's text."""
+        ...
+
+
+class PanelTab(KindProtocol, Protocol, kind="panel_tab", floor_hash=1639328444):
+    """A kind of tab.
+
+    `describe` answers the same on every call with nothing run. `tail` is asked only of a [`Shows::Log`] kind.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What this kind of tab is."""
+        ...
+
+    @required
+    @fallible
+    def tail(self, request: Ref) -> str:
+        """The latest lines of the log, oldest first, each ended by a newline; empty for a kind that shows no log."""
+        ...
+
+
+class ProfileItem(KindProtocol, Protocol, kind="profile_item", floor_hash=2386280575):
+    """One thing a profile may set.
+
+    `describe` answers the same on every call with nothing run. `apply` runs when a session starts, with the values the profile holds
+    for the item already read against its schema; it must change nothing outside the effect it answers with.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What this item is and the form it asks for."""
+        ...
+
+    @required
+    @fallible
+    def apply(self, request: Ref) -> ValueAnswer:
+        """What the values do to a session."""
+        ...
+
+
 class SecretProvider(KindProtocol, Protocol, kind="secret_provider", floor_hash=246402531):
     """A provider of secrets. One instance is one configuration of one provider. Every setting has a default, so a host can make an
     instance with none to describe the provider before anyone has set it up.
@@ -199,6 +263,34 @@ class SecretProvider(KindProtocol, Protocol, kind="secret_provider", floor_hash=
     @fallible
     def forget(self, request: Ref, spawner: Taken[ProcessSpawner]) -> None:
         """Forgets what it keeps under the name; not having it is no error. `UNSUPPORTED` when [`ProviderInfo::can_store`] is false."""
+        ...
+
+
+class SettingsSection(KindProtocol, Protocol, kind="settings_section", floor_hash=3110564773):
+    """A page of Settings, or a group on one.
+
+    `describe` answers the same on every call with nothing run. `read` and `write` are asked only for a [`Stored::Provider`]
+    section; a [`Stored::Config`] section answers them with nothing.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """What this section is and the form it asks for."""
+        ...
+
+    @required
+    @fallible
+    def read(self) -> str:
+        """What the section holds now, as a JSON object keyed by the schema's member names. A sensitive member is left out."""
+        ...
+
+    @required
+    @fallible
+    def write(self, values: Ref) -> None:
+        """Keeps `values`, a JSON object keyed by the schema's member names that the host has already checked against the schema. A
+        sensitive member the person left empty is absent, so what was kept stays.
+        """
         ...
 
 
@@ -569,4 +661,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=192835
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "SecretProvider", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "CatalogSource", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "AgentVendor"]

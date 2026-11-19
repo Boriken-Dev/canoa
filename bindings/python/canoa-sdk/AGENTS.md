@@ -34,9 +34,30 @@ class SecretProvider:     # canoa_sdk.secret: somewhere a secret comes from; abs
 class FormSecretProvider(SecretProvider)         # the person's form: needs_person, holds nothing
 class SystemStoreSecretProvider(SecretProvider)  # a store of keys and texts you supply (abstract read, write, remove), with an index of names
 name_of(request) -> str; keeping_of(request) -> (name, value)   # a request's name and value, checked as the kind says
+class ProfileItem:        # canoa_sdk.profile: one thing a profile sets; abstract slot apply(request) -> an effect (effect(...))
+    item: str; title: str; help = None; harnesses = ()        # item = the id the profile keeps its values under
+    values = None         # a dataclass: its schema (Guatiao) and form (canoa_sdk.forms); values_schema / values_form give plain data instead
+class SettingProfileItem(ProfileItem)   # one text becomes a session setting: setting, member = None, note
+class EnvProfileItem(ProfileItem)       # values become variables: variables = {member: [NAMES]}, lines = None, line_label, note
+class NetworkProfileItem(ProfileItem)   # values become a network effect, the proxy item's members (the proxy itself is the host's)
+values_of(request); text_of(values, name); words_of(values, name); effect(env=, args=, settings=, network=, notes=); NETWORK_MODES
+class CatalogSource:      # canoa_sdk.source: where a Store type's catalog comes from; abstract slot read(request, spawner) -> the catalog's text
+    source: str; title: str; help = None; types = ()          # source = the id canoa.cfg records, and the provider's id
+    values = None         # a dataclass, as above
+class CommandCatalogSource(CatalogSource)   # a program the person named; its output (or `file`) is the catalog
+class ReadCatalogSource(CatalogSource)      # a place the type reads itself; read answers a file on this computer
+fields_of(request); MAX_BYTES; DEFAULT_SECONDS; TAIL_BYTES
+class SettingsSection:    # canoa_sdk.settings: section, title, help, icon, group, under, keywords, stored = "config" | "provider", values; read(), write(values)
+class PanelTab:           # canoa_sdk.panel: tab, title, help, icon, shows = "log" | "terminal", shell; tail(request)
+class TerminalPanelTab(PanelTab); class LogPanelTab(PanelTab)   # lines() -> the log's lines, oldest first
 ```
 
-Models (`VendorInfo`, `StandardTitle`, `ModeTitle`, `ExtensionInfo`, `ExtensionType`, `SpeechInfo`, `ProviderInfo`, `Held`) are dataclasses with `to_data()`: the
+A catalog source's `read` is handed the host's `spawner`: `spawner.spawn(spec)` starts a program as the person, `spawner.read_file(path, max)`
+reads a file anywhere the person's account can (an absolute path); the source destroys it. A class that names its `source` is the provider
+of that id (the host finds a source by the id it is described under); `item`, `section` and `tab` are the ids the profile, Settings and the
+panel keep, and the provider's own id stays Guatiao's (`<module>_<class in snake case>`).
+
+Models (`VendorInfo`, `StandardTitle`, `ModeTitle`, `ExtensionInfo`, `ExtensionType`, `SpeechInfo`, `ProviderInfo`, `Held`, `ItemEffect`, `NetworkEffect`) are dataclasses with `to_data()`: the
 plain map the host reads, an absent (`None`) field left out. The host checks what a provider answers and says why it refuses it in
 its log; the SDK checks only what a missing attribute makes impossible.
 

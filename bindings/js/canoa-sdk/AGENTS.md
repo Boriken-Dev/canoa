@@ -29,7 +29,33 @@ class SecretProvider extends Provider {       // secret.js: static title, descri
 class FormSecretProvider extends SecretProvider            // the person's form: needs_person, holds nothing
 class SystemStoreSecretProvider extends SecretProvider     // a store of keys and texts you supply (read, write, remove), with an index of names
 nameOf(request); keepingOf(request); release(spawner)      // a request's name and value, checked as the kind says; lets the host's spawner go
+class ProfileItem extends Provider {          // profile.js: one thing a profile sets; apply(request) -> an effect
+  static item; static title; static help; static harnesses = [];   // item = the id the profile keeps its values under
+  static values; static form;                 // the values' guatiao schema and intake form, plain data
+}
+class SettingProfileItem extends ProfileItem  // one text becomes a session setting: static setting, member?, note
+class EnvProfileItem extends ProfileItem      // values become variables: static variables = {member: [NAMES]}, lines?, lineLabel, note
+class NetworkProfileItem extends ProfileItem  // values become a network effect, the proxy item's members (the proxy itself is the host's)
+valuesOf(request); textOf(values, name); wordsOf(values, name); effect({env, args, settings, network, notes}); NETWORK_MODES
+class CatalogSource extends Provider {        // source.js: where a Store type's catalog comes from; read(request, spawner) -> the catalog's text
+  static source; static title; static help; static types = [];     // source = the id canoa.cfg records; its provider id too
+  static values; static form;
+}
+class CommandCatalogSource extends CatalogSource   // a program the person named; its output (or `file`) is the catalog
+class ReadCatalogSource extends CatalogSource      // a place the type reads itself; read answers a file on this computer
+fieldsOf(request); releaseSpawner(spawner); MAX_BYTES; DEFAULT_SECONDS; TAIL_BYTES
+class SettingsSection extends Provider {      // section.js: static section, title, help, icon, group, under, keywords, stored = 'config'|'provider', values, form
+  read()  // '{}' for a config section; write(values)
+}
+class PanelTab extends Provider {             // panel.js: static tab, title, help, icon, shows = 'log'|'terminal', shell; tail(request)
+}
+class TerminalPanelTab extends PanelTab; class LogPanelTab extends PanelTab   // lines() -> the log's lines, oldest first
 ```
+
+A catalog source's `read` is handed the host's `spawner`: `spawner.spawn(spec)` starts a program as the person, `spawner.readFile(path, max)`
+reads a file anywhere the person's account can (an absolute path). A handle's methods are the slot names in camel case. The provider's id
+is its `source` (the host finds a source by the id it is described under); `static item`, `section` and `tab` are the ids the profile,
+Settings and the panel keep, and the provider's own id stays Guatiao's (`<library>_<class>`).
 
 `describe()` is answered from the statics (`info()`), an absent field left out. A slot a base leaves in place (`open`, `voices`, `say`,
 `program`, ...) refuses with `Unsupported` when called; JavaScript has no class-creation check, so a subclass that forgets one is found
