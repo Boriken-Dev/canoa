@@ -46,6 +46,13 @@
         ],
         "description": "Where the agent puts a tool's own name in a tool call's `_meta`, as a JSON pointer below `_meta` (`/claudeCode/toolName`); absent for an agent whose tool call title is the name."
       },
+      "skills_folder": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The folder below a project where the agent reads skills from (`.claude/skills`), for a source of skills to be searched there."
+      },
       "standards": {
         "type": "array",
         "items": {

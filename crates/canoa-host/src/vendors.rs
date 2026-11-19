@@ -25,6 +25,8 @@ pub(crate) struct Vendor {
     pub(crate) model_variable: Option<&'static str>,
     /// Where it puts a tool's own name in a tool call's `_meta`, as a JSON pointer below `_meta`.
     pub(crate) tool_name: Option<&'static str>,
+    /// The folder below a project where it reads skills from.
+    pub(crate) skills_folder: Option<&'static str>,
     /// The credential standards that are the vendor's own.
     pub(crate) standards: Vec<&'static str>,
     /// The names it reports in `initialize`.
@@ -44,6 +46,7 @@ impl Vendor {
             aos: info.aos.as_deref().map(keep),
             model_variable: info.model_variable.as_deref().map(keep),
             tool_name: info.tool_name.as_deref().map(keep),
+            skills_folder: info.skills_folder.as_deref().map(keep),
             standards: info.standards.iter().map(|each| keep(&each.id)).collect(),
             names: info.names.iter().map(|name| keep(name)).collect(),
         }

@@ -162,6 +162,31 @@ fn a_repository_with_an_agents_skills_folder_lists_those_skills() {
 }
 
 #[test]
+fn the_folder_each_loaded_agent_reads_skills_from_is_one_of_the_usual_ones() {
+    let (control, tmp, _overlays) = host("scan-vendor-folders");
+    let upstream = repo(
+        &tmp,
+        "project",
+        &[
+            (".codex/skills/plan/SKILL.md", &skill_md("plan")),
+            (".pi/skills/chat/SKILL.md", &skill_md("chat")),
+            (".gemini/skills/ask/SKILL.md", &skill_md("ask")),
+            ("tools/other/SKILL.md", &skill_md("other")),
+        ],
+    );
+    let answer = scan(&control, source(&upstream, ""));
+    assert_eq!(
+        listed(&answer),
+        [
+            pair("ask", ".gemini/skills/ask"),
+            pair("chat", ".pi/skills/chat"),
+            pair("plan", ".codex/skills/plan")
+        ],
+        "a skill outside the folders the loaded agents name is not offered while there are some in them: {answer}"
+    );
+}
+
+#[test]
 fn a_repository_that_is_one_skill_lists_it_alone_with_the_whole_repository_as_its_files() {
     let (control, tmp, _overlays) = host("scan-root");
     let upstream = repo(

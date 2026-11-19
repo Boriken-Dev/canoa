@@ -102,6 +102,7 @@ impl AgentVendor for GeminiVendor {
         info.vendor = Some("google".to_owned());
         info.aos = Some("gemini-cli".to_owned());
         info.model_variable = Some("GEMINI_MODEL".to_owned());
+        info.skills_folder = Some(".gemini/skills".to_owned());
         info.names = vec!["gemini-cli".to_owned()];
         Ok(info)
     }

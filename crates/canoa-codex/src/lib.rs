@@ -61,6 +61,7 @@ impl AgentVendor for CodexVendor {
         info.vendor = Some("openai".to_owned());
         info.aos = Some("codex".to_owned());
         info.model_variable = Some("OPENAI_MODEL".to_owned());
+        info.skills_folder = Some(".codex/skills".to_owned());
         info.standards = vec![
             StandardTitle::new("codex", "Codex"),
             StandardTitle::new("openai-api", "OpenAI API"),

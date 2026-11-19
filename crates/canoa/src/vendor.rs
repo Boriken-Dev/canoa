@@ -87,6 +87,8 @@ pub struct VendorInfo {
     /// Where the agent puts a tool's own name in a tool call's `_meta`, as a JSON pointer below `_meta` (`/claudeCode/toolName`);
     /// absent for an agent whose tool call title is the name.
     pub tool_name: Option<String>,
+    /// The folder below a project where the agent reads skills from (`.claude/skills`), for a source of skills to be searched there.
+    pub skills_folder: Option<String>,
     /// The credential standards that are the vendor's own, with their names for people.
     #[map(default)]
     pub standards: Vec<StandardTitle>,
@@ -118,6 +120,7 @@ impl VendorInfo {
             aos: None,
             model_variable: None,
             tool_name: None,
+            skills_folder: None,
             standards: Vec::new(),
             names: Vec::new(),
             markers: Vec::new(),

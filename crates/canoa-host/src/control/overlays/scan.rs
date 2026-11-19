@@ -22,32 +22,30 @@ const MAX_DESCRIPTION: usize = 1024;
 /// How deep below the folder scanned a `SKILL.md` is looked for when none is in the usual places.
 const MAX_DEPTH: usize = 5;
 
-/// The folders whose subfolders are skills, which `npx skills` reads first: its own `skills/`, the three folders under it, and
-/// the folder each agent it installs for reads skills from.
-const SKILL_FOLDERS: [&str; 22] = [
-    "skills",
-    "skills/.curated",
-    "skills/.experimental",
-    "skills/.system",
-    ".agents/skills",
-    ".agent/skills",
-    ".claude/skills",
-    ".codex/skills",
-    ".cursor/skills",
-    ".gemini/skills",
-    ".github/skills",
-    ".opencode/skills",
-    ".pi/skills",
-    ".windsurf/skills",
-    ".augment/skills",
-    ".cline/skills",
-    ".continue/skills",
-    ".goose/skills",
-    ".kiro/skills",
-    ".roo/skills",
-    ".trae/skills",
-    ".zed/skills",
-];
+/// The folders whose subfolders are skills, which `npx skills` reads first: its own `skills/`, the three folders under it, the
+/// `.agents/skills` and `.agent/skills` that agents share, and the folder each loaded agent says it reads skills from.
+fn skill_folders() -> Vec<String> {
+    let mut folders: Vec<String> = [
+        "skills",
+        "skills/.curated",
+        "skills/.experimental",
+        "skills/.system",
+        ".agents/skills",
+        ".agent/skills",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    for folder in crate::vendors::all()
+        .into_iter()
+        .filter_map(|vendor| vendor.skills_folder)
+    {
+        if !folders.iter().any(|held| held == folder) {
+            folders.push(folder.to_owned());
+        }
+    }
+    folders
+}
 
 /// One `SKILL.md` the tree holds: its folder below the folder scanned (empty for that folder itself), its blob and its size.
 struct Found {
@@ -239,10 +237,11 @@ fn choose(found: Vec<Found>) -> Vec<Found> {
             .collect();
     }
     // A skill directly inside `skills/` has the folder `skills/<name>`, whose parent is a usual folder.
+    let folders = skill_folders();
     let usual = |each: &Found| {
         each.folder
             .rsplit_once('/')
-            .is_some_and(|(parent, _)| SKILL_FOLDERS.contains(&parent))
+            .is_some_and(|(parent, _)| folders.iter().any(|held| held == parent))
     };
     if found.iter().any(usual) {
         return found.into_iter().filter(usual).collect();

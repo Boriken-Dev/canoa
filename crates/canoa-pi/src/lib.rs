@@ -64,6 +64,7 @@ impl AgentVendor for PiVendor {
         info.vendor = None;
         info.aos = Some("pi".to_owned());
         info.model_variable = Some("PI_MODEL".to_owned());
+        info.skills_folder = Some(".pi/skills".to_owned());
         info.standards = vec![StandardTitle::new("pi", "Pi")];
         info.names = vec!["pi-acp".to_owned()];
         info.modes = vec![

@@ -61,6 +61,7 @@ impl AgentVendor for ClaudeVendor {
         info.aos = Some("claude-code".to_owned());
         info.model_variable = Some("ANTHROPIC_MODEL".to_owned());
         info.tool_name = Some("/claudeCode/toolName".to_owned());
+        info.skills_folder = Some(".claude/skills".to_owned());
         info.standards = vec![
             StandardTitle::new("claude-code", "Claude Code"),
             StandardTitle::new("anthropic-api", "Anthropic API"),

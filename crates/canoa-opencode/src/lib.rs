@@ -52,6 +52,7 @@ impl AgentVendor for OpenCodeVendor {
         let mut info = VendorInfo::new("opencode", "OpenCode");
         info.program = Some("OpenCode".to_owned());
         info.aos = Some("opencode".to_owned());
+        info.skills_folder = Some(".opencode/skills".to_owned());
         info.standards = vec![
             StandardTitle::new("opencode", "OpenCode"),
             StandardTitle::new("opencode-key", "OpenCode provider key"),
