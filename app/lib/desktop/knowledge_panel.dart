@@ -106,7 +106,7 @@ class _KnowledgeSearchPanelState extends State<KnowledgeSearchPanel> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text(
         'An agent can search the knowledge its overlays ship. By default that matches the words it uses. Name a server of your own '
-        '(an OpenAI-compatible one, such as Foundry Local) to match what is meant, and a chat model to put the best passages '
+        '(an OpenAI-compatible one, such as a model server on this computer) to match what is meant, and a chat model to put the best passages '
         'first. Searched text goes to these addresses only.',
         key: Key('host-kb-intro'),
       ),

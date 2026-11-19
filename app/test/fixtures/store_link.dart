@@ -98,6 +98,8 @@ final class FakeStore {
   Map<String, Map<String, Object?>>? plan;
 }
 
+Map<String, Object?> _noModels(Map<String, Object?> given) => {'type': given['type'], 'models': <Object?>[]};
+
 /// The host's end: stores, a record of every request, and handlers a test replaces.
 final class FakeStoreHost {
   FakeStoreHost(this.stores);
@@ -128,10 +130,12 @@ final class FakeStoreHost {
   /// What `shell/list` answers: the shells found, the host's choice and what each agent entry is told.
   Map<String, Object?> shellReport = {'shells': <Object?>[], 'agents': <Object?>[]};
 
-  /// Foundry Local's models as `foundry/models` lists them (`id`, `cached`, `loaded` and the rest), and whether the host found
-  /// Foundry Local; `foundry/model` changes them the way the real command line does.
-  List<Map<String, Object?>> foundryModels = [];
-  bool foundryInstalled = false;
+  /// What `store/models` answers for a Store type's models, as the host words it (the library's rows and the type's settings).
+  Map<String, Object?> Function(Map<String, Object?> given) modelsAnswer = _noModels;
+
+  /// What `store/model` does to the host's models, given its params; what `store/model_setting` answers, given its params.
+  void Function(Map<String, Object?> given)? onModel;
+  Map<String, Object?> Function(Map<String, Object?> given)? onSetting;
 
   /// Every line the app sent on any link, whole, to look for what must never be in one.
   final wire = <String>[];
@@ -176,42 +180,22 @@ final class FakeStoreHost {
   Object? _answer(String method, Map<String, Object?> given) {
     // What the host grants this key is not a store request, so it is not in [calls].
     if (method == 'host/grants') return {'grants': grants};
-    if (method == 'foundry/models' || method == 'foundry/model' || method == 'foundry/window') {
+    if (method == 'store/models' || method == 'store/model' || method == 'store/model_setting') {
       calls.add(method);
       params.putIfAbsent(method, () => []).add(given);
       if (failures[method] case final failure?) throw failure;
-      if (method == 'foundry/models') return {'installed': foundryInstalled, 'models': foundryModels};
-      final model = foundryModels.firstWhere((each) => each['id'] == given['model']);
-      if (method == 'foundry/window') {
-        // The host keeps the number in canoa.cfg and lowers it to the model's own context length.
-        final window = Map<String, Object?>.from(model['window'] is Map ? model['window']! as Map<Object?, Object?> : const {});
-        var tokens = given['window'] as int?;
-        String? note;
-        final limit = window['context_length'] as int?;
-        if (tokens != null && limit != null && tokens > limit) {
-          note = '$tokens tokens is above the model\'s own context length: the window is $limit tokens';
-          tokens = limit;
-        }
-        window['chosen'] = tokens;
-        model['window'] = window;
-        return {'ok': true, 'model': given['model'], 'window': tokens, 'note': note};
+      if (method == 'store/models') return modelsAnswer(given);
+      if (method == 'store/model') {
+        onModel?.call(given);
+        return {'ok': true, 'model': given['model'], 'action': given['action']};
       }
-      switch (given['action']) {
-        case 'download':
-          model['cached'] = true;
-        case 'load':
-          if (model['cached'] != true) throw ControlFailed(-32002, '${model['id']} is not downloaded');
-          model['loaded'] = true;
-        case 'unload':
-          model['loaded'] = false;
-      }
-      return {'ok': true, 'model': given['model'], 'action': given['action']};
+      return onSetting?.call(given) ?? {'ok': true, 'model': given['model'], 'values': given['values']};
     }
     if (method == 'speech/enable') {
       calls.add(method);
       params.putIfAbsent(method, () => []).add(given);
       if (failures[method] case final failure?) throw failure;
-      return {'name': 'foundry', 'provider': 'speech_endpoint', 'model': given['model'], 'saved': true};
+      return {'name': given['offer'], 'provider': 'speech_endpoint', 'model': given['model'], 'saved': true};
     }
     final provider = given['provider'] as String?;
     final key = '$method ${provider ?? ''}'.trim();

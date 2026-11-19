@@ -4,7 +4,7 @@ import 'package:canoa/desktop/control_client.dart' show ControlFailed;
 import 'package:canoa/store/store_extension.dart' show ExtensionBody, ExtensionStoreType;
 import 'package:canoa/store/store_extension_catalog.dart';
 import 'package:canoa/store/store_extensions.dart';
-import 'package:canoa/store/store_foundry.dart';
+import 'package:canoa/store/store_models.dart';
 import 'package:canoa/store/store_runtimes.dart';
 import 'package:canoa/store/store_view.dart';
 import 'package:flutter/material.dart';
@@ -63,18 +63,28 @@ void main() {
     extensions.dispose();
   });
 
-  test('the Foundry models type is listed while the host lists the type its library adds, and not otherwise', () async {
-    final host = FakeStoreHost([FakeStore('foundry_store', title: 'Foundry Local', extensionType: foundryLibraryTypeId, copies: [copyOf('0.14.0')])])
+  test('a type whose library lists models has a page of them after its own, and a type that lists none has not', () async {
+    final host = FakeStoreHost([FakeStore('runner_store', title: 'Runner', extensionType: 'runner', copies: [copyOf('0.14.0')])])
       ..extensionTypes = [
-        {'id': foundryLibraryTypeId, 'title': 'Foundry Local', 'icon': 'memory', 'stores': ['foundry_store'], 'extension': 'built-in', 'extension_title': 'Foundry Local'},
+        {
+          'id': 'runner',
+          'title': 'Runner',
+          'icon': 'memory',
+          'stores': ['runner_store'],
+          'extension': 'built-in',
+          'extension_title': 'Runner',
+          'models': {'provider': 'runner_models', 'title': 'Runner models'},
+        },
+        {'id': 'plain', 'title': 'Plain', 'stores': <String>[], 'models': null},
       ];
     final shared = host.client();
     final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, extensionsTypeId, foundryLibraryTypeId]);
-    final program = extensions.types.last;
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, extensionsTypeId, 'runner', modelsTypeId('runner'), 'plain']);
+    expect(extensions.types.map((type) => type.label), ['Runtimes', 'Extensions', 'Runner', 'Runner models', 'Plain']);
+    final program = extensions.types[2];
     await program.load!();
-    expect(program.items().single.name, 'Foundry Local');
+    expect(program.items().single.name, 'Runner');
     extensions.dispose();
 
     final without = FakeStoreHost([])..extensionTypes = [];

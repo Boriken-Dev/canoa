@@ -15,7 +15,7 @@ String? markIdOf(String? name) {
 /// The first of [names] that has a mark, as [markIdOf] reads each.
 String? firstMarkId(Iterable<String?> names) => names.map(markIdOf).nonNulls.firstOrNull;
 
-/// The mark an account shows: its harness's, else its kind's (`anthropic-api-key`); null when neither has one (Foundry Local).
+/// The mark an account shows: its harness's, else its kind's (`anthropic-api-key`); null when neither has one (a gateway account).
 String? accountMarkId(String harness, String kind) => firstMarkId([harness, kind]);
 
 /// The generic icon for a provider with no vendor mark here: any other id, and an entry with no provider (a program on

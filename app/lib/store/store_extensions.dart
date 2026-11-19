@@ -10,7 +10,7 @@ import 'runtime_mark.dart';
 import 'runtime_page.dart';
 import 'store_extension.dart';
 import 'store_extension_catalog.dart';
-import 'store_foundry.dart';
+import 'store_models.dart';
 import 'store_runtimes.dart';
 import 'store_selection.dart' show StoreMarkImage;
 
@@ -109,7 +109,7 @@ ExtensionStoreType programsStoreType({
 
 /// The store types beyond the built-in four: Runtimes, the Extensions the catalogs list, each type an extension named in the host's
 /// canoa.cfg adds and each a library the host carries adds. The host lists the types and does every install; this only holds what it
-/// said. Foundry Local's models are listed while the host lists the type its library adds.
+/// said. A type whose library lists models has a page of them after its own.
 class StoreExtensions extends ChangeNotifier {
   StoreExtensions({
     required Future<ControlClient> Function() control,
@@ -121,9 +121,8 @@ class StoreExtensions extends ChangeNotifier {
   }) : _control = control,
        _open = open {
     _runtimes = ProgramStores(control: control, open: open, kind: 'runtimes');
-    _foundry = FoundryModels(control: control, open: open);
     _catalogs = ExtensionCatalogs(control: control, mayInstall: mayInstall, restart: restart, saved: saved);
-    _types = _built(const [], withModels: false);
+    _types = _built(const []);
   }
 
   final Future<ControlClient> Function() _control;
@@ -132,29 +131,24 @@ class StoreExtensions extends ChangeNotifier {
   /// What is done once a program of the type [id] was installed: the Secret providers type opens the provider's setup.
   final Future<void> Function(BuildContext context, String type)? afterInstall;
   late final ProgramStores _runtimes;
-  late final FoundryModels _foundry;
   late final ExtensionCatalogs _catalogs;
   late List<ExtensionStoreType> _types;
   Future<void>? _asking;
   final _held = <ProgramStores>[];
+  final _heldModels = <TypeModels>[];
 
   /// The runtimes the host's Store keeps, which the Runtimes type lists and an overlay's unmet need is installed from.
   ProgramStores get runtimes => _runtimes;
 
-  /// Runtimes first, then Foundry Local's models (while the host lists its library's type) and the Extensions the catalogs list, then
-  /// what extensions add, in the host's order.
+  /// Runtimes first, then the Extensions the catalogs list, then what extensions add, in the host's order, each type followed by the
+  /// page of its models when its library lists any.
   List<ExtensionStoreType> get types => _types;
 
   /// The titles of the types each extension adds, by the extension's name in canoa.cfg, as the host listed them.
   Map<String, List<String>> get addedBy => _addedBy;
   var _addedBy = <String, List<String>>{};
 
-  List<ExtensionStoreType> _built(List<ExtensionStoreType> added, {required bool withModels}) => [
-    _runtimesType(),
-    if (withModels) foundryModelsType(_foundry),
-    extensionsStoreType(_catalogs),
-    ...added,
-  ];
+  List<ExtensionStoreType> _built(List<ExtensionStoreType> added) => [_runtimesType(), extensionsStoreType(_catalogs), ...added];
 
   ExtensionStoreType _runtimesType() => programsStoreType(
     id: runtimesTypeId,
@@ -181,22 +175,29 @@ class StoreExtensions extends ChangeNotifier {
       for (final each in list) {
         if (each is! Map || each['id'] is! String || each['title'] is! String) continue;
         final id = each['id'] as String;
-        if (id == runtimesTypeId || id == foundryTypeId || id == extensionsTypeId) continue;
+        if (id == runtimesTypeId || id == extensionsTypeId) continue;
         final programs = ProgramStores(control: _control, open: _open, kind: 'extension', type: id);
+        final icon = extensionIcons[each['icon']] ?? Icons.extension_outlined;
+        final image = extensionImage(each['icon']);
         added.add(programsStoreType(
           id: id,
           label: each['title'] as String,
-          icon: extensionIcons[each['icon']] ?? Icons.extension_outlined,
-          image: extensionImage(each['icon']),
+          icon: icon,
+          image: image,
           programs: programs,
           catalog: each['extension_title'] is String ? each['extension_title'] as String : 'An extension',
           afterInstall: afterInstall == null ? null : (context) => afterInstall!(context, id),
         ));
+        if (each['models'] case {'title': final String title}) {
+          final models = TypeModels(type: id, title: title, control: _control, open: _open);
+          _heldModels.add(models);
+          added.add(modelsStoreType(id: id, models: models, icon: icon, image: image));
+        }
         if (each['extension'] is String) (by[each['extension'] as String] ??= []).add(each['title'] as String);
         _held.add(programs);
         listing.add(programs.ensure());
       }
-      _types = _built(added, withModels: added.any((type) => type.id == foundryLibraryTypeId));
+      _types = _built(added);
       _addedBy = by;
       notifyListeners();
       await Future.wait([_runtimes.ensure(), ...listing]);
@@ -209,7 +210,9 @@ class StoreExtensions extends ChangeNotifier {
   @override
   void dispose() {
     _runtimes.dispose();
-    _foundry.dispose();
+    for (final models in _heldModels) {
+      models.dispose();
+    }
     _catalogs.dispose();
     for (final programs in _held) {
       programs.dispose();

@@ -147,7 +147,7 @@ final class SpeechOffer {
   /// The account whose API key an offer made of an account uses; the account's name is what tells the person which key pays.
   final String? account;
 
-  /// The service on the host an offer calls (Foundry Local), set up with a model the person has loaded there.
+  /// The Store type whose service on the host an offer calls, set up with a model the person has loaded there.
   final String? service;
 
   /// Why it cannot be set up now, in the host's words; null when it can.

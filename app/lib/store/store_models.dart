@@ -1,0 +1,453 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../desktop/control_client.dart';
+import '../forms/schema_fields.dart';
+import '../selectable.dart';
+import 'entry_details.dart';
+import 'programs_view.dart' show hostWords;
+import 'store_extension.dart';
+import 'store_selection.dart' show StoreMarkImage;
+
+// The models of a Store type, as its library lists them: what the host's `store/models` answers (rows with a line, tags, what + does,
+// the page's sections and the form of a model's settings), moved by `store/model` and kept by `store/model_setting`. The host runs
+// the type's program and says what it refused in its own words; this draws only what the host answered and names no model.
+
+/// How long a download may take before the app stops waiting; the host ends it sooner than this.
+const Duration modelWait = Duration(hours: 4, minutes: 10);
+
+/// The id of the page that lists the models of the Store type [typeId], in the Store's index; a colon keeps it from any type's own.
+String modelsTypeId(String typeId) => '$typeId:models';
+
+Map<String, Object?> _map(Object? value) => value is Map ? value.cast<String, Object?>() : const {};
+
+List<T> _list<T>(Object? value, T? Function(Map<Object?, Object?> each) read) => [
+  for (final each in value is List ? value : const []) if (each is Map) ?read(each),
+];
+
+String? _text(Object? value) => value is String && value.isNotEmpty ? value : null;
+
+/// One thing a page states of a model.
+final class ModelFact {
+  const ModelFact(this.label, this.value);
+
+  final String label, value;
+}
+
+/// One section of a model's page.
+final class ModelSection {
+  const ModelSection({required this.title, this.facts = const [], this.paragraphs = const [], this.settings = false});
+
+  final String title;
+  final List<ModelFact> facts;
+  final List<String> paragraphs;
+
+  /// Whether the form of the model's settings is drawn in it.
+  final bool settings;
+}
+
+/// What + does for a model once the person has read what it takes.
+final class ModelAction {
+  const ModelAction({required this.title, required this.confirm, required this.label, required this.steps});
+
+  /// The confirmation's title and text, what its button says, and the actions the host is asked for in order.
+  final String title, confirm, label;
+  final List<String> steps;
+}
+
+/// How a model may be the person's speech-to-text.
+final class ModelSpeech {
+  const ModelSpeech({required this.text, this.caution});
+
+  final String text;
+
+  /// What the page warns of now, when it does.
+  final String? caution;
+}
+
+/// One model, as the host listed it.
+final class StoreModel {
+  const StoreModel({
+    required this.id,
+    required this.summary,
+    this.by,
+    this.tags = const [],
+    this.on = false,
+    this.state,
+    this.facts = const [],
+    this.actions = const [],
+    this.sections = const [],
+    this.speech,
+    this.values = const {},
+  });
+
+  factory StoreModel.fromJson(Map<Object?, Object?> json) => StoreModel(
+    id: json['id']! as String,
+    by: _text(json['by']),
+    summary: json['summary'] is String ? json['summary']! as String : '',
+    tags: [for (final tag in json['tags'] is List ? json['tags']! as List : const []) if (tag is String) tag],
+    on: json['on'] == true,
+    state: _text(json['state']),
+    facts: _list(json['facts'], (fact) => fact['label'] is String ? ModelFact(fact['label']! as String, '${fact['value'] ?? ''}') : null),
+    actions: _list(
+      json['actions'],
+      (action) => ModelAction(
+        title: '${action['title'] ?? ''}',
+        confirm: '${action['confirm'] ?? ''}',
+        label: '${action['label'] ?? ''}',
+        steps: [for (final step in action['steps'] is List ? action['steps']! as List : const []) if (step is String) step],
+      ),
+    ),
+    sections: _list(
+      json['sections'],
+      (section) => ModelSection(
+        title: '${section['title'] ?? ''}',
+        facts: _list(section['facts'], (fact) => fact['label'] is String ? ModelFact(fact['label']! as String, '${fact['value'] ?? ''}') : null),
+        paragraphs: [for (final each in section['paragraphs'] is List ? section['paragraphs']! as List : const []) if (each is String) each],
+        settings: section['settings'] == true,
+      ),
+    ),
+    speech: json['speech'] is Map ? ModelSpeech(text: '${(json['speech']! as Map)['text'] ?? ''}', caution: _text((json['speech']! as Map)['caution'])) : null,
+    values: _map(json['values']),
+  );
+
+  /// The name the host's calls take.
+  final String id;
+  final String? by;
+
+  /// Where it stands and what it is, in a line.
+  final String summary;
+  final List<String> tags;
+
+  /// Whether it is in use: the tile is marked.
+  final bool on;
+
+  /// Its state in a word, when it has one worth a badge.
+  final String? state;
+  final List<ModelFact> facts;
+
+  /// What it can do; + does the first.
+  final List<ModelAction> actions;
+  final List<ModelSection> sections;
+
+  /// Present when it may be used as the person's speech-to-text.
+  final ModelSpeech? speech;
+
+  /// What canoa.cfg keeps for it, by the members of the type's settings.
+  final Map<String, Object?> values;
+}
+
+/// The settings a type keeps for each model: a guatiao schema and a guatiao-intake form, drawn by the one renderer.
+final class ModelSettings {
+  const ModelSettings({required this.schema, required this.form, this.help});
+
+  final Map<String, Object?> schema, form;
+  final String? help;
+}
+
+/// The models of one Store type and what the person asks the host to do with one.
+class TypeModels extends ChangeNotifier {
+  TypeModels({required this.type, required this.title, required Future<ControlClient> Function() control, required Future<ControlClient> Function() open})
+    : _control = control,
+      _open = open;
+
+  /// The id of the Store type whose models these are, and the page's name in the plural.
+  final String type;
+  final String title;
+  final Future<ControlClient> Function() _control;
+  final Future<ControlClient> Function() _open;
+  Future<void>? _asking;
+  bool _loaded = false;
+  List<StoreModel> _models = const [];
+  String? _problem, _unavailable, _catalog, _publisher, _missing;
+  ModelSettings? _settings;
+  bool _speech = false;
+
+  /// Whether the host has answered yet.
+  bool get loaded => _loaded;
+  List<StoreModel> get models => _models;
+
+  /// What the host said when it could not list them, in its words.
+  String? get problem => _problem;
+
+  /// Why the host lists none (the program is not installed), in the library's words.
+  String? get unavailable => _unavailable;
+
+  /// What the page says without rows, when the host said nothing of its own.
+  String get missing => _missing ?? 'The host lists no models now.';
+
+  /// Where the rows come from, and who they are by when a row names no one.
+  String get catalog => _catalog ?? title;
+  String get publisher => _publisher ?? '';
+
+  /// The settings a model keeps, when the type keeps any.
+  ModelSettings? get settings => _settings;
+
+  /// Whether a model of the type may be the person's speech-to-text.
+  bool get speech => _speech;
+
+  /// Asks the host for the models, once; [refresh] asks again.
+  Future<void> ensure() => _asking ??= refresh();
+
+  Future<void> refresh() async {
+    try {
+      final client = await _control();
+      final answer = await client.call('store/models', {'type': type}, null, const Duration(minutes: 3));
+      final map = answer is Map ? answer : const {};
+      _catalog = _text(map['catalog']);
+      _publisher = _text(map['publisher']);
+      _missing = _text(map['missing']);
+      _unavailable = _text(map['unavailable']);
+      _speech = map['speech'] == true;
+      final settings = _map(map['settings']);
+      _settings = settings['schema'] is Map ? ModelSettings(schema: _map(settings['schema']), form: _map(settings['form']), help: _text(settings['help'])) : null;
+      _models = [
+        for (final each in map['models'] is List ? map['models'] as List : const [])
+          if (each is Map && each['id'] is String) StoreModel.fromJson(each),
+      ];
+      _problem = null;
+      _loaded = true;
+    } on Object catch (error) {
+      _models = const [];
+      _unavailable = null;
+      _problem = hostWords(error);
+      _loaded = true;
+      _asking = null;
+    }
+    notifyListeners();
+  }
+
+  /// Makes [model] a speech-to-text provider on the host, which calls the type's service with it. The model is not loaded here:
+  /// loading one is the person's choice. Returns the provider's name; throws what the host refuses with.
+  Future<String> useForSpeech(String model) async {
+    final client = await _control();
+    final answer = await client.call('speech/enable', {'offer': type, 'model': model}, null, const Duration(seconds: 30));
+    return answer is Map && answer['name'] is String ? answer['name'] as String : type;
+  }
+
+  /// Keeps [values] as the settings of [model] (none takes them away). Returns the host's note and what it kept; throws what the host
+  /// refuses with. The list is read again after.
+  Future<({String? note, Map<String, Object?> values})> setSettings(String model, Map<String, Object?> values) async {
+    final client = await _control();
+    try {
+      final answer = await client.call('store/model_setting', {'type': type, 'model': model, 'values': values}, null, const Duration(seconds: 30));
+      final map = _map(answer);
+      return (note: _text(map['note']), values: _map(map['values']));
+    } finally {
+      await refresh();
+    }
+  }
+
+  /// Asks the host to run [action] on [model], on a link of its own since a download takes long; throws what it refuses with. The
+  /// list is read again after, whatever came of it.
+  Future<void> run(String model, String action) async {
+    final client = await _open();
+    try {
+      await client.call('store/model', {'type': type, 'model': model, 'action': action}, null, modelWait);
+    } finally {
+      unawaited(client.close());
+      await refresh();
+    }
+  }
+}
+
+/// The page of the models of a Store type, listed after the type's own.
+ExtensionStoreType modelsStoreType({required String id, required TypeModels models, required IconData icon, StoreMarkImage? image}) => ExtensionStoreType(
+  id: modelsTypeId(id),
+  label: models.title,
+  icon: icon,
+  image: image,
+  changes: models,
+  load: models.refresh,
+  items: () {
+    if (!models.loaded) return const [];
+    final why = models.problem ?? models.unavailable;
+    if (why != null) {
+      return [ExtensionStoreItem(catalog: models.catalog, name: models.catalog, by: models.publisher, summary: why)];
+    }
+    return [
+      for (final model in models.models)
+        ExtensionStoreItem(
+          catalog: models.catalog,
+          name: model.id,
+          by: model.by ?? models.publisher,
+          summary: model.summary,
+          tags: model.tags,
+          installed: model.on,
+          install: model.actions.isEmpty ? null : (context) => _choose(context, models, model),
+          details: (context, config) => ModelPage(models: models, id: model.id),
+        ),
+    ];
+  },
+);
+
+Future<bool> _confirm(BuildContext context, {required String title, required String text, required String action}) async {
+  final answer = await showSelectableDialog<bool>(
+    context: context,
+    builder: (dialog) => AlertDialog(
+      key: const Key('model-confirm'),
+      title: Text(title),
+      content: Text(text),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
+        FilledButton(key: const Key('model-confirm-yes'), onPressed: () => Navigator.pop(dialog, true), child: Text(action)),
+      ],
+    ),
+  );
+  return answer == true;
+}
+
+Future<void> _failed(BuildContext context, String title, Object error) => showSelectableDialog<void>(
+  context: context,
+  builder: (dialog) => AlertDialog(
+    key: const Key('model-failed'),
+    title: Text(title),
+    content: SelectableText(hostWords(error)),
+    actions: [TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('Close'))],
+  ),
+);
+
+/// What + does for [model]: its first action, once the person has read what it takes, one step at a time.
+Future<void> _choose(BuildContext context, TypeModels models, StoreModel model) async {
+  final action = model.actions.first;
+  if (!await _confirm(context, title: action.title, text: action.confirm, action: action.label)) return;
+  if (!context.mounted) return;
+  try {
+    for (final step in action.steps) {
+      await models.run(model.id, step);
+    }
+  } on Object catch (error) {
+    if (context.mounted) await _failed(context, action.title, error);
+  }
+}
+
+/// One model's page: what the library says of it, section by section, the form of its settings where a section puts it, and, for a
+/// model that may be the person's speech-to-text, "Use as speech provider", which makes the host's provider that sends dictation to
+/// it. The settings are kept by the host in canoa.cfg.
+class ModelPage extends StatefulWidget {
+  const ModelPage({super.key, required this.models, required this.id});
+
+  final TypeModels models;
+  final String id;
+
+  @override
+  State<ModelPage> createState() => _ModelPageState();
+}
+
+class _ModelPageState extends State<ModelPage> {
+  String? _said;
+  bool _busy = false;
+  String? _made;
+  String? _speechProblem;
+
+  StoreModel? get _model {
+    for (final each in widget.models.models) {
+      if (each.id == widget.id) return each;
+    }
+    return null;
+  }
+
+  Future<String?> _save(Map<String, Object?> values) async {
+    setState(() => _said = null);
+    try {
+      final kept = await widget.models.setSettings(widget.id, values);
+      if (mounted) setState(() => _said = kept.note ?? (kept.values.isEmpty ? 'The settings are removed.' : 'Saved.'));
+      return null;
+    } on Object catch (error) {
+      return hostWords(error);
+    }
+  }
+
+  Future<void> _use() async {
+    setState(() {
+      _busy = true;
+      _speechProblem = null;
+    });
+    try {
+      final name = await widget.models.useForSpeech(widget.id);
+      if (mounted) setState(() => _made = name);
+    } on Object catch (error) {
+      if (mounted) setState(() => _speechProblem = hostWords(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _settingsForm(StoreModel model, ModelSettings settings) => Padding(
+    padding: const EdgeInsets.only(top: 8),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (settings.help case final help?) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(help, key: const Key('model-setting-help'))),
+      SchemaSettingsForm(
+        key: ValueKey('${model.id} ${model.values}'),
+        schema: settings.schema,
+        form: settings.form,
+        name: model.id,
+        values: model.values,
+        keyPrefix: 'model-setting',
+        onSave: (values, cleared, from) => _save(values),
+      ),
+      if (_said != null) Text(_said!, key: const Key('model-setting-said')),
+    ]),
+  );
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.models,
+    builder: (context, _) {
+      final model = _model;
+      if (model == null) {
+        return Scaffold(
+          appBar: AppBar(title: const Text('Model')),
+          body: const Padding(padding: EdgeInsets.all(16), child: Text('The host does not list this model now.', key: Key('model-gone'))),
+        );
+      }
+      final settings = widget.models.settings;
+      final speech = model.speech;
+      return EntryDetails(
+        key: Key('model-${model.id}'),
+        title: model.id,
+        leading: const Icon(Icons.memory, size: 56),
+        from: widget.models.catalog,
+        summary: model.summary,
+        state: model.state,
+        overview: {for (final fact in model.facts) fact.label: fact.value},
+        contents: false,
+        sections: [
+          if (speech != null && widget.models.speech)
+            DetailSection(key: const Key('model-speech'), title: 'Speech to text', children: [
+              Padding(padding: const EdgeInsets.only(top: 4), child: Text(speech.text)),
+              if (speech.caution case final caution?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(caution, key: const Key('model-speech-caution'), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton(key: const Key('model-use-speech'), onPressed: _busy ? null : () => unawaited(_use()), child: const Text('Use as speech provider')),
+                ),
+              ),
+              if (_made case final made?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text('Added as the provider "$made". Choose it in Settings, Voice.', key: const Key('model-speech-done')),
+                ),
+              if (_speechProblem case final problem?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(problem, key: const Key('model-speech-failed'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ),
+            ]),
+          for (final (at, section) in model.sections.indexed)
+            DetailSection(key: Key('model-section-$at'), title: section.title, children: [
+              for (final fact in section.facts) DetailField(label: fact.label, value: fact.value),
+              for (final paragraph in section.paragraphs) Padding(padding: const EdgeInsets.only(top: 8), child: Text(paragraph)),
+              if (section.settings && settings != null) _settingsForm(model, settings),
+            ]),
+        ],
+      );
+    },
+  );
+}
