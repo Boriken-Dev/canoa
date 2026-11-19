@@ -19,12 +19,12 @@ use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use aes_gcm::aead::{Aead, Generate, Key, KeyInit, Payload};
 use aes_gcm::aes::cipher::consts::U12;
 use aes_gcm::{Aes256Gcm, Nonce};
-use keyring_core::{Entry, Error as KeyError};
+use keyring_core::{CredentialStore, Entry, Error as KeyError};
 use sha2::{Digest as _, Sha256};
 use zeroize::Zeroize as _;
 
@@ -179,9 +179,41 @@ fn patiently<T>(mut call: impl FnMut() -> Result<T, KeyError>) -> Result<T, KeyE
     }
 }
 
-/// Makes the platform's credential store the default of `keyring_core`, once.
-fn use_platform_store() -> Result<(), StoreError> {
-    static ONCE: OnceLock<Result<(), String>> = OnceLock::new();
+/// The environment variable that keeps every credential this process stores in its memory and out of the operating system's store.
+/// Only `memory` means anything. A process started with it forgets what it was given when it ends, so it is for tests, which
+/// set it, and for nothing a person runs.
+pub(crate) const STORE_VARIABLE: &str = "CANOA_CREDENTIAL_STORE";
+
+/// The credential store a [`KeyringStore`] talks to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Backend {
+    /// The operating system's store, except where the process asked for its memory (see [`STORE_VARIABLE`]) and in this crate's own
+    /// unit tests, which never reach the operating system's store unless a test names it.
+    Chosen,
+    /// The operating system's store, whatever the process asked: only a test about that store.
+    #[cfg(test)]
+    Platform,
+}
+
+/// The credential store that is the process's memory, shared by every [`KeyringStore`] of the process, once.
+fn memory_store() -> Result<Arc<CredentialStore>, StoreError> {
+    static ONCE: OnceLock<Result<Arc<CredentialStore>, String>> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        keyring_core::mock::Store::new()
+            .map(|store| store as Arc<CredentialStore>)
+            .map_err(|error| error.to_string())
+    })
+    .clone()
+    .map_err(|why| {
+        StoreError(format!(
+            "the in-memory credential store is not available ({why})"
+        ))
+    })
+}
+
+/// The operating system's credential store, once.
+fn platform_store() -> Result<Arc<CredentialStore>, StoreError> {
+    static ONCE: OnceLock<Result<Arc<CredentialStore>, String>> = OnceLock::new();
     ONCE.get_or_init(|| {
         #[cfg(target_os = "windows")]
         let store = windows_native_keyring_store::Store::new();
@@ -195,7 +227,7 @@ fn use_platform_store() -> Result<(), StoreError> {
         #[cfg(any(windows, unix))]
         {
             store
-                .map(|store| keyring_core::set_default_store(store))
+                .map(|store| store as Arc<CredentialStore>)
                 .map_err(|error| error.to_string())
         }
         #[cfg(not(any(windows, unix)))]
@@ -209,6 +241,25 @@ fn use_platform_store() -> Result<(), StoreError> {
             "the operating system's credential store is not available ({why})"
         ))
     })
+}
+
+impl Backend {
+    /// The store, and whether it is the operating system's.
+    fn open(self) -> Result<(Arc<CredentialStore>, bool), StoreError> {
+        match self {
+            Self::Chosen => {
+                let in_memory = cfg!(test)
+                    || std::env::var(STORE_VARIABLE).is_ok_and(|value| value == "memory");
+                if in_memory {
+                    memory_store().map(|store| (store, false))
+                } else {
+                    platform_store().map(|store| (store, true))
+                }
+            }
+            #[cfg(test)]
+            Self::Platform => platform_store().map(|store| (store, true)),
+        }
+    }
 }
 
 /// Asks the operating system's store a question that changes nothing: whether an entry of `service` exists. A store
@@ -238,6 +289,10 @@ pub(crate) fn holds_files(dir: &Path) -> bool {
 /// The operating system's credential store, through `keyring-core`: one entry per chunk, under `service`.
 pub(crate) struct KeyringStore {
     service: String,
+    backend: Backend,
+    /// Every entry this store asked for, so that a test about the real store can remove each one.
+    #[cfg(test)]
+    touched: Option<Arc<Mutex<std::collections::BTreeSet<String>>>>,
     /// The accounts this store has shown to this process: written, or read with an index. An index that later reads as
     /// missing, though the store held it a moment ago, is not the account's absence.
     shown: Mutex<std::collections::BTreeSet<String>>,
@@ -283,6 +338,9 @@ impl KeyringStore {
     pub(crate) fn new(service: impl Into<String>) -> Self {
         Self {
             service: service.into(),
+            backend: Backend::Chosen,
+            #[cfg(test)]
+            touched: None,
             shown: Mutex::new(std::collections::BTreeSet::new()),
         }
     }
@@ -314,24 +372,42 @@ impl KeyringStore {
     }
 
     pub(crate) fn entry(&self, user: &str) -> Result<Entry, StoreError> {
-        use_platform_store().map_err(|StoreError(why)| {
+        let (store, platform) = self.backend.open().map_err(|StoreError(why)| {
             StoreError(format!(
                 "{why}; [secrets] accounts = \"auto\" uses sealed files when there is none, and \"file\" always does"
             ))
         })?;
-        self.entry_raw(user)
+        self.build(&*store, platform, user)
     }
 
     /// An entry of this store, its failure in the platform's words only.
     fn entry_raw(&self, user: &str) -> Result<Entry, StoreError> {
-        use_platform_store()?;
-        // Windows' Credential Manager roams an enterprise credential with the profile; this one stays on this machine.
-        let modifiers: std::collections::HashMap<&str, &str> = if cfg!(windows) {
+        let (store, platform) = self.backend.open()?;
+        self.build(&*store, platform, user)
+    }
+
+    fn build(
+        &self,
+        store: &CredentialStore,
+        platform: bool,
+        user: &str,
+    ) -> Result<Entry, StoreError> {
+        #[cfg(test)]
+        if let Some(touched) = &self.touched {
+            touched
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(user.to_owned());
+        }
+        // Windows' Credential Manager roams an enterprise credential with the profile; this one stays on this machine. The
+        // in-memory store takes no modifiers.
+        let modifiers: std::collections::HashMap<&str, &str> = if cfg!(windows) && platform {
             std::collections::HashMap::from([("persistence", "local")])
         } else {
             std::collections::HashMap::new()
         };
-        Entry::new_with_modifiers(&self.service, user, &modifiers)
+        store
+            .build(&self.service, user, Some(&modifiers))
             .map_err(|error| failed("the credential store refused an entry", error))
     }
 
@@ -711,3 +787,6 @@ impl SecretStore for FileStore {
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) mod real_store;

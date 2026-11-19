@@ -33,16 +33,6 @@ pub(crate) const FILE: &str = "file";
 /// with a home gives it the service of that home, and the person may name another.
 pub(crate) const DEFAULT_SERVICE: &str = "dev.boriken.canoa.secrets";
 
-/// [`DEFAULT_SERVICE`], except in this crate's own tests, which each process gives a service of its own so that no test reads or
-/// writes what the person keeps in the operating system's store.
-pub(crate) fn default_service() -> String {
-    if cfg!(test) {
-        format!("{DEFAULT_SERVICE}.test.{}", std::process::id())
-    } else {
-        DEFAULT_SERVICE.to_owned()
-    }
-}
-
 /// The person's form: it holds nothing, so a secret it is to answer is typed in the app, which the host asks itself.
 #[derive(Default, Provider)]
 #[provider(SecretProvider, id = "form", crate = ::coqui_acp_api::guatiao)]
@@ -111,7 +101,7 @@ impl From<SystemSettings> for SystemSecrets {
         let service = settings
             .service
             .filter(|service| !service.trim().is_empty())
-            .unwrap_or_else(default_service);
+            .unwrap_or_else(|| DEFAULT_SERVICE.to_owned());
         Self::over(Box::new(KeyringStore::new(service)))
     }
 }
@@ -408,13 +398,26 @@ mod tests {
         assert!(form.names(spawner()).is_err());
     }
 
-    /// A made-up service, so the operating system's real store is exercised with an entry nobody else has, and removed.
+    /// The provider the host builds from its settings keeps what it is given under the service they name (in memory, as every test but
+    /// the ones about the operating system's store).
+    #[test]
+    fn the_provider_built_from_its_settings_reads_back_what_it_was_given() {
+        let provider = SystemSecrets::from(SystemSettings {
+            service: Some("in-memory.settings".to_owned()),
+        });
+        provider
+            .put(Keeping::new("probe", "a-made-up-value"), spawner())
+            .unwrap();
+        let held = provider.get(Named::new("probe"), spawner()).unwrap();
+        assert_eq!(held.value.unwrap().expose(), "a-made-up-value");
+        provider.forget(Named::new("probe"), spawner()).unwrap();
+    }
+
+    /// The operating system's real store, under a service of this run's own, emptied when the test ends however it ends.
     #[test]
     fn the_operating_systems_store_reads_back_what_it_was_given_when_it_answers() {
-        let service = format!("dev.boriken.canoa.test.secrets.{}", std::process::id());
-        let provider = SystemSecrets::from(SystemSettings {
-            service: Some(service),
-        });
+        let real = crate::accounts::store::real_store::RealStore::new();
+        let provider = SystemSecrets::over(Box::new(real.store()));
         let put = provider.put(Keeping::new("probe", "a-made-up-value"), spawner());
         let Ok(()) = put else {
             // No credential store here (a container with no session bus): the memory store above is the test.

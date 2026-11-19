@@ -11,6 +11,7 @@ use std::time::SystemTime;
 
 use coqui_acp_api::{AccountKindInfo, AccountLoss, AccountRenewal, Credentials};
 
+use super::store::real_store::RealStore;
 use super::store::{FileStore, KeyringStore, SecretStore};
 use super::*;
 use crate::config::AccountConfig;
@@ -109,13 +110,12 @@ fn the_file_store_keeps_its_key_and_files_to_the_owner() {
     }
 }
 
-/// The operating system's store, under a service of this test's own that is emptied afterwards. It needs a credential
-/// store, which a headless Linux has none of: there it is skipped, and the file store is the one tested.
+/// The operating system's store, under a service of this run's own that is emptied afterwards, however the test ends. It
+/// needs a credential store, which a headless Linux has none of: there it is skipped, and the file store is the one tested.
 #[test]
 fn the_operating_systems_store_round_trips_a_record_over_the_blob_limit() {
-    let service = format!("dev.boriken.canoa.test.{}.{}", std::process::id(), line!());
-    let store = KeyringStore::new(service);
-    let _forget = Forget(&store, &["account-one"]);
+    let real = RealStore::new();
+    let store = real.store();
     let bytes = large();
     match store.put("account-one", &bytes) {
         Ok(()) => {}
@@ -140,15 +140,10 @@ fn the_operating_systems_store_round_trips_a_record_over_the_blob_limit() {
 /// for its index, a put through that instance refuses rather than writing generation 1 over the live record.
 #[test]
 fn a_store_that_only_read_an_account_does_not_write_over_it_when_its_index_goes_missing() {
-    let service = format!("dev.boriken.canoa.test.{}.{}", std::process::id(), line!());
+    let service = format!("in-memory.{}", line!());
     let writer = KeyringStore::new(service.clone());
     let reader = KeyringStore::new(service);
-    let _forget = Forget(&writer, &["account-read"]);
-    match writer.put("account-read", b"first") {
-        Ok(()) => {}
-        Err(error) if store_unavailable(&error.to_string()) => return,
-        Err(error) => panic!("the store refused a record: {error}"),
-    }
+    writer.put("account-read", b"first").expect("writes");
     assert_eq!(
         reader.get("account-read").expect("reads"),
         Some(b"first".to_vec())
@@ -395,9 +390,9 @@ fn config(id: &str) -> AccountConfig {
 #[cfg(windows)]
 #[test]
 fn windows_refuses_one_credential_over_2560_bytes() {
+    let real = RealStore::new();
     let _turn = super::store::one_at_a_time();
-    let service = format!("dev.boriken.canoa.test.{}.{}", std::process::id(), line!());
-    let entry = KeyringStore::new(service).entry("limit").expect("an entry");
+    let entry = real.store().entry("limit").expect("an entry");
     let at_limit = entry.set_secret(&vec![b'x'; 2560]);
     let _ = entry.delete_credential();
     let over = entry.set_secret(&vec![b'x'; 2561]);
@@ -430,18 +425,6 @@ pub(crate) fn store_unavailable(why: &str) -> bool {
         );
     }
     unavailable
-}
-
-/// Takes an account's entries out of the operating system's store when the test ends, however it ends: a test that
-/// panics must not leave credentials behind, which fill the store until it refuses every write.
-struct Forget<'a>(&'a KeyringStore, &'static [&'static str]);
-
-impl Drop for Forget<'_> {
-    fn drop(&mut self) {
-        for id in self.1 {
-            let _ = self.0.remove(id);
-        }
-    }
 }
 
 /// The clock behind a directory's name ticks more slowly than tests start, so the name alone is not unique: two tests that
@@ -765,9 +748,8 @@ fn an_entry_that_keeps_nothing_it_is_given_cannot_hold_the_accounts() {
 
 #[test]
 fn an_unreachable_os_store_names_auto_and_file() {
-    let error = KeyringStore::new(format!("dev.boriken.canoa.test.{}", std::process::id()))
-        .get("one")
-        .err();
+    let real = RealStore::new();
+    let error = real.store().get("one").err();
     if let Some(error) = error.map(|error| error.to_string())
         && error.contains("is not available")
     {
