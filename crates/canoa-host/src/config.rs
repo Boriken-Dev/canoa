@@ -4436,19 +4436,19 @@ fn read_raw(bytes: &[u8], name: Option<&str>) -> Result<RawFile, anycfg::Error> 
     formats().from_slice_typed::<RawFile>(bytes, options)
 }
 
-/// What a key the host does not know is told as: its name, and what took the place of one that was removed.
+/// What a key the host does not know is told as. Its name is a person's own text and may be a pasted secret, so it is told
+/// only for a key this host once read, which says what replaced it; any other is told as "a setting this host does not know".
 fn unknown_key(table: &str, key: &str) -> String {
-    let moved = match (table, key) {
-        ("host", "account_store") => {
-            "; `accounts` under `[secrets]` replaced it (`file` is `file`, `os` is `system`)"
-        }
-        _ => "",
-    };
-    format!("{key} is not a setting this host knows{moved}")
+    match (table, key) {
+        ("host", "account_store") => format!(
+            "{key} is not a setting this host knows; `accounts` under `[secrets]` replaced it (`file` is `file`, `os` is `system`)"
+        ),
+        _ => "a setting this host does not know".to_owned(),
+    }
 }
 
-/// anycfg's refusal as ours: the position or the key's path, and its words only where they come from the schema. A value is
-/// never told; the name of a key the host does not know is.
+/// anycfg's refusal as ours: the position or the key's path, and its words only where they come from the schema. A value,
+/// or a key nobody declared (bar a removed one that `unknown_key` knows), is never told.
 fn config_error(error: &anycfg::Error, file: Option<&Path>) -> ConfigError {
     use anycfg::Error;
     let parse = |file: Option<&Path>, line, column, what: String| ConfigError::Parse {
@@ -4476,7 +4476,7 @@ fn config_error(error: &anycfg::Error, file: Option<&Path>) -> ConfigError {
         Error::Conversion { path, message } => {
             let message = message.as_deref().unwrap_or("not of the expected shape");
             let (path, what) = if message.starts_with("unknown field") {
-                // The key is the last of the path; its name is told, never its value.
+                // The unknown key is the last of the path.
                 match path.as_deref().map(|path| path.rsplit_once('.')) {
                     Some(Some((parent, key))) => {
                         (Some(parent.to_owned()), unknown_key(parent, key))

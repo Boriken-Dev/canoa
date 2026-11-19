@@ -2201,17 +2201,16 @@ fn the_secrets_table_is_carried_for_who_keeps_the_accounts_and_the_old_account_s
         refused.contains("`accounts` under `[secrets]`"),
         "{refused}"
     );
-    // A key with no replacement is named and nothing more; its value is not.
-    let refused = parse(
-        "[host]
-unheard_of = \"hunter2\"
-",
-    )
-    .expect_err("refused")
-    .to_string();
-    assert!(refused.contains("host: unheard_of is not a setting this host knows"));
+    // Any other key is not told: it may be a secret pasted in the wrong place.
+    let refused = parse("[host]\nunheard_of = \"hunter2\"\n")
+        .expect_err("refused")
+        .to_string();
     assert!(
-        !refused.contains("replaced") && !refused.contains("hunter2"),
+        refused.contains("host: a setting this host does not know"),
+        "{refused}"
+    );
+    assert!(
+        !refused.contains("unheard_of") && !refused.contains("hunter2"),
         "{refused}"
     );
 }
