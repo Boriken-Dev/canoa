@@ -89,6 +89,12 @@ pub(crate) fn verify_extension(extension: &crate::config::Extension) -> Result<(
     }
 }
 
+/// The id of the Store type that lists what the secret providers need on the computer.
+pub(crate) const SECRETS_TYPE: &str = "secrets";
+
+/// The store that installs Bitwarden's command line.
+const BITWARDEN_STORE: &str = "bitwarden_store";
+
 /// A store type an extension adds, with the extension it comes from.
 #[derive(Clone, Debug)]
 struct AddedType {
@@ -232,6 +238,22 @@ impl Stores {
         self
     }
 
+    /// The same, also listing the Secret providers type: what a secret provider needs on the computer (Bitwarden's `bw`), installed
+    /// by the Store like any program. The providers themselves ship in the host.
+    pub(crate) fn with_secret_providers(mut self) -> Self {
+        let mut info = ExtensionType::new(SECRETS_TYPE, "Secret providers", [BITWARDEN_STORE]);
+        info.icon = Some("lock".to_owned());
+        if !self.types.iter().any(|each| each.info.id == SECRETS_TYPE) {
+            self.types.push(AddedType {
+                info,
+                extension: "built-in".to_owned(),
+                extension_title: "Canoa".to_owned(),
+                publisher: "Boriken Dev".to_owned(),
+            });
+        }
+        self
+    }
+
     /// The built-in stores over this user's programs folder.
     pub(crate) fn built_in() -> Result<Self, String> {
         let root = Shelf::default_root().ok_or("this user has no data folder")?;
@@ -241,7 +263,8 @@ impl Stores {
             Arc::new(Programs::new(shelf, registry)),
             BUILT_IN.iter().map(|id| (*id).to_owned()).collect(),
         )
-        .with_runtimes(runtimes_here()))
+        .with_runtimes(runtimes_here())
+        .with_secret_providers())
     }
 }
 
@@ -763,7 +786,8 @@ mod runtimes_tests {
             Arc::new(programs),
             BUILT_IN.iter().map(|id| (*id).to_owned()).collect(),
         )
-        .with_runtimes(runtimes_here());
+        .with_runtimes(runtimes_here())
+        .with_secret_providers();
         (stores, root)
     }
 
@@ -847,6 +871,59 @@ mod runtimes_tests {
         assert!(report.is_ok(), "{report:?}");
         let unknown = stores.read("store/report", &json!({"provider": "bun_store"}), None);
         assert_eq!(unknown.expect_err("unknown").0, NOT_FOUND);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn secret_providers_are_a_store_type_that_lists_bitwardens_command_apart_from_agents_and_runtimes()
+     {
+        let (stores, root) = stores();
+        let types = stores
+            .read("store/extensions", &json!({}), None)
+            .expect("the types");
+        let secrets = types["types"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .find(|each| each["id"] == "secrets")
+            .expect("the Secret providers type is listed");
+        assert_eq!(secrets["title"], "Secret providers");
+        assert_eq!(secrets["stores"], json!(["bitwarden_store"]));
+        let listed = stores
+            .read(
+                "store/list",
+                &json!({"kind": "extension", "type": "secrets"}),
+                None,
+            )
+            .expect("the type's stores");
+        assert_eq!(
+            programs_of(&listed),
+            [("bitwarden_store".to_owned(), "bw".to_owned())]
+        );
+        let store = &listed["stores"][0];
+        assert_eq!(store["title"], "Bitwarden");
+        assert_eq!(store["icon"], "brackets");
+        assert_eq!(
+            store["commands"],
+            json!([]),
+            "it is on no search path, so it provides no command"
+        );
+        for kind in [json!({}), json!({"kind": "runtimes"})] {
+            let other = stores.read("store/list", &kind, None).expect("a list");
+            assert!(
+                programs_of(&other)
+                    .iter()
+                    .all(|(_, program)| program != "bw"),
+                "{kind}: Bitwarden's command is the Secret providers type's"
+            );
+        }
+        // Nothing is installed: a report asks the shelf and the search path.
+        let report = stores.read(
+            "store/report",
+            &json!({"provider": "bitwarden_store"}),
+            None,
+        );
+        assert!(report.is_ok(), "{report:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

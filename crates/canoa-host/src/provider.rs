@@ -258,25 +258,67 @@ fn serve_on(
         .map_err(|error| ProviderError::Facade(error.to_string()))
 }
 
-/// What `source` names in place of a file to say QuickJS, built into the host, serves libraries written in JavaScript.
-pub(crate) const BUNDLED_JS: &str = "bundled:js";
+/// What adds the source of JavaScript libraries to a registry, with the source's settings (`dirs`, `kinds`, `limits`).
+pub type AddJs = fn(&mut Registry, &Map) -> Result<(), String>;
 
-/// Adds the source of JavaScript libraries built into the host to `registry`, with `config` (`dirs`, `kinds`, `limits`), and has it
-/// read the libraries of its directories.
+static JS: std::sync::OnceLock<AddJs> = std::sync::OnceLock::new();
+
+/// Gives the host the source of JavaScript libraries that the program running it carries (QuickJS, built in), so `source =
+/// "bundled:js"` and the script providers that ship in the host work. A program that carries none leaves them unoffered. Call it
+/// once, as the program starts, with [`bundle_js!`](crate::bundle_js): the engine is linked into that program and not into this
+/// library, so a Guatiao library of its own that uses this crate does not export the engine's symbols beside its own.
+pub fn bundle_js(add: AddJs) {
+    let _ = JS.set(add);
+}
+
+/// Gives the host the JavaScript source this program carries: the program depends on `guatiao-source-js`, `guatiao-bridge` and
+/// `guatiao-libffi` at the revision this crate does.
+#[macro_export]
+macro_rules! bundle_js {
+    () => {
+        $crate::provider::bundle_js(|registry, config| {
+            let source = ::guatiao_bridge::BridgeSource::<::guatiao_source_js::JsEngine>::pinned(
+                config,
+                "guatiao-source-js",
+            )
+            .map_err(|error| error.to_string())?
+            .with_mechanism(::std::sync::Arc::new(::guatiao_libffi::Libffi));
+            registry
+                .add_source($crate::provider::BUNDLED_JS, source)
+                .map_err(|error| error.to_string())
+        })
+    };
+}
+
+/// What `source` names in place of a file to say QuickJS, built into the program, serves libraries written in JavaScript.
+pub const BUNDLED_JS: &str = "bundled:js";
+
+/// Adds the source of JavaScript libraries built into the program to `registry`, with `config`, and has it read the libraries of
+/// its directories.
 ///
 /// # Errors
 ///
-/// [`ProviderError::Source`] with the source's words.
+/// [`ProviderError::Source`] with the source's words, or when the program carries none.
 pub(crate) fn add_bundled_js(registry: &mut Registry, config: &Map) -> Result<(), ProviderError> {
-    let source = guatiao_bridge::BridgeSource::<guatiao_source_js::JsEngine>::pinned(
-        config,
-        "guatiao-source-js",
-    )
-    .map_err(|error| ProviderError::Source(error.to_string()))?
-    .with_mechanism(Arc::new(guatiao_libffi::Libffi));
-    registry
-        .add_source(BUNDLED_JS, source)
-        .map_err(|error| ProviderError::Source(error.to_string()))?;
+    // A test of this library carries the engine itself.
+    #[cfg(test)]
+    JS.get_or_init(|| {
+        |registry, config| {
+            let source = guatiao_bridge::BridgeSource::<guatiao_source_js::JsEngine>::pinned(
+                config,
+                "guatiao-source-js",
+            )
+            .map_err(|error| error.to_string())?
+            .with_mechanism(Arc::new(guatiao_libffi::Libffi));
+            registry
+                .add_source(BUNDLED_JS, source)
+                .map_err(|error| error.to_string())
+        }
+    });
+    let add = JS.get().ok_or_else(|| {
+        ProviderError::Source("this program carries no JavaScript source".to_owned())
+    })?;
+    add(registry, config).map_err(ProviderError::Source)?;
     for refused in registry.refresh().refused {
         tracing::warn!(
             library = refused.id.as_deref().unwrap_or("?"),

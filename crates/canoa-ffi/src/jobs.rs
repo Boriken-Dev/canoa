@@ -326,6 +326,8 @@ fn run_command(args: &[String], front: &JobFront) -> i32 {
             return if wrong { STATUS_USAGE } else { 0 };
         }
     };
+    // The host carries the engine its script providers run on; it is linked here, not into the library.
+    canoa_host::bundle_js!();
     match cli::run(parsed, front) {
         Ok(()) => 0,
         Err(failed) => {

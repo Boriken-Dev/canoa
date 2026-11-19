@@ -65,7 +65,11 @@ pub fn runtimes_here() -> Vec<String> {
 
 /// The names of the programs the runtimes are kept under on the programs folder, and so the folders put on the `PATH` of what
 /// the host starts. Foundry Local is kept beside them but is not one: its folder holds libraries a program should not find.
-pub const RUNTIME_PROGRAMS: [&str; 5] = ["node", "python", "git-bash", "powershell", "bw"];
+pub const RUNTIME_PROGRAMS: [&str; 4] = ["node", "python", "git-bash", "powershell"];
+
+/// The programs the Store keeps for a secret provider to run: found by name by the spawner a provider is handed, and on no `PATH`, so
+/// no agent or server the host starts finds Bitwarden's command by its name.
+pub const SECRET_PROGRAMS: [&str; 1] = ["bw"];
 
 /// The provider id of the Store runtime that installs the command `command` on this computer, when one does: what a program that
 /// is missing is offered. Each runtime's recipe lists the same commands in its [`StoreInfo`].

@@ -13,7 +13,7 @@ use coqui_acp_api::{
 };
 use coqui_acp_harness::LocalSpawner;
 
-use crate::store::runtimes::RUNTIME_PROGRAMS;
+use crate::store::runtimes::SECRET_PROGRAMS;
 
 /// The program a bare `program` stands for: the copy the Store installed when it names one, else as it was written. A name with a
 /// folder in it is the person's or the provider's choice and is never replaced.
@@ -21,7 +21,7 @@ fn resolved(program: &str) -> String {
     let bare = !program.contains(['/', '\\']);
     let stem = program.strip_suffix(".exe").unwrap_or(program);
     if bare
-        && RUNTIME_PROGRAMS.contains(&stem)
+        && SECRET_PROGRAMS.contains(&stem)
         && let Some((path, _)) = crate::sources::managed_program(stem)
     {
         return path.to_string_lossy().into_owned();

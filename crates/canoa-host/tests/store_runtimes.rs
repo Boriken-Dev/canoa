@@ -18,6 +18,9 @@ use canoa::store::{
     STORE_GLYPHS, StoreInfo, StoreSettings,
 };
 use canoa_foundry::store::{DOWNLOADS, FoundryRecipe, RELEASES_API};
+use canoa_host::store::bitwarden::{
+    BitwardenRecipe, DOWNLOADS as BITWARDEN_DOWNLOADS, RELEASES_API as BITWARDEN_RELEASES_API,
+};
 use canoa_host::store::contract::{Fixture, Variant, World, WorldTransport, run, standin_bytes};
 use canoa_host::store::engine::Engine;
 use canoa_host::store::runtimes::{
@@ -547,6 +550,93 @@ impl Fixture for PowerShellFixture {
     }
 }
 
+/// Bitwarden's command line: a zip of the one program, on the release list of the repository that publishes every Bitwarden client.
+struct BitwardenFixture;
+
+impl BitwardenFixture {
+    fn tag(version: &str) -> String {
+        format!("cli-v{version}")
+    }
+
+    fn name(version: &str) -> String {
+        let os = match std::env::consts::OS {
+            "windows" => "windows",
+            "macos" if cfg!(target_arch = "aarch64") => "macos-arm64",
+            "macos" => "macos",
+            _ if cfg!(target_arch = "aarch64") => "linux-arm64",
+            _ => "linux",
+        };
+        format!("bw-{os}-{version}.zip")
+    }
+
+    fn archive(version: &str, exit: u32, extra: &[u8]) -> Vec<u8> {
+        let mut program = standin_bytes(&standin(), version, exit, None);
+        program.extend_from_slice(extra);
+        zipped(&[(if cfg!(windows) { "bw.exe" } else { "bw" }, &program)])
+    }
+}
+
+impl Fixture for BitwardenFixture {
+    fn older(&self) -> String {
+        "2026.9.0".to_owned()
+    }
+
+    fn newer(&self) -> String {
+        "2026.10.1".to_owned()
+    }
+
+    fn platform(&self) -> Platform {
+        here()
+    }
+
+    fn auto_update_var(&self) -> Option<String> {
+        None
+    }
+
+    fn world(&self, variant: Variant) -> World {
+        let mut world = World::new();
+        // The listing holds every client's releases; only the command line's are its own.
+        let mut releases = vec![
+            serde_json::json!({"tag_name": "web-v2026.11.0", "draft": false, "prerelease": false, "assets": []}),
+            serde_json::json!({"tag_name": "cli-v2026.11.0-rc1", "draft": false, "prerelease": true, "assets": []}),
+        ];
+        for (version, newer) in [("2026.9.0", false), ("2026.10.1", true)] {
+            let (exit, extra, claim_good) = bytes_for(variant, version, newer);
+            let bytes = Self::archive(version, exit, extra);
+            let claimed = if claim_good {
+                sha256(&Self::archive(version, 0, b""))
+            } else {
+                sha256(&bytes)
+            };
+            let name = Self::name(version);
+            releases.push(serde_json::json!({
+                "tag_name": Self::tag(version),
+                "draft": false,
+                "prerelease": false,
+                "assets": [
+                    {"name": name, "digest": format!("sha256:{claimed}")},
+                    {"name": format!("bitwarden-cli-{version}-npm-build.zip"), "digest": format!("sha256:{}", "0".repeat(64))},
+                ],
+            }));
+            world.put(
+                format!("{BITWARDEN_DOWNLOADS}{}/{name}", Self::tag(version)),
+                bytes,
+            );
+        }
+        world.put(
+            format!("{BITWARDEN_RELEASES_API}?per_page=100"),
+            serde_json::Value::Array(releases).to_string().into_bytes(),
+        );
+        if variant == Variant::DownloadFails {
+            world.fail_big(1024);
+        }
+        if variant == Variant::Slow {
+            world.slow();
+        }
+        world
+    }
+}
+
 macro_rules! forwarding {
     ($name:ident, $recipe:ty) => {
         struct $name(Engine<$recipe>);
@@ -595,6 +685,7 @@ forwarding!(Python, PythonRecipe);
 forwarding!(Foundry, FoundryRecipe);
 forwarding!(GitBash, GitBashRecipe);
 forwarding!(PowerShell, PowerShellRecipe);
+forwarding!(Bitwarden, BitwardenRecipe);
 
 #[test]
 fn the_node_store_passes_every_check() {
@@ -657,6 +748,56 @@ fn the_powershell_store_passes_every_check() {
     )));
     let failures = run(store, &PowerShellFixture);
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn the_bitwarden_store_passes_every_check() {
+    let _alone = ONE_SUITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let store: Arc<dyn ProgramStore> = Arc::new(Bitwarden(Engine::new(
+        BitwardenRecipe,
+        StoreSettings::default(),
+    )));
+    let failures = run(store, &BitwardenFixture);
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn the_bitwarden_plan_fetches_the_zip_of_this_system_and_checks_the_digest_github_lists() {
+    let bw = Bitwarden(Engine::new(BitwardenRecipe, StoreSettings::default()));
+    let plan = plan_of(&bw, &BitwardenFixture, None);
+    assert_eq!(
+        plan.version.as_deref(),
+        Some("2026.10.1"),
+        "the newest of the command line's own, never a prerelease or another client's"
+    );
+    let [download] = plan.downloads.as_slice() else {
+        panic!("one download: {plan:#?}");
+    };
+    assert_eq!(
+        download.url,
+        format!(
+            "{BITWARDEN_DOWNLOADS}cli-v2026.10.1/{}",
+            BitwardenFixture::name("2026.10.1")
+        )
+    );
+    assert_eq!(
+        download.check,
+        Check::Sha256 {
+            value: sha256(&BitwardenFixture::archive("2026.10.1", 0, b""))
+        }
+    );
+    assert!(plan.changes.is_empty(), "it reads and writes nothing else");
+    assert_eq!(
+        plan_of(&bw, &BitwardenFixture, Some("2026.9.0"))
+            .version
+            .as_deref(),
+        Some("2026.9.0")
+    );
+    let tools = tools_for(&bw, BitwardenFixture.world(Variant::Normal));
+    let freebsd = PlanRequest::new(Action::Install, Platform::new("freebsd", "x86_64"));
+    assert!(bw.plan(freebsd, tools).is_err(), "not published for it");
 }
 
 fn tools_for(store: &dyn ProgramStore, world: World) -> Object<dyn InstallTools> {
@@ -941,6 +1082,7 @@ fn the_runtimes_stores_name_the_publishers_endpoints_and_nothing_wider() {
         FoundryRecipe.info(),
         GitBashRecipe.info(),
         PowerShellRecipe.info(),
+        BitwardenRecipe.info(),
     ] {
         assert!(!info.endpoints.is_empty());
         assert!(
@@ -960,6 +1102,7 @@ fn each_runtime_says_what_it_is_names_a_glyph_and_the_commands_it_puts_on_a_path
         FoundryRecipe.info(),
         GitBashRecipe.info(),
         PowerShellRecipe.info(),
+        BitwardenRecipe.info(),
     ] {
         let program = &info.program;
         let icon = info.icon.as_deref().unwrap_or_default();
@@ -987,6 +1130,7 @@ fn each_runtime_says_what_it_is_names_a_glyph_and_the_commands_it_puts_on_a_path
     );
     assert_eq!(GitBashRecipe.info().commands, ["bash", "sh", "git"]);
     assert_eq!(PowerShellRecipe.info().commands, ["pwsh"]);
+    assert!(BitwardenRecipe.info().commands.is_empty());
     assert_eq!(GitBashRecipe.info().icon.as_deref(), Some("branch"));
     assert_eq!(PowerShellRecipe.info().icon.as_deref(), Some("prompt"));
 }

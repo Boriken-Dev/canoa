@@ -78,6 +78,7 @@ impl Front for Standard {
 }
 
 fn main() -> ExitCode {
+    canoa_host::bundle_js!();
     // A browser starts a native messaging host with the extension's origin as its first argument and no way to name a command.
     let mut arguments: Vec<std::ffi::OsString> = std::env::args_os().collect();
     if arguments

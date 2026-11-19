@@ -66,7 +66,7 @@ fn digest_of(asset: &serde_json::Value) -> Option<String> {
 }
 
 /// Each asset of a release that lists a plain SHA-256: its name and the digest.
-fn assets_of(release: &serde_json::Value) -> Vec<(String, String)> {
+pub(super) fn assets_of(release: &serde_json::Value) -> Vec<(String, String)> {
     release["assets"]
         .as_array()
         .into_iter()
@@ -75,7 +75,7 @@ fn assets_of(release: &serde_json::Value) -> Vec<(String, String)> {
         .collect()
 }
 
-fn numbers<const N: usize>(text: &str) -> Option<[u64; N]> {
+pub(super) fn numbers<const N: usize>(text: &str) -> Option<[u64; N]> {
     let mut parts = text.split('.').map(|part| part.parse::<u64>().ok());
     let mut found = [0; N];
     for slot in &mut found {
@@ -85,15 +85,15 @@ fn numbers<const N: usize>(text: &str) -> Option<[u64; N]> {
 }
 
 /// One published release: its version as the files name it, what orders it, its tag and its digested assets.
-struct Published<const N: usize> {
-    version: String,
-    order: [u64; N],
-    tag: String,
-    assets: Vec<(String, String)>,
+pub(super) struct Published<const N: usize> {
+    pub(super) version: String,
+    pub(super) order: [u64; N],
+    pub(super) tag: String,
+    pub(super) assets: Vec<(String, String)>,
 }
 
 impl<const N: usize> Published<N> {
-    fn digest_of(&self, name: &str) -> Option<&str> {
+    pub(super) fn digest_of(&self, name: &str) -> Option<&str> {
         self.assets
             .iter()
             .find(|(asset, _)| asset == name)
@@ -150,7 +150,7 @@ fn powershell_releases(listing: &serde_json::Value) -> Vec<Published<3>> {
         .collect()
 }
 
-fn newest<const N: usize>(all: Vec<Published<N>>) -> Option<Published<N>> {
+pub(super) fn newest<const N: usize>(all: Vec<Published<N>>) -> Option<Published<N>> {
     all.into_iter().max_by_key(|release| release.order)
 }
 

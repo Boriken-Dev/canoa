@@ -22,6 +22,10 @@ web = ["canoa-host/web"]
 
 [dependencies]
 canoa-host.workspace = true
+# The script engine the host carries: linked into this library, not into canoa-host.
+guatiao-source-js.workspace = true
+guatiao-bridge.workspace = true
+guatiao-libffi.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

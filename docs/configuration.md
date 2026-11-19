@@ -896,6 +896,8 @@ provider = "bitwarden"
 session = { entry = "form", name = "bw_session" }   # the key is a secret you gave Canoa, so it is not written here
 ```
 
+Store, Secret providers lists Bitwarden's command line (`bw`), which it installs for you with a plan you confirm (the zip of your system, checked against the SHA-256 GitHub lists for it); Canoa runs it itself and no agent finds it by name.
+
 A script of your own is added as an extension that names the JavaScript Canoa carries: `source = "bundled:js"`, with `source_settings` of `dirs` (the folders of its `*.guatiao` manifests) and `kinds` (the description of the kind it serves, `canoa.secret.kinds.json`).
 
 The vault is never unlocked for you: until the key is given, a request for a name Bitwarden answers falls back to asking you, and a wrong or expired key does the same. The key goes to `bw` in its environment, never on a command line.

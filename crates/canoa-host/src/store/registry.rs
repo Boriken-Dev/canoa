@@ -10,6 +10,7 @@ use alloc::sync::Arc;
 
 use coqui_acp_api::guatiao::library::Registry;
 
+use super::bitwarden::BitwardenStore;
 use super::builtin::store_provider;
 use super::piper::PiperStore;
 use super::runtimes::{FoundryStore, NodeStore, PythonStore};
@@ -66,6 +67,7 @@ coqui_acp_api::guatiao::local_providers!(
         FoundryStore,
         WhisperStore,
         PiperStore,
+        BitwardenStore,
         GitBashStore,
         PowerShellStore
     ]
