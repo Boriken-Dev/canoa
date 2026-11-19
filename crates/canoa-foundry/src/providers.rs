@@ -542,22 +542,19 @@ mod tests {
         let gateway = FoundryGateway::with_engines(Arc::new(|_| {
             Err("no Foundry Local service is running".to_owned())
         }));
-        let refused = gateway
-            .open(request("a", "local-model"), spawner())
-            .err()
-            .expect("no service");
+        let Err(refused) = gateway.open(request("a", "local-model"), spawner()) else {
+            panic!("no service");
+        };
         assert_eq!(refused.message(), "no Foundry Local service is running");
         let mut stray = GatewayRequest::new("a");
         stray.settings = json!({"model": "m", "password": "x"}).to_string();
-        let stray = gateway
-            .open(stray, spawner())
-            .err()
-            .expect("a setting the kind does not have");
+        let Err(stray) = gateway.open(stray, spawner()) else {
+            panic!("a setting the kind does not have");
+        };
         assert!(stray.message().contains("password"), "{}", stray.message());
-        let none = gateway
-            .open(GatewayRequest::new("a"), spawner())
-            .err()
-            .expect("no model");
+        let Err(none) = gateway.open(GatewayRequest::new("a"), spawner()) else {
+            panic!("no model");
+        };
         assert!(none.message().contains("model"), "{}", none.message());
     }
 

@@ -101,6 +101,9 @@ pub(crate) fn runs_managed_by_own_name(id: &str) -> bool {
         .any(|bundle| bundle.preset.harness == Some(id) && bundle.preset.managed.is_none())
 }
 
+/// What a library runs in a process of its own: the arguments after its name on the command line.
+pub(crate) type Helper = fn(&[String]) -> std::io::Result<()>;
+
 /// A library this build carries that is no agent: it offers accounts, gateways, Store types and the like, registered the way a
 /// library the person names is.
 #[derive(Clone, Copy)]
@@ -110,7 +113,7 @@ pub(crate) struct Included {
     /// What the crate offers: its providers.
     pub(crate) library: Library,
     /// What the library runs in a process of its own, when it does: the arguments after its name on the command line.
-    pub(crate) helper: Option<fn(&[String]) -> std::io::Result<()>>,
+    pub(crate) helper: Option<Helper>,
 }
 
 /// Every library this build carries that is no agent.
