@@ -488,3 +488,168 @@ fn a_key_that_may_only_read_the_store_cannot_run_a_types_program_or_set_a_model_
         assert_eq!(answer["error"]["code"], DENIED, "{method}: {answer}");
     }
 }
+
+/// A library that is nobody's vendor: a type, and the models provider that lists its rows.
+mod stub {
+    use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtension};
+    use canoa::store::models::{
+        ModelAct, ModelActed, ModelKeep, ModelKept, ModelList, ModelQuery, ModelRow, ModelStore,
+        ModelStoreInfo, ServiceQuery, ServiceReport,
+    };
+    use coqui_acp_api::ProcessSpawner;
+    use coqui_acp_api::guatiao::library::{Object, ProviderError};
+    use coqui_acp_api::guatiao::{Provider, Status};
+
+    use crate::store::builtin::EchoStore;
+
+    #[derive(Default, Debug, Clone, Copy, Provider)]
+    #[provider(StoreExtension, id = "stub_extension", crate = ::coqui_acp_api::guatiao)]
+    pub(super) struct StubExtension;
+
+    impl StoreExtension for StubExtension {
+        fn describe(&self) -> Result<ExtensionInfo, ProviderError> {
+            let mut listed = ExtensionType::new("stubs", "Stubs", ["echo_store"]);
+            listed.models = Some("stub_models".to_owned());
+            // A type that names a models provider the library does not offer is not listed.
+            let mut broken = ExtensionType::new("broken", "Broken", Vec::<String>::new());
+            broken.models = Some("nobody_models".to_owned());
+            Ok(ExtensionInfo::new("Stub", "Acme", vec![listed, broken]))
+        }
+    }
+
+    #[derive(Default, Debug, Clone, Copy, Provider)]
+    #[provider(ModelStore, id = "stub_models", crate = ::coqui_acp_api::guatiao)]
+    pub(super) struct StubModels;
+
+    impl ModelStore for StubModels {
+        fn describe(&self) -> Result<ModelStoreInfo, ProviderError> {
+            Ok(ModelStoreInfo::new(
+                "Stub models",
+                "Stubs",
+                "Acme",
+                "No stubs here.",
+            ))
+        }
+
+        fn list(
+            &self,
+            query: ModelQuery,
+            spawner: Object<dyn ProcessSpawner>,
+        ) -> Result<ModelList, ProviderError> {
+            drop(spawner);
+            let mut list = ModelList::default();
+            let mut row = ModelRow::new("one", format!("home {}", query.home.unwrap_or_default()));
+            row.on = query.program.is_some();
+            list.models = vec![row];
+            Ok(list)
+        }
+
+        fn act(
+            &self,
+            request: ModelAct,
+            spawner: Object<dyn ProcessSpawner>,
+        ) -> Result<ModelActed, ProviderError> {
+            drop(spawner);
+            let mut acted = ModelActed::default();
+            acted.note = Some(format!("{} {}", request.action, request.model));
+            Ok(acted)
+        }
+
+        fn keep(
+            &self,
+            _request: ModelKeep,
+            _spawner: Object<dyn ProcessSpawner>,
+        ) -> Result<ModelKept, ProviderError> {
+            Err(ProviderError::new(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                "no setting",
+            ))
+        }
+
+        fn service(
+            &self,
+            _query: ServiceQuery,
+            _spawner: Object<dyn ProcessSpawner>,
+        ) -> Result<ServiceReport, ProviderError> {
+            Err(ProviderError::new(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                "no service",
+            ))
+        }
+    }
+
+    coqui_acp_api::guatiao::local_providers!(
+        id = "test-stub-models",
+        version = env!("CARGO_PKG_VERSION"),
+        providers = [EchoStore, StubExtension, StubModels]
+    );
+}
+
+#[test]
+fn a_library_of_no_vendor_adds_a_type_and_its_models_and_a_type_naming_no_provider_it_offers_is_not_listed()
+ {
+    let root = std::env::temp_dir().join(format!("canoa-models-stub-{}", std::process::id()));
+    let mut registry =
+        coqui_acp_api::guatiao::library::Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    registry
+        .register_local("test-stub-models", stub::library)
+        .expect("registered");
+    let registry = Arc::new(registry);
+    let programs = Programs::new(Shelf::unchecked(root.join("shelf")), Arc::clone(&registry));
+    let stores = Stores::new(Arc::new(programs), Vec::new())
+        .with_included_extensions(&registry)
+        .with_home(Some(root.join("home")));
+    let files = Files::new(None, Vec::new(), None, None, UploadLimits::default());
+
+    let types = stores
+        .read("store/extensions", &json!({}), None)
+        .expect("the types");
+    let listed: Vec<&str> = types["types"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter_map(|each| each["id"].as_str())
+        .collect();
+    assert_eq!(listed, ["stubs"], "{types}");
+    assert_eq!(
+        types["types"][0]["models"],
+        json!({"provider": "stub_models", "title": "Stub models"})
+    );
+
+    let answer = stores
+        .models_read(&json!({"type": "stubs"}), &files)
+        .expect("listed");
+    assert_eq!(answer["catalog"], "Stubs");
+    assert_eq!(answer["settings"], Value::Null);
+    assert_eq!(answer["speech"], false);
+    let row = &answer["models"][0];
+    assert_eq!(row["id"], "one");
+    assert!(
+        row["summary"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("home ")),
+        "{row}"
+    );
+    assert_eq!(row["on"], false, "the stub type's program was not found");
+    assert_eq!(
+        stores
+            .model_act(&json!({"type": "stubs", "model": "one", "action": "go"}))
+            .expect("acted")["note"],
+        "go one"
+    );
+    let refused = stores
+        .model_setting(
+            &json!({"type": "stubs", "model": "one", "values": {}}),
+            &files,
+        )
+        .expect_err("no setting");
+    assert_eq!(refused.0, REFUSED);
+    assert!(stores.speech_services().is_empty());
+    assert_eq!(
+        stores
+            .models_read(&json!({"type": "broken"}), &files)
+            .expect_err("not listed")
+            .0,
+        super::super::NOT_FOUND
+    );
+}

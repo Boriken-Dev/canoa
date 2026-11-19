@@ -250,11 +250,11 @@ impl Stores {
                 listing.add(&each.info.id, provider, &registry)?;
             }
         }
-        self.models = listing;
         let mut sources = self.sources.clone();
         sources.add(Some(&extension.name), Arc::clone(&registry))?;
         self.sources = sources;
         self.programs.add_registry(registry);
+        self.models = listing;
         self.types.extend(added);
         Ok(())
     }
