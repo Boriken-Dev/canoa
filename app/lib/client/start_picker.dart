@@ -42,7 +42,7 @@ final class StartChoice extends ChangeNotifier {
 }
 
 /// The loadout and profile controls of the chat-only app, over [choice] and canoa.cfg's [config]. It lists the same choices as the
-/// composer of the full app and shows nothing when canoa.cfg holds neither.
+/// composer of the full app and shows nothing when canoa.cfg holds no loadout and no profile besides the default one.
 class StartPicker extends StatelessWidget {
   const StartPicker({super.key, required this.choice, required this.config, this.client});
 
@@ -55,8 +55,10 @@ class StartPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final loadouts = config.loadouts.keys.toList();
+    // The default profile is always there and sets nothing until it is edited: with no other, there is nothing to choose.
     final presets = config.presets.keys.toList();
-    if (loadouts.isEmpty && presets.isEmpty) return const SizedBox.shrink();
+    final choosable = presets.any((name) => name != presetDefault);
+    if (loadouts.isEmpty && !choosable) return const SizedBox.shrink();
     return ListenableBuilder(
       listenable: choice,
       builder: (context, _) {
@@ -82,7 +84,7 @@ class StartPicker extends StatelessWidget {
                 ),
               ),
             ),
-          if (presets.isNotEmpty)
+          if (choosable)
             MenuAnchor(
               menuChildren: profileChoices(names: presets, chosen: preset, onChoose: choice.chooseProfile),
               builder: (context, controller, _) => InkWell(
