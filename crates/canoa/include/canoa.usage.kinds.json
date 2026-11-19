@@ -1,0 +1,102 @@
+{
+  "kinds": [
+    {
+      "name": "usage_reader",
+      "floor_hash": 1793635073,
+      "object": false,
+      "doc": "Reads an agent's own quota. A provider is the same on every call; what it keeps for one agent is in the reading it opens.",
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Who it is and how its figures are asked for. The same answer on every call, with nothing run."
+        },
+        {
+          "name": "open",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "members",
+              "type": "object",
+              "kind": "process_members",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "usage_reading"
+          },
+          "doc": "A reading of one agent's figures, for the connection or entry the host opens it for. `members` is the host's: the\nprocesses of an agent's tree."
+        }
+      ]
+    },
+    {
+      "name": "usage_reading",
+      "floor_hash": 2968988783,
+      "object": true,
+      "doc": "One agent's quota, read as often as the host asks. Its methods may be called from different threads, one at a time.",
+      "slots": [
+        {
+          "name": "opened",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "result",
+              "type": "str"
+            }
+          ],
+          "doc": "The agent answered a `session/new` or `session/load` request: `result` is its `result` as JSON text. The reader keeps what it\nneeds of it (the models the agent lists, to match its figures to them)."
+        },
+        {
+          "name": "read",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "root",
+              "type": "u32"
+            },
+            {
+              "name": "tree",
+              "type": "bool"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Reads the figures of the agent whose process is `root`. `tree` says the agent may sit below a launcher, so the whole tree\nis looked through from the first try; otherwise the reader looks at the process itself first and widens when it finds\nnothing there."
+        }
+      ]
+    },
+    {
+      "name": "process_members",
+      "floor_hash": 1125452186,
+      "object": true,
+      "doc": "The processes that belong to an agent, which the host finds from the operating system's process table.",
+      "slots": [
+        {
+          "name": "members",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "root",
+              "type": "u32"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "`root` and every process below it, plus on Unix the ones in its process group; always holds `root`. An agent may sit below\na launcher, so what it owns is not always a child of the process the host started."
+        }
+      ]
+    }
+  ]
+}

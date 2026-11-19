@@ -1,14 +1,15 @@
 //! The description of the kinds a library written in Python or JavaScript may serve (`agent_vendor`, `store_extension`,
-//! `secret_provider`, `profile_item`, `catalog_source`, `settings_section` and `panel_tab`), and their models' schemas: what such a
+//! `secret_provider`, `profile_item`, `catalog_source`, `settings_section`, `panel_tab` and `usage_reader`), and their models' schemas: what such a
 //! library is built against. Regenerate the files with
-//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab --test script_kinds`.
+//! `CANOA_WRITE_KINDS=1 cargo test -p canoa --features store,vendor,secret,profile-item,settings-section,panel-tab,usage --test script_kinds`.
 #![cfg(all(
     feature = "store",
     feature = "vendor",
     feature = "secret",
     feature = "profile-item",
     feature = "settings-section",
-    feature = "panel-tab"
+    feature = "panel-tab",
+    feature = "usage"
 ))]
 #![allow(
     clippy::std_instead_of_core,
@@ -27,6 +28,10 @@ use canoa::secret_provider::{Held, Keeping, Named, Names, ProviderInfo, SecretPr
 use canoa::settings_section::{SectionInfo, SettingsSectionVtable, Stored};
 use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtensionVtable};
 use canoa::store::source::{CatalogSourceProviderVtable, ReadRequest, SourceInfo};
+use canoa::usage_reader::{
+    Failure, ProcessMembersVtable, ReaderInfo, Reading, Retry, UsageReaderVtable,
+    UsageReadingVtable,
+};
 use canoa::vendor::{
     AccessTarget, AgentVendorVtable, DeliveredFile, EntrySettingsRequest, GatewayRoute,
     HistoryAnswer, HistoryRequest, HookCommand, HookSupport, HookSupportRequest, HooksDelivery,
@@ -255,6 +260,33 @@ fn the_committed_panel_tab_schemas_are_what_this_build_describes() {
             ("TabInfo", schema_of::<TabInfo>()),
             ("TailRequest", schema_of::<TailRequest>()),
             ("Shows", schema_of::<Shows>()),
+        ]),
+    );
+}
+
+#[test]
+fn the_committed_usage_description_is_what_this_build_describes() {
+    // The host's process table, which `open` is handed, and the reading it answers with are described beside the reader.
+    committed(
+        "include/canoa.usage.kinds.json",
+        &document(&format!(
+            "{},{},{}",
+            UsageReaderVtable::description(),
+            UsageReadingVtable::description(),
+            ProcessMembersVtable::description()
+        )),
+    );
+}
+
+#[test]
+fn the_committed_usage_schemas_are_what_this_build_describes() {
+    committed(
+        "include/canoa.usage.schemas.json",
+        &schemas(vec![
+            ("ReaderInfo", schema_of::<ReaderInfo>()),
+            ("Reading", schema_of::<Reading>()),
+            ("Failure", schema_of::<Failure>()),
+            ("Retry", schema_of::<Retry>()),
         ]),
     );
 }

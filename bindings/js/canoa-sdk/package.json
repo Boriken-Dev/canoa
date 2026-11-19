@@ -50,6 +50,10 @@
       "types": "./types/panel.d.ts",
       "import": "./src/panel.js"
     },
+    "./usage": {
+      "types": "./types/usage.d.ts",
+      "import": "./src/usage.js"
+    },
     "./forms": {
       "types": "./types/forms.d.ts",
       "import": "./src/forms.js"

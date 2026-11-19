@@ -458,3 +458,84 @@ def test_a_catalog_source_is_the_provider_of_the_id_it_is_described_under() -> N
     assert Team.__guatiao_provider__.id == "team"
     assert Command.__guatiao_provider__.id == "command"
     assert provide.library("sources", "1", providers=[Team, Command]).kinds == ("catalog_source",)
+
+
+class Members:
+    """The host's process table, as a handle answers: a tree that is read and closed."""
+
+    class Answer:
+        def __init__(self, ids: List[int]) -> None:
+            self.ids = ids
+
+        def __enter__(self) -> "Members.Answer":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def to_python(self) -> List[int]:
+            return self.ids
+
+    def members(self, root: int) -> "Members.Answer":
+        return Members.Answer([root, root + 1])
+
+
+class Quota(sdk.UsageReading):
+    def read(self, root: int, tree: bool):  # type: ignore[no-untyped-def]
+        if root + 1 not in self.processes(root):
+            return sdk.failed("not a member", sdk.Retry.NEVER)
+        return sdk.reading([sdk.bucket("q:five_hour", remaining=750, resets_at=1893456000, observed_at=1)])
+
+
+class QuillUsage(sdk.UsageReader):
+    reader = "quill"
+    bucket_prefix = "q:"
+    settle_ms = 100
+    retries_ms = [2000, 4000]
+
+    def open(self, members):  # type: ignore[no-untyped-def]
+        return Quota(members)
+
+
+def test_a_usage_reader_answers_its_description_from_its_class_attributes() -> None:
+    assert QuillUsage().describe() == {
+        "id": "quill",
+        "bucket_prefix": "q:",
+        "settle_ms": 100,
+        "retries_ms": [2000, 4000],
+        "cache_ms": 15000,
+        "private_limit_ms": 40000,
+        "private_retries_ms": [],
+    }
+    assert provide.library("quill", "1", providers=[QuillUsage]).kinds == ("usage_reader",)
+
+
+def test_a_reading_asks_the_host_for_the_agents_processes_and_answers_buckets_as_plain_data() -> None:
+    answer = QuillUsage().open(Members()).read(10, False)
+    assert answer == {
+        "buckets": [
+            {
+                "id": "q:five_hour",
+                "models": {"kind": "unknown"},
+                "unit": "permille",
+                "remaining": 750,
+                "refill": {"kind": "fixed_window", "resets_at": 1893456000},
+                "status": "unknown",
+                "observed_at": 1,
+                "source": "reported",
+            }
+        ]
+    }
+
+
+def test_a_failed_reading_says_whether_to_ask_again() -> None:
+    assert sdk.failed("no port", sdk.Retry.NOT_YET) == {"buckets": [], "failure": {"why": "no port", "retry": "not_yet"}}
+    assert sdk.failed("gone")["failure"]["retry"] == "never"
+
+
+def test_a_usage_reader_that_leaves_open_in_place_is_refused_at_creation() -> None:
+    with pytest.raises(TypeError, match="Mute does not implement open"):
+
+        class Mute(sdk.UsageReader):
+            reader = "mute"
+            bucket_prefix = "m:"

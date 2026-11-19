@@ -1,0 +1,7 @@
+type = "js"
+name = "listed_usage"
+version = "1.0.0"
+main = "listed_usage.js"
+kinds = ["usage_reader"]
+# This folder, and the SDK the module imports by a relative path.
+paths = [".", "../../../../bindings/js/canoa-sdk/src"]

@@ -871,6 +871,96 @@ const described = kindsOf({
       ]
     },
     {
+      "name": "usage_reader",
+      "floor_hash": 1793635073,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        },
+        {
+          "name": "open",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "members",
+              "type": "object",
+              "kind": "process_members",
+              "pass": "taken"
+            }
+          ],
+          "answer": {
+            "type": "object",
+            "kind": "usage_reading"
+          }
+        }
+      ]
+    },
+    {
+      "name": "usage_reading",
+      "floor_hash": 2968988783,
+      "object": true,
+      "slots": [
+        {
+          "name": "opened",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "result",
+              "type": "str"
+            }
+          ]
+        },
+        {
+          "name": "read",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "root",
+              "type": "u32"
+            },
+            {
+              "name": "tree",
+              "type": "bool"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        }
+      ]
+    },
+    {
+      "name": "process_members",
+      "floor_hash": 1125452186,
+      "object": true,
+      "slots": [
+        {
+          "name": "members",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "root",
+              "type": "u32"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          }
+        }
+      ]
+    },
+    {
       "name": "agent_vendor",
       "floor_hash": 1928350951,
       "object": false,
@@ -1214,6 +1304,15 @@ export const InstallTools = described["install_tools"];
 
 /** Adds types to the Store. The same answer on every call, with nothing run and no connection opened. */
 export const StoreExtension = described["store_extension"];
+
+/** Reads an agent's own quota. A provider is the same on every call; what it keeps for one agent is in the reading it opens. */
+export const UsageReader = described["usage_reader"];
+
+/** One agent's quota, read as often as the host asks. Its methods may be called from different threads, one at a time. */
+export const UsageReading = described["usage_reading"];
+
+/** The processes that belong to an agent, which the host finds from the operating system's process table. */
+export const ProcessMembers = described["process_members"];
 
 /**
  * Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with

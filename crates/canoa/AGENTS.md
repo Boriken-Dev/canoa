@@ -63,12 +63,12 @@ A provider that asks the person for something (a profile item, a catalog source)
 
 ## `canoa::usage_reader` (feature `usage`)
 
-The `usage_reader` kind: how an agent's own quota is read when the agent reports none over ACP. A provider knows where the figures are (Antigravity's language server on a loopback port) and reads them; the host decides when and runs it on a thread of its own. Offered by a bundled agent's crate, named by the `usage` key of an agent entry and by `SourcePreset::usage`. It is not part of the script kinds: no `include/` description and no SDK class.
+The `usage_reader` kind: how an agent's own quota is read when the agent reports none over ACP. A provider knows where the figures are (Antigravity's language server on a loopback port) and reads them; the host decides when and runs it on a thread of its own. Offered by a bundled agent's crate or by a library in Python or JavaScript, named by the `usage` key of an agent entry and by `SourcePreset::usage`. `include/canoa.usage.kinds.json` and `canoa.usage.schemas.json` describe it (with `usage_reading` and `process_members`) for the script SDKs, checked by `tests/script_kinds.rs` with the other kinds'; a library in a script subclasses the SDK's `UsageReader` and `UsageReading` (`bindings/{python,js}/canoa-sdk`; `examples/providers/*/usage` is one): `reader` and `bucket_prefix` (and the timings) make `describe`, `open(members)` answers the reading, whose `read(root, tree)` answers `reading([bucket(...)])` or `failed(why, retry)`, `opened(result)` hears the agent's `session/new` answer and `processes(root)` asks the host's process table. A script has no sockets or files: it reads what the agent said or what the processes tell it.
 
 ```rust
 pub const KIND: &str = "usage_reader";
 #[non_exhaustive] pub struct ReaderInfo { pub id: String, pub bucket_prefix: String, pub settle_ms: u64, pub retries_ms: Vec<u64>, pub cache_ms: u64, pub private_limit_ms: u64, pub private_retries_ms: Vec<u64> }
-impl ReaderInfo { pub fn new(id, bucket_prefix) -> Self; pub fn problem(&self) -> Option<String> }   // new: settle 10 s, no retries, cache 15 s, 40 s for a private agent
+impl ReaderInfo { pub fn new(id, bucket_prefix) -> Self; pub fn is_id(text: &str) -> bool; pub fn problem(&self) -> Option<String> }   // new: settle 10 s, no retries, cache 15 s, 40 s for a private agent
 #[non_exhaustive] pub enum Retry { Never, NotYet, NoAnswer }
 #[non_exhaustive] pub struct Failure { pub why: String, pub retry: Retry }
 #[non_exhaustive] pub struct Reading { pub buckets: Vec<Bucket>, pub failure: Option<Failure> }     // Reading::read(buckets), Reading::failed(failure)

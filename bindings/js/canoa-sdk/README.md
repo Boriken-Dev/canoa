@@ -30,6 +30,7 @@ nothing else, so a library imports the SDK by a relative path to where it is und
 | `catalog_source` | `CatalogSource`, `CommandCatalogSource`, `ReadCatalogSource` | `canoa-sdk/source` |
 | `settings_section` | `SettingsSection` | `canoa-sdk/section` |
 | `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab` | `canoa-sdk/panel` |
+| `usage_reader` | `UsageReader`, `UsageReading` | `canoa-sdk/usage` |
 
 The examples in `examples/providers/js` are loaded by `crates/canoa-host/tests/script_providers.rs`. See `AGENTS.md` for the API.
 Development: `npm install` (TypeScript is a dev dependency), then `GUATIAO_NODE=<guatiao>/bindings/node/guatiao npm test`, which typechecks the SDK and the

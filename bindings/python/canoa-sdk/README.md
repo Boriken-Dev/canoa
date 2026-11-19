@@ -30,6 +30,7 @@ examples in `examples/providers/python` are loaded by `crates/canoa-host/tests/s
 | `catalog_source` | `CatalogSource`, `CommandCatalogSource`, `ReadCatalogSource` | `canoa_sdk.source` |
 | `settings_section` | `SettingsSection` | `canoa_sdk.settings` |
 | `panel_tab` | `PanelTab`, `TerminalPanelTab`, `LogPanelTab` | `canoa_sdk.panel` |
+| `usage_reader` | `UsageReader`, `UsageReading` | `canoa_sdk.usage` |
 | coqui-acp's `acp_harness`, `agent_provider` | re-exported | `canoa_sdk.acp` |
 
 A provider's settings are the dataclass its `__init__` takes; `canoa_sdk.forms` writes the form that shows them (`ui()` on a field,

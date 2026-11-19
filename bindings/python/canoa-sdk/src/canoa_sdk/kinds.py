@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from guatiao import Ref
-from guatiao.kinds import I64, U64, KindProtocol, Taken, ValueAnswer, fallible, required
+from guatiao.kinds import I64, U32, U64, KindProtocol, Taken, ValueAnswer, fallible, required
 
 
 class SpawnedProcess(KindProtocol, Protocol, kind="spawned_process", floor_hash=3306532587, is_object=True):
@@ -543,6 +543,57 @@ class StoreExtension(KindProtocol, Protocol, kind="store_extension", floor_hash=
         ...
 
 
+class ProcessMembers(KindProtocol, Protocol, kind="process_members", floor_hash=1125452186, is_object=True):
+    """The processes that belong to an agent, which the host finds from the operating system's process table."""
+
+    @required
+    @fallible
+    def members(self, root: U32) -> ValueAnswer:
+        """`root` and every process below it, plus on Unix the ones in its process group; always holds `root`. An agent may sit below
+        a launcher, so what it owns is not always a child of the process the host started.
+        """
+        ...
+
+
+class UsageReading(KindProtocol, Protocol, kind="usage_reading", floor_hash=2968988783, is_object=True):
+    """One agent's quota, read as often as the host asks. Its methods may be called from different threads, one at a time."""
+
+    @required
+    @fallible
+    def opened(self, result: str) -> None:
+        """The agent answered a `session/new` or `session/load` request: `result` is its `result` as JSON text. The reader keeps what it
+        needs of it (the models the agent lists, to match its figures to them).
+        """
+        ...
+
+    @required
+    @fallible
+    def read(self, root: U32, tree: bool) -> ValueAnswer:
+        """Reads the figures of the agent whose process is `root`. `tree` says the agent may sit below a launcher, so the whole tree
+        is looked through from the first try; otherwise the reader looks at the process itself first and widens when it finds
+        nothing there.
+        """
+        ...
+
+
+class UsageReader(KindProtocol, Protocol, kind="usage_reader", floor_hash=1793635073):
+    """Reads an agent's own quota. A provider is the same on every call; what it keeps for one agent is in the reading it opens."""
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """Who it is and how its figures are asked for. The same answer on every call, with nothing run."""
+        ...
+
+    @required
+    @fallible
+    def open(self, members: Taken[ProcessMembers]) -> UsageReading:
+        """A reading of one agent's figures, for the connection or entry the host opens it for. `members` is the host's: the
+        processes of an agent's tree.
+        """
+        ...
+
+
 class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=1928350951):
     """Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with
     nothing run and no connection opened; every other method has a default that says the agent has nothing to add.
@@ -661,4 +712,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=192835
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "CatalogSource", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "AgentVendor"]
+__all__ = ["SpawnedProcess", "ProcessSpawner", "CatalogSource", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]

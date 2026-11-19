@@ -28,6 +28,11 @@ class SpeechOutput extends Provider {         // speech.js: info() (the OutputIn
 }
 class SecretProvider extends Provider {       // secret.js: static title, description, can_store, can_list, needs_person; get(request, spawner); names, put, forget refuse with Unsupported
 }
+class UsageReader extends Provider {          // usage.js: static reader (the id an entry's `usage` names), bucket_prefix; settle_ms = 10000, retries_ms = [], cache_ms = 15000, private_limit_ms = 40000, private_retries_ms = []; open(members) answers a UsageReading
+}
+class UsageReading {                          // usage.js: not a provider: constructor(members); opened(result); read(root, tree) answers reading([...]) or failed(why, retry); processes(root); destroys members when the host lets it go
+}
+bucket(id, {label, models, unit, used, limit, remaining, resets_at, status, observed_at, evidence}); reading(buckets); failed(why, retry = Retry.NEVER); Retry.{NEVER, NOT_YET, NO_ANSWER}
 class FormSecretProvider extends SecretProvider            // the person's form: needs_person, holds nothing
 class SystemStoreSecretProvider extends SecretProvider     // a store of keys and texts you supply (read, write, remove), with an index of names
 nameOf(request); keepingOf(request); release(spawner)      // a request's name and value, checked as the kind says; lets the host's spawner go

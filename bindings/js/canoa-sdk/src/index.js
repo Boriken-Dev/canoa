@@ -42,4 +42,5 @@ export {
   release as releaseSpawner,
 } from './source.js';
 export { ProgramStore, StoreExtension } from './store.js';
+export { Retry, UsageReader, UsageReading, bucket, failed, reading } from './usage.js';
 export { AgentVendor } from './vendor.js';

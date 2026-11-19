@@ -31,6 +31,9 @@ class SpeechProvider:     # canoa_sdk.speech: audio in, text out; abstract slot 
 class SpeechOutput:       # canoa_sdk.speech: text in, audio out; abstract slots voices, say; info() -> dict (the OutputInfo)
 class SecretProvider:     # canoa_sdk.secret: somewhere a secret comes from; abstract slot get(request, spawner); names, put, forget refuse UNSUPPORTED
     title: str; description = None; can_store = can_list = needs_person = False
+class UsageReader:        # canoa_sdk.usage: how an agent's own quota is read; reader: str, bucket_prefix: str, settle_ms = 10000, retries_ms = (), cache_ms = 15000, private_limit_ms = 40000, private_retries_ms = (); abstract slot open(members) -> UsageReading
+class UsageReading:       # canoa_sdk.usage: __init__(members); opened(result); abstract-ish read(root, tree) -> reading([...]) or failed(why, retry); processes(root) -> list[int]
+bucket(id, *, label, models, unit, used, limit, remaining, resets_at, status, observed_at, evidence) -> dict; reading(buckets); failed(why, retry=Retry.NEVER); Retry.NEVER|NOT_YET|NO_ANSWER
 class FormSecretProvider(SecretProvider)         # the person's form: needs_person, holds nothing
 class SystemStoreSecretProvider(SecretProvider)  # a store of keys and texts you supply (abstract read, write, remove), with an index of names
 name_of(request) -> str; keeping_of(request) -> (name, value)   # a request's name and value, checked as the kind says
@@ -57,7 +60,7 @@ reads a file anywhere the person's account can (an absolute path); the source de
 of that id (the host finds a source by the id it is described under); `item`, `section` and `tab` are the ids the profile, Settings and the
 panel keep, and the provider's own id stays Guatiao's (`<module>_<class in snake case>`).
 
-Models (`VendorInfo`, `StandardTitle`, `ModeTitle`, `ExtensionInfo`, `ExtensionType`, `SpeechInfo`, `ProviderInfo`, `Held`, `ItemEffect`, `NetworkEffect`) are dataclasses with `to_data()`: the
+Models (`VendorInfo`, `StandardTitle`, `ModeTitle`, `ExtensionInfo`, `ExtensionType`, `SpeechInfo`, `ProviderInfo`, `Held`, `ItemEffect`, `NetworkEffect`, `ReaderInfo`) are dataclasses with `to_data()`: the
 plain map the host reads, an absent (`None`) field left out. The host checks what a provider answers and says why it refuses it in
 its log; the SDK checks only what a missing attribute makes impossible.
 

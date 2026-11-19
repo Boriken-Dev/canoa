@@ -788,6 +788,97 @@ export interface StoreExtensionRemote extends k.RemoteBase<typeof StoreExtension
 export declare const StoreExtension: k.DescribedKind<StoreExtension, StoreExtensionRemote, false>;
 
 /**
+ * Reads an agent's own quota. A provider is the same on every call; what it keeps for one agent is in the reading it opens.
+ *
+ * The `usage_reader` kind: what a provider of it implements.
+ */
+export interface UsageReader {
+  /** Who it is and how its figures are asked for. The same answer on every call, with nothing run. */
+  describe(): unknown;
+  /**
+   * A reading of one agent's figures, for the connection or entry the host opens it for. `members` is the host's: the
+   * processes of an agent's tree.
+   */
+  open(members: k.ObjectHandle<typeof ProcessMembers>): UsageReading | k.ObjectHandle<typeof UsageReading>;
+}
+
+/** A caller's handle on a `usage_reader` table: a method per slot. */
+export interface UsageReaderRemote extends k.RemoteBase<typeof UsageReader> {
+  /** Who it is and how its figures are asked for. The same answer on every call, with nothing run. */
+  describe(): g.Value;
+  /**
+   * A reading of one agent's figures, for the connection or entry the host opens it for. `members` is the host's: the
+   * processes of an agent's tree.
+   */
+  open(members: ProcessMembers | k.ObjectHandle<typeof ProcessMembers>): k.ObjectHandle<typeof UsageReading>;
+}
+
+/** Reads an agent's own quota. A provider is the same on every call; what it keeps for one agent is in the reading it opens. */
+export declare const UsageReader: k.DescribedKind<UsageReader, UsageReaderRemote, false>;
+
+/**
+ * One agent's quota, read as often as the host asks. Its methods may be called from different threads, one at a time.
+ *
+ * The `usage_reading` kind: what an object of it implements.
+ */
+export interface UsageReading {
+  /**
+   * The agent answered a `session/new` or `session/load` request: `result` is its `result` as JSON text. The reader keeps what it
+   * needs of it (the models the agent lists, to match its figures to them).
+   */
+  opened(result: string): void;
+  /**
+   * Reads the figures of the agent whose process is `root`. `tree` says the agent may sit below a launcher, so the whole tree
+   * is looked through from the first try; otherwise the reader looks at the process itself first and widens when it finds
+   * nothing there.
+   */
+  read(root: number, tree: boolean): unknown;
+}
+
+/** A caller's handle on a `usage_reading` table or object: a method per slot. */
+export interface UsageReadingRemote extends k.RemoteBase<typeof UsageReading> {
+  /**
+   * The agent answered a `session/new` or `session/load` request: `result` is its `result` as JSON text. The reader keeps what it
+   * needs of it (the models the agent lists, to match its figures to them).
+   */
+  opened(result: string): void;
+  /**
+   * Reads the figures of the agent whose process is `root`. `tree` says the agent may sit below a launcher, so the whole tree
+   * is looked through from the first try; otherwise the reader looks at the process itself first and widens when it finds
+   * nothing there.
+   */
+  read(root: number, tree: boolean): g.Value;
+}
+
+/** One agent's quota, read as often as the host asks. Its methods may be called from different threads, one at a time. */
+export declare const UsageReading: k.DescribedKind<UsageReading, UsageReadingRemote, true>;
+
+/**
+ * The processes that belong to an agent, which the host finds from the operating system's process table.
+ *
+ * The `process_members` kind: what an object of it implements.
+ */
+export interface ProcessMembers {
+  /**
+   * `root` and every process below it, plus on Unix the ones in its process group; always holds `root`. An agent may sit below
+   * a launcher, so what it owns is not always a child of the process the host started.
+   */
+  members(root: number): unknown;
+}
+
+/** A caller's handle on a `process_members` table or object: a method per slot. */
+export interface ProcessMembersRemote extends k.RemoteBase<typeof ProcessMembers> {
+  /**
+   * `root` and every process below it, plus on Unix the ones in its process group; always holds `root`. An agent may sit below
+   * a launcher, so what it owns is not always a child of the process the host started.
+   */
+  members(root: number): g.Value;
+}
+
+/** The processes that belong to an agent, which the host finds from the operating system's process table. */
+export declare const ProcessMembers: k.DescribedKind<ProcessMembers, ProcessMembersRemote, true>;
+
+/**
  * Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with
  * nothing run and no connection opened; every other method has a default that says the agent has nothing to add.
  *

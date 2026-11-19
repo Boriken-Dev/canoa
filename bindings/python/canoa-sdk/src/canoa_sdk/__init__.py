@@ -1,7 +1,7 @@
 """Write a Canoa provider in Python: subclass a kind's base class, set a few attributes or override a few methods, and list the class
 in the module's `__all__`; a guatiao source loads the module like any other, and the host offers the provider.
 
-Each kind lives in its own module (`canoa_sdk.vendor`, `.store`, `.speech`, `.secret`, `.profile`, `.source`, `.settings`, `.panel`); `canoa_sdk.acp` re-exports coqui-acp's. A settings form
+Each kind lives in its own module (`canoa_sdk.vendor`, `.store`, `.speech`, `.secret`, `.profile`, `.source`, `.settings`, `.panel`, `.usage`); `canoa_sdk.acp` re-exports coqui-acp's. A settings form
 is written on a dataclass with `canoa_sdk.forms`. `canoa_sdk.kinds` holds the typed `Protocol` classes written from the kinds'
 descriptions, which the base classes sit on.
 """
@@ -35,6 +35,7 @@ from .settings import SettingsSection
 from .source import CatalogSource, CommandCatalogSource, ReadCatalogSource, fields_of
 from .speech import SpeechInfo, SpeechOutput, SpeechProvider, SpeechSession, SpeechUtterance
 from .store import ExtensionInfo, ExtensionType, ProgramStore, StoreExtension
+from .usage import ReaderInfo, Retry, UsageReader, UsageReading, bucket, failed, reading
 from .vendor import AgentVendor, ModeTitle, StandardTitle, VendorInfo
 
 __all__ = [
@@ -56,6 +57,8 @@ __all__ = [
     "ProgramStore",
     "ProviderInfo",
     "ReadCatalogSource",
+    "ReaderInfo",
+    "Retry",
     "SecretProvider",
     "Section",
     "SettingProfileItem",
@@ -69,13 +72,18 @@ __all__ = [
     "StoreExtension",
     "SystemStoreSecretProvider",
     "TerminalPanelTab",
+    "UsageReader",
+    "UsageReading",
     "VendorInfo",
+    "bucket",
     "effect",
+    "failed",
     "fields_of",
     "form_meta",
     "form_of",
     "keeping_of",
     "name_of",
+    "reading",
     "section",
     "text_of",
     "ui",

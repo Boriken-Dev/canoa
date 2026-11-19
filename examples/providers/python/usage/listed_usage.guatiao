@@ -1,0 +1,4 @@
+type = "python"
+module = "listed_usage"
+kinds = ["usage_reader"]
+paths = ["."]

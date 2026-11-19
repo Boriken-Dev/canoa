@@ -1,6 +1,7 @@
 //! Providers written with the Canoa SDK in Python and in JavaScript, loaded by the host from the examples under `examples/providers`
-//! through Guatiao's sources: an `agent_vendor` the host lists as an agent, a `store_extension` that adds a Store type, and one
-//! library that serves a `profile_item`, a `settings_section`, a `panel_tab` and `catalog_source`s the host lists and reads. Each
+//! through Guatiao's sources: an `agent_vendor` the host lists as an agent, a `store_extension` that adds a Store type, one
+//! library that serves a `profile_item`, a `settings_section`, a `panel_tab` and `catalog_source`s the host lists and reads, and a
+//! `usage_reader` the host reads an agent's quota through. Each
 //! language builds its source from Cargo's checkout of Guatiao at the workspace's revision: Python against the interpreter
 //! `CANOA_TEST_PYTHON` names (a Python 3.9 or later with its shared library), JavaScript with a C compiler for QuickJS
 //! (`CANOA_TEST_JS` set to anything). Without a variable its test is ignored, and a run counts it as not run.
@@ -37,7 +38,7 @@ mod with_source {
 
     use serde_json::{Value, json};
 
-    use crate::linked::{Hosted, ask};
+    use crate::linked::{Hosted, ask, open_session};
     use crate::support::{example, quoted};
 
     /// The root of the Cargo checkout of the package `name`, where its workspace is.
@@ -85,6 +86,11 @@ mod with_source {
     /// Builds the source crate `krate` of Guatiao from a copy of its checkout, since a build writes beside its manifest. The
     /// copy is named after the checkout's directory, which Cargo names by revision, and shared by every test of the run.
     pub fn build_source(krate: &str, library: &str, environment: &[(&str, String)]) -> PathBuf {
+        // Tests of one run build and copy the same tree: one at a time.
+        static BUILDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _one_at_a_time = BUILDING
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let guatiao = checkout("guatiao");
         let revision = guatiao
             .file_name()
@@ -163,6 +169,68 @@ mod with_source {
             quoted(&source.to_string_lossy()),
             quoted(provider),
         )
+    }
+
+    /// canoa.cfg with the same extension entry and an agent entry whose quota is read by the `listed` reader the usage example
+    /// offers, over the agent that lists the models of a recorded Antigravity answer when a session opens.
+    pub fn usage_config(source: &Path, provider: &str, settings: &str) -> String {
+        let agent = example("stdio_agent", false);
+        let fixture = repository().join("crates/canoa-host/tests/fixtures/agy/getuserstatus.json");
+        format!(
+            "[host.agents.Probe]\nprogram = {}\nargs = [\"--agy\", {}]\nlisten = \"127.0.0.1:0\"\nusage = \"listed\"\n\n\
+             [host.extensions.examples]\nsource = {}\nprovider = {}\n\
+             [host.extensions.examples.source_settings]\n{settings}",
+            quoted(&agent.to_string_lossy()),
+            quoted(&fixture.to_string_lossy()),
+            quoted(&source.to_string_lossy()),
+            quoted(provider),
+        )
+    }
+
+    /// What the host does with the reader the example offers: it starts with an entry that names it, and once a session has
+    /// opened it reads the agent's quota through the script, a bucket for each model the agent listed.
+    pub fn check_usage(config: String) {
+        let hosted = Hosted::start_with_setup(|_| config, &[]);
+        let link = hosted.local.open("Probe").expect("a link");
+        let dir = hosted.scratch.0.to_string_lossy().into_owned();
+        let _session = open_session(&link, &dir);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut id = 3;
+        let report = loop {
+            let (report, _) = ask(&link, id, "_coqui_acp/usage", json!({})).expect("answered");
+            id += 1;
+            if report["buckets"]
+                .as_array()
+                .is_some_and(|buckets| !buckets.is_empty())
+                || std::time::Instant::now() >= until
+            {
+                break report;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        };
+        let buckets = report["buckets"].as_array().expect("buckets");
+        // The recorded answer lists thirteen models, each of which the reader made a full bucket of.
+        assert_eq!(buckets.len(), 13, "{report}");
+        let first = &buckets[0];
+        assert_eq!(first["id"], "listed:gemini-4-argon-medium", "{report}");
+        assert_eq!(first["unit"], "permille", "{report}");
+        assert_eq!(first["remaining"], 1000, "{report}");
+        assert_eq!(first["status"], "ok", "{report}");
+        assert_eq!(first["source"], "reported", "{report}");
+        assert_eq!(
+            first["models"],
+            json!({"kind": "only", "models": ["gemini-4-argon-medium"]}),
+            "{report}"
+        );
+        assert!(
+            buckets.iter().all(|bucket| bucket["id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("listed:"))),
+            "{report}"
+        );
+        assert_eq!(report["account"], "Probe", "{report}");
+        drop(link);
+        hosted.stop();
     }
 
     /// What the host says of the examples: the Store types its extension adds, and the agent row its vendor describes.
@@ -277,7 +345,9 @@ mod python {
     use std::path::PathBuf;
     use std::process::Command;
 
-    use super::with_source::{build_source, check, checkout, config, list, repository};
+    use super::with_source::{
+        build_source, check, check_usage, checkout, config, list, repository, usage_config,
+    };
 
     const PROBE: &str = "import sys; print(sys.executable); print(sys.base_prefix)";
 
@@ -315,11 +385,43 @@ mod python {
         );
         check(config(&source, "notes_extension_notes", &settings));
     }
+
+    #[test]
+    fn a_usage_reader_written_with_the_python_sdk_reads_an_agents_quota_for_the_host() {
+        let named = env!("CANOA_TEST_PYTHON");
+        let output = Command::new(named)
+            .args(["-I", "-c", PROBE])
+            .output()
+            .unwrap_or_else(|error| panic!("CANOA_TEST_PYTHON={named} does not run: {error}"));
+        assert!(output.status.success(), "CANOA_TEST_PYTHON={named} failed");
+        let text = String::from_utf8(output.stdout).expect("UTF-8");
+        let mut lines = text.lines();
+        let executable = lines.next().expect("an executable").to_owned();
+        let prefix = PathBuf::from(lines.next().expect("a prefix"));
+        let source = build_source(
+            "guatiao-source-py",
+            "guatiao_source_py",
+            &[("PYO3_PYTHON", executable)],
+        );
+        let examples = repository().join("examples/providers/python");
+        let settings = format!(
+            "dirs = {}\npaths = {}\nimport_dirs = {}\n",
+            list(&[examples.join("usage"), examples.join("extension")]),
+            list(&[
+                checkout("guatiao").join("bindings/python/guatiao/src"),
+                repository().join("bindings/python/canoa-sdk/src"),
+            ]),
+            list(&[prefix]),
+        );
+        check_usage(usage_config(&source, "notes_extension_notes", &settings));
+    }
 }
 
 #[cfg(canoa_test_js)]
 mod javascript {
-    use super::with_source::{build_source, check, config, list, repository};
+    use super::with_source::{
+        build_source, check, check_usage, config, list, repository, usage_config,
+    };
 
     #[test]
     fn a_library_of_providers_written_with_the_javascript_sdk_is_offered_and_its_sources_answer_a_catalog()
@@ -335,5 +437,16 @@ mod javascript {
             ]),
         );
         check(config(&source, "notes_extension_notes", &settings));
+    }
+
+    #[test]
+    fn a_usage_reader_written_with_the_javascript_sdk_reads_an_agents_quota_for_the_host() {
+        let source = build_source("guatiao-source-js", "guatiao_source_js", &[]);
+        let examples = repository().join("examples/providers/js");
+        let settings = format!(
+            "dirs = {}\n",
+            list(&[examples.join("usage"), examples.join("extension")]),
+        );
+        check_usage(usage_config(&source, "notes_extension_notes", &settings));
     }
 }
