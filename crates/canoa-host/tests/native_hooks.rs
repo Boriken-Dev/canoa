@@ -170,9 +170,10 @@ fn claude(manifest: &str, arms: &[(&str, Arm)], steps: &Value) -> Run {
         "claude",
         "--executable",
         claude,
-        "--setting-sources",
-        "user,project",
-        "--allow-client-plugins"
+        "--setting",
+        "setting_sources=[\"user\",\"project\"]",
+        "--setting",
+        "allow_client_plugins=true"
     ]);
     std::fs::write(
         root.join("agent.json"),

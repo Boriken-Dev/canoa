@@ -2413,6 +2413,56 @@ mod tests {
         );
     }
 
+    /// Whether the provider of `run` takes the settings `canoa agent` would give it.
+    fn provider_takes(run: &crate::harness::AgentRun) -> Result<(), String> {
+        let settings = run.provider_settings()?;
+        let registry = std::sync::Arc::new(crate::kind::registry(None).map_err(|e| e.to_string())?);
+        crate::kind::Harness::new(
+            &registry,
+            &run.id,
+            (&settings, &crate::config::Settings::default()),
+            false,
+            Vec::new(),
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn the_command_lines_that_start_an_agent_are_accepted_by_every_bundled_agents_provider() {
+        // What the host's tests and documents start `canoa agent` with, and what every agent takes alike (a flag that sets a provider setting is
+        // left out of the loop over every agent: a provider need not declare it, and says so).
+        let documented: [&[&str]; 3] = [
+            &[
+                "claude",
+                "--executable",
+                "none",
+                "--setting",
+                "setting_sources=[\"user\",\"project\"]",
+                "--setting",
+                "allow_client_plugins=true",
+            ],
+            &["claude", "--executable", "none"],
+            &["codex", "--executable", "none"],
+        ];
+        for args in documented {
+            let run = agent_run(args);
+            provider_takes(&run).unwrap_or_else(|why| panic!("{args:?}: {why}"));
+        }
+        for id in crate::bundled::harnesses() {
+            let run = agent_run(&[
+                id,
+                "--executable",
+                "none",
+                "--working-root",
+                "/w",
+                "--cache-lifetime",
+                "short",
+            ]);
+            provider_takes(&run).unwrap_or_else(|why| panic!("{id}: {why}"));
+        }
+    }
+
     #[test]
     fn agent_takes_the_access_every_agent_takes_the_same_way_and_any_id() {
         use coqui_acp_harness::{Access, Approvals, Sandbox};
