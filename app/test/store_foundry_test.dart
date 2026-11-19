@@ -45,7 +45,7 @@ void _tall(WidgetTester tester) {
 }
 
 void main() {
-  test('the models are listed with where each stands, and a host without Foundry Local says to install it', () async {
+  test('the models are listed with where each stands, and a host without Foundry Local says where to install it', () async {
     final host = FakeStoreHost([])
       ..foundryInstalled = true
       ..foundryModels = [
@@ -71,7 +71,7 @@ void main() {
     await models.refresh();
     final nothing = type.items().single;
     expect(nothing.install, isNull, reason: 'there is nothing to download or load');
-    expect(nothing.summary, contains('Runtimes'));
+    expect(nothing.summary, contains('Foundry Local list'));
     models.dispose();
   });
 

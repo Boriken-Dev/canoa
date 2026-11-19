@@ -107,8 +107,9 @@ ExtensionStoreType programsStoreType({
   ],
 );
 
-/// The store types beyond the built-in four: Runtimes, Foundry Local's models, the Extensions the catalogs list, and each type an extension
-/// named in the host's canoa.cfg adds. The host lists the types and does every install; this only holds what it said.
+/// The store types beyond the built-in four: Runtimes, the Extensions the catalogs list, each type an extension named in the host's
+/// canoa.cfg adds and each a library the host carries adds. The host lists the types and does every install; this only holds what it
+/// said. Foundry Local's models are listed while the host lists the type its library adds.
 class StoreExtensions extends ChangeNotifier {
   StoreExtensions({
     required Future<ControlClient> Function() control,
@@ -122,7 +123,7 @@ class StoreExtensions extends ChangeNotifier {
     _runtimes = ProgramStores(control: control, open: open, kind: 'runtimes');
     _foundry = FoundryModels(control: control, open: open);
     _catalogs = ExtensionCatalogs(control: control, mayInstall: mayInstall, restart: restart, saved: saved);
-    _types = [_runtimesType(), foundryModelsType(_foundry), extensionsStoreType(_catalogs)];
+    _types = _built(const [], withModels: false);
   }
 
   final Future<ControlClient> Function() _control;
@@ -140,12 +141,20 @@ class StoreExtensions extends ChangeNotifier {
   /// The runtimes the host's Store keeps, which the Runtimes type lists and an overlay's unmet need is installed from.
   ProgramStores get runtimes => _runtimes;
 
-  /// Runtimes first, then Foundry Local's models and the Extensions the catalogs list, then what extensions add, in the host's order.
+  /// Runtimes first, then Foundry Local's models (while the host lists its library's type) and the Extensions the catalogs list, then
+  /// what extensions add, in the host's order.
   List<ExtensionStoreType> get types => _types;
 
   /// The titles of the types each extension adds, by the extension's name in canoa.cfg, as the host listed them.
   Map<String, List<String>> get addedBy => _addedBy;
   var _addedBy = <String, List<String>>{};
+
+  List<ExtensionStoreType> _built(List<ExtensionStoreType> added, {required bool withModels}) => [
+    _runtimesType(),
+    if (withModels) foundryModelsType(_foundry),
+    extensionsStoreType(_catalogs),
+    ...added,
+  ];
 
   ExtensionStoreType _runtimesType() => programsStoreType(
     id: runtimesTypeId,
@@ -187,7 +196,7 @@ class StoreExtensions extends ChangeNotifier {
         _held.add(programs);
         listing.add(programs.ensure());
       }
-      _types = [_runtimesType(), foundryModelsType(_foundry), extensionsStoreType(_catalogs), ...added];
+      _types = _built(added, withModels: added.any((type) => type.id == foundryLibraryTypeId));
       _addedBy = by;
       notifyListeners();
       await Future.wait([_runtimes.ensure(), ...listing]);

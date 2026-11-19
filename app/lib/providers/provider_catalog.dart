@@ -164,12 +164,32 @@ final class UsageReaderOffer {
   }
 }
 
+/// A gateway the host offers for the sessions of accounts that run a model on this computer: the account kind it serves, the vendor
+/// of what runs the model, the account provider that makes the kind and the kind's name.
+final class GatewayOffer {
+  const GatewayOffer(this.kind, this.vendor, {this.provider = '', this.title});
+
+  final String kind, vendor, provider;
+  final String? title;
+
+  static GatewayOffer? parse(Object? json) {
+    if (json is! Map || json['kind'] is! String || json['vendor'] is! String) return null;
+    return GatewayOffer(
+      json['kind'] as String,
+      json['vendor'] as String,
+      provider: json['provider'] is String ? json['provider'] as String : '',
+      title: json['title'] is String ? json['title'] as String : null,
+    );
+  }
+}
+
 /// The agents the host has loaded (`providers/list`): where the app learns which agents there are, what each is called, which
 /// vendor and credential standards are its own, and what its mark looks like. Until a host answers, none is known, so nothing is
 /// listed, named or drawn for an agent.
 final class ProviderCatalog extends ChangeNotifier {
   List<AgentProvider> _providers = const [];
   List<UsageReaderOffer> _usageReaders = const [];
+  List<GatewayOffer> _gateways = const [];
   bool _answered = false;
   String? _problem;
   int _revision = 0;
@@ -179,6 +199,12 @@ final class ProviderCatalog extends ChangeNotifier {
 
   /// The readers of an agent's own quota the host offers, bundled first: the values an agent entry's `usage` may take there.
   List<UsageReaderOffer> get usageReaders => _usageReaders;
+
+  /// The gateways the host offers for accounts that run a model on this computer.
+  List<GatewayOffer> get gateways => _gateways;
+
+  /// The vendor of what runs the model of an account of [kind], when a gateway the host offers serves the kind.
+  String? gatewayVendor(String kind) => _gateways.where((each) => each.kind == kind).firstOrNull?.vendor;
 
   /// The agents that run a harness provider in the host, which are the ones an account can be added to.
   List<AgentProvider> get withAccounts => [for (final each in _providers) if (each.accounts != null) each];
@@ -198,15 +224,18 @@ final class ProviderCatalog extends ChangeNotifier {
     _providers = [if (list is List) for (final each in list) ?AgentProvider.parse(each)];
     final readers = answer is Map ? answer['usage_readers'] : null;
     _usageReaders = [if (readers is List) for (final each in readers) ?UsageReaderOffer.parse(each)];
+    final gateways = answer is Map ? answer['gateways'] : null;
+    _gateways = [if (gateways is List) for (final each in gateways) ?GatewayOffer.parse(each)];
     _answered = true;
     _problem = null;
     _changed();
   }
 
   /// Takes the agents as they were parsed, as [adopt] does from the host's answer.
-  void replace(List<AgentProvider> providers, {List<UsageReaderOffer> usageReaders = const []}) {
+  void replace(List<AgentProvider> providers, {List<UsageReaderOffer> usageReaders = const [], List<GatewayOffer> gateways = const []}) {
     _providers = List.of(providers);
     _usageReaders = List.of(usageReaders);
+    _gateways = List.of(gateways);
     _answered = true;
     _problem = null;
     _changed();
@@ -222,6 +251,7 @@ final class ProviderCatalog extends ChangeNotifier {
   void clear() {
     _providers = const [];
     _usageReaders = const [];
+    _gateways = const [];
     _answered = false;
     _problem = null;
     _changed();

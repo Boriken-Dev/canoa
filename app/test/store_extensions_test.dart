@@ -23,13 +23,13 @@ void main() {
       ];
     final shared = host.client();
     final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, extensionsTypeId]);
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, extensionsTypeId], reason: 'no type of a library is listed before the host says so');
     var heard = 0;
     extensions.addListener(() => heard++);
 
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, extensionsTypeId, 'echoes'], reason: 'a type may not take a built-in one\'s id');
-    expect(extensions.types.map((type) => type.label), [runtimesTypeLabel, foundryTypeLabel, extensionsTypeLabel, 'Echoes']);
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, extensionsTypeId, 'echoes'], reason: 'a type may not take a built-in one\'s id');
+    expect(extensions.types.map((type) => type.label), [runtimesTypeLabel, extensionsTypeLabel, 'Echoes']);
     expect(heard, 1);
 
     final echoes = extensions.types.last;
@@ -53,14 +53,36 @@ void main() {
     final shared = host.client();
     final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, extensionsTypeId]);
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, extensionsTypeId]);
     host.failures.clear();
     host.extensionTypes = [
       {'id': 'echoes', 'title': 'Echoes', 'stores': <String>[]},
     ];
     await extensions.ensure();
-    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, extensionsTypeId, 'echoes']);
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, extensionsTypeId, 'echoes']);
     extensions.dispose();
+  });
+
+  test('the Foundry models type is listed while the host lists the type its library adds, and not otherwise', () async {
+    final host = FakeStoreHost([FakeStore('foundry_store', title: 'Foundry Local', extensionType: foundryLibraryTypeId, copies: [copyOf('0.14.0')])])
+      ..extensionTypes = [
+        {'id': foundryLibraryTypeId, 'title': 'Foundry Local', 'icon': 'memory', 'stores': ['foundry_store'], 'extension': 'built-in', 'extension_title': 'Foundry Local'},
+      ];
+    final shared = host.client();
+    final extensions = StoreExtensions(control: () async => shared, open: () async => host.client());
+    await extensions.ensure();
+    expect(extensions.types.map((type) => type.id), [runtimesTypeId, foundryTypeId, extensionsTypeId, foundryLibraryTypeId]);
+    final program = extensions.types.last;
+    await program.load!();
+    expect(program.items().single.name, 'Foundry Local');
+    extensions.dispose();
+
+    final without = FakeStoreHost([])..extensionTypes = [];
+    final sharedWithout = without.client();
+    final bare = StoreExtensions(control: () async => sharedWithout, open: () async => without.client());
+    await bare.ensure();
+    expect(bare.types.map((type) => type.id), [runtimesTypeId, extensionsTypeId]);
+    bare.dispose();
   });
 
   test('a type\'s icon is one of the app\'s names, or a small picture the extension ships', () async {

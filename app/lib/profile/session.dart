@@ -39,7 +39,7 @@ final class SessionWho {
   /// `subscription`, `api-key`, `gateway` or `local`.
   final String? accountKind;
 
-  /// `anthropic`, `openai`, `xai`, `google` or `microsoft-foundry`.
+  /// `anthropic`, `openai`, `xai`, `google`, or the vendor of what runs a local model.
   final String? accountProvider;
   final String? profile;
   final String? loadout;
@@ -116,7 +116,7 @@ final class SessionVariables {
 ) {
   // The vendor a name belongs to: an agent's id, a standard it owns, its AOS id or the vendor's own name.
   String? providerOf(String name) => providerCatalog.resolve(name)?.vendor;
-  if (kind == 'foundry-local') return ('local', 'microsoft-foundry');
+  if (providerCatalog.gatewayVendor(kind) case final vendor?) return ('local', vendor);
   final byPrefix = [
     for (final each in providerCatalog.providers)
       if (each.vendor != null) ...[

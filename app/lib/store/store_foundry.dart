@@ -10,7 +10,11 @@ import 'store_extension.dart';
 
 // Foundry Local's models in the Store: the catalog its command line lists, which are downloaded and which are in memory, and the
 // + that downloads a model and loads it once the person has read what that takes. The host runs the command line and says what
-// it refused in its own words; this holds only what the host answered. Foundry Local itself is a row of Runtimes.
+// it refused in its own words; this holds only what the host answered. Foundry Local itself is a row of the Store type the Foundry
+// Local library adds to the host's list ([foundryLibraryTypeId]), and the models type is shown only while the host lists that.
+
+/// The id of the Store type the Foundry Local library adds to the host's list, made of the program that runs the models.
+const String foundryLibraryTypeId = 'foundry';
 
 /// The id and plural title of the Foundry models type in the Store's index.
 const String foundryTypeId = 'foundrymodels';
@@ -169,7 +173,7 @@ ExtensionStoreType foundryModelsType(FoundryModels models) => ExtensionStoreType
           catalog: foundryCatalog,
           name: 'Foundry Local',
           by: 'Microsoft',
-          summary: models.problem ?? 'Not installed: install it from Runtimes, and its models are listed here.',
+          summary: models.problem ?? 'Not installed: install it from the Foundry Local list, and its models are listed here.',
         ),
       ];
     }

@@ -433,5 +433,13 @@
       "id": "antigravity",
       "origin": "bundled"
     }
+  ],
+  "gateways": [
+    {
+      "kind": "foundry-local",
+      "vendor": "microsoft-foundry",
+      "provider": "foundry_accounts",
+      "title": "Foundry Local"
+    }
   ]
 }
