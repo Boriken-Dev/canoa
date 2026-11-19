@@ -104,9 +104,9 @@ pub enum Grant {
     /// `host/restart`: ends this host so that its supervisor starts it again with the canoa.cfg then.
     HostRestart,
     /// `store/apply`, `store/rollback` and `store/remove`, and the probing `store/report`: install, update, roll back and remove an
-    /// agent program on the host's programs shelf, which downloads and runs code as this user. Also `foundry/models`, `foundry/model`
-    /// and `foundry/window`: list, download, load and unload Foundry Local's models, which runs its command line as this user, and set
-    /// the window a model is run with.
+    /// agent program on the host's programs shelf, which downloads and runs code as this user. Also `store/models`, `store/model`
+    /// and `store/model_setting`: list, move and set up the models a Store type's library lists, which runs the type's program as
+    /// this user.
     StorePrograms,
     /// `accounts/catalog`, `accounts/list`, `accounts/add`, `accounts/login`, `accounts/remove`, `accounts/entries` and
     /// `accounts/offer`, and `pools/list`, `pools/set` `pools/remove` and `pools/turn` (sets of accounts of one standard, and which of them takes a turn): sign in to a provider on this host, which runs the provider's program as this user and keeps a credential in
@@ -1130,13 +1130,15 @@ impl Control {
                             )
                         })
                 }
-                Some("foundry/models") => allow(caller, Grant::StorePrograms).and_then(|()| {
-                    foundry::models(foundry::locate(), &self.files.foundry_windows())
-                }),
-                Some("foundry/model") => allow(caller, Grant::StorePrograms)
-                    .and_then(|()| foundry::act(&params, foundry::locate())),
-                Some("foundry/window") => allow(caller, Grant::StorePrograms)
-                    .and_then(|()| foundry::window(&params, &self.files)),
+                Some("store/models") => allow(caller, Grant::StorePrograms)
+                    .and_then(|()| self.stores())
+                    .and_then(|stores| stores.models_read(&params, &self.files)),
+                Some("store/model") => allow(caller, Grant::StorePrograms)
+                    .and_then(|()| self.stores())
+                    .and_then(|stores| stores.model_act(&params)),
+                Some("store/model_setting") => allow(caller, Grant::StorePrograms)
+                    .and_then(|()| self.stores())
+                    .and_then(|stores| stores.model_setting(&params, &self.files)),
                 Some("store/index") => self.store_index(caller, &params),
                 Some(method @ ("store/rollback" | "store/remove")) => {
                     allow(caller, Grant::StorePrograms)
@@ -1185,7 +1187,7 @@ impl Control {
                     caller,
                     &self.files,
                     self.stores(),
-                    &speech_offers::Lend::new(self.accounts.as_ref()),
+                    &speech_offers::Lend::new(self.accounts.as_ref(), self.stores().ok()),
                     method,
                     &params,
                 ),
@@ -1199,7 +1201,7 @@ impl Control {
                 Some(method) if method.starts_with("speech/") => self.speech.call(
                     caller,
                     &self.files,
-                    &speech_offers::Lend::new(self.accounts.as_ref()),
+                    &speech_offers::Lend::new(self.accounts.as_ref(), self.stores().ok()),
                     method,
                     &params,
                 ),
@@ -1811,7 +1813,6 @@ mod files;
 mod files_tests;
 #[cfg(test)]
 mod folders_tests;
-mod foundry;
 pub(crate) mod hosting;
 #[cfg(test)]
 mod hosting_tests;

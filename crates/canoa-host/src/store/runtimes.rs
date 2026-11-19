@@ -63,7 +63,7 @@ pub fn runtimes_here() -> Vec<String> {
 }
 
 /// The names of the programs the runtimes are kept under on the programs folder, and so the folders put on the `PATH` of what
-/// the host starts. A store of a library the host carries (Foundry Local's, whose folder holds libraries a program should not
+/// the host starts. A store of a library the host carries (one whose folder holds libraries a program should not
 /// find) keeps its program beside them without being one.
 pub const RUNTIME_PROGRAMS: [&str; 4] = ["node", "python", "git-bash", "powershell"];
 

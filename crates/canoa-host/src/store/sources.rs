@@ -58,9 +58,9 @@ static BUNDLE: Bundle = Bundle {
     ],
 };
 
-/// The spawner a source's `read` is handed: this machine's, with the person's own reach, so a source runs a program as the person
-/// and reads a file anywhere their account can. It writes and removes nothing.
-struct Reach(LocalSpawner);
+/// The spawner a source's `read` (or a model store's methods) is handed: this machine's, with the person's own reach, so a provider
+/// runs a program as the person and reads a file anywhere their account can. It writes and removes nothing.
+pub(crate) struct Reach(pub(crate) LocalSpawner);
 
 fn refused(status: Status, why: impl AsRef<str>) -> ProviderError {
     ProviderError::new(status, why.as_ref())
@@ -83,7 +83,7 @@ impl ProcessSpawner for Reach {
     ) -> Result<(), ProviderError> {
         Err(refused(
             Status::GUATIAO_ERR_UNSUPPORTED,
-            "a catalog source keeps no file",
+            "this spawner keeps no file",
         ))
     }
 
@@ -132,7 +132,7 @@ impl ProcessSpawner for Reach {
     fn remove_file(&self, _path: &str) -> Result<(), ProviderError> {
         Err(refused(
             Status::GUATIAO_ERR_UNSUPPORTED,
-            "a catalog source removes no file",
+            "this spawner removes no file",
         ))
     }
 

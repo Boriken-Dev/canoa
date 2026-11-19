@@ -41,6 +41,10 @@ pub(crate) struct Stores {
     types: Vec<AddedType>,
     /// The catalog sources the host has built in and the extensions add.
     sources: crate::store::sources::Sources,
+    /// The `model_store` providers of the types that list models.
+    models: models::ModelStores,
+    /// The person's home folder, which a program of a type keeps its own files in.
+    home: Option<std::path::PathBuf>,
 }
 
 /// Checks the bytes of an extension the Store installed against the digest it recorded, before any of it is loaded, so a file that
@@ -122,7 +126,16 @@ impl Stores {
             runtimes: Vec::new(),
             types: Vec::new(),
             sources: crate::store::sources::Sources::built_in(),
+            models: models::ModelStores::default(),
+            home: std::env::home_dir(),
         }
+    }
+
+    /// These stores keeping the person's home at `home`, as a test that must not touch the real one does.
+    #[cfg(test)]
+    pub(crate) fn with_home(mut self, home: Option<std::path::PathBuf>) -> Self {
+        self.home = home;
+        self
     }
 
     /// These stores offering `sources`, as a host with the extensions that add them loaded does.
@@ -215,6 +228,13 @@ impl Stores {
                     ));
                 }
             }
+            if let Some(provider) = &kind.models
+                && !models::offered(&registry, provider)
+            {
+                return Err(format!(
+                    "the models provider {provider:?} is not one this extension offers"
+                ));
+            }
             added.push(AddedType {
                 info: kind,
                 extension: extension.name.clone(),
@@ -224,6 +244,13 @@ impl Stores {
         }
         drop(offer);
         let registry = Arc::new(registry);
+        let mut listing = self.models.clone();
+        for each in &added {
+            if let Some(provider) = &each.info.models {
+                listing.add(&each.info.id, provider, &registry)?;
+            }
+        }
+        self.models = listing;
         let mut sources = self.sources.clone();
         sources.add(Some(&extension.name), Arc::clone(&registry))?;
         self.sources = sources;
@@ -259,7 +286,7 @@ impl Stores {
     /// logged: the others stay.
     pub(crate) fn with_included_extensions(
         mut self,
-        registry: &coqui_acp_api::guatiao::library::Registry,
+        registry: &Arc<coqui_acp_api::guatiao::library::Registry>,
     ) -> Self {
         for offer in registry.offers::<dyn StoreExtension>() {
             let id = offer.id().to_owned();
@@ -288,6 +315,13 @@ impl Stores {
                             format!("the store {store:?} is taken or not one this build offers")
                         })
                     })
+                });
+                let problem = problem.or_else(|| {
+                    let provider = kind.models.as_deref()?;
+                    self.models
+                        .add(&kind.id, provider, registry)
+                        .err()
+                        .map(|why| format!("its models are not listed: {why}"))
                 });
                 if let Some(problem) = problem {
                     tracing::warn!(extension = id.as_str(), "not listed: {problem}");
@@ -318,6 +352,8 @@ impl Stores {
         .with_included_extensions(&registry))
     }
 }
+
+mod models;
 
 type Failed = (i32, String);
 
@@ -388,6 +424,9 @@ impl Stores {
                         "id": t.info.id, "title": t.info.title, "icon": t.info.icon,
                         "stores": t.info.stores, "extension": t.extension,
                         "extension_title": t.extension_title, "publisher": t.publisher,
+                        "models": self.models.of(&t.info.id).map(|held| {
+                            json!({"provider": t.info.models, "title": held.info.title})
+                        }),
                     })
                 })
                 .collect();

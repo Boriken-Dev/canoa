@@ -1,5 +1,6 @@
 //! The two speech-to-text providers whose tables are completed when they are used: OpenAI under the API key of one of the person's
-//! accounts, and Foundry Local's service on this computer. Each runs against a stand-in server on the loopback.
+//! accounts, and the service of a Store type's models on this computer (the library this build carries). Each runs against a stand-in
+//! server on the loopback.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -15,8 +16,20 @@ use serde_json::{Value, json};
 use super::files::{Files, UploadLimits};
 use super::speech::Speech;
 use super::speech_offers::{self, Lend};
-use super::{Caller, NOT_FOUND, REFUSED};
+use super::{Caller, NOT_FOUND, REFUSED, Stores};
 use crate::config::Layers;
+use crate::store::programs::Programs;
+use crate::store::shelf::Shelf;
+
+/// The Store of a build that carries its libraries, whose people's home is `home`: nothing of the real one is read.
+fn stores(home: Option<PathBuf>) -> Stores {
+    let root = dir("stores");
+    let registry = crate::store::registry::built_in().expect("the built-in stores");
+    let programs = Programs::new(Shelf::unchecked(&root), Arc::clone(&registry));
+    Stores::new(Arc::new(programs), Vec::new())
+        .with_included_extensions(&registry)
+        .with_home(home)
+}
 
 fn dir(name: &str) -> PathBuf {
     static NEXT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
@@ -404,7 +417,7 @@ fn a_provider_whose_account_was_removed_says_so_and_does_not_open() {
 fn a_host_that_keeps_no_accounts_offers_none_and_refuses_one() {
     let home = home("none", &[], None, "");
     let files = files(&home);
-    let lend = Lend::new(None);
+    let lend = Lend::new(None, None);
     let rows = offers(&files, &lend);
     assert!(rows.iter().all(|row| row["account"].is_null()));
     let err = enable(&files, &lend, &json!({"offer": "openai_account:work"})).expect_err("none");
@@ -431,7 +444,8 @@ fn the_foundry_offer_says_what_is_missing_and_lists_only_the_whisper_models_the_
     let home = home("foundry-offer", &[], None, "");
     let files = files(&home);
     let nothing = foundry_home("foundry-none", None);
-    let lend = Lend::from(&home.layers, &home.root, Some(nothing.clone()));
+    let none_stores = stores(Some(nothing.clone()));
+    let lend = Lend::from(&home.layers, &home.root, Some(&none_stores));
     let rows = offers(&files, &lend);
     let foundry = by_id(&rows, "foundry");
     assert_eq!(foundry["local"], true);
@@ -455,7 +469,8 @@ fn the_foundry_offer_says_what_is_missing_and_lists_only_the_whisper_models_the_
         |_| {},
     );
     let running = foundry_home("foundry-up", Some(&base));
-    let lend = Lend::from(&home.layers, &home.root, Some(running.clone()));
+    let up_stores = stores(Some(running.clone()));
+    let lend = Lend::from(&home.layers, &home.root, Some(&up_stores));
     let rows = offers(&files, &lend);
     let foundry = by_id(&rows, "foundry");
     assert!(foundry["unavailable"].is_null(), "{foundry}");
@@ -474,7 +489,8 @@ fn the_foundry_offer_says_what_is_missing_and_lists_only_the_whisper_models_the_
 fn a_foundry_provider_finds_the_running_service_each_time_and_says_when_there_is_none() {
     let home = home("foundry-provider", &[], None, "");
     let files = files(&home);
-    let lend_none = Lend::from(&home.layers, &home.root, Some(foundry_home("f-none", None)));
+    let none_stores = stores(Some(foundry_home("f-none", None)));
+    let lend_none = Lend::from(&home.layers, &home.root, Some(&none_stores));
     let made = enable(
         &files,
         &lend_none,
@@ -484,7 +500,7 @@ fn a_foundry_provider_finds_the_running_service_each_time_and_says_when_there_is
     assert_eq!(made["name"], "foundry");
     let written = fs::read_to_string(&home.cfg).expect("canoa.cfg");
     assert!(
-        written.contains("service = \"foundry_local\"") && !written.contains("url ="),
+        written.contains("service = \"foundry\"") && !written.contains("url ="),
         "the address changes with each start, so it is not written: {written}"
     );
     let speech = Speech::default();
@@ -494,7 +510,7 @@ fn a_foundry_provider_finds_the_running_service_each_time_and_says_when_there_is
     assert!(
         row["problem"]
             .as_str()
-            .is_some_and(|why| why.contains("no Foundry Local service is running")),
+            .is_some_and(|why| why.contains("service is not running")),
         "{row}"
     );
     let err = dictate(&files, &lend_none, "foundry").expect_err("not running");
@@ -503,7 +519,8 @@ fn a_foundry_provider_finds_the_running_service_each_time_and_says_when_there_is
     // The same table with a service up calls it.
     let (base, _received) = standin("200 OK", r#"{"data":[]}"#, |_| {});
     let up = foundry_home("f-up", Some(&base));
-    let lend_up = Lend::from(&home.layers, &home.root, Some(up.clone()));
+    let up_stores = stores(Some(up.clone()));
+    let lend_up = Lend::from(&home.layers, &home.root, Some(&up_stores));
     let listed = speak(&speech, &files, &lend_up, "speech/providers", &json!({})).expect("listed");
     assert!(listed["providers"][0].get("problem").is_none(), "{listed}");
     for path in [&home.root, &up] {
@@ -528,12 +545,13 @@ fn a_foundry_provider_hands_the_service_a_wav_file_by_name_and_removes_it_after(
         },
     );
     let text = format!(
-        "\n[speech.foundry]\nprovider = \"speech_endpoint\"\nmodel = \"openai-whisper-tiny-generic-cpu\"\nservice = \"foundry_local\"\nservice_address = \"{base}\"\noffer = \"foundry\"\n"
+        "\n[speech.foundry]\nprovider = \"speech_endpoint\"\nmodel = \"openai-whisper-tiny-generic-cpu\"\nservice = \"foundry\"\nservice_address = \"{base}\"\noffer = \"foundry\"\n"
     );
     let mut cfg = fs::read_to_string(&home.cfg).expect("canoa.cfg");
     cfg.push_str(&text);
     fs::write(&home.cfg, cfg).expect("written");
-    let lend = Lend::from(&home.layers, &home.root, None);
+    let held = stores(None);
+    let lend = Lend::from(&home.layers, &home.root, Some(&held));
 
     let answer = dictate(&files, &lend, "foundry").expect("dictated");
     assert_eq!(answer["text"], "the quick brown fox");
@@ -556,20 +574,30 @@ fn a_foundry_provider_hands_the_service_a_wav_file_by_name_and_removes_it_after(
 }
 
 #[test]
-fn a_foundry_model_is_a_models_name_and_an_unknown_offer_is_not_found() {
+fn a_service_offer_takes_a_models_name_and_an_offer_nothing_serves_is_not_found() {
     let home = home("foundry-name", &[], None, "");
     let files = files(&home);
-    let lend = Lend::new(None);
+    let held = stores(None);
+    let lend = Lend::from(&home.layers, &home.root, Some(&held));
     for bad in [
         json!({"offer": "foundry"}),
-        json!({"offer": "foundry", "model": "-x"}),
-        json!({"offer": "foundry", "model": "a b"}),
+        json!({"offer": "foundry", "model": "a\nb"}),
+        json!({"offer": "foundry", "model": "m".repeat(101)}),
     ] {
         let err = enable(&files, &lend, &bad).expect_err("refused");
         assert_eq!(err.0, super::BAD_PARAMS, "{bad}: {}", err.1);
     }
     let err = enable(&files, &lend, &json!({"offer": "elsewhere"})).expect_err("unknown");
     assert_eq!(err.0, NOT_FOUND);
+    // A host that carries no library offers no service, and its table names a service nothing runs.
+    let bare = Lend::new(None, None);
+    let err = enable(&files, &bare, &json!({"offer": "foundry", "model": "m"})).expect_err("none");
+    assert_eq!(err.0, NOT_FOUND);
+    assert!(
+        offers(&files, &bare)
+            .iter()
+            .all(|row| row["service"].is_null())
+    );
     let _ = fs::remove_dir_all(&home.root);
 }
 
@@ -579,10 +607,11 @@ fn saving_a_providers_settings_keeps_its_account_and_service() {
         "keeps",
         &ACCOUNTS,
         Some("sk"),
-        "\n[speech.openai-work]\nprovider = \"speech_endpoint\"\nurl = \"https://api.openai.com/v1/audio/transcriptions\"\nmodel = \"gpt-transcribe\"\naccount = \"work\"\noffer = \"openai_account:work\"\n\n[speech.foundry]\nprovider = \"speech_endpoint\"\nmodel = \"m\"\nservice = \"foundry_local\"\noffer = \"foundry\"\n",
+        "\n[speech.openai-work]\nprovider = \"speech_endpoint\"\nurl = \"https://api.openai.com/v1/audio/transcriptions\"\nmodel = \"gpt-transcribe\"\naccount = \"work\"\noffer = \"openai_account:work\"\n\n[speech.foundry]\nprovider = \"speech_endpoint\"\nmodel = \"m\"\nservice = \"foundry\"\noffer = \"foundry\"\n",
     );
     let files = files(&home);
-    let lend = Lend::from(&home.layers, &home.root, None);
+    let held = stores(None);
+    let lend = Lend::from(&home.layers, &home.root, Some(&held));
     let speech = Speech::default();
     for (name, settings) in [
         (
@@ -602,7 +631,7 @@ fn saving_a_providers_settings_keeps_its_account_and_service() {
     }
     let written = fs::read_to_string(&home.cfg).expect("canoa.cfg");
     assert!(written.contains("account = \"work\""), "{written}");
-    assert!(written.contains("service = \"foundry_local\""), "{written}");
+    assert!(written.contains("service = \"foundry\""), "{written}");
     assert!(written.contains("model = \"other\""), "{written}");
     let _ = fs::remove_dir_all(&home.root);
 }

@@ -20,6 +20,7 @@ use canoa::settings_section::SettingsSectionVtable;
 use canoa::speech::output::{SpeechOutputVtable, SpeechUtteranceVtable};
 use canoa::speech::{SpeechProviderVtable, SpeechSessionVtable};
 use canoa::store::extension::StoreExtensionVtable;
+use canoa::store::models::ModelStoreVtable;
 use canoa::store::source::CatalogSourceProviderVtable;
 use canoa::store::{InstallPrompterVtable, InstallToolsVtable, ProgramStoreVtable};
 use canoa::usage_reader::{ProcessMembersVtable, UsageReaderVtable, UsageReadingVtable};
@@ -37,6 +38,7 @@ pub(crate) fn document() -> String {
     let kinds = [
         AgentVendorVtable::description(),
         StoreExtensionVtable::description(),
+        ModelStoreVtable::description(),
         SecretProviderVtable::description(),
         ProfileItemVtable::description(),
         CatalogSourceProviderVtable::description(),

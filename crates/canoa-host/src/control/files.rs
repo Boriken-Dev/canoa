@@ -6,7 +6,6 @@
     reason = "files and locks are std's"
 )]
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read as _, Write as _};
 use std::path::{Component, Path, PathBuf};
@@ -520,36 +519,38 @@ impl Files {
         self.write_section(section, &next).map(|_| ())
     }
 
-    /// The window each Foundry Local model is set to in this host's canoa.cfg, by variant id (`[foundry.windows]`); empty when the
-    /// host has no canoa.cfg or the table is not there.
-    pub(crate) fn foundry_windows(&self) -> BTreeMap<String, u64> {
+    /// What this host's canoa.cfg keeps for each model of a library's Store type, by model id (`[<table>.models."<id>"]`): each an
+    /// object of the settings the library's schema names. Empty when the host has no canoa.cfg or the table is not there.
+    pub(crate) fn model_settings(&self, table: &str) -> serde_json::Map<String, Value> {
         self.config
             .as_deref()
-            .map(foundry_windows_in)
+            .map(|path| models_in(&table_in(path, table)))
             .unwrap_or_default()
     }
 
-    /// Sets the window of Foundry Local model `model` to `window` tokens, or takes the setting away with `None`, in `[foundry.windows]`.
-    pub(crate) fn set_foundry_window(
+    /// Keeps `values` as the settings of `model` in `[<table>.models."<model>"]`, or takes them away with `None`; an emptied table
+    /// is not left behind.
+    pub(crate) fn set_model_settings(
         &self,
+        table: &str,
         model: &str,
-        window: Option<u64>,
+        values: Option<serde_json::Map<String, Value>>,
     ) -> Result<(), (i32, String)> {
-        self.hidden_update(FOUNDRY, |current| {
-            let mut windows = windows_of(Some(&current));
-            match window {
-                Some(tokens) => {
-                    windows.insert(model.to_owned(), tokens);
+        self.hidden_update(table, |current| {
+            let mut models = models_in(&current);
+            match values {
+                Some(values) => {
+                    models.insert(model.to_owned(), Value::Object(values));
                 }
                 None => {
-                    windows.remove(model);
+                    models.remove(model);
                 }
             }
             let mut section = current.as_object().cloned().unwrap_or_default();
-            if windows.is_empty() {
-                section.remove("windows");
+            if models.is_empty() {
+                section.remove("models");
             } else {
-                section.insert("windows".to_owned(), json!(windows));
+                section.insert("models".to_owned(), Value::Object(models));
             }
             Ok(if section.is_empty() {
                 Value::Null
@@ -1110,23 +1111,15 @@ fn plain(path: PathBuf) -> PathBuf {
     crate::share::plain(&path).into_owned()
 }
 
-/// The table of canoa.cfg that holds Foundry Local's per-model settings: `windows` maps a model variant's id to the window, in
-/// tokens, its runs are given.
-pub(crate) const FOUNDRY: &str = "foundry";
-
-/// The windows a `[foundry]` table names: each value a whole number of tokens of at least 1; anything else is left out.
-pub(crate) fn windows_of(section: Option<&Value>) -> BTreeMap<String, u64> {
+/// The settings a library's table keeps per model: its `models` member, each model an object; anything else is left out.
+pub(crate) fn models_in(section: &Value) -> serde_json::Map<String, Value> {
     section
-        .and_then(|section| section.get("windows"))
+        .get("models")
         .and_then(Value::as_object)
         .into_iter()
         .flatten()
-        .filter_map(|(model, tokens)| {
-            tokens
-                .as_u64()
-                .filter(|tokens| *tokens > 0)
-                .map(|tokens| (model.clone(), tokens))
-        })
+        .filter(|(_, values)| values.is_object())
+        .map(|(model, values)| (model.clone(), values.clone()))
         .collect()
 }
 
@@ -1143,11 +1136,6 @@ pub(crate) fn table_in(path: &Path, name: &str) -> Value {
         })
         .filter(Value::is_object);
     table.unwrap_or_else(|| Value::Object(serde_json::Map::new()))
-}
-
-/// The windows of the canoa.cfg at `path`; none when the file is missing or cannot be read, which leaves each model its own.
-pub(crate) fn foundry_windows_in(path: &Path) -> BTreeMap<String, u64> {
-    windows_of(Some(&table_in(path, FOUNDRY)))
 }
 
 /// canoa.cfg's text, and whether the file is there; empty when it is not.

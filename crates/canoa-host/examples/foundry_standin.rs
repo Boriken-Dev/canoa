@@ -1,7 +1,7 @@
 //! A stand-in for Foundry Local's command line, for the tests of the host's model calls. It holds a three-model catalog and keeps
-//! which are downloaded and loaded in the files `cached` and `loaded` of the folder `FOUNDRY_STANDIN_STATE` names, one model a
-//! line. `FOUNDRY_STANDIN_SLEEP_MS` makes every `model` action wait that long first; `FOUNDRY_STANDIN_FAIL` makes `list` fail.
-//! It loads nothing and downloads nothing.
+//! which are downloaded and loaded in the files `cached` and `loaded` of its own folder, one model a line, so a test copies it into a
+//! folder of its own. A file `sleep_ms` there (a number) makes every `model` action wait that long first; a file `fail` makes `list`
+//! fail. It loads nothing and downloads nothing.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -32,7 +32,7 @@ const CATALOG: [(&str, &str, &str, &str, u64); 3] = [
 ];
 
 fn state(name: &str) -> Option<PathBuf> {
-    Some(PathBuf::from(std::env::var_os("FOUNDRY_STANDIN_STATE")?).join(name))
+    Some(std::env::current_exe().ok()?.parent()?.join(name))
 }
 
 fn lines(name: &str) -> Vec<String> {
@@ -59,16 +59,16 @@ fn main() -> ExitCode {
         eprintln!("unexpected arguments: {args:?}");
         return ExitCode::from(2);
     }
-    if let Some(ms) = std::env::var("FOUNDRY_STANDIN_SLEEP_MS")
-        .ok()
-        .and_then(|ms| ms.parse().ok())
+    if let Some(ms) = state("sleep_ms")
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|ms| ms.trim().parse().ok())
     {
         std::thread::sleep(std::time::Duration::from_millis(ms));
     }
     let (cached, loaded) = (lines("cached"), lines("loaded"));
     match word(1) {
         Some("list") => {
-            if std::env::var_os("FOUNDRY_STANDIN_FAIL").is_some() {
+            if state("fail").is_some_and(|path| path.exists()) {
                 eprintln!("\u{1b}[31merror:\u{1b}[0m the catalog is not reachable");
                 return ExitCode::from(1);
             }

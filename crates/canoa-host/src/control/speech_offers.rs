@@ -8,16 +8,17 @@
 //!
 //! Two offers make tables that are not complete in canoa.cfg, and [`Lend`] completes them each time a provider is built:
 //! an OpenAI API key of an account the person has in Canoa (`account`, the key is read from the account's store when a
-//! recording opens and is never written to canoa.cfg) and the Foundry Local service on this computer (`service`, whose address
-//! changes with each start and is read from the service's own file).
+//! recording opens and is never written to canoa.cfg) and the service a Store type's models run in on this computer (`service`,
+//! the type's id; its address changes with each start and its library says where it is, through the type's `model_store`).
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
     reason = "paths are std's"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use canoa::store::models::ServiceReport;
 use coqui_acp_api::{AccountKindInfo, EndpointSlot, MODEL_API, standard};
 use serde_json::{Map, Value, json};
 
@@ -56,7 +57,8 @@ pub(super) const OFFER_KEY: &str = "offer";
 /// The key of a table that names the account whose OpenAI API key the provider uses.
 pub(super) const ACCOUNT_KEY: &str = "account";
 
-/// The key of a table that names a service on this computer the provider calls, and the one that overrides its address.
+/// The key of a table that names the Store type whose service on this computer the provider calls, and the one that overrides its
+/// address.
 pub(super) const SERVICE_KEY: &str = "service";
 pub(super) const ADDRESS_KEY: &str = "service_address";
 
@@ -72,12 +74,8 @@ pub(super) const HOST_KEYS: [&str; 8] = [
     "import_search",
 ];
 
-/// What a provider that calls Foundry Local says when its service is not up.
-const NO_SERVICE: &str =
-    "no Foundry Local service is running: start it (`foundry server start`) and load the model";
-
-/// The value of [`SERVICE_KEY`] for Foundry Local.
-const FOUNDRY_SERVICE: &str = "foundry_local";
+/// The offers that are the host's own, whose ids no Store type's service may take.
+const OWN_OFFERS: [&str; 2] = ["whisper", "openai"];
 
 /// The offer made of one of the person's accounts is `openai_account:NAME`.
 const ACCOUNT_OFFER: &str = "openai_account";
@@ -87,9 +85,6 @@ const OPENAI_KEY_FIELD: &str = "api_key";
 
 /// What an OpenAI key's service is called at, without the path.
 const OPENAI_BASE: &str = "https://api.openai.com/v1";
-
-/// The route Foundry Local transcribes at, below the service's address.
-const FOUNDRY_ROUTE: &str = "/v1/audio/transcriptions";
 
 /// The most a model's name may be.
 const MAX_MODEL: usize = 100;
@@ -144,32 +139,29 @@ pub(super) fn with_model(table: &Value, params: &Value) -> Result<Value, (i32, S
     Ok(changed)
 }
 
-/// What a provider's table is completed from: the accounts the host keeps, and the home Foundry Local's file is in.
+/// What a provider's table is completed from: the accounts the host keeps, and the Store types whose services it calls.
 pub(super) struct Lend<'a> {
     /// The canoa.cfg files accounts are listed in, and the home their credentials rest in.
     accounts: Option<(&'a Layers, &'a Path)>,
-    foundry_home: Option<PathBuf>,
+    /// The stores, which say where a type's service is and what it serves.
+    stores: Option<&'a Stores>,
 }
 
 impl<'a> Lend<'a> {
-    /// What this host has: `accounts` is the host's accounts, when it keeps any, and the service is looked for in the person's home.
-    pub(super) fn new(accounts: Option<&'a HostAccounts>) -> Self {
+    /// What this host has: `accounts` is the host's accounts, when it keeps any, and `stores` its Store.
+    pub(super) fn new(accounts: Option<&'a HostAccounts>, stores: Option<&'a Stores>) -> Self {
         Self {
             accounts: accounts.map(|each| (each.layers(), each.home_dir())),
-            foundry_home: std::env::home_dir(),
+            stores,
         }
     }
 
-    /// As [`Lend::new`], with the accounts from `layers` and `home`, and Foundry Local's file looked for in `foundry_home`.
+    /// As [`Lend::new`], with the accounts from `layers` and `home`.
     #[cfg(test)]
-    pub(super) fn from(
-        layers: &'a Layers,
-        home: &'a Path,
-        foundry_home: Option<PathBuf>,
-    ) -> Lend<'a> {
+    pub(super) fn from(layers: &'a Layers, home: &'a Path, stores: Option<&'a Stores>) -> Lend<'a> {
         Lend {
             accounts: Some((layers, home)),
-            foundry_home,
+            stores,
         }
     }
 
@@ -218,23 +210,31 @@ impl<'a> Lend<'a> {
             .ok_or_else(|| format!("the account {name} holds no key: sign in to it again"))
     }
 
-    /// The address of the Foundry Local service a table calls: the one it names, else the running service's.
-    fn foundry_base(&self, table: &Value) -> Option<String> {
-        table
-            .get(ADDRESS_KEY)
-            .and_then(Value::as_str)
-            .map(|address| address.trim_end_matches('/').to_owned())
-            .or_else(|| {
-                self.foundry_home
-                    .as_deref()
-                    .and_then(canoa_foundry::running_endpoint)
-            })
+    /// Where the service of the Store type `service` is now, as its library says, with the models that can transcribe when asked
+    /// for: the reason when it cannot be asked.
+    fn report(&self, service: &str, models: bool) -> Result<ServiceReport, String> {
+        self.stores
+            .ok_or_else(|| "this host keeps no Store".to_owned())?
+            .speech_report(service, models)
+    }
+
+    /// The address of the service a table calls: the one it names, else the running service's; the reason when there is none.
+    fn service_base(&self, table: &Value, service: &str) -> Result<String, String> {
+        if let Some(address) = table.get(ADDRESS_KEY).and_then(Value::as_str) {
+            return Ok(address.trim_end_matches('/').to_owned());
+        }
+        let report = self.report(service, false)?;
+        report.address.ok_or_else(|| {
+            report
+                .unavailable
+                .unwrap_or_else(|| format!("the service of {service} is not running"))
+        })
     }
 
     /// Why a provider cannot take a recording now for want of a service, when it cannot.
     pub(super) fn missing(&self, table: &Value) -> Option<String> {
-        let calls_foundry = table.get(SERVICE_KEY).and_then(Value::as_str) == Some(FOUNDRY_SERVICE);
-        (calls_foundry && self.foundry_base(table).is_none()).then(|| NO_SERVICE.to_owned())
+        let service = table.get(SERVICE_KEY).and_then(Value::as_str)?;
+        self.service_base(table, service).err()
     }
 
     /// `table` as the settings of its kind: the host's own keys taken out, the address of the service it calls found and, with
@@ -256,22 +256,30 @@ impl<'a> Lend<'a> {
                 self.usable(&self.config()?, account)?;
             }
         }
-        match table.get(SERVICE_KEY).and_then(Value::as_str) {
-            None => {}
-            Some(FOUNDRY_SERVICE) => {
-                // Saving or listing a provider needs no service: only a recording does, and the listing says so with `problem`.
-                let base = match self.foundry_base(table) {
-                    Some(base) => base,
-                    None if with_key => return Err(NO_SERVICE.to_owned()),
-                    None => "http://127.0.0.1".to_owned(),
-                };
-                map.insert(
-                    "url".to_owned(),
-                    Value::String(format!("{base}{FOUNDRY_ROUTE}")),
-                );
+        if let Some(service) = table.get(SERVICE_KEY).and_then(Value::as_str) {
+            let how = self
+                .stores
+                .and_then(|stores| {
+                    stores
+                        .speech_services()
+                        .into_iter()
+                        .find(|(id, _)| id == service)
+                })
+                .map(|(_, how)| how)
+                .ok_or_else(|| format!("this host has no service {service}"))?;
+            // Saving or listing a provider needs no service: only a recording does, and the listing says so with `problem`.
+            let base = match self.service_base(table, service) {
+                Ok(base) => base,
+                Err(why) if with_key => return Err(why),
+                Err(_) => "http://127.0.0.1".to_owned(),
+            };
+            map.insert(
+                "url".to_owned(),
+                Value::String(format!("{base}{}", how.route)),
+            );
+            if how.local_file {
                 map.insert("request".to_owned(), Value::String("local_file".to_owned()));
             }
-            Some(other) => return Err(format!("this host has no service {other}")),
         }
         Ok(settings)
     }
@@ -348,65 +356,42 @@ fn account_offers(files: &Files, lend: &Lend<'_>) -> Result<Vec<Value>, (i32, St
     Ok(rows)
 }
 
-/// The names of the models of a Foundry Local service that transcribe in the way measured: Whisper's, which take a file.
-fn speech_models(base: &str) -> Vec<Value> {
-    let Ok(agent) = canoa::network::Network::current().agent(
-        ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .max_redirects(0)
-            .timeout_global(Some(core::time::Duration::from_secs(5)))
-            .build(),
-    ) else {
-        return Vec::new();
+/// The offers of the services the Store types' libraries run models in on this computer: ready when the service is running and lists
+/// a model that transcribes, else saying what is missing (the library's words).
+fn service_offers(files: &Files, lend: &Lend<'_>) -> Result<Vec<Value>, (i32, String)> {
+    let Some(stores) = lend.stores else {
+        return Ok(Vec::new());
     };
-    let Ok(mut answer) = agent.get(format!("{base}/v1/models")).call() else {
-        return Vec::new();
-    };
-    let Ok(text) = answer.body_mut().read_to_string() else {
-        return Vec::new();
-    };
-    let listed = serde_json::from_str::<Value>(&text).unwrap_or(Value::Null);
-    listed
-        .get("data")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|model| model.get("id").and_then(Value::as_str))
-        .filter(|id| id.to_ascii_lowercase().contains("whisper"))
-        .map(|id| json!({"id": id, "label": id}))
-        .collect()
-}
-
-/// The offer of Foundry Local on this computer: ready when its service is running and lists a Whisper model, else saying what
-/// is missing.
-fn foundry_offer(files: &Files, lend: &Lend<'_>) -> Result<Value, (i32, String)> {
-    let base = lend.foundry_base(&json!({}));
-    let models = base.as_deref().map(speech_models).unwrap_or_default();
-    let unavailable = if base.is_none() {
-        Some(
-            "Foundry Local's service is not running: start it (`foundry server start`), then load a Whisper model on the Foundry models page.",
-        )
-    } else if models.is_empty() {
-        Some(
-            "Foundry Local's service lists no Whisper model: download and load one on the Foundry models page.",
-        )
-    } else {
-        None
-    };
-    Ok(json!({
-        "id": "foundry",
-        "title": "Foundry Local",
-        "summary": "Speech to text by a Whisper model that Foundry Local runs on this computer. Load the model on the Foundry models page first: Canoa never loads one for you.",
-        "license": "MIT (Whisper); Foundry Local is Microsoft's",
-        "local": true,
-        "where": "The audio is written to a temporary file on this computer, handed to Foundry Local's service on a loopback address and removed afterwards: nothing is sent to another service.",
-        "service": FOUNDRY_SERVICE,
-        "models": models,
-        "default_model": models.first().and_then(|model| model["id"].as_str()),
-        "installed": unavailable.is_none(),
-        "unavailable": unavailable,
-        "provider": enabled(files, "foundry")?,
-    }))
+    let mut rows = Vec::new();
+    for (id, how) in stores.speech_services() {
+        if OWN_OFFERS.contains(&id.as_str()) {
+            continue;
+        }
+        let report = stores.speech_report(&id, true);
+        let (models, unavailable) = match &report {
+            Ok(report) => (report.models.clone(), report.unavailable.clone()),
+            Err(why) => (Vec::new(), Some(why.clone())),
+        };
+        let listed: Vec<Value> = models
+            .iter()
+            .map(|model| json!({"id": model.id, "label": model.label}))
+            .collect();
+        rows.push(json!({
+            "id": id,
+            "title": how.title,
+            "summary": how.summary,
+            "license": how.license,
+            "local": true,
+            "where": how.location,
+            "service": id,
+            "models": listed,
+            "default_model": models.first().map(|model| model.id.clone()),
+            "installed": unavailable.is_none(),
+            "unavailable": unavailable,
+            "provider": enabled(files, &id)?,
+        }));
+    }
+    Ok(rows)
 }
 
 /// The name of the provider canoa.cfg has that was made from the offer `id`, if any.
@@ -444,7 +429,6 @@ fn offers(files: &Files, stores: Result<&Stores, (i32, String)>, lend: &Lend<'_>
             "version": installed,
             "provider": enabled(files, "whisper")?,
         }),
-        foundry_offer(files, lend)?,
         json!({
             "id": "openai",
             "title": "OpenAI",
@@ -458,6 +442,7 @@ fn offers(files: &Files, stores: Result<&Stores, (i32, String)>, lend: &Lend<'_>
             "provider": enabled(files, "openai")?,
         }),
     ];
+    offers.extend(service_offers(files, lend)?);
     offers.extend(account_offers(files, lend)?);
     Ok(json!({"offers": offers}))
 }
@@ -551,8 +536,8 @@ fn name_of<'a>(params: &'a Value, fallback: &'a str) -> Result<&'a str, (i32, St
 
 /// `speech/enable` `{offer, name?, model?}`: makes (or remakes) the provider of an offer that needs no form. `whisper` is made
 /// from the copy the Store has installed, whose model is the one the copy holds (another is installed through the Store, and this
-/// is called again). `foundry` takes the Whisper model `model` of Foundry Local's service, which the person loads, and
-/// `openai_account:NAME` the API key of the account `NAME`.
+/// is called again). The id of a Store type whose models run in a service takes the model `model` of that service, which the person
+/// loads, and `openai_account:NAME` the API key of the account `NAME`.
 fn enable(
     files: &Files,
     stores: Result<&Stores, (i32, String)>,
@@ -560,8 +545,11 @@ fn enable(
     params: &Value,
 ) -> Outcome {
     let offer = text_param(params, "offer")?.ok_or_else(|| bad("offer is needed"))?;
-    if offer == "foundry" {
-        return enable_foundry(files, params);
+    if let Some(stores) = lend.stores
+        && !OWN_OFFERS.contains(&offer)
+        && stores.speech_services().iter().any(|(id, _)| id == offer)
+    {
+        return enable_service(files, offer, params);
     }
     if let Some(account) = offer
         .strip_prefix(ACCOUNT_OFFER)
@@ -587,19 +575,16 @@ fn enable(
     Ok(json!({"name": name, "provider": "speech_command", "model": model, "saved": true}))
 }
 
-/// The provider that calls the Whisper model `model` of Foundry Local's service. The model is not loaded, checked or looked for
-/// here: loading one is the person's choice, and a provider whose service is not running says so when it is listed.
-fn enable_foundry(files: &Files, params: &Value) -> Outcome {
-    let name = name_of(params, "foundry")?;
+/// The provider that calls the model `model` of the service of the Store type `service`. The model is not loaded, checked or looked
+/// for here: loading one is the person's choice, and a provider whose service is not running says so when it is listed.
+fn enable_service(files: &Files, service: &str, params: &Value) -> Outcome {
+    let name = name_of(params, service)?;
     let model = model_of(params, None)?;
-    if !canoa_foundry::models::valid_model(&model) {
-        return Err(bad("model is a Foundry Local model's name"));
-    }
     let mut table = Map::new();
     table.insert("provider".to_owned(), json!("speech_endpoint"));
     table.insert("model".to_owned(), json!(model));
-    table.insert(SERVICE_KEY.to_owned(), json!(FOUNDRY_SERVICE));
-    table.insert(OFFER_KEY.to_owned(), json!("foundry"));
+    table.insert(SERVICE_KEY.to_owned(), json!(service));
+    table.insert(OFFER_KEY.to_owned(), json!(service));
     write_table(files, name, table)?;
     Ok(json!({"name": name, "provider": "speech_endpoint", "model": model, "saved": true}))
 }
