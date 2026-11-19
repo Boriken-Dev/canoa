@@ -115,3 +115,51 @@ fn an_account_a_gateway_serves_lists_the_models_of_the_gateway_through_the_same_
     assert_eq!(ids, ["local-small", "local-large"]);
     assert!(choices.models[0].is_default && !choices.models[1].is_default);
 }
+
+/// An account another harness's provider made is listed by that provider, which knows what its kind is: Pi's own account
+/// provider keeps no account of an Anthropic API key.
+#[test]
+fn an_account_another_harness_made_is_listed_by_the_account_provider_that_made_it() {
+    let dir = Dir::new();
+    let root = dir.0.join("accounts");
+    let store = Accounts::with_store(root.clone(), Box::new(FileStore::new(root))).expect("opens");
+    let mut key = Credentials::new();
+    key.insert("api_key", "sk-not-a-real-key");
+    store
+        .store_login("id-shared", &key, None)
+        .expect("the account is made");
+    // Claude Code is a program that is not there: only an account provider that starts it can say so.
+    let missing = dir
+        .0
+        .join(format!("no-such-claude{}", std::env::consts::EXE_SUFFIX));
+    let config = Config::from_str_in(
+        &format!(
+            "[host.agents.Pi]\nharness = \"pi\"\naccounts = [\"shared\"]\n\
+             [host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\n\
+             [host.accounts.shared]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-shared\"\n",
+            toml_string(&missing.to_string_lossy())
+        ),
+        std::path::Path::new(""),
+    )
+    .expect("parses");
+    let asking = Asking {
+        account: Some(("shared".to_owned(), store)),
+        any_account: true,
+        ..Asking::default()
+    };
+    let choices = entry_with(&config, "Pi", &asking).expect("an entry");
+    assert!(!choices.known, "{choices:?}");
+    assert_eq!(choices.unknown_kind, Some("not_installed"), "{choices:?}");
+    assert!(
+        choices
+            .unknown_because
+            .as_deref()
+            .is_some_and(|why| why.contains("Claude Code")),
+        "{choices:?}"
+    );
+}
+
+/// A TOML basic string of `text`.
+fn toml_string(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+}
