@@ -582,7 +582,15 @@ fn models_of(
             if let Some(listing) = held.gateway_models() {
                 return listing;
             }
-            (held.grant(), other)
+            // The account's own provider, a maker included, is given every credential the account holds.
+            (
+                if other.is_some() {
+                    held.provider_grant()
+                } else {
+                    held.grant()
+                },
+                other,
+            )
         }
     };
     let provider = match other {

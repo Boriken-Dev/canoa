@@ -630,9 +630,15 @@ impl Accounts {
                 }
             }
         }
+        let keys = standards::keys_for(
+            &info.provides,
+            matching::borrowed(config, runs.harness),
+            grant.credentials.expose(),
+        );
         let mut held = Held::new(self, name, grant, Some(lock), files, rotates);
         held.owner.clone_from(&config.harness);
         held.session = session;
+        held.keys = keys;
         if gateway {
             held.kind.clone_from(&config.kind);
         }
@@ -873,6 +879,9 @@ pub(crate) struct Held {
     owner: String,
     /// The session's bearer on a gateway, ended when the account is let go.
     session: Option<Lease>,
+    /// The keys of the credentials a harness is given, when the account holds more than the standard it is applied as takes (a
+    /// refresh token the account's maker renews with): the maker is given them all, the harness only these.
+    keys: Option<BTreeSet<String>>,
 }
 
 impl fmt::Debug for Held {
@@ -904,6 +913,7 @@ impl Held {
             files,
             rotates,
             session: None,
+            keys: None,
         }
     }
 
@@ -931,8 +941,25 @@ impl Held {
         self.session.as_ref().map(gateways::Lease::models)
     }
 
-    /// The grant for a call that runs the harness.
+    /// The grant for a call that runs the harness: an account that holds more than its standard takes is given the credentials the
+    /// standard names and no others.
     pub(crate) fn grant(&self) -> AccountGrant {
+        let mut grant = self.grant.clone();
+        if let Some(keys) = &self.keys {
+            let kept: Credentials = grant
+                .credentials
+                .expose()
+                .iter()
+                .filter(|(key, _)| keys.contains(*key))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();
+            grant = grant.credentials(kept);
+        }
+        grant
+    }
+
+    /// The grant for a call to the account's own provider (to renew it, to list its models): every credential it holds.
+    pub(crate) fn provider_grant(&self) -> AccountGrant {
         self.grant.clone()
     }
 

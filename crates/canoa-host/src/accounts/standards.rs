@@ -8,6 +8,8 @@
 //!
 //! The host names no kind and no standard.
 
+use std::collections::BTreeSet;
+
 use coqui_acp_api::AccountKindInfo;
 use coqui_acp_api::guatiao::Value;
 use coqui_acp_api::standard::is_standard;
@@ -70,6 +72,28 @@ pub(crate) fn for_harness(info: &AccountKindInfo, settings: Option<&Settings>) -
     Value::from(map_of(&Settings::new(map)).unwrap_or_default())
 }
 
+/// The keys of `credentials` a harness is given for an account applied as one of `provides`, when `borrowed` and the account holds
+/// keys no standard it provides names: those the well-known standards name. `None` when the harness is given them all: the account
+/// is one of the harness's own kinds, a standard it provides is not a well-known one (its keys are unknown), or it holds nothing
+/// more than the standards name.
+pub(crate) fn keys_for(
+    provides: &[String],
+    borrowed: bool,
+    credentials: &coqui_acp_api::Credentials,
+) -> Option<BTreeSet<String>> {
+    if !borrowed {
+        return None;
+    }
+    let mut named = BTreeSet::new();
+    for standard in provides {
+        let known = coqui_acp_api::standard::well_known(standard)?;
+        named.extend(known.credentials.iter().map(|key| (*key).to_owned()));
+    }
+    let held: BTreeSet<String> = credentials.keys().cloned().collect();
+    let kept: BTreeSet<String> = held.intersection(&named).cloned().collect();
+    (!kept.is_empty() && kept != held).then_some(kept)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -109,6 +133,37 @@ mod tests {
             guatiao_serde::adapt::from_value::<serde_json::Map<String, serde_json::Value>>(&given)
                 .expect("a table");
         assert_eq!(given.keys().collect::<Vec<_>>(), ["base_url"]);
+    }
+
+    #[test]
+    fn a_harness_is_given_the_keys_its_standard_names_and_the_maker_the_rest() {
+        let held = coqui_acp_api::Credentials::from_iter([
+            ("api_key", "k"),
+            ("refresh_token", "r"),
+            ("client_id", "c"),
+        ]);
+        let both = ["openai-api".to_owned(), "anthropic-api".to_owned()];
+        let kept = keys_for(&both, true, &held).expect("a refresh token is not the harness's");
+        assert_eq!(kept.into_iter().collect::<Vec<_>>(), ["api_key"]);
+        assert!(
+            keys_for(&both, false, &held).is_none(),
+            "a kind of its own harness is given all"
+        );
+        let only = coqui_acp_api::Credentials::from_iter([("api_key", "k")]);
+        assert!(
+            keys_for(&both, true, &only).is_none(),
+            "nothing to leave out"
+        );
+        let own = ["a-standard-nobody-named".to_owned()];
+        assert!(
+            keys_for(&own, true, &held).is_none(),
+            "its keys are not known"
+        );
+        let none = coqui_acp_api::Credentials::from_iter([("refresh_token", "r")]);
+        assert!(
+            keys_for(&both, true, &none).is_none(),
+            "the harness says why it cannot"
+        );
     }
 
     #[test]
