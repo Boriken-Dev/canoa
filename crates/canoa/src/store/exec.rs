@@ -354,22 +354,6 @@ impl<'a> Run<'a> {
         Ok(Output::new(exit.code, text))
     }
 
-    /// Runs a command that only reads, such as a program asked its version, as [`Run::exec`] does, and again when the spawner could
-    /// not start it, up to three runs in all: a program that ends before Windows has put it in a job object is refused
-    /// as one that could not be contained, though it ran, and asking it again changes nothing.
-    ///
-    /// # Errors
-    ///
-    /// As [`Run::exec`]; a cancel or a deadline is never tried again.
-    pub fn read(
-        &self,
-        program: &str,
-        args: &[&str],
-        extra: &[(&str, &str)],
-    ) -> Result<Output, ProviderError> {
-        repeated(READ_ATTEMPTS, || self.exec(program, args, extra))
-    }
-
     fn say(&self, line: &str) {
         if let Some(prompter) = self.prompter
             && !line.is_empty()
@@ -402,25 +386,6 @@ impl StepRunner for Run<'_> {
     }
 }
 
-/// How many times [`Run::read`] runs a command that the spawner refused to start.
-const READ_ATTEMPTS: usize = 3;
-
-/// `attempt`, run again while it fails with anything but the end of the install, `attempts` runs in all.
-fn repeated<T>(
-    attempts: usize,
-    mut attempt: impl FnMut() -> Result<T, ProviderError>,
-) -> Result<T, ProviderError> {
-    let mut tried = 1;
-    loop {
-        match attempt() {
-            Err(error) if error.status != Status::GUATIAO_ERR_GONE && tried < attempts => {
-                tried += 1;
-            }
-            done => return done,
-        }
-    }
-}
-
 /// A line the person may read: control and bidirectional characters out, at most 4 KiB.
 #[must_use]
 pub fn clean(line: &str) -> String {
@@ -444,7 +409,3 @@ pub fn clean(line: &str) -> String {
 pub fn deadline_after(timeout_ms: u64) -> Instant {
     Instant::now() + Duration::from_millis(timeout_ms)
 }
-
-#[cfg(test)]
-#[path = "exec_tests.rs"]
-mod tests;

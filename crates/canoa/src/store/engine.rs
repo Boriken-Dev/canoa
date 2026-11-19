@@ -97,7 +97,7 @@ impl<R: Recipe> Engine<R> {
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
-        let output = run.read(path, self.recipe.version_args(), &extra).ok()?;
+        let output = run.exec(path, self.recipe.version_args(), &extra).ok()?;
         version_in(&output.text, |line| self.recipe.parse_version(line))
     }
 
@@ -389,7 +389,7 @@ impl<R: Recipe> Engine<R> {
                 .version_command(&program, &request.staging, &release);
         let version_args: Vec<&str> = version_args.iter().map(String::as_str).collect();
         let output = run
-            .read(&version_program, &version_args, &extra)
+            .exec(&version_program, &version_args, &extra)
             .map_err(|error| {
                 if error.status == Status::GUATIAO_ERR_GONE {
                     error
