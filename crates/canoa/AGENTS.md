@@ -361,17 +361,23 @@ pub const CREDENTIAL: &str = "api_key";         // the key of the credentials th
 pub const BASE_URL: &str = "base_url";          // the setting that holds the address
 pub const STANDARDS: &str = "standards";        // the setting that names the standards the address speaks
 pub const PROVIDES_NOTE: &str = "x-provides";   // the schema annotation that makes a setting the account's standards
-#[non_exhaustive] pub struct Settings { pub base_url: String, pub standards: Vec<String> }   // Debug, Clone, Eq
-impl Settings { pub fn from_map(&Map<String, Value>) -> Result<Self, String>; pub fn to_value(&self) -> Value; }   // `standards` is a list of ids or text of ids separated by commas or white space; the address is checked as `check_address`; any other key is refused
+pub const BY_STANDARD: &str = "by_standard";    // the setting that holds, for a standard, the address and the credential key a program is given
+pub const BY_STANDARD_NOTE: &str = "x-by-standard";   // the schema annotation that makes a setting that
+pub const ADDRESSES: &str = "addresses";  pub const CREDENTIALS: &str = "credentials";   // the sign-in's inputs for it: `standard=address` and `standard=credential` pairs
+#[non_exhaustive] pub struct Settings { pub base_url: String, pub standards: Vec<String>, pub by_standard: BTreeMap<String, StandardSettings> }   // Debug, Clone, Eq
+#[non_exhaustive] pub struct StandardSettings { pub base_url: Option<String>, pub credential: Option<String> }   // Debug, Clone, Default, Eq
+impl Settings { pub fn from_map(&Map<String, Value>) -> Result<Self, String>; pub fn to_value(&self) -> Value; pub fn address_for(&self, standard: &str) -> &str; }   // `standards` is a list of ids or text of ids separated by commas or white space; `by_standard` is a table keyed by standard, and `addresses` and `credentials` (text pairs, as a sign-in's inputs have them) name the same things: each must be of a standard in `standards`, an address is checked as `check_address` and loses a trailing `/`, a credential key is one the standard names (`well_known`) or, for any other, a name; any other key is refused. `address_for` is the account's address for a standard: its own where `by_standard` names none
 pub fn offer() -> AccountOffer;                 // the kind (provides none of its own; its endpoint slot is `base_url`) and the one sign-in method
 pub fn settings_schema() -> Value;  pub fn inputs_schema() -> Value;   // the account's settings (the standards property is `"x-provides": true`, the key `writeOnly` and `x-sensitive`) and what the sign-in asks before it runs
 pub fn parse_standards(text: &str) -> Result<Vec<String>, String>;   // each once, in the order given; none, or one that is not an id (`coqui_acp_api::standard::is_standard`), is refused
+pub fn parse_pairs(text: &str) -> Result<Vec<(String, String)>, String>;   // `name=value` pairs separated by commas or white space
+pub fn check_credential(standard: &str, key: &str) -> Result<(), String>;  // a key a well-known standard takes, else a name
 pub fn check_address(url: &str) -> Result<(), String>;               // `https`, or `http` to this computer; no login in it, no space
 pub fn models_url(base: &str) -> String;                              // `/v1/models`, or `/models` when `base` already ends in `/v1`
 pub fn openai_models(base: &str, key: &str) -> ModelListing;         // GET it with `Authorization: Bearer KEY`; anything it cannot say is an unknown with the reason (the address does not answer, answers its status, or a list with no `data`)
 pub fn key_form(title: &str, what: &str) -> LoginForm;  pub fn key_of(&LoginAnswer) -> Result<String, ProviderError>;   // the sealed form that asks for a key, and the trimmed key it answers (BAD_VALUE when nothing was typed)
 pub fn credential_schema(title: &str, description: &str) -> Value;  pub fn value(&Value) -> guatiao::Value;
-#[derive(Default, Debug, Clone, Copy, Provider)] pub struct ApiGatewayAccounts;   // `account_provider` `api_gateway_accounts`: login (address and standards as inputs, the key in the sealed form), usage (not offered: a gateway of unknown make has no plan limits), models (the OpenAI list when the account provides `openai-api`, else unknown saying so), renew and watch (not offered)
+#[derive(Default, Debug, Clone, Copy, Provider)] pub struct ApiGatewayAccounts;   // `account_provider` `api_gateway_accounts`: login (address and standards as inputs, the key in the sealed form), usage (not offered: a gateway of unknown make has no plan limits), models (the OpenAI list, read at the address the account names for `openai-api` or else its own, when the account provides `openai-api`, else unknown saying so), renew and watch (not offered)
 pub fn library(host: Host) -> Option<LibraryParts>;                  // what `Registry::register_local` takes
 pub mod http {
     pub const WAIT: Duration;                   // 30 s a request
@@ -384,7 +390,8 @@ pub mod http {
 ```
 
 - A request goes the way the host's every other does (the system's proxy and its login, the operating system's certificate verifier, the person's overrides) and follows no redirect, so a key is shown to the address it was given for and no other. What it says of a failure holds no key and no query.
-- `"x-provides": true` on a property of a kind's settings schema (an array of standard ids) says the account provides those standards in place of the kind's: a host reads it, and gives a harness the settings without it. The address is what a harness takes of such an account (`base_url`), so a gateway that serves its standards at different addresses is one account for each.
+- `"x-provides": true` on a property of a kind's settings schema (an array of standard ids) says the account provides those standards in place of the kind's: a host reads it, and gives a harness the settings without it. The address is what a harness takes of such an account (`base_url`).
+- `"x-by-standard": true` on a property (an object keyed by standard id, each value `{base_url, credential}`) says the account names, for a standard it provides, the address a harness is given when it applies the account as that standard and the credential key the account's one credential is given under there (`auth_token` for a bearer token where the standard takes one): a host reads it, so a gateway that serves its standards at different addresses, or wants a bearer for one and a key for another, is one account. The maker (this provider) is still given the account as it holds it.
 - The kind's `provides` is empty and its endpoint slot is `base_url`, so the host checks the address as it does any endpoint setting and a harness that accepts any standard the account names runs on it.
 
 ## `canoa::loopback` (feature `loopback`)
