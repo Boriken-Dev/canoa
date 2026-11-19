@@ -122,3 +122,23 @@ fn the_proxy_item_asks_for_each_pattern_of_hosts_with_the_certificate_to_present
     let hints = &proxy["form"]["fields"]["client_certificate_hosts"]["form"]["fields"];
     assert_eq!(hints["identity"]["widget"], "client_certificate", "{proxy}");
 }
+
+#[test]
+fn the_apps_fixture_is_the_proxy_item_this_build_lists() {
+    let answer = of(&ItemCatalog::built_in());
+    let listed = serde_json::json!({ "items": [row(&answer, "proxy")] });
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../app/test/fixtures/profile_items_proxy.json");
+    if std::env::var_os("CANOA_WRITE_PROFILE_ITEMS").is_some() {
+        let mut text = serde_json::to_string_pretty(&listed).expect("rows are JSON");
+        text.push('\n');
+        std::fs::write(&path, text).expect("the fixture is written");
+    }
+    let held: Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("the fixture is committed"))
+            .expect("the fixture is JSON");
+    assert!(
+        held == listed,
+        "regenerate it: CANOA_WRITE_PROFILE_ITEMS=1 cargo test -p canoa-host --lib profile_items"
+    );
+}
