@@ -758,6 +758,7 @@ dependencies = [
  "guatiao-intake",
  "guatiao-serde",
  "httparse",
+ "percent-encoding",
  "regex",
  "rustix",
  "rustls",

@@ -18,7 +18,7 @@ entries and their grants in one: not a security boundary by itself. See the [doc
 
 ## Installation
 
-Not published. `publish = false` until `canoa-host` is. Cargo features: `store`, the `program_store` kind (a store for one agent program), which needs `coqui-acp-api` and `serde_json`; `speech`, the `speech_provider` kind (audio in, text and front matter out), which needs `guatiao` and `coqui-acp-api`; and `speech-builtin`, its providers: a program and an endpoint the person names for speech to text, and for the `speech_output` kind (text in, audio out) a program, an endpoint, Piper and the operating system voices.
+Not published. `publish = false` until `canoa-host` is. Cargo features: `store`, the `program_store` kind (a store for one agent program), which needs `coqui-acp-api` and `serde_json`; `speech`, the `speech_provider` kind (audio in, text and front matter out), which needs `guatiao` and `coqui-acp-api`; `api-gateway`, the account kind of an address that speaks one or several credential standards, with the account provider that makes it and the request, model list and sign-in form any account provider of such an address builds on (needs `network`); and `speech-builtin`, its providers: a program and an endpoint the person names for speech to text, and for the `speech_output` kind (text in, audio out) a program, an endpoint, Piper and the operating system voices.
 
 ## Quick start
 

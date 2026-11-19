@@ -5,6 +5,9 @@
 
 extern crate alloc;
 
+#[cfg(feature = "api-gateway")]
+#[cfg_attr(docsrs, doc(cfg(feature = "api-gateway")))]
+pub mod api_gateway;
 #[cfg(feature = "gateway")]
 #[cfg_attr(docsrs, doc(cfg(feature = "gateway")))]
 pub mod gateway;
