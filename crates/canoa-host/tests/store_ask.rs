@@ -212,10 +212,13 @@ fn host(key: &Identity, wait: Option<Duration>) -> Hosted {
     store
         .accept_key(&key.key_material())
         .expect("the key is paired");
-    let mut options = ServeOptions::new(host_binary()).with_programs(
-        Arc::new(programs(scratch.0.join("programs"), scratch.0.join("user"))),
-        vec!["asking_store".to_owned()],
-    );
+    let mut options = ServeOptions::new(host_binary())
+        .with_programs(
+            Arc::new(programs(scratch.0.join("programs"), scratch.0.join("user"))),
+            vec!["asking_store".to_owned()],
+        )
+        // A host serves its home, where the scripts that ship in it are kept: never the person's own.
+        .with_state_dir(home.dir());
     if let Some(wait) = wait {
         options = options.with_ask_wait(wait);
     }

@@ -86,10 +86,13 @@ fn a_program_is_planned_installed_reported_rolled_back_and_removed_over_the_link
         &config,
         identity,
         home.store().expect("a store"),
-        &ServeOptions::new(host_binary()).with_programs(
-            Arc::new(programs(shelf.clone(), scratch.0.join("user"))),
-            vec!["echo_store".to_owned()],
-        ),
+        &ServeOptions::new(host_binary())
+            .with_programs(
+                Arc::new(programs(shelf.clone(), scratch.0.join("user"))),
+                vec!["echo_store".to_owned()],
+            )
+            // A host serves its home, where the scripts that ship in it are kept: never the person's own.
+            .with_state_dir(home.dir()),
     )
     .expect("it binds");
     let local = serving.local();

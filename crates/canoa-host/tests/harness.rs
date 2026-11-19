@@ -815,7 +815,7 @@ fn bind_refused(config: &str) -> String {
         &config,
         identity,
         home.store().expect("a store"),
-        &ServeOptions::new(host_binary()),
+        &ServeOptions::new(host_binary()).with_state_dir(home.dir()),
     )
     .expect_err("it does not bind")
     .to_string()

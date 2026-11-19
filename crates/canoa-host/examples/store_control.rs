@@ -69,6 +69,8 @@ fn programs(root: PathBuf, home: PathBuf) -> Programs {
 }
 
 fn serve(dir: &Path) -> Result<(), String> {
+    // The scripts that ship in the host, such as the speech provider that runs a program, run in the JavaScript source the program carries.
+    canoa_host::bundle_js!();
     let home = Home::at(dir.join("home"));
     let _lock = home
         .lock("store_control")
@@ -92,7 +94,9 @@ fn serve(dir: &Path) -> Result<(), String> {
     // A canoa.cfg in the directory is the file `config/*` and `speech/*` read and write, when the caller made one.
     let options = ServeOptions::new(sibling("canoa").to_string_lossy().into_owned())
         .with_programs(stores, vec!["echo_store".to_owned()])
-        .with_config_file(dir.join("canoa.cfg"));
+        .with_config_file(dir.join("canoa.cfg"))
+        // The scripts that ship in the host are kept in the home it serves, never in the person's own.
+        .with_state_dir(home.dir());
     let serving =
         Serving::bind(&config, identity, store, &options).map_err(|error| error.to_string())?;
     let local = serving.local();

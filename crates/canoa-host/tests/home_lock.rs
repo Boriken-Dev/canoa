@@ -192,7 +192,7 @@ fn a_host_stopped_through_the_library_gives_back_its_address_and_agents() {
         &config,
         identity,
         home.store().expect("a store"),
-        &ServeOptions::new(host_binary()),
+        &ServeOptions::new(host_binary()).with_state_dir(home.dir()),
     )
     .expect("it binds");
     let url = serving.listening()[0].url.clone();
@@ -241,7 +241,7 @@ fn a_host_stopped_through_the_library_gives_back_its_address_and_agents() {
         &config,
         home.identity(Some(support::method())).expect("the same"),
         home.store().expect("a store"),
-        &ServeOptions::new(host_binary()),
+        &ServeOptions::new(host_binary()).with_state_dir(home.dir()),
     )
     .expect("it binds again");
     again.stopper().stop();
@@ -263,7 +263,7 @@ fn a_fixed_address_is_free_once_stop_returns_from_run() {
             &config,
             home.identity(Some(support::method())).expect("the same"),
             home.store().expect("a store"),
-            &ServeOptions::new(host_binary()),
+            &ServeOptions::new(host_binary()).with_state_dir(home.dir()),
         )
         .expect("the address is free");
         let stopper = serving.stopper();
