@@ -100,7 +100,8 @@
           "claude-login",
           "claude-oauth-token",
           "anthropic-api-key",
-          "anthropic-auth-token"
+          "anthropic-auth-token",
+          "harness-login"
         ],
         "local": true
       },
