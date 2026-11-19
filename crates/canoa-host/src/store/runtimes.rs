@@ -38,10 +38,9 @@ const GITHUB_ASSET_HOSTS: [&str; 2] = [
 ];
 
 /// The provider ids of the runtimes' stores, in the order the app lists them.
-pub const RUNTIMES: [&str; 7] = [
+pub const RUNTIMES: [&str; 6] = [
     "node_store",
     "python_store",
-    "foundry_store",
     "whisper_store",
     "piper_store",
     "git_bash_store",
@@ -64,7 +63,8 @@ pub fn runtimes_here() -> Vec<String> {
 }
 
 /// The names of the programs the runtimes are kept under on the programs folder, and so the folders put on the `PATH` of what
-/// the host starts. Foundry Local is kept beside them but is not one: its folder holds libraries a program should not find.
+/// the host starts. A store of a library the host carries (Foundry Local's, whose folder holds libraries a program should not
+/// find) keeps its program beside them without being one.
 pub const RUNTIME_PROGRAMS: [&str; 4] = ["node", "python", "git-bash", "powershell"];
 
 /// The programs the Store keeps for a secret provider to run: found by name by the spawner a provider is handed, and on no `PATH`, so
@@ -91,10 +91,6 @@ store_provider!(
 store_provider!(
     /// The Python store.
     PythonStore, PythonRecipe, "python_store"
-);
-store_provider!(
-    /// The Foundry Local store.
-    FoundryStore, canoa_foundry::store::FoundryRecipe, "foundry_store"
 );
 
 fn hex_of(sums: &str, file: &str) -> Option<String> {

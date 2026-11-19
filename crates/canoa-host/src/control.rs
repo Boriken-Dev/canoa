@@ -23,7 +23,7 @@ pub use files::{
     DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_TOTAL, DEFAULT_MAX_UPLOADS, MAX_CHUNK, MAX_LIST,
     MAX_SECTION_BYTES, SECTIONS,
 };
-pub(crate) use files::{Files, UploadLimits, foundry_windows_in};
+pub(crate) use files::{Files, UploadLimits, table_in};
 pub(crate) use import::{Homes, IMPORT_KEY};
 pub(crate) use moves::Moves;
 pub(crate) use overlays::{OverlayLimits, Overlays, valid_skill_name};

@@ -62,7 +62,7 @@ fn read_account(
         }
         report
     };
-    if account.kind == canoa_foundry::account::KIND {
+    if crate::gateways::for_kind(&account.kind).is_some() {
         return Ok(stamp(UsageReport::unsupported(
             "a model that runs on this computer has no plan limits",
         )));

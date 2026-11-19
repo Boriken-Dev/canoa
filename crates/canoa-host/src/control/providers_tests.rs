@@ -10,7 +10,7 @@ use coqui_acp_api::{
 };
 use serde_json::Value;
 
-use super::providers::{bundled_registry, rows_of, usage_readers_of};
+use super::providers::{bundled_registry, gateways_of, rows_of, usage_readers_of};
 use crate::bundled::{self, Bundle};
 
 /// An agent no crate of Canoa's names: a vendor description and an account provider, offered by a library of its own.
@@ -230,6 +230,23 @@ fn an_agent_a_library_adds_is_listed_with_its_kinds_like_a_bundled_one() {
 }
 
 #[test]
+fn a_gateway_a_library_carries_is_listed_with_its_kind_and_vendor_and_its_accounts_are_no_agents() {
+    let listed = gateways_of();
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0]["kind"], "foundry-local");
+    assert_eq!(listed[0]["vendor"], "microsoft-foundry");
+    assert_eq!(listed[0]["provider"], "foundry_accounts");
+    assert_eq!(listed[0]["title"], "Foundry Local");
+    // The kind joins the catalogs of the harnesses that can be given a gateway: no agent of its own is listed for it.
+    let registry = bundled_registry(bundled::ALL).expect("the libraries are accepted");
+    let rows = rows_of(&[("bundled", &registry)], bundled::ALL);
+    assert!(
+        rows.iter().all(|row| row["id"] != "foundry"),
+        "no row for a gateway's accounts: {rows:?}"
+    );
+}
+
+#[test]
 fn the_usage_readers_offered_are_listed_bundled_first_then_a_librarys_own() {
     let bundled_only = bundled_registry(bundled::ALL).expect("the libraries are accepted");
     assert_eq!(
@@ -305,6 +322,7 @@ fn the_apps_fixture_is_what_this_build_lists() {
     let listed = serde_json::json!({
         "providers": rows(bundled::ALL),
         "usage_readers": usage_readers_of(&[("bundled", &registry)]),
+        "gateways": gateways_of(),
     });
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../app/test/fixtures/providers_list.json");

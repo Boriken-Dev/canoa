@@ -31,7 +31,7 @@ pub(crate) struct Who<'a> {
     pub(crate) account: Option<&'a str>,
     /// The account's kind: `subscription`, `api-key`, `gateway` or `local`.
     pub(crate) account_kind: Option<&'a str>,
-    /// The account's provider: `anthropic`, `openai`, `xai`, `google` or `microsoft-foundry`.
+    /// The account's provider: `anthropic`, `openai`, `xai`, `google`, or the vendor of what runs a local model.
     pub(crate) account_provider: Option<&'a str>,
     /// The profile the connection runs.
     pub(crate) profile: Option<&'a str>,
@@ -55,8 +55,8 @@ pub(crate) fn account_words(
 ) -> (Option<&'static str>, Option<&'static str>) {
     // The vendor a name belongs to: an agent's id, a standard it owns, its registry id or the vendor's own name.
     let provider_of = |name: &str| crate::vendors::resolve(name).and_then(|known| known.vendor);
-    if kind == "foundry-local" {
-        return (Some("local"), Some("microsoft-foundry"));
+    if let Some(vendor) = crate::gateways::vendor_of(kind) {
+        return (Some("local"), Some(vendor));
     }
     let by_prefix = crate::vendors::all().into_iter().find_map(|known| {
         let vendor = known.vendor?;

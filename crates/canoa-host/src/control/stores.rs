@@ -254,17 +254,68 @@ impl Stores {
         self
     }
 
+    /// The same, also listing the store types the libraries this build carries add (the `store_extension` providers of `registry`),
+    /// each made of stores `registry` offers. One that adds a type already taken or a store it does not offer is skipped and
+    /// logged: the others stay.
+    pub(crate) fn with_included_extensions(
+        mut self,
+        registry: &coqui_acp_api::guatiao::library::Registry,
+    ) -> Self {
+        for offer in registry.offers::<dyn StoreExtension>() {
+            let id = offer.id().to_owned();
+            let Some(info) = offer
+                .default_instance()
+                .and_then(|extension| extension.describe().ok())
+            else {
+                continue;
+            };
+            for kind in info.types {
+                let problem = kind.problem().or_else(|| {
+                    self.types
+                        .iter()
+                        .any(|each| each.info.id == kind.id)
+                        .then(|| format!("the type {:?} is already added", kind.id))
+                });
+                let problem = problem.or_else(|| {
+                    kind.stores.iter().find_map(|store| {
+                        let taken = self
+                            .providers
+                            .iter()
+                            .chain(&self.runtimes)
+                            .chain(self.types.iter().flat_map(|t| &t.info.stores))
+                            .any(|each| each == store);
+                        (taken || registry.offer::<dyn ProgramStore>(store).is_none()).then(|| {
+                            format!("the store {store:?} is taken or not one this build offers")
+                        })
+                    })
+                });
+                if let Some(problem) = problem {
+                    tracing::warn!(extension = id.as_str(), "not listed: {problem}");
+                    continue;
+                }
+                self.types.push(AddedType {
+                    info: kind,
+                    extension: "built-in".to_owned(),
+                    extension_title: info.title.clone(),
+                    publisher: info.publisher.clone(),
+                });
+            }
+        }
+        self
+    }
+
     /// The built-in stores over this user's programs folder.
     pub(crate) fn built_in() -> Result<Self, String> {
         let root = Shelf::default_root().ok_or("this user has no data folder")?;
         let shelf = Shelf::configured(root).map_err(|error| error.to_string())?;
         let registry = crate::store::registry::built_in()?;
         Ok(Self::new(
-            Arc::new(Programs::new(shelf, registry)),
+            Arc::new(Programs::new(shelf, Arc::clone(&registry))),
             agent_stores(crate::bundled::ALL),
         )
         .with_runtimes(runtimes_here())
-        .with_secret_providers())
+        .with_secret_providers()
+        .with_included_extensions(&registry))
     }
 }
 
@@ -784,7 +835,10 @@ mod runtimes_tests {
         );
         let stores = Stores::new(Arc::new(programs), agent_stores(crate::bundled::ALL))
             .with_runtimes(runtimes_here())
-            .with_secret_providers();
+            .with_secret_providers()
+            .with_included_extensions(
+                &crate::store::registry::built_in().expect("the built-in stores"),
+            );
         (stores, root)
     }
 
@@ -822,7 +876,6 @@ mod runtimes_tests {
         let every = [
             ("node_store", "node", "nodes"),
             ("python_store", "python", "indent"),
-            ("foundry_store", "foundry", "crucible"),
             ("whisper_store", "whisper", "chip"),
             ("piper_store", "piper", "speaker"),
             ("git_bash_store", "git-bash", "branch"),
@@ -868,6 +921,45 @@ mod runtimes_tests {
         assert!(report.is_ok(), "{report:?}");
         let unknown = stores.read("store/report", &json!({"provider": "bun_store"}), None);
         assert_eq!(unknown.expect_err("unknown").0, NOT_FOUND);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_library_this_build_carries_adds_its_type_and_its_program_is_no_runtime_and_no_agents() {
+        let (stores, root) = stores();
+        let types = stores
+            .read("store/extensions", &json!({}), None)
+            .expect("the types");
+        let added = types["types"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .find(|each| each["id"] == canoa_foundry::STORE_TYPE)
+            .expect("the type the library adds is listed");
+        assert_eq!(added["stores"], json!(["foundry_store"]));
+        assert_eq!(added["extension"], "built-in");
+        let listed = stores
+            .read(
+                "store/list",
+                &json!({"kind": "extension", "type": canoa_foundry::STORE_TYPE}),
+                None,
+            )
+            .expect("the type's stores");
+        assert_eq!(
+            programs_of(&listed),
+            [("foundry_store".to_owned(), "foundry".to_owned())]
+        );
+        for kind in [json!({}), json!({"kind": "runtimes"})] {
+            let other = stores.read("store/list", &kind, None).expect("a list");
+            assert!(
+                programs_of(&other)
+                    .iter()
+                    .all(|(id, _)| id != "foundry_store"),
+                "{kind}: the library's program is its type's alone"
+            );
+        }
+        let report = stores.read("store/report", &json!({"provider": "foundry_store"}), None);
+        assert!(report.is_ok(), "{report:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -96,10 +96,16 @@ pub(crate) fn sign_in(
     interaction: Arc<dyn Interaction>,
     timeout_ms: Option<u64>,
 ) -> Result<LoginOutcome, SignInError> {
-    // Foundry Local is the host's own kind: there is no program to sign in to, and the inputs are the account.
-    if method == canoa_foundry::account::KIND {
-        return super::foundry::sign_in(inputs).map_err(SignInError);
-    }
+    // A kind a gateway serves is made by the account provider of the library that offers the gateway, not by the harness's own.
+    let own = provider
+        .offers()
+        .is_ok_and(|offered| offered.logins.iter().any(|each| each.id == method));
+    let included = if own {
+        None
+    } else {
+        crate::gateways::login_provider(method)
+    };
+    let provider: &dyn AccountProvider = included.as_deref().unwrap_or(provider);
     // The directory goes when this returns, however the sign-in ended.
     let dir = accounts
         .login_dir()

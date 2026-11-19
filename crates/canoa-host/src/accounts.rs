@@ -13,7 +13,6 @@
 )]
 
 pub(crate) mod commands;
-pub(crate) mod foundry;
 mod gate;
 pub(crate) mod login;
 pub(crate) mod matching;
@@ -42,7 +41,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroize as _;
 
 use crate::config::{AccountConfig, Config, Settings};
-use crate::gateway::Ticket;
+use crate::gateways::{self, Lease};
 use crate::provider::map_of;
 use matching::Runs;
 
@@ -104,8 +103,8 @@ pub(crate) enum Refusal {
     NoCredentials,
     /// The store failed; the reason is for the host's log, not for a client.
     Store(String),
-    /// The gateway of a Foundry Local account could not be given: the reason is the model's or the service's, and the person
-    /// can act on it.
+    /// The gateway of an account that runs a model on this computer could not be given: the reason is the model's or the
+    /// service's, and the person can act on it.
     Gateway(String),
 }
 
@@ -167,8 +166,8 @@ pub(crate) struct Accounts {
     writing: Mutex<()>,
     /// Why the credentials rest in sealed files, when they do by a choice that is not the default.
     note: Option<String>,
-    /// The gateways of Foundry Local accounts that sessions hold.
-    gateways: foundry::Gateways,
+    /// The gateways of accounts that run a model on this computer, which sessions hold.
+    gateways: gateways::Gateways,
 }
 
 /// The note that sealed files are in use: what they protect against and what they do not.
@@ -326,7 +325,7 @@ impl Accounts {
         note: Option<String>,
     ) -> Result<Arc<Self>, StoreError> {
         private::create_root(&dir).map_err(|error| io_error(&dir, &error))?;
-        let gateways = foundry::Gateways::in_home(dir.parent());
+        let gateways = gateways::Gateways::in_home(dir.parent());
         let accounts = Arc::new(Self {
             dir,
             store,
@@ -340,19 +339,19 @@ impl Accounts {
         Ok(accounts)
     }
 
-    /// Has the gateways of Foundry Local accounts read each model's window from the canoa.cfg at `file`.
-    pub(crate) fn windows_from(&self, file: PathBuf) {
-        self.gateways.windows_from(file);
+    /// Has the gateways read their own tables from the canoa.cfg at `file`.
+    pub(crate) fn config_from(&self, file: PathBuf) {
+        self.gateways.table_from(file);
     }
 
-    /// Names the program that runs a Foundry Local account's SDK engine in a process of its own.
-    pub(crate) fn engine_program(&self, program: crate::cli::Program) {
-        self.gateways.engine_program(program);
+    /// Names the program that starts the host's own helper command, which a gateway runs part of itself in.
+    pub(crate) fn helper_program(&self, program: crate::cli::Program) {
+        self.gateways.helper(program);
     }
 
-    /// The gateways of Foundry Local accounts.
+    /// The gateways of the accounts that run a model on this computer.
     #[cfg(test)]
-    pub(crate) fn gateways(&self) -> &foundry::Gateways {
+    pub(crate) fn gateways(&self) -> &gateways::Gateways {
         &self.gateways
     }
 
@@ -586,7 +585,7 @@ impl Accounts {
             held.owner.clone_from(&config.harness);
             return Ok(held);
         }
-        let foundry = config.kind == canoa_foundry::account::KIND;
+        let gateway = self.gateways.serves(&config.kind);
         let record = self
             .load(&id)
             .map_err(|error| Refusal::Store(error.to_string()))?
@@ -618,8 +617,8 @@ impl Accounts {
             }
         }
         let mut session = None;
-        if foundry {
-            match foundry::grant(&self.gateways, runs.harness, &grant) {
+        if gateway {
+            match gateways::grant(&self.gateways, runs.harness, &grant) {
                 Ok((mapped, ticket)) => {
                     grant = mapped;
                     session = Some(ticket);
@@ -633,7 +632,7 @@ impl Accounts {
         let mut held = Held::new(self, name, grant, Some(lock), files, rotates);
         held.owner.clone_from(&config.harness);
         held.session = session;
-        if foundry {
+        if gateway {
             held.kind.clone_from(&config.kind);
         }
         Ok(held)
@@ -867,12 +866,12 @@ pub(crate) struct Held {
     lock: Option<fs::File>,
     files: Arc<Mutex<BTreeSet<String>>>,
     rotates: bool,
-    /// The account's own kind, which a Foundry Local account's grant does not carry: the harness is given its own.
+    /// The account's own kind, which the grant of an account served by a gateway does not carry: the harness is given its own.
     kind: String,
     /// The provider that made the account, whose account provider signs it in, renews it and watches it.
     owner: String,
     /// The session's bearer on a gateway, ended when the account is let go.
-    session: Option<Ticket>,
+    session: Option<Lease>,
 }
 
 impl fmt::Debug for Held {

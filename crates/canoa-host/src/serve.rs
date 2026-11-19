@@ -1497,10 +1497,10 @@ impl Serving {
             accounts.clone(),
         ));
         if let (Some(accounts), Some(file)) = (&accounts, &options.config_file) {
-            accounts.windows_from(file.clone());
+            accounts.config_from(file.clone());
         }
         if let Some(accounts) = &accounts {
-            accounts.engine_program(crate::cli::Program::new(
+            accounts.helper_program(crate::cli::Program::new(
                 options.provider_program.clone(),
                 options.program_args.clone(),
             ));

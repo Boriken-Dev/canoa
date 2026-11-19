@@ -40,7 +40,25 @@ pub(crate) fn list(config: &Config) -> Value {
     json!({
         "providers": rows_of(&loaded, bundled::ALL),
         "usage_readers": usage_readers_of(&loaded),
+        "gateways": gateways_of(),
     })
+}
+
+/// The gateways the bundled libraries offer for the sessions of accounts that run a model on this computer: each `{kind, vendor,
+/// provider, title}`, the account kind it serves, the vendor of what runs the model, the account provider that makes the kind and
+/// the kind's name.
+pub(crate) fn gateways_of() -> Vec<Value> {
+    crate::gateways::offered()
+        .iter()
+        .map(|offer| {
+            json!({
+                "kind": offer.info.kind,
+                "vendor": offer.info.vendor,
+                "provider": offer.provider,
+                "title": offer.kind().map(|kind| kind.title.clone()),
+            })
+        })
+        .collect()
 }
 
 /// The `usage_reader` providers `registries` offer, each `{id, origin}` (`origin` as a row's): the ids an agent entry's `usage` may
@@ -144,10 +162,11 @@ pub(crate) fn looks_of(registries: &[(&str, &Registry)]) -> Vec<Value> {
     looks
 }
 
-/// A registry holding the libraries of `bundles`.
+/// A registry holding the libraries of `bundles`, and the ones this build carries that are no agent.
 pub(crate) fn bundled_registry(bundles: &[Bundle]) -> Result<Registry, String> {
     let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
     bundled::register(&mut registry, bundles)?;
+    bundled::register_included(&mut registry)?;
     Ok(registry)
 }
 
@@ -209,6 +228,10 @@ pub(crate) fn rows_of(registries: &[(&str, &Registry)], bundles: &[Bundle]) -> V
         }
         for offer in registry.offers::<dyn AccountProvider>() {
             let provider_id = offer.id().to_owned();
+            // The kinds of a gateway's accounts join the catalogs of the harnesses that can be given a gateway: no agent is theirs.
+            if crate::gateways::account_providers().any(|each| each == provider_id) {
+                continue;
+            }
             let harness = provider_id
                 .strip_suffix(ACCOUNTS_SUFFIX)
                 .unwrap_or(&provider_id)

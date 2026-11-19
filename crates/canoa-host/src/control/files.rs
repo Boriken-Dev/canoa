@@ -1130,20 +1130,24 @@ pub(crate) fn windows_of(section: Option<&Value>) -> BTreeMap<String, u64> {
         .collect()
 }
 
+/// The table `name` of the canoa.cfg at `path`, as JSON; an empty object when the file is missing, cannot be read or has no such
+/// table.
+pub(crate) fn table_in(path: &Path, name: &str) -> Value {
+    let table = read_cfg(path)
+        .ok()
+        .and_then(|(text, _)| parse(path, &text).ok())
+        .and_then(|table| {
+            table
+                .get(name)
+                .and_then(|value| serde_json::to_value(value).ok())
+        })
+        .filter(Value::is_object);
+    table.unwrap_or_else(|| Value::Object(serde_json::Map::new()))
+}
+
 /// The windows of the canoa.cfg at `path`; none when the file is missing or cannot be read, which leaves each model its own.
 pub(crate) fn foundry_windows_in(path: &Path) -> BTreeMap<String, u64> {
-    let Ok((text, _)) = read_cfg(path) else {
-        return BTreeMap::new();
-    };
-    let Ok(table) = parse(path, &text) else {
-        return BTreeMap::new();
-    };
-    windows_of(
-        table
-            .get(FOUNDRY)
-            .and_then(|value| serde_json::to_value(value).ok())
-            .as_ref(),
-    )
+    windows_of(Some(&table_in(path, FOUNDRY)))
 }
 
 /// canoa.cfg's text, and whether the file is there; empty when it is not.

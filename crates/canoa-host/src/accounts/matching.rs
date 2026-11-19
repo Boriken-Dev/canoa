@@ -9,7 +9,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use canoa_foundry::account::KIND as FOUNDRY;
 use coqui_acp_api::{AccountCatalog, AccountKindInfo};
 
 use super::commands::provider_for;
@@ -141,7 +140,9 @@ pub(crate) fn fits(
             ),
         ));
     }
-    if account.kind == FOUNDRY && crate::vendors::gateway_route(runs).is_none() {
+    if crate::gateways::for_kind(&account.kind).is_some()
+        && crate::vendors::gateway_route(runs).is_none()
+    {
         return Err(format!("{runs} cannot be given a gateway"));
     }
     Ok(())
@@ -207,6 +208,7 @@ pub(crate) fn usable(config: &Config, catalogs: &Catalogs<'_>, harness: &str) ->
 
 #[cfg(test)]
 mod tests {
+    use canoa_foundry::account::KIND as FOUNDRY;
     use coqui_acp_api::{Accepted, standard};
 
     use super::*;

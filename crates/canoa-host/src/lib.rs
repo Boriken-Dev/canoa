@@ -14,7 +14,7 @@ mod delegate;
 mod descriptions;
 mod format;
 mod forms;
-mod gateway;
+mod gateways;
 mod harness;
 mod history;
 pub mod home;

@@ -663,8 +663,8 @@ pub(crate) fn instance(
     }
 }
 
-/// The account provider the library of harness `harness` offers as `<harness>_accounts`, what it offers listed with the host's
-/// own kind. `own` configures it; the harness's `executable` and `harness` settings are
+/// The account provider the library of harness `harness` offers as `<harness>_accounts`, what it offers listed with the kinds that
+/// gateways serve. `own` configures it; the harness's `executable` and `harness` settings are
 /// given to it where it declares them, so that it runs the program the harness runs. A library with no such provider has no
 /// accounts to make, and its listing holds only the login a program has where it runs.
 fn account_side(
@@ -682,7 +682,7 @@ fn account_side(
         listing.kinds.extend(offer.kinds);
         listing.logins = offer.logins;
     }
-    crate::accounts::foundry::extend(&mut listing, harness);
+    crate::gateways::extend(&mut listing, harness);
     Ok((provider, listing))
 }
 

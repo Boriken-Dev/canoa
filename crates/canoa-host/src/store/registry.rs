@@ -15,7 +15,7 @@ use coqui_acp_api::guatiao::library::Registry;
 
 use super::bitwarden::BitwardenStore;
 use super::piper::PiperStore;
-use super::runtimes::{FoundryStore, NodeStore, PythonStore};
+use super::runtimes::{NodeStore, PythonStore};
 use super::shell_stores::{GitBashStore, PowerShellStore};
 use super::whisper::WhisperStore;
 use crate::bundled::{self, Bundle};
@@ -26,7 +26,6 @@ coqui_acp_api::guatiao::local_providers!(
     providers = [
         NodeStore,
         PythonStore,
-        FoundryStore,
         WhisperStore,
         PiperStore,
         BitwardenStore,
@@ -49,6 +48,7 @@ pub fn built_in() -> Result<Arc<Registry>, String> {
         return Err("the built-in stores were not accepted".to_owned());
     }
     bundled::register(&mut registry, bundled::ALL)?;
+    bundled::register_included(&mut registry)?;
     Ok(Arc::new(registry))
 }
 
