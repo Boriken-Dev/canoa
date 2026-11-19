@@ -161,7 +161,7 @@ pub const DEFAULT_MAX_SESSIONS: usize = 8;
 pub const MAX_NAME: usize = 64;
 pub const MAX_TITLE: usize = 64;
 
-#[non_exhaustive] pub struct Config { pub origins: Vec<String>, pub entries: Vec<Entry>, pub profiles: IndexMap<String, HostProfile>, pub web: Option<WebConfig>, pub limit_phrases: Option<Vec<String>>, pub protected_paths: Option<Vec<String>>, pub accounts: IndexMap<String, AccountConfig>, pub secrets: Option<serde_json::Value>, pub shell: Option<String>, pub store: StoreConfig, pub skill_pins: BTreeMap<String, String> }   // Default, Clone, Eq
+#[non_exhaustive] pub struct Config { pub origins: Vec<String>, pub entries: Vec<Entry>, pub profiles: IndexMap<String, HostProfile>, pub web: Option<WebConfig>, pub limit_phrases: Option<Vec<String>>, pub protected_paths: Option<Vec<String>>, pub accounts: IndexMap<String, AccountConfig>, pub pools: IndexMap<String, PoolConfig>, pub secrets: Option<serde_json::Value>, pub shell: Option<String>, pub store: StoreConfig, pub skill_pins: BTreeMap<String, String> }   // Default, Clone, Eq
 #[non_exhaustive] pub struct WebConfig { pub dir: Option<PathBuf>, pub listen: SocketAddr, pub tls: Option<WebTls>, pub hosts: Vec<String>, pub connect: Vec<String>, pub limits: web::Limits, pub keep_out: Vec<PathBuf>, pub mode: Option<WebMode>, pub office: bool, pub office_frames: Vec<String>, pub office_local: bool, pub office_secret: bool }   // Default, Clone, Eq
 pub fn WebConfig::new() -> WebConfig            // the site built in, on web::DEFAULT_LISTEN, plain HTTP, nothing else allowed, default limits
 // keep_out is never read from the file: `serve` fills it with canoa.cfg's directory and the identity home
