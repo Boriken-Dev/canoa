@@ -441,9 +441,33 @@ canoa accounts add local --harness claude --method foundry-local --input model=q
   reason, in the API's own error shape and in an `x-canoa-dropped` header. The service's model list overstates tool calling
   (only `qwen3-14b-generic-gpu:2` returned structured calls when measured), so the account offers tools and the service's own
   refusal is passed on as it said it.
-- **`engine`** is `service` (the default: the model lives in the Foundry Local service) or `sdk` (the model lives in this
-  program, through Foundry Local's Rust SDK, which needs a build with the `foundry` feature and `library`, a copy of its native
-  library made outside the installed package: Windows does not let a program outside the package load one from it).
+- **`engine`** is `service` (the default: the model lives in the Foundry Local service) or `sdk` (the model lives in a process
+  of the host's own, through Foundry Local's Rust SDK, which needs a build with the `foundry` feature and `library`, a copy of its
+  native library made outside the installed package: Windows does not let a program outside the package load one from it).
+- **The `sdk` engine runs in its own process.** The host starts `canoa foundry-engine` (the program it starts its other commands
+  with) for the account, which opens the SDK, loads the model and answers over its standard input and output. The native library
+  crashes on some models and prompts (a segmentation fault on a prompt of about two thousand tokens was measured on
+  `gpt-oss-20b-generic-gpu:1`), and a crash there ends only that process: the request under way fails with how it ended, and the
+  next request starts the process again, which loads the model again (seconds to a minute). A process that has not stopped its
+  work 30 seconds after a request was cancelled is ended. The model is unloaded when the account's last session ends.
+- **The model's folder.** The SDK keeps the models registered with it in a catalog file inside the models folder it is given, so
+  the `sdk` engine is given a models folder of the host's own, `foundry-models/` in its home, and links the model into it from
+  Foundry Local's cache (hard links, the weights never copied): Foundry Local's own folder and its catalog file are not
+  written. On a drive that cannot link the weights (the host's home and Foundry Local's cache on different drives) the engine
+  falls back to Foundry Local's folder, changes its catalog file while the model runs, restores it when the engine ends, and the
+  host's log says so.
+- **Tool calls on a model whose package has no tool-call markers.** Foundry Local refuses a request that carries tools to a
+  model whose package publishes no opening and closing tool markers (`qwen3.5-9b-generic-gpu:4` is one), although the model
+  writes `<tool_call>` and `</tool_call>`. With the `sdk` engine the model is registered as a copy of the host's own that carries
+  those markers (the `qwen3.5` family; no other model is changed), so it takes tools; the `service` engine cannot do this.
+- **A client that goes away stops the model's work.** The gateway watches each request's connection: when the client hangs up
+  (Claude Code killed, a timeout) the engine's call is ended, so the model is free for the next request. With the `service`
+  engine that closes the connection to the service, and with the `sdk` engine it cancels the native request. Through a proxy
+  the host's network puts between the host and the service, the call is abandoned but the service cannot be told.
+- **A tool call cut by the token limit is a stop for length.** When the answer runs out of tokens while the model writes a tool
+  call, Foundry Local answers HTTP 500 (`ThrowInvalidToolCallWithoutRecovery ... Tool-call output was interrupted`). The gateway
+  answers it as the API's own stop for length (`max_tokens` in Anthropic's, `length` in chat completions, `incomplete` in
+  Responses) with the call dropped and a line saying so, which the agent knows how to meet; it is no longer an error.
 - **A model's window.** The window is how many tokens a prompt and its answer may take together: a model's own
   `genai_config.json` says what it was built for (`model.context_length`, the most it can be set to) and what a session over
   it allows as cached (`search.max_length`). The Store's page of a Foundry model shows both and offers a setting, kept in
@@ -457,7 +481,7 @@ canoa accounts add local --harness claude --method foundry-local --input model=q
   A number above the model's context length is lowered to it, and the page says so. Foundry Local's cache is never edited
   (a re-download would undo that): with `engine = "sdk"` the host makes a folder of its own for the model under
   `foundry-windows/` in its home, with a hard link to each of the cached model's files and its own `genai_config.json` whose
-  `search.max_length` is the window, and registers it in the SDK's local catalog. The weights are linked, never copied: on a
+  `search.max_length` is the window, and registers it in the SDK's local catalog (the one in `foundry-models/`). The weights are linked, never copied: on a
   drive that cannot link them (Canoa's home and Foundry Local's cache on different drives) the account's gateway is refused
   with that said, since copying gigabytes silently is not a choice to make for the person. The setting is read when a gateway
   starts. **The `service` engine ignores it**: the Foundry Local service loads the models of its own cache and has no call to

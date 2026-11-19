@@ -48,7 +48,10 @@ pub mod openai {      // POST /v1/chat/completions, GET /v1/models
 
 #[non_exhaustive] pub struct Translated { pub chat: Value, pub stream: bool, pub show_thinking: bool, pub dropped: Vec<String> }
 #[non_exhaustive] pub struct Completion { pub id: String, pub model: String, pub text: String, pub thinking: Option<String>, pub tool_calls: Vec<ToolCall>, pub finish: Finish, pub usage: Usage }
-impl Completion { pub fn from_chat(response: &Value) -> Result<Self, ApiError>; }   // a leading <think> block, or reasoning_content, is `thinking`
+impl Completion {
+    pub fn from_chat(response: &Value) -> Result<Self, ApiError>;        // a leading <think> block, or reasoning_content, is `thinking`; with finish `Length`, a tool call whose arguments are not a JSON object is dropped and the text says so
+    pub fn cut_off(model: impl Into<String>) -> Self;                   // a stop for length with no calls and a line saying the tool call was cut off and dropped
+}
 #[non_exhaustive] pub struct ToolCall { pub id: String, pub name: String, pub arguments: String }
 impl ToolCall { pub fn new(id, name, arguments) -> Self; pub fn input(&self) -> Value; }   // arguments that are not JSON come back as {"_unparsed_arguments": text}
 #[non_exhaustive] pub enum Finish { Stop, Length, ToolCalls }
@@ -61,10 +64,13 @@ impl ApiError { pub fn invalid(msg) -> Self /* 400 */; pub fn not_found(msg) -> 
 pub trait Engine: Send + Sync + 'static {
     fn model(&self) -> Result<ModelInfo, EngineError>;
     fn models(&self) -> Vec<ModelInfo>;
-    fn chat(&self, request: &Value) -> Result<Value, EngineError>;       // a chat completion request, never streamed; the chat completion response
+    fn chat(&self, request: &Value, cancel: &Cancel) -> Result<Value, EngineError>;   // a chat completion request, never streamed; the chat completion response. When `cancel` is cancelled the engine stops the model's work for it and returns `Cancelled`
 }
+#[derive(Clone, Default)] pub struct Cancel;                              // Cancel::new(); .cancel() runs what was registered, once; .is_cancelled(); .on_cancel(hook) runs at once if already cancelled
+pub fn lock_unless_cancelled(lock: &Mutex<()>, cancel: &Cancel) -> Result<MutexGuard<'_, ()>, EngineError>;   // an engine's one-at-a-time turn, given up when the request is cancelled while it waits
+pub fn is_cut_tool_call(reason: &str) -> bool;                           // Foundry's 500 "Tool-call output was interrupted": a tool call cut by the answer's token allowance
 #[non_exhaustive] pub struct ModelInfo { pub id: String, pub tools: bool, pub images: bool, pub context: Option<u64> }   // ModelInfo::new(id).tools(b).images(b).context(n)
-#[non_exhaustive] pub enum EngineError { NotLoaded(String), Refused(String), Failed(String) }
+#[non_exhaustive] pub enum EngineError { Cancelled, CutToolCall(String), NotLoaded(String), Refused(String), Failed(String) }   // CutToolCall: the gateway answers it as a stop for length, never as an error
 pub fn running_endpoint(home: &Path) -> Option<String>;                  // web_urls of <home>/.foundry/daemon.json
 
 pub fn sse(event: Option<&str>, data: &Value) -> String;
@@ -77,11 +83,12 @@ pub mod daemon {      // feature `daemon`
     impl DaemonEngine { pub fn open(config: &DaemonConfig, home: &Path) -> Result<Self, EngineError>; }   // finds the service, checks it lists the model; loads nothing
 }
 pub mod sdk {         // feature `sdk`
-    #[non_exhaustive] pub struct SdkConfig { pub model: String, pub library: Option<PathBuf>, pub cache: Option<PathBuf>, pub window: Option<SdkWindow> }
+    #[non_exhaustive] pub struct SdkConfig { pub model: String, pub library: Option<PathBuf>, pub cache: Option<PathBuf>, pub window: Option<SdkWindow>, pub copies: Option<PathBuf>, pub own_cache: Option<PathBuf> }
     #[non_exhaustive] pub struct SdkWindow { pub tokens: u64, pub folder: PathBuf }   // SdkWindow::new(tokens, folder)
     pub struct SdkEngine;
     impl SdkEngine {
-        pub fn open(config: &SdkConfig) -> Result<Self, EngineError>;   // with a window: makes the adjusted copy and registers it in the SDK's local catalog; the model must be downloaded
+        pub fn open(config: &SdkConfig) -> Result<Self, EngineError>;   // with a window, or for a model whose package lacks tool-call markers (`window::tool_markers`) and `copies` or a window folder: makes the copy and registers it in the SDK's local catalog; the model must be downloaded. With `own_cache`: links the model into it and gives the SDK that as its models folder
+        pub fn notes(&self) -> &[String];                               // what the engine did that the person may want to know (a fall back to Foundry Local's own models folder, a copy it could not make)
         pub fn load(&self) -> Result<(), EngineError>; /* registers the execution providers, then loads */ pub fn unload(&self) -> Result<(), EngineError>;
         pub fn adjusted(&self) -> Option<&window::Adjusted>;
     }
@@ -99,7 +106,18 @@ pub mod window {
     pub fn adjust(source: &Path, base: &Path, id: &str, wanted: u64) -> Result<Adjusted, WindowError>;   // <base>/<folder_name(id)>: hard links + its own genai_config.json
     pub fn registered_id(id: &str, window: u64) -> String;               // qwen3-1.7b-generic-gpu:2, 16384 -> canoa-qwen3-1.7b-generic-gpu-w16384:2
     pub fn folder_name(id: &str) -> String;
+    pub fn mirror(from: &Path, to: &Path, id: &str) -> Result<PathBuf, WindowError>;   // links the downloaded model `id` of Foundry Local's cache `from` into Canoa's own models folder `to`, at the same place; reused when its source is unchanged
+    pub fn tool_markers(id: &str) -> Option<(&'static str, &'static str)>;           // ("<tool_call>", "</tool_call>") for the qwen3.5 family, None for any other
     #[non_exhaustive] pub enum WindowError { Read(String), Invalid(String), NotLinked(String), Write(String) }
+}
+
+// An engine in a process of its own: the lines the two ends speak over standard input and output. Plain functions, no feature.
+pub mod worker {
+    pub fn serve<E: Engine>(open: impl FnOnce() -> Result<E, EngineError>, input: impl BufRead, output: impl Write + Send) -> io::Result<()>;   // says {"ready": model} or {"failed": why}, then answers {"id", "chat"} lines with {"id", "ok"} or {"id", "error": {"kind", "message"}}, {"cancel": id} stops one; ends when the input does
+    pub fn hello(line: &str) -> Option<Hello>;                           // Hello::{Ready(ModelInfo), Failed(String)}; a line that is not one is something a library printed
+    pub fn answer(line: &str) -> Option<(u64, Result<Value, EngineError>)>;
+    pub fn chat_line(id: u64, request: &Value) -> String;  pub fn cancel_line(id: u64) -> String;
+    pub fn model_json(&ModelInfo) -> Value;  pub fn model_from(&Value) -> Option<ModelInfo>;  pub fn error_json(&EngineError) -> Value;  pub fn error_from(&Value) -> EngineError;
 }
 
 // Foundry Local as a Store program.
@@ -151,12 +169,15 @@ pub mod account {
 
 `window::adjust` never writes to the cached model: it reads its `genai_config.json`, caps the request at `model.context_length` (the model's own, never raised; the note says when a request was lowered), and makes `<base>/<folder_name(id)>` holding a hard link to every other file and its own `genai_config.json` whose `search.max_length` is the window. A folder already made for the same source and window is reused; one that is not Canoa's (no `canoa-window.json`) is left alone. The weights are never copied: a file over 16 MiB that cannot be linked (another drive) is `WindowError::NotLinked`, and smaller ones are copied. `SdkEngine::open` with a `window` registers the folder through `Catalog::register_model` in the SDK's local catalog under `registered_id`, with the original's task, modalities and tool-call markers, so Foundry Local's own cache and catalog are untouched. `DaemonEngine` cannot take a window: the Foundry Local service loads from its own cache.
 
+With `own_cache` the SDK is given a models folder of the caller's (`window::mirror` links the model into it, so the catalog file the SDK keeps there is not Foundry Local's); only a model that cannot be linked there (another drive) makes the engine use `cache`, change its catalog file while it runs and put it back, which `notes()` says. A model that Foundry Local's package leaves without tool-call markers and whose family is known (`window::tool_markers`) is registered as a copy that carries them, so that it takes tools.
+
 ## Gotchas
 
 - The command line's `-o json` answers were not measured: `models::rows` reads a list (or an object holding one) and takes a row's name from the first of `id`, `variantId`, `modelId` and `name`, so a shape with another key lists nothing. The program is `foundry`; `FoundryRecipe` unpacks Microsoft's own Windows package, whose run outside the installed package was not measured.
 
 - The Foundry Local service's model list says every Qwen calls tools; only `qwen3-14b-generic-gpu:2` returned structured calls when measured, so `DaemonEngine` offers tools and lets the service refuse, in its own words (`EngineError::Refused`).
-- The service's streaming delivers no tokens in 0.14.0: `DaemonEngine` forces `stream: false`, and a request abandoned mid-stream leaves the model held.
+- The service's streaming delivers no tokens in 0.14.0: `DaemonEngine` forces `stream: false`. A request abandoned by its client left the model held for 21 minutes (the service answers one at a time and "session still using it" stands until it is stopped), so `chat` ends the call when `cancel` is cancelled: each call has a `ureq` agent of its own (a loopback endpoint goes direct, with ureq's own sockets), and `Agent::shutdown` closes its connection, which tells the service the answer is not wanted. Through a proxy the call goes on in a thread nobody waits for, and the service is not told. The network's agent built by `canoa::network` cannot be shut down: its connector registers no handle.
+- A tool call cut by the answer's token allowance is a 500 from the service (`ThrowInvalidToolCallWithoutRecovery ... Tool-call output was interrupted`); `DaemonEngine` returns it as `CutToolCall`.
 - The SDK's native library cannot be loaded from the installed Windows package (access is denied to a program outside it): `SdkConfig::library` names a copy, or `FOUNDRY_LOCAL_LIB_DIR` does. With the SDK pointed at a running service, its catalog is empty, so `SdkEngine` always runs in-process.
 - The SDK keeps its own folder of models unless told: `SdkConfig::cache` (default: Foundry Local's `.foundry/cache/models` in the person's home, when it exists) is what lets it find a model the service downloaded. Without it the model is "not found at path" when loaded.
 - A model needs its execution provider registered in the process before it loads (`SdkEngine::load` does it, and loads nothing else); the engine unloads the model it loaded when it is dropped, takes the window copy it registered out of the SDK's local catalog (a file in the models folder, which is Foundry Local's own, so it is left as it was found), and keeps a handle on the SDK's native manager for the life of the process, since releasing the manager ended the process with a fail-fast (0xC0000409) on Windows ARM64 with the WebGPU provider.

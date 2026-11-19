@@ -402,7 +402,7 @@ class _FoundryModelPageState extends State<FoundryModelPage> {
             const Padding(
               padding: EdgeInsets.only(top: 4),
               child: Text(
-                'It applies when an account runs this model with the sdk engine: Canoa then makes a folder of its own for the model, with links to Foundry Local\'s files and its own configuration, so Foundry Local\'s cache is never changed. It takes effect the next time the account\'s gateway starts. The Foundry Local service engine runs the model as it is cached and does not use this setting.',
+                'It applies when an account runs this model with the sdk engine: Canoa then makes a folder of its own for the model, with links to Foundry Local\'s files and its own configuration, and runs the model in a models folder of its own as well, so Foundry Local\'s cache and its catalog file are not changed (only when Canoa\'s folder is on another drive than Foundry Local\'s cache does it use Foundry Local\'s folder and put its catalog file back afterwards). It takes effect the next time the account\'s gateway starts. The Foundry Local service engine runs the model as it is cached and does not use this setting.',
                 key: Key('foundry-window-engine'),
               ),
             ),
