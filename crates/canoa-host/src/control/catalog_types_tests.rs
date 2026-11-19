@@ -2,7 +2,6 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -12,7 +11,7 @@ use super::*;
 use crate::store::index::StoreIndex;
 use crate::store::programs::Programs;
 use crate::store::shelf::Shelf;
-use crate::store::sources::tests::{STANDIN_FAILS, with_standin};
+use crate::store::sources::tests::{standin_down, with_standin};
 
 struct Rig {
     tmp: PathBuf,
@@ -270,19 +269,19 @@ fn a_program_generates_a_catalog_the_type_lists_and_a_failing_one_keeps_the_last
 fn an_extensions_source_generates_a_catalog_the_same_way_and_keeps_the_last_good_on_failure() {
     let rig = Rig::new("catalog-extension-source");
     let control = rig.control(
-        "[store.overlays.catalogs]\nboriken = false\n\n[store.overlays.catalogs.theirs]\nprovider = \"everywhere\"\n",
+        "[store.overlays.catalogs]\nboriken = false\n\n[store.overlays.catalogs.ours]\nprovider = \"everywhere\"\n",
         true,
     );
-    STANDIN_FAILS.store(false, Ordering::SeqCst);
+    standin_down("ours", false);
     let refresh = json!({"refresh": true});
     let first = ask(&control, &Caller::Owner, "store/index", refresh.clone());
     assert_eq!(made_names(&first), ["made"], "{first}");
     assert_eq!(first["result"]["sources"][0]["provider"], "everywhere");
-    assert_eq!(first["result"]["sources"][0]["name"], "From theirs");
+    assert_eq!(first["result"]["sources"][0]["name"], "From ours");
 
-    STANDIN_FAILS.store(true, Ordering::SeqCst);
+    standin_down("ours", true);
     let failed = ask(&control, &Caller::Owner, "store/index", refresh);
-    STANDIN_FAILS.store(false, Ordering::SeqCst);
+    standin_down("ours", false);
     assert_eq!(made_names(&failed), ["made"], "{failed}");
     assert!(
         failed["result"]["sources"][0]["problem"]

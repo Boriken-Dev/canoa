@@ -13,7 +13,7 @@ use crate::control::registry::Registry;
 use crate::store::index::StoreIndex;
 use crate::store::programs::Programs;
 use crate::store::shelf::Shelf;
-use crate::store::sources::tests::{STANDIN_FAILS, with_standin};
+use crate::store::sources::tests::{standin_down, with_standin};
 use crate::store::tools::{Reply, ToolsLimits, Transport};
 
 #[derive(Debug, Default)]
@@ -223,7 +223,7 @@ fn an_extensions_source_serves_the_types_its_description_lists_and_no_other() {
          [store.mcps.catalogs.theirs]\nprovider = \"lister\"\n\n\
          [store.mcps.catalogs.skillsonly]\nprovider = \"standin\"\nteam = \"a\"\n",
     );
-    STANDIN_FAILS.store(false, Ordering::SeqCst);
+    standin_down("theirs", false);
     let skills = rig.catalog(&control, "skills", "theirs", json!({}));
     assert_eq!(names(&skills, "skills"), ["from-extension"], "{skills}");
     assert_eq!(skills["result"]["provider"], "lister");
@@ -237,9 +237,9 @@ fn an_extensions_source_serves_the_types_its_description_lists_and_no_other() {
             .is_some_and(|why| why.contains("does not serve")),
         "{refused}"
     );
-    STANDIN_FAILS.store(true, Ordering::SeqCst);
+    standin_down("theirs", true);
     let down = rig.catalog(&control, "skills", "theirs", json!({}));
-    STANDIN_FAILS.store(false, Ordering::SeqCst);
+    standin_down("theirs", false);
     assert!(
         down["error"]["message"]
             .as_str()

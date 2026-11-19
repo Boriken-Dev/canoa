@@ -1,5 +1,4 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use canoa::store::source::{CatalogSourceProvider, ReadRequest, SourceInfo};
 use coqui_acp_api::ProcessSpawner;
@@ -10,8 +9,24 @@ use serde_json::json;
 
 use super::Sources;
 
-/// Whether the stand-in extension source fails.
-pub(crate) static STANDIN_FAILS: AtomicBool = AtomicBool::new(false);
+/// The catalog labels the stand-in sources fail for. A label, not one switch, since tests that use the stand-ins run at once.
+static DOWN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Makes the stand-in sources fail, or work again, for a catalog of this label.
+pub(crate) fn standin_down(label: &str, down: bool) {
+    let mut labels = DOWN.lock().unwrap_or_else(|e| e.into_inner());
+    labels.retain(|l| l != label);
+    if down {
+        labels.push(label.to_owned());
+    }
+}
+
+fn is_down(label: &str) -> bool {
+    DOWN.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|l| l == label)
+}
 
 /// A source an extension would add, serving only the Skills type.
 #[derive(Default, Provider)]
@@ -41,7 +56,7 @@ impl CatalogSourceProvider for Standin {
         request: ReadRequest,
         _spawner: Object<dyn ProcessSpawner>,
     ) -> Result<String, ProviderError> {
-        if STANDIN_FAILS.load(Ordering::SeqCst) {
+        if is_down(&request.label) {
             return Err(canoa::store::recipe::internal_error("the stand-in is down"));
         }
         Ok(format!(
@@ -66,7 +81,7 @@ impl CatalogSourceProvider for Everywhere {
         request: ReadRequest,
         _spawner: Object<dyn ProcessSpawner>,
     ) -> Result<String, ProviderError> {
-        if STANDIN_FAILS.load(Ordering::SeqCst) {
+        if is_down(&request.label) {
             return Err(canoa::store::recipe::internal_error("the stand-in is down"));
         }
         Ok(format!(
@@ -93,7 +108,7 @@ impl CatalogSourceProvider for Lister {
         request: ReadRequest,
         _spawner: Object<dyn ProcessSpawner>,
     ) -> Result<String, ProviderError> {
-        if STANDIN_FAILS.load(Ordering::SeqCst) {
+        if is_down(&request.label) {
             return Err(canoa::store::recipe::internal_error("the stand-in is down"));
         }
         Ok(if request.kind == "skills" {
