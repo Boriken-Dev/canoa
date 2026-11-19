@@ -374,7 +374,13 @@ accounts = ["work", "personal"] # a session runs on the first unless its client 
 harness = "claude"
 kind = "claude-login"
 id = "0b7d3c1e-5a52-4f0e-9d0f-6c1f5d5b8e21"
+
+[host.pools.logins]             # accounts that provide one credential standard, chosen as one
+standard = "claude-code"
+accounts = ["local", "work"]
 ```
+
+A session runs on one account, with a model that account lists, or on a pool: a named set of accounts that provide the same standard (the kind of credential: a Claude Code login, an Anthropic API key, an OpenAI API key, whatever the providers name). The Accounts section makes, edits and removes pools: pick the standard and it offers every account that provides it. Canoa also makes an `any-<standard>` pool for each standard an account provides, holding all of them, which follows the accounts as they are added and removed and is written nowhere. An entry offers a pool by naming it among its `accounts`. A pool takes each new session on the next of its accounts that lists the model and has usage left, in turn; a session keeps its account while its prompt cache is warm, moves to the next account when the cache has lapsed or when its account has run out (the conversation goes with it, and the chat says which account and why), and a turn that no account of the pool can take is refused with the time the soonest allowance refills. A session on one account is never moved: when that account runs out, the chat offers the move.
 
 ```sh
 canoa accounts add work --harness claude --method subscription   # signs in; asks for the code the page shows, with no echo
