@@ -21,8 +21,8 @@ use canoa::store::{
     MANAGER_UNKNOWN, Platform, Serves, StoreInfo, Updatable,
 };
 use canoa::vendor::{
-    AccessTarget, AgentVendor, DeliveredFile, GatewayRoute, ModeTitle, ShellAdvice, ShellRequest,
-    StandardTitle, Variable, VendorInfo,
+    AccessTarget, AgentVendor, DeliveredFile, EntrySettingsRequest, GatewayRoute, ModeTitle,
+    ShellAdvice, ShellRequest, StandardTitle, Variable, VendorInfo,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, Value};
@@ -103,6 +103,24 @@ impl AgentVendor for PiVendor {
     fn gateway_files(&self, address: String) -> Result<Vec<DeliveredFile>, ProviderError> {
         let text = serde_json::json!({"providers": {"openai": {"baseUrl": address}}}).to_string();
         Ok(vec![DeliveredFile::new("models.json", text)])
+    }
+
+    /// A managed copy runs as its Node and script, and the person's protected list, when there is one, replaces the provider's
+    /// recommended places a session may not read or change (absent, those stay: nothing was said).
+    fn entry_settings(
+        &self,
+        request: EntrySettingsRequest,
+    ) -> Result<Option<String>, ProviderError> {
+        let mut settings = serde_json::Map::new();
+        for key in ["node", "script"] {
+            if let Some(held) = request.managed.iter().find(|each| each.name == key) {
+                settings.insert(key.to_owned(), held.value.clone().into());
+            }
+        }
+        if let Some(protected) = request.protected {
+            settings.insert("protected".to_owned(), protected.into());
+        }
+        Ok((!settings.is_empty()).then(|| serde_json::Value::Object(settings).to_string()))
     }
 
     fn mcp_not_taken(&self) -> Result<Option<String>, ProviderError> {
@@ -381,6 +399,33 @@ mod tests {
         assert_eq!(
             file["providers"]["openai"]["baseUrl"],
             "http://127.0.0.1:1/v1"
+        );
+    }
+
+    #[test]
+    fn a_managed_copy_runs_as_its_node_and_script_and_the_protected_list_replaces_the_recommended_one()
+     {
+        let said = |request: EntrySettingsRequest| {
+            PiVendor
+                .entry_settings(request)
+                .expect("answers")
+                .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("JSON"))
+        };
+        assert_eq!(said(EntrySettingsRequest::new()), None);
+        let mut request = EntrySettingsRequest::new();
+        request.managed = vec![
+            Variable::new("node", "/p/node"),
+            Variable::new("script", "/p/cli.js"),
+        ];
+        assert_eq!(
+            said(request.clone()),
+            Some(serde_json::json!({"node": "/p/node", "script": "/p/cli.js"}))
+        );
+        request.managed.clear();
+        request.protected = Some(vec!["~/.ssh".to_owned()]);
+        assert_eq!(
+            said(request),
+            Some(serde_json::json!({"protected": ["~/.ssh"]}))
         );
     }
 

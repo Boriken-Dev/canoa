@@ -451,7 +451,7 @@ class StoreExtension(KindProtocol, Protocol, kind="store_extension", floor_hash=
         ...
 
 
-class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=3218056832):
+class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=1928350951):
     """Describes an agent, and answers what Canoa does for it beyond its description. `describe` is the same answer on every call, with
     nothing run and no connection opened; every other method has a default that says the agent has nothing to add.
     """
@@ -539,6 +539,13 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=321805
     def gateway_files(self, address: Ref) -> ValueAnswer:
         """The files the agent reads from its own folder to use a gateway at `address` (what [`GatewayRoute::address`] leaves out, and what
         a gateway cannot serve turned off). The default: none.
+        """
+        ...
+
+    @fallible
+    def entry_settings(self, request: Ref) -> ValueAnswer:
+        """The settings of the agent's own harness provider that the host's source for it is started with, as a JSON object (a managed
+        copy's program, the person's protected places), or `None` when there are none to add. The default: none.
         """
         ...
 

@@ -690,6 +690,36 @@ impl GatewayRoute {
     }
 }
 
+/// What the host knows that an agent's entry settings may depend on.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct EntrySettingsRequest {
+    /// The launch settings of the copy of the agent the Store installed, each a name and its text; empty when there is none. A setting
+    /// that is an absolute path names a file inside that copy.
+    #[map(default)]
+    pub managed: Vec<Variable>,
+    /// The places the person's configuration says a session may not read or change, when it says any; absent when it says nothing.
+    pub protected: Option<Vec<String>>,
+}
+
+impl EntrySettingsRequest {
+    /// A request with no managed copy and nothing said of protected places.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            managed: Vec::new(),
+            protected: None,
+        }
+    }
+}
+
+impl Default for EntrySettingsRequest {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// What a shell is said to do for an agent that has no word of its own.
 pub const NO_SHELL_SETTING: &str = "this agent documents no setting for its shell";
 
@@ -786,6 +816,16 @@ pub trait AgentVendor: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// The settings of the agent's own harness provider that the host's source for it is started with, as a JSON object (a managed
+    /// copy's program, the person's protected places), or `None` when there are none to add. The default: none.
+    fn entry_settings(
+        &self,
+        request: EntrySettingsRequest,
+    ) -> Result<Option<String>, ProviderError> {
+        drop(request);
+        Ok(None)
+    }
+
     /// The table of words that says what became of the access a profile sets, for the agent the host starts or serves; `None` for an
     /// agent no table covers, which is started as its entry says. The default: none.
     fn access_target(&self) -> Result<Option<AccessTarget>, ProviderError> {
@@ -849,6 +889,12 @@ mod tests {
             None
         );
         assert_eq!(plain.access_target().expect("answers"), None);
+        assert_eq!(
+            plain
+                .entry_settings(EntrySettingsRequest::new())
+                .expect("answers"),
+            None
+        );
         assert_eq!(plain.gateway_route().expect("answers"), None);
         assert_eq!(
             plain.gateway_files("http://x".to_owned()).expect("answers"),

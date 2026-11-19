@@ -19,11 +19,11 @@ pub(crate) struct Source {
     pub(crate) missing: Vec<String>,
 }
 
-/// A managed Pi: a Node and Pi's CLI script, which the Store's Pi extension installed and its launch names.
+/// A copy of an agent the Store installed, as its launch records it: each setting of the launch that is text. A setting that is an
+/// absolute path names a file inside the copy.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ManagedPi {
-    pub(crate) node: PathBuf,
-    pub(crate) script: PathBuf,
+pub(crate) struct ManagedCopy {
+    pub(crate) settings: Vec<(String, String)>,
 }
 
 /// The presets of the bundled agents, in the order they are offered.
@@ -49,29 +49,30 @@ pub(crate) fn entries(config: &Config) -> Vec<Source> {
     )
 }
 
-/// The copy of `program` that `shelf` manages, as a Node and a script, when `current.json` is the one this host wrote, every file
-/// of the copy is as it was installed and both lie inside the copy.
-fn managed_in(shelf: &Shelf, program: &str) -> Option<ManagedPi> {
+/// The copy of `program` that `shelf` manages, as the text settings of its launch, when `current.json` is the one this host wrote, every
+/// file of the copy is as it was installed and each setting that is an absolute path is a file inside the copy.
+fn managed_in(shelf: &Shelf, program: &str) -> Option<ManagedCopy> {
     let dir = shelf.program(program).ok()?;
     let current = dir.current_checked().ok()??;
     dir.verify(&current).ok()?;
-    let setting = |key: &str| {
-        current
-            .launch
-            .settings
-            .get(key)
-            .and_then(serde_json::Value::as_str)
-            .map(PathBuf::from)
-    };
-    let (node, script) = (setting("node")?, setting("script")?);
+    let held = &current.launch.settings;
     let inside = |path: &Path| {
-        path.is_absolute()
-            && path.is_file()
+        path.is_file()
             && canoa::store::exec::normalize(path)
                 .zip(canoa::store::exec::normalize(Path::new(&current.dir)))
                 .is_some_and(|(path, root)| path.starts_with(root))
     };
-    (inside(&node) && inside(&script)).then_some(ManagedPi { node, script })
+    let mut settings = Vec::new();
+    for (name, value) in held.as_object()? {
+        let Some(text) = value.as_str() else {
+            continue;
+        };
+        if Path::new(text).is_absolute() && !inside(Path::new(text)) {
+            return None;
+        }
+        settings.push((name.clone(), text.to_owned()));
+    }
+    (!settings.is_empty()).then_some(ManagedCopy { settings })
 }
 
 /// The program the Store installed under the name `program` on `shelf`, to run in place of one found on the computer: the copy's
@@ -169,7 +170,7 @@ pub(crate) fn managed_program(program: &str) -> Option<(PathBuf, Vec<(String, St
 fn sources_in(
     config: &Config,
     find: &dyn Fn(&str, &[&str]) -> Option<PathBuf>,
-    managed: &dyn Fn(&str) -> Option<ManagedPi>,
+    managed: &dyn Fn(&str) -> Option<ManagedCopy>,
 ) -> Vec<Source> {
     // The person's own commands come after the built-in ones, and take a built-in's name from it.
     let mut own: Vec<Source> = config
@@ -242,7 +243,7 @@ fn sources_in(
 fn entry_of(
     preset: &Preset,
     found: Option<&Path>,
-    managed: Option<&ManagedPi>,
+    managed: Option<&ManagedCopy>,
     config: &Config,
 ) -> Option<Entry> {
     let quoted = |text: &str| serde_json::to_string(text).unwrap_or_default();
@@ -260,9 +261,12 @@ fn entry_of(
         if found.is_some() {
             text.push_str(&format!("executable = {}\n", quoted(&program)));
         }
-        if harness == "pi" {
-            text.push_str(&pi_settings(managed, config.protected_paths.as_deref()));
-        }
+        text.push_str(&entry_settings(
+            preset.name,
+            harness,
+            managed,
+            config.protected_paths.as_deref(),
+        ));
     } else {
         let args: Vec<String> = preset.args.iter().map(|arg| quoted(arg)).collect();
         text.push_str(&format!(
@@ -288,25 +292,39 @@ fn entry_of(
     }
 }
 
-/// Pi's provider settings for the source: a managed copy runs as its Node and script, and the person's `[permissions]
-/// protected` list, when canoa.cfg has one, replaces the provider's recommended places a session may not read or change
-/// (absent, those stay: nothing was said).
-fn pi_settings(managed: Option<&ManagedPi>, protected: Option<&[String]>) -> String {
-    let quoted = |text: &str| serde_json::to_string(text).unwrap_or_default();
-    let mut text = String::new();
-    if managed.is_some() || protected.is_some() {
-        text.push_str("[host.agents.Pi.settings]\n");
-    }
+/// The settings of the agent `harness`'s provider that its source `name` is started with, as the agent's description says: a managed
+/// copy's launch and the person's `[permissions] protected` list are what it may answer from.
+fn entry_settings(
+    name: &str,
+    harness: &str,
+    managed: Option<&ManagedCopy>,
+    protected: Option<&[String]>,
+) -> String {
+    let mut request = canoa::vendor::EntrySettingsRequest::new();
     if let Some(managed) = managed {
-        text.push_str(&format!(
-            "node = {}\nscript = {}\n",
-            quoted(&managed.node.to_string_lossy()),
-            quoted(&managed.script.to_string_lossy())
-        ));
+        request.managed = managed
+            .settings
+            .iter()
+            .map(|(name, value)| canoa::vendor::Variable::new(name.clone(), value.clone()))
+            .collect();
     }
-    if let Some(lines) = protected {
-        let lines: Vec<String> = lines.iter().map(|line| quoted(line)).collect();
-        text.push_str(&format!("protected = [{}]\n", lines.join(", ")));
+    request.protected = protected.map(<[String]>::to_vec);
+    let said = crate::vendors::behave(harness, |vendor| vendor.entry_settings(request))
+        .and_then(Result::ok)
+        .flatten()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+    let Some(serde_json::Value::Object(settings)) = said else {
+        return String::new();
+    };
+    let quoted = |text: &str| serde_json::to_string(text).unwrap_or_default();
+    let mut text = format!("[host.agents.{name}.settings]\n");
+    for (key, value) in settings {
+        if !value.is_object() && !value.is_null() {
+            text.push_str(&format!("{} = {value}\n", quoted(&key)));
+        }
+    }
+    if text.lines().count() == 1 {
+        return String::new();
     }
     text
 }
@@ -597,9 +615,11 @@ mod tests {
 
     #[test]
     fn a_managed_pi_runs_as_its_node_and_script_and_no_program_is_looked_for() {
-        let copy = ManagedPi {
-            node: PathBuf::from("/data/pi/node/bin/node"),
-            script: PathBuf::from("/data/pi/cli.js"),
+        let copy = ManagedCopy {
+            settings: vec![
+                ("node".to_owned(), "/data/pi/node/bin/node".to_owned()),
+                ("script".to_owned(), "/data/pi/cli.js".to_owned()),
+            ],
         };
         let sources = sources_in(&nothing_found(), &|_, _| None, &|program| {
             (program == "pi").then(|| copy.clone())
@@ -776,8 +796,14 @@ mod tests {
         let root = scratch("managed-pi");
         let (shelf, script) = shelf_with_pi(&root);
         let copy = managed_in(&shelf, "pi").expect("a managed Pi");
-        assert_eq!(copy.script, script);
-        assert!(copy.node.ends_with("node.bin"));
+        let setting = |key: &str| {
+            copy.settings
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| PathBuf::from(value))
+        };
+        assert_eq!(setting("script"), Some(script.clone()));
+        assert!(setting("node").is_some_and(|node| node.ends_with("node.bin")));
         assert_eq!(
             managed_in(&shelf, "grok"),
             None,

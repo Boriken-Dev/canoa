@@ -817,5 +817,45 @@
       "kind",
       "credential"
     ]
+  },
+  "EntrySettingsRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "managed": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Its name."
+            },
+            "value": {
+              "type": "string",
+              "description": "Its value."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "value"
+          ]
+        },
+        "description": "The launch settings of the copy of the agent the Store installed, each a name and its text; empty when there is none. A setting that is an absolute path names a file inside that copy.",
+        "default": []
+      },
+      "protected": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "type": "string"
+        },
+        "description": "The places the person's configuration says a session may not read or change, when it says any; absent when it says nothing."
+      }
+    },
+    "additionalProperties": false
   }
 }

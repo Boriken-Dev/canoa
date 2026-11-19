@@ -709,6 +709,11 @@ export interface AgentVendor {
    */
   gatewayFiles?(address: g.Ref): unknown;
   /**
+   * The settings of the agent's own harness provider that the host's source for it is started with, as a JSON object (a managed
+   * copy's program, the person's protected places), or `None` when there are none to add. The default: none.
+   */
+  entrySettings?(request: g.Ref): unknown;
+  /**
    * The table of words that says what became of the access a profile sets, for the agent the host starts or serves; `None` for an
    * agent no table covers, which is started as its entry says. The default: none.
    */
@@ -808,6 +813,13 @@ export interface AgentVendorRemote extends k.RemoteBase<typeof AgentVendor> {
    * Throws `Unsupported` when the table lacks it: `has()` asks first.
    */
   gatewayFiles(address: unknown): g.Value;
+  /**
+   * The settings of the agent's own harness provider that the host's source for it is started with, as a JSON object (a managed
+   * copy's program, the person's protected places), or `None` when there are none to add. The default: none.
+   *
+   * Throws `Unsupported` when the table lacks it: `has()` asks first.
+   */
+  entrySettings(request: unknown): g.Value;
   /**
    * The table of words that says what became of the access a profile sets, for the agent the host starts or serves; `None` for an
    * agent no table covers, which is started as its entry says. The default: none.
