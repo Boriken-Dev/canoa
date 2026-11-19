@@ -248,6 +248,21 @@ fn dropping_the_session_network_stops_its_proxy() {
     assert!(TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err());
 }
 
+/// Another process holds a copy of the listening descriptor for a moment when a thread forks (until its `exec`), so the proxy
+/// has to stop listening whoever else still holds the socket.
+#[cfg(unix)]
+#[test]
+fn a_proxy_stops_listening_while_another_holder_still_has_its_socket() {
+    let world = world("session-held", &["downloads.example.test"], b"x");
+    let proxy =
+        Middleman::start(through(&world), BypassRules::none(), TOKEN, None).expect("starts");
+    let addr = proxy.addr;
+    let copy = proxy.listener.try_clone().expect("another holder");
+    drop(proxy);
+    assert!(TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err());
+    drop(copy);
+}
+
 fn effect(mode: &str) -> NetworkEffect {
     NetworkEffect::new(mode)
 }

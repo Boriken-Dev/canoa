@@ -608,6 +608,10 @@ pub(crate) struct Middleman {
     stop: Arc<AtomicBool>,
     clients: Arc<Mutex<Vec<Arc<TcpStream>>>>,
     thread: Option<JoinHandle<()>>,
+    /// A second handle on the listening socket: shutting it down ends the listening for every copy of the descriptor, including
+    /// one a thread's `fork` holds until its `exec` closes it, which closing the accept loop's own handle would not.
+    #[cfg(unix)]
+    listener: TcpListener,
 }
 
 struct Shared {
@@ -630,6 +634,8 @@ impl Middleman {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let addr = listener.local_addr()?;
         listener.set_nonblocking(true)?;
+        #[cfg(unix)]
+        let held = listener.try_clone()?;
         let shared = Arc::new(Shared {
             network,
             bypass,
@@ -675,6 +681,8 @@ impl Middleman {
             stop,
             clients,
             thread: Some(thread),
+            #[cfg(unix)]
+            listener: held,
         })
     }
 }
@@ -682,6 +690,9 @@ impl Middleman {
 impl Drop for Middleman {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
+        // A listening socket that is not shut down keeps accepting connections while any process holds a copy of it.
+        #[cfg(unix)]
+        let _ = rustix::net::shutdown(&self.listener, rustix::net::Shutdown::Both);
         for client in self
             .clients
             .lock()
