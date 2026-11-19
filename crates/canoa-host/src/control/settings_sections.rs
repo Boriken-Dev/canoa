@@ -250,7 +250,7 @@ pub(crate) fn set(
     if let Some(unknown) = values.keys().find(|key| !members.contains(*key)) {
         return Err(bad(&format!("{unknown} is not a setting of {id}")));
     }
-    values.retain(|key, value| !(secrets.contains(key) && !filled(value)));
+    values.retain(|key, value| !secrets.contains(key) || filled(value));
     let stored = section.info().stored;
     if stored == Stored::Config && !secrets.is_empty() {
         // What an earlier host kept in the file is moved first, so replacing the section's table never drops it.
