@@ -68,7 +68,7 @@ void main() {
     await expectLater(channel.send('after'), throwsA(isA<TransportUnavailable>()));
   });
 
-  SealedChannel closing(Wire wire) => SealedChannel(
+  SealedChannel closing(ByteWebChannel wire) => SealedChannel(
     wire,
     seal: (message) async => message,
     open: (record) async => record.isEmpty ? null : record,
@@ -124,6 +124,41 @@ void main() {
     await expectLater(initialized, throwsA(anything));
     await Future<void>.delayed(const Duration(milliseconds: 20));
   });
+
+  // The host ending under a link the page still holds, as the page lets that link go: the cancel is the reader's, and the end of the
+  // connection is not an error of it, whether or not the cancel is awaited.
+  for (final staged in [true, false]) {
+    final source = staged ? 'a staged connection' : 'a connection';
+    for (final order in ['the end first', 'the cancel first']) {
+      test('$source that ends as its reader cancels ($order) tells that reader no error, awaited or not', () async {
+        final uncaught = <Object>[];
+        await runZonedGuarded(() async {
+          for (final awaited in [true, false]) {
+            final wire = Wire();
+            final channel = closing(staged ? (StagedChannel(wire)..allowApplicationMessages()) : wire);
+            final heard = <Object>[];
+            final subscription = channel.messages.listen((_) {}, onError: heard.add);
+            await Future<void>.delayed(Duration.zero);
+            final Future<void> cancelling;
+            if (order == 'the end first') {
+              unawaited(wire.incoming.close());
+              cancelling = subscription.cancel();
+            } else {
+              cancelling = subscription.cancel();
+              unawaited(wire.incoming.close());
+            }
+            try {
+              if (awaited) await cancelling;
+            } on Object catch (error) {
+              uncaught.add(error);
+            }
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+          }
+        }, (error, stack) => uncaught.add(error));
+        expect(uncaught, isEmpty);
+      });
+    }
+  }
 
   test('closing sends the close record after what was queued', () async {
     final wire = Wire();

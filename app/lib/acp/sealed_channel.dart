@@ -30,8 +30,30 @@ final class SealedChannel implements WebChannel {
   @override
   WebChannelKind get kind => _source.kind;
 
+  /// The messages, ending with an error when the connection is cut. A reader that cancels as the connection ends is told no error:
+  /// there is no one left to tell, and an error handed to its cancel would be uncaught wherever the cancel is not awaited.
   @override
-  Stream<String> get messages async* {
+  Stream<String> get messages {
+    late final StreamController<String> out;
+    StreamSubscription<String>? reading;
+    out = StreamController<String>(
+      onListen: () {
+        final subscription = reading = _read().listen(out.add, onError: out.addError, onDone: out.close);
+        out.onPause = subscription.pause;
+        out.onResume = subscription.resume;
+      },
+      onCancel: () async {
+        try {
+          await reading?.cancel();
+        } on Object {
+          // The end of the connection, which the reader no longer hears.
+        }
+      },
+    );
+    return out.stream;
+  }
+
+  Stream<String> _read() async* {
     try {
       await for (final record in _source.bytes) {
         final Uint8List? opened;

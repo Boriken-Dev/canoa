@@ -341,15 +341,8 @@ team = ${jsonEncode('$catalog@main#extensions.toml')}
           reason: 'a supervised host restarts when asked',
         );
         await tester.runAsync(remote.supervise);
-        // The link ends with the host, which the transport reports once as an error of that link; the page's next request dials
-        // the host again and finds it up.
+        // The link ends with the host, which the page takes as a closed link; its next request dials the host again and finds it up.
         await settle(tester);
-        final ended = tester.takeException();
-        expect(
-          ended == null || '$ended'.contains('Transport disconnected'),
-          isTrue,
-          reason: '$ended',
-        );
         await tester.runAsync(() => HostFiles(remoteControl).awaitHost());
         final again = control(remote);
         final after = StoreExtensions(
