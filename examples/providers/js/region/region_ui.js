@@ -4,7 +4,13 @@
 import { LogPanelTab } from '../../../../bindings/js/canoa-sdk/src/panel.js';
 import { EnvProfileItem } from '../../../../bindings/js/canoa-sdk/src/profile.js';
 import { SettingsSection } from '../../../../bindings/js/canoa-sdk/src/section.js';
-import { CatalogSource, fieldsOf, release } from '../../../../bindings/js/canoa-sdk/src/source.js';
+import {
+  CatalogSource,
+  CommandCatalogSource,
+  ReadCatalogSource,
+  fieldsOf,
+  release,
+} from '../../../../bindings/js/canoa-sdk/src/source.js';
 
 const REGION_VALUES = {
   type: 'object',
@@ -46,6 +52,18 @@ export class TeamSource extends CatalogSource {
     const { team } = fieldsOf(request);
     return JSON.stringify({ skills: [{ name: `from-${team}`, description: 'Listed by a script.', source: 'owner/repo' }] });
   }
+}
+
+/** The SDK's command source under an id of its own: the program a catalog names runs through the host's spawner. */
+export class EchoCommand extends CommandCatalogSource {
+  static source = 'echo_command';
+  static title = 'Echo a program';
+}
+
+/** The SDK's read source under an id of its own: the file a catalog names is read through the host's spawner. */
+export class EchoRead extends ReadCatalogSource {
+  static source = 'echo_read';
+  static title = 'Echo a file';
 }
 
 /** A page of Settings whose values the host keeps in canoa.cfg. */

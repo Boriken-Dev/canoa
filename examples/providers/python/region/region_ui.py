@@ -9,10 +9,20 @@ import json
 from dataclasses import dataclass, field
 from typing import Annotated, List
 
-from canoa_sdk import CatalogSource, EnvProfileItem, LogPanelTab, SettingsSection, fields_of, section, ui
+from canoa_sdk import (
+    CatalogSource,
+    CommandCatalogSource,
+    EnvProfileItem,
+    LogPanelTab,
+    ReadCatalogSource,
+    SettingsSection,
+    fields_of,
+    section,
+    ui,
+)
 
 __version__ = "1.0.0"
-__all__ = ["BuildsTab", "RegionItem", "RegionSection", "TeamSource"]
+__all__ = ["BuildsTab", "EchoCommand", "EchoRead", "RegionItem", "RegionSection", "TeamSource"]
 
 
 @dataclass
@@ -53,6 +63,20 @@ class TeamSource(CatalogSource):
         spawner.destroy()
         team = fields_of(request)["team"]
         return json.dumps({"skills": [{"name": f"from-{team}", "description": "Listed by a script.", "source": "owner/repo"}]})
+
+
+class EchoCommand(CommandCatalogSource):
+    """The SDK's command source under an id of its own: the program a catalog names runs through the host's spawner."""
+
+    source = "echo_command"
+    title = "Echo a program"
+
+
+class EchoRead(ReadCatalogSource):
+    """The SDK's read source under an id of its own: the file a catalog names is read through the host's spawner."""
+
+    source = "echo_read"
+    title = "Echo a file"
 
 
 class RegionSection(SettingsSection):

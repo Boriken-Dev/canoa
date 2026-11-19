@@ -1,6 +1,6 @@
 //! Providers written with the Canoa SDK in Python and in JavaScript, loaded by the host from the examples under `examples/providers`
 //! through Guatiao's sources: an `agent_vendor` the host lists as an agent, a `store_extension` that adds a Store type, and one
-//! library that serves a `profile_item`, a `settings_section` and a `panel_tab` the host lists. Each
+//! library that serves a `profile_item`, a `settings_section`, a `panel_tab` and `catalog_source`s the host lists and reads. Each
 //! language builds its source from Cargo's checkout of Guatiao at the workspace's revision: Python against the interpreter
 //! `CANOA_TEST_PYTHON` names (a Python 3.9 or later with its shared library), JavaScript with a C compiler for QuickJS
 //! (`CANOA_TEST_JS` set to anything). Without a variable its test is ignored, and a run counts it as not run.
@@ -141,10 +141,24 @@ mod with_source {
     pub fn config(source: &Path, provider: &str, settings: &str) -> String {
         // The host serves at least one entry; this agent is the one other tests use.
         let agent = example("stdio_agent", false);
+        let listing = repository().join("examples/providers/team_skills.json");
+        // A program that prints the listing, on each platform's own tool.
+        let shown = quoted(&listing.to_string_lossy());
+        #[cfg(windows)]
+        let echo = format!(
+            "[\"cmd\", \"/C\", \"type\", {}]",
+            // `type` reads a `/` as the start of an option.
+            quoted(&listing.to_string_lossy().replace('/', "\\"))
+        );
+        #[cfg(not(windows))]
+        let echo = format!("[\"cat\", {shown}]");
         format!(
             "[host.agents.Probe]\nprogram = {}\nargs = [\"--scripted\"]\n\n\
              [host.extensions.examples]\nsource = {}\nprovider = {}\n\
-             [host.extensions.examples.source_settings]\n{settings}",
+             [host.extensions.examples.source_settings]\n{settings}\n\
+             [store.skills.catalogs.mine]\nprovider = \"team\"\nteam = \"core\"\n\n\
+             [store.skills.catalogs.echoed]\nprovider = \"echo_command\"\ncommand = {echo}\n\n\
+             [store.skills.catalogs.filed]\nprovider = \"echo_read\"\nsource = {shown}\n",
             quoted(&agent.to_string_lossy()),
             quoted(&source.to_string_lossy()),
             quoted(provider),
@@ -232,6 +246,27 @@ mod with_source {
         )
         .expect("the tail");
         assert_eq!(tail["text"], "build 42 failed\n");
+        // The sources the library offers answer a Skills catalog: its own, then the SDK's command and read sources, which run a
+        // program and read a file through the spawner the host hands them.
+        let skills = |id: u64, label: &str| {
+            let (listed, _) = ask(
+                &link,
+                id,
+                "store/catalog",
+                json!({"type": "skills", "label": label}),
+            )
+            .unwrap_or_else(|why| panic!("{label}: {why}"));
+            listed
+        };
+        let mine = skills(7, "mine");
+        assert_eq!(mine["provider"], "team", "{mine}");
+        assert_eq!(mine["skills"][0]["name"], "from-core", "{mine}");
+        let echoed = skills(8, "echoed");
+        assert_eq!(echoed["provider"], "echo_command", "{echoed}");
+        assert_eq!(echoed["skills"][0]["name"], "from-file", "{echoed}");
+        let filed = skills(9, "filed");
+        assert_eq!(filed["provider"], "echo_read", "{filed}");
+        assert_eq!(filed["skills"][0]["name"], "from-file", "{filed}");
         drop(link);
         hosted.stop();
     }
@@ -247,7 +282,7 @@ mod python {
     const PROBE: &str = "import sys; print(sys.executable); print(sys.base_prefix)";
 
     #[test]
-    fn a_vendor_and_a_store_extension_written_with_the_python_sdk_are_offered_by_the_host() {
+    fn a_library_of_providers_written_with_the_python_sdk_is_offered_and_its_sources_answer_a_catalog() {
         let named = env!("CANOA_TEST_PYTHON");
         let output = Command::new(named)
             .args(["-I", "-c", PROBE])
@@ -286,7 +321,7 @@ mod javascript {
     use super::with_source::{build_source, check, config, list, repository};
 
     #[test]
-    fn a_vendor_and_a_store_extension_written_with_the_javascript_sdk_are_offered_by_the_host() {
+    fn a_library_of_providers_written_with_the_javascript_sdk_is_offered_and_its_sources_answer_a_catalog() {
         let source = build_source("guatiao-source-js", "guatiao_source_js", &[]);
         let examples = repository().join("examples/providers/js");
         let settings = format!(
