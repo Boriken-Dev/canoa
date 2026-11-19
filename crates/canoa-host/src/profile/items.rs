@@ -13,7 +13,7 @@
 )]
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use canoa::profile_item::{
     ApplyRequest, ItemEffect, ItemInfo, NetworkEffect, ProfileItem, Setting, Variable,
@@ -305,10 +305,17 @@ impl Listed {
 }
 
 impl ItemCatalog {
-    /// The built-in and the bundled items alone.
+    /// The built-in and the bundled items alone, made once for each place the bundled files are kept.
     pub(crate) fn built_in() -> Arc<Self> {
-        static KEPT: OnceLock<Arc<ItemCatalog>> = OnceLock::new();
-        Arc::clone(KEPT.get_or_init(|| Arc::new(Self::from_registries(Vec::new()))))
+        static KEPT: Mutex<Vec<(std::path::PathBuf, Arc<ItemCatalog>)>> = Mutex::new(Vec::new());
+        let home = crate::scripts::root();
+        let mut kept = KEPT.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((_, made)) = kept.iter().find(|(place, _)| *place == home) {
+            return Arc::clone(made);
+        }
+        let made = Arc::new(Self::from_registries(Vec::new()));
+        kept.push((home, Arc::clone(&made)));
+        made
     }
 
     /// The built-in and the bundled items, then those `registries` offer, each registry as its origin names it. An item whose id an

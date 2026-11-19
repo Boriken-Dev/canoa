@@ -10,7 +10,7 @@
     reason = "files and processes are std's"
 )]
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use canoa::store::source::{CatalogSourceProvider, KIND, ReadRequest, SourceInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
@@ -161,12 +161,18 @@ impl core::fmt::Debug for Sources {
 }
 
 impl Sources {
-    /// The providers that ship with this host: scripts it carries, found like any extension's. The registry is made once.
+    /// The providers that ship with this host: scripts it carries, found like any extension's. The registry is made once for each
+    /// place the bundled files are kept.
     pub(crate) fn built_in() -> Self {
-        static MADE: OnceLock<Sources> = OnceLock::new();
-        MADE.get_or_init(|| {
+        static MADE: Mutex<Vec<(std::path::PathBuf, Sources)>> = Mutex::new(Vec::new());
+        let home = crate::scripts::root();
+        let mut made = MADE.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((_, sources)) = made.iter().find(|(place, _)| *place == home) {
+            return sources.clone();
+        }
+        let sources = {
             let mut sources = Self::default();
-            match BUNDLE.registry(&crate::scripts::root()) {
+            match BUNDLE.registry(&home) {
                 Ok(registry) => {
                     if let Err(why) = sources.add(None, Arc::new(registry)) {
                         tracing::warn!("the built-in catalog sources were refused: {why}");
@@ -175,8 +181,9 @@ impl Sources {
                 Err(why) => tracing::warn!("the built-in catalog sources are not offered: {why}"),
             }
             sources
-        })
-        .clone()
+        };
+        made.push((home, sources.clone()));
+        sources
     }
 
     /// Takes every `catalog_source` provider of `registry`, brought by the extension `extension` or built in. Nothing is taken

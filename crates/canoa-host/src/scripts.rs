@@ -26,8 +26,25 @@ pub(crate) struct Bundle {
     pub(crate) files: &'static [(&'static str, &'static str)],
 }
 
-/// Where bundled files are kept when the caller names no home: this user's own, which no other user can write.
+static ROOT: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Keeps the bundled files in `home` from now on, as the host that serves `home` does, so a host started on a home of its own writes
+/// nothing to another's.
+pub(crate) fn use_home(home: &Path) {
+    *ROOT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(home.to_path_buf());
+}
+
+/// Where bundled files are kept: the home of the host being served, else this user's own, which no other user can write.
 pub(crate) fn root() -> PathBuf {
+    if let Some(home) = ROOT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+    {
+        return home;
+    }
     // A test of this crate keeps them in the temporary folder, never in the person's own home.
     #[cfg(test)]
     {

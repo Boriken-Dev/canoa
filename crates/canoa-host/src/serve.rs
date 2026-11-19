@@ -1377,6 +1377,10 @@ impl Serving {
             }
             None => config,
         };
+        // The scripts that ship in this host are kept in its home.
+        if let Some(home) = &options.state_dir {
+            crate::scripts::use_home(home);
+        }
         // The items a profile may set: the ones this host carries and those its entries' and extensions' libraries add.
         let items = crate::profile::ItemSet::of(config);
         let mut sources = if options.local_sources {
