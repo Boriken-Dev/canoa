@@ -18,6 +18,7 @@ mod gateway;
 pub mod harness;
 mod history;
 pub mod home;
+pub mod host_log;
 mod inproc;
 mod kb_mcp;
 mod kind;
@@ -29,6 +30,7 @@ pub mod native;
 mod network;
 pub mod options;
 mod pair_run;
+mod panel_tabs;
 pub mod peers;
 pub mod pipe;
 #[cfg(all(unix, feature = "portal"))]

@@ -239,7 +239,7 @@ void main() {
       await tester.pump();
       expect(find.text('Open a surface'), findsNothing);
       expect(_key('tab files'), findsOneWidget);
-      expect(find.byTooltip('Open a surface'), findsOneWidget);
+      expect(find.byTooltip('New tab'), findsOneWidget);
       await tester.tap(_key('panel-add'));
       await tester.pumpAndSettle();
       await tester.tap(_key('open terminal'));
@@ -250,7 +250,9 @@ void main() {
 
     testWidgets('switching tabs keeps every surface as it was, and closing one ends it', (tester) async {
       final rig = await _show(tester, _both);
-      rig.layout.setRightOpen(true);
+      rig.layout
+        ..setRightOpen(true)
+        ..setRightWidth(520);
       final mine = rig.surfaces.of(rig.first.id)
         ..openSurface(_both[0])
         ..openSurface(_both[1], SurfaceSlot.right);

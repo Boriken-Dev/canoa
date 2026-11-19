@@ -94,7 +94,7 @@ fn main() -> ExitCode {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     tracing_subscriber::fmt()
         .with_env_filter(filter)
-        .with_writer(std::io::stderr)
+        .with_writer(canoa_host::host_log::Tee)
         .with_ansi(ansi)
         .with_target(false)
         .init();

@@ -25,6 +25,7 @@ const Map<String, IconData> extensionIcons = {
   'folder': Icons.folder_outlined,
   'terminal': Icons.terminal,
   'apps': Icons.apps,
+  'article': Icons.article_outlined,
   'book': Icons.menu_book_outlined,
   'bolt': Icons.bolt,
   'cloud': Icons.cloud_outlined,

@@ -12,7 +12,9 @@ import 'package:canoa/desktop/control_client.dart' show ControlFailed;
 import 'package:canoa/session_store.dart';
 import 'package:canoa/settings/shell_settings.dart' show HostShell;
 import 'package:canoa/shell/layout_state.dart';
+import 'package:canoa/shell/panel_tabs.dart';
 import 'package:canoa/shell/surface.dart';
+import 'package:canoa/shell/work_panel.dart';
 import 'package:canoa/surfaces/terminal_controller.dart';
 import 'package:canoa/surfaces/terminal_surface.dart';
 import 'package:canoa/theme/look.dart';
@@ -62,17 +64,22 @@ final class _Host implements TerminalHost {
   /// A refusal to give instead of a shell.
   String? refuse;
 
+  /// The shells the host lists, and the shell each one opened was asked to run.
+  List<HostShell> listed = const [];
+  final shellsAsked = <String?>[];
+
   @override
   Future<RemoteTerminal> open({String? cwd, String? shell, required int cols, required int rows}) async {
     cwds.add(cwd);
+    shellsAsked.add(shell);
     if (refuse case final why?) throw ControlFailed(-32002, why);
-    final shell = _Shell(cwd ?? '/home');
-    opened.add(shell);
-    return shell;
+    final remote = _Shell(cwd ?? '/home');
+    opened.add(remote);
+    return remote;
   }
 
   @override
-  Future<List<HostShell>> shells() async => const [];
+  Future<List<HostShell>> shells() async => listed;
 }
 
 Finder _key(String name) => find.byKey(ValueKey(name));
@@ -85,6 +92,53 @@ Future<void> _show(WidgetTester tester, Widget child, {Size size = const Size(90
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(MaterialApp(debugShowCheckedModeBanner: false, theme: themeFor(LookId.canoa, Brightness.dark), home: Scaffold(body: child)));
   await tester.pump(const Duration(milliseconds: 50));
+}
+
+/// A bottom panel with the Terminal open in it, as a conversation shows it: the one tab bar, the + menu and the actions menu.
+Future<({WorkSurfaces registry, SessionSurfaces open, TerminalSurface surface})> _panel(
+  WidgetTester tester,
+  _Host host,
+  SessionStore store,
+  ChatSession session, {
+  Size size = const Size(900, 420),
+  void Function(String name, String text)? onAttachText,
+  TerminalSurface? surface,
+}) async {
+  final terminal = surface ?? TerminalSurface((_) => TerminalOnHost(host));
+  final registry = WorkSurfaces([terminal]);
+  addTearDown(registry.dispose);
+  final open = registry.of(session.id)..openSurface(terminal, SurfaceSlot.bottom);
+  addTearDown(() => tester.runAsync(() => Future.wait([for (final each in open.open) each.controller.release()])));
+  final layout = ShellLayout();
+  await _show(
+    tester,
+    SurfaceEnvironment(
+      store: store,
+      onComment: (_) {},
+      onOpenChild: () {},
+      onAttachText: onAttachText,
+      child: WorkPanel(slot: SurfaceSlot.bottom, session: session, surfaces: open, offered: registry.availableFor(session, SurfaceSlot.bottom), layout: layout),
+    ),
+    size: size,
+  );
+  await _settle(tester);
+  return (registry: registry, open: open, surface: terminal);
+}
+
+/// Opens the + menu and gives its entries' keys, then chooses [key].
+Future<void> _addTab(WidgetTester tester, String key) async {
+  await tester.tap(_key('panel-add'));
+  await tester.pumpAndSettle();
+  await tester.tap(_key(key));
+  await _settle(tester);
+}
+
+/// Chooses an entry of the panel's actions menu.
+Future<void> _action(WidgetTester tester, String key) async {
+  await tester.tap(_key('panel-more'));
+  await tester.pumpAndSettle();
+  await tester.tap(_key(key));
+  await tester.pumpAndSettle();
 }
 
 /// Lets the stand-in's futures and streams run, which the test clock does not.
@@ -153,14 +207,9 @@ void main() {
     final store = SessionStore();
     addTearDown(store.dispose);
     final session = _session(store, '/work/app');
-    final surface = TerminalSurface((_) => TerminalOnHost(host));
-    final controller = SurfaceController('terminal');
-    addTearDown(() => tester.runAsync(controller.release));
-    await _show(tester, Builder(builder: (context) => surface.build(context, session, controller)));
-    await _settle(tester);
-    await tester.tap(_key('terminal new'));
-    await _settle(tester);
-    final workspace = surface.workspaceFor(controller, session)!;
+    final shown = await _panel(tester, host, store, session);
+    await _addTab(tester, 'open terminal');
+    final workspace = shown.surface.workspaceFor(shown.open.find('terminal')!.controller, session)!;
     workspace.split(workspace.active!);
     await _settle(tester);
     expect(host.cwds, ['/work/app', '/work/app', '/work/app']);
@@ -208,43 +257,91 @@ void main() {
     expect(host.opened.single.closed, isTrue);
   });
 
-  testWidgets('tabs: a new shell, a split beside one, a rename, and closing ends only that shell', (tester) async {
+  testWidgets('the panel has one tab bar: each shell is a tab in it, with a new shell, a split, a rename, and closing ends only that shell', (tester) async {
     final host = _Host();
     final store = SessionStore();
     addTearDown(store.dispose);
     final session = _session(store, '/work/app');
-    final surface = TerminalSurface((_) => TerminalOnHost(host));
-    final controller = SurfaceController('terminal');
-    addTearDown(() => tester.runAsync(controller.release));
-    await _show(tester, Builder(builder: (context) => surface.build(context, session, controller)));
-    await _settle(tester);
-    final workspace = surface.workspaceFor(controller, session)!;
+    final shown = await _panel(tester, host, store, session);
+    final workspace = shown.surface.workspaceFor(shown.open.find('terminal')!.controller, session)!;
 
-    await tester.tap(_key('terminal new'));
-    await _settle(tester);
+    // The first shell is the panel's tab; there is no tab of "Terminal" with another bar of shells under it.
+    expect(_key('tab terminal:1'), findsOneWidget);
+    expect(_key('tab terminal'), findsNothing);
+    expect(_key('terminal new'), findsNothing, reason: 'the shells have no bar of their own');
+    expect(_key('terminal tab 1'), findsNothing);
+    expect(find.byType(TabBar), findsNothing);
+
+    await _addTab(tester, 'open terminal');
     expect(workspace.tabs.map((tab) => tab.name), ['Shell 1', 'Shell 2']);
     expect(host.opened, hasLength(2));
+    expect(_key('tab terminal:2'), findsOneWidget);
 
-    await tester.tap(_key('terminal split'));
-    await _settle(tester);
+    await _action(tester, 'action terminal split');
     expect(workspace.active!.panes, hasLength(2));
     expect(host.opened, hasLength(3));
-    expect(tester.widget<IconButton>(_key('terminal split')).onPressed, isNull, reason: 'a tab splits in two, no more');
+    await tester.tap(_key('panel-more'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<PopupMenuItem<String>>(_key('action terminal split')).enabled, isFalse, reason: 'a tab splits in two, no more');
+    await tester.tapAt(const Offset(2, 2));
+    await tester.pumpAndSettle();
 
     // The second tab is the one shown, so the menu renames it.
-    await tester.tap(_key('terminal menu'));
-    await tester.pumpAndSettle();
-    await tester.tap(_key('terminal rename'));
-    await tester.pumpAndSettle();
+    await _action(tester, 'action terminal rename');
     await tester.enterText(_key('terminal rename field'), 'Build');
     await tester.tap(_key('terminal rename ok'));
     await tester.pumpAndSettle();
     expect(workspace.tabs.map((tab) => tab.name), ['Shell 1', 'Build']);
+    expect(find.text('Build'), findsOneWidget);
 
-    await tester.tap(_key('terminal close tab 2'));
+    // Choosing the first tab shows its shell; closing the second ends only the shells of that tab.
+    await tester.tap(_key('tab terminal:1'));
+    await tester.pumpAndSettle();
+    expect(workspace.active!.name, 'Shell 1');
+    await tester.tap(_key('tab terminal:2'));
+    await tester.pumpAndSettle();
+    await tester.tap(_key('close terminal:2'));
     await _settle(tester);
     expect(workspace.tabs.map((tab) => tab.name), ['Shell 1']);
     expect(host.opened.map((shell) => shell.closed), [false, true, true], reason: 'both shells of the closed tab ended, the first stayed');
+    expect(_key('tab terminal:2'), findsNothing);
+  });
+
+  testWidgets('the new-tab menu offers Terminal with the host\'s shells, and a kind an extension names a shell for', (tester) async {
+    final host = _Host()
+      ..listed = const [
+        HostShell(id: 'git-bash', label: 'Git Bash', path: '/bin/bash', family: 'bash', origin: 'canoa'),
+        HostShell(id: 'pwsh', label: 'PowerShell 7', path: '/bin/pwsh', family: 'powershell', origin: 'system'),
+      ];
+    final store = SessionStore();
+    addTearDown(store.dispose);
+    final session = _session(store, '/work/app');
+    final surface = TerminalSurface(
+      (_) => TerminalOnHost(host),
+      kinds: () => const [
+        PanelTabKind(id: 'terminal', title: 'Terminal', shows: PanelShows.terminal, origin: 'built-in'),
+        PanelTabKind(id: 'devshell', title: 'Dev shell', shows: PanelShows.terminal, origin: 'builds', shell: 'git-bash'),
+        PanelTabKind(id: 'logs', title: 'Logs', shows: PanelShows.log, origin: 'built-in'),
+      ],
+    );
+    await _panel(tester, host, store, session, surface: surface);
+    await tester.tap(_key('panel-add'));
+    await tester.pumpAndSettle();
+    for (final key in ['open terminal', 'open terminal shell git-bash', 'open terminal shell pwsh', 'open terminal kind devshell']) {
+      expect(_key(key), findsOneWidget, reason: key);
+    }
+    expect(find.textContaining('Terminal: Git Bash', findRichText: true), findsOneWidget);
+    expect(find.textContaining('Dev shell', findRichText: true), findsOneWidget);
+    expect(_key('open terminal kind logs'), findsNothing, reason: 'a log is not a shell');
+
+    await tester.tap(_key('open terminal shell pwsh'));
+    await _settle(tester);
+    await tester.tap(_key('panel-add'));
+    await tester.pumpAndSettle();
+    await tester.tap(_key('open terminal kind devshell'));
+    await _settle(tester);
+    expect(host.shellsAsked, [null, 'pwsh', 'git-bash'], reason: 'the first shell had the host\'s choice, the others the shell each entry names');
+    expect(_key('tab terminal:3'), findsOneWidget);
   });
 
   testWidgets('the selection and the last output go to the message as text files; nothing else does', (tester) async {
@@ -252,37 +349,25 @@ void main() {
     final store = SessionStore();
     addTearDown(store.dispose);
     final session = _session(store, '/work/app');
-    final surface = TerminalSurface((_) => TerminalOnHost(host));
-    final controller = SurfaceController('terminal');
-    addTearDown(() => tester.runAsync(controller.release));
     final attached = <(String, String)>[];
-    await _show(
-      tester,
-      SurfaceEnvironment(
-        store: store,
-        onComment: (_) {},
-        onOpenChild: () {},
-        onAttachText: (name, text) => attached.add((name, text)),
-        child: Builder(builder: (context) => surface.build(context, session, controller)),
-      ),
-    );
-    await _settle(tester);
+    final shown = await _panel(tester, host, store, session, onAttachText: (name, text) => attached.add((name, text)));
     host.opened.single.print('build ok\r\n3 tests passed\r\n');
     await _settle(tester);
 
-    expect(tester.widget<IconButton>(_key('terminal attach selection')).onPressed, isNull, reason: 'nothing is selected');
-    await tester.tap(_key('terminal attach output'));
-    await tester.pump();
+    await tester.tap(_key('panel-more'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<PopupMenuItem<String>>(_key('action terminal attach selection')).enabled, isFalse, reason: 'nothing is selected');
+    await tester.tap(_key('action terminal attach output'));
+    await tester.pumpAndSettle();
     expect(attached, [('terminal output.txt', 'build ok\n3 tests passed')]);
     expect(host.opened.single.writes, isEmpty, reason: 'attaching types nothing into the shell');
 
-    final pane = surface.workspaceFor(controller, session)!.focused!;
+    final pane = shown.surface.workspaceFor(shown.open.find('terminal')!.controller, session)!.focused!;
     final buffer = pane.terminal.buffer;
     pane.view.setSelection(buffer.createAnchor(0, 0), buffer.createAnchor(8, 0));
     await tester.pump();
     expect(pane.selectedText, 'build ok');
-    await tester.tap(_key('terminal attach selection'));
-    await tester.pump();
+    await _action(tester, 'action terminal attach selection');
     expect(attached.last, ('terminal selection.txt', 'build ok'));
   });
 
@@ -366,27 +451,13 @@ void main() {
     expect(other.bottomOpen, isFalse);
   });
 
-  testWidgets('the panel as it is drawn: two tabs, the second split, a prompt in each', (tester) async {
+  testWidgets('the panel as it is drawn: two shells as tabs, the second split, a prompt in each', (tester) async {
     final host = _Host();
     final store = SessionStore();
     addTearDown(store.dispose);
     final session = _session(store, '/work/app');
-    final surface = TerminalSurface((_) => TerminalOnHost(host));
-    final controller = SurfaceController('terminal');
-    addTearDown(() => tester.runAsync(controller.release));
-    await _show(
-      tester,
-      SurfaceEnvironment(
-        store: store,
-        onComment: (_) {},
-        onOpenChild: () {},
-        onAttachText: (_, _) {},
-        child: Builder(builder: (context) => surface.build(context, session, controller)),
-      ),
-      size: const Size(900, 300),
-    );
-    await _settle(tester);
-    final workspace = surface.workspaceFor(controller, session)!;
+    final shown = await _panel(tester, host, store, session, size: const Size(900, 300), onAttachText: (_, _) {});
+    final workspace = shown.surface.workspaceFor(shown.open.find('terminal')!.controller, session)!;
     workspace.newTab();
     await _settle(tester);
     workspace.split(workspace.active!);

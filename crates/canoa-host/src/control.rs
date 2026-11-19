@@ -952,6 +952,14 @@ impl Control {
                         &params,
                     )
                 }),
+            Some("panel_tabs/list") => allow(caller, Grant::ConfigRead)
+                .and_then(|()| self.loaded_config())
+                .map(|config| panel_tabs::list(&crate::panel_tabs::TabCatalog::of(&config))),
+            Some("panel_tabs/tail") => allow(caller, Grant::Hosting)
+                .and_then(|()| self.loaded_config())
+                .and_then(|config| {
+                    panel_tabs::tail(&crate::panel_tabs::TabCatalog::of(&config), &params)
+                }),
             Some("providers/list") => allow(caller, Grant::ConfigRead)
                 .and_then(|()| self.loaded_config())
                 .map(|config| providers::list(&config)),
@@ -1193,197 +1201,18 @@ impl Control {
                         "this needs a link that can carry its output".to_owned(),
                     ))
                 }),
-                Some("overlay/apply") => allow(caller, Grant::OverlayWrite)
-                    .and_then(|()| self.overlays.apply(caller, &params)),
-                Some("overlay/remove") => {
-                    allow(caller, Grant::OverlayWrite).and_then(|()| self.overlays.remove(&params))
-                }
-                Some("overlay/discard") => {
-                    allow(caller, Grant::OverlayWrite).and_then(|()| self.overlays.discard(&params))
-                }
-                Some("catalog/fetch") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                    self.overlays
-                        .catalog_fetch(&params, &|repo| self.may_read_source(caller, repo))
-                }),
-                Some("catalog/remove") => allow(caller, Grant::OverlayWrite)
-                    .and_then(|()| self.overlays.catalog_remove(&params)),
-                Some("skill/list") => {
-                    allow(caller, Grant::OverlayRead).and_then(|()| self.overlays.skill_list())
-                }
-                Some("skill/read") => allow(caller, Grant::OverlayRead)
-                    .and_then(|()| self.overlays.skill_read(&params)),
-                Some("skill/fetch") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                    self.overlays
-                        .skill_fetch(&params, &|repo| self.may_read_source(caller, repo))
-                }),
-                Some("skill/scan") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                    self.overlays
-                        .skill_scan(&params, &|repo| self.may_read_source(caller, repo))
-                }),
-                Some("skill/save") => allow(caller, Grant::OverlayWrite)
-                    .and_then(|()| self.overlays.skill_save(&params)),
-                Some("skill/remove") => allow(caller, Grant::OverlayWrite)
-                    .and_then(|()| self.overlays.skill_remove(&params)),
-                Some("registry/fetch") => allow(caller, Grant::OverlayWrite)
-                    .and_then(|()| self.registry_fetch(caller, &params)),
-                Some("skill/search") => {
-                    allow(caller, Grant::OverlayWrite).and_then(|()| self.skill_search(&params))
-                }
-                Some("store/read_ahead") => allow(caller, Grant::OverlayWrite).and_then(|()| {
-                    self.overlays
-                        .read_ahead(caller, &params, &|repo| self.may_read_source(caller, repo))
-                }),
-                Some("store/contents") => allow(caller, Grant::OverlayRead)
-                    .and_then(|()| self.registry.contents(caller, &params)),
-                Some("store/contents_put") => allow(caller, Grant::OverlayRead)
-                    .and_then(|()| self.registry.put_contents(caller, &params)),
-                Some("network/fetch") => {
-                    owner_only_network(caller).and_then(|()| self.fetch.run(&params))
-                }
-                Some("network/tunnel") => {
-                    owner_only_network(caller).and_then(|()| self.tunnel.run(&params))
-                }
-                Some("network/client_certificates") => {
-                    allow(caller, Grant::ConfigWrite).map(|()| self.client_certificates.list())
-                }
-                Some("host/which") => allow(caller, Grant::StoreRead)
-                    .and_then(|()| registry::which(&params, &crate::sources::runtime_dirs())),
-                Some("host/restart") => {
-                    allow(caller, Grant::HostRestart).and_then(|()| self.restart_now())
-                }
-                Some(
-                    method @ ("worktree/new" | "worktree/status" | "worktree/remove"
-                    | "worktree/diff"),
-                ) => {
-                    return Some(self.worktree(caller, method, &request, &id));
-                }
-                Some(
-                    method @ ("store/list" | "store/extensions" | "store/report" | "store/latest"
-                    | "store/plan"),
-                ) => {
-                    // Running a program of the user's, and choosing which copy, is the person's; a key reads what is found.
-                    let runs = method == "store/report"
-                        && (params
-                            .get("probe")
-                            .is_some_and(|probe| probe != &Value::Bool(false))
-                            || params.get("pick").is_some_and(|pick| !pick.is_null()));
-                    allow(caller, Grant::StoreRead)
-                        .and_then(|()| {
-                            if runs {
-                                allow(caller, Grant::StorePrograms)
-                            } else {
-                                Ok(())
-                            }
-                        })
-                        .and_then(|()| self.stores())
-                        .and_then(|stores| {
-                            stores.read(
-                                method,
-                                &params,
-                                caller.may(Grant::StorePrograms).then(|| caller.owner()),
-                            )
-                        })
-                }
-                Some("foundry/models") => allow(caller, Grant::StorePrograms).and_then(|()| {
-                    foundry::models(foundry::locate(), &self.files.foundry_windows())
-                }),
-                Some("foundry/model") => allow(caller, Grant::StorePrograms)
-                    .and_then(|()| foundry::act(&params, foundry::locate())),
-                Some("foundry/window") => allow(caller, Grant::StorePrograms)
-                    .and_then(|()| foundry::window(&params, &self.files)),
-                Some("store/index") => self.store_index(caller, &params),
-                Some(method @ ("store/rollback" | "store/remove")) => {
-                    allow(caller, Grant::StorePrograms)
-                        .and_then(|()| self.stores())
-                        .and_then(|stores| stores.change(method, &params))
-                }
-                Some(method @ ("history/export" | "history/move")) => {
-                    owner_only_history(caller).and_then(|()| self.history_call(method, &params))
-                }
-                Some("history/portable") => {
-                    owner_only_history(caller).and_then(|()| self.history_portable())
-                }
-                Some("history/account") => {
-                    owner_only_history(caller).and_then(|()| self.account_move(&params))
-                }
-                Some(method @ ("history/importable" | "history/import" | "history/imported")) => {
-                    owner_only_history(caller).and_then(|()| self.import_call(method, &params))
-                }
-                Some(
-                    method @ ("accounts/catalog" | "accounts/list" | "accounts/remove"
-                    | "accounts/entries" | "accounts/offer"),
-                ) => allow(caller, Grant::Accounts)
-                    .and_then(|()| self.accounts())
-                    .and_then(|accounts| accounts.call(method, &params)),
-                Some(method @ ("mail/accounts" | "mail/add" | "mail/test" | "mail/remove")) => {
-                    allow(caller, Grant::MailSetup)
-                        .and_then(|()| self.mail_setup())
-                        .and_then(|setup| setup.call(method, &params))
-                }
-                Some(
-                    method @ ("secrets/providers" | "secrets/list" | "secrets/reveal"
-                    | "secrets/forget" | "secrets/configure"),
-                ) => allow(caller, Grant::Secrets)
-                    .and_then(|()| self.vault())
-                    .and_then(|vault| secrets::call(&vault, &self.files, method, &params)),
-                Some(method @ ("usage/summary" | "usage/limits")) => {
-                    allow(caller, Grant::Usage).and_then(|()| self.usage_call(method, &params))
-                }
-                Some("usage/read") => allow(caller, Grant::Usage)
-                    .and_then(|()| self.accounts())
-                    .and_then(|accounts| {
-                        usage_read::call(accounts, self.usage.as_deref(), &params)
-                    }),
-                Some("options/choices") => self
-                    .accounts()
-                    .and_then(|accounts| choices::call(accounts, caller, &params)),
-                Some("discover/nearby") => {
-                    allow(caller, Grant::Discover).and_then(|()| discover::nearby(&params))
-                }
-                Some(method @ ("speech/offers" | "speech/enable")) => speech_offers::call(
-                    caller,
-                    &self.files,
-                    self.stores(),
-                    &speech_offers::Lend::new(self.accounts.as_ref()),
-                    method,
-                    &params,
-                ),
-                Some(
-                    method @ ("speech/voices"
-                    | "speech/say"
-                    | "speech/audio"
-                    | "speech/stop"
-                    | "speech/say_configure"),
-                ) => self.say.call(caller, &self.files, method, &params),
-                Some(method) if method.starts_with("speech/") => self.speech.call(
-                    caller,
-                    &self.files,
-                    &speech_offers::Lend::new(self.accounts.as_ref()),
-                    method,
-                    &params,
-                ),
-                Some("host/grants") => Ok(caller.grants_json()),
-                // The shells a terminal could start, and which one each agent is told to use: for a key that may open a terminal
-                // or read what programs are installed here (their paths are in `store/report` too).
-                Some("shell/list") => if caller.may(Grant::StoreRead) {
-                    Ok(())
-                } else {
-                    allow(caller, Grant::Terminal)
-                }
-                .map(|()| self.shells.report(&crate::shells::Lookup::here())),
-                Some(method) if method.starts_with("terminal/") => allow(caller, Grant::Terminal)
-                    .and_then(|()| {
-                        Err((
-                            REFUSED,
-                            "this needs a link that can carry its output".to_owned(),
-                        ))
-                    }),
-                Some("store/apply" | "accounts/add" | "accounts/login" | "host/pair") => Err((
-                    REFUSED,
-                    "this needs a link that can carry its progress".to_owned(),
-                )),
-                _ => Err((NO_METHOD, "this host has no such method".to_owned())),
-            };
+            Some(
+                method @ ("secrets/providers" | "secrets/list" | "secrets/reveal"
+                | "secrets/forget" | "secrets/configure"),
+            ) => allow(caller, Grant::Secrets)
+                .and_then(|()| self.vault())
+                .and_then(|vault| secrets::call(&vault, &self.files, method, &params)),
+            Some("store/apply" | "accounts/add" | "accounts/login" | "host/pair") => Err((
+                REFUSED,
+                "this needs a link that can carry its progress".to_owned(),
+            )),
+            _ => Err((NO_METHOD, "this host has no such method".to_owned())),
+        };
         Some(match outcome {
             Ok(result) => {
                 serde_json::to_vec(&json!({"jsonrpc": "2.0", "id": id, "result": result}))
@@ -1978,6 +1807,7 @@ mod looks_tests;
 pub(crate) mod mail_setup;
 #[cfg(test)]
 mod mail_setup_tests;
+pub(crate) mod panel_tabs;
 pub(crate) mod profile_items;
 pub(crate) mod providers;
 #[cfg(test)]

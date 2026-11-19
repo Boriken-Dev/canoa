@@ -2,7 +2,7 @@
 
 Header-file-style reference for the `canoa` crate: every public item with its signature, contract and gotchas, so the crate can be used without reading its source. It ships inside the package and is self-contained. Development documentation lives with the source at <https://github.com/Boriken-Dev/canoa>.
 
-Eight Cargo features (`vendor` is the `agent_vendor` kind, `profile-item` the `profile_item` kind, `secret` the `secret_provider` kind and `settings-section` the `settings_section` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
+Nine Cargo features (`vendor` is the `agent_vendor` kind, `profile-item` the `profile_item` kind, `secret` the `secret_provider` kind, `settings-section` the `settings_section` kind and `panel-tab` the `panel_tab` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
 The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`) and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
 
@@ -117,6 +117,27 @@ impl SectionInfo { pub fn new(id, title) -> Self; pub fn taking<S: Schema + Scre
 - `schema` is a guatiao schema of an object and `form` the guatiao-intake form that shows it, built from a type with `taking::<S>()` (`Schema` and `Form` derives); the application draws them with the renderer every such form is drawn with. A member the schema marks sensitive is never answered in clear: the host names it as set instead.
 - `Stored::Config` values are written by the host into `[settings.ID]` after it checked them; `read` and `write` are then not asked and answer nothing. `Stored::Provider` values are the provider's: the host calls `read` to show them and `write` with the checked values to keep them.
 - `SectionInfo::problem` says why a description cannot be used (a bad id, no title, a section under itself, an empty group, a form its schema does not fit).
+
+## `canoa::panel_tab` (feature `panel-tab`)
+
+The `panel_tab` kind: a kind of tab the application's bottom panel can open. Which kinds of tab the panel offers is not Canoa's to say: each is a provider, the ones Canoa carries (a terminal, the host's log) and the ones an extension adds alike.
+
+```rust
+pub const KIND: &str = "panel_tab";   pub const KIND_VERSIONS: [&str; 1] = ["1"];   pub const MAX_TAIL_LINES: u32 = 5000;
+pub enum Shows { Terminal, Log }
+#[non_exhaustive] pub struct TabInfo { pub id: String, pub title: String, pub help: Option<String>, pub icon: Option<String>,
+    pub shows: Shows, pub shell: Option<String> }
+#[non_exhaustive] pub struct TailRequest { pub lines: u32 }
+#[guatiao::kind(name = "panel_tab")] pub trait PanelTab: Send + Sync {
+    fn describe(&self) -> Result<TabInfo, ProviderError>;                    // the same on every call, with nothing run
+    fn tail(&self, request: TailRequest) -> Result<String, ProviderError>;   // `Shows::Log`: the latest lines, oldest first; empty for a terminal
+}
+pub fn internal_error(why) -> ProviderError;
+impl TabInfo { pub fn new(id, title, shows) -> Self; pub fn problem(&self) -> Option<String> }
+```
+
+- `id` is a word of lower-case letters, digits and `_` (1 to 32). `Shows::Terminal` opens a shell on the host: `shell` is the id of one the host lists (`shell/list`), none for the host's own choice. `Shows::Log` is a text the provider keeps: the application asks for the latest lines every couple of seconds while the tab is open.
+- `TabInfo::problem` says why a description cannot be used (a bad id, no title, a shell named by a kind that shows no terminal).
 
 ## `canoa::network` (feature `network`)
 

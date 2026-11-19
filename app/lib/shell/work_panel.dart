@@ -1,4 +1,6 @@
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatLookOf;
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../session_store.dart';
@@ -43,7 +45,8 @@ class WorkPanel extends StatelessWidget {
     final focused = layout.focus == _mine;
     final other = _right ? SurfaceSlot.bottom : SurfaceSlot.right;
     final canMove = active != null && active.surface.placements.contains(other);
-    final more = [for (final each in offered) if (surfaces.find(each.id) == null) each];
+    // Read when the menu opens, so what depends on a selection is as it is then.
+    List<SurfaceAction> actionsNow() => active == null ? const <SurfaceAction>[] : active.surface.actions(context, session, active.controller);
     return Material(
       color: context.look.bar,
       child: SizedBox(
@@ -62,30 +65,48 @@ class WorkPanel extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
               children: [
                 for (final each in here)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: _Tab(
-                      key: ValueKey('tab ${each.surface.id}'),
-                      open: each,
-                      selected: identical(each, active),
-                      onSelect: () => surfaces.activate(each.surface.id),
-                      onClose: () => surfaces.close(each.surface.id),
+                  if (each.surface.tabs(session, each.controller) case final inside when inside.isNotEmpty)
+                    for (final tab in inside)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: _Tab(
+                          key: ValueKey('tab ${each.surface.id}:${tab.id}'),
+                          title: tab.title,
+                          icon: each.surface.icon,
+                          closeKey: ValueKey('close ${each.surface.id}:${tab.id}'),
+                          selected: identical(each, active) && tab.selected,
+                          onSelect: () {
+                            tab.select();
+                            surfaces.activate(each.surface.id);
+                          },
+                          onClose: tab.close ?? () => surfaces.close(each.surface.id),
+                        ),
+                      )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: _Tab(
+                        key: ValueKey('tab ${each.surface.id}'),
+                        title: each.title,
+                        icon: each.surface.icon,
+                        closeKey: ValueKey('close ${each.surface.id}'),
+                        selected: identical(each, active),
+                        onSelect: () => surfaces.activate(each.surface.id),
+                        onClose: () => surfaces.close(each.surface.id),
+                      ),
                     ),
-                  ),
               ],
             ),
           ),
-          if (more.isNotEmpty && here.isNotEmpty)
-            PopupMenuButton<WorkSurface>(
-              key: const ValueKey('panel-add'),
-              tooltip: 'Open a surface',
-              icon: const Icon(Icons.add, size: 20),
-              padding: EdgeInsets.zero,
-              onSelected: (surface) => surfaces.openSurface(surface, slot),
-              itemBuilder: (_) => [
-                for (final each in more)
-                  PopupMenuItem(key: ValueKey('open ${each.id}'), value: each, child: Text.rich(TextSpan(children: [WidgetSpan(alignment: PlaceholderAlignment.middle, child: Icon(each.icon, size: 18)), TextSpan(text: '  ${each.title}')]))),
-              ],
+          if (here.isNotEmpty)
+            Builder(
+              builder: (button) => IconButton(
+                key: const ValueKey('panel-add'),
+                tooltip: 'New tab',
+                icon: const Icon(Icons.add, size: 20),
+                padding: EdgeInsets.zero,
+                onPressed: () => unawaited(_chooseNew(button)),
+              ),
             ),
           PopupMenuButton<String>(
             key: const ValueKey('panel-more'),
@@ -93,6 +114,12 @@ class WorkPanel extends StatelessWidget {
             icon: const Icon(Icons.more_horiz, size: 20),
             padding: EdgeInsets.zero,
             onSelected: (value) {
+              if (value.startsWith('action:')) {
+                for (final each in actionsNow()) {
+                  if (value == 'action:${each.id}') each.run(context);
+                }
+                return;
+              }
               switch (value) {
                 case 'move':
                   surfaces.move(active!.surface.id, other);
@@ -105,6 +132,9 @@ class WorkPanel extends StatelessWidget {
               }
             },
             itemBuilder: (_) => [
+              for (final each in actionsNow())
+                PopupMenuItem(key: ValueKey('action ${active!.surface.id} ${each.id}'), value: 'action:${each.id}', enabled: each.enabled, child: Text(each.label)),
+              if (actionsNow().isNotEmpty) const PopupMenuDivider(),
               if (canMove) PopupMenuItem(value: 'move', child: Text(_right ? 'Move to the bottom panel' : 'Move to the right panel')),
               if (!focused) const PopupMenuItem(value: 'focus', child: Text('Maximise this panel')),
               if (focused) const PopupMenuItem(value: 'restore', child: Text('Restore the panel to its size')),
@@ -131,6 +161,32 @@ class WorkPanel extends StatelessWidget {
         ]),
       ),
     );
+  }
+
+  /// The kinds of tab the + menu offers (each surface says its own), asked when it is opened so that what a host lists since shows.
+  Future<void> _chooseNew(BuildContext button) async {
+    final box = button.findRenderObject()! as RenderBox;
+    final overlay = Overlay.of(button).context.findRenderObject()! as RenderBox;
+    final corner = RelativeRect.fromRect(
+      Rect.fromPoints(box.localToGlobal(Offset.zero, ancestor: overlay), box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay)),
+      Offset.zero & overlay.size,
+    );
+    final entries = [for (final each in await Future.wait([for (final surface in offered) surface.newTabs(session, surfaces)])) ...each];
+    if (entries.isEmpty || !button.mounted) return;
+    final chosen = await showMenu<NewTab>(
+      context: button,
+      position: corner,
+      items: [
+        for (final each in entries)
+          PopupMenuItem(
+            key: ValueKey(each.key),
+            value: each,
+            enabled: each.enabled,
+            child: Text.rich(TextSpan(children: [WidgetSpan(alignment: PlaceholderAlignment.middle, child: Icon(each.icon, size: 18)), TextSpan(text: '  ${each.label}')])),
+          ),
+      ],
+    );
+    chosen?.open(slot);
   }
 
   Widget _launcher(BuildContext context) {
@@ -183,7 +239,7 @@ class WorkPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([surfaces, layout]),
+    listenable: Listenable.merge([surfaces, layout, for (final each in surfaces.inSlot(slot)) ?each.surface.tabsChanged(session, each.controller)]),
     builder: (context, _) {
       final here = surfaces.inSlot(slot);
       final active = surfaces.activeIn(slot);
@@ -200,9 +256,11 @@ class WorkPanel extends StatelessWidget {
 }
 
 class _Tab extends StatelessWidget {
-  const _Tab({super.key, required this.open, required this.selected, required this.onSelect, required this.onClose});
+  const _Tab({super.key, required this.title, required this.icon, required this.closeKey, required this.selected, required this.onSelect, required this.onClose});
 
-  final OpenSurface open;
+  final String title;
+  final IconData icon;
+  final Key closeKey;
   final bool selected;
   final VoidCallback onSelect, onClose;
 
@@ -212,7 +270,7 @@ class _Tab extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      label: open.title,
+      label: title,
       child: Material(
         color: selected ? context.look.selected : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
@@ -222,13 +280,13 @@ class _Tab extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.only(left: 10),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(open.surface.icon, size: 16, color: selected ? scheme.primary : scheme.onSurfaceVariant),
+              Icon(icon, size: 16, color: selected ? scheme.primary : scheme.onSurfaceVariant),
               const SizedBox(width: 6),
-              Text(open.title, style: TextStyle(fontSize: 13, fontWeight: selected ? FontWeight.w600 : FontWeight.w400)),
+              Text(title, style: TextStyle(fontSize: 13, fontWeight: selected ? FontWeight.w600 : FontWeight.w400)),
               if (selected)
                 IconButton(
-                  key: ValueKey('close ${open.surface.id}'),
-                  tooltip: 'Close ${open.title}',
+                  key: closeKey,
+                  tooltip: 'Close $title',
                   visualDensity: VisualDensity.compact,
                   iconSize: 14,
                   icon: const Icon(Icons.close),
@@ -277,7 +335,7 @@ class PanelFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([layout, surfaces]),
+    listenable: Listenable.merge([layout, surfaces, registry]),
     builder: (context, _) => LayoutBuilder(builder: (context, constraints) {
       final focus = layout.focus;
       final rightOffered = registry.availableFor(session, SurfaceSlot.right);

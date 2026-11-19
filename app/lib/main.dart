@@ -125,6 +125,7 @@ import 'secrets/provider_setup.dart';
 import 'secrets/secrets_section.dart';
 import 'settings/extension_settings.dart';
 import 'settings/host_sections.dart';
+import 'shell/panel_tabs.dart';
 import 'settings/shell_settings.dart';
 import 'settings/settings_page.dart';
 import 'rail/session_groups.dart';
@@ -637,7 +638,20 @@ class _CanoaAppState extends State<CanoaApp> {
   String? _settingsFirst;
 
   late final ShellLayout _layout = widget.layout ?? ShellLayout();
-  late final WorkSurfaces _surfaces = WorkSurfaces(widget.surfaces ?? [...builtInSurfaces(), FilesSurface(_filesOf), TerminalSurface(_terminalOf)]);
+  late final WorkSurfaces _surfaces = widget.surfaces == null
+      ? WorkSurfaces(
+          [...builtInSurfaces(), FilesSurface(_filesOf), TerminalSurface(_terminalOf, kinds: () => _panelTabs?.terminals ?? const [])],
+          added: () => [
+            // A log is the host's own diagnostics: only a key that may change the host's settings reads it.
+            if (_panelTabs case final kinds? when _grants?.may(HostGrants.hosting) ?? false)
+              for (final kind in kinds.logs) LogSurface(kind, kinds),
+          ],
+          addedChanged: _panelTabs,
+        )
+      : WorkSurfaces(widget.surfaces!);
+
+  /// The kinds of tab the host's providers offer the panel: a shell, a log, and what an extension adds.
+  late final PanelTabKinds? _panelTabs = _control == null ? null : PanelTabKinds((method, params) async => (await _control.ready(wait: false)).call(method, params));
 
   /// Hosting is part of Local's overview, in the Hosts section.
   Future<void> _showHosting() async {
@@ -3354,6 +3368,7 @@ class _CanoaAppState extends State<CanoaApp> {
     try {
       final client = await control.ready(wait: wait);
       unawaited(_hostSections?.load());
+      unawaited(_panelTabs?.load());
       profileItems.adopt(await client.call('profile_items/list', const {}));
       if (profileItems.asksForClientCertificate) {
         // The pick is only for the owner or a key that edits profiles: a refusal leaves the keystores' own choice alone.

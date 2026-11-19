@@ -385,16 +385,17 @@ class TerminalWorkspace extends ChangeNotifier {
   /// The shell the keyboard is in.
   TerminalPane? get focused => active?.focused;
 
-  TerminalPane _pane() {
-    final pane = TerminalPane(host: host, cwd: cwd, shell: shell);
+  TerminalPane _pane([String? own]) {
+    final pane = TerminalPane(host: host, cwd: cwd, shell: own ?? shell);
     unawaited(pane.start());
     return pane;
   }
 
-  /// A tab with a new shell, which becomes the one shown; null at [limit].
-  TerminalTab? newTab() {
+  /// A tab with a new shell, which becomes the one shown; null at [limit]. [shell] is the id of one the host listed for this tab
+  /// alone; the workspace's own choice when null.
+  TerminalTab? newTab({String? shell}) {
     if (_released || full) return null;
-    final tab = TerminalTab(++_made, 'Shell $_made', _pane());
+    final tab = TerminalTab(++_made, 'Shell $_made', _pane(shell));
     tabs.add(tab);
     _active = tab;
     notifyListeners();

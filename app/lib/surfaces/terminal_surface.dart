@@ -7,6 +7,7 @@ import 'package:xterm/xterm.dart';
 import '../session_store.dart';
 import '../shell/surface.dart';
 import '../theme/look.dart';
+import '../shell/panel_tabs.dart' show PanelShows, PanelTabKind;
 import 'files_surface.dart' show FilesSurface;
 import 'terminal_controller.dart';
 
@@ -33,9 +34,12 @@ final class TerminalRefused extends TerminalAccess {
 /// them. Hiding it or moving it to the other panel leaves the shells running; closing the surface ends them. Nothing a shell prints
 /// reaches the agent: the person attaches a selection or the last output to their own message.
 class TerminalSurface extends WorkSurface {
-  const TerminalSurface(this.accessFor);
+  const TerminalSurface(this.accessFor, {this.kinds});
 
   static const surfaceId = 'terminal';
+
+  /// The kinds of terminal tab the host lists (an extension's names a shell of its own); the host's own is the surface itself.
+  final List<PanelTabKind> Function()? kinds;
 
   /// What the host [session] runs on offers; null when it offers nothing to this app and the surface is not listed.
   final TerminalAccess? Function(ChatSession session) accessFor;
@@ -54,16 +58,102 @@ class TerminalSurface extends WorkSurface {
 
   static const _key = 'terminal workspace';
 
-  /// The shells of [controller]'s surface for [session], made with a first one the first time; null where the host offers none.
-  TerminalWorkspace? workspaceFor(SurfaceController controller, ChatSession session) {
+  /// The shells of [controller]'s surface for [session], made with a first one (running [firstShell], the host's own choice when
+  /// null) the first time; null where the host offers none.
+  TerminalWorkspace? workspaceFor(SurfaceController controller, ChatSession session, {String? firstShell}) {
     if (controller.data[_key] case final TerminalWorkspace made) return made;
     if (accessFor(session) case TerminalOnHost(:final host)) {
-      final made = TerminalWorkspace(host: host, cwd: FilesSurface.workspaceOf(session))..newTab();
+      final made = TerminalWorkspace(host: host, cwd: FilesSurface.workspaceOf(session))..newTab(shell: firstShell);
       controller.data[_key] = made;
       controller.onRelease(made.release);
       return made;
     }
     return null;
+  }
+
+  /// The shells are the panel's own tabs, so the panel has one tab bar and the shells have none of their own.
+  @override
+  List<SurfaceTab> tabs(ChatSession session, SurfaceController controller) {
+    final workspace = workspaceFor(controller, session);
+    if (workspace == null) return const [];
+    return [
+      for (final tab in workspace.tabs)
+        SurfaceTab(
+          id: '${tab.id}',
+          title: tab.name,
+          selected: identical(tab, workspace.active),
+          select: () => workspace.activate(tab),
+          close: () => workspace.closeTab(tab),
+        ),
+    ];
+  }
+
+  @override
+  Listenable? tabsChanged(ChatSession session, SurfaceController controller) => workspaceFor(controller, session);
+
+  @override
+  List<SurfaceAction> actions(BuildContext context, ChatSession session, SurfaceController controller) {
+    final workspace = workspaceFor(controller, session);
+    final tab = workspace?.active;
+    if (workspace == null || tab == null) return const [];
+    final pane = workspace.focused;
+    final attach = SurfaceEnvironment.maybeOf(context)?.onAttachText;
+    return [
+      SurfaceAction(id: 'split', label: 'Split: a second shell beside this one', enabled: tab.panes.length < 2 && !workspace.full, run: (_) => workspace.split(tab)),
+      SurfaceAction(id: 'rename', label: 'Rename the tab', run: (context) => unawaited(renameTerminalTab(context, workspace, tab))),
+      if (attach != null && pane != null) ...[
+        SurfaceAction(
+          id: 'attach selection',
+          label: 'Attach the selected text to your message',
+          enabled: pane.selectedText != null,
+          run: (_) => attach('terminal selection.txt', pane.selectedText!),
+        ),
+        SurfaceAction(
+          id: 'attach output',
+          label: 'Attach the last output to your message',
+          run: (_) {
+            final text = pane.lastOutput();
+            if (text != null) attach('terminal output.txt', text);
+          },
+        ),
+      ],
+    ];
+  }
+
+  /// The new-shell entries: the host's own choice, then each shell the host lists, then the tab kinds an extension names a shell for.
+  /// They are offered whether or not a terminal is open, since each opens a new shell.
+  @override
+  Future<List<NewTab>> newTabs(ChatSession session, SessionSurfaces surfaces) async {
+    if (accessFor(session) is! TerminalOnHost) return const [];
+    final TerminalOnHost(:host) = accessFor(session)! as TerminalOnHost;
+    final open = surfaces.find(id);
+    final workspace = open == null ? null : workspaceFor(open.controller, session);
+    final full = workspace?.full ?? false;
+    NewTab entry(String key, String label, IconData icon, String? shell) => NewTab(
+      key: key,
+      label: label,
+      icon: icon,
+      enabled: !full,
+      open: (slot) {
+        final existing = surfaces.find(id);
+        if (existing == null) {
+          surfaces.openSurface(this, slot, (controller) => workspaceFor(controller, session, firstShell: shell));
+        } else {
+          surfaces.openSurface(this, slot);
+          workspaceFor(existing.controller, session)?.newTab(shell: shell);
+        }
+      },
+    );
+    final listed = [for (final each in kinds?.call() ?? const <PanelTabKind>[]) if (each.shows == PanelShows.terminal) each];
+    final own = listed.where((each) => each.id == surfaceId).firstOrNull;
+    final shells = await host.shells();
+    final label = own?.title ?? title;
+    return [
+      entry('open $id', label, own?.iconData ?? icon, own?.shell),
+      for (final shell in shells) entry('open $id shell ${shell.id}', '$label: ${shell.label}', own?.iconData ?? icon, shell.id),
+      for (final each in listed)
+        if (each.id != surfaceId) entry('open $id kind ${each.id}', each.title, each.iconData, each.shell),
+    ];
   }
 
   @override
@@ -73,7 +163,7 @@ class TerminalSurface extends WorkSurface {
     }
     final workspace = workspaceFor(controller, session);
     if (workspace == null) return const Center(child: Text('This host offers no terminal.'));
-    return TerminalPanel(workspace: workspace, onAttachText: SurfaceEnvironment.maybeOf(context)?.onAttachText);
+    return TerminalPanel(workspace: workspace, showToolbar: false);
   }
 }
 
@@ -101,15 +191,16 @@ const terminalTextStyle = TerminalStyle(
 
 /// The terminal's tabs and screens.
 class TerminalPanel extends StatelessWidget {
-  const TerminalPanel({super.key, required this.workspace, this.onAttachText});
+  const TerminalPanel({super.key, required this.workspace, this.onAttachText, this.showToolbar = true});
 
   final TerminalWorkspace workspace;
   final void Function(String name, String text)? onAttachText;
 
-  Future<void> _rename(BuildContext context, TerminalTab tab) async {
-    final name = await showDialog<String>(context: context, builder: (context) => _RenameDialog(name: tab.name));
-    if (name != null) workspace.rename(tab, name);
-  }
+  /// Whether the panel draws its own bar of shells. A conversation's panel has one tab bar, which holds the shells, so it asks for
+  /// none; the Terminal section has no other, so it keeps this one.
+  final bool showToolbar;
+
+  Future<void> _rename(BuildContext context, TerminalTab tab) => renameTerminalTab(context, workspace, tab);
 
   Widget _toolbar(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -222,8 +313,7 @@ class TerminalPanel extends StatelessWidget {
     builder: (context, _) {
       final active = workspace.active;
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _toolbar(context),
-        const Divider(height: 1),
+        if (showToolbar) ...[_toolbar(context), const Divider(height: 1)],
         Expanded(
           child: active == null
               ? Center(child: FilledButton.icon(key: const ValueKey('terminal start'), onPressed: workspace.newTab, icon: const Icon(Icons.add), label: const Text('New shell')))
@@ -245,6 +335,12 @@ class TerminalPanel extends StatelessWidget {
       ]);
     },
   );
+}
+
+/// Asks for a new name for [tab] and renames it.
+Future<void> renameTerminalTab(BuildContext context, TerminalWorkspace workspace, TerminalTab tab) async {
+  final name = await showDialog<String>(context: context, builder: (context) => _RenameDialog(name: tab.name));
+  if (name != null) workspace.rename(tab, name);
 }
 
 class _Screen extends StatelessWidget {

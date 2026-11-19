@@ -1148,6 +1148,13 @@ kept in `[settings.ID]` of canoa.cfg, or by the provider itself; a field the sch
 be set. The host lists the sections it loaded with `settings/sections`. A section disappears from Settings with the extension that
 offered it, and the values it kept stay in canoa.cfg until you remove the table.
 
+### Panel tabs from extensions
+
+The bottom panel of a conversation is one bar of tabs. Its + menu offers Terminal (and Terminal in each shell the host lists), the host's
+Logs and what an extension adds: a provider of the `panel_tab` kind says a tab's name, icon and whether it shows a shell (the host's
+own, or one it names) or a log whose latest lines the provider answers. The host lists the kinds with `panel_tabs/list`. Opening
+Logs and an extension's logs needs the key to hold `hosting`.
+
 ## Windows, macOS and Linux tray behavior
 
 Canoa uses a desktop tray controller and the shared Flutter app under root app/. The app can start without a visible main window, remain alive when its window closes, and expose Open Canoa, Hosting, Settings, Hide and Exit commands via the notification area. Closing the window leaves the app, its conversations, its own agents and `canoa` running; Exit, or **Quit Canoa** in Settings, ends them.

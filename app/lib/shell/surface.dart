@@ -40,6 +40,47 @@ class SurfaceController extends ChangeNotifier {
   }
 }
 
+/// A tab a surface puts in the panel's one tab bar, in place of its own single tab: a terminal's shells, each its own tab.
+class SurfaceTab {
+  const SurfaceTab({required this.id, required this.title, required this.selected, required this.select, this.close});
+
+  /// Unique among the surface's tabs; the tab's key is `tab <surface id>:<id>`.
+  final String id;
+  final String title;
+
+  /// Whether it is the surface's chosen tab; it shows as chosen only while the surface is the panel's.
+  final bool selected;
+  final VoidCallback select;
+
+  /// Closes just this tab; null for one that closes with its surface.
+  final VoidCallback? close;
+}
+
+/// Something a surface does for its chosen tab, listed in the panel's actions menu.
+class SurfaceAction {
+  const SurfaceAction({required this.id, required this.label, required this.run, this.enabled = true});
+
+  /// The menu entry's key is `action <surface id> <id>`.
+  final String id;
+  final String label;
+  final bool enabled;
+  final void Function(BuildContext context) run;
+}
+
+/// One thing the panel's + menu can open: a kind of tab, made new each time it is chosen.
+class NewTab {
+  const NewTab({required this.key, required this.label, required this.icon, required this.open, this.enabled = true});
+
+  /// The menu entry's key.
+  final String key;
+  final String label;
+  final IconData icon;
+  final bool enabled;
+
+  /// Opens it in [slot] and chooses it.
+  final void Function(SurfaceSlot slot) open;
+}
+
 /// A view that can sit in the work panel: details, changes, and what later plans add (files, a browser, a terminal).
 abstract class WorkSurface {
   const WorkSurface();
@@ -53,6 +94,22 @@ abstract class WorkSurface {
 
   /// Whether it has something to show for [session]. It never needs an agent to have started, unless it says so here.
   bool available(ChatSession session);
+
+  /// The tabs this surface shows in the panel's one tab bar instead of a single tab of its own; none leaves the single tab. A surface
+  /// whose last tab closes shows its single tab again.
+  List<SurfaceTab> tabs(ChatSession session, SurfaceController controller) => const [];
+
+  /// What changes [tabs], listened to by the panel.
+  Listenable? tabsChanged(ChatSession session, SurfaceController controller) => null;
+
+  /// What the surface does for its chosen tab, listed in the panel's actions menu.
+  List<SurfaceAction> actions(BuildContext context, ChatSession session, SurfaceController controller) => const [];
+
+  /// What the panel's + menu offers of this surface for [session]: by default the surface itself, once, until it is open. A surface
+  /// whose tabs are made new each time (a shell) offers its kinds of tab whether it is open or not.
+  Future<List<NewTab>> newTabs(ChatSession session, SessionSurfaces surfaces) async => surfaces.find(id) != null
+      ? const []
+      : [NewTab(key: 'open $id', label: title, icon: icon, open: (slot) => surfaces.openSurface(this, slot))];
 
   /// The surface's view. It is built under a [SurfaceEnvironment], and keeps its state in [controller] or in its own State, which
   /// moving it between panels preserves.
@@ -138,10 +195,20 @@ class SessionSurfaces extends ChangeNotifier {
 
 /// The surfaces a window offers and, for each session, the ones open. Kept outside the widget tree.
 class WorkSurfaces extends ChangeNotifier {
-  WorkSurfaces(this.registry);
+  WorkSurfaces(this._base, {this.added, this.addedChanged}) {
+    addedChanged?.addListener(notifyListeners);
+  }
 
-  /// Every surface the app has, in the order the launcher lists them.
-  final List<WorkSurface> registry;
+  final List<WorkSurface> _base;
+
+  /// Surfaces made from what the host lists (the tabs its providers add), asked for each time the registry is read.
+  final List<WorkSurface> Function()? added;
+
+  /// What changes [added].
+  final Listenable? addedChanged;
+
+  /// Every surface the app has, in the order the launcher lists them: its own, then those the host's providers add.
+  List<WorkSurface> get registry => [..._base, ...?added?.call()];
 
   final Map<String, SessionSurfaces> _bySession = {};
 
@@ -158,6 +225,7 @@ class WorkSurfaces extends ChangeNotifier {
 
   @override
   void dispose() {
+    addedChanged?.removeListener(notifyListeners);
     for (final each in _bySession.values) {
       for (final open in each.open) {
         unawaited(open.controller.release());

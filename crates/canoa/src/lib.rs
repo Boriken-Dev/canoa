@@ -5,6 +5,9 @@
 
 extern crate alloc;
 
+#[cfg(feature = "panel-tab")]
+#[cfg_attr(docsrs, doc(cfg(feature = "panel-tab")))]
+pub mod panel_tab;
 pub mod preset;
 #[cfg(feature = "profile-item")]
 #[cfg_attr(docsrs, doc(cfg(feature = "profile-item")))]

@@ -40,6 +40,7 @@ pub(crate) fn follow(job: &Arc<Job>) {
 
 /// One line of the log.
 fn route(line: &str) {
+    canoa_host::host_log::record(line);
     FOLLOWERS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
