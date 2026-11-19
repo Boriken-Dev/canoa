@@ -1,6 +1,7 @@
-//! The sections of Settings the providers of this host offer: each is a provider of the `settings_section` kind, in a library the host
-//! carries (a bundled agent's) or one the entries and extensions of canoa.cfg load. Nothing here names a section: the application
-//! draws what a provider says of its section, and the section is gone with its provider.
+//! The sections of Settings the providers of this host offer: each is a provider of the `settings_section` kind, the application's own
+//! pages (`built_in`) registered the way an extension's library is, in a library the host carries (a bundled agent's) or one the
+//! entries and extensions of canoa.cfg load. The application draws what a provider says of its section, and the section is gone with
+//! its provider.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -15,8 +16,12 @@ use serde_json::{Value, json};
 
 use crate::config::Config;
 
+mod built_in;
 #[cfg(test)]
 pub(crate) mod standin;
+
+/// The origin of the sections the application draws itself, which the host carries.
+pub(crate) const BUILT_IN: &str = "built-in";
 
 /// One section a registry offers.
 struct Entry {
@@ -96,12 +101,29 @@ impl Section<'_> {
     }
 }
 
+fn built_in() -> Result<Registry, String> {
+    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let loading = registry
+        .register_local("canoa-settings-sections", built_in::library)
+        .map_err(|error| format!("canoa-settings-sections: {error}"))?;
+    if loading.loaded().is_none() {
+        return Err("canoa-settings-sections was not accepted".to_owned());
+    }
+    Ok(registry)
+}
+
 impl SectionCatalog {
-    /// The sections `registries` offer, each registry as its origin names it. A section whose id an earlier one took, or that cannot
-    /// be described, is left out and logged.
+    /// The sections the application draws itself, then those `registries` offer, each registry as its origin names it. A section whose
+    /// id an earlier one took, or that cannot be described, is left out and logged.
     pub(crate) fn from_registries(registries: Vec<(String, Registry)>) -> Self {
+        let mut found: Vec<(String, Registry)> = Vec::new();
+        match built_in() {
+            Ok(registry) => found.push((BUILT_IN.to_owned(), registry)),
+            Err(why) => tracing::warn!("the built-in settings sections are not offered: {why}"),
+        }
+        found.extend(registries);
         let mut entries: Vec<Entry> = Vec::new();
-        for (origin, registry) in registries {
+        for (origin, registry) in found {
             let registry = Arc::new(registry);
             let keys: Vec<String> = registry
                 .offers::<dyn SettingsSection>()
@@ -147,11 +169,22 @@ impl SectionCatalog {
                 });
             }
         }
+        // A registry offers its providers by name: the application's own sections keep the order it gives them, ahead of the others.
+        entries.sort_by_key(|entry| {
+            if entry.origin == BUILT_IN {
+                built_in::ORDER
+                    .iter()
+                    .position(|id| *id == entry.info.id)
+                    .unwrap_or(built_in::ORDER.len())
+            } else {
+                usize::MAX
+            }
+        });
         Self { entries }
     }
 
-    /// The sections the bundled libraries and those of `config`'s entries and extensions offer, each library opened as the host opens
-    /// it for `providers/list`: an extension whose pin no longer matches is left out.
+    /// The sections the application draws itself, the bundled libraries' and those of `config`'s entries and extensions, each library
+    /// opened as the host opens it for `providers/list`: an extension whose pin no longer matches is left out.
     pub(crate) fn of(config: &Config) -> Self {
         Self::from_registries(crate::control::providers::loaded(config))
     }

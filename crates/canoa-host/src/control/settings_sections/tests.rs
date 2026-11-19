@@ -57,16 +57,76 @@ fn an_extensions_section_is_listed_as_its_own_and_another_as_a_group_under_an_ex
     assert_eq!(cache["stored"], "provider");
 }
 
+/// The sections the application draws itself, in the order it lists them.
+const BUILT_IN: [&str; 16] = [
+    "general",
+    "appearance",
+    "notifications",
+    "voice",
+    "shortcuts",
+    "sources",
+    "profiles",
+    "mcp",
+    "permissions",
+    "accounts",
+    "mail",
+    "shells",
+    "usage",
+    "store",
+    "extensions",
+    "about",
+];
+
+fn ids(answer: &Value) -> Vec<String> {
+    answer["sections"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|each| each["id"].as_str().expect("an id").to_owned())
+        .collect()
+}
+
 #[test]
-fn an_extension_taken_away_takes_its_sections_from_the_list() {
+fn the_sections_the_application_draws_are_listed_as_providers_first_and_an_extension_taken_away_takes_only_its_own()
+ {
     let without = list(&SectionCatalog::from_registries(Vec::new()));
-    assert_eq!(without["sections"], json!([]));
-    assert_eq!(
-        list(&with_extension())["sections"]
-            .as_array()
-            .expect("a list")
-            .len(),
-        2
+    assert_eq!(ids(&without), BUILT_IN);
+    let with = ids(&list(&with_extension()));
+    assert_eq!(with[..BUILT_IN.len()], BUILT_IN);
+    assert_eq!(with[BUILT_IN.len()..], ["cache", "region"]);
+    for id in BUILT_IN {
+        let each = row(&without, id);
+        assert_eq!(each["origin"], "built-in", "{id}");
+        assert_eq!(
+            each["schema"],
+            Value::Null,
+            "{id}: the application draws it"
+        );
+        assert!(
+            each["group"].is_string() && each["icon"].is_string() && each["keywords"].is_string(),
+            "{id}: {each}"
+        );
+    }
+    assert_eq!(row(&without, "accounts")["group"], "Agents");
+    assert_eq!(row(&without, "about")["group"], "About");
+}
+
+#[test]
+fn the_apps_fixture_is_what_this_build_lists() {
+    let listed = list(&SectionCatalog::from_registries(Vec::new()));
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../app/test/fixtures/settings_sections.json");
+    if std::env::var_os("CANOA_WRITE_SECTIONS").is_some() {
+        let mut text = serde_json::to_string_pretty(&listed).expect("rows are JSON");
+        text.push('\n');
+        fs::write(&path, text).expect("the fixture is written");
+    }
+    let held: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("the fixture is committed"))
+            .expect("the fixture is JSON");
+    assert!(
+        held == listed,
+        "regenerate it: CANOA_WRITE_SECTIONS=1 cargo test -p canoa-host --lib settings_sections"
     );
 }
 

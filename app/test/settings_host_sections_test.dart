@@ -8,6 +8,7 @@ import 'package:canoa/settings/host_sections.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fixtures/sections_fixture.dart';
 import 'fixtures/settings_fixture.dart';
 import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
@@ -65,7 +66,7 @@ const _cache = {
 final class _Host {
   final held = <String, Map<String, Object?>>{};
   final secrets = <String, Map<String, Object?>>{};
-  List<Object?> listed = [_region, _cache];
+  List<Object?> listed = [...builtInSectionsJson(), _region, _cache];
   final calls = <String>[];
 
   Future<Object?> call(String method, Map<String, Object?> params) async {
@@ -171,7 +172,7 @@ void main() {
     await openSettings(tester, hostSections: sections, section: 'general');
     expect(find.byKey(const Key('settings-nav-region')), findsOneWidget);
     expect(find.byKey(const Key('settings-group-cache')), findsOneWidget);
-    host.listed = [];
+    host.listed = builtInSectionsJson();
     await sections.load();
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('settings-nav-region')), findsNothing);
@@ -182,6 +183,7 @@ void main() {
   testWidgets('a section whose group names no section of the app is a section of its own, and one that takes an id the app uses is left out', (tester) async {
     final host = _Host()
       ..listed = [
+        ...builtInSectionsJson(),
         {..._cache, 'under': 'nothing_like_it', 'title': 'Cache'},
         {..._region, 'id': 'general', 'title': 'Impostor'},
       ];
@@ -193,8 +195,42 @@ void main() {
     expect(find.byKey(const Key('settings-nav-general')), findsOneWidget);
   });
 
+  testWidgets('Settings lists the sections its host lists and no others: the app draws its own by id', (tester) async {
+    final builtIn = builtInSectionsJson();
+    Object? byId(String id) => builtIn.firstWhere((each) => (each! as Map)['id'] == id);
+    final host = _Host()..listed = [byId('general'), byId('about'), _region];
+    final sections = HostSections(host.call);
+    await sections.load();
+    await openSettings(tester, hostSections: sections);
+    expect(find.byKey(const Key('settings-nav-general')), findsOneWidget);
+    expect(find.byKey(const Key('settings-nav-region')), findsOneWidget);
+    expect(find.byKey(const Key('settings-nav-about')), findsOneWidget);
+    for (final id in ['appearance', 'voice', 'accounts', 'sources', 'permissions']) {
+      expect(find.byKey(Key('settings-nav-$id')), findsNothing, reason: '$id is not listed by this host');
+    }
+    // The app draws General itself, from its widget; nothing of it is a provider's form.
+    expect(find.byKey(const Key('settings-host-general')), findsNothing);
+    expect(find.byKey(const Key('settings-section-general')), findsOneWidget);
+    expect(find.text('Close the window to the tray'), findsOneWidget);
+    // A heading comes from what the host says of the section, About last.
+    expect(find.text('App'), findsOneWidget);
+    expect(tester.getTopLeft(find.byKey(const Key('settings-nav-region'))).dy, lessThan(tester.getTopLeft(find.byKey(const Key('settings-nav-about'))).dy));
+  });
+
+  testWidgets('a page opened at a section before the host has listed its sections shows it once they are listed', (tester) async {
+    final host = _Host()..listed = [];
+    final sections = HostSections(host.call);
+    sections.adopt({'sections': <Object?>[]});
+    await openSettings(tester, hostSections: sections, section: 'appearance');
+    expect(find.byKey(const Key('settings-nav-appearance')), findsNothing);
+    host.listed = builtInSectionsJson();
+    await sections.load();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('settings-section-appearance')), findsOneWidget);
+  });
+
   testWidgets('a host that refuses the values says why in the section', (tester) async {
-    final host = _Host()..listed = [_region];
+    final host = _Host()..listed = [...builtInSectionsJson(), _region];
     final sections = HostSections((method, params) async {
       if (method == 'settings/section_set') throw const ControlFailed(-32002, 'region: tier is fast or standard');
       return host.call(method, params);

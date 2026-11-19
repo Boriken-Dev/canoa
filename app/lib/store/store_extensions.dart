@@ -41,6 +41,16 @@ const Map<String, IconData> extensionIcons = {
   'star': Icons.star_outline,
   'storefront': Icons.storefront_outlined,
   'wrench': Icons.handyman_outlined,
+  'tune': Icons.tune,
+  'notifications': Icons.notifications_none,
+  'mic': Icons.mic_none,
+  'keyboard': Icons.keyboard_outlined,
+  'hub': Icons.hub_outlined,
+  'layers': Icons.layers_outlined,
+  'accounts': Icons.manage_accounts_outlined,
+  'mail': Icons.mail_outline,
+  'speed': Icons.speed,
+  'info': Icons.info_outline,
 };
 
 /// The picture an extension ships as its type's icon, from the `data:image/png;base64,` or `data:image/webp;base64,` address the

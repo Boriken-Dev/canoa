@@ -16,6 +16,8 @@ import 'package:canoa/voice/speech_backend.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'sections_fixture.dart';
+
 /// Settings as a page on its own, with every configuration it applies kept: Settings has no Save, so what a test reads is
 /// the last one applied.
 final class SettingsHarness {
@@ -82,7 +84,7 @@ Future<SettingsHarness> openSettings(
       hostSpeech: hostSpeech,
       voiceOutputs: voiceOutputs,
       reader: reader,
-      hostSections: hostSections,
+      hostSections: hostSections ?? builtInSections(),
     ),
   ));
   await tester.pumpAndSettle();

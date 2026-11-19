@@ -15,6 +15,11 @@ import 'settings_row.dart';
 /// What the app asks the host with: `settings/sections`, `settings/section_get` and `settings/section_set`.
 typedef SectionCall = Future<Object?> Function(String method, Map<String, Object?> params);
 
+/// What Settings lists before its host has listed its sections, and when the host cannot: nothing, since the sections are the host's to
+/// list. A test whose host is never asked stands in for the list by setting this.
+@visibleForTesting
+List<Object?> sectionsUntilListed = const [];
+
 /// The heading a section sits under when its provider names none.
 const defaultSectionGroup = 'Extensions';
 
@@ -79,10 +84,13 @@ typedef SectionValues = ({Map<String, Object?> values, Set<String> secretsSet});
 
 /// The sections the host lists, and the values of each.
 final class HostSections extends ChangeNotifier {
-  HostSections(this._call);
+  HostSections(this._call) : _sections = [for (final each in sectionsUntilListed) ?HostSection.read(each)];
+
+  /// The sections of an app that has no host to ask.
+  HostSections.withoutHost() : this((method, params) async => throw const ControlFailed(-32601, 'this app has no host'));
 
   final SectionCall _call;
-  List<HostSection> _sections = const [];
+  List<HostSection> _sections;
   bool _disposed = false;
 
   /// The sections in the order the host listed them.
@@ -118,12 +126,12 @@ final class HostSections extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Asks the host for the sections again; what it cannot answer leaves the list empty.
+  /// Asks the host for the sections again; a host that cannot answer leaves the list as it was.
   Future<void> load() async {
     try {
       adopt(await _call('settings/sections', const {}));
     } on Object {
-      adopt(null);
+      return;
     }
   }
 

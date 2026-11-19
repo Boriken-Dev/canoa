@@ -40,11 +40,10 @@ final class SettingsSection {
   /// What the search box finds the section by, besides its title.
   final String keywords;
 
-  /// The provider's description when a provider of the host offers this section, drawn by the generic form renderer; null for a
-  /// section the app draws itself.
+  /// What the section's provider says of it, drawn by the generic form renderer when the app has no widget of its own for the id.
   final HostSection? host;
 
-  /// The section a provider describes, as a section of its own.
+  /// The section a provider describes.
   factory SettingsSection.of(HostSection section) => SettingsSection(
     id: section.id,
     group: section.group ?? defaultSectionGroup,
@@ -54,25 +53,6 @@ final class SettingsSection {
     host: section,
   );
 }
-
-const _sections = [
-  SettingsSection(id: 'general', group: 'App', title: 'General', icon: Icons.tune, keywords: 'tray window startup network webtransport timeout sessions remembered folder workspace keep history'),
-  SettingsSection(id: 'appearance', group: 'App', title: 'Appearance', icon: Icons.palette_outlined, keywords: 'look theme brightness dark light detail verbose density preview'),
-  SettingsSection(id: 'notifications', group: 'App', title: 'Notifications', icon: Icons.notifications_none, keywords: 'alerts permission question finished browser toast'),
-  SettingsSection(id: 'voice', group: 'App', title: 'Voice', icon: Icons.mic_none, keywords: 'dictation speech microphone input device language push to talk transcribe audio read aloud voice speak speaker playback tts text to speech'),
-  SettingsSection(id: 'shortcuts', group: 'App', title: 'Shortcuts', icon: Icons.keyboard_outlined, keywords: 'keyboard keys chords hotkeys'),
-  SettingsSection(id: 'sources', group: 'Agents', title: 'Sources', icon: Icons.hub_outlined, keywords: 'agents providers programs command install update version ready'),
-  SettingsSection(id: 'profiles', group: 'Agents', title: 'Profiles', icon: Icons.layers_outlined, keywords: 'overlays layers model effort mode skills trusted directories project'),
-  SettingsSection(id: 'mcp', group: 'Agents', title: 'MCP servers', icon: Icons.extension_outlined, keywords: 'tools servers mcp allowed per agent'),
-  SettingsSection(id: 'permissions', group: 'Agents', title: 'Permissions', icon: Icons.shield_outlined, keywords: 'bypass mode allow once remembered rules protected paths log revoke full access'),
-  SettingsSection(id: 'accounts', group: 'Agents', title: 'Accounts', icon: Icons.manage_accounts_outlined, keywords: 'login sign in api key subscription credentials add remove several'),
-  SettingsSection(id: 'mail', group: 'Agents', title: 'Mail', icon: Icons.mail_outline, keywords: 'email exchange outlook ews mailbox inbox messages password account add remove test sign in'),
-  SettingsSection(id: 'shells', group: 'Agents', title: 'Shells', icon: Icons.terminal, keywords: 'bash git bash powershell pwsh wsl msys2 terminal shell command windows'),
-  SettingsSection(id: 'usage', group: 'Agents', title: 'Usage', icon: Icons.speed, keywords: 'limit warn percent quota'),
-  SettingsSection(id: 'store', group: 'Store', title: 'Store', icon: Icons.storefront_outlined, keywords: 'catalog catalogs sources registries overlays skills mcp servers types limits icons size'),
-  SettingsSection(id: 'extensions', group: 'Store', title: 'Extensions', icon: Icons.extension_outlined, keywords: 'store types runtimes add library provider host restart'),
-  SettingsSection(id: 'about', group: 'About', title: 'About', icon: Icons.info_outline, keywords: 'version canoa boriken licence'),
-];
 
 /// Settings as a page: a list of sections at the left (a page of its own at phone width), a search over their keywords, and
 /// rows that apply as they change. The configuration is written through [apply] on every change; there is nothing to save.
@@ -188,32 +168,71 @@ class SettingsPageState extends State<SettingsPage> {
   final _search = TextEditingController();
   String? _selected;
 
-  /// The sections the app draws itself that this build and key have, then those the host's providers offer as sections of their own
-  /// (before About, which stays last). A provider's section that names an id the app uses is left out.
+  /// The sections of a page given none: those of an app with no host to ask.
+  late final HostSections _none = HostSections.withoutHost();
+  HostSections get _held => widget.hostSections ?? _none;
+
+  /// The widget the app draws for the section [id] itself, with whether this build and key have what it needs. A section the app draws
+  /// is listed by the host like any other and the widget is only chosen here, by its id; an id with no entry is drawn from the form
+  /// its provider describes.
+  Map<String, ({bool ready, Widget Function() build})> get _own => {
+    'general': (ready: true, build: () => GeneralSection(controller: controller, ledger: widget.ledger, hostWorkspacePreview: widget.hostWorkspacePreview)),
+    'appearance': (ready: true, build: () => AppearanceSection(controller: controller)),
+    'notifications': (ready: true, build: () => NotificationsSection(controller: controller, onAllowNotifications: widget.onAllowNotifications)),
+    'voice': (
+      ready: true,
+      build: () => VoiceSection(controller: controller, backends: widget.voiceBackends, host: widget.hostSpeech, outputs: widget.voiceOutputs, reader: widget.reader),
+    ),
+    'shortcuts': (ready: true, build: () => const ShortcutsSection()),
+    'sources': (
+      ready: true,
+      build: () => SourcesSection(
+        controller: controller, presets: widget.presets, hosted: widget.hosted, checkSource: widget.checkSource, programs: widget.programs, accounts: widget.accounts),
+    ),
+    'profiles': (
+      ready: true,
+      build: () => ProfilesPanel(
+        key: const Key('settings-profiles-panel'),
+        config: controller.config,
+        agents: widget.profileAgents,
+        home: widget.home,
+        onPin: widget.onPin,
+        onLoadout: widget.onLoadout,
+        onChange: controller.change,
+      ),
+    ),
+    'mcp': (ready: true, build: () => McpSection(controller: controller, agents: widget.profileAgents, onLoadout: widget.onLoadout)),
+    'permissions': (ready: true, build: () => PermissionsSection(controller: controller, rules: widget.rules, sources: widget.profileAgents)),
+    'accounts': (ready: widget.accounts != null, build: () => AccountsSection(controller: widget.accounts!)),
+    'mail': (ready: widget.mail != null, build: () => MailSection(key: const Key('settings-mail'), controller: widget.mail!)),
+    'shells': (ready: widget.shells != null, build: () => ShellsSection(key: const Key('settings-shells'), settings: widget.shells!)),
+    'usage': (ready: !widget.usageSection, build: () => UsageWarning(controller: controller)),
+    'store': (ready: true, build: () => StoreSection(key: const Key('settings-store'), onStore: widget.onLoadout)),
+    'extensions': (ready: widget.extensions != null, build: () => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!)),
+    'about': (ready: true, build: () => AboutSection(version: widget.version)),
+  };
+
+  /// The sections the host lists, in its order but with About last: those the app draws that this build and key have, and the
+  /// provider's own. A section that is a group inside another one is not a page of its own.
   List<SettingsSection> get _available {
-    final own = [
-      for (final section in _sections)
-        if ((section.id != 'accounts' || widget.accounts != null) && (section.id != 'mail' || widget.mail != null) && (section.id != 'extensions' || widget.extensions != null) && (section.id != 'shells' || widget.shells != null) && (section.id != 'usage' || !widget.usageSection)) section,
-    ];
-    final held = widget.hostSections;
-    if (held == null) return own;
-    final taken = {for (final section in own) section.id};
-    final added = <SettingsSection>[];
-    final known = {for (final section in _sections) section.id, for (final section in held.sections) if (section.under == null) section.id};
+    final held = _held;
+    final known = {for (final section in held.sections) if (section.under == null) section.id};
+    final pages = <SettingsSection>[];
+    final taken = <String>{};
     for (final section in held.ownOf(known)) {
-      if (taken.add(section.id)) added.add(SettingsSection.of(section));
+      if (!(_own[section.id]?.ready ?? true)) continue;
+      if (taken.add(section.id)) pages.add(SettingsSection.of(section));
     }
-    final about = own.indexWhere((section) => section.id == 'about');
-    return [...own.take(about < 0 ? own.length : about), ...added, ...own.skip(about < 0 ? own.length : about)];
+    return [...pages.where((section) => section.id != 'about'), ...pages.where((section) => section.id == 'about')];
   }
 
   /// The groups providers put inside the section [id].
-  List<HostSection> _groups(String id) => widget.hostSections?.groupsIn(id) ?? const [];
+  List<HostSection> _groups(String id) => _held.groupsIn(id);
 
   @override
   void initState() {
     super.initState();
-    widget.hostSections?.addListener(_changed);
+    _held.addListener(_changed);
     if (_available.any((section) => section.id == widget.section)) _selected = widget.section;
   }
 
@@ -221,13 +240,16 @@ class SettingsPageState extends State<SettingsPage> {
   void didUpdateWidget(SettingsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.hostSections != widget.hostSections) {
-      oldWidget.hostSections?.removeListener(_changed);
-      widget.hostSections?.addListener(_changed);
+      (oldWidget.hostSections ?? _none).removeListener(_changed);
+      _held.addListener(_changed);
     }
   }
 
   void _changed() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // The page can open before the host has listed the sections: the one it was asked to show is chosen once it is there.
+    if (_selected == null && widget.section != null && _available.any((section) => section.id == widget.section)) _selected = widget.section;
+    setState(() {});
   }
 
   /// Shows the section [id], as when the page is already open and something sends the person to it.
@@ -237,7 +259,7 @@ class SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
-    widget.hostSections?.removeListener(_changed);
+    _held.removeListener(_changed);
     controller
       ..removeListener(_changed)
       ..dispose();
@@ -305,10 +327,7 @@ class SettingsPageState extends State<SettingsPage> {
       matching.where((section) => section.id == _selected).firstOrNull ?? matching.firstOrNull;
 
   Widget _body(BuildContext context, SettingsSection section) {
-    final config = controller.config;
-    final child = section.host != null
-        ? HostSectionForm(key: Key('settings-host-${section.id}'), section: section.host!, sections: widget.hostSections!)
-        : _builtIn(section, config);
+    final child = _own[section.id]?.build() ?? HostSectionForm(key: Key('settings-host-${section.id}'), section: section.host!, sections: _held);
     final groups = _groups(section.id);
     return Align(
       alignment: Alignment.topCenter,
@@ -328,42 +347,11 @@ class SettingsPageState extends State<SettingsPage> {
                 child: Text(problem, key: const Key('settings-write-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
               ),
             SettingsLayers(controller: controller, child: child),
-            for (final group in groups) HostSectionForm(key: Key('settings-host-${group.id}'), section: group, sections: widget.hostSections!, asGroup: true),
+            for (final group in groups) HostSectionForm(key: Key('settings-host-${group.id}'), section: group, sections: _held, asGroup: true),
           ],
         ),
       ),
     );
-  }
-
-  /// A section the app draws itself.
-  Widget _builtIn(SettingsSection section, CanoaConfig config) {
-    return switch (section.id) {
-      'general' => GeneralSection(controller: controller, ledger: widget.ledger, hostWorkspacePreview: widget.hostWorkspacePreview),
-      'appearance' => AppearanceSection(controller: controller),
-      'notifications' => NotificationsSection(controller: controller, onAllowNotifications: widget.onAllowNotifications),
-      'voice' => VoiceSection(controller: controller, backends: widget.voiceBackends, host: widget.hostSpeech, outputs: widget.voiceOutputs, reader: widget.reader),
-      'shortcuts' => const ShortcutsSection(),
-      'sources' => SourcesSection(
-        controller: controller, presets: widget.presets, hosted: widget.hosted, checkSource: widget.checkSource, programs: widget.programs, accounts: widget.accounts),
-      'profiles' => ProfilesPanel(
-        key: const Key('settings-profiles-panel'),
-        config: config,
-        agents: widget.profileAgents,
-        home: widget.home,
-        onPin: widget.onPin,
-        onLoadout: widget.onLoadout,
-        onChange: controller.change,
-      ),
-      'mcp' => McpSection(controller: controller, agents: widget.profileAgents, onLoadout: widget.onLoadout),
-      'permissions' => PermissionsSection(controller: controller, rules: widget.rules, sources: widget.profileAgents),
-      'accounts' => AccountsSection(controller: widget.accounts!),
-      'mail' => MailSection(key: const Key('settings-mail'), controller: widget.mail!),
-      'usage' => UsageWarning(controller: controller),
-      'store' => StoreSection(key: const Key('settings-store'), onStore: widget.onLoadout),
-      'extensions' => ExtensionsSection(key: const Key('settings-extensions'), settings: widget.extensions!),
-      'shells' => ShellsSection(key: const Key('settings-shells'), settings: widget.shells!),
-      _ => AboutSection(version: widget.version),
-    };
   }
 
   @override

@@ -89,7 +89,7 @@ impl ReaderInfo { pub fn new(id, bucket_prefix) -> Self; pub fn problem(&self) -
 
 ## `canoa::profile_item` (feature `profile-item`)
 
-The `profile_item` kind: one thing a profile may set, and what it does to a session. Which items there are is not Canoa's to say: each is a provider, the ones Canoa carries and the ones an extension adds alike.
+The `profile_item` kind: one thing a profile may set, and what it does to a session. Which items there are is not Canoa's to say: each is a provider, the ones Canoa carries and the ones an extension adds alike. The application's own pages (General to About) are providers of the host with no schema: the application draws such a section itself and chooses its widget by the id.
 
 ```rust
 pub const KIND: &str = "profile_item";   pub const KIND_VERSIONS: [&str; 1] = ["1"];   pub const NETWORK_MODES: [&str; 5] = [...];

@@ -1156,7 +1156,8 @@ and the form it asks for (a guatiao schema and the guatiao-intake form that show
 of its own (`Extensions` when it names none) or is a titled group at the end of an existing section's page (`under`). Its values are
 kept in `[settings.ID]` of canoa.cfg, or by the provider itself; a field the schema marks sensitive is never shown again, only said to
 be set. The host lists the sections it loaded with `settings/sections`. A section disappears from Settings with the extension that
-offered it, and the values it kept stay in canoa.cfg until you remove the table.
+offered it, and the values it kept stay in canoa.cfg until you remove the table. The pages Canoa draws itself (General, Appearance,
+Accounts and the rest) are listed by the host the same way, so the app learns what Settings has from the host and not from a list of its own.
 
 ### Panel tabs from extensions
 

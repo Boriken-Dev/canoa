@@ -1,0 +1,64 @@
+//! The sections of Settings the application draws itself, offered as providers of the `settings_section` kind the way an extension's
+//! are: the application learns that General, Voice or Accounts exist from the host's list, and picks the widget for each by its id.
+//! A section here has no form of its own, so nothing is asked of its provider but what it is called and where it sits.
+
+use canoa::settings_section::{SectionInfo, SettingsSection};
+use coqui_acp_api::guatiao::Provider;
+use coqui_acp_api::guatiao::library::ProviderError;
+
+/// A section the application draws, with the heading it sits under and the words Settings' search finds it by.
+macro_rules! built_in_sections {
+    ($($provider:ident($id:literal, $title:literal, $group:literal, $icon:literal, $keywords:literal);)+) => {
+        $(
+            #[derive(Default, Provider)]
+            #[provider(SettingsSection, id = $id, crate = ::coqui_acp_api::guatiao)]
+            pub struct $provider;
+
+            impl SettingsSection for $provider {
+                fn describe(&self) -> Result<SectionInfo, ProviderError> {
+                    let mut info = SectionInfo::new($id, $title);
+                    info.group = Some($group.to_owned());
+                    info.icon = Some($icon.to_owned());
+                    info.keywords = Some($keywords.to_owned());
+                    Ok(info)
+                }
+
+                fn read(&self) -> Result<String, ProviderError> {
+                    Ok("{}".to_owned())
+                }
+
+                fn write(&self, _values: String) -> Result<(), ProviderError> {
+                    Ok(())
+                }
+            }
+        )+
+
+        /// The sections in the order Settings lists them: a registry offers its providers by name, which is no order for people.
+        pub(super) const ORDER: &[&str] = &[$($id),+];
+
+        coqui_acp_api::guatiao::local_providers!(
+            id = "canoa-settings-sections",
+            version = env!("CARGO_PKG_VERSION"),
+            providers = [$($provider),+]
+        );
+    };
+}
+
+built_in_sections! {
+    General("general", "General", "App", "tune", "tray window startup network webtransport timeout sessions remembered folder workspace keep history");
+    Appearance("appearance", "Appearance", "App", "palette", "look theme brightness dark light detail verbose density preview");
+    Notifications("notifications", "Notifications", "App", "notifications", "alerts permission question finished browser toast");
+    Voice("voice", "Voice", "App", "mic", "dictation speech microphone input device language push to talk transcribe audio read aloud voice speak speaker playback tts text to speech");
+    Shortcuts("shortcuts", "Shortcuts", "App", "keyboard", "keyboard keys chords hotkeys");
+    Sources("sources", "Sources", "Agents", "hub", "agents providers programs command install update version ready");
+    Profiles("profiles", "Profiles", "Agents", "layers", "overlays layers model effort mode skills trusted directories project");
+    Mcp("mcp", "MCP servers", "Agents", "extension", "tools servers mcp allowed per agent");
+    Permissions("permissions", "Permissions", "Agents", "security", "bypass mode allow once remembered rules protected paths log revoke full access");
+    Accounts("accounts", "Accounts", "Agents", "accounts", "login sign in api key subscription credentials add remove several");
+    Mail("mail", "Mail", "Agents", "mail", "email exchange outlook ews mailbox inbox messages password account add remove test sign in");
+    Shells("shells", "Shells", "Agents", "terminal", "bash git bash powershell pwsh wsl msys2 terminal shell command windows");
+    Usage("usage", "Usage", "Agents", "speed", "limit warn percent quota");
+    Store("store", "Store", "Store", "storefront", "catalog catalogs sources registries overlays skills mcp servers types limits icons size");
+    Extensions("extensions", "Extensions", "Store", "extension", "store types runtimes add library provider host restart");
+    About("about", "About", "About", "info", "version canoa boriken licence");
+}
