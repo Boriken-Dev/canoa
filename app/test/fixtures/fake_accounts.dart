@@ -207,6 +207,31 @@ final class FakeAccountsHost implements AccountsHost {
   int cancelled = 0;
   String? removeRefusal;
 
+  /// The pools the host lists, and what it was asked to make or remove; a refusal is what [setPool] and [removePool] throw.
+  final List<PoolInfo> hostPools = [];
+  final poolsSet = <(String, String, List<String>)>[];
+  final poolsRemoved = <String>[];
+  String? poolRefusal;
+
+  @override
+  Future<List<PoolInfo>> pools() async => List.of(hostPools);
+
+  @override
+  Future<void> setPool(String name, String standard, List<String> accounts) async {
+    if (poolRefusal != null) throw StateError(poolRefusal!);
+    poolsSet.add((name, standard, List.of(accounts)));
+    hostPools
+      ..removeWhere((each) => each.name == name)
+      ..insert(hostPools.where((each) => !each.automatic).length, PoolInfo(name: name, standard: standard, accounts: List.of(accounts)));
+  }
+
+  @override
+  Future<void> removePool(String name) async {
+    if (poolRefusal != null) throw StateError(poolRefusal!);
+    poolsRemoved.add(name);
+    hostPools.removeWhere((each) => each.name == name);
+  }
+
   @override
   Future<List<AgentProvider>> providersLoaded() async => List.of(providers);
 
@@ -226,7 +251,7 @@ final class FakeAccountsHost implements AccountsHost {
     final at = hostEntries.indexWhere((each) => each.name == entry);
     if (at >= 0) {
       final one = hostEntries[at];
-      hostEntries[at] = AccountEntry(name: one.name, harness: one.harness, accounts: List.of(accounts), open: one.open, accepts: one.accepts, usable: one.usable);
+      hostEntries[at] = AccountEntry(name: one.name, harness: one.harness, accounts: List.of(accounts), open: one.open, accepts: one.accepts, usable: one.usable, pools: one.pools);
     }
   }
 

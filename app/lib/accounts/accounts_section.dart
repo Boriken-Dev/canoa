@@ -8,6 +8,7 @@ import 'account_models.dart';
 import 'accounts_controller.dart';
 import 'accounts_host.dart';
 import 'add_account_dialog.dart';
+import 'pools_section.dart';
 import 'usage_view.dart';
 
 /// Settings › Accounts: a group per provider listing its accounts (name, kind, endpoint, whether it is signed in or a session holds
@@ -145,6 +146,7 @@ class _AccountsSectionState extends State<AccountsSection> {
             for (final account in _accounts.of(harness)) _row(account),
           ],
         ),
+      PoolsGroup(controller: _accounts),
     ]);
   }
 

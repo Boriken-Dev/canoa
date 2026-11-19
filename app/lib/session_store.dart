@@ -244,6 +244,10 @@ class ChatSession {
   /// Kept with the draft and, as a name, with the session in the ledger: no credential is ever held here.
   String? account;
 
+  /// The account the host ran the session on, and the pool it took it from when [account] names a pool, as the host said them when
+  /// the session started; null before then and for a host that names none. Not kept: the next start says them again.
+  String? ranOnAccount, ranOnPool;
+
   /// What is written in a draft's composer, kept with it.
   String draftText = '';
 
@@ -1521,7 +1525,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       ..place = place
       ..endpoint = endpoint
       ..websocketFallback = websocketFallback
-      ..method = method;
+      ..method = method
+      ..ranOnAccount = client.identity.ranOnAccount
+      ..ranOnPool = client.identity.ranOnPool;
     applyOpened(draft, opened);
     attachVerifiedClient(draft.id, client);
     final kept = draft.draftId;
@@ -2679,6 +2685,9 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
       final client = await reopenOn(
         moved != null && moved.moved ? moved.session : oldId,
       );
+      session
+        ..ranOnAccount = client.identity.ranOnAccount
+        ..ranOnPool = client.identity.ranOnPool;
       if (moved != null && moved.moved) {
         // The conversation has a new id in the new folder: the list follows it, with what the person had made of it.
         if (oldEntry != null) ledger?.remove(oldEntry);

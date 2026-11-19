@@ -18,6 +18,7 @@ class AccountsController extends ChangeNotifier {
     required this.host,
     required this.config,
     required this.change,
+    this.restart,
     this.usage,
     this.holder,
     this.hostIsHere = true,
@@ -30,6 +31,10 @@ class AccountsController extends ChangeNotifier {
 
   /// Writes a change to canoa.cfg (an entry offering an account) and restarts the host so it serves it.
   final ChangeAccountConfig change;
+
+  /// Has the host serve what it just wrote about pools, which it reads when it starts; the person is asked first. Null where the
+  /// app cannot start that host.
+  final Future<void> Function()? restart;
 
   /// What the sessions on an account have last heard of its allowances, by the account's id.
   final UsageReport? Function(String accountId)? usage;
@@ -46,12 +51,16 @@ class AccountsController extends ChangeNotifier {
   List<AgentProvider>? _agents;
   List<AccountInfo> _accounts = const [];
   List<AccountEntry> _entries = const [];
+  List<PoolInfo> _pools = const [];
   final _catalogs = <String, AccountCatalog>{};
   String? _problem;
   bool _loading = false;
   bool _disposed = false;
 
   List<AccountInfo> get accounts => _accounts;
+
+  /// The pools of the host, the person's own first and then its own `any-<standard>` ones.
+  List<PoolInfo> get pools => _pools;
 
   /// The agent entries the host lists, which a built-in source is one of before canoa.cfg names it.
   List<AccountEntry> get hostEntries => _entries;
@@ -77,6 +86,34 @@ class AccountsController extends ChangeNotifier {
   /// offers none: its harness then runs on the login it has where it runs.
   List<AccountInfo> offeredBy(String entry) => [
     for (final name in _view.hostAccountsOf(entry)) ?named(name),
+  ];
+
+  /// The pools the agent entry [entry] offers a session: those it names and the host's own its harness accepts.
+  List<EntryPool> poolsOf(String entry) => hostEntry(entry)?.pools ?? const [];
+
+  /// The pool of [entry] called [name]; null when [name] is no pool the entry offers (an account's name, say).
+  EntryPool? poolOf(String entry, String? name) => name == null ? null : poolsOf(entry).where((each) => each.name == name).firstOrNull;
+
+  /// The account or pool a session of [entry] starts on when the person chose none: the first the entry lists when that is a pool,
+  /// else the first account it offers that can be used; null runs the login the agent has where it runs.
+  String? defaultOf(String entry) {
+    final first = _view.hostAccountsOf(entry).firstOrNull;
+    if (first != null && poolOf(entry, first) != null) return first;
+    return offeredBy(entry).where((each) => each.usable).firstOrNull?.name;
+  }
+
+  /// Every standard some account provides or a pool of the host is of, in the order the accounts are, for a new pool to be of.
+  List<String> get standards => {
+    for (final each in _accounts) ...each.provides,
+    for (final each in _pools) each.standard,
+  }.toList();
+
+  /// What a pool of [standard] may hold: the login a harness has where it runs (`local`) when the host's own pool of the standard
+  /// holds it, then the accounts that provide it, in canoa.cfg's order.
+  List<String> membersFor(String standard) => [
+    if (_pools.any((each) => each.automatic && each.standard == standard && each.accounts.contains(localAccount))) localAccount,
+    for (final each in _accounts)
+      if (each.provides.contains(standard)) each.name,
   ];
 
   /// The provider the agent entry [entry] runs, which takes accounts; null for an entry that runs a program of its own.
@@ -159,6 +196,11 @@ class AccountsController extends ChangeNotifier {
         _entries = await host.entries();
       } on Object {
         // A host with no list of its entries leaves what canoa.cfg names.
+      }
+      try {
+        _pools = await host.pools();
+      } on Object {
+        // A host with no pools lists none.
       }
       _problem = null;
       for (final harness in {..._accounts.map((each) => each.harness)}) {
@@ -247,6 +289,21 @@ class AccountsController extends ChangeNotifier {
     } finally {
       await refresh();
     }
+  }
+
+  /// Makes the pool [name] or changes it to hold [accounts], in that order. A refusal is the host's words, thrown as they are; the
+  /// host serves the pool when it starts again, which [restart] does when the person agrees.
+  Future<void> setPool(String name, String standard, List<String> accounts) async {
+    await host.setPool(name, standard, accounts);
+    await refresh();
+    await restart?.call();
+  }
+
+  /// Takes the pool [name] away; the host refuses while an entry offers it, in its own words.
+  Future<void> removePool(String name) async {
+    await host.removePool(name);
+    await refresh();
+    await restart?.call();
   }
 
   /// The configuration changed under it: what entries offer is read again.

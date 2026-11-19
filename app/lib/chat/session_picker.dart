@@ -56,8 +56,16 @@ const machineLoginLabel = "This machine's login";
 /// own choice of that, else the entry's first listed account, else that login too.
 AccountInfo? chosenAccount(AccountsController accounts, String entry, String? account) {
   if (account == machineLogin) return null;
+  // A pool is a choice of its own, not an account: the pool tile says so, and no account tile is the chosen one.
+  if (chosenPool(accounts, entry, account) != null) return null;
   final named = accounts.availableTo(entry).where((each) => each.name == account).firstOrNull;
   return named ?? accounts.offeredBy(entry).firstOrNull;
+}
+
+/// The pool [entry]'s session runs on when [account] names one, or none was named and the entry's first is a pool; else null.
+EntryPool? chosenPool(AccountsController accounts, String entry, String? account) {
+  if (account == machineLogin) return null;
+  return accounts.poolOf(entry, account ?? accounts.defaultOf(entry));
 }
 
 /// One row of the model list: a model of the chosen agent, or, under Favourites, of any agent whose models are held.
@@ -136,7 +144,12 @@ class _SessionPickerState extends State<SessionPicker> {
       final models = source == null ? null : store.choicesOf(source)?.models;
       for (final choice in option?.choices ?? const <Choice>[]) {
         final listed = models?.where((each) => each.id == choice.value).firstOrNull;
-        rows.add(_ModelRow(value: choice.value, label: choiceLabel(OptionRole.model, choice), detail: listed?.description));
+        // The models of a pool say which of its accounts list each.
+        final detail = [
+          ?listed?.description,
+          if (listed != null && listed.accounts.isNotEmpty) 'On ${listed.accounts.join(', ')}',
+        ].join(' · ');
+        rows.add(_ModelRow(value: choice.value, label: choiceLabel(OptionRole.model, choice), detail: detail.isEmpty ? null : detail));
       }
     }
     var number = 0;
@@ -488,6 +501,8 @@ class _SessionPickerState extends State<SessionPicker> {
     final offered = accounts.availableTo(entry);
     final look = context.chatLook;
     final chosen = chosenAccount(accounts, entry, session.account);
+    final pool = chosenPool(accounts, entry, session.account);
+    final pools = accounts.poolsOf(entry);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -495,8 +510,9 @@ class _SessionPickerState extends State<SessionPicker> {
         Text('Account', style: TextStyle(fontSize: 11.5, color: look.muted)),
         const SizedBox(height: 2),
         ConstrainedBox(constraints: const BoxConstraints(maxHeight: 260), child: SingleChildScrollView(child: SizedBox(width: double.infinity, child: Wrap(spacing: 6, runSpacing: 6, children: [
-          _accountTile(context, accounts, null, chosen: chosen == null, now: now),
+          _accountTile(context, accounts, null, chosen: chosen == null && pool == null, now: now),
           for (final account in offered) _accountTile(context, accounts, account, chosen: account.name == chosen?.name, now: now),
+          for (final each in pools) _poolTile(context, each, chosen: each.name == pool?.name),
           ActionChip(
             key: const Key('account-add'),
             avatar: const Icon(Icons.add, size: 16),
@@ -518,6 +534,46 @@ class _SessionPickerState extends State<SessionPicker> {
             child: Text(block, key: const Key('picker-account-note'), style: TextStyle(fontSize: 11.5, color: look.muted)),
           ),
       ]),
+    );
+  }
+
+  /// One pool the entry offers: accounts that provide one standard, which a session runs on whichever is free and lists the model.
+  /// It is chosen for a draft; a conversation that has started keeps the account it runs on, which is said here.
+  Widget _poolTile(BuildContext context, EntryPool pool, {required bool chosen}) {
+    final look = context.chatLook;
+    final enabled = draft && pool.members.isNotEmpty;
+    final members = pool.members.map((each) => each.name == localAccount ? machineLoginLabel : each.name).join(', ');
+    final ran = !draft && chosen ? session.ranOnAccount : null;
+    final state = [
+      standardTitle(pool.standard),
+      if (pool.automatic) 'made by Canoa',
+      if (ran != null) 'running on $ran' else if (pool.members.isEmpty) 'no account yet' else members,
+    ].join(' · ');
+    return Tooltip(
+      message: draft ? 'A session on a pool runs on whichever of its accounts is free' : 'A pool is chosen for a new conversation',
+      child: InkWell(
+        key: Key('pool-choice ${pool.name}'),
+        borderRadius: BorderRadius.circular(8),
+        onTap: enabled ? () => store.setAccount(session, pool.name) : null,
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 120),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            color: chosen ? look.raised : null,
+            border: Border.all(color: chosen ? look.accent : look.border),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.layers_outlined, size: 16, color: enabled || chosen ? null : look.muted, key: Key('pool-mark ${pool.name}')),
+              const SizedBox(width: 6),
+              Text(pool.name, style: TextStyle(fontSize: 13, color: enabled || chosen ? null : look.muted)),
+              if (chosen) ...[const SizedBox(width: 4), const Icon(Icons.check, size: 14)],
+            ]),
+            Text(state, key: Key('pool-state ${pool.name}'), style: TextStyle(fontSize: 11, color: look.muted)),
+          ]),
+        ),
+      ),
     );
   }
 

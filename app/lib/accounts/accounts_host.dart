@@ -137,6 +137,16 @@ abstract interface class AccountsHost {
   /// The agent entries of the host that run a provider with accounts, and the accounts each offers.
   Future<List<AccountEntry>> entries();
 
+  /// The pools of the host: the person's own, then the host's `any-<standard>` ones.
+  Future<List<PoolInfo>> pools();
+
+  /// Makes the pool [name], or changes it to hold exactly [accounts], in that order, all providing [standard]. The host refuses an
+  /// account that does not, in words that name it; it writes canoa.cfg and serves the pool when it starts again.
+  Future<void> setPool(String name, String standard, List<String> accounts);
+
+  /// Takes the pool [name] out of canoa.cfg; the host refuses while an entry offers it.
+  Future<void> removePool(String name);
+
   /// Makes the entry [entry] offer exactly [accounts], in that order, in the host's canoa.cfg, which the host alone writes. An entry
   /// it does not have is made when [harness] says what it runs. The host reads it when it starts.
   Future<void> offer(String entry, List<String> accounts, {String? harness});
@@ -201,6 +211,23 @@ final class ControlAccountsHost implements AccountsHost {
     final result = await _call('accounts/entries', const {});
     final entries = result is Map ? result['entries'] : null;
     return [if (entries is List) for (final each in entries) ?AccountEntry.parse(each)];
+  }
+
+  @override
+  Future<List<PoolInfo>> pools() async {
+    final result = await _call('pools/list', const {});
+    final pools = result is Map ? result['pools'] : null;
+    return [if (pools is List) for (final each in pools) ?PoolInfo.parse(each)];
+  }
+
+  @override
+  Future<void> setPool(String name, String standard, List<String> accounts) async {
+    await _call('pools/set', {'name': name, 'standard': standard, 'accounts': accounts});
+  }
+
+  @override
+  Future<void> removePool(String name) async {
+    await _call('pools/remove', {'name': name});
   }
 
   @override

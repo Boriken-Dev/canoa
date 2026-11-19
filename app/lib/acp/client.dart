@@ -5,6 +5,7 @@ import 'package:coqui_acp/coqui_acp.dart';
 import 'package:coqui_acp/page.dart';
 import 'package:coqui_transport_web/coqui_transport_web.dart';
 
+import '../accounts/account_meta.dart' show accountMeta;
 import '../chat/agent_events.dart';
 import '../chat/timing_log.dart';
 import 'delegate.dart';
@@ -46,6 +47,10 @@ final class AgentIdentity {
   /// `agentVersion`) is known by them.
   List<String> markers = const [];
 
+  /// The account the host ran this connection on, and the pool it took it from when the client named a pool, as the answer's
+  /// `_meta` says them; null when the host named none.
+  String? ranOnAccount, ranOnPool;
+
   /// The usage extension, when the agent advertised it.
   UsageSupport? usage;
 
@@ -86,6 +91,10 @@ final class AgentIdentity {
     if (meta is Map) {
       markers = [for (final MapEntry(:key, :value) in meta.entries) if (value == true && key is String) key];
       this.version ??= _text(meta['agentVersion']);
+      if (meta[accountMeta] case final Map<Object?, Object?> account) {
+        ranOnAccount = _text(account['name']);
+        ranOnPool = _text(account['pool']);
+      }
     }
     final capabilities = result[version == 2 ? 'capabilities' : 'agentCapabilities'];
     bool says(List<String> path) {

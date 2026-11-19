@@ -29,6 +29,9 @@ class AccountChooser extends StatelessWidget {
       builder: (context, _) {
         if (accounts.harnessOf(entry) == null) return const SizedBox.shrink();
         final chosen = chosenAccount(accounts, entry, session.account);
+        final pool = chosenPool(accounts, entry, session.account);
+        // A conversation on a pool says which account the host took from it.
+        final ran = pool == null || session.isDraft ? null : session.ranOnAccount;
         return InkWell(
           key: session.isDraft ? const Key('option-account') : const Key('session-account'),
           borderRadius: BorderRadius.circular(8),
@@ -36,12 +39,14 @@ class AccountChooser extends StatelessWidget {
           child: Tooltip(
             message: session.isDraft ? 'The account this session runs on' : 'The account this session runs on; another needs a new conversation',
             child: ComposerPill(
-              label: chosen?.name ?? machineLoginLabel,
-              leading: SourceMark.provider(
-                chosen == null ? accounts.harnessOf(entry) : accountMarkId(chosen.harness, chosen.kind),
-                size: 16,
-                key: const Key('account-chip-mark'),
-              ),
+              label: pool == null ? chosen?.name ?? machineLoginLabel : ran == null ? pool.name : '${pool.name} · $ran',
+              leading: pool != null
+                  ? const Icon(Icons.layers_outlined, size: 16, key: Key('account-chip-pool'))
+                  : SourceMark.provider(
+                      chosen == null ? accounts.harnessOf(entry) : accountMarkId(chosen.harness, chosen.kind),
+                      size: 16,
+                      key: const Key('account-chip-mark'),
+                    ),
             ),
           ),
         );

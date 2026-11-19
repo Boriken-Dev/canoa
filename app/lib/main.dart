@@ -1726,6 +1726,7 @@ class _CanoaAppState extends State<CanoaApp> {
       host: host,
       config: () => config,
       change: _changeAccounts,
+      restart: _poolsChanged,
       holder: _accountHolder,
       usage: (id) => store.accountUsage[id],
       // A page a host served is not on the host's machine as far as its browser's loopback goes.
@@ -1754,7 +1755,6 @@ class _CanoaAppState extends State<CanoaApp> {
   /// Writes what changes which entries offer which accounts and has the host serve it. The host wrote the account's own table in
   /// the person's file, so it is read again first: saving the copy this app held would take it out.
   Future<void> _changeAccounts(CanoaConfig Function(CanoaConfig config) edit) async {
-    final path = _configPath;
     final fresh = await _readConfig();
     // What entries offer is the host's to say, and the host alone writes canoa.cfg for it: the edit is made over the entries the host
     // lists, and each entry it changes is asked of the host, which makes the entry too when there is none. This app reads the file
@@ -1772,24 +1772,38 @@ class _CanoaAppState extends State<CanoaApp> {
     }
     // The host serves what an entry offers from the moment it starts, so a change of the offers restarts it, which ends the
     // sessions open on it: the person is asked first, and says which. Declined, it is saved and applies when the host next starts.
-    final canRestart = widget.served != null || (widget.host != null && path != null);
-    var restart = canRestart && offers.isNotEmpty;
-    if (restart) {
-      final ending = _endedByRestart();
-      if (ending.isNotEmpty && !await _confirmAccountsRestart(ending)) restart = false;
-    }
+    final restart = offers.isNotEmpty && await _mayRestartForAccounts();
     final changed = await _readConfig();
     if (mounted) setState(() => config = changed);
     _settingsKey.currentState?.controller.adopt(changed);
     await _accountsHeld?.refresh();
     _accounts?.changed();
     if (!restart) return;
+    await _restartHostForAccounts();
+  }
+
+  /// Whether the host may be started again for a change of what it serves about accounts (their offers, their pools): it can be from
+  /// here, and the person, told which open conversations that ends, agrees.
+  Future<bool> _mayRestartForAccounts() async {
+    final canRestart = widget.served != null || (widget.host != null && _configPath != null);
+    if (!canRestart) return false;
+    final ending = _endedByRestart();
+    return ending.isEmpty || await _confirmAccountsRestart(ending);
+  }
+
+  /// Starts the host again so it serves what canoa.cfg now says of accounts, and asks it for them once more.
+  Future<void> _restartHostForAccounts() async {
     if (widget.served != null) {
       await _startHostAgain();
     } else {
-      await widget.host!.apply(configPath: path);
+      await widget.host!.apply(configPath: _configPath);
     }
     await _accountsHeld?.refresh();
+  }
+
+  /// A pool the host just wrote takes effect when the host starts again: after the person agrees to that, it does.
+  Future<void> _poolsChanged() async {
+    if (await _mayRestartForAccounts()) await _restartHostForAccounts();
   }
 
   /// canoa.cfg as it is now: the person's own file on this computer, or the copy this page holds where the host that served it keeps
@@ -2137,7 +2151,7 @@ class _CanoaAppState extends State<CanoaApp> {
     final entry = source.hostEntry;
     if (entry == null) return null;
     final accounts = source.host == null ? _accounts : _accountsOn(source.host);
-    return accounts?.offeredBy(entry).where((each) => each.usable).firstOrNull?.name;
+    return accounts?.defaultOf(entry);
   }
 
   /// The choices the host chip offers: this computer (or the host that served this page) first, then each saved connection.
@@ -2555,10 +2569,10 @@ class _CanoaAppState extends State<CanoaApp> {
     if (host == null || listening == null) throw StateError('canoa is not serving $name now: open Hosting to see why');
     // Only a desktop holds its host in this process; a served page reaches every entry, account or not, over its host's endpoint.
     if (widget.served == null && (listening.local || draft.account != null || (_accounts?.offeredBy(name).isNotEmpty ?? false))) {
-      draft.account ??= _accounts?.offeredBy(name).where((each) => each.usable).firstOrNull?.name;
+      draft.account ??= _accounts?.defaultOf(name);
       return _startViaLink(draft, name, folder, worktree, starting);
     }
-    draft.account ??= _accounts?.offeredBy(name).where((each) => each.usable).firstOrNull?.name;
+    draft.account ??= _accounts?.defaultOf(name);
     final method = PeerMethod.values.where((method) => method.id == (listening.method ?? host.peerMethod)).firstOrNull;
     if (method == null) throw StateError('canoa did not say which method it proves by');
     final endpoint = Uri.parse(listening.url);

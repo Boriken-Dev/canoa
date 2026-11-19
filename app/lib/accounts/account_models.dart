@@ -4,6 +4,8 @@ library;
 
 import '../providers/provider_catalog.dart';
 
+export 'account_meta.dart';
+
 Map<String, Object?> _map(Object? value) => value is Map
     ? {for (final MapEntry(:key, :value) in value.entries) '$key': value}
     : const {};
@@ -200,10 +202,82 @@ enum AccountStatus {
   unreadable,
 }
 
+/// A pool of canoa.cfg, or one the host makes of every account that provides a standard (`any-<standard>`): accounts that provide one
+/// credential standard, which a session may run on instead of one account. The members are accounts by name, `local` among them for
+/// the login a harness has where it runs.
+final class PoolInfo {
+  const PoolInfo({required this.name, required this.standard, this.automatic = false, this.accounts = const []});
+
+  /// One object of `pools/list`, or null when it is not one.
+  static PoolInfo? parse(Object? json) {
+    if (json is! Map || json['name'] is! String || json['standard'] is! String) return null;
+    return PoolInfo(
+      name: json['name'] as String,
+      standard: json['standard'] as String,
+      automatic: json['automatic'] == true,
+      accounts: _texts(json['accounts']),
+    );
+  }
+
+  final String name, standard;
+
+  /// Made by the host, in no file: it holds every account that provides the standard and follows them as they come and go.
+  final bool automatic;
+
+  /// The members, in the order the pool takes them.
+  final List<String> accounts;
+}
+
+/// An account of a pool as one entry offers it.
+final class PoolMember {
+  const PoolMember({required this.name, this.listed = false});
+
+  final String name;
+
+  /// Whether the entry offers the account by itself, which a connection with no grant for accounts needs to run on it.
+  final bool listed;
+}
+
+/// A pool as one agent entry offers it to a session.
+final class EntryPool {
+  const EntryPool({required this.name, required this.standard, this.automatic = false, this.listed = false, this.members = const []});
+
+  /// One object of an entry's `pools`, or null when it is not one.
+  static EntryPool? parse(Object? json) {
+    if (json is! Map || json['name'] is! String || json['standard'] is! String) return null;
+    return EntryPool(
+      name: json['name'] as String,
+      standard: json['standard'] as String,
+      automatic: json['automatic'] == true,
+      listed: json['listed'] == true,
+      members: [
+        if (json['accounts'] is List)
+          for (final each in json['accounts'] as List)
+            if (each is Map && each['name'] is String) PoolMember(name: each['name'] as String, listed: each['listed'] == true),
+      ],
+    );
+  }
+
+  final String name, standard;
+  final bool automatic;
+
+  /// Whether the entry names it in its `accounts`.
+  final bool listed;
+  final List<PoolMember> members;
+}
+
 /// An agent entry of the host that runs a provider with accounts, as the host lists it: what it offers a client is the host's to say,
 /// and a built-in source (Claude, Codex) is one before canoa.cfg names it.
 final class AccountEntry {
-  const AccountEntry({required this.name, required this.harness, this.accounts = const [], this.open = true, this.accepts = const [], this.usable});
+  const AccountEntry({
+    required this.name,
+    required this.harness,
+    this.accounts = const [],
+    this.open = true,
+    this.accepts = const [],
+    this.usable,
+    this.pools = const [],
+  });
 
   /// One object of `accounts/entries`, or null when it is not one.
   static AccountEntry? parse(Object? json) {
@@ -217,6 +291,7 @@ final class AccountEntry {
       open: json['open'] != false,
       accepts: _texts(json['accepts']),
       usable: json['usable'] is List ? _texts(json['usable']) : null,
+      pools: [if (json['pools'] is List) for (final each in json['pools'] as List) ?EntryPool.parse(each)],
     );
   }
 
@@ -229,8 +304,11 @@ final class AccountEntry {
   /// the choice to the provider's own accounts.
   final List<String>? usable;
 
-  /// The accounts it offers, the first being the default.
+  /// The accounts it offers, the first being the default; a name here may be a pool's.
   final List<String> accounts;
+
+  /// The pools it offers a session, those it names and the host's own `any-<standard>` its harness accepts.
+  final List<EntryPool> pools;
 
   /// Whether every paired key may use it.
   final bool open;
@@ -302,12 +380,10 @@ final class AccountInfo {
   bool get usable => status == AccountStatus.signedIn || status == AccountStatus.whereItRuns;
 }
 
-/// The `_meta` key of `initialize` through which the chat names the account a session runs on.
-const accountMeta = 'dev.boriken.canoa/account';
+/// The automatic account every harness that has a login of its own offers: the login it has where it runs.
+const localAccount = 'local';
 
-/// The `_meta` key of `initialize` naming the model a session starts on, by the id its account lists: the host refuses a start on a
-/// model the account does not list, naming both.
-const modelMeta = 'dev.boriken.canoa/model';
+
 
 /// What a session's account holds when the person chose the login the agent has where it runs, not an account of the host. It is
 /// sent as an explicit null, which an entry that lists accounts reads as "none", where an absent name means its first.

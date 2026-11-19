@@ -17,6 +17,7 @@ final class ModelChoice {
     this.efforts = const [],
     this.defaultEffort,
     this.isDefault = false,
+    this.accounts = const [],
   });
 
   /// What a session is told to use.
@@ -39,6 +40,9 @@ final class ModelChoice {
   /// Whether the harness uses it when none is named.
   final bool isDefault;
 
+  /// For the models of a pool: the accounts of the pool that list it. Empty for one account's list.
+  final List<String> accounts;
+
   static ModelChoice? _parse(Object? json) {
     if (json is! Map || json['id'] is! String) return null;
     String? text(String key) => json[key] is String ? json[key] as String : null;
@@ -52,8 +56,18 @@ final class ModelChoice {
       efforts: [if (json['efforts'] is List) for (final effort in json['efforts'] as List) if (effort is String) effort],
       defaultEffort: text('default_effort'),
       isDefault: json['is_default'] == true,
+      accounts: [if (json['accounts'] is List) for (final each in json['accounts'] as List) if (each is String) each],
     );
   }
+}
+
+/// An account of a pool, and whether it listed its models; a member that could not says why.
+final class PoolListing {
+  const PoolListing({required this.name, this.listed = true, this.why});
+
+  final String name;
+  final bool listed;
+  final String? why;
 }
 
 /// Why a source's provider could not list its models when it could not be started at all. A provider that lists only in its
@@ -88,6 +102,7 @@ final class SourceChoices {
     this.cacheLifetime,
     this.cacheLifetimeSetting,
     this.cacheChoices = const [],
+    this.members = const [],
     DateTime? fetchedAt,
   }) : _fetchedAt = fetchedAt;
 
@@ -120,6 +135,9 @@ final class SourceChoices {
   /// choice. Only these are offered.
   final List<CacheChoice> cacheChoices;
 
+  /// For the choices of a pool: each of its accounts and whether it listed its models. Empty for one account's.
+  final List<PoolListing> members;
+
   /// Whether the provider honours [lifetime]: the agent's default always, the rest only as [cacheChoices] lists them.
   bool offersCache(CacheLifetime lifetime) =>
       lifetime == CacheLifetime.harness || cacheChoices.any((choice) => choice.lifetime == lifetime);
@@ -145,6 +163,7 @@ final class SourceChoices {
         cacheLifetime: cacheLifetime,
         cacheLifetimeSetting: cacheLifetimeSetting,
         cacheChoices: cacheChoices,
+        members: members,
         fetchedAt: when,
       );
 
@@ -176,6 +195,12 @@ final class SourceChoices {
           cacheLifetime: value['cache_lifetime'] is String ? value['cache_lifetime'] as String : null,
           cacheLifetimeSetting: CacheLifetime.named(value['cache_lifetime_setting']),
           cacheChoices: [if (value['cache_choices'] is List) for (final choice in value['cache_choices'] as List) ?_cacheChoice(choice)],
+          members: [
+            if (value['accounts'] is List)
+              for (final each in value['accounts'] as List)
+                if (each is Map && each['name'] is String)
+                  PoolListing(name: each['name'] as String, listed: each['listed'] != false, why: each['why'] is String ? each['why'] as String : null),
+          ],
         );
       } on FormatException {
         continue;
