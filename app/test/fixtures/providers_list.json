@@ -101,7 +101,8 @@
           "claude-oauth-token",
           "anthropic-api-key",
           "anthropic-auth-token"
-        ]
+        ],
+        "local": true
       },
       "source": "Claude",
       "launch": null,
@@ -198,8 +199,10 @@
         "usage": [
           "codex-chatgpt",
           "codex-access-token",
-          "codex-api-key"
-        ]
+          "codex-api-key",
+          "harness-login"
+        ],
+        "local": true
       },
       "source": "Codex",
       "launch": null,
@@ -343,7 +346,8 @@
             "produces": "opencode-provider-key"
           }
         ],
-        "usage": []
+        "usage": [],
+        "local": true
       },
       "source": "OpenCode",
       "launch": null,
@@ -399,7 +403,8 @@
           }
         ],
         "logins": [],
-        "usage": []
+        "usage": [],
+        "local": true
       },
       "source": "Pi",
       "launch": null,

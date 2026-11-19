@@ -4,9 +4,10 @@ use canoa::vendor::{AgentVendor, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::Provider;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::{
-    AccountKeeper, AccountKindInfo, AccountOffer, AccountProvider, AccountProviderInfo,
-    AccountUsage, AccountUsageQuery, AccountWatch, LoginMethodInfo, LoginOutcome, LoginPrompter,
-    LoginRequest, ProcessSpawner, RenewReport, RenewRequest, WatchRequest,
+    AccountKeeper, AccountKindInfo, AccountModelsQuery, AccountOffer, AccountProvider,
+    AccountProviderInfo, AccountUsage, AccountUsageQuery, AccountWatch, LoginMethodInfo,
+    LoginOutcome, LoginPrompter, LoginRequest, ProcessSpawner, RenewReport, RenewRequest,
+    WatchRequest,
 };
 use serde_json::Value;
 
@@ -89,6 +90,15 @@ mod standin {
             _: Object<dyn ProcessSpawner>,
             _: Object<dyn AccountKeeper>,
         ) -> Result<AccountUsage, ProviderError> {
+            Err(unsupported())
+        }
+
+        fn models(
+            &self,
+            _: AccountModelsQuery,
+            _: Object<dyn ProcessSpawner>,
+            _: Object<dyn AccountKeeper>,
+        ) -> Result<coqui_acp_api::ModelListing, ProviderError> {
             Err(unsupported())
         }
     }

@@ -346,6 +346,7 @@ pub trait ModelGateway {   // kind `model_gateway`
 pub trait GatewayLease {   // object kind `gateway_lease`; destroying it ends the session's access, and the last one for an account ends its gateway
     fn address(&self) -> Result<String, ProviderError>;   // http://127.0.0.1:PORT, no path
     fn bearer(&self) -> Result<String, ProviderError>;    // good for this session alone, and for a program of this user
+    fn models(&self) -> Result<ModelListing, ProviderError>;   // the models the gateway could serve, as an account provider lists an account's, the one the account serves marked `is_default`; `ModelListing::unknown(reason)` when it cannot list
 }
 ```
 

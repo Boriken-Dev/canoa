@@ -902,6 +902,19 @@ pub struct AccountConfig {
     pub settings: Option<Settings>,
 }
 
+impl AccountConfig {
+    /// The automatic `local` account of the harness `harness`: its own login, run as its configuration stands. It is in no
+    /// `[host.accounts]`.
+    pub(crate) fn local(harness: &str) -> Self {
+        Self {
+            harness: harness.to_owned(),
+            kind: coqui_acp_api::HARNESS_LOGIN.to_owned(),
+            id: coqui_acp_api::LOCAL_ACCOUNT.to_owned(),
+            settings: None,
+        }
+    }
+}
+
 /// `[host.web]`: the web app on a listener of its own, beside the entries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -2330,6 +2343,14 @@ impl Config {
             .unwrap_or_default();
         let mut accounts = IndexMap::new();
         for (name, raw) in host.accounts {
+            if name == coqui_acp_api::LOCAL_ACCOUNT {
+                return Err(ConfigError::Invalid {
+                    entry: None,
+                    what: format!(
+                        "account {name}: that name is taken by the automatic account every harness that has a login of its own offers"
+                    ),
+                });
+            }
             let account = account_of(&name, raw)?;
             if accounts
                 .values()
@@ -2411,7 +2432,7 @@ impl Config {
             }
             let offered_accounts = agent.accounts.unwrap_or_default();
             for (index, account) in offered_accounts.iter().enumerate() {
-                if !accounts.contains_key(account) {
+                if account != coqui_acp_api::LOCAL_ACCOUNT && !accounts.contains_key(account) {
                     return Err(invalid(
                         &name,
                         "accounts names an account [host.accounts] does not hold",

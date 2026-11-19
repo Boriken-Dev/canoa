@@ -264,6 +264,7 @@ pub(crate) fn rows_of(registries: &[(&str, &Registry)], bundles: &[Bundle]) -> V
                     "kinds": offered.kinds.iter().map(|kind| json!({"id": kind.id, "title": kind.title})).collect::<Vec<_>>(),
                     "logins": offered.logins.iter().map(|login| json!({"id": login.id, "title": login.title, "produces": login.produces})).collect::<Vec<_>>(),
                     "usage": offered.usage,
+                    "local": offered.local,
                 }));
             }
         }

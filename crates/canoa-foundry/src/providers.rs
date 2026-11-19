@@ -16,9 +16,9 @@ use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtension};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Provider, Status};
 use coqui_acp_api::{
-    AccountKeeper, AccountOffer, AccountProvider, AccountProviderInfo, AccountUsage,
-    AccountUsageQuery, AccountWatch, Credentials, LoginOutcome, LoginPrompter, LoginRequest,
-    ProcessSpawner, RenewReport, RenewRequest, WatchRequest,
+    AccountKeeper, AccountModelsQuery, AccountOffer, AccountProvider, AccountProviderInfo,
+    AccountUsage, AccountUsageQuery, AccountWatch, Credentials, LoginOutcome, LoginPrompter,
+    LoginRequest, ModelListing, ProcessSpawner, RenewReport, RenewRequest, WatchRequest,
 };
 use serde_json::{Map, Value};
 
@@ -118,6 +118,47 @@ impl AccountProvider for FoundryAccounts {
         usage.account = Some(query.account.id);
         Ok(usage)
     }
+
+    fn models(
+        &self,
+        query: AccountModelsQuery,
+        spawner: Object<dyn ProcessSpawner>,
+        keeper: Object<dyn AccountKeeper>,
+    ) -> Result<ModelListing, ProviderError> {
+        drop((spawner, keeper));
+        query.account.check_id()?;
+        Ok(ModelListing::unknown(
+            "a model that runs on this computer is listed by the gateway that serves it, once a session holds the account",
+        ))
+    }
+}
+
+/// The models a gateway's engine could serve, as a listing: the one the account serves is marked as the one in use when none is
+/// named.
+fn listing(models: Vec<crate::ModelInfo>, serving: &str) -> ModelListing {
+    ModelListing::of(
+        models
+            .into_iter()
+            .map(|model| {
+                let mut info = coqui_acp_api::ModelInfo::new(model.id.clone());
+                info.is_default = model.id == serving;
+                let mut can = Vec::new();
+                if model.tools {
+                    can.push("tools".to_owned());
+                }
+                if model.images {
+                    can.push("images".to_owned());
+                }
+                if let Some(window) = model.context {
+                    can.push(format!("{window} tokens of context"));
+                }
+                if !can.is_empty() {
+                    info.description = Some(can.join(", "));
+                }
+                info
+            })
+            .collect(),
+    )
 }
 
 /// The gateways that are up, one per account while a session holds it, and how to make an engine for one.
@@ -231,13 +272,19 @@ impl ModelGateway for FoundryGateway {
                 Some(&launch),
             )
             .map_err(|why| ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &why))?;
-        Ok(Lease { ticket }.into_object())
+        Ok(Lease {
+            ticket,
+            serving: settings.model,
+        }
+        .into_object())
     }
 }
 
 /// One session's bearer on a gateway; dropping it ends the session's access.
 struct Lease {
     ticket: Ticket,
+    /// The model the account serves.
+    serving: String,
 }
 
 impl GatewayLease for Lease {
@@ -247,6 +294,10 @@ impl GatewayLease for Lease {
 
     fn bearer(&self) -> Result<String, ProviderError> {
         Ok(self.ticket.bearer().to_owned())
+    }
+
+    fn models(&self) -> Result<ModelListing, ProviderError> {
+        Ok(listing(self.ticket.models(), &self.serving))
     }
 }
 
@@ -535,6 +586,43 @@ mod tests {
             address,
             "another account, another gateway"
         );
+    }
+
+    #[test]
+    fn a_lease_lists_the_models_of_its_engine_and_marks_the_one_the_account_serves() {
+        let gateway = stand_in();
+        let lease = gateway
+            .open(request("a", "local-model"), spawner())
+            .expect("opens");
+        let listing = lease.models().expect("listed");
+        assert!(listing.known, "{listing:?}");
+        let ids: Vec<&str> = listing
+            .models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect();
+        assert_eq!(ids, ["local-model"]);
+        assert!(listing.models[0].is_default);
+        assert_eq!(listing.models[0].description.as_deref(), Some("tools"));
+        let other = gateway
+            .open(request("b", "another-model"), spawner())
+            .expect("opens");
+        assert!(
+            !other.models().expect("listed").models[0].is_default,
+            "only the model the account serves is the one in use"
+        );
+    }
+
+    #[test]
+    fn the_account_provider_lists_none_for_a_model_a_gateway_serves() {
+        let listing = FoundryAccounts
+            .models(
+                AccountModelsQuery::new(coqui_acp_api::AccountGrant::new("a", KIND)),
+                spawner(),
+                NoKeeper.into_object(),
+            )
+            .expect("answered");
+        assert!(!listing.known && listing.unknown_because.is_some());
     }
 
     #[test]

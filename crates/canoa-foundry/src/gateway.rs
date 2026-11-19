@@ -456,6 +456,11 @@ impl Ticket {
     pub(crate) fn address(&self) -> String {
         self.running.address()
     }
+
+    /// The models the gateway's engine could serve, loaded or not.
+    pub(crate) fn models(&self) -> Vec<ModelInfo> {
+        self.running.gateway.engine.models()
+    }
 }
 
 impl core::fmt::Debug for Ticket {

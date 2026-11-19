@@ -2245,6 +2245,34 @@ fn a_harness_entry_configures_its_account_provider_apart_from_the_harness() {
 }
 
 #[test]
+fn the_name_local_is_taken_by_the_automatic_account_and_an_entry_may_name_it() {
+    let refused = parse(
+        "[host.accounts.local]
+harness = \"claude\"
+kind = \"claude-login\"
+id = \"id-local\"
+",
+    )
+    .expect_err("taken");
+    assert!(refused.to_string().contains("taken"), "{refused}");
+    let config = parse(
+        "[host.accounts.work]
+harness = \"claude\"
+kind = \"claude-login\"
+id = \"id-work\"
+[host.agents.Claude]
+harness = \"claude\"
+accounts = [\"work\", \"local\"]
+",
+    )
+    .expect("an entry names it among its accounts");
+    let EntryKind::Harness { accounts, .. } = &config.entry("Claude").expect("there").kind else {
+        panic!("a harness entry");
+    };
+    assert_eq!(accounts, &["work", "local"]);
+}
+
+#[test]
 fn a_shared_entrys_permission_window_is_off_unless_set_and_needs_shared() {
     let config = parse(
         "[host.agents.a]

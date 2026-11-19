@@ -16,7 +16,8 @@ use canoa::gateway::{GatewayInfo, GatewayLease, GatewayRequest, ModelGateway};
 use coqui_acp_api::guatiao::Value;
 use coqui_acp_api::guatiao::library::{Object, Registry};
 use coqui_acp_api::{
-    AccountCatalog, AccountGrant, AccountOffer, AccountProvider, Credentials, ProcessSpawner,
+    AccountCatalog, AccountGrant, AccountOffer, AccountProvider, Credentials, ModelListing,
+    ProcessSpawner, UnknownKind,
 };
 use coqui_acp_harness::LocalSpawner;
 
@@ -273,7 +274,7 @@ impl Gateways {
             .and_then(|address| Ok((address, object.bearer()?)))
             .map_err(|error| error.message().to_owned())?;
         Ok(Lease {
-            _object: object,
+            object,
             address,
             bearer,
         })
@@ -282,7 +283,7 @@ impl Gateways {
 
 /// A session's bearer on a gateway; dropping it ends the session's access.
 pub(crate) struct Lease {
-    _object: Object<dyn GatewayLease>,
+    object: Object<dyn GatewayLease>,
     address: String,
     bearer: String,
 }
@@ -296,6 +297,13 @@ impl Lease {
     /// The bearer an agent shows.
     pub(crate) fn bearer(&self) -> &str {
         &self.bearer
+    }
+
+    /// The models the gateway could serve for the account, as the gateway lists them.
+    pub(crate) fn models(&self) -> ModelListing {
+        self.object
+            .models()
+            .unwrap_or_else(|error| ModelListing::unavailable(UnknownKind::Failed, error.message()))
     }
 }
 

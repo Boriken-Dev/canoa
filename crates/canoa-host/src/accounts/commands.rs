@@ -536,6 +536,11 @@ pub(crate) fn add_with(
     signer: &mut Signer<'_>,
 ) -> Result<Added, Failed> {
     check_name(name).map_err(Failed::usage)?;
+    if name == coqui_acp_api::LOCAL_ACCOUNT {
+        return Err(Failed::usage(format!(
+            "{name} is taken: it is the automatic account of a harness that has a login of its own"
+        )));
+    }
     if cfg.config.accounts.contains_key(name) {
         return Err(Failed::usage(format!("an account called {name} exists")));
     }

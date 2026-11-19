@@ -21,7 +21,7 @@ use coqui_acp_api::guatiao::library::kind::InstantiateError;
 use coqui_acp_api::guatiao::schema::{SchemaRef, differences, inline_refs};
 use coqui_acp_api::{
     AccountCatalog, AccountKindInfo, AccountProvider, AcpHarness, CacheLifetime, Environment,
-    HarnessNotice, ProcessSpawner, StartRequest,
+    HARNESS_LOGIN, HarnessNotice, LOCAL_ACCOUNT, ProcessSpawner, StartRequest,
 };
 
 use crate::accounts::matching::Runs;
@@ -75,8 +75,10 @@ pub(crate) struct Harness {
     /// The account kinds and sign-in methods the harness's account provider offers, with the host's own beside them: what an
     /// account of this provider can be, and how it is made.
     listing: AccountCatalog,
-    /// The harness's account provider, which signs in, renews, watches and reads plan limits; `None` when it offers none.
+    /// The harness's account provider, which signs in, renews, watches, reads plan limits and lists models; `None` when it offers none.
     accounts_of: Option<Arc<dyn AccountProvider>>,
+    /// Whether the account provider offers the harness's own login as the automatic `local` account.
+    local: bool,
     /// The accounts the entry offers, when it offers any.
     accounts: Option<Offer>,
     /// The entry's `cache_lifetime`: what its sessions ask when the client does not choose.
@@ -128,7 +130,7 @@ impl Harness {
     /// The provider `id` of `registry`, configured with `settings`; with `profiles`, also the same with client plugins
     /// allowed. `roots` are the entry's working roots, which every connection's provider holds a session and a resumed
     /// thread to. The account provider the same library offers as `<id>_accounts` is configured with the second of
-    /// `settings`, and with the harness's `executable` and `harness` settings where it declares them.
+    /// `settings`, and with the harness's `executable`, `harness`, `node` and `script` settings where it declares them.
     ///
     /// # Errors
     ///
@@ -148,7 +150,7 @@ impl Harness {
                 other => other,
             })?;
         let catalog = plain.accounts().ok();
-        let (accounts_of, listing) = account_side(registry, id, settings, account_settings)?;
+        let (accounts_of, listing, local) = account_side(registry, id, settings, account_settings)?;
         let profiled = if profiles {
             let mut map = settings.as_map().clone();
             map.insert(CLIENT_PLUGINS.to_owned(), serde_json::Value::Bool(true));
@@ -170,6 +172,7 @@ impl Harness {
             catalog,
             listing,
             accounts_of,
+            local,
             accounts: None,
             lifetime: None,
             entry: String::new(),
@@ -260,6 +263,18 @@ impl Harness {
     /// them, each kind saying the standards it provides.
     pub(crate) const fn listing(&self) -> &AccountCatalog {
         &self.listing
+    }
+
+    /// The automatic `local` account: the harness run on its own login, as its configuration stands, when its account provider
+    /// offers it. It is in no `[host.accounts]`: the host lists it for the entry, first unless the entry names accounts.
+    pub(crate) fn local_account(&self) -> Option<Offered> {
+        if !self.local {
+            return None;
+        }
+        let info = self.listing.kind(HARNESS_LOGIN)?.clone();
+        let mut config = AccountConfig::local(&self.id);
+        config.id = LOCAL_ACCOUNT.to_owned();
+        Some((LOCAL_ACCOUNT.to_owned(), config, info))
     }
 
     /// This harness as an account is held for it.
@@ -663,8 +678,12 @@ pub(crate) fn instance(
     }
 }
 
+/// A harness's account provider, what it offers listed with the kinds that gateways serve, and whether it offers the harness's own
+/// login as the automatic `local` account.
+type AccountSide = (Option<Arc<dyn AccountProvider>>, AccountCatalog, bool);
+
 /// The account provider the library of harness `harness` offers as `<harness>_accounts`, what it offers listed with the kinds that
-/// gateways serve. `own` configures it; the harness's `executable` and `harness` settings are
+/// gateways serve. `own` configures it; the harness's `executable`, `harness`, `node` and `script` settings are
 /// given to it where it declares them, so that it runs the program the harness runs. A library with no such provider has no
 /// accounts to make, and its listing holds only the login a program has where it runs.
 fn account_side(
@@ -672,18 +691,20 @@ fn account_side(
     harness: &str,
     settings: &Settings,
     own: &Settings,
-) -> Result<(Option<Arc<dyn AccountProvider>>, AccountCatalog), ProviderError> {
+) -> Result<AccountSide, ProviderError> {
     let mut listing = AccountCatalog::new();
     let provider = account_provider(registry, harness, settings, own)?;
+    let mut local = false;
     if let Some(provider) = &provider {
         let offer = provider
             .offers()
             .map_err(|error| ProviderError::Settings(error.message().to_owned()))?;
+        local = offer.local;
         listing.kinds.extend(offer.kinds);
         listing.logins = offer.logins;
     }
     crate::gateways::extend(&mut listing, harness);
-    Ok((provider, listing))
+    Ok((provider, listing, local))
 }
 
 pub(crate) fn account_provider(
@@ -713,7 +734,7 @@ pub(crate) fn account_provider(
                 .is_some_and(|schema| schema.find(key).is_some())
         };
         let mut map = own.as_map().clone();
-        for key in ["executable", "harness"] {
+        for key in ["executable", "harness", "node", "script"] {
             if !map.contains_key(key)
                 && declares(key)
                 && let Some(value) = settings.as_map().get(key)

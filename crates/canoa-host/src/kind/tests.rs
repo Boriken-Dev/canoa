@@ -106,6 +106,35 @@ fn an_account_setting_the_provider_does_not_declare_is_refused_naming_the_provid
 }
 
 #[test]
+fn a_harness_with_a_login_of_its_own_offers_it_as_the_local_account_and_names_it_by_default() {
+    let config = crate::config::Config::from_str_in(
+        "[host.agents.Pi]
+harness = \"pi\"
+",
+        std::path::Path::new(""),
+    )
+    .expect("parses");
+    for id in ["claude", "codex", "pi"] {
+        let built = harness(id, &Settings::default(), &Settings::default()).expect("builds");
+        let (name, account, info) = built.local_account().expect("it offers its own login");
+        assert_eq!(name, coqui_acp_api::LOCAL_ACCOUNT, "{id}");
+        assert_eq!(account.kind, HARNESS_LOGIN);
+        assert_eq!(account.harness, id);
+        assert_eq!(info.id, HARNESS_LOGIN);
+        // An entry that names no account offers it, and one that names others offers those alone.
+        let none = crate::serve::entry_accounts(&config, id, &[], &built)
+            .expect("listed")
+            .expect("an account");
+        assert_eq!(none.len(), 1);
+        assert_eq!(none[0].0, coqui_acp_api::LOCAL_ACCOUNT);
+        let named = crate::serve::entry_accounts(&config, id, &["local".to_owned()], &built)
+            .expect("listed")
+            .expect("an account");
+        assert_eq!(named[0].0, coqui_acp_api::LOCAL_ACCOUNT);
+    }
+}
+
+#[test]
 fn only_a_kind_the_account_provider_offers_is_accepted_for_an_account() {
     let pi = harness("pi", &Settings::default(), &Settings::default()).expect("builds");
     let config = |kind: &str| {

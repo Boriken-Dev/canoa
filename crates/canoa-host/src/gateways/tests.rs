@@ -87,6 +87,12 @@ impl GatewayLease for Lease {
     fn bearer(&self) -> Result<String, ProviderError> {
         Ok(format!("bearer-{}", self.number))
     }
+
+    fn models(&self) -> Result<coqui_acp_api::ModelListing, ProviderError> {
+        Ok(coqui_acp_api::ModelListing::unknown(
+            "a stand-in lists none",
+        ))
+    }
 }
 
 impl Drop for Lease {
@@ -255,6 +261,15 @@ impl AccountProvider for Plain {
         _spawner: Object<dyn ProcessSpawner>,
         _keeper: Object<dyn AccountKeeper>,
     ) -> Result<AccountUsage, ProviderError> {
+        Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"))
+    }
+
+    fn models(
+        &self,
+        _query: coqui_acp_api::AccountModelsQuery,
+        _spawner: Object<dyn ProcessSpawner>,
+        _keeper: Object<dyn AccountKeeper>,
+    ) -> Result<coqui_acp_api::ModelListing, ProviderError> {
         Err(ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, "no"))
     }
 }

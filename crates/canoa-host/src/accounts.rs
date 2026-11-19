@@ -924,6 +924,12 @@ impl Held {
         &self.owner
     }
 
+    /// The models of an account a gateway serves, which the gateway's own model lists and no account provider does; `None` for any
+    /// other account.
+    pub(crate) fn gateway_models(&self) -> Option<coqui_acp_api::ModelListing> {
+        self.session.as_ref().map(gateways::Lease::models)
+    }
+
     /// The grant for a call that runs the harness.
     pub(crate) fn grant(&self) -> AccountGrant {
         self.grant.clone()

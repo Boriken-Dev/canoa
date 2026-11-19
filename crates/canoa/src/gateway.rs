@@ -15,9 +15,9 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Schema, ToValue};
+use coqui_acp_api::{ModelListing, ProcessSpawner};
 
 /// The name of the `model_gateway` kind.
 pub const KIND: &str = "model_gateway";
@@ -110,6 +110,11 @@ pub trait GatewayLease: Send + Sync {
 
     /// The bearer the agent shows. It is good for this session alone, and for no one but a program of this user.
     fn bearer(&self) -> Result<String, ProviderError>;
+
+    /// The models this gateway could serve, as an account provider lists the models of an account of an ordinary kind, with the
+    /// one the account serves marked as the default. A gateway that cannot list them answers [`ModelListing::unknown`] with its
+    /// reason.
+    fn models(&self) -> Result<ModelListing, ProviderError>;
 }
 
 #[cfg(test)]

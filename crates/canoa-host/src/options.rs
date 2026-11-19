@@ -17,8 +17,8 @@ use std::sync::mpsc;
 
 use coqui_acp_api::guatiao::library::Object;
 use coqui_acp_api::{
-    AccountGrant, AcpHarness, CacheLifetime, ModelInfo, ModelListing, ModelsRequest,
-    ProcessSpawner, UnknownKind,
+    AccountGrant, AccountKeeper, AccountModelsQuery, AccountProvider, AcpHarness, CacheLifetime,
+    HARNESS_LOGIN, LOCAL_ACCOUNT, ModelInfo, ModelListing, ProcessSpawner, UnknownKind,
 };
 use serde_json::{Map, Value, json};
 
@@ -27,7 +27,7 @@ use crate::spawn::{Command, Stdio};
 pub(crate) mod limits;
 mod probe;
 
-use crate::accounts::Watcher;
+use crate::accounts::{Held, NoAccounts};
 use crate::config::{Config, EntryKind, Settings, cache_lifetime_name};
 use crate::kind;
 
@@ -48,7 +48,8 @@ static PROBED: Mutex<BTreeMap<String, Choices>> = Mutex::new(BTreeMap::new());
 pub struct Asking {
     /// How long a probe session is waited for.
     pub wait: Duration,
-    /// The account of the entry to ask as, with the host's accounts; `None` asks on the login the machine has.
+    /// The account of the entry to ask as, with the host's accounts; `None` asks as the automatic `local` account does, on the
+    /// login the harness has where it runs.
     pub(crate) account: Option<(String, Arc<crate::accounts::Accounts>)>,
     /// Whether the account may be any of the provider's, as for the person at this computer or a key trusted with accounts, and
     /// not only one the entry lists.
@@ -233,9 +234,10 @@ pub fn preset(harness: &str, executable: Option<&OsStr>) -> Choices {
         Ok(configured) => {
             let connection = configured.connection(None, None, CacheLifetime::Default);
             ask(
+                &configured,
                 connection.harness.as_ref(),
-                connection.spawner,
-                (None, connection.watch),
+                (connection.spawner, NoAccounts.into_object()),
+                Who::Local,
             )
         }
         Err(error) => Choices::failed(error.to_string()),
@@ -287,17 +289,17 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
                 Err(error) => return Some(Choices::failed(error.to_string())),
             };
             let mut held = None;
+            let mut owner = None;
             if let Some((account, store)) = &asking.account {
-                if !accounts.contains(account) && !asking.any_account {
+                let listed = match crate::serve::entry_accounts(config, harness, accounts, &built) {
+                    Ok(listed) => listed.unwrap_or_default(),
+                    Err(why) => return Some(Choices::failed(why)),
+                };
+                if !listed.iter().any(|(each, ..)| each == account) && !asking.any_account {
                     return Some(Choices::failed(format!(
                         "{name} does not offer the account {account}"
                     )));
                 }
-                let listed = match crate::serve::offered_accounts(config, harness, accounts, &built)
-                {
-                    Ok(listed) => listed,
-                    Err(why) => return Some(Choices::failed(why)),
-                };
                 let others = if asking.any_account {
                     crate::serve::other_accounts(config, harness, &listed, &built)
                 } else {
@@ -309,15 +311,41 @@ pub fn entry_with(config: &Config, name: &str, asking: &Asking) -> Option<Choice
                     Ok(taken) => held = Some(taken),
                     Err(refusal) => return Some(Choices::failed(refusal.client_reason())),
                 }
+                // An account another provider made is listed by that provider, which knows what its kind is.
+                if let Some(taken) = &held
+                    && taken.owner() != harness
+                {
+                    match crate::accounts::commands::provider_for(config, taken.owner()).and_then(
+                        |other| {
+                            other
+                                .account_provider()
+                                .map(Arc::clone)
+                                .map_err(crate::cli::Failed::run)
+                        },
+                    ) {
+                        Ok(provider) => owner = Some((provider, store.source())),
+                        Err(failed) => return Some(Choices::failed(failed.to_string())),
+                    }
+                }
             }
             let connection = built.connection(None, held.as_ref(), CacheLifetime::Default);
-            let mut choices = ask(
-                connection.harness.as_ref(),
-                connection.spawner,
-                (
-                    held.as_ref().map(crate::accounts::Held::grant),
-                    connection.watch,
+            let keeper = match &held {
+                Some(taken) => taken.keeper(
+                    owner
+                        .as_ref()
+                        .map_or_else(|| built.plain_source(), |(_, source)| *source),
                 ),
+                None => NoAccounts.into_object(),
+            };
+            let who = match &held {
+                Some(taken) => Who::Held(taken, owner.map(|(provider, _)| provider)),
+                None => Who::Local,
+            };
+            let mut choices = ask(
+                &built,
+                connection.harness.as_ref(),
+                (connection.spawner, keeper),
+                who,
             );
             choices.configured_cache_lifetime = options
                 .cache_lifetime
@@ -378,22 +406,51 @@ fn probed(name: &str, program: &OsString, args: &[OsString], wait: Duration) -> 
     choices
 }
 
-/// Asks `harness` for its models, as `account` when one is named, and its program for its version.
+/// Whose models are asked for.
+enum Who<'a> {
+    /// The automatic `local` account: the harness on its own login, as its configuration stands.
+    Local,
+    /// An account held for the call, and the account provider of another harness that made it, when the harness's own did not.
+    Held(&'a Held, Option<Arc<dyn AccountProvider>>),
+}
+
+/// The models of the account asked for, as the account provider of its kind lists them (an account a gateway serves is listed by
+/// the gateway's own model, which no account provider describes).
+fn models_of(
+    built: &kind::Harness,
+    (spawner, keeper): (Object<dyn ProcessSpawner>, Object<dyn AccountKeeper>),
+    who: Who<'_>,
+) -> ModelListing {
+    let (grant, other) = match who {
+        Who::Local => (AccountGrant::new(LOCAL_ACCOUNT, HARNESS_LOGIN), None),
+        Who::Held(held, other) => {
+            if let Some(listing) = held.gateway_models() {
+                return listing;
+            }
+            (held.grant(), other)
+        }
+    };
+    let provider = match other {
+        Some(provider) => provider,
+        None => match built.account_provider() {
+            Ok(provider) => Arc::clone(provider),
+            Err(why) => return ModelListing::unknown(why),
+        },
+    };
+    provider
+        .models(AccountModelsQuery::new(grant), spawner, keeper)
+        .unwrap_or_else(|error| ModelListing::unavailable(UnknownKind::Failed, error.message()))
+}
+
+/// Asks the account provider for the models of the account `who` names, and `harness` for its program and its version. The
+/// provider placed the account's login for the call and tells `keeper` of a renewal the program made.
 fn ask(
+    built: &kind::Harness,
     harness: &dyn AcpHarness,
-    spawner: Object<dyn ProcessSpawner>,
-    (account, watch): (Option<AccountGrant>, Option<Watcher>),
+    handed: (Object<dyn ProcessSpawner>, Object<dyn AccountKeeper>),
+    who: Who<'_>,
 ) -> Choices {
-    let mut request = ModelsRequest::new();
-    if let Some(account) = account {
-        request = request.account(account);
-    }
-    let listing = harness
-        .models(request, spawner)
-        .unwrap_or_else(|error| ModelListing::unavailable(UnknownKind::Failed, error.message()));
-    // The harness placed the login for the call, and a program that ran on it may have renewed it: the account provider looks
-    // when its watch begins and again when it ends.
-    drop(watch.map(Watcher::begin));
+    let listing = models_of(built, handed, who);
     let info = harness.describe().ok();
     let program = harness.program().ok().flatten();
     let program_version = program.as_deref().and_then(version_of);
@@ -528,19 +585,8 @@ pub(crate) fn usage_at(
     .map_err(|error| error.to_string())?;
     let listed = crate::serve::offered_accounts(config, harness, &[name.to_owned()], &built)?;
     let built = built.offering(store, listed, Vec::new());
-    if let Some(report) = limits::read(&built, name, account) {
-        return serde_json::to_value(report?).map_err(|error| error.to_string());
-    }
-    let held = built
-        .hold_account(name, "usage", false)
-        .map_err(|refusal| refusal.client_reason())?;
-    let connection = built.connection(None, Some(&held), CacheLifetime::Default);
-    let report = connection
-        .harness
-        .usage(
-            coqui_acp_api::UsageQuery::new().account(held.grant()),
-            connection.spawner,
-        )
-        .map_err(|error| error.message().to_owned())?;
-    serde_json::to_value(&report).map_err(|error| error.to_string())
+    serde_json::to_value(limits::read(&built, name, account)?).map_err(|error| error.to_string())
 }
+
+#[cfg(test)]
+mod tests;

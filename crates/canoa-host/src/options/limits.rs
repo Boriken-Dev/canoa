@@ -38,15 +38,18 @@ impl Endpoints {
     }
 }
 
-/// The limits of the account `name`, read by the account provider of its harness, or `None` for a harness with no account
-/// provider (the caller then asks the provider's harness).
+/// The limits of the account `name`, read by the account provider of its harness; a harness with none reports none.
 pub(super) fn read(
     built: &kind::Harness,
     name: &str,
     account: &AccountConfig,
-) -> Option<Result<UsageReport, String>> {
-    let provider = built.account_provider().ok()?;
-    Some(read_account(built, provider, name, account))
+) -> Result<UsageReport, String> {
+    let Ok(provider) = built.account_provider() else {
+        return Ok(UsageReport::unsupported(
+            "this account's provider reads no plan limits: it has no account provider",
+        ));
+    };
+    read_account(built, provider, name, account)
 }
 
 fn read_account(
@@ -68,9 +71,11 @@ fn read_account(
         )));
     }
     if account.kind == coqui_acp_api::HARNESS_LOGIN {
-        return Ok(stamp(UsageReport::unsupported(
-            "the login a program has where it runs is not one this host reads limits with",
-        )));
+        // The login a program has where it runs holds nothing here: the provider asks the program as it stands.
+        let grant = AccountGrant::new(account.id.clone(), coqui_acp_api::HARNESS_LOGIN);
+        return ask(provider, &grant)
+            .map(stamp)
+            .map_err(|error| why(&error));
     }
     let grant = built
         .read_account(name)

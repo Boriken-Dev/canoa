@@ -1698,11 +1698,10 @@ impl Serving {
                     };
                     let mut provider = build(&configured)?;
                     let listed = match &accounts {
-                        Some(_) if !offered.is_empty() => Some(
-                            offered_accounts(config, harness, offered, &provider)
-                                .map_err(refused)?,
-                        ),
-                        _ => None,
+                        Some(_) => {
+                            entry_accounts(config, harness, offered, &provider).map_err(refused)?
+                        }
+                        None => None,
                     };
                     // A cloned repository's own settings can set the endpoint a key is sent to, so an entry that offers an
                     // account whose credential is in the environment loads no settings files unless it says which.
@@ -3422,6 +3421,15 @@ pub(crate) fn offered_accounts(
     let catalogs = Catalogs::with(config, harness, catalog, provider.listing());
     let mut listed = Vec::new();
     for name in names {
+        if name == coqui_acp_api::LOCAL_ACCOUNT {
+            let Some(local) = provider.local_account() else {
+                return Err(format!(
+                    "account {name}: {harness} has no login of its own to offer as it"
+                ));
+            };
+            listed.push(local);
+            continue;
+        }
         let Some(account) = config.accounts.get(name) else {
             return Err(format!("account {name} is not in [host.accounts]"));
         };
@@ -3438,6 +3446,24 @@ pub(crate) fn offered_accounts(
         listed.push((name.clone(), account.clone(), info));
     }
     Ok(listed)
+}
+
+/// The accounts an entry of `harness` offers: those it names, else the automatic `local` account when the harness has a login of
+/// its own. `None` when it offers none.
+///
+/// # Errors
+///
+/// As [`offered_accounts`].
+pub(crate) fn entry_accounts(
+    config: &Config,
+    harness: &str,
+    names: &[String],
+    provider: &kind::Harness,
+) -> Result<Option<Vec<kind::Offered>>, String> {
+    if !names.is_empty() {
+        return offered_accounts(config, harness, names, provider).map(Some);
+    }
+    Ok(provider.local_account().map(|local| vec![local]))
 }
 
 /// The accounts, of `harness` or of another provider whose standards it accepts, that an entry which does not list them can

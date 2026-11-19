@@ -166,6 +166,8 @@ pub fn run_helper(args: &[String]) -> io::Result<()>;   // the SDK engine's proc
 
 ## The gateway
 
+A lease's `models` lists what the engine could serve (each with what it can do in its description), the model the account serves marked as the default; `FoundryAccounts::models` answers unknown, since an account of this kind is listed by the gateway that serves it.
+
 `FoundryGateway::open` takes a `GatewayRequest`: the account's id and settings (JSON text), the host's own table of canoa.cfg named `foundry` (`windows` maps a model variant's id to the window it is run with: a whole number of tokens of at least 1, anything else is left out), the host's home and the command line of its helper command. One server (a `canoa::loopback` listener, a `canoa::loopback::Service` that answers `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, `/v1/messages/count_tokens` and `/v1/models`) runs for an account while any session holds a lease; each lease has its own bearer, and dropping it ends that session's access (the last ends the server and unloads what the engine loaded). The settings' `engine` is `service` (`daemon::DaemonEngine`, in this process) or `sdk` (a child process started through the host's spawner: `<helper> canoa-foundry --model ...`, which opens `sdk::SdkEngine`, loads the model and answers `worker`'s lines; a crash there fails the request under way and the next request starts it again). Each request is recorded in `<home>/foundry-gateway.log` as a line of JSON (the route, the model, how it ended, how long it took, never what was said).
 
 ## What a translation does
