@@ -59,17 +59,20 @@ impl ReaderInfo {
         }
     }
 
+    /// Whether `text` can be a reader's id: a word of letters, digits, `_` and `-`, at most 64 bytes.
+    #[must_use]
+    pub fn is_id(text: &str) -> bool {
+        !text.is_empty()
+            && text.len() <= 64
+            && text
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    }
+
     /// Why this description cannot be used, or `None` when it can.
     #[must_use]
     pub fn problem(&self) -> Option<String> {
-        let word = |text: &str| {
-            !text.is_empty()
-                && text.len() <= 64
-                && text
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-        };
-        if !word(&self.id) {
+        if !Self::is_id(&self.id) {
             return Some("a reader's id is a word of letters, digits, `_` and `-`".to_owned());
         }
         if self.bucket_prefix.is_empty() {

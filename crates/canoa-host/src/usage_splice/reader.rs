@@ -24,7 +24,7 @@ use std::time::Instant;
 use canoa::usage_reader::{
     Failure as ReadFailure, ProcessMembers, ReaderInfo, Retry, UsageReader, UsageReading,
 };
-use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::library::{Object, ProviderError, Registry};
 use coqui_acp_api::{Source, UsageReport, UsageSupport};
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
 use coqui_acp_bridge::relay::relay;
@@ -48,24 +48,42 @@ impl ProcessMembers for Table {
     }
 }
 
-/// A bundled agent's `usage_reader` provider, as it described itself: when to read and how its buckets are named.
+/// A `usage_reader` provider, as it described itself: when to read and how its buckets are named. It is one a bundled agent's crate
+/// offers, or one a library or source of canoa.cfg offers.
 #[derive(Clone, Debug)]
 pub(crate) struct Reader {
     info: Arc<ReaderInfo>,
+    /// The registry of the library that offers it: none for a bundled agent's.
+    registry: Option<Arc<Registry>>,
+}
+
+/// The description of the reader `id` among those `registry` offers.
+fn described(registry: &Registry, id: &str) -> Option<ReaderInfo> {
+    registry.offers::<dyn UsageReader>().find_map(|offer| {
+        offer
+            .default_instance()
+            .and_then(|reader| reader.describe().ok())
+            .filter(|info| info.id == id && info.problem().is_none())
+    })
 }
 
 impl Reader {
     /// The bundled reader whose id is `id`, or `None` when no bundled agent offers one.
     pub(crate) fn named(id: &str) -> Option<Self> {
         let registry = crate::vendors::bundled_providers()?;
-        registry.offers::<dyn UsageReader>().find_map(|offer| {
-            offer
-                .default_instance()
-                .and_then(|reader| reader.describe().ok())
-                .filter(|info| info.id == id && info.problem().is_none())
-                .map(|info| Self {
-                    info: Arc::new(info),
-                })
+        described(registry, id).map(|info| Self {
+            info: Arc::new(info),
+            registry: None,
+        })
+    }
+
+    /// The reader whose id is `id` that one of `registries` offers, which are those of the libraries and sources of canoa.cfg.
+    pub(crate) fn offered_by(id: &str, registries: &[Arc<Registry>]) -> Option<Self> {
+        registries.iter().find_map(|registry| {
+            described(registry, id).map(|info| Self {
+                info: Arc::new(info),
+                registry: Some(Arc::clone(registry)),
+            })
         })
     }
 
@@ -74,6 +92,11 @@ impl Reader {
         let Some(registry) = crate::vendors::bundled_providers() else {
             return Vec::new();
         };
+        Self::ids_in(registry)
+    }
+
+    /// The ids of the readers `registry` offers.
+    pub(crate) fn ids_in(registry: &Registry) -> Vec<String> {
         registry
             .offers::<dyn UsageReader>()
             .filter_map(|offer| offer.default_instance()?.describe().ok())
@@ -84,7 +107,10 @@ impl Reader {
 
     /// A reading of one agent's figures.
     fn open(&self) -> Result<Object<dyn UsageReading>, String> {
-        let registry = crate::vendors::bundled_providers().ok_or("no reader is loaded")?;
+        let registry = match &self.registry {
+            Some(registry) => registry.as_ref(),
+            None => crate::vendors::bundled_providers().ok_or("no reader is loaded")?,
+        };
         for offer in registry.offers::<dyn UsageReader>() {
             let Some(reader) = offer.default_instance() else {
                 continue;
@@ -114,17 +140,24 @@ impl Reader {
     }
 }
 
-/// One agent's reading, opened from its reader and asked one thread at a time.
-struct Opened(Mutex<Object<dyn UsageReading>>);
+/// One agent's reading, opened from its reader and asked one thread at a time. A library's reading is let go before the library.
+struct Opened {
+    reading: Mutex<Object<dyn UsageReading>>,
+    /// Keeps the library the reading came from loaded; declared after the reading, which is let go first.
+    _library: Option<Arc<Registry>>,
+}
 
 impl Opened {
     fn new(reader: &Reader) -> Result<Self, String> {
-        reader.open().map(|reading| Self(Mutex::new(reading)))
+        reader.open().map(|reading| Self {
+            reading: Mutex::new(reading),
+            _library: reader.registry.clone(),
+        })
     }
 
     /// What the agent said when it opened a session.
     fn opened(&self, result: &str) {
-        if let Err(error) = lock(&self.0).opened(result) {
+        if let Err(error) = lock(&self.reading).opened(result) {
             tracing::debug!("usage reader: {}", error.message());
         }
     }
@@ -135,7 +168,7 @@ impl Opened {
         root: u32,
         tree: bool,
     ) -> Result<Vec<coqui_acp_api::usage::Bucket>, ReadFailure> {
-        match lock(&self.0).read(root, tree) {
+        match lock(&self.reading).read(root, tree) {
             Ok(reading) => match reading.failure {
                 None => Ok(reading.buckets),
                 Some(failure) => Err(failure),

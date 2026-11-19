@@ -19,6 +19,7 @@ mod door;
 mod kept;
 mod sessions;
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
+use coqui_acp_api::guatiao::library::Registry as GuatiaoRegistry;
 use coqui_acp_bridge::agent::Agent as BridgeAgent;
 use coqui_acp_bridge::relay::relay;
 use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
@@ -302,6 +303,13 @@ pub enum ServeError {
         /// Why; names a key, never a value.
         what: String,
     },
+    /// An agent entry's `usage` names a reader that no bundled agent and no library or source of canoa.cfg offers.
+    Usage {
+        /// The entry.
+        entry: String,
+        /// Why; names the reader's id.
+        what: String,
+    },
 }
 
 impl fmt::Display for ServeError {
@@ -331,12 +339,28 @@ impl fmt::Display for ServeError {
             }
             Self::Accounts { what } => write!(f, "[host.accounts]: {what}"),
             Self::Network { what } => write!(f, "[host.network]: {what}"),
+            Self::Usage { entry, what } => {
+                write!(
+                    f,
+                    "host entry {entry}: its usage reader is unusable: {what}"
+                )
+            }
             Self::Control(error) => write!(f, "the control channel's ledger {error}"),
         }
     }
 }
 
 impl core::error::Error for ServeError {}
+
+/// The registries of the libraries and sources canoa.cfg's entries and extensions load, which offer the usage readers beside the
+/// bundled agents'.
+fn readers_of_libraries(config: &Config) -> Vec<Arc<GuatiaoRegistry>> {
+    crate::control::providers::loaded(config)
+        .into_iter()
+        .filter(|(origin, _)| origin != "bundled")
+        .map(|(_, registry)| Arc::new(registry))
+        .collect()
+}
 
 /// An entry that is listening.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1490,6 +1514,9 @@ impl Serving {
             ))
         });
         let agents = Arc::new(Mutex::new(Agents::default()));
+        // The libraries and sources of canoa.cfg are opened for their usage readers only when an entry names one no bundled agent
+        // offers.
+        let mut library_readers: Option<Vec<Arc<GuatiaoRegistry>>> = None;
         let mut registry = Registry::new();
         let mut listeners = Vec::new();
         let mut listening = Vec::new();
@@ -1549,16 +1576,34 @@ impl Serving {
                                 .account(entry.name.clone())
                                 .limit_phrases(config.limit_phrases.clone())
                                 .usage_log(usage_log.clone(), &harness);
-                            match usage.as_deref().and_then(Reader::named) {
-                                Some(reader) => scope.quota(Launch {
-                                    reader,
-                                    program: program.clone(),
-                                    args: args.clone(),
-                                    state_dir: options.state_dir.clone(),
-                                    private: profiles.is_empty() && local_profile.is_none(),
-                                    per_connection: !profiles.is_empty() || local_profile.is_some(),
-                                    starter: Some(private_starter(&agents)),
-                                }),
+                            match usage.as_deref() {
+                                Some(id) => {
+                                    let reader = Reader::named(id)
+                                        .or_else(|| {
+                                            Reader::offered_by(
+                                                id,
+                                                library_readers.get_or_insert_with(|| {
+                                                    readers_of_libraries(config)
+                                                }),
+                                            )
+                                        })
+                                        .ok_or_else(|| ServeError::Usage {
+                                            entry: entry.name.clone(),
+                                            what: format!(
+                                                "no usage reader {id} is offered by a bundled agent or by a library or source of canoa.cfg"
+                                            ),
+                                        })?;
+                                    scope.quota(Launch {
+                                        reader,
+                                        program: program.clone(),
+                                        args: args.clone(),
+                                        state_dir: options.state_dir.clone(),
+                                        private: profiles.is_empty() && local_profile.is_none(),
+                                        per_connection: !profiles.is_empty()
+                                            || local_profile.is_some(),
+                                        starter: Some(private_starter(&agents)),
+                                    })
+                                }
                                 None => scope,
                             }
                         },

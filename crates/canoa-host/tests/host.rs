@@ -1440,3 +1440,27 @@ fn check_accepts_a_title_on_an_agent_and_refuses_it_elsewhere_or_blank() {
     std::fs::write(&path, provider_entry("echo", "title = \"Echo\"")).expect("written");
     assert_eq!(run().status.code(), Some(2), "a provider takes no title");
 }
+
+#[test]
+fn an_entry_naming_a_usage_reader_nobody_offers_stops_the_host_and_says_which() {
+    let scratch = Scratch::new();
+    let path = scratch.0.join("canoa.cfg");
+    std::fs::write(&path, agent_entry("fixture", "usage = \"nobody\"")).expect("written");
+    let output = std::process::Command::new(host_binary())
+        .args([
+            "serve",
+            "--config",
+            &path.to_string_lossy(),
+            "--method",
+            support::method().name(),
+        ])
+        .env("COQUI_AGENTIC_PEER_HOME", scratch.0.join("home"))
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        said.contains("fixture") && said.contains("no usage reader nobody"),
+        "{said}"
+    );
+}

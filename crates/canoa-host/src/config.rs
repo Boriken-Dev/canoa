@@ -2496,11 +2496,13 @@ impl Config {
                     let usage = match agent.usage.as_deref() {
                         None => None,
                         Some(text) => {
-                            if crate::usage_splice::Reader::named(text).is_none() {
+                            // A reader a library or source of this file offers is known only once that is loaded, which the host does
+                            // when it serves; here the id is held to what an id is.
+                            if !canoa::usage_reader::ReaderInfo::is_id(text) {
                                 return Err(invalid(
                                     &name,
                                     &format!(
-                                        "usage names no usage reader this host has ({})",
+                                        "usage names a reader by an id of letters, digits, `_` and `-` (bundled: {})",
                                         crate::usage_splice::Reader::ids().join(", ")
                                     ),
                                 ));

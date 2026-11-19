@@ -1057,8 +1057,11 @@ fn an_agent_entry_names_where_its_usage_is_read_from() {
         &config.entries[0].kind,
         EntryKind::Agent { usage: Some(reader), .. } if reader == "antigravity"
     ));
+    // A reader a library or source offers is found when the host serves, so any id parses.
+    parse("[host.agents.a]\nprogram = \"x\"\nusage = \"from-a-library\"\n").expect("parses");
     for text in [
-        "[host.agents.a]\nprogram = \"agy\"\nusage = \"other\"\n",
+        "[host.agents.a]\nprogram = \"agy\"\nusage = \"not an id\"\n",
+        "[host.agents.a]\nprogram = \"agy\"\nusage = \"\"\n",
         "[host.agents.a]\nharness = \"claude\"\nusage = \"antigravity\"\n",
     ] {
         assert!(
