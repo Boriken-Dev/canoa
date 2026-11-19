@@ -72,12 +72,22 @@ impl AgentVendor for ClaudeVendor {
     }
 }
 
+canoa::store_provider!(
+    /// The Claude Code store: the program the recipe installs, offered with the agent's other providers.
+    ClaudeStore, ClaudeRecipe, "claude_store"
+);
+
 // What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is
 // read, so a bundled agent and an outside one are offered and chosen alike.
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-claude",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [acp::ClaudeProvider, acp::ClaudeAccounts, ClaudeVendor]
+    providers = [
+        acp::ClaudeProvider,
+        acp::ClaudeAccounts,
+        ClaudeVendor,
+        ClaudeStore
+    ]
 );
 
 /// Claude Code.

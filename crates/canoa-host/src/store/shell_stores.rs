@@ -25,7 +25,7 @@ use canoa::store::{
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
-use super::builtin::store_provider;
+use canoa::store_provider;
 
 /// The release listing of Git for Windows.
 pub const GIT_RELEASES_API: &str = "https://api.github.com/repos/git-for-windows/git/releases";

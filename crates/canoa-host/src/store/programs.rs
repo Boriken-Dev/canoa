@@ -29,11 +29,11 @@ use coqui_acp_api::{Environment, LoginAnswer, LoginForm, ProcessSpawner};
 use coqui_acp_harness::LocalSpawner;
 use sha2::{Digest, Sha256};
 
-use super::exec::{GuardedSpawner, is_credential_name};
 use super::footprint::{Difference, Footprint, Watch, is_profile_file, uncovered};
-use super::protect::{Protected, RECOMMENDED_PLACES, RECOMMENDED_VARIABLES};
 use super::shelf::{Current, FileRecord, MadeBy, Shelf, ShelfError};
 use super::tools::{HttpTransport, LocalTools, Lookup, Transport};
+use canoa::store::exec::{GuardedSpawner, is_credential_name};
+use canoa::store::protect::{Protected, RECOMMENDED_PLACES, RECOMMENDED_VARIABLES};
 
 /// Why an operation on a program did not happen.
 #[derive(Debug)]
@@ -215,7 +215,7 @@ impl RelayPrompter {
 impl InstallPrompter for RelayPrompter {
     fn say(&self, line: &str) -> Result<(), ProviderError> {
         self.gone()?;
-        let line = super::exec::clean(line);
+        let line = canoa::store::exec::clean(line);
         if let Ok(mut lines) = self.lines.lock() {
             lines.push(line.clone());
         }
@@ -254,7 +254,7 @@ pub struct Options {
     /// The home whose profile files the footprint watches; the process's own by default.
     pub home: Option<PathBuf>,
     /// The places a declared change may not be at, under or hold, and the folders it may only enter a place of its own in: lines
-    /// in gitignore syntax (see [`protect`](super::protect)). canoa.cfg's `[host.store] protected`; the recommended list by default.
+    /// in gitignore syntax (see [`protect`](canoa::store::protect)). canoa.cfg's `[host.store] protected`; the recommended list by default.
     pub protected: Vec<String>,
     /// The variables an install is never given and a launch never sets, in the same syntax, matched against a name.
     /// canoa.cfg's `[host.store] credential_variables`; the recommended list by default.
@@ -346,8 +346,8 @@ fn check_launch_shape(launch: &Launch, staging: &Path) -> Result<(), StoreError>
     let settings = super::shelf::LaunchRecord::of(launch).settings;
     for key in ["executable", "node", "script"] {
         if let Some(path) = settings.get(key).and_then(serde_json::Value::as_str) {
-            let inside = super::exec::normalize(Path::new(path))
-                .zip(super::exec::normalize(staging))
+            let inside = canoa::store::exec::normalize(Path::new(path))
+                .zip(canoa::store::exec::normalize(staging))
                 .is_some_and(|(path, staging)| path.starts_with(staging));
             if !inside {
                 return Err(StoreError::Contract(format!(
@@ -680,8 +680,8 @@ impl Programs {
             .options
             .home
             .as_deref()
-            .and_then(super::exec::normalize);
-        let Some(place) = super::exec::normalize(path) else {
+            .and_then(canoa::store::exec::normalize);
+        let Some(place) = canoa::store::exec::normalize(path) else {
             return true;
         };
         protected.protects(&place, home.as_deref()) || protected.holds(&place, home.as_deref())
@@ -748,8 +748,8 @@ impl Programs {
             .ok_or(StoreError::Shelf(ShelfError::Nothing("there is no copy")))?;
         let launch = current.launch.launch();
         let inside = |path: &Path, root: &Path| {
-            super::exec::normalize(path)
-                .zip(super::exec::normalize(root))
+            canoa::store::exec::normalize(path)
+                .zip(canoa::store::exec::normalize(root))
                 .is_some_and(|(path, root)| path.starts_with(root))
         };
         if !inside(Path::new(&current.dir), self.shelf.root())
@@ -787,8 +787,8 @@ impl Programs {
                     if parts.is_empty() {
                         return Err(refuse(change, "that is the home itself"));
                     }
-                    let place = super::exec::normalize(Path::new(&change.target));
-                    let at_home = super::exec::normalize(home);
+                    let place = canoa::store::exec::normalize(Path::new(&change.target));
+                    let at_home = canoa::store::exec::normalize(home);
                     let (Some(place), Some(at_home)) = (place, at_home) else {
                         return Err(refuse(change, "that cannot be placed"));
                     };
@@ -1024,7 +1024,7 @@ impl Programs {
             .granted(staging)
             .lookup(self.lookup(&environment))
             .cancelled_by(Arc::clone(&cancel))
-            .deadline(super::exec::deadline_after(DEFAULT_APPLY_TIMEOUT_MS));
+            .deadline(canoa::store::exec::deadline_after(DEFAULT_APPLY_TIMEOUT_MS));
         let fetched = tools.fetch_log();
         let lines = Arc::new(Mutex::new(Vec::new()));
         let mut prompter = RelayPrompter::new(sink, cancel);
@@ -1183,8 +1183,8 @@ impl Programs {
 
 /// The parts of `target` below `home`, lower case, when it is under it; resolved by name (`.` and `..` gone).
 fn parts_under_home(target: &str, home: &Path) -> Option<Vec<String>> {
-    let target = super::exec::normalize(Path::new(target))?;
-    let home = super::exec::normalize(home)?;
+    let target = canoa::store::exec::normalize(Path::new(target))?;
+    let home = canoa::store::exec::normalize(home)?;
     let lower = |p: &Path| -> Vec<String> {
         p.components()
             .map(|c| c.as_os_str().to_string_lossy().to_lowercase())

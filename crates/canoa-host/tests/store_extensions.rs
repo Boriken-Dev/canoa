@@ -11,12 +11,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use canoa::store::{Action, InstallTools, PlanRequest, Platform, ProgramStore, StoreSettings};
+use canoa_antigravity::AgyStore;
+use canoa_claude::ClaudeStore;
+use canoa_codex::CodexStore;
+use canoa_grok::GrokStore;
 use canoa_host::store::contract::{Fixture, Variant, World, WorldTransport, run, standin_bytes};
-use canoa_host::store::registry::{
-    AgyStore, ClaudeStore, CodexStore, GrokStore, OpenCodeStore, PiStore,
-};
 use canoa_host::store::tools::LocalTools;
+use canoa_opencode::OpenCodeStore;
 use canoa_pi as pi;
+use canoa_pi::PiStore;
 use coqui_acp_api::guatiao::Status;
 use sha2::{Digest, Sha256, Sha512};
 

@@ -24,7 +24,7 @@ pub use coqui_acp_codex as acp;   // the provider crate, whole: `acp::CodexProvi
 - `CodexRecipe`: Codex's Store recipe: the `codex-package` tar.gz from the release site, SHA-256 from the release's checksums and the channel's digest; no setting stops its own updater.
 - `acp`: the `coqui-acp-codex` crate re-exported whole, so a host reaches the provider and its history helpers through this crate and needs no direct dependency. It is the only path to them.
 
-Each item is public at this one path. `CodexRecipe` is not a Store provider: `canoa-host` wraps it in its engine as the guatiao provider `codex_store`.
+Each item is public at this one path. `CodexRecipe` is made a Store provider by `canoa::store_provider!`: `CodexStore` is the guatiao provider `codex_store` over it, offered by this crate's library.
 
 ## Description and library
 

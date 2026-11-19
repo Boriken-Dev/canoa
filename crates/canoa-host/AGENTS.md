@@ -1308,9 +1308,12 @@ stores that know each program. Nothing runs at startup, and the host holds no pr
   put back only where undeclared and still what the install wrote; a value the person changed since is left and named. Installs and updates on a
   shelf run one at a time (`Shelf::apply_lock`). It refuses an elevated host (root; on Windows `is_elevated`) and an `ELEVATION` plan unless
   `Options::allow_elevated`.
-- `engine::Engine` and the six built-in stores (`registry::{ClaudeStore, CodexStore, GrokStore, AgyStore, PiStore, OpenCodeStore}`, `registry::built_in()`). Each store wraps the
-  `Recipe` of one vendor crate (`canoa-claude`, `canoa-codex`, `canoa-grok`, `canoa-antigravity`, `canoa-opencode`, `canoa-pi`), which also carries that agent's source
-  preset (`sources.rs` lists them) and, for Claude, Codex and Pi, re-exports the coqui-acp provider `kind.rs` registers. `canoa::store::recipe::Recipe` and its
+- `registry::built_in()`: the host's own stores (the runtimes, Whisper, Piper, Bitwarden, the shells) and, registered from `bundled::ALL`, the `program_store` provider
+  each vendor crate's library offers (`claude_store`, `codex_store`, ...): `registry::agent_stores` lists the ids the bundled libraries offer, which the Store shows beside the
+  runtimes, so an agent a crate adds to `bundled.rs` has its store with no other line. The engine that runs a `Recipe` (`canoa::store::engine::Engine`), the process spawner
+  `canoa::store::exec` and the protected-paths matcher `canoa::store::protect` are in `canoa`; `canoa::store_provider!` makes a provider of a recipe. Each vendor crate
+  (`canoa-claude`, `canoa-codex`, `canoa-grok`, `canoa-antigravity`, `canoa-opencode`, `canoa-pi`) carries that agent's recipe and store provider, its source
+  preset (`bundled.rs` lists them) and, for Claude, Codex and Pi, re-exports the coqui-acp provider `kind.rs` registers. `canoa::store::recipe::Recipe` and its
   helpers are the contract a recipe is written against. A recipe names the
   publisher's documents and the version's shape; the engine downloads, unpacks, runs the recipe's extra step and reads the version back.
   Claude: one binary, SHA-256 from the manifest (its signature is not checked). Codex: `codex-package` tar.gz, SHA-256 from the release's

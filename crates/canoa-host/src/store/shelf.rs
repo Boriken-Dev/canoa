@@ -231,12 +231,12 @@ impl Shelf {
     ///
     /// [`ShelfError::NotPrivate`] for a root outside [`default_root`](Self::default_root), or when there is no default.
     pub fn configured(root: impl Into<PathBuf>) -> Result<Self, ShelfError> {
-        let root = super::exec::normalize(&root.into()).ok_or_else(|| {
+        let root = canoa::store::exec::normalize(&root.into()).ok_or_else(|| {
             ShelfError::NotPrivate("a programs folder that climbs above its root".into())
         })?;
         let default = Self::default_root()
             .ok_or_else(|| ShelfError::NotPrivate("this user has no data folder".into()))?;
-        let default = super::exec::normalize(&default).unwrap_or(default);
+        let default = canoa::store::exec::normalize(&default).unwrap_or(default);
         if !super::footprint::path_under(&root.to_string_lossy(), &default.to_string_lossy()) {
             return Err(ShelfError::NotPrivate(
                 "a programs folder outside the user's data folder is not accepted until the access list of the place can be read"

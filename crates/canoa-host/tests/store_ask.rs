@@ -15,13 +15,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use canoa::store::engine::Engine;
 use canoa::store::{
     ApplyOutcome, ApplyRequest, InstallPrompter, InstallTools, ProgramQuery, ProgramReport,
     ProgramStore, StoreInfo, StoreSettings,
 };
 use canoa_host::store::contract::{Fixture, Variant, WorldTransport};
 use canoa_host::store::echo::{EchoFixture, EchoRecipe};
-use canoa_host::store::engine::Engine;
 use canoa_host::store::programs::{Options, Programs};
 use canoa_host::store::shelf::Shelf;
 use canoa_host::{Config, Home, Link, ServeOptions, Serving};

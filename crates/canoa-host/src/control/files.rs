@@ -1045,7 +1045,7 @@ fn classify(bytes: &[u8], truncated: bool) -> (&'static str, Option<&'static str
 fn visible_name(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for c in name.chars() {
-        if c.is_control() || crate::store::text::hides_text(c) {
+        if c.is_control() || canoa::store::text::hides_text(c) {
             out.push_str(&format!("<U+{:04X}>", u32::from(c)));
         } else {
             out.push(c);

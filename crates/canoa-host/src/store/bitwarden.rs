@@ -25,8 +25,8 @@ use canoa::store::{
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
-use super::builtin::store_provider;
 use super::shell_stores::{Published, assets_of, newest, numbers};
+use canoa::store_provider;
 
 /// The release listing of the repository that publishes the command line among the other Bitwarden clients.
 pub const RELEASES_API: &str = "https://api.github.com/repos/bitwarden/clients/releases";

@@ -1,67 +1,29 @@
-//! The registry of the stores built into this binary, registered the way `claude` and `codex` are for `acp_harness`.
+//! The registry of the stores built into this binary: the host's own (the runtimes, the speech and secret programs, the shells)
+//! and the ones each bundled agent's library offers, registered the way a library the person names is.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
     reason = "the registry is the host's"
 )]
 
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 
+use canoa::store::ProgramStore;
 use coqui_acp_api::guatiao::library::Registry;
 
 use super::bitwarden::BitwardenStore;
-use super::builtin::store_provider;
 use super::piper::PiperStore;
 use super::runtimes::{FoundryStore, NodeStore, PythonStore};
 use super::shell_stores::{GitBashStore, PowerShellStore};
 use super::whisper::WhisperStore;
-
-/// The provider ids of the built-in agent stores, in the order the app lists them; the runtimes are `runtimes::RUNTIMES`.
-pub const BUILT_IN: [&str; 6] = [
-    "claude_store",
-    "codex_store",
-    "grok_store",
-    "agy_store",
-    "pi_store",
-    "opencode_store",
-];
-
-store_provider!(
-    /// The Claude Code store.
-    ClaudeStore, canoa_claude::ClaudeRecipe, "claude_store"
-);
-store_provider!(
-    /// The Codex store.
-    CodexStore, canoa_codex::CodexRecipe, "codex_store"
-);
-store_provider!(
-    /// The Grok store.
-    GrokStore, canoa_grok::GrokRecipe, "grok_store"
-);
-store_provider!(
-    /// The Antigravity store.
-    AgyStore, canoa_antigravity::AgyRecipe, "agy_store"
-);
-store_provider!(
-    /// The Pi store.
-    PiStore, canoa_pi::PiRecipe, "pi_store"
-);
-store_provider!(
-    /// The OpenCode store.
-    OpenCodeStore, canoa_opencode::OpenCodeRecipe, "opencode_store"
-);
+use crate::bundled::{self, Bundle};
 
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-built-in-stores",
     version = env!("CARGO_PKG_VERSION"),
     providers = [
-        ClaudeStore,
-        CodexStore,
-        GrokStore,
-        AgyStore,
-        PiStore,
-        OpenCodeStore,
         NodeStore,
         PythonStore,
         FoundryStore,
@@ -73,7 +35,7 @@ coqui_acp_api::guatiao::local_providers!(
     ]
 );
 
-/// A registry holding the built-in stores.
+/// A registry holding the built-in stores and those of the bundled agents.
 ///
 /// # Errors
 ///
@@ -86,5 +48,67 @@ pub fn built_in() -> Result<Arc<Registry>, String> {
     if loading.loaded().is_none() {
         return Err("the built-in stores were not accepted".to_owned());
     }
+    bundled::register(&mut registry, bundled::ALL)?;
     Ok(Arc::new(registry))
+}
+
+/// The ids of the `program_store` providers the bundled agents' libraries offer, in the order the agents are offered: the stores
+/// of the agents, which the Store lists beside the runtimes it knows.
+pub(crate) fn agent_stores(bundles: &[Bundle]) -> Vec<String> {
+    let mut ids = Vec::new();
+    for bundle in bundles {
+        let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        if bundled::register(&mut registry, core::slice::from_ref(bundle)).is_err() {
+            continue;
+        }
+        ids.extend(
+            registry
+                .offers::<dyn ProgramStore>()
+                .map(|offer| offer.id().to_owned()),
+        );
+    }
+    ids
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::builtin::EchoStore;
+    use canoa::preset::SourcePreset;
+
+    coqui_acp_api::guatiao::local_providers!(
+        id = "test-echo-agent",
+        version = env!("CARGO_PKG_VERSION"),
+        providers = [EchoStore]
+    );
+
+    #[test]
+    fn the_agent_stores_are_the_ones_the_bundled_libraries_offer() {
+        let mut ids = agent_stores(bundled::ALL);
+        ids.sort();
+        assert_eq!(
+            ids,
+            [
+                "agy_store",
+                "claude_store",
+                "codex_store",
+                "grok_store",
+                "opencode_store",
+                "pi_store"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_library_added_to_the_bundles_is_listed_beside_them() {
+        let mut all = bundled::ALL.to_vec();
+        all.push(Bundle {
+            name: "test-echo-agent",
+            library,
+            preset: SourcePreset::new("Echo", "echo"),
+        });
+        let ids = agent_stores(&all);
+        assert_eq!(ids.last().map(String::as_str), Some("echo_store"));
+        assert_eq!(ids.len(), bundled::ALL.len() + 1);
+    }
 }

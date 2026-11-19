@@ -11,8 +11,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use canoa::store::exec::{GuardedSpawner, Run, clean, is_credential_name};
 use canoa::store::{Change, Check, FetchRequest, InstallTools, PATH, UnpackRequest};
-use canoa_host::store::exec::{GuardedSpawner, Run, clean, is_credential_name};
 use canoa_host::store::footprint::{Footprint, Watch, uncovered};
 use canoa_host::store::tools::{HttpTransport, LocalTools};
 use coqui_acp_api::ProcessSpawner;
@@ -275,7 +275,7 @@ fn a_script_named_with_a_trailing_space_or_dot_is_still_a_script() {
 
 #[test]
 fn a_credential_variable_is_refused_by_the_list_the_spawner_was_given() {
-    use canoa_host::store::protect::Protected;
+    use canoa::store::protect::Protected;
     let dir = Dir::new("credentials");
     let staging = dir.0.join("staging");
     fs::create_dir_all(&staging).expect("staging");

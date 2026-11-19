@@ -11,6 +11,7 @@ use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use canoa::store::engine::Engine;
 use canoa::store::recipe::Recipe;
 use canoa::store::{
     Action, ApplyOutcome, ApplyRequest, Check, InstallPlan, InstallPrompter, InstallTools,
@@ -22,7 +23,6 @@ use canoa_host::store::bitwarden::{
     BitwardenRecipe, DOWNLOADS as BITWARDEN_DOWNLOADS, RELEASES_API as BITWARDEN_RELEASES_API,
 };
 use canoa_host::store::contract::{Fixture, Variant, World, WorldTransport, run, standin_bytes};
-use canoa_host::store::engine::Engine;
 use canoa_host::store::runtimes::{
     NODE_ORIGIN, NodeRecipe, PYTHON_RELEASES, PythonRecipe, RUNTIME_PROGRAMS,
 };

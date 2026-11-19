@@ -18,7 +18,7 @@ impl canoa::store::recipe::Recipe for AgyRecipe { /* every required method */ }
 - `PRESET`: how the host starts Antigravity when `canoa.cfg` does not name it: runs `agy acp`, searched for in `%LOCALAPPDATA%/agy/bin`, with the `antigravity` usage reader.
 - `AgyRecipe`: Antigravity's Store recipe: the build the publisher's manifest names, SHA-512 from it; only the newest build (a pinned version is unsupported).
 
-Each item is public at this one path. `AgyRecipe` is not a Store provider: `canoa-host` wraps it in its engine as the guatiao provider `agy_store`.
+Each item is public at this one path. `AgyRecipe` is made a Store provider by `canoa::store_provider!`: `AgyStore` is the guatiao provider `agy_store` over it, offered by this crate's library.
 
 ## Description and library
 

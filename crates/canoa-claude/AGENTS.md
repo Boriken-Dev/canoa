@@ -15,6 +15,7 @@ pub const PRESET: SourcePreset;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ClaudeRecipe;
+pub struct ClaudeStore;   // the `program_store` provider `claude_store` over it (`canoa::store_provider!`), offered by `library`
 impl canoa::store::recipe::Recipe for ClaudeRecipe { /* every required method */ }
 
 pub use coqui_acp_claude as acp;   // the provider crate, whole: `acp::ClaudeProvider` is the `acp_harness` provider and `acp::ClaudeAccounts` the `account_provider`, never redefined here
@@ -24,7 +25,7 @@ pub use coqui_acp_claude as acp;   // the provider crate, whole: `acp::ClaudePro
 - `ClaudeRecipe`: Claude Code's Store recipe: one binary per platform from the publisher's release bucket, named by its manifest with a SHA-256 (the manifest's detached signature is not checked); channels `latest` and `stable`.
 - `acp`: the `coqui-acp-claude` crate re-exported whole, so a host reaches the provider and its history helpers through this crate and needs no direct dependency. It is the only path to them.
 
-Each item is public at this one path. `ClaudeRecipe` is not a Store provider: `canoa-host` wraps it in its engine as the guatiao provider `claude_store`.
+Each item is public at this one path. `ClaudeRecipe` is made a Store provider by `canoa::store_provider!`: `ClaudeStore` is the guatiao provider `claude_store` over it, offered by this crate's library.
 
 ## Description and library
 

@@ -57,12 +57,17 @@ impl AgentVendor for GrokVendor {
     }
 }
 
+canoa::store_provider!(
+    /// The Grok store: the program the recipe installs, offered with the agent's other providers.
+    GrokStore, GrokRecipe, "grok_store"
+);
+
 // What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is
 // read, so a bundled agent and an outside one are offered and chosen alike.
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-grok",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [GrokVendor]
+    providers = [GrokVendor, GrokStore]
 );
 
 /// Grok.

@@ -32,7 +32,7 @@ use canoa::store::{
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
-use super::builtin::store_provider;
+use canoa::store_provider;
 
 /// The release listing of the publisher's repository.
 pub const RELEASES_API: &str = "https://api.github.com/repos/ggml-org/whisper.cpp/releases";

@@ -393,6 +393,12 @@ pub fn internal_error(why: impl AsRef<str>) -> ProviderError;    // status INTER
 pub fn bad_value_error(why: impl AsRef<str>) -> ProviderError;   // status BAD_VALUE
 ```
 
+`canoa::store::engine::Engine<R: Recipe>` is the store that runs a recipe (`describe`, `program`, `latest`, `plan`, `apply`, with the `Run` of `canoa::store::exec` that
+starts a program for it, keeps the person's cancel and the deadline, and refuses a credential variable), and `canoa::store_provider!(Name, RecipeType, "id")` makes the
+`program_store` provider `Name` of a recipe with `Default`, which a crate offers from its library beside its agent's other providers (the crate names `canoa` and
+`coqui-acp-api` as dependencies). `canoa::store::protect` holds the gitignore-syntax lists of places and variables a store's install may not touch, and `canoa::store::text::hides_text`
+says which characters can hide text.
+
 A recipe fetches only through the `InstallTools` it is handed and starts no process of its own: a test in `canoa-host` scans every crate that holds a recipe for `std::process::Command`.
 
 ## `canoa::preset::SourcePreset`

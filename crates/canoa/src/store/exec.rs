@@ -15,8 +15,8 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use super::protect::{Protected, RECOMMENDED_VARIABLES};
-use canoa::store::InstallPrompter;
-use canoa::store::recipe::{Output, StepRunner};
+use crate::store::InstallPrompter;
+use crate::store::recipe::{Output, StepRunner};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Secret, Status};
 use coqui_acp_api::{
@@ -427,7 +427,7 @@ pub fn clean(line: &str) -> String {
     let mut out: String = line
         .trim_end_matches(['\r', '\n'])
         .chars()
-        .filter(|c| (!c.is_control() || *c == '\t') && !crate::store::text::hides_text(*c))
+        .filter(|c| (!c.is_control() || *c == '\t') && !super::text::hides_text(*c))
         .collect();
     if out.len() > 4096 {
         let mut end = 4096;

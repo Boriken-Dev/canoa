@@ -113,7 +113,7 @@ pub(crate) fn clean(text: &str, max: usize, lines: bool) -> String {
     for (taken, c) in text
         .chars()
         .filter(|c| {
-            !crate::store::text::hides_text(*c)
+            !canoa::store::text::hides_text(*c)
                 && (!c.is_control() || (lines && matches!(*c, '\n' | '\t')))
         })
         .enumerate()

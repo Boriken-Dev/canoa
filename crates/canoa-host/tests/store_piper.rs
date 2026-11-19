@@ -11,13 +11,13 @@ use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use canoa::store::engine::Engine;
 use canoa::store::recipe::Recipe;
 use canoa::store::{
     Action, ApplyRequest, Check, InstallPrompter, InstallTools, PlanRequest, Platform, Progress,
     STORE_GLYPHS, StoreSettings,
 };
 use canoa_host::store::contract::{World, WorldTransport, standin_bytes};
-use canoa_host::store::engine::Engine;
 use canoa_host::store::piper::{Catalog, Engine as Archive, PiperRecipe, VERSION, VoiceFile};
 use canoa_host::store::tools::LocalTools;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};

@@ -62,6 +62,11 @@ impl AgentVendor for OpenCodeVendor {
     }
 }
 
+canoa::store_provider!(
+    /// The OpenCode store: the program the recipe installs, offered with the agent's other providers.
+    OpenCodeStore, OpenCodeRecipe, "opencode_store"
+);
+
 // What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is
 // read, so a bundled agent and an outside one are offered and chosen alike.
 coqui_acp_api::guatiao::local_providers!(
@@ -70,7 +75,8 @@ coqui_acp_api::guatiao::local_providers!(
     providers = [
         coqui_acp_harness::stdio::OpenCodeProvider,
         coqui_acp_harness::stdio::OpenCodeAccounts,
-        OpenCodeVendor
+        OpenCodeVendor,
+        OpenCodeStore
     ]
 );
 

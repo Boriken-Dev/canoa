@@ -25,7 +25,7 @@ use canoa::store::{
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
-use super::builtin::store_provider;
+use canoa::store_provider;
 
 /// The origin Node's builds and digests are served from.
 pub const NODE_ORIGIN: &str = "https://nodejs.org/dist/";

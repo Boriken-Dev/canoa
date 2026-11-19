@@ -92,7 +92,7 @@ pub(super) fn inert(text: &str, max: usize) -> String {
 }
 
 fn is_hidden(c: char) -> bool {
-    c.is_control() || crate::store::text::hides_text(c)
+    c.is_control() || canoa::store::text::hides_text(c)
 }
 
 fn flag(args: &Value, name: &str) -> Result<bool, String> {

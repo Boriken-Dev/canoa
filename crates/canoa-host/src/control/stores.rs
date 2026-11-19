@@ -23,7 +23,7 @@ use super::accounts::{open_answer, put_form};
 use super::{BAD_PARAMS, NO_METHOD, POLL, REFUSED, error_line};
 use crate::secrets::ask::{Asked, Asker};
 use crate::store::programs::{Event, Programs, Sink, StoreError};
-use crate::store::registry::BUILT_IN;
+use crate::store::registry::agent_stores;
 use crate::store::runtimes::runtimes_here;
 use crate::store::shelf::Shelf;
 
@@ -261,7 +261,7 @@ impl Stores {
         let registry = crate::store::registry::built_in()?;
         Ok(Self::new(
             Arc::new(Programs::new(shelf, registry)),
-            BUILT_IN.iter().map(|id| (*id).to_owned()).collect(),
+            agent_stores(crate::bundled::ALL),
         )
         .with_runtimes(runtimes_here())
         .with_secret_providers())
@@ -782,12 +782,9 @@ mod runtimes_tests {
             Shelf::unchecked(&root),
             crate::store::registry::built_in().expect("the built-in stores"),
         );
-        let stores = Stores::new(
-            Arc::new(programs),
-            BUILT_IN.iter().map(|id| (*id).to_owned()).collect(),
-        )
-        .with_runtimes(runtimes_here())
-        .with_secret_providers();
+        let stores = Stores::new(Arc::new(programs), agent_stores(crate::bundled::ALL))
+            .with_runtimes(runtimes_here())
+            .with_secret_providers();
         (stores, root)
     }
 

@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use canoa::store::engine::Engine;
 use canoa::store::{
     Action, ApplyOutcome, ApplyRequest, InstallPlan, InstallPrompter, InstallTools, LatestQuery,
     LatestReport, PlanRequest, ProgramQuery, ProgramReport, ProgramStore, StoreInfo, StoreSettings,
@@ -19,7 +20,6 @@ use canoa::store::{
 use canoa_host::store::builtin::{EchoArchiveStore, EchoStore};
 use canoa_host::store::contract::{Fixture, Variant, WorldTransport};
 use canoa_host::store::echo::{EchoFixture, EchoRecipe};
-use canoa_host::store::engine::Engine;
 use canoa_host::store::programs::{Options, Programs, Recorder, StoreError};
 use canoa_host::store::shelf::Shelf;
 use coqui_acp_api::ProcessSpawner;
@@ -1066,7 +1066,7 @@ fn a_state_folder_is_a_folder_named_for_the_program_and_never_a_place_the_system
 fn a_declared_target_on_the_hosts_list_is_refused_and_accepted_once_the_person_removes_it() {
     let own = |s: &Setup| Rig::DeclaresState(s.dir.0.join("home").join(".echo"));
     let recommended = || -> Vec<String> {
-        canoa_host::store::protect::RECOMMENDED_PLACES
+        canoa::store::protect::RECOMMENDED_PLACES
             .iter()
             .map(|line| (*line).to_owned())
             .collect()

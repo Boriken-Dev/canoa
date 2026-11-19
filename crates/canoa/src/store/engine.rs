@@ -1,7 +1,7 @@
 //! [`Engine`]: the plan, apply and find that every built-in store shares, driven by a [`Recipe`] that holds what is specific
 //! to one program: where it is published, how its download is checked, and how its version is read.
 //!
-//! A recipe describes a release as [`Part`](canoa::store::recipe::Part)s: files to fetch into the version's folder, each perhaps unpacked, and a path
+//! A recipe describes a release as [`Part`](crate::store::recipe::Part)s: files to fetch into the version's folder, each perhaps unpacked, and a path
 //! the program starts from. The engine never runs an installer the publisher wrote: it downloads, checks, places and reads
 //! the version back.
 #![allow(
@@ -16,9 +16,9 @@ use core::fmt::Write as _;
 use std::path::Path;
 use std::time::Instant;
 
-use canoa::store::recipe::executable_settings;
-use canoa::store::recipe::{Finish, Recipe, Release};
-use canoa::store::{
+use crate::store::recipe::executable_settings;
+use crate::store::recipe::{Finish, Recipe, Release};
+use crate::store::{
     Action, ApplyOutcome, ApplyRequest, Check, FetchRequest, FindRequest, InstallPlan,
     InstallPrompter, InstallTools, LatestQuery, LatestReport, Launch, MANAGER_CANOA,
     PROBE_TIMEOUT_MS, PlanRequest, Platform, ProgramCopy, ProgramQuery, ProgramReport, Progress,
@@ -252,7 +252,6 @@ impl<R: Recipe> Engine<R> {
                 Check::Sha256 { .. } => "SHA-256 checked".to_owned(),
                 Check::Sha512 { .. } => "SHA-512 checked".to_owned(),
                 Check::Unverified { why } => format!("not verified: {why}"),
-                _ => "checked".to_owned(),
             };
             plan.steps
                 .push(format!("Download {} ({how})", part.download.url));
@@ -413,7 +412,7 @@ impl<R: Recipe> Engine<R> {
                 "the downloaded program will not run: it printed no version",
             ));
         };
-        if !canoa::store::recipe::valid_version(&read) || read != release.version {
+        if !crate::store::recipe::valid_version(&read) || read != release.version {
             return Err(refuse(
                 Status::GUATIAO_ERR_INTERNAL,
                 &format!("the program reports {read}, not {}", release.version),

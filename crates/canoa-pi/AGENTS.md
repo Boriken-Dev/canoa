@@ -23,7 +23,7 @@ pub use coqui_acp_pi as acp;   // the provider crate, whole: `acp::PiProvider` i
 - `PiRecipe`: Pi's Store recipe: the publisher's standalone Node (checked against its `SHASUMS256.txt`), then Pi installed into it by that Node's own npm with install scripts off; npm fetches Pi's packages itself, from the registry, and checks each against the registry's integrity, so the host does not see those bytes.
 - `acp`: the `coqui-acp-pi` crate re-exported whole, so a host reaches the provider and its history helpers through this crate and needs no direct dependency. It is the only path to them.
 
-Each item is public at this one path. `PiRecipe` is not a Store provider: `canoa-host` wraps it in its engine as the guatiao provider `pi_store`.
+Each item is public at this one path. `PiRecipe` is made a Store provider by `canoa::store_provider!`: `PiStore` is the guatiao provider `pi_store` over it, offered by this crate's library.
 
 ## Description and library
 

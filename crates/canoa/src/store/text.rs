@@ -5,7 +5,7 @@
 /// grapheme joiner (which draw as blanks), the musical formatting characters and the annotation marks. Control characters are not here;
 /// each caller decides which of those it keeps.
 #[must_use]
-pub(crate) fn hides_text(c: char) -> bool {
+pub fn hides_text(c: char) -> bool {
     matches!(
         c,
         '\u{202a}'..='\u{202e}'

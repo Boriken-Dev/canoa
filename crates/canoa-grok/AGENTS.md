@@ -18,7 +18,7 @@ impl canoa::store::recipe::Recipe for GrokRecipe { /* every required method */ }
 - `PRESET`: how the host starts Grok when `canoa.cfg` does not name it: runs `grok agent stdio`, searched for in `~/.grok/bin`.
 - `GrokRecipe`: Grok's Store recipe: one binary per platform from the publisher's storage; the publisher gives no checksum, so the plan says the download is not verified; channels `stable`, `alpha`, `enterprise`.
 
-Each item is public at this one path. `GrokRecipe` is not a Store provider: `canoa-host` wraps it in its engine as the guatiao provider `grok_store`.
+Each item is public at this one path. `GrokRecipe` is made a Store provider by `canoa::store_provider!`: `GrokStore` is the guatiao provider `grok_store` over it, offered by this crate's library.
 
 ## Description and library
 

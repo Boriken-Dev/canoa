@@ -31,10 +31,10 @@ use coqui_acp_api::guatiao::{Secret, Status};
 use coqui_acp_api::{Environment, LoginAnswer, LoginForm, ProcessSpawner};
 use coqui_acp_harness::LocalSpawner;
 
-use super::exec::GuardedSpawner;
 use super::footprint::{Footprint, Watch, uncovered};
 use super::programs::install_environment;
 use super::tools::{LocalTools, Lookup, Reply, ToolsLimits, Transport};
+use canoa::store::exec::GuardedSpawner;
 
 /// The variable the suite puts a canary secret in, which must appear nowhere a store writes.
 pub const CANARY_NAME: &str = "COQUI_SUITE_CANARY_TOKEN";
@@ -402,7 +402,7 @@ impl MachineWorld {
 /// What one apply left behind.
 struct Applied {
     result: Result<canoa::store::ApplyOutcome, ProviderError>,
-    spawned: Vec<super::exec::Spawned>,
+    spawned: Vec<canoa::store::exec::Spawned>,
     violations: Vec<String>,
     differences: Vec<super::footprint::Difference>,
     urls: Vec<String>,
@@ -762,7 +762,7 @@ impl Runner<'_> {
             );
         }
         for name in launch.environment.keys() {
-            if super::exec::is_credential_name(name) {
+            if canoa::store::exec::is_credential_name(name) {
                 self.fail(
                     "apply.launch_environment",
                     format!("{name} looks like a credential"),

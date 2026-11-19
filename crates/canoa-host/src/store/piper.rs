@@ -29,7 +29,7 @@ use canoa::store::{
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
-use super::builtin::store_provider;
+use canoa::store_provider;
 
 /// The version Piper prints, and the one this store offers.
 pub const VERSION: &str = "1.2.0";

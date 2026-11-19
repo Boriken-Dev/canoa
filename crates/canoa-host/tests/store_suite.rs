@@ -10,6 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use canoa::store::engine::Engine;
 use canoa::store::{
     ApplyOutcome, ApplyRequest, Check, FetchRequest, InstallPlan, InstallPrompter, InstallTools,
     LatestQuery, LatestReport, PlanRequest, ProgramQuery, ProgramReport, ProgramStore, StoreInfo,
@@ -17,7 +18,6 @@ use canoa::store::{
 };
 use canoa_host::store::contract::{Failure, run};
 use canoa_host::store::echo::{EchoArchiveRecipe, EchoFixture, EchoRecipe};
-use canoa_host::store::engine::Engine;
 use coqui_acp_api::ProcessSpawner;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 

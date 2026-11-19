@@ -75,12 +75,17 @@ impl AgentVendor for PiVendor {
     }
 }
 
+canoa::store_provider!(
+    /// The Pi store: the program the recipe installs, offered with the agent's other providers.
+    PiStore, PiRecipe, "pi_store"
+);
+
 // What this crate offers as a library the host links: handed to `Registry::register_local`, the same way a loaded library is
 // read, so a bundled agent and an outside one are offered and chosen alike.
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-pi",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [acp::PiProvider, acp::PiAccounts, PiVendor]
+    providers = [acp::PiProvider, acp::PiAccounts, PiVendor, PiStore]
 );
 
 /// Pi.

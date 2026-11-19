@@ -67,8 +67,8 @@ fn managed_in(shelf: &Shelf, program: &str) -> Option<ManagedPi> {
     let inside = |path: &Path| {
         path.is_absolute()
             && path.is_file()
-            && crate::store::exec::normalize(path)
-                .zip(crate::store::exec::normalize(Path::new(&current.dir)))
+            && canoa::store::exec::normalize(path)
+                .zip(canoa::store::exec::normalize(Path::new(&current.dir)))
                 .is_some_and(|(path, root)| path.starts_with(root))
     };
     (inside(&node) && inside(&script)).then_some(ManagedPi { node, script })
@@ -104,8 +104,8 @@ pub(crate) fn managed_program_in(
     let path = PathBuf::from(&current.launch.path);
     let inside = path.is_absolute()
         && path.is_file()
-        && crate::store::exec::normalize(&path)
-            .zip(crate::store::exec::normalize(Path::new(&current.dir)))
+        && canoa::store::exec::normalize(&path)
+            .zip(canoa::store::exec::normalize(Path::new(&current.dir)))
             .is_some_and(|(path, root)| path.starts_with(root));
     inside.then(|| {
         let environment = current

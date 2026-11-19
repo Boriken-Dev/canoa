@@ -10,7 +10,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::store::protect::Protected;
+use canoa::store::protect::Protected;
 
 /// What the host protects when the person wrote no list: the app's recommended list, one file both read.
 pub(crate) const RECOMMENDED: &str = include_str!("../../../protected_default.txt");
