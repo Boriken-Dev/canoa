@@ -563,6 +563,7 @@ impl Accounts {
                 info,
                 config.settings.as_ref(),
                 &applied,
+                runs.borrowed(config),
             ))
             .provides(info.provides.iter().cloned());
         if config.kind != HARNESS_LOGIN && (info.state_dir || runs.directory(config, info)) {
@@ -583,7 +584,9 @@ impl Accounts {
     ) -> Result<Held, Refusal> {
         let id = config.id.clone();
         let applied = applied_as(config, info, runs);
-        let for_harness = standards::for_harness(info, config.settings.as_ref(), &applied);
+        let borrowed = runs.borrowed(config);
+        let for_harness =
+            standards::for_harness(info, config.settings.as_ref(), &applied, borrowed);
         let mut grant = AccountGrant::new(id.clone(), config.kind.clone())
             .settings(standards::for_maker(info, config.settings.as_ref()))
             .provides(info.provides.iter().cloned());
@@ -636,17 +639,13 @@ impl Accounts {
                 }
             }
         }
-        let keys = standards::keys_for(
-            &info.provides,
-            runs.borrowed(config),
-            grant.credentials.expose(),
-        );
+        let keys = standards::keys_for(&info.provides, borrowed, grant.credentials.expose());
         let mut held = Held::new(self, name, grant, Some(lock), files, rotates);
         held.owner.clone_from(&config.harness);
         held.session = session;
         held.keys = keys;
         held.credential = applied.credential;
-        if standards::names_per_standard(info) {
+        if standards::names_per_standard(info) || (borrowed && standards::picks_by_value(info)) {
             held.harness_settings = Some(for_harness);
         }
         if gateway {

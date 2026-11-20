@@ -11,11 +11,17 @@
 //! standard ids and whose values hold `base_url` and `credential`. A gateway that serves its standards at different addresses, or
 //! wants a bearer token for one and a key for another, is one account.
 //!
+//! A kind may instead say that the value of one of its settings picks the standards: the property carries
+//! `coqui_acp_api::PROVIDES_BY_VALUE`, an object from each value to its standards (a provider key whose variable names the API it is
+//! a key of). The kind's own `provides` is what an account holding any other value provides, and a harness that is not the kind's own
+//! is not given that setting, since it takes only the address of an account of a standard.
+//!
 //! The host names no kind and no standard.
 
 use std::collections::BTreeSet;
 
 use coqui_acp_api::AccountKindInfo;
+use coqui_acp_api::PROVIDES_BY_VALUE;
 use coqui_acp_api::guatiao::Value;
 use coqui_acp_api::standard::is_standard;
 
@@ -38,6 +44,48 @@ fn annotated(info: &AccountKindInfo, note: &str) -> Option<String> {
         .iter()
         .find(|(_, field)| field.get(note).and_then(serde_json::Value::as_bool) == Some(true))
         .map(|(name, _)| name.clone())
+}
+
+/// The property of `info`'s settings whose value picks the standards, and what each value picks.
+fn by_value(
+    info: &AccountKindInfo,
+) -> Option<(String, serde_json::Map<String, serde_json::Value>)> {
+    let schema = guatiao_serde::adapt::from_value::<serde_json::Value>(&info.settings).ok()?;
+    schema
+        .get("properties")?
+        .as_object()?
+        .iter()
+        .find_map(|(name, field)| {
+            let picked = field.get(PROVIDES_BY_VALUE)?.as_object()?;
+            Some((name.clone(), picked.clone()))
+        })
+}
+
+/// Whether the standards an account provides are picked by the value of one of its settings.
+pub(crate) fn picks_by_value(info: &AccountKindInfo) -> bool {
+    by_value(info).is_some()
+}
+
+/// The standards the account with `settings` provides, for a kind whose settings carry [`PROVIDES_BY_VALUE`]: those its value
+/// lists, else the kind's own. A listed name that is not a standard id is left out.
+fn provided_by_value(info: &AccountKindInfo, settings: Option<&Settings>) -> Vec<String> {
+    let listed = by_value(info).and_then(|(key, picked)| {
+        let held = settings?.as_map().get(&key)?.as_str()?.to_owned();
+        picked.get(&held)?.as_array().cloned()
+    });
+    let Some(listed) = listed else {
+        return info.provides.clone();
+    };
+    listed
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|id| is_standard(id))
+        .fold(Vec::new(), |mut found, id| {
+            if !found.iter().any(|each| each == id) {
+                found.push(id.to_owned());
+            }
+            found
+        })
 }
 
 /// The name of the property of `info`'s settings that holds the standards an account provides, when the kind says one does.
@@ -98,7 +146,7 @@ fn address_key(info: &AccountKindInfo) -> String {
 /// nothing; `check_settings` is what tells the person.
 pub(crate) fn provided(info: &AccountKindInfo, settings: Option<&Settings>) -> Vec<String> {
     let Some(key) = property(info) else {
-        return info.provides.clone();
+        return provided_by_value(info, settings);
     };
     match settings.and_then(|settings| settings.as_map().get(&key)) {
         Some(serde_json::Value::Array(listed)) => listed
@@ -136,11 +184,13 @@ pub(crate) fn for_maker(info: &AccountKindInfo, settings: Option<&Settings>) -> 
 }
 
 /// The settings a harness is given for the account: without the properties that hold the standards and what each says, and with the
-/// address `applied` names, in place of the account's own, when it names one.
+/// address `applied` names, in place of the account's own, when it names one. A harness that applies the account as one of a
+/// standard (`borrowed`) is not given the setting whose value picked the standards either: it is the kind's own.
 pub(crate) fn for_harness(
     info: &AccountKindInfo,
     settings: Option<&Settings>,
     applied: &Applied,
+    borrowed: bool,
 ) -> Value {
     let Some(settings) = settings else {
         return Value::from(coqui_acp_api::guatiao::Map::new());
@@ -150,6 +200,9 @@ pub(crate) fn for_harness(
         .into_iter()
         .flatten()
     {
+        map.remove(&key);
+    }
+    if borrowed && let Some((key, _)) = by_value(info) {
         map.remove(&key);
     }
     if let Some(address) = &applied.address {
@@ -217,7 +270,7 @@ mod tests {
             of_account(info.clone(), Some(&one)).provides,
             ["a-api", "b-api"]
         );
-        let given = for_harness(&info, Some(&one), &Applied::default());
+        let given = for_harness(&info, Some(&one), &Applied::default(), false);
         let given =
             guatiao_serde::adapt::from_value::<serde_json::Map<String, serde_json::Value>>(&given)
                 .expect("a table");
@@ -267,6 +320,66 @@ mod tests {
         assert!(provided(&info, Some(&wrong)).is_empty());
         let bad = settings(json!({"standards": ["Not An Id", "ok-api"]}));
         assert_eq!(provided(&info, Some(&bad)), ["ok-api"]);
+    }
+
+    fn by_value_kind() -> AccountKindInfo {
+        let mut kind = AccountKindInfo::new("key", "Key");
+        kind.settings = guatiao_serde::from_serde(json!({
+            "type": "object",
+            "properties": {
+                "variable": {
+                    "type": "string",
+                    "x-provides-by-value": {"A_KEY": ["a-api"], "AB_KEY": ["a-api", "b-api", "a-api", "Not An Id"]},
+                },
+            },
+        }))
+        .expect("a schema");
+        kind
+    }
+
+    #[test]
+    fn the_value_of_a_setting_picks_the_standards_an_account_provides_and_another_value_picks_the_kinds_own()
+     {
+        let info = by_value_kind();
+        assert!(picks_by_value(&info));
+        assert!(!picks_by_value(&kind()));
+        let held = |variable: &str| settings(json!({ "variable": variable }));
+        assert_eq!(provided(&info, Some(&held("A_KEY"))), ["a-api"]);
+        assert_eq!(
+            provided(&info, Some(&held("AB_KEY"))),
+            ["a-api", "b-api"],
+            "once each, and only ids"
+        );
+        assert!(provided(&info, Some(&held("OTHER_KEY"))).is_empty());
+        assert!(provided(&info, None).is_empty());
+        assert_eq!(
+            of_account(info.clone(), Some(&held("A_KEY"))).provides,
+            ["a-api"]
+        );
+        let own = by_value_kind().provides(["own-api"]);
+        assert_eq!(provided(&own, Some(&held("OTHER_KEY"))), ["own-api"]);
+        assert_eq!(provided(&own, Some(&held("A_KEY"))), ["a-api"]);
+    }
+
+    #[test]
+    fn a_harness_that_applies_the_account_as_a_standard_is_not_given_the_setting_that_picked_it() {
+        let info = by_value_kind();
+        let account = settings(json!({"variable": "A_KEY"}));
+        let given = |borrowed: bool| {
+            guatiao_serde::adapt::from_value::<serde_json::Value>(&for_harness(
+                &info,
+                Some(&account),
+                &Applied::default(),
+                borrowed,
+            ))
+            .expect("JSON")
+        };
+        assert_eq!(
+            given(false),
+            json!({"variable": "A_KEY"}),
+            "the kind's own harness"
+        );
+        assert_eq!(given(true), json!({}));
     }
 
     fn by_standard_kind() -> AccountKindInfo {
@@ -326,6 +439,7 @@ mod tests {
                 &info,
                 Some(&account),
                 applied,
+                false,
             ))
             .expect("JSON")
         };
