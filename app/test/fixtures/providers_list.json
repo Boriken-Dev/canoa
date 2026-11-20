@@ -396,14 +396,24 @@
       "accounts": {
         "provider": "pi_accounts",
         "title": "Pi accounts",
-        "description": "Watches the sign-in Pi's own `/login` wrote; it signs no one in, renews nothing and reads no plan limits.",
+        "description": "Watches the sign-in Pi's own `/login` wrote and signs a provider's key in; it renews nothing and reads no plan limits.",
         "kinds": [
+          {
+            "id": "pi-api-key",
+            "title": "Pi provider key"
+          },
           {
             "id": "pi-oauth",
             "title": "Pi sign-in"
           }
         ],
-        "logins": [],
+        "logins": [
+          {
+            "id": "api-key",
+            "title": "Provider API key",
+            "produces": "pi-api-key"
+          }
+        ],
         "usage": [],
         "local": true
       },

@@ -186,6 +186,60 @@ const opencodeCatalog = {
   ],
 };
 
+/// Pi as its provider says it: a provider's key whose variable names the API it is a key of (the kind lists no standard of its own),
+/// and the sign-in its own `auth.json` keeps, which no method drives.
+const piCatalog = {
+  'harness': 'pi',
+  'kinds': [
+    {
+      'id': 'pi-api-key',
+      'provides': <String>[],
+      'title': 'Pi provider key',
+      'state_dir': true,
+      'settings': {
+        'type': 'object',
+        'properties': {
+          'variable': {
+            'type': 'string',
+            'examples': ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GROQ_API_KEY'],
+            'x-provides-by-value': {
+              'ANTHROPIC_API_KEY': ['anthropic-api'],
+              'OPENAI_API_KEY': ['openai-api'],
+            },
+          },
+        },
+        'required': ['variable'],
+      },
+      'notices': ['the credential is in the environment of every program the agent runs, in the variable the account names'],
+    },
+    {
+      'id': 'pi-oauth',
+      'provides': ['pi'],
+      'title': 'Pi sign-in',
+      'rotates': true,
+      'state_dir': true,
+      'notices': ['the login is kept in a file that what the agent runs can read'],
+    },
+  ],
+  'logins': [
+    {
+      'id': 'api-key',
+      'title': 'Provider API key',
+      'description': 'Asks which environment variable the key goes in and then the key',
+      'produces': 'pi-api-key',
+      'steps': ['ask'],
+      'remote': true,
+      'inputs': {
+        'type': 'object',
+        'properties': {
+          'variable': {'type': 'string', 'title': 'Variable', 'examples': ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GROQ_API_KEY']},
+        },
+        'required': ['variable'],
+      },
+    },
+  ],
+};
+
 final class FakeAccountsHost implements AccountsHost {
   FakeAccountsHost({List<AccountInfo>? accounts, List<AgentProvider>? providers})
     : accounts = accounts ?? [],
@@ -195,7 +249,7 @@ final class FakeAccountsHost implements AccountsHost {
   final List<AgentProvider> providers;
 
   final List<AccountInfo> accounts;
-  final catalogs = <String, Object?>{'claude': claudeCatalog, 'codex': codexCatalog, 'opencode': opencodeCatalog};
+  final catalogs = <String, Object?>{'claude': claudeCatalog, 'codex': codexCatalog, 'opencode': opencodeCatalog, 'pi': piCatalog};
   final signIns = <SignIn>[];
   final inputsGiven = <Map<String, String>>[];
   final removed = <String>[];

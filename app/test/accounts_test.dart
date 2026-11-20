@@ -18,6 +18,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_accounts.dart';
+import 'fixtures/providers_fixture.dart' show providersOf;
 import 'fixtures/secret_host.dart' show until;
 
 const _canary = 'sk-ant-CANARY-4f9a2c71e8d0';
@@ -120,6 +121,37 @@ void main() {
     await tester.enterText(find.byKey(const Key('ask-field-variable')), 'ACME_GATEWAY_KEY');
     await tester.tap(find.byKey(const Key('ask-submit')));
     // The sign-in that starts keeps a spinner going, so the frames are pumped, not settled.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(host.inputsGiven.single, {'variable': 'ACME_GATEWAY_KEY'});
+  });
+
+  testWidgets("Pi's key is an account Add account offers: the variable is asked first, with the providers' variables suggested and any other name taken", (tester) async {
+    final host = FakeAccountsHost(providers: providersOf(const ['claude', 'codex', 'opencode', 'pi']));
+    final controller = _controller(host);
+    await _show(tester, controller);
+    expect(find.byKey(const Key('accounts-pi')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('add-account-pi')));
+    await tester.pumpAndSettle();
+    final catalog = controller.catalogIfKnown('pi');
+    expect(catalog?.kind('pi-api-key')?.title, 'Pi provider key');
+    expect(catalog?.kind('pi-oauth')?.provides, ['pi']);
+    expect(catalog?.kind('pi-api-key')?.provides, isEmpty, reason: 'which API the key is for is its variable, which the host reads');
+    expect(find.byKey(const Key('login-method api-key')), findsOneWidget);
+    expect(find.text('Provider API key'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('add-account-name')), 'anthropic-via-pi');
+    await tester.tap(find.byKey(const Key('login-method api-key')));
+    await tester.pump();
+    expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNotNull);
+    await tester.tap(find.byKey(const Key('add-account-start')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('program-ask')), findsOneWidget);
+    expect(find.byKey(const Key('ask-suggest-variable-ANTHROPIC_API_KEY')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('ask-suggest-variable-ANTHROPIC_API_KEY')));
+    await tester.pump();
+    expect(tester.widget<TextField>(find.byKey(const Key('ask-field-variable'))).controller?.text, 'ANTHROPIC_API_KEY');
+    await tester.enterText(find.byKey(const Key('ask-field-variable')), 'ACME_GATEWAY_KEY');
+    await tester.tap(find.byKey(const Key('ask-submit')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(host.inputsGiven.single, {'variable': 'ACME_GATEWAY_KEY'});

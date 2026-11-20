@@ -75,19 +75,19 @@ fn claude_lists_the_kinds_and_sign_in_methods_its_account_provider_offers() {
 }
 
 #[test]
-fn pi_offers_its_own_login_only() {
+fn pi_offers_its_own_login_and_a_provider_key_it_signs_in() {
     let pi = harness("pi", &Settings::default(), &Settings::default()).expect("builds");
     let kinds = ids(&pi);
     assert!(kinds.iter().any(|id| id == "pi-oauth"), "{kinds:?}");
     assert!(
-        !kinds.iter().any(|id| id == "pi-api-key"),
-        "a key is not one it offers: {kinds:?}"
+        kinds.iter().any(|id| id == "pi-api-key"),
+        "a key whose variable names an API is an account it keeps: {kinds:?}"
     );
     assert!(
         pi.listing()
             .logins
             .iter()
-            .all(|method| method.produces != "pi-api-key")
+            .any(|method| method.produces == "pi-api-key")
     );
 }
 
@@ -155,9 +155,10 @@ fn only_a_kind_the_account_provider_offers_is_accepted_for_an_account() {
     };
     let names = ["p".to_owned()];
     crate::serve::offered_accounts(&config("pi-oauth"), "pi", &names, &pi).expect("offered");
-    let why = crate::serve::offered_accounts(&config("pi-api-key"), "pi", &names, &pi)
-        .expect_err("a key is not offered");
-    assert!(why.contains("pi-api-key"), "{why}");
+    crate::serve::offered_accounts(&config("pi-api-key"), "pi", &names, &pi).expect("offered");
+    let why = crate::serve::offered_accounts(&config("anthropic-api-key"), "pi", &names, &pi)
+        .expect_err("another vendor's kind is not offered");
+    assert!(why.contains("anthropic-api-key"), "{why}");
 }
 
 /// A harness whose account provider's id does not follow `<harness>_accounts`: the host finds it through what the harness

@@ -1163,3 +1163,107 @@ fn an_account_says_what_it_provides_an_entry_what_it_accepts_and_an_offer_follow
     assert_eq!(pi["usable"], json!(["work"]));
     host.stop();
 }
+
+#[test]
+fn a_pi_provider_key_is_added_over_the_link_and_lands_in_the_pool_of_the_api_its_variable_names() {
+    let host = host();
+    let link = host.local.open("@control").expect("a link");
+    let mut app = app_of(&host);
+    // Pi lists the key kind and the way to sign one in.
+    let catalog =
+        plain_call(&link, 1, "accounts/catalog", json!({"harness": "pi"})).expect("catalog");
+    assert!(
+        catalog["kinds"]
+            .as_array()
+            .expect("kinds")
+            .iter()
+            .any(|kind| kind["id"] == "pi-api-key"),
+        "{catalog}"
+    );
+    let method = catalog["logins"]
+        .as_array()
+        .expect("logins")
+        .iter()
+        .find(|method| method["id"] == "api-key")
+        .unwrap_or_else(|| panic!("Pi signs a key in: {catalog}"));
+    assert_eq!(method["produces"], "pi-api-key", "{method}");
+    let (_, one) = app.drive(
+        &link,
+        2,
+        "accounts/add",
+        &json!({"name": "one", "harness": "claude", "method": "api-key"}),
+        &Typed::Fills(&[("api_key", KEY)]),
+    );
+    one.expect("an Anthropic key account");
+    let (_, added) = app.drive(
+        &link,
+        3,
+        "accounts/add",
+        &json!({"name": "pi-key", "harness": "pi", "method": "api-key",
+                "inputs": {"variable": "ANTHROPIC_API_KEY"}}),
+        &Typed::Fills(&[("api_key", KEY)]),
+    );
+    let added = added.expect("a Pi key is an account");
+    assert_eq!(added["account"]["kind"], "pi-api-key", "{added}");
+    let (_, other) = app.drive(
+        &link,
+        4,
+        "accounts/add",
+        &json!({"name": "pi-other", "harness": "pi", "method": "api-key",
+                "inputs": {"variable": "MISTRAL_API_KEY"}}),
+        &Typed::Fills(&[("api_key", KEY)]),
+    );
+    other.expect("a key of a variable no API is named for is an account too");
+    let cfg = config_text(&host);
+    assert!(
+        cfg.contains("ANTHROPIC_API_KEY") && cfg.contains("MISTRAL_API_KEY"),
+        "{cfg}"
+    );
+    let listed = plain_call(&link, 5, "accounts/list", json!({})).expect("listed");
+    let provides = |name: &str| {
+        listed["accounts"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .find(|row| row["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is listed: {listed}"))["provides"]
+            .clone()
+    };
+    assert_eq!(provides("pi-key"), json!(["anthropic-api"]));
+    assert_eq!(provides("pi-other"), json!([]));
+    // Claude Code is offered both keys of the Anthropic API, and the pool of that API holds the two.
+    plain_call(
+        &link,
+        6,
+        "accounts/offer",
+        json!({"entry": "Claude", "accounts": ["one", "pi-key"]}),
+    )
+    .expect("Claude takes a Pi key of the Anthropic API");
+    let refused = plain_call(
+        &link,
+        7,
+        "accounts/offer",
+        json!({"entry": "Claude", "accounts": ["one", "pi-other"]}),
+    )
+    .expect_err("a key of another variable provides nothing Claude takes");
+    assert!(!refused.contains(KEY), "{refused}");
+    // Pi, which reads the key from the variable the account names, is offered it whatever the variable is.
+    plain_call(
+        &link,
+        9,
+        "accounts/offer",
+        json!({"entry": "Pi", "harness": "pi", "accounts": ["pi-other"]}),
+    )
+    .expect("Pi takes a key of its own kind");
+    let pools = plain_call(&link, 8, "pools/list", json!({})).expect("listed");
+    let pool = pools["pools"]
+        .as_array()
+        .expect("pools")
+        .iter()
+        .find(|pool| pool["name"] == "any-anthropic-api")
+        .unwrap_or_else(|| panic!("the pool of the Anthropic API: {pools}"));
+    assert_eq!(pool["accounts"], json!(["one", "pi-key"]), "{pool}");
+    let hits = found_in(KEY, &written(&host, &app));
+    assert!(hits.is_empty(), "{hits:?}");
+    host.stop();
+}
