@@ -350,6 +350,7 @@ void main() {
     await shot('new-session-cached');
     await tester.tap(composer);
     await tester.enterText(composer, 'Say ready');
+    await tester.pump();
     await tester.tap(find.byTooltip('Send'));
     await until(() => store.selected?.messages.any((message) => message.text == 'ready') ?? false, 'the new session to start',
         within: const Duration(minutes: 4));

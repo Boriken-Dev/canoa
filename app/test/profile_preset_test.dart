@@ -173,6 +173,9 @@ void main() {
       await pumpApp(tester, _store(), profileHome: _home(), config: _config(), linked: agent.openLink, size: size);
       await _draft(tester, 'Claude');
       await _menuItem(tester, 'profile-choice Deep review');
+      // The profile menu stays open after a choice, and at a phone's width it covers the model's control.
+      await tester.tapAt(const Offset(2, 2));
+      await frames(tester);
       await pick(tester, 'option-effort', 'Low');
       await tester.tap(find.byKey(const Key('profile-pill')));
       await frames(tester);

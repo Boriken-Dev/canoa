@@ -113,9 +113,22 @@ Future<_Rig> _pump(WidgetTester tester,
   return rig;
 }
 
+/// Presses the microphone, or, while a message is typed and Send has taken its place, the + menu's Dictate.
+Future<void> _pressMic(WidgetTester tester) async {
+  if (find.byKey(const Key('dictate')).evaluate().isNotEmpty) {
+    await tester.tap(find.byKey(const Key('dictate')));
+    return;
+  }
+  await tester.tap(find.byKey(const Key('composer-plus')));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 300));
+  await tester.tap(find.byKey(const Key('plus-dictate')));
+  await tester.pump(const Duration(milliseconds: 300));
+}
+
 /// Presses the microphone and answers the first-use dialog.
 Future<void> _begin(WidgetTester tester, {bool accept = true}) async {
-  await tester.tap(find.byKey(const Key('dictate')));
+  await _pressMic(tester);
   await tester.pump();
   if (find.byKey(const Key('dictate-accept')).evaluate().isNotEmpty) {
     await tester.tap(find.byKey(Key(accept ? 'dictate-accept' : 'dictate-decline')));
@@ -280,7 +293,8 @@ void main() {
     expect(rig.input.text, 'please run the tests now');
     expect(rig.input.selection.baseOffset, 'please run the tests'.length);
     expect(rig.sent, 0, reason: 'dictation never sends');
-    expect(find.byKey(const Key('dictate')), findsOneWidget);
+    expect(find.byKey(const Key('dictate')), findsNothing, reason: 'the message has text now, so Send is where the microphone was');
+    expect(find.byTooltip('Send'), findsOneWidget);
   });
 
   testWidgets('dictation into a message with an attachment leaves the attachment', (tester) async {
@@ -307,7 +321,33 @@ void main() {
     expect(rig.service.cancelled, 1);
     expect(rig.input.text, 'draft');
     expect(rig.dictation.state, DictationState.idle);
+    expect(find.byKey(const Key('dictate')), findsNothing, reason: 'the draft is still there, so Send holds the place');
+    expect(find.byTooltip('Send'), findsOneWidget);
+  });
+
+  testWidgets('with text typed the microphone is Send, and dictation goes on from the + menu and the shortcut', (tester) async {
+    final rig = await _pump(tester, voice: const VoiceSettings(backend: 'stand-in', acknowledged: {'stand-in'}));
     expect(find.byKey(const Key('dictate')), findsOneWidget);
+    expect(find.byTooltip('Send'), findsNothing);
+    rig.input.text = 'draft';
+    await tester.pump();
+    expect(find.byKey(const Key('dictate')), findsNothing);
+    expect(find.byTooltip('Send'), findsOneWidget);
+    // The shortcut needs no button on screen.
+    await rig.dictation.start();
+    await tester.pump();
+    await tester.pump();
+    expect(rig.dictation.state, DictationState.listening);
+    expect(find.byKey(const Key('dictate-stop')), findsOneWidget, reason: 'a dictation under way stays in view beside Send');
+    expect(find.byTooltip('Send'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('dictate-cancel')));
+    await tester.pump(const Duration(seconds: 10));
+    expect(rig.dictation.state, DictationState.idle);
+    // The + menu's entry begins one.
+    await _begin(tester);
+    expect(rig.dictation.state, DictationState.listening);
+    await tester.tap(find.byKey(const Key('dictate-cancel')));
+    await tester.pump(const Duration(seconds: 10));
   });
 
   testWidgets('Stop with no speech puts nothing in the message and says nothing was heard', (tester) async {
@@ -354,7 +394,7 @@ void main() {
     await tester.pump(const Duration(seconds: 6));
     expect(rig.dictation.state, DictationState.idle);
     expect(rig.input.text, 'draft');
-    await tester.tap(find.byKey(const Key('dictate')));
+    await _pressMic(tester);
     await tester.pump(const Duration(seconds: 3));
     expect(rig.service.started, 2, reason: 'the first capture never closed; the second must not wait for it');
     expect(rig.dictation.state, DictationState.listening);

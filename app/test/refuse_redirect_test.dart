@@ -83,6 +83,7 @@ Future<(_Agent, ChatSession, SessionStore)> _waiting(WidgetTester tester, {Size 
   await tester.pump();
   // A first message leaves the turn open, as it is when an agent asks for leave.
   await tester.enterText(_field, 'Fix the sums');
+  await tester.pump();
   await tester.tap(find.byTooltip('Send'));
   await _settle(tester);
   agent.ask(7);
@@ -113,6 +114,7 @@ void main() {
   testWidgets('sending refuses once, with the agent\'s own refusal, and the text goes to the agent', (tester) async {
     final (agent, session, store) = await _waiting(tester);
     await tester.enterText(_field, 'Edit calc.ts instead');
+    await tester.pump();
     await tester.tap(find.byKey(const Key('composer-queue')));
     await _settle(tester);
     expect(agent.answerTo(7)?['result'], {'outcome': {'outcome': 'selected', 'optionId': 'reject'}});
@@ -141,7 +143,9 @@ void main() {
 
   testWidgets('an empty message sends nothing and leaves the card waiting', (tester) async {
     final (agent, session, _) = await _waiting(tester);
-    await tester.tap(find.byKey(const Key('composer-queue')));
+    expect(find.byKey(const Key('composer-queue')), findsNothing, reason: 'there is nothing typed to send');
+    await tester.tap(_field);
+    await tester.testTextInput.receiveAction(TextInputAction.send);
     await _settle(tester);
     expect(session.pendingPermissions, hasLength(1));
     expect(agent.answerTo(7), isNull);

@@ -3,6 +3,7 @@
 // queue going as one message by `[sessions] queue_delivery`. Against an in-memory ACP v2 agent that answers what a test says.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Directory;
 
 import 'package:canoa/acp/client.dart';
 import 'package:canoa/config/canoa_config.dart';
@@ -12,6 +13,8 @@ import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'fixtures/store_fixtures.dart' show PlatformTolerant;
 
 /// An agent speaking ACP v2 in memory: it answers each request with `{}` (a prompt with a message id), or with an error for a
 /// method a test lists in [refuse].
@@ -89,7 +92,7 @@ Future<void> _settle(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 300));
 }
 
-Finder get _composer => find.byWidgetPredicate((widget) => widget is TextField && (widget.decoration?.hintText ?? '').startsWith('Message agent'));
+Finder get _composer => find.byWidgetPredicate((widget) => widget is TextField && (widget.decoration?.hintText ?? '').startsWith('Message'));
 
 String _textOf(WidgetTester tester) => tester.widget<TextField>(_composer).controller!.text;
 
@@ -115,6 +118,45 @@ CanoaConfig _steering(WhileWorking whileWorking, {QueueDelivery delivery = Queue
     CanoaConfig(sessions: LedgerSettings(whileWorking: whileWorking, queueDelivery: delivery));
 
 void main() {
+  setUpAll(() => goldenFileComparator = PlatformTolerant(Uri.file('${Directory.current.path}/test/steer_queue_test.dart')));
+
+  group('the box while a turn runs', () {
+    for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
+      testWidgets('has Stop beside the microphone and a spinner at the end of the line, at $label width', (tester) async {
+        await _working(tester);
+        await tester.binding.setSurfaceSize(size);
+        await _settle(tester);
+        final box = tester.getRect(find.byKey(const Key('composer')));
+        expect(find.byKey(const Key('composer-stop')), findsOneWidget);
+        expect(find.byKey(const Key('dictate')), findsOneWidget, reason: 'the microphone stays while nothing is typed');
+        expect(find.byKey(const Key('composer-queue')), findsNothing, reason: 'nothing typed to queue');
+        expect(find.byKey(const Key('composer-steer')), findsNothing);
+        expect(find.byTooltip('Send'), findsNothing);
+        expect(box.contains(tester.getCenter(find.byKey(const Key('composer-stop')))), isTrue);
+        expect(tester.getTopLeft(find.byKey(const Key('composer-stop'))).dx, lessThan(tester.getTopLeft(find.byKey(const Key('dictate'))).dx));
+        expect(tester.getTopLeft(find.byKey(const Key('composer-busy'))).dy, greaterThanOrEqualTo(box.bottom), reason: 'under the box');
+        expect(tester.takeException(), isNull);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/composer_working_$label.png'));
+      });
+    }
+
+    testWidgets('typing puts Queue and Steer where the microphone was, and the spinner goes when the turn ends', (tester) async {
+      final (agent, _, _) = await _working(tester);
+      expect(find.byKey(const Key('composer-busy')), findsOneWidget);
+      await tester.enterText(_composer, 'next');
+      await tester.pump();
+      expect(find.byKey(const Key('dictate')), findsNothing);
+      expect(find.byKey(const Key('composer-queue')), findsOneWidget);
+      expect(find.byKey(const Key('composer-steer')), findsOneWidget);
+      expect(find.byKey(const Key('composer-stop')), findsOneWidget);
+      agent.idle('end_turn');
+      await _settle(tester);
+      expect(find.byKey(const Key('composer-busy')), findsNothing);
+      expect(find.byKey(const Key('composer-stop')), findsNothing);
+      expect(find.byTooltip('Send'), findsOneWidget, reason: 'the typed message is still there');
+    });
+  });
+
   group('the keys', () {
     testWidgets('Enter queues and Alt+Enter steers by default; Steer stops the turn and the message goes first', (tester) async {
       final (agent, session, _) = await _working(tester);
@@ -133,6 +175,9 @@ void main() {
 
     testWidgets('with while_working = steer, Enter steers and Alt+Enter queues, and the tooltips say so', (tester) async {
       final (agent, session, _) = await _working(tester, config: _steering(WhileWorking.steer));
+      expect(find.byKey(const Key('composer-steer')), findsNothing, reason: 'nothing is typed to steer with');
+      await tester.enterText(_composer, 'x');
+      await tester.pump();
       expect(find.byTooltip('Steer: stop the turn and send this first (Enter)'), findsOneWidget);
       expect(find.byTooltip('Queue: send this when the turn ends (Alt+Enter)'), findsOneWidget);
       await _altEnter(tester, 'later');
@@ -146,9 +191,11 @@ void main() {
     testWidgets('the buttons do the same as the keys', (tester) async {
       final (agent, session, _) = await _working(tester);
       await tester.enterText(_composer, 'queued');
+      await tester.pump();
       await tester.tap(find.byKey(const Key('composer-queue')));
       await _settle(tester);
       await tester.enterText(_composer, 'steering');
+      await tester.pump();
       await tester.tap(find.byKey(const Key('composer-steer')));
       await _settle(tester);
       expect(agent.cancels, 1);

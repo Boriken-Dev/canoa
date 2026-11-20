@@ -96,6 +96,7 @@ void main() {
     Future<void> send(String text) async {
       await tester.tap(composer);
       await tester.enterText(composer, text);
+      await tester.pump();
       await tester.tap(find.byTooltip('Send'));
       await until(() => said(text.substring('Say '.length)), 'the agent to answer "$text"');
       await tester.pumpAndSettle();

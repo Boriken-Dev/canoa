@@ -135,9 +135,10 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
     await tester.pump();
 
-    final composer = find.byWidgetPredicate((widget) => widget is TextField && (widget.decoration?.hintText ?? '').startsWith('Message agent'));
+    final composer = find.byWidgetPredicate((widget) => widget is TextField && (widget.decoration?.hintText ?? '').startsWith('Message'));
     for (final text in ['first', 'second', 'third']) {
       await tester.enterText(composer, text);
+      await tester.pump();
       await tester.tap(find.byKey(const Key('composer-queue')));
       await tester.pump();
     }

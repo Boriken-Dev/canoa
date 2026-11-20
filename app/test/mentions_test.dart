@@ -93,22 +93,33 @@ void main() {
     });
   });
 
-  testWidgets('the placeholder names the inputs', (tester) async {
-    await _started(tester);
-    expect(_hint(tester), 'Message agent: @ files, / commands');
+  testWidgets('the placeholder names the agent and the send keys, and the inputs are in the + menu', (tester) async {
+    final (store, _, _) = await _started(tester);
+    expect(_hint(tester), 'Message ${store.selected!.agent} · Enter to send');
+    expect(_hint(tester), isNot(contains('@')), reason: 'the placeholder says nothing of what the field takes');
+    await tester.tap(find.byKey(const Key('composer-plus')));
+    await frames(tester);
+    expect(find.byKey(const Key('plus-mention')), findsOneWidget);
+    expect(find.byKey(const Key('plus-slash')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('plus-mention')));
+    await frames(tester);
+    expect(tester.widget<TextField>(_field).controller!.text, '@', reason: 'the entry starts a mention');
     await finish(tester);
   });
 
-  testWidgets('on a phone the placeholder is one line, and a draft\'s names its inputs too', (tester) async {
-    await _started(tester, size: const Size(390, 844));
+  testWidgets('on a phone the placeholder is one line: the agent alone, and a draft names its source', (tester) async {
+    final (store, _, _) = await _started(tester, size: const Size(390, 844));
     final hint = _hint(tester)!;
-    expect(hint, 'Message agent: @ files, / commands');
+    expect(hint, 'Message ${store.selected!.agent}');
     expect(tester.getSize(find.text(hint)).height, lessThan(30));
     await newSession(tester);
     final draft = _hint(tester)!;
-    expect(draft, 'Message Scripted: / commands', reason: 'no folder is chosen yet, so no @');
-    expect(draft, isNot(contains('it starts when you send')), reason: 'the short form');
+    expect(draft, 'Message Scripted');
     expect(tester.getSize(find.text(draft)).height, lessThan(30));
+    await tester.tap(find.byKey(const Key('composer-plus')));
+    await frames(tester);
+    expect(find.byKey(const Key('plus-mention')), findsNothing, reason: 'no folder is chosen yet, so no @');
+    expect(find.byKey(const Key('plus-slash')), findsOneWidget);
     await finish(tester);
   });
 

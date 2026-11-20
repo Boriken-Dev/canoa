@@ -143,6 +143,7 @@ void main() {
     await showWindow(tester, windows.opened.single);
 
     await tester.enterText(find.byType(TextField), 'and add a test');
+    await tester.pump();
     await tester.tap(find.byTooltip('Queue'));
     await _settle(tester);
     expect(session.queue.map((m) => m.text), ['and add a test']);

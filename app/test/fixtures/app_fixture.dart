@@ -245,9 +245,18 @@ Future<void> until(WidgetTester tester, bool Function() done, String what) async
   if (!done()) fail('timed out waiting for $what');
 }
 
+/// Opens the composer's + menu and chooses its entry [key].
+Future<void> choosePlus(WidgetTester tester, String key) async {
+  await tester.tap(find.byKey(const Key('composer-plus')));
+  await frames(tester);
+  await tester.tap(find.byKey(Key(key)));
+  await frames(tester);
+}
+
 /// Writes [text] and presses Send.
 Future<void> send(WidgetTester tester, String text) async {
   await tester.enterText(find.byType(TextField).last, text);
+  await tester.pump();
   await tester.tap(find.byTooltip('Send'));
   await settle(tester);
 }

@@ -5,7 +5,7 @@ import 'package:coqui_acp_chat/experimental.dart' show ChatSessionView;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' as chat;
 import 'package:flutter/material.dart';
 
-import '../chat/reply_voice.dart' show VoiceModeButton;
+import '../chat/reply_voice.dart' show VoiceModeMenuItem, VoiceModeStatus;
 import '../chat/session_views.dart' show appName;
 import '../theme/look.dart';
 import '../voice/reply_speaker.dart';
@@ -32,6 +32,9 @@ class PopoutChat extends StatefulWidget {
   @override
   State<PopoutChat> createState() => _PopoutChatState();
 }
+
+/// What a window with no speaker listens to: nothing.
+final Listenable _noSpeaker = Listenable.merge(const []);
 
 class _PopoutChatState extends State<PopoutChat> {
   final _input = TextEditingController();
@@ -117,11 +120,6 @@ class _PopoutChatState extends State<PopoutChat> {
                       maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
                 ]),
               ),
-              if (widget.speaker case final speaker?)
-                ListenableBuilder(
-                  listenable: speaker,
-                  builder: (context, _) => speaker.available ? VoiceModeButton(reader: speaker, controller: _input, onChanged: (_) {}) : const SizedBox.shrink(),
-                ),
               IconButton(
                 key: const Key('dock-back'),
                 tooltip: 'Bring back to the main window',
@@ -191,14 +189,23 @@ class _PopoutChatState extends State<PopoutChat> {
             heightFactor: 1,
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: context.chatLook.messageWidth + 100),
-              child: chat.Composer(
-                controller: _input,
-                focusNode: _focus,
-                onSend: () => unawaited(_send()),
-                enabled: view.isOpen && session.status != model.ChatStatus.disconnected,
-                working: working,
-                onStop: view.isOpen ? view.cancel : null,
-                commands: session.commands,
+              child: ListenableBuilder(
+                listenable: widget.speaker ?? _noSpeaker,
+                builder: (context, _) {
+                  final speaker = widget.speaker;
+                  final voice = speaker != null && speaker.available;
+                  return chat.Composer(
+                    controller: _input,
+                    focusNode: _focus,
+                    onSend: () => unawaited(_send()),
+                    enabled: view.isOpen && session.status != model.ChatStatus.disconnected,
+                    working: working,
+                    onStop: view.isOpen ? view.cancel : null,
+                    commands: session.commands,
+                    plusItems: [if (voice) VoiceModeMenuItem(reader: speaker, onChanged: (_) {})],
+                    below: [if (voice) VoiceModeStatus(reader: speaker, controller: _input, onChanged: (_) {})],
+                  );
+                },
               ),
             ),
           ),

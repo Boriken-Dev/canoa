@@ -105,6 +105,7 @@ Future<(_Agent, ChatSession)> _waiting(
   await tester.pumpWidget(CanoaApp(store: store));
   await tester.pump();
   await tester.enterText(find.byType(TextField).last, 'Fix the sums');
+  await tester.pump();
   await tester.tap(find.byTooltip('Send'));
   await _settle(tester);
   agent.ask(7, toolCall: toolCall, description: description, options: options);

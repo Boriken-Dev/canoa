@@ -276,7 +276,7 @@ void main() {
       agent.reply(agent.sent.firstWhere((message) => message['method'] == 'session/prompt')['id'], {'stopReason': 'cancelled'});
       await _settle(tester);
       expect(session.status, SessionStatus.connected, reason: 'a cancelled turn has ended');
-      expect(find.byTooltip('Send'), findsOneWidget);
+      expect(find.byKey(const Key('composer-stop')), findsNothing, reason: 'the turn has ended, so Stop has gone');
       expect(session.messages.last.text, 'Stopped.');
     });
 

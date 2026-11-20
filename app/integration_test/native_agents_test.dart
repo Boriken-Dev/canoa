@@ -96,6 +96,7 @@ void main() {
       final composer = find.descendant(of: find.byKey(const Key('composer')), matching: find.byType(TextField));
       await tester.tap(composer);
       await tester.enterText(composer, text);
+      await tester.pump();
       await tester.tap(find.byTooltip('Send'));
       await tester.pump();
       await until(() => showing(find.byKey(const Key('permission-card'))), 'the $label question');

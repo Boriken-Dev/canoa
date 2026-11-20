@@ -135,6 +135,7 @@ void main() {
     await tester.pumpAndSettle();
     await closePicker(tester);
     await tester.enterText(find.byType(TextField), 'Fix it');
+    await tester.pump();
     await tester.tap(find.byTooltip('Send'));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pumpAndSettle();

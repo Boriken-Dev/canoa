@@ -365,9 +365,10 @@ final class SessionAttachments implements ComposerAttachments {
 
 final _addPaths = addPaths;
 
-/// The message being written, what goes with it, and a row of controls under it: `+`, the source and Local or Worktree
-/// before the session starts, the agent's mode, model and effort, the overlays, and Send. The package's [Composer] draws it; what
-/// is Canoa's (the controls, the session's attachments, the extension's header) goes in its slots.
+/// The message being written, in one box: `+` at the left, the text, what goes with it as cards above it, and at the right the
+/// microphone while it is empty and Send once it is not. Under the box a quiet line holds the model and effort, the mode, the
+/// account and, for a draft, the source and the rest of what it starts with. The package's [Composer] draws it; what is Canoa's
+/// (the controls, the session's attachments, the extension's header) goes in its slots.
 class SessionComposer extends StatelessWidget {
   const SessionComposer({
     super.key,
@@ -406,9 +407,15 @@ class SessionComposer extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) => Actions(
       actions: _fieldOwnsVerticalMoves,
-      child: _composer(context, narrow: box.maxWidth < Composer.wideFrom),
+      // A dictation that is under way keeps its microphone in view, though text has been typed beside it.
+      child: ListenableBuilder(
+        listenable: kit.dictation ?? _nothing,
+        builder: (context, _) => _composer(context, narrow: box.maxWidth < Composer.wideFrom),
+      ),
     ),
   );
+
+  static final Listenable _nothing = Listenable.merge(const []);
 
   /// Up and Down, and Page Up and Page Down, in the field are the field's: the selection area around the screen has actions for
   /// the same intents, and a field that defers to it can be handed an action that is not its own. Each is answered by handing the
@@ -426,8 +433,8 @@ class SessionComposer extends StatelessWidget {
     final mentions = kit.listFolder != null && kit.resolveInside != null && store.canAttach(session) && SessionMentions.offeredFor(session, readable: kit.foldersReadable)
         ? SessionMentions(store: store, session: session, list: kit.listFolder!, resolve: kit.resolveInside!)
         : null;
-    final inputs = [if (mentions != null) '@ files', '/ commands'].join(', ');
     final actions = _actions(session);
+    final dictation = kit.dictation;
     return Composer(
       controller: controller,
       focusNode: focusNode,
@@ -443,15 +450,7 @@ class SessionComposer extends StatelessWidget {
       actionsTitle: '$appName actions',
       mentions: mentions,
       centred: centred,
-      hint: !enabled
-          ? (store.isStarting(session) ? 'Starting ${session.agent}…' : 'Connect an ACP peer to chat')
-          : session.pendingPermissions.isNotEmpty
-          ? (narrow ? narrowRedirectHint : redirectHint)
-          : session.isDraft
-          ? narrow
-                ? 'Message ${session.source?.displayName ?? 'an agent'}: $inputs'
-                : 'Message ${session.source?.displayName ?? 'an agent'}: it starts when you send. $inputs'
-          : 'Message agent: $inputs',
+      hint: _hint(narrow: narrow),
       header: kit.extension?.header(context, session, controller),
       attachments: SessionAttachments(store, session, kit),
       pickFiles: kit.pickFiles == null
@@ -465,6 +464,19 @@ class SessionComposer extends StatelessWidget {
       pasteAsFile: kit.pasteAsFile,
       plusItems: [
         ...?kit.extension?.menuItems(context, session),
+        if (mentions != null)
+          MenuItemButton(
+            key: const Key('plus-mention'),
+            leadingIcon: const Icon(Icons.alternate_email, size: 18),
+            // A mention is read at the start of a word, so the entry adds one to the end.
+            onPressed: () {
+              final text = controller.text;
+              final at = text.isEmpty || RegExp(r'\s$').hasMatch(text) ? '@' : ' @';
+              controller.value = TextEditingValue(text: '$text$at', selection: TextSelection.collapsed(offset: text.length + at.length));
+              focusNode?.requestFocus();
+            },
+            child: const Text('Mention a file'),
+          ),
         MenuItemButton(
           key: const Key('plus-slash'),
           leadingIcon: const Icon(Icons.terminal, size: 18),
@@ -477,32 +489,55 @@ class SessionComposer extends StatelessWidget {
               : null,
           child: const Text('Slash commands'),
         ),
+        // The microphone gives way to Send once something is typed, so dictating into a message goes on from here (or the shortcut).
+        if (dictation != null)
+          MenuItemButton(
+            key: const Key('plus-dictate'),
+            leadingIcon: const Icon(Icons.mic_none, size: 18),
+            onPressed: dictation.cancellable ? null : () => unawaited(dictation.start()),
+            child: Text('Dictate ($dictationKeys)'),
+          ),
+        if (kit.reader case final reader? when reader.available) VoiceModeMenuItem(reader: reader, onChanged: kit.onVoiceMode ?? (_) {}),
       ],
       onShiftTab: session.status == SessionStatus.preview ? null : () => unawaited(store.cycleMode(session)),
       recall: _lastSent,
-      // The mode first at the bottom left, then Add; the model and effort sit beside Send, as Claude Code and Codex lay them out.
-      before: [
-        ModeChooser(store: store, session: session, options: options, seen: seen),
-        if (session.status != SessionStatus.preview && session.reportsUsage)
-          UsagePill(report: session.usageReport, warnPermille: kit.warnPermille),
-      ],
-      after: [
-        if (draft) SourceChooser(store: store, session: session, kit: kit),
-        AccountChooser(store: store, session: session, kit: kit),
-        if (draft && session.kind == SessionKind.workspace) PlaceToggle(store: store, session: session, kit: kit),
-      ],
-      trailing: [
-        if (kit.dictation case final dictation?) DictationButton(dictation: dictation, controller: controller, shortcut: dictationKeys),
-        if (kit.reader case final reader? when reader.available)
-          VoiceModeButton(reader: reader, controller: controller, dictation: kit.dictation, onChanged: kit.onVoiceMode ?? (_) {}),
-        if (draft) SourceTroubleChip(store: store, session: session, kit: kit),
-        if (draft && (kit.presets.isNotEmpty || kit.savePreset != null)) PresetChooser(store: store, session: session, kit: kit),
+      primary: dictation == null ? null : DictationButton(dictation: dictation, controller: controller, shortcut: dictationKeys),
+      holdPrimary: dictation != null && dictation.state != DictationState.idle,
+      // Quiet text under the box, the choices a person changes most first; a draft's extra choosers follow in the same line.
+      below: [
         ModelEffortChooser(store: store, session: session, options: options, kit: kit, seen: seen),
+        ModeChooser(store: store, session: session, options: options, seen: seen),
+        AccountChooser(store: store, session: session, kit: kit),
+        if (draft) SourceChooser(store: store, session: session, kit: kit),
+        if (draft) SourceTroubleChip(store: store, session: session, kit: kit),
+        if (draft && session.kind == SessionKind.workspace) PlaceToggle(store: store, session: session, kit: kit),
+        if (draft && (kit.presets.isNotEmpty || kit.savePreset != null)) PresetChooser(store: store, session: session, kit: kit),
         if (options.any((option) => roleOf(option) == OptionRole.other)) MoreChooser(store: store, session: session, options: options),
         if (draft) CacheChooser(store: store, session: session),
         if (kit.overlays.isNotEmpty || kit.loadouts.isNotEmpty || session.profile != null) OverlaysChooser(store: store, session: session, kit: kit),
+        if (session.status != SessionStatus.preview && session.reportsUsage)
+          UsagePill(report: session.usageReport, warnPermille: kit.warnPermille),
+        if (kit.reader case final reader? when reader.available)
+          VoiceModeStatus(reader: reader, controller: controller, dictation: kit.dictation, onChanged: kit.onVoiceMode ?? (_) {}),
+        if (working) const _Busy(),
       ],
     );
+  }
+
+  /// What the message field says while it is empty: who it goes to and the keys that send it.
+  String _hint({required bool narrow}) {
+    if (!enabled) return store.isStarting(session) ? 'Starting ${session.agent}…' : 'Connect to an agent to chat';
+    if (session.pendingPermissions.isNotEmpty) return narrow ? narrowRedirectHint : redirectHint;
+    final name = session.isDraft ? (session.source?.displayName ?? 'an agent') : (shortLine(session.agent) ?? 'the agent');
+    if (narrow) return 'Message $name';
+    final keys = !working
+        ? 'Enter to send'
+        : onSteer == null
+        ? 'Enter to queue'
+        : kit.enterSteers
+        ? 'Enter to steer, Alt+Enter to queue'
+        : 'Enter to queue, Alt+Enter to steer';
+    return 'Message $name \u00b7 $keys';
   }
 
   /// Canoa's own entries in the `/` list: what the person could do from the controls, by name.
@@ -531,4 +566,15 @@ class SessionComposer extends StatelessWidget {
 final class _FieldMove<T extends Intent> extends ContextAction<T> {
   @override
   Object? invoke(T intent, [BuildContext? context]) => callingAction?.invoke(intent);
+}
+
+/// A small spinner at the end of the line under the box while a turn runs.
+class _Busy extends StatelessWidget {
+  const _Busy();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.symmetric(horizontal: 8),
+    child: SizedBox.square(key: Key('composer-busy'), dimension: 12, child: CircularProgressIndicator(strokeWidth: 1.5)),
+  );
 }

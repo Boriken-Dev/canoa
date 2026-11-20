@@ -32,9 +32,7 @@ Future<void> _shiftTab(WidgetTester tester) async {
 
 void main() {
   group('the control', () {
-    testWidgets('sits at the composer\'s bottom left, before the add button', (
-      tester,
-    ) async {
+    testWidgets('sits in the line under the composer\'s box, not in it', (tester) async {
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
       await pumpApp(
         tester,
@@ -43,15 +41,10 @@ void main() {
       );
       await _draft(tester);
       await send(tester, 'Say hello');
-      final mode = tester.getTopLeft(find.byKey(const Key('option-mode')));
-      final plus = tester.getTopLeft(find.byKey(const Key('composer-plus')));
+      final mode = tester.getRect(find.byKey(const Key('option-mode')));
       final box = tester.getRect(find.byKey(const Key('composer')));
-      expect(mode.dx, lessThan(plus.dx));
-      expect(
-        mode.dy,
-        greaterThan(box.center.dy),
-        reason: 'under the message, not over it',
-      );
+      expect(mode.top, greaterThanOrEqualTo(box.bottom), reason: 'under the box');
+      expect(mode.left, greaterThan(box.left + box.width / 2), reason: 'toward the right, as the line is');
       await finish(tester);
     });
 
@@ -105,7 +98,7 @@ void main() {
 
   group('the row', () {
     testWidgets(
-      'stays on one line at desktop width, a new session too: mode, Add, then model and effort by Send',
+      'at desktop width the box is one line, + then the text, and the choices sit under it: model and effort, then the mode',
       (tester) async {
         final agent = OptionsAgent(modes: OptionsAgent.claudeModes);
         await pumpApp(
@@ -115,46 +108,24 @@ void main() {
           size: const Size(1280, 800),
         );
         await _draft(tester);
-        Offset centre(String key) => tester.getCenter(find.byKey(Key(key)));
-        void inOneRow(List<Offset> points) {
-          for (final point in points) {
-            expect(
-              (point.dy - points.first.dy).abs(),
-              lessThan(4),
-              reason: 'one line: $points',
-            );
-          }
-        }
-
-        // Before the session starts the model and effort show once the source has been seen; Add and the mode are always there.
-        inOneRow([
-          centre('option-mode'),
-          centre('composer-plus'),
-          tester.getCenter(find.byTooltip('Send')),
-        ]);
-        expect(centre('option-mode').dx, lessThan(centre('composer-plus').dx));
+        Rect rect(String key) => tester.getRect(find.byKey(Key(key)));
+        final box = rect('composer');
+        final plus = rect('composer-plus');
+        expect(box.contains(plus.center), isTrue, reason: '+ is in the box');
+        expect(
+          (tester.getCenter(find.byType(TextField).last).dy - plus.center.dy).abs(),
+          lessThan(32),
+          reason: 'one line: + and the text',
+        );
+        expect(rect('option-mode').top, greaterThanOrEqualTo(box.bottom), reason: 'before the session starts the mode is under the box too');
         await send(tester, 'Say hello');
-        inOneRow([
-          centre('option-mode'),
-          centre('composer-plus'),
-          centre('option-model'),
-          tester.getCenter(find.byTooltip('Send')),
-        ]);
-        expect(centre('composer-plus').dx, lessThan(centre('option-model').dx));
-        expect(
-          centre('option-model').dx,
-          lessThan(tester.getCenter(find.byTooltip('Send')).dx),
-        );
-        expect(
-          centre('option-model').dx,
-          greaterThan(tester.getCenter(find.byKey(const Key('composer'))).dx),
-          reason: 'on the right',
-        );
+        expect(rect('option-model').top, greaterThanOrEqualTo(box.bottom));
+        expect(rect('option-model').left, lessThan(rect('option-mode').left), reason: 'model and effort first, then the mode');
         await finish(tester);
       },
     );
 
-    testWidgets('may wrap at phone width, with Send still at the end', (
+    testWidgets('may wrap at phone width, under the box', (
       tester,
     ) async {
       final agent = OptionsAgent(modes: OptionsAgent.claudeModes);

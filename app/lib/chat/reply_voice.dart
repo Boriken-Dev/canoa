@@ -113,10 +113,40 @@ void followReplies(ReplyReader reader, String session, List<ChatMessage> message
   reader.observe(session, replies);
 }
 
-/// Voice mode's switch beside the microphone: while it is on, each reply is read aloud as it arrives, a sentence at a time. Typing,
-/// and starting to dictate, stop what is being read.
-class VoiceModeButton extends StatefulWidget {
-  const VoiceModeButton({super.key, required this.reader, required this.controller, this.dictation, required this.onChanged});
+/// Voice mode's entry in the `+` menu: while it is on, each reply is read aloud as it arrives, a sentence at a time.
+class VoiceModeMenuItem extends StatelessWidget {
+  const VoiceModeMenuItem({super.key, required this.reader, required this.onChanged});
+
+  final ReplySpeaker reader;
+
+  /// Told when the person turns it on or off, to keep the choice.
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: reader,
+    builder: (context, _) {
+      final on = reader.voiceMode;
+      return CheckboxMenuButton(
+        value: on,
+        onChanged: (_) => _turn(reader, !on, onChanged),
+        child: const Text('Read replies aloud', key: Key('voice-mode')),
+      );
+    },
+  );
+}
+
+/// Turns voice mode [on] or off. A browser lets a page make a sound only after a press, so the output is made ready here.
+void _turn(ReplySpeaker reader, bool on, ValueChanged<bool> onChanged) {
+  reader.unlock();
+  reader.setVoiceMode(on);
+  onChanged(on);
+}
+
+/// Voice mode in the line under the composer: nothing while it is off and "Voice mode" while it is on, which turns it off. Typing,
+/// and starting to dictate, stop what is being read, and a failure to read is said in a message.
+class VoiceModeStatus extends StatefulWidget {
+  const VoiceModeStatus({super.key, required this.reader, required this.controller, this.dictation, required this.onChanged});
 
   final ReplySpeaker reader;
 
@@ -124,14 +154,14 @@ class VoiceModeButton extends StatefulWidget {
   final TextEditingController controller;
   final Dictation? dictation;
 
-  /// Told when the person turns it on or off, to keep the choice.
+  /// Told when the person turns it off, to keep the choice.
   final ValueChanged<bool> onChanged;
 
   @override
-  State<VoiceModeButton> createState() => _VoiceModeButtonState();
+  State<VoiceModeStatus> createState() => _VoiceModeStatusState();
 }
 
-class _VoiceModeButtonState extends State<VoiceModeButton> {
+class _VoiceModeStatusState extends State<VoiceModeStatus> {
   String _text = '';
 
   @override
@@ -176,19 +206,15 @@ class _VoiceModeButtonState extends State<VoiceModeButton> {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.reader,
     builder: (context, _) {
-      final on = widget.reader.voiceMode;
-      return IconButton(
-        key: const Key('voice-mode'),
-        tooltip: on ? 'Voice mode is on: replies are read aloud as they arrive. Typing or dictating stops it' : 'Read replies aloud as they arrive',
-        icon: Icon(on ? Icons.record_voice_over : Icons.record_voice_over_outlined, size: 20, color: on ? Theme.of(context).colorScheme.primary : null),
-        visualDensity: VisualDensity.compact,
-        isSelected: on,
-        onPressed: () {
-          // A browser lets a page make a sound only after a press, so the output is made ready here.
-          widget.reader.unlock();
-          widget.reader.setVoiceMode(!on);
-          widget.onChanged(!on);
-        },
+      if (!widget.reader.voiceMode) return const SizedBox.shrink();
+      return InkWell(
+        key: const Key('voice-mode-on'),
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _turn(widget.reader, false, widget.onChanged),
+        child: const Tooltip(
+          message: 'Voice mode is on: replies are read aloud as they arrive. Typing or dictating stops the reading. Click to turn it off',
+          child: ComposerPill(label: 'Voice mode', icon: Icons.record_voice_over, status: true, enabled: false),
+        ),
       );
     },
   );

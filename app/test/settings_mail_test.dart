@@ -184,6 +184,7 @@ void main() {
       await tester.pumpWidget(CanoaApp(store: store));
       await tester.pump();
       await tester.enterText(find.byType(TextField).last, 'Archive the budget mail');
+      await tester.pump();
       await tester.tap(find.byTooltip('Send'));
       await _settle(tester);
       // What the host puts to the person for mail_move: the change and the messages, bound to a digest.
@@ -218,6 +219,7 @@ void main() {
       await tester.pumpWidget(CanoaApp(store: store, config: const CanoaConfig(density: ChatDensity.verbose)));
       await tester.pump();
       await tester.enterText(find.byType(TextField).last, 'What did Ana write?');
+      await tester.pump();
       await tester.tap(find.byTooltip('Send'));
       await _settle(tester);
       agent.update({

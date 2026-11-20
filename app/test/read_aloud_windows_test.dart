@@ -109,10 +109,13 @@ void main() {
       final scene = await _scene(tester);
       await tester.runAsync(() => scene.hub.popOut(scene.session));
       await _show(tester, scene.windows.opened.single);
+      await tester.tap(find.byKey(const Key('composer-plus')));
+      await _settle(tester);
       expect(find.byKey(const Key('voice-mode')), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('voice-mode')));
       await _settle(tester);
+      expect(find.byKey(const Key('voice-mode-on')), findsOneWidget);
       expect(scene.reader.voiceMode, isTrue);
       expect(scene.reader.pinned, scene.session.id);
       expect(scene.voiceModes, [true], reason: 'the choice is kept like the composer\'s');
@@ -142,6 +145,7 @@ void main() {
       await _settle(tester);
       expect(find.byKey(const Key('reply-play')), findsNothing);
       expect(find.byKey(const Key('voice-mode')), findsNothing);
+      expect(tester.widget<IconButton>(find.byKey(const Key('composer-plus'))).onPressed, isNull, reason: 'nothing to put in the menu');
       expect(find.text('It is done. Really.'), findsOneWidget);
     });
   });

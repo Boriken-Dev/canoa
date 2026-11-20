@@ -1,5 +1,5 @@
 // The chat's reading aloud, in widgets: Play beside Copy on an agent's reply (reading its prose, ending on Stop), voice mode's switch
-// in the composer (which stops when the person types or dictates), and, in the whole app, a reply read as it arrives.
+// in the composer's + menu (which stops when the person types or dictates), and, in the whole app, a reply read as it arrives.
 import 'package:canoa/chat/composer.dart';
 import 'package:canoa/chat/dictation.dart';
 import 'package:canoa/chat/reply_voice.dart';
@@ -145,22 +145,29 @@ void main() {
       return reader;
     }
 
-    testWidgets('is beside the microphone, and turns voice mode on and off, saying so', (tester) async {
+    testWidgets('is in the + menu, turns voice mode on and off, and says so in the line under the box while it is on', (tester) async {
       final changes = <bool>[];
       final player = FakePlayer();
       final reader = await pump(tester, FakeOutput('browser', 'Stand-in'), player, changes: changes);
-      expect(find.byKey(const Key('voice-mode')), findsOneWidget);
       expect(find.byKey(const Key('dictate')), findsOneWidget);
+      expect(find.byKey(const Key('voice-mode')), findsNothing, reason: 'it is in the menu, not beside the microphone');
+      expect(find.byKey(const Key('voice-mode-on')), findsNothing);
       expect(reader.voiceMode, isFalse);
-      await tester.tap(find.byKey(const Key('voice-mode')));
-      await tester.pump();
+      await choosePlus(tester, 'voice-mode');
       expect(reader.voiceMode, isTrue);
       expect(changes, [true]);
       expect(player.unlocks, 1, reason: 'a browser lets a page make a sound only after a press');
-      await tester.tap(find.byKey(const Key('voice-mode')));
+      expect(find.byKey(const Key('voice-mode-on')), findsOneWidget);
+      expect(find.text('Voice mode'), findsOneWidget);
+      // The status in the line turns it off, as the menu entry does.
+      await tester.tap(find.byKey(const Key('voice-mode-on')));
       await tester.pump();
       expect(reader.voiceMode, isFalse);
       expect(changes, [true, false]);
+      expect(find.byKey(const Key('voice-mode-on')), findsNothing);
+      await choosePlus(tester, 'voice-mode');
+      await choosePlus(tester, 'voice-mode');
+      expect(changes, [true, false, true, false]);
     });
 
     testWidgets('typing stops what is being read, and sending the message does not count as typing', (tester) async {
@@ -220,8 +227,7 @@ void main() {
       );
       await newSession(tester);
       await chooseSource(tester, 'Scripted');
-      await tester.tap(find.byKey(const Key('voice-mode')));
-      await tester.pump();
+      await choosePlus(tester, 'voice-mode');
       expect(written.last.voice.speak.readReplies, isTrue);
       expect(written.last.encode(), contains('read_replies = true'));
 

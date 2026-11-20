@@ -344,7 +344,7 @@ void main() {
       await tester.enterText(find.byKey(const Key('change-comment')), 'Keep the old name.');
       await tester.tap(find.text('Add to message'));
       await tester.pumpAndSettle();
-      final composer = tester.widget<TextField>(find.byWidgetPredicate((widget) => widget is TextField && (widget.decoration?.hintText ?? '').startsWith('Message agent')));
+      final composer = tester.widget<TextField>(find.byWidgetPredicate((widget) => widget is TextField && (widget.decoration?.hintText ?? '').startsWith('Message')));
       expect(composer.controller!.text, 'src/calc.js:1: `new src/calc.js 0`\nKeep the old name.\n');
     });
 

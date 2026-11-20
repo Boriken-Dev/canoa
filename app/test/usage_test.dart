@@ -122,14 +122,14 @@ void main() {
       await finish(tester);
     });
 
-    testWidgets('sits right after the mode', (tester) async {
+    testWidgets('sits in the line under the box, after the mode', (tester) async {
       final agent = OptionsAgent()..usage = _report([]);
       await _started(tester, agent, _store());
-      final mode = tester.getTopLeft(find.byKey(const Key('option-mode'))).dx;
-      final usage = tester.getTopLeft(_pill).dx;
-      final add = tester.getTopLeft(find.byKey(const Key('composer-plus'))).dx;
-      expect(usage, greaterThan(mode));
-      expect(usage, lessThan(add));
+      final mode = tester.getTopLeft(find.byKey(const Key('option-mode')));
+      final usage = tester.getTopLeft(_pill);
+      final box = tester.getRect(find.byKey(const Key('composer')));
+      expect(usage.dy, greaterThanOrEqualTo(box.bottom));
+      expect(usage.dx, greaterThan(mode.dx));
       await finish(tester);
     });
 
@@ -198,7 +198,7 @@ void main() {
       final agent = OptionsAgent()..usage = _report([_bucket('five_hour', label: '5 hours', used: 500, refill: _window(600))]);
       await _started(tester, agent, _store());
       final scheme = Theme.of(tester.element(_pill)).colorScheme;
-      expect(_colour(tester), isNull);
+      expect(_colour(tester), tester.element(_pill).chatLook.muted, reason: 'plain, in the muted colour of the line');
       agent.pushUsage(_report([_bucket('five_hour', label: '5 hours', used: 800, refill: _window(600))], revision: 2));
       await settle(tester);
       expect(_colour(tester), scheme.tertiary, reason: 'from [usage] warn_permille, 800 by default');
@@ -222,7 +222,7 @@ void main() {
         ..usage = _report([_bucket('five_hour', label: '5 hours', used: 1000, status: 'exhausted', refill: _window(-30))]);
       await _started(tester, agent, _store());
       expect(_shown(tester), '5 hours · reset, not yet reported');
-      expect(_colour(tester), isNull);
+      expect(_colour(tester), tester.element(_pill).chatLook.muted, reason: 'plain, in the muted colour of the line');
       await finish(tester);
     });
 

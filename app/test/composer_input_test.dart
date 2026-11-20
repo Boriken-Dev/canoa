@@ -167,7 +167,7 @@ void main() {
       ..copiedFiles = [disk.sizes.keys.last];
     await _paste(tester);
     await _attached(tester, 'shot.png');
-    expect(find.text('Scripted does not take images: it goes as a link to the file'), findsOneWidget);
+    expect(find.text('shot.png: Scripted does not take images: it goes as a link to the file'), findsOneWidget);
     await _sendWaiting(tester, agent, 'Look');
     expect(_lastPrompt(agent).map((block) => block['type']), ['text', 'resource_link']);
     await finish(tester);
@@ -185,6 +185,32 @@ void main() {
       await _paste(tester);
       expect(tester.takeException(), isNull);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/attachments_$label.png'));
+      await finish(tester);
+    });
+  }
+
+  for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
+    testWidgets('an image is a picture card above the text, and typing turns the microphone into Send, at $label width', (tester) async {
+      final (_, _, clipboard, _) = await _started(tester, size: size);
+      expect(find.byKey(const Key('dictate')), findsOneWidget, reason: 'nothing typed: the microphone');
+      expect(find.byTooltip('Send'), findsNothing);
+      clipboard.copiedImage = _png;
+      await _paste(tester);
+      await _attached(tester, 'Pasted image 1.png');
+      await tester.enterText(find.byType(TextField).last, 'look how simple that looks');
+      await tester.pump();
+      final card = tester.getRect(find.byKey(const ValueKey('attachment Pasted image 1.png')));
+      final box = tester.getRect(find.byKey(const Key('composer')));
+      expect(find.byType(Image), findsWidgets, reason: 'the picture itself');
+      expect(box.contains(card.center), isTrue);
+      expect(card.bottom, lessThan(tester.getTopLeft(find.byType(TextField).last).dy), reason: 'above the text');
+      expect(find.byTooltip('Send'), findsOneWidget);
+      expect(find.byKey(const Key('dictate')), findsNothing);
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/composer_picture_$label.png'));
+      await tester.tap(find.byTooltip('Remove Pasted image 1.png'));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('attachment Pasted image 1.png')), findsNothing, reason: 'the x takes it back');
       await finish(tester);
     });
   }
