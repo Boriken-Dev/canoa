@@ -28,6 +28,12 @@
             "title": "Engine",
             "description": "`service` (the default) uses the Foundry Local service you run, which holds the model. `sdk` runs the model inside this program through Foundry Local's SDK, which needs the native library below and loads the model into this program's memory."
           },
+          "answer_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "title": "Longest answer (seconds)",
+            "description": "How long one answer may take before the request to the service is ended, for the `service` engine. A large prompt on a slow model needs a long time; the default is 1800 (30 minutes), and there is no ceiling."
+          },
           "library": {
             "type": "string",
             "title": "Native library",
@@ -87,6 +93,12 @@
             ],
             "title": "Engine",
             "description": "`service` (the default) uses the Foundry Local service you run, which holds the model. `sdk` runs the model inside this program through Foundry Local's SDK, which needs the native library below and loads the model into this program's memory."
+          },
+          "answer_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "title": "Longest answer (seconds)",
+            "description": "How long one answer may take before the request to the service is ended, for the `service` engine. A large prompt on a slow model needs a long time; the default is 1800 (30 minutes), and there is no ceiling."
           },
           "library": {
             "type": "string",
