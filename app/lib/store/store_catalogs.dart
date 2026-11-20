@@ -16,6 +16,22 @@ import 'overlay_page.dart' show oneLine;
 import 'store.dart';
 import 'store_settings.dart';
 
+/// Asks before a catalog is taken out of canoa.cfg, naming it and what stays as it is; true when the person says so.
+Future<bool> confirmCatalogRemoval(BuildContext context, String label) async =>
+    await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const Key('confirm-remove-catalog'),
+        title: Text('Stop reading $label?'),
+        content: const Text('It is taken out of canoa.cfg. What was installed from it stays installed, and adding it again reads it once more.'),
+        actions: [
+          TextButton(key: const Key('confirm-remove-catalog-no'), onPressed: () => Navigator.pop(context, false), child: const Text('Keep it')),
+          FilledButton(key: const Key('confirm-remove-catalog-yes'), onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
+        ],
+      ),
+    ) ??
+    false;
+
 /// Store settings of one type: the catalogs that type reads, added, listed with what each said and removed. What the type calls them
 /// and the forms that add one are the host's to say (`store/catalogs`), so a type an extension adds has them too. Where the limits
 /// on a catalog are not the defaults, they are named here too.
@@ -202,7 +218,11 @@ class CatalogRowTile extends StatelessWidget {
           ? null
           : TextButton(
               key: Key('store-remove-catalog-${row.label}'),
-              onPressed: c.busy != null ? null : () => unawaited(c.removeCatalogOf(type, row.label)),
+              onPressed: c.busy != null
+                  ? null
+                  : () async {
+                      if (await confirmCatalogRemoval(context, row.label)) await c.removeCatalogOf(type, row.label);
+                    },
               child: const Text('Remove'),
             ),
     );
@@ -362,7 +382,11 @@ class CatalogTile extends StatelessWidget {
       subtitle: Text(lines.map(oneLine).join('\n')),
       trailing: TextButton(
         key: Key('store-remove-catalog-${catalog.label}'),
-        onPressed: c.busy != null ? null : () => unawaited(c.removeCatalog(catalog.label)),
+        onPressed: c.busy != null
+            ? null
+            : () async {
+                if (await confirmCatalogRemoval(context, catalog.label)) await c.removeCatalog(catalog.label);
+              },
         child: const Text('Remove'),
       ),
     );
