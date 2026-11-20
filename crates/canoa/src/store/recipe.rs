@@ -294,7 +294,7 @@ pub fn executable_settings(path: &str) -> Value {
     Value::from(map)
 }
 
-/// The four platforms the stores are measured on.
+/// The four platforms the stores are measured on. A store may serve more: the recipe's `release` decides.
 #[must_use]
 pub fn measured_platforms() -> Vec<Platform> {
     ["windows", "linux"]

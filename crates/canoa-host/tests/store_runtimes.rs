@@ -813,6 +813,50 @@ fn plan_of(store: &dyn ProgramStore, fixture: &dyn Fixture, version: Option<&str
 }
 
 #[test]
+fn a_platform_the_store_was_not_measured_on_is_for_the_publishers_release_to_accept_or_refuse() {
+    let node = Node(Engine::new(NodeRecipe, StoreSettings::default()));
+    let mut world = World::new();
+    world.put(
+        format!("{NODE_ORIGIN}index.json"),
+        br#"[{"version":"v2.0.0","lts":"Two"}]"#.to_vec(),
+    );
+    let sums = format!(
+        "{}  node-v2.0.0-darwin-arm64.tar.gz
+",
+        "ab".repeat(32)
+    );
+    world.put(
+        format!("{NODE_ORIGIN}v2.0.0/SHASUMS256.txt"),
+        sums.into_bytes(),
+    );
+    let plan = node
+        .plan(
+            PlanRequest::new(Action::Install, Platform::new("macos", "aarch64")),
+            tools_for(&node, world),
+        )
+        .expect("the publisher lists a build for macOS");
+    let [download] = plan.downloads.as_slice() else {
+        panic!("one download: {plan:#?}");
+    };
+    assert!(
+        download.url.ends_with("node-v2.0.0-darwin-arm64.tar.gz"),
+        "{}",
+        download.url
+    );
+    let refused = node.plan(
+        PlanRequest::new(Action::Install, Platform::new("freebsd", "x86_64")),
+        tools_for(&node, NodeFixture.world(Variant::Normal)),
+    );
+    assert!(
+        refused
+            .expect_err("no build")
+            .message()
+            .contains("not published"),
+        "the recipe says why"
+    );
+}
+
+#[test]
 fn a_plan_fetches_one_file_from_the_publisher_and_checks_its_published_digest() {
     let node = Node(Engine::new(NodeRecipe, StoreSettings::default()));
     let plan = plan_of(&node, &NodeFixture, None);

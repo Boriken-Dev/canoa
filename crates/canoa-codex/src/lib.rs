@@ -279,6 +279,7 @@ impl Recipe for CodexRecipe {
             &[
                 ("windows", "pc-windows-msvc"),
                 ("linux", "unknown-linux-musl"),
+                ("macos", "apple-darwin"),
             ],
         )
         .ok_or_else(|| unsupported_error("Codex is not published for this system"))?;

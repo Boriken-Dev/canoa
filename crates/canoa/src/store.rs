@@ -150,7 +150,8 @@ pub struct StoreInfo {
     /// The harness providers that start it.
     #[map(default)]
     pub serves: Vec<Serves>,
-    /// What it can be installed for.
+    /// The platforms it has been measured on. The engine refuses none: a platform not listed here is for the recipe's `release` to
+    /// accept or refuse, as the publisher's own release does.
     #[map(default)]
     pub platforms: Vec<Platform>,
     /// Its release channels; the first is the default, and none means it has none.

@@ -250,8 +250,11 @@ impl Recipe for PiRecipe {
                 )?
             }
         };
-        let os = spell(&platform.os, &[("windows", "win"), ("linux", "linux")])
-            .ok_or_else(|| unsupported_error("Node is not published for this system"))?;
+        let os = spell(
+            &platform.os,
+            &[("windows", "win"), ("linux", "linux"), ("macos", "darwin")],
+        )
+        .ok_or_else(|| unsupported_error("Node is not published for this system"))?;
         let arch = spell(&platform.arch, &[("x86_64", "x64"), ("aarch64", "arm64")])
             .ok_or_else(|| unsupported_error("Node is not published for this processor"))?;
         let windows = platform.os == "windows";

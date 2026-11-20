@@ -183,25 +183,11 @@ impl<R: Recipe> Engine<R> {
         Ok(self.recipe.latest(channel, tools))
     }
 
-    fn check_platform(&self, platform: &Platform) -> Result<(), ProviderError> {
-        let info = self.recipe.info();
-        if info.platforms.iter().any(|p| p == platform) {
-            return Ok(());
-        }
-        Err(refuse(
-            Status::GUATIAO_ERR_UNSUPPORTED,
-            &format!(
-                "{} is not published for {} on {}",
-                info.title, platform.os, platform.arch
-            ),
-        ))
-    }
-
     /// What `apply` would do.
     ///
     /// # Errors
     ///
-    /// `GUATIAO_ERR_UNSUPPORTED` for a platform or version the publisher does not serve; what the publisher's endpoints
+    /// `GUATIAO_ERR_UNSUPPORTED` for a platform or version the publisher's release does not serve (the recipe's `release` says, whatever `ProgramInfo::platforms` lists); what the publisher's endpoints
     /// refuse.
     pub fn plan(
         &self,
@@ -214,7 +200,6 @@ impl<R: Recipe> Engine<R> {
             plan.from_version = from;
             return Ok(plan);
         }
-        self.check_platform(&request.platform)?;
         let version = request
             .version
             .as_deref()

@@ -1542,7 +1542,7 @@
       },
       "platforms": {
         "default": [],
-        "description": "What it can be installed for.",
+        "description": "The platforms it has been measured on. The engine refuses none: a platform not listed here is for the recipe's `release` to accept or refuse, as the publisher's own release does.",
         "items": {
           "additionalProperties": false,
           "properties": {

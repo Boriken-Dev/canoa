@@ -283,9 +283,11 @@ fn asset_name(platform: &Platform) -> Result<&'static str, ProviderError> {
         ("windows", "aarch64") => Ok("whisper-bin-win-cpu-arm64.zip"),
         ("linux", "x86_64") => Ok("whisper-bin-ubuntu-x64.tar.gz"),
         ("linux", "aarch64") => Ok("whisper-bin-ubuntu-arm64.tar.gz"),
-        _ => Err(unsupported_error(
-            "whisper.cpp publishes no program for this system",
-        )),
+        _ => Err(unsupported_error(alloc::format!(
+            "whisper.cpp publishes no program for {} on {}",
+            platform.os,
+            platform.arch
+        ))),
     }
 }
 
