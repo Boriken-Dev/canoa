@@ -4,6 +4,7 @@ import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show SecretRequestCard
 import 'package:flutter/material.dart';
 
 import '../desktop/control_client.dart';
+import '../forms/schema_fields.dart';
 import '../selectable.dart';
 import '../sources/source_icons.dart';
 import 'programs.dart';
@@ -471,8 +472,9 @@ class _ProgressDialogState extends State<ProgressDialog> {
   }
 }
 
-/// A question put to the person in a dialog, as a form from the schema it gave, for the plain inputs a sign-in takes before it runs. Pops the
-/// values and the secrets, or null.
+/// A question put to the person in a dialog, as a form from the schema it gave, for the plain inputs a sign-in takes before it runs.
+/// Drawn by [SchemaFields], so it has what every form has (sections, conditions, units, suggestions) and is checked by the same
+/// rules. Pops the values and the secrets, or null.
 class AskDialog extends StatefulWidget {
   const AskDialog({super.key, required this.question});
 
@@ -483,57 +485,23 @@ class AskDialog extends StatefulWidget {
 }
 
 class _AskDialogState extends State<AskDialog> {
-  late final Map<String, Map<String, Object?>> _fields = widget.question.fields;
-  late final Map<String, TextEditingController> _text = {
-    for (final MapEntry(:key, :value) in _fields.entries)
-      if (value['type'] != 'boolean' && value['enum'] is! List) key: TextEditingController(text: '${value['default'] ?? ''}'),
-  };
-  late final Map<String, Object?> _chosen = {
-    for (final MapEntry(:key, :value) in _fields.entries)
-      if (value['type'] == 'boolean') key: value['default'] == true else if (value['enum'] is List) key: value['default'],
+  late Map<String, Object?> _values = {
+    for (final MapEntry(:key, :value) in widget.question.fields.entries)
+      if (value['default'] != null) key: value['default'],
   };
   String? _problem;
 
-  @override
-  void dispose() {
-    for (final each in _text.values) {
-      each.dispose();
-    }
-    super.dispose();
-  }
-
   void _submit() {
+    final schema = widget.question.schema;
+    final why = schemaProblem(schema, const {}, _values);
+    if (why != null) {
+      setState(() => _problem = why);
+      return;
+    }
     final values = <String, Object?>{}, secrets = <String, Object?>{};
-    final required = {if (widget.question.schema['required'] is List) for (final each in widget.question.schema['required'] as List) '$each'};
-    for (final MapEntry(:key, :value) in _fields.entries) {
-      Object? given;
-      if (_text.containsKey(key)) {
-        final raw = _text[key]!.text;
-        if (raw.isEmpty) {
-          if (required.contains(key)) {
-            setState(() => _problem = '${value['title'] ?? key} is needed.');
-            return;
-          }
-          continue;
-        }
-        given = switch (value['type']) {
-          'integer' => int.tryParse(raw),
-          'number' => num.tryParse(raw),
-          _ => raw,
-        };
-        if (given == null) {
-          setState(() => _problem = '${value['title'] ?? key} must be a number.');
-          return;
-        }
-      } else {
-        given = _chosen[key];
-        if (given == null && required.contains(key)) {
-          setState(() => _problem = '${value['title'] ?? key} is needed.');
-          return;
-        }
-        if (given == null) continue;
-      }
-      (ProgramAsk.sensitive(value) ? secrets : values)[key] = given;
+    final fields = widget.question.fields;
+    for (final MapEntry(:key, :value) in collectSchemaValues(schema, const {}, _values).entries) {
+      (ProgramAsk.sensitive(fields[key] ?? const {}) ? secrets : values)[key] = value;
     }
     Navigator.pop(context, (values: values, secrets: secrets));
   }
@@ -546,49 +514,17 @@ class _AskDialogState extends State<AskDialog> {
       width: 420,
       child: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          for (final MapEntry(:key, :value) in _fields.entries)
-            if (value['type'] == 'boolean')
-              SwitchListTile(
-                key: Key('ask-field-$key'),
-                contentPadding: EdgeInsets.zero,
-                title: Text('${value['title'] ?? key}'),
-                subtitle: value['description'] is String ? Text(value['description'] as String) : null,
-                value: _chosen[key] == true,
-                onChanged: (on) => setState(() => _chosen[key] = on),
-              )
-            else if (value['enum'] is List)
-              DropdownButtonFormField<Object?>(
-                key: Key('ask-field-$key'),
-                initialValue: _chosen[key],
-                decoration: InputDecoration(labelText: '${value['title'] ?? key}', helperText: value['description'] as String?),
-                items: [for (final each in value['enum'] as List) DropdownMenuItem(value: each, child: Text('$each'))],
-                onChanged: (chosen) => setState(() => _chosen[key] = chosen),
-              )
-            else
-              Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-                TextField(
-                  key: Key('ask-field-$key'),
-                  controller: _text[key],
-                  obscureText: ProgramAsk.sensitive(value),
-                  keyboardType: value['type'] == 'integer' || value['type'] == 'number' ? TextInputType.number : null,
-                  decoration: InputDecoration(labelText: '${value['title'] ?? key}', helperText: value['description'] as String?),
-                  onSubmitted: (_) => _submit(),
-                ),
-                // The schema's examples are suggestions: a tap fills the field, and any other text is as good.
-                if (value['examples'] is List && !ProgramAsk.sensitive(value))
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Wrap(spacing: 6, runSpacing: 4, children: [
-                      for (final each in (value['examples'] as List).whereType<String>())
-                        ActionChip(
-                          key: Key('ask-suggest-$key-$each'),
-                          label: Text(each),
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () => setState(() => _text[key]!.text = each),
-                        ),
-                    ]),
-                  ),
-              ]),
+          SchemaFields(
+            schema: widget.question.schema,
+            form: const {},
+            values: _values,
+            idPrefix: 'ask',
+            onSubmitted: _submit,
+            onValues: (held) => setState(() {
+              _values = held;
+              _problem = null;
+            }),
+          ),
           if (_problem != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),

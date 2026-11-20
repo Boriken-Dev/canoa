@@ -466,44 +466,67 @@ class _SchemaFieldsState extends State<SchemaFields> {
         ? (current is List ? current.join('\n') : '')
         : (current?.toString() ?? (isNumber && field['default'] != null ? field['default'].toString() : ''));
     final set = secret && widget.secretsSet.contains(key) && !widget.cleared.contains(key);
+    final controller = _controller(key, secret ? '' : initial);
+    void typed(String text) {
+      if (secret) {
+        widget.onClear?.call(key, clear: false);
+        _values[key] = text;
+      } else if (isList) {
+        _values[key] = [for (final line in text.split('\n')) if (line.trim().isNotEmpty) line.trim()];
+      } else if (isNumber) {
+        final number = _parseNumber(type, text);
+        _values[key] = number ?? (text.trim().isEmpty ? null : text.trim());
+      } else {
+        _values[key] = text.isEmpty ? null : text;
+      }
+      widget.onValues({..._values});
+    }
+
+    // The schema's examples are suggestions: a tap fills the box, and any other text is as good.
+    final examples = field['examples'] is List && !secret && !isList && !isNumber ? [for (final each in field['examples']! as List) if (each is String) each] : const <String>[];
     return SizedBox(
       width: 280,
-      child: TextField(
-        key: Key(id),
-        controller: _controller(key, secret ? '' : initial),
-        obscureText: secret || hints['widget'] == 'password',
-        minLines: hints['widget'] == 'textarea' ? 3 : 1,
-        maxLines: isList ? 4 : (hints['widget'] == 'textarea' ? 6 : 1),
-        keyboardType: isNumber ? TextInputType.numberWithOptions(signed: true, decimal: type == 'number') : TextInputType.text,
-        decoration: InputDecoration(
-          isDense: true,
-          hintText: set ? 'Set. Type to replace' : (placeholder ?? (field['default'] != null && !isNumber ? '${field['default']}' : null)),
-          suffixText: unit,
-          suffixIcon: set
-              ? IconButton(
-                  key: Key('${widget.idPrefix}-clear-$key'),
-                  tooltip: 'Remove it',
-                  icon: const Icon(Icons.clear, size: 18),
-                  onPressed: () => widget.onClear?.call(key, clear: true),
-                )
-              : null,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        TextField(
+          key: Key(id),
+          controller: controller,
+          obscureText: secret || hints['widget'] == 'password',
+          minLines: hints['widget'] == 'textarea' ? 3 : 1,
+          maxLines: isList ? 4 : (hints['widget'] == 'textarea' ? 6 : 1),
+          keyboardType: isNumber ? TextInputType.numberWithOptions(signed: true, decimal: type == 'number') : TextInputType.text,
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: set ? 'Set. Type to replace' : (placeholder ?? (field['default'] != null && !isNumber ? '${field['default']}' : null)),
+            suffixText: unit,
+            suffixIcon: set
+                ? IconButton(
+                    key: Key('${widget.idPrefix}-clear-$key'),
+                    tooltip: 'Remove it',
+                    icon: const Icon(Icons.clear, size: 18),
+                    onPressed: () => widget.onClear?.call(key, clear: true),
+                  )
+                : null,
+          ),
+          onSubmitted: isList || widget.onSubmitted == null ? null : (_) => widget.onSubmitted!(),
+          onChanged: typed,
         ),
-        onSubmitted: isList || widget.onSubmitted == null ? null : (_) => widget.onSubmitted!(),
-        onChanged: (text) {
-          if (secret) {
-            widget.onClear?.call(key, clear: false);
-            _values[key] = text;
-          } else if (isList) {
-            _values[key] = [for (final line in text.split('\n')) if (line.trim().isNotEmpty) line.trim()];
-          } else if (isNumber) {
-            final number = _parseNumber(type, text);
-            _values[key] = number ?? (text.trim().isEmpty ? null : text.trim());
-          } else {
-            _values[key] = text.isEmpty ? null : text;
-          }
-          widget.onValues({..._values});
-        },
-      ),
+        if (examples.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Wrap(spacing: 6, runSpacing: 4, children: [
+              for (final each in examples)
+                ActionChip(
+                  key: Key('${widget.idPrefix}-suggest-$key-$each'),
+                  label: Text(each),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () {
+                    controller.text = each;
+                    typed(each);
+                  },
+                ),
+            ]),
+          ),
+      ]),
     );
   }
 
