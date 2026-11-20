@@ -30,7 +30,7 @@ use coqui_transport::{Channel, Failure};
 use serde_json::{Value, json};
 
 use super::kept::{Keeper, Kept};
-use super::{FIRST_MESSAGE, MAX_LINE, Served, Shared};
+use super::{FIRST_MESSAGE, Served, Shared};
 use crate::control::Grant;
 use crate::local::{self, Link};
 
@@ -282,6 +282,8 @@ pub(super) struct Session {
     kept: Option<Arc<Kept>>,
     /// The bounds of the hub's log, from the entry.
     log_bounds: (Option<usize>, Option<usize>),
+    /// The longest message a client may be sent, `[host] max_message_bytes`.
+    max_line: usize,
     access: Arc<dyn Policy>,
     state: Mutex<State>,
 }
@@ -653,8 +655,13 @@ impl Session {
                         continue;
                     };
                     let bytes = marked_for(&client, message).to_string().into_bytes();
-                    if bytes.len() > MAX_LINE {
-                        tracing::warn!(entry = self.entry, "a message over the limit was not sent");
+                    if bytes.len() > self.max_line {
+                        tracing::warn!(
+                            entry = self.entry,
+                            "a message of {} bytes was not sent: it is over host.max_message_bytes ({})",
+                            bytes.len(),
+                            self.max_line
+                        );
                         continue;
                     }
                     match slot.outbox.push(bytes) {
@@ -1037,7 +1044,7 @@ fn open<C: Channel>(
         }
         return;
     }
-    let (driver, host) = local::pair(MAX_LINE, Arc::clone(&shared.stopped));
+    let (driver, host) = local::pair(shared.max_line, Arc::clone(&shared.stopped));
     let access: Arc<dyn Policy> = Arc::new(Access {
         shared: Arc::downgrade(shared),
         served: Arc::clone(served),
@@ -1057,6 +1064,7 @@ fn open<C: Channel>(
         agent: driver,
         kept: keep.keep_log.then(|| shared.hosted.kept.clone()).flatten(),
         log_bounds: (keep.log_entries, keep.log_bytes),
+        max_line: shared.max_line,
         access,
         state: Mutex::new(State {
             phase: Phase::Boot(Box::new(Boot {

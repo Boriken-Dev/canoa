@@ -100,7 +100,10 @@ impl Link {
 #[non_exhaustive]
 pub enum LinkError {
     /// The message is longer than a connection carries.
-    TooLong,
+    TooLong {
+        /// The most a connection carries, in bytes: `[host] max_message_bytes`.
+        limit: usize,
+    },
     /// Nothing arrived in time; the link is still usable.
     Timeout,
     /// Either end closed, or the host stopped.
@@ -110,7 +113,12 @@ pub enum LinkError {
 impl core::fmt::Display for LinkError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
-            Self::TooLong => "the message is longer than a connection carries",
+            Self::TooLong { limit } => {
+                return write!(
+                    f,
+                    "the message is longer than the {limit} bytes this host takes: raise max_message_bytes under [host] in canoa.cfg"
+                );
+            }
             Self::Timeout => "nothing arrived in time",
             Self::Ended => "the link has ended",
         })
@@ -119,12 +127,12 @@ impl core::fmt::Display for LinkError {
 
 impl core::error::Error for LinkError {}
 
-impl From<Failure> for LinkError {
-    fn from(failure: Failure) -> Self {
+impl Link {
+    fn error(&self, failure: Failure) -> LinkError {
         match failure {
-            Failure::Timeout => Self::Timeout,
-            Failure::Protocol => Self::TooLong,
-            _ => Self::Ended,
+            Failure::Timeout => LinkError::Timeout,
+            Failure::Protocol => LinkError::TooLong { limit: self.max },
+            _ => LinkError::Ended,
         }
     }
 }
@@ -134,9 +142,9 @@ impl Link {
     ///
     /// # Errors
     ///
-    /// [`LinkError::TooLong`] past the largest ACP message, which ends nothing; [`LinkError::Ended`] once either end closed.
+    /// [`LinkError::TooLong`] past `[host] max_message_bytes`, which ends nothing; [`LinkError::Ended`] once either end closed.
     pub fn send(&self, message: &[u8]) -> Result<(), LinkError> {
-        self.put(message).map_err(Into::into)
+        self.put(message).map_err(|failure| self.error(failure))
     }
 
     /// The next message, or `None` once the other end closed and everything it sent was read. `None` for `timeout` waits
@@ -146,7 +154,7 @@ impl Link {
     ///
     /// [`LinkError::Timeout`] when nothing arrived in time, after which the link is still usable.
     pub fn receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, LinkError> {
-        self.take(timeout).map_err(Into::into)
+        self.take(timeout).map_err(|failure| self.error(failure))
     }
 
     /// Ends both ends: the host's agent for this connection ends too. Safe to call more than once.
@@ -287,7 +295,7 @@ mod tests {
     #[test]
     fn a_message_over_the_limit_is_refused_and_ends_nothing() {
         let (client, host, _) = ends();
-        assert_eq!(client.send(&[0; 17]), Err(LinkError::TooLong));
+        assert_eq!(client.send(&[0; 17]), Err(LinkError::TooLong { limit: 16 }));
         client.send(&[0; 16]).expect("at the limit");
         assert_eq!(host.receive(None), Ok(Some(vec![0; 16])));
     }

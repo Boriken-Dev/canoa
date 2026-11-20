@@ -2692,3 +2692,18 @@ model = \"x\"
         Some("Be brief.")
     );
 }
+
+#[test]
+fn the_longest_message_is_a_setting_with_no_ceiling_of_its_own() {
+    let program = "[host.agents.a]\nprogram = \"x\"\n";
+    assert_eq!(
+        parse(program).expect("parses").max_message_bytes,
+        DEFAULT_MAX_MESSAGE_BYTES
+    );
+    let huge = format!("[host]\nmax_message_bytes = 68719476736\n{program}");
+    assert_eq!(
+        parse(&huge).expect("parses").max_message_bytes,
+        68_719_476_736
+    );
+    assert!(parse(&format!("[host]\nmax_message_bytes = 0\n{program}")).is_err());
+}

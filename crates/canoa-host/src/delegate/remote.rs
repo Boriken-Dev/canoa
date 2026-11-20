@@ -27,8 +27,6 @@ use serde_json::{Value, json};
 use super::child::{Child, Outcome};
 use super::{Engine, Remote, Session, lock};
 
-/// The largest message of the link once the other host has proved itself.
-const MAX_MESSAGE: usize = 16 * 1024 * 1024;
 /// How often a link that says nothing is probed, and how many probes may go unanswered before it is lost.
 const HEARTBEAT: (Duration, u32) = (Duration::from_secs(15), 3);
 /// How often a stop is looked for while the other host's events are awaited.
@@ -81,7 +79,8 @@ pub(super) fn drive(
         Err(why) => return Outcome::Failed(format!("{name} cannot be reached: {why}")),
     };
     let dial_limit = Duration::from_secs(engine.config.dial_seconds);
-    let channel = match dial(&target.url, &proof, dial_limit) {
+    let max_message = host.max_message();
+    let channel = match dial(&target.url, &proof, dial_limit, max_message) {
         Ok(channel) => Arc::new(channel),
         Err(why) => return Outcome::Failed(format!("{name} cannot be reached: {why}")),
     };
@@ -92,16 +91,21 @@ pub(super) fn drive(
         session,
         (child, text, workspace),
         (&proof, &channel, &target),
-        dial_limit,
+        (dial_limit, max_message),
     );
     channel.close();
     outcome
 }
 
-fn dial(url: &str, proof: &Proof, limit: Duration) -> Result<websocket::Channel, String> {
+fn dial(
+    url: &str,
+    proof: &Proof,
+    limit: Duration,
+    max_message: usize,
+) -> Result<websocket::Channel, String> {
     let url = url::Url::parse(url).map_err(|error| error.to_string())?;
     let mut limits = coqui_transport_web::Limits::default();
-    limits.max_message = proof.method().record_length(MAX_MESSAGE);
+    limits.max_message = proof.method().record_length(max_message);
     websocket::Dialer::builder()
         .frames(Frames::Binary)
         .limits(limits)
@@ -116,7 +120,7 @@ fn linked(
     session: &Arc<Session>,
     sent: (&Arc<Child>, &str, Option<&str>),
     (proof, channel, target): (&Proof, &Arc<websocket::Channel>, &Remote),
-    dial_limit: Duration,
+    (dial_limit, max_message): (Duration, usize),
 ) -> Outcome {
     let (child, text, workspace) = sent;
     let name = &child.source;
@@ -124,7 +128,7 @@ fn linked(
         proof,
         &**channel,
         dial_limit,
-        proof.method().record_length(MAX_MESSAGE),
+        proof.method().record_length(max_message),
     ) {
         Ok(established) => established,
         Err(error) => return Outcome::Failed(format!("{name} did not prove its key: {error}")),
@@ -135,7 +139,7 @@ fn linked(
     }
     let sealed = Sealed::new(&**channel, established.session);
     let mut limits = Limits::default();
-    limits.max_message = MAX_MESSAGE;
+    limits.max_message = max_message;
     limits.heartbeat = Some(Heartbeat::new(HEARTBEAT.0, HEARTBEAT.1));
     let outcome = Mux::run(&sealed, Side::Dialed, limits, None, |mux| {
         mirror(engine, session, (child, text, workspace), target, mux)

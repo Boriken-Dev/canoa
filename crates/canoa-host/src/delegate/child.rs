@@ -633,7 +633,9 @@ impl Work<'_> {
                         };
                     }
                 }
-                Ok(None) | Err(LinkError::Ended | LinkError::TooLong) => return Err(self.lost()),
+                Ok(None) | Err(LinkError::Ended | LinkError::TooLong { .. }) => {
+                    return Err(self.lost());
+                }
                 Err(LinkError::Timeout) => {}
             }
         }

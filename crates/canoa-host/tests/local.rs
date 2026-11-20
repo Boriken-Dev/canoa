@@ -109,3 +109,54 @@ fn entries_with_max_peers_take_no_more_links_than_they_allow() {
     drop(first);
     host.stop();
 }
+
+fn long_prompt(session: &str, bytes: usize) -> serde_json::Value {
+    json!({"jsonrpc": "2.0", "id": 3, "method": "session/prompt", "params": {
+        "sessionId": session,
+        "prompt": [{"type": "text", "text": "a".repeat(bytes)}],
+    }})
+}
+
+#[test]
+fn a_prompt_over_the_default_message_limit_is_refused_naming_the_setting() {
+    let host = Hosted::start(&entry("fixture", ""));
+    let link = host.local.open("fixture").expect("a link");
+    let session = open_session(&link, &cwd(&host.scratch));
+    let refused = try_send(&link, &long_prompt(&session, 20 * 1024 * 1024)).expect_err("refused");
+    assert!(refused.contains("max_message_bytes"), "{refused}");
+    // Nothing ended: a short prompt is still answered.
+    let (answer, _) = ask(
+        &link,
+        4,
+        "session/prompt",
+        json!({"sessionId": session, "prompt": [{"type": "text", "text": "hi"}]}),
+    )
+    .expect("answered");
+    assert_eq!(answer["stopReason"], "end_turn");
+    drop(link);
+    host.stop();
+}
+
+#[test]
+fn a_prompt_over_the_default_is_taken_when_the_host_setting_is_raised() {
+    let size = 20 * 1024 * 1024;
+    let config = format!(
+        "[host]\nmax_message_bytes = {}\n{}",
+        32 * 1024 * 1024,
+        entry("fixture", "")
+    );
+    let host = Hosted::start(&config);
+    let link = host.local.open("fixture").expect("a link");
+    let session = open_session(&link, &cwd(&host.scratch));
+    let (answer, updates) = ask(
+        &link,
+        3,
+        "session/prompt",
+        long_prompt(&session, size)["params"].clone(),
+    )
+    .expect("the turn is answered");
+    assert_eq!(answer["stopReason"], "end_turn");
+    assert_eq!(said(&updates).len(), "echo: ".len() + size);
+    drop(link);
+    host.stop();
+}

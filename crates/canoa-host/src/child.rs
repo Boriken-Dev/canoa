@@ -19,7 +19,6 @@ use std::time::Instant;
 use coqui_transport::{Channel, Failure};
 
 use crate::provider::HostLine;
-use crate::serve::MAX_LINE;
 use crate::spawn::{Child, Command, Stdio};
 
 /// What a provider's process may write to its standard output and error, together, for one connection; the rest is
@@ -160,6 +159,7 @@ pub(crate) fn serve<C: Channel>(
     running: &Running,
     streams: Streams,
     line: &HostLine,
+    max_line: usize,
     channel: &C,
 ) -> &'static str {
     let Streams {
@@ -183,7 +183,7 @@ pub(crate) fn serve<C: Channel>(
     match accept(&prepared.listener, &prepared.token, running) {
         Some(stream) => {
             drop(prepared);
-            relay(channel, &stream)
+            relay(channel, &stream, max_line)
         }
         None => "the provider did not connect",
     }
@@ -288,7 +288,7 @@ fn proves(stream: &TcpStream, token: &str) -> bool {
 }
 
 /// Passes lines between `channel` and the provider's socket until either ends, and says which.
-fn relay<C: Channel>(channel: &C, stream: &TcpStream) -> &'static str {
+fn relay<C: Channel>(channel: &C, stream: &TcpStream, max_line: usize) -> &'static str {
     if stream.set_read_timeout(Some(POLL)).is_err()
         || stream.set_write_timeout(Some(PEER_LIMIT)).is_err()
     {
@@ -303,7 +303,7 @@ fn relay<C: Channel>(channel: &C, stream: &TcpStream) -> &'static str {
             let _ = stream.shutdown(Shutdown::Both);
             end
         });
-        let outbound = from_provider(channel, stream, &stop);
+        let outbound = from_provider(channel, stream, &stop, max_line);
         stop.store(true, Ordering::SeqCst);
         let _ = stream.shutdown(Shutdown::Both);
         let inbound = inbound.join().unwrap_or("the relay failed");
@@ -337,6 +337,7 @@ fn from_provider<C: Channel>(
     channel: &C,
     stream: &TcpStream,
     stop: &AtomicBool,
+    max_line: usize,
 ) -> Option<&'static str> {
     let mut reader = BufReader::new(stream);
     let mut line = Vec::new();
@@ -364,8 +365,8 @@ fn from_provider<C: Channel>(
         };
         line.extend_from_slice(&buffer[..taken]);
         reader.consume(taken);
-        if line.len() > MAX_LINE + 2 {
-            return Some("the provider sent a line over the limit");
+        if line.len() > max_line + 2 {
+            return Some("the provider sent a line over host.max_message_bytes");
         }
         if complete {
             while matches!(line.last(), Some(b'\n' | b'\r')) {

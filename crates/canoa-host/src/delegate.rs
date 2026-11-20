@@ -152,6 +152,10 @@ pub(crate) trait Host: Send + Sync {
     fn open(&self, source: &str, context: ChildContext) -> Result<Link, LocalError>;
     /// This host's own identity, set to prove itself to `peer` and to accept no other key from it.
     fn prover(&self, peer: &PeerId) -> Result<Proof, String>;
+    /// The longest message a link this host opens to another machine carries (`[host] max_message_bytes`).
+    fn max_message(&self) -> usize {
+        crate::config::DEFAULT_MAX_MESSAGE_BYTES
+    }
 }
 
 /// What a connection that may delegate is.

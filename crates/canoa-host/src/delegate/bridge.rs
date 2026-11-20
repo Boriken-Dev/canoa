@@ -25,7 +25,7 @@ const CONNECT_LIMIT: Duration = Duration::from_secs(5);
 /// What an answer may take beyond the wait its call asks of the host.
 const ANSWER_MARGIN: Duration = Duration::from_secs(60);
 /// The largest line either way.
-const MAX_LINE: usize = crate::serve::MAX_LINE;
+const MAX_LINE: usize = crate::config::DEFAULT_MAX_MESSAGE_BYTES;
 
 /// How long the answer to `body` may take: the wait the call asks of the host (`wait_ms`), if any, and a margin.
 fn answer_limit(body: &[u8]) -> Duration {

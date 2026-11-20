@@ -11,6 +11,7 @@ fn run(id: &str) -> AgentRun {
         access_asked: false,
         roots: Vec::new(),
         lifetime: CacheLifetime::Default,
+        max_message_bytes: crate::config::DEFAULT_MAX_MESSAGE_BYTES,
     }
 }
 

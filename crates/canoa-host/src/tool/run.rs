@@ -25,7 +25,7 @@ use super::{
     TOOL_KINDS, ToolSpec, ToolStatus,
 };
 use crate::child::OUTPUT_LIMIT;
-use crate::serve::MAX_LINE;
+use crate::config::DEFAULT_MAX_MESSAGE_BYTES as MAX_LINE;
 use crate::share;
 use crate::spawn::{Child, Command, Stdio};
 

@@ -55,6 +55,8 @@ pub(crate) struct AgentRun {
     pub(crate) roots: Vec<PathBuf>,
     /// How long the prompt cache should live, where the provider has a control for it.
     pub(crate) lifetime: CacheLifetime,
+    /// The longest ACP message, as one line, either way on the standard streams.
+    pub(crate) max_message_bytes: usize,
 }
 
 impl AgentRun {
@@ -225,7 +227,7 @@ pub(crate) fn serve_stdio(run: &AgentRun) -> Result<(), Refused> {
         &*connection.harness,
         (connection.request, connection.spawner),
         connection.watch,
-        crate::serve::MAX_LINE,
+        run.max_message_bytes,
         &control,
     );
     match end {

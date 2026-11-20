@@ -588,7 +588,7 @@ fn plain_starter() -> Starter {
         let agent = Arc::new(coqui_acp_bridge::agent::Agent::spawn(
             program,
             args,
-            crate::serve::MAX_LINE,
+            crate::config::DEFAULT_MAX_MESSAGE_BYTES,
         )?);
         Ok(Some((agent, Box::new(|| {}))))
     }))

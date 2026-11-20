@@ -65,8 +65,6 @@ const HARNESS_MAX_REQUESTS: u64 = 64;
 /// Worktree requests one connection may make before its first ACP message.
 const MAX_WORKTREE_REQUESTS: usize = 16;
 
-/// The longest ACP message either way, as one line.
-pub const MAX_LINE: usize = 16 * 1024 * 1024;
 /// Connections at once that have not proven a key, across every entry; past it a new one is dropped.
 pub const MAX_UNPROVEN: usize = 64;
 /// How long a peer has to prove its key.
@@ -599,6 +597,8 @@ struct Shared {
     office_dir: Option<PathBuf>,
     /// The sessions kept for more than one connection.
     hosted: Arc<sessions::Hosted>,
+    /// The longest ACP message, as one line, either way (`[host] max_message_bytes`).
+    max_line: usize,
 }
 
 impl Shared {
@@ -790,7 +790,7 @@ impl Shared {
                 &crate::spawn::Agents,
                 program,
                 args,
-                MAX_LINE,
+                self.max_line,
             )?);
             Ok((Process::Agent(Arc::clone(&agent)), agent))
         })
@@ -862,7 +862,7 @@ fn refresh_of(
     })
 }
 
-fn private_starter(agents: &Arc<Mutex<Agents>>) -> Starter {
+fn private_starter(agents: &Arc<Mutex<Agents>>, max_line: usize) -> Starter {
     let agents = Arc::clone(agents);
     Starter(Arc::new(move |program, args| {
         let mut held = agents.lock().unwrap_or_else(PoisonError::into_inner);
@@ -873,7 +873,7 @@ fn private_starter(agents: &Arc<Mutex<Agents>>) -> Starter {
             &crate::spawn::Agents,
             program,
             args,
-            MAX_LINE,
+            max_line,
         )?);
         held.next += 1;
         let key = held.next;
@@ -1034,7 +1034,7 @@ impl Local {
         if self.shared.stopped.load(Ordering::SeqCst) {
             return Err(LocalError::Stopped);
         }
-        let (client, host) = local::pair(MAX_LINE, Arc::clone(&self.shared.stopped));
+        let (client, host) = local::pair(self.shared.max_line, Arc::clone(&self.shared.stopped));
         let shared = Arc::clone(&self.shared);
         let served = Arc::clone(served);
         thread::Builder::new()
@@ -1159,6 +1159,14 @@ impl delegate::Host for DelegationHost {
         self.usage
             .as_ref()?
             .session_usage(scope.account_id()?, session)
+    }
+
+    fn max_message(&self) -> usize {
+        self.shared
+            .upgrade()
+            .map_or(crate::config::DEFAULT_MAX_MESSAGE_BYTES, |shared| {
+                shared.max_line
+            })
     }
 
     fn prover(&self, peer: &PeerId) -> Result<Proof, String> {
@@ -1603,7 +1611,10 @@ impl Serving {
                                         private: profiles.is_empty() && local_profile.is_none(),
                                         per_connection: !profiles.is_empty()
                                             || local_profile.is_some(),
-                                        starter: Some(private_starter(&agents)),
+                                        starter: Some(private_starter(
+                                            &agents,
+                                            config.max_message_bytes,
+                                        )),
                                     })
                                 }
                                 None => scope,
@@ -1961,6 +1972,13 @@ impl Serving {
             options.state_dir.as_ref().map(|dir| dir.join("history")),
             config.history,
         ));
+        if config.max_message_bytes != crate::config::DEFAULT_MAX_MESSAGE_BYTES {
+            tracing::info!(
+                "non-default: host.max_message_bytes is {}, default {}",
+                config.max_message_bytes,
+                crate::config::DEFAULT_MAX_MESSAGE_BYTES
+            );
+        }
         let stopped = Arc::new(AtomicBool::new(false));
         let trust = Arc::clone(&store);
         let kept = options
@@ -1998,6 +2016,7 @@ impl Serving {
                     &options.program_args,
                 )),
                 hosted: Arc::clone(&hosted),
+                max_line: config.max_message_bytes,
                 control_grants: config
                     .control
                     .as_ref()
@@ -2730,7 +2749,7 @@ fn connection<C: Channel>(
         &shared.method,
         channel,
         PROOF_LIMIT,
-        shared.method.method().record_length(MAX_LINE),
+        shared.method.method().record_length(shared.max_line),
     ) {
         Ok(established) => established,
         // A client of the other method has no key here to accept: it has to pair again under this host's method.
@@ -2810,7 +2829,7 @@ fn serve_proven<C: Channel>(
             match shared.delegation.as_ref().filter(|_| served.delegable) {
                 Some(delegation) => {
                     tracing::info!(entry = served.name, %peer, "a link of streams");
-                    delegation.serve_link(sealed, first, &peer.to_string(), MAX_LINE);
+                    delegation.serve_link(sealed, first, &peer.to_string(), shared.max_line);
                 }
                 None => {
                     tracing::info!(entry = served.name, %peer, "a link of streams was refused: this entry serves plain ACP");
@@ -3772,7 +3791,7 @@ fn give_harness<C: Channel>(
             &*started.harness,
             to_provider,
             started.watch,
-            MAX_LINE,
+            shared.max_line,
             &control,
         ),
         None => inproc::serve_kind(
@@ -3800,7 +3819,7 @@ fn give_harness<C: Channel>(
             &*started.harness,
             to_provider,
             started.watch,
-            MAX_LINE,
+            shared.max_line,
             &control,
         ),
     };
@@ -3843,6 +3862,7 @@ fn give_provider<C: Channel>(
         &running,
         streams,
         line,
+        shared.max_line,
         &crate::scope::Screening::new(channel),
     );
     tracing::info!(entry = served.name, %peer, "left: {end}");
@@ -4079,7 +4099,7 @@ settings = { replay_max_bytes = 4096 }
     #[test]
     fn stopping_the_host_ends_an_agent_started_for_a_reading_and_refuses_the_next() {
         let agents = Arc::new(Mutex::new(Agents::default()));
-        let starter = private_starter(&agents);
+        let starter = private_starter(&agents, crate::config::DEFAULT_MAX_MESSAGE_BYTES);
         let (program, args): (OsString, Vec<OsString>) = if cfg!(windows) {
             (
                 "ping".into(),

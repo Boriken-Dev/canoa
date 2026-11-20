@@ -23,6 +23,8 @@ use crate::tool::ToolSpec;
 pub(crate) mod layers;
 pub use layers::{ENTRIES, INSTALLED_DIR_VARIABLE, Layers, merge_into};
 
+/// The longest ACP message, as one line, either way on a connection, when `[host] max_message_bytes` does not say.
+pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 /// Connections an entry serves at once when the file does not say.
 pub const DEFAULT_MAX_PEERS: usize = 4;
 /// Sessions one connection to a provider may hold when the file does not say.
@@ -63,6 +65,9 @@ pub struct Config {
     /// `[host] shell`: the program a terminal starts, with no arguments; `None` leaves it to the person's own (`$SHELL`, else
     /// `pwsh` or `powershell` on Windows).
     pub shell: Option<String>,
+    /// `[host] max_message_bytes`: the longest ACP message, as one line, either way on a connection (a prompt carrying an
+    /// attachment is one message). There is no ceiling here: a message over it is refused with this setting named.
+    pub max_message_bytes: usize,
     /// `[host.store]`: what the program stores' installs are held to.
     pub store: StoreConfig,
     /// `[host.network]`: how the host reaches the network; the system's proxy, login, certificate verifier and client
@@ -1698,6 +1703,7 @@ struct RawHost {
     #[serde(default)]
     pools: IndexMap<String, RawPool>,
     shell: Option<String>,
+    max_message_bytes: Option<usize>,
     web: Option<RawWeb>,
     control: Option<RawControl>,
     native: Option<RawNative>,
@@ -2408,6 +2414,13 @@ impl Config {
                 what: "shell is the name or path of a program".to_owned(),
             });
         }
+        let max_message_bytes = host.max_message_bytes.unwrap_or(DEFAULT_MAX_MESSAGE_BYTES);
+        if max_message_bytes == 0 {
+            return Err(ConfigError::Invalid {
+                entry: None,
+                what: "host: max_message_bytes must be at least 1".to_owned(),
+            });
+        }
         let store = host
             .store
             .map_or_else(StoreConfig::default, |raw| StoreConfig {
@@ -2956,6 +2969,7 @@ impl Config {
             pools,
             secrets,
             shell: host.shell,
+            max_message_bytes,
             local_agents,
             remote_agents,
             local_profiles,

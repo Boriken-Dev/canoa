@@ -616,6 +616,9 @@ struct AgentArgs {
     /// background runs) or long (about an hour, for an interactive session). An agent with no such setting ignores it.
     #[arg(long, value_name = "LIFETIME", default_value = "default", value_parser = parse_lifetime)]
     cache_lifetime: coqui_acp_api::CacheLifetime,
+    /// The longest ACP message, as one line, either way, in bytes: raise it for a client that sends large attachments.
+    #[arg(long, value_name = "BYTES", default_value_t = crate::config::DEFAULT_MAX_MESSAGE_BYTES)]
+    max_message_bytes: usize,
 }
 
 fn parse_setting(text: &str) -> Result<(String, serde_json::Value), String> {
@@ -675,6 +678,7 @@ impl AgentCommand {
             access_asked,
             roots: common.working_roots,
             lifetime: common.cache_lifetime,
+            max_message_bytes: common.max_message_bytes,
         }
     }
 }
@@ -2017,8 +2021,11 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
                 })?;
             }
             let line = if settings_on_stdin {
-                HostLine::read(&mut std::io::stdin().lock(), crate::serve::MAX_LINE)
-                    .map_err(Failed::run)?
+                HostLine::read(
+                    &mut std::io::stdin().lock(),
+                    crate::config::DEFAULT_MAX_MESSAGE_BYTES,
+                )
+                .map_err(Failed::run)?
             } else {
                 HostLine::default()
             };
@@ -2095,7 +2102,8 @@ pub fn run(cli: Cli, front: &dyn Front) -> Result<(), Failed> {
         #[cfg(unix)]
         Command::Spawner => crate::spawn::serve().map_err(Failed::run),
         Command::Launch { program, args } => {
-            let error = crate::profile::launch(&program, &args, crate::serve::MAX_LINE);
+            let error =
+                crate::profile::launch(&program, &args, crate::config::DEFAULT_MAX_MESSAGE_BYTES);
             Err(match error.kind() {
                 std::io::ErrorKind::InvalidData => Failed::usage(error),
                 _ => Failed::run(error),

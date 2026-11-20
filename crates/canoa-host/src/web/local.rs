@@ -363,7 +363,9 @@ impl Tools {
         }
         match pane.link.send(body) {
             Ok(()) => (200, json!({"ok": true})),
-            Err(LinkError::TooLong) => (413, json!({"why": "the message is too long"})),
+            Err(too_long @ LinkError::TooLong { .. }) => {
+                (413, json!({"why": too_long.to_string()}))
+            }
             Err(_) => {
                 lock(&self.panes).remove(session);
                 ended()
