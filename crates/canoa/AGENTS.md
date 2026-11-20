@@ -194,6 +194,17 @@ pub fn loopback_problem(url: &str) -> Option<&'static str>;   // None for http/h
 - `id` is a word of lower-case letters, digits and `_` (1 to 32). `Shows::Terminal` opens a shell on the host: `shell` is the id of one the host lists (`shell/list`), none for the host's own choice. `Shows::Log` is a text the provider keeps: the application asks for the latest lines every couple of seconds while the tab is open. `Shows::Page` is a page the extension's own server answers on this computer's loopback, at `url`: the application has no web view of its own, so the tab names the page and a button opens it in the person's browser (the same decision as the Browser surface: nothing is embedded, and the extension's own permissions stay in the browser).
 - `TabInfo::problem` says why a description cannot be used (a bad id, no title, a shell named by a kind that shows no terminal, an address on a kind that shows no page, a page with none or one that is not `http`/`https` on the loopback: a tab names a server on this computer, not another site).
 
+## `canoa::address` (feature `network`)
+
+The http and https addresses a person types. Any is accepted; plain `http` beyond this computer is told of and never refused (a library does not decide what the person's own network may carry).
+
+```rust
+pub fn parse(address: &str) -> Result<url::Url, String>;      // `http` or `https`, a host, no user information, no space or control character; the reason never repeats the address
+pub fn is_loopback(url: &url::Url) -> bool;                     // `localhost`, 127.0.0.0/8 or ::1
+pub fn plain_beyond_loopback(url: &url::Url) -> bool;           // `http` to anywhere else
+pub fn plain_http_note(what: &str, address: &str) -> Option<String>;  // the sentence for such an address (`WHAT is plain http to HOST: ...`), `None` for any other, valid or not
+```
+
 ## `canoa::network` (feature `network`)
 
 How Canoa reaches the network: the system's proxy (PAC and WPAD included), proxy login, the operating system's certificate verifier and the client certificates of its keystores, built on `coqui-syshttp` and `ureq`. The `speech-builtin` feature and `canoa-foundry`'s `daemon` feature turn it on.
@@ -372,7 +383,7 @@ pub fn settings_schema() -> Value;  pub fn inputs_schema() -> Value;   // the ac
 pub fn parse_standards(text: &str) -> Result<Vec<String>, String>;   // each once, in the order given; none, or one that is not an id (`coqui_acp_api::standard::is_standard`), is refused
 pub fn parse_pairs(text: &str) -> Result<Vec<(String, String)>, String>;   // `name=value` pairs separated by commas or white space
 pub fn check_credential(standard: &str, key: &str) -> Result<(), String>;  // a key a well-known standard takes, else a name
-pub fn check_address(url: &str) -> Result<(), String>;               // `https`, or `http` to this computer; no login in it, no space
+pub fn check_address(url: &str) -> Result<(), String>;               // `address::parse` without the `Url`: any `http` or `https` address, no login in it, no space
 pub fn models_url(base: &str) -> String;                              // `/v1/models`, or `/models` when `base` already ends in `/v1`
 pub fn openai_models(base: &str, key: &str) -> ModelListing;         // GET it with `Authorization: Bearer KEY`; anything it cannot say is an unknown with the reason (the address does not answer, answers its status, or a list with no `data`)
 pub fn key_form(title: &str, what: &str) -> LoginForm;  pub fn key_of(&LoginAnswer) -> Result<String, ProviderError>;   // the sealed form that asks for a key, and the trimmed key it answers (BAD_VALUE when nothing was typed)

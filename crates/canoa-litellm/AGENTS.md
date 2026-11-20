@@ -19,7 +19,7 @@ pub mod account {
     pub const API_KEY: &str = "api_key";  pub const REFRESH_TOKEN: &str = "refresh_token";  pub const CLIENT_ID: &str = "client_id";   // the keys of the account's credentials
     pub const BASE_URL: &str = "base_url";                                // the one setting
     #[non_exhaustive] pub struct Settings { pub base_url: String }        // Debug, Clone, Eq
-    impl Settings { pub fn from_map(&Map<String, Value>) -> Result<Self, String>; pub fn to_value(&self) -> Value; }   // https (or http to this computer), no login in it; a trailing `/` and a final `/v1` are dropped; any other key is refused
+    impl Settings { pub fn from_map(&Map<String, Value>) -> Result<Self, String>; pub fn to_value(&self) -> Value; }   // any http or https address (plain http beyond this computer is told of by the host, not refused), no login in it; a trailing `/` and a final `/v1` are dropped; any other key is refused
     pub fn settings_schema() -> Value;  pub fn inputs_schema() -> Value;  pub fn provides() -> Vec<String>;   // the account's settings and key; what a sign-in asks first; [`openai-api`, `anthropic-api`]
     pub fn offer() -> AccountOffer;                                       // the kind (provides both, renews, no state directory, not rotating; endpoints `model_api` and `auth` at `base_url`), two sign-in methods, and `usage` for the kind
 }
