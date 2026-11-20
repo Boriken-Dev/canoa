@@ -1,9 +1,17 @@
-//! The one way the host writes a file people may have set the access of (canoa.cfg, the overlay records): whole or not at all, and
-//! with the mode (Unix) or the access list (Windows) the file had.
+//! The one way the host writes a whole file (canoa.cfg, the overlay records, its state and caches): whole or not at all, and with
+//! the mode (Unix) or the access list (Windows) the file had. A file that grows by appends, or arrives in pieces over several
+//! requests, is not written here.
 
+use core::sync::atomic::{AtomicU64, Ordering};
 use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+
+/// The mode of a new file only its owner reads: a secret, a sealed record, a list of keys.
+pub(crate) const PRIVATE: u32 = 0o600;
+
+/// The mode `fs::write` gives a new file, the process's umask deciding the rest: a record the person's other programs may read.
+pub(crate) const SHARED: u32 = 0o666;
 
 /// Writes `bytes` as the whole of `path`: a finished file is made beside it, synced, and put in its place, so a stop in the middle
 /// leaves the old file. A file that exists keeps its mode on Unix and its access list on Windows, and when `path` is a link it is
@@ -14,6 +22,21 @@ use std::path::{Path, PathBuf};
 ///
 /// The file could not be written; what was made beside it is removed.
 pub(crate) fn write_file(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
+    write(path, bytes, mode, true)
+}
+
+/// As [`write_file`], but on Windows the file takes the access list of its folder, as a new one would, and is put in place with
+/// one rename: a reader that opens the name meanwhile finds the old file or the new one, never none. For a folder that is made
+/// private to its owner, whose files are read while they are rewritten.
+///
+/// # Errors
+///
+/// As [`write_file`].
+pub(crate) fn write_file_in_folder(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
+    write(path, bytes, mode, false)
+}
+
+fn write(path: &Path, bytes: &[u8], mode: u32, keep_access: bool) -> io::Result<()> {
     // A link is written through to its target, which is what the person pointed at.
     let target = fs::canonicalize(path).map_or_else(
         |_| path.to_path_buf(),
@@ -24,11 +47,21 @@ pub(crate) fn write_file(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()>
     {
         fs::create_dir_all(parent)?;
     }
+    // A name no other writer has, in this process or another, and none could have put a link at in advance: it is made only
+    // where nothing is.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
     let mut beside = target.as_os_str().to_owned();
-    beside.push(format!(".new{}", std::process::id()));
+    beside.push(format!(
+        ".new{}.{stamp}.{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
     let beside = PathBuf::from(beside);
-    let done =
-        make_beside(&beside, &target, bytes, mode).and_then(|()| put_in_place(&beside, &target));
+    let done = make_beside(&beside, &target, bytes, mode)
+        .and_then(|()| put_in_place(&beside, &target, keep_access));
     if done.is_err() {
         let _ = fs::remove_file(&beside);
     }
@@ -39,7 +72,7 @@ pub(crate) fn write_file(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()>
 fn make_beside(beside: &Path, target: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
     let existing = fs::metadata(target).ok().filter(fs::Metadata::is_file);
     let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
@@ -58,9 +91,11 @@ fn make_beside(beside: &Path, target: &Path, bytes: &[u8], mode: u32) -> io::Res
 
 /// Puts the finished file `beside` in the place of `target`, which is then the new text whole, never part of it. On Windows a file
 /// that exists is replaced with its access list, which a file made beside it would not have.
-fn put_in_place(beside: &Path, target: &Path) -> io::Result<()> {
+fn put_in_place(beside: &Path, target: &Path, keep_access: bool) -> io::Result<()> {
+    #[cfg(not(windows))]
+    let _ = keep_access;
     #[cfg(windows)]
-    if target.is_file() {
+    if keep_access && target.is_file() {
         return native::replace(beside, target);
     }
     fs::rename(beside, target)
@@ -103,6 +138,46 @@ mod native {
         } else {
             Ok(())
         }
+    }
+}
+
+/// What the tests of the modules that write through [`write_file`] share.
+#[cfg(test)]
+pub(crate) mod proof {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    /// A new empty folder of this process's, removed by the caller.
+    pub(crate) fn folder(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("canoa-one-writer-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("a folder");
+        dir
+    }
+
+    /// The names in `dir`, sorted.
+    pub(crate) fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .expect("a folder")
+            .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// Gives `path` the mode `mode`, which a write over it must keep.
+    #[cfg(unix)]
+    pub(crate) fn set_mode(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("a mode");
+    }
+
+    /// The permission bits of `path`.
+    #[cfg(unix)]
+    pub(crate) fn mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::metadata(path).expect("a file").permissions().mode() & 0o777
     }
 }
 
