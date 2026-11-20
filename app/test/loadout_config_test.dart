@@ -124,7 +124,11 @@ void main() {
       expect(() => CanoaConfig.parse(text), throwsA(isA<FormatException>().having((e) => e.message, 'message', contains('loadout'))),
           reason: text);
     }
-    expect(() => CanoaConfig.parse('[loadout]\noff = ["team"]\n'), throwsA(isA<FormatException>()), reason: 'the old table has no reader');
+    // A table nothing reads is kept as found and has no effect: the old `[loadout]` is no shim.
+    final old = CanoaConfig.parse('[loadout]\noff = ["team"]\n');
+    expect(old.tables['loadout'], {'off': ['team']});
+    expect(old.loadouts, isEmpty);
+    expect(old.defaultLoadout, isNull);
   });
 
   test('a session that names a loadout the file does not hold is refused with the name', () {

@@ -181,8 +181,11 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
     });
 
     test('the old tables are refused outright, with no key decoded', () {
+      // A top-level table nothing reads is kept as found, and no key of it is decoded into a catalog.
+      final old = CanoaConfig.parse('[catalogs]\nteam = "https://example.invalid/a.git@main#c.toml"\n');
+      expect(old.tables['catalogs'], {'team': 'https://example.invalid/a.git@main#c.toml'});
+      expect(old.overlayCatalogs.keys, [defaultCatalogLabel]);
       for (final text in [
-        '[catalogs]\nteam = "https://example.invalid/a.git@main#c.toml"\n',
         '[store]\nregistries = ["https://x.test"]\n',
         '[store.skill_sources]\nweb = "o/r"\n',
         '[store.extension_catalogs]\nteam = "https://example.invalid/e.git@main#e.toml"\n',

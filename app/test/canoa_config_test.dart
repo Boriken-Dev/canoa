@@ -165,7 +165,9 @@ provider = "echo_provider"
     expect(((saved.host!['agents'] as Map)['mine'] as Map).containsKey('usage'), isFalse);
     expect(() => saved.withHostAgent(name: 'mine', program: 'x', listen: '127.0.0.1:1'), throwsArgumentError);
     expect(() => saved.withHostAgent(name: 'echo', program: 'x', listen: '127.0.0.1:1'), throwsArgumentError);
-    expect(() => saved.withHostAgent(name: 'no spaces', program: 'x', listen: '127.0.0.1:1'), throwsArgumentError);
+    // What an entry's name may hold is the host's to say when it checks the file, so the app writes any name, quoted.
+    final spaced = saved.withHostAgent(name: 'no spaces', program: 'x', listen: '127.0.0.1:1');
+    expect(CanoaConfig.parse(spaced.encode()).hostEntries.map((entry) => entry.name), contains('no spaces'));
     final removed = CanoaConfig.parse(saved.withoutHostEntry('mine').encode());
     expect(removed.hostEntries.map((entry) => entry.name), ['echo']);
   });
