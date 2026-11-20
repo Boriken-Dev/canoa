@@ -7,6 +7,7 @@
 use canoa::preset::SourcePreset;
 use coqui_acp_api::guatiao::library::Registry;
 use coqui_acp_api::guatiao::library::kind::LibraryParts;
+use coqui_acp_harness::Target;
 
 /// A crate's `library`, as `Registry::register_local` takes it.
 pub(crate) type Library = fn(coqui_acp_api::guatiao::library::Host) -> Option<LibraryParts>;
@@ -18,6 +19,8 @@ pub(crate) struct Bundle {
     pub(crate) name: &'static str,
     /// What the crate offers: the providers of the agent.
     pub(crate) library: Library,
+    /// How an access setting is said in the agent's own words, when the agent has a table for it.
+    pub(crate) access: Option<Target>,
     /// How the host starts the agent on its own, when canoa.cfg names no entry for it.
     pub(crate) preset: SourcePreset,
 }
@@ -28,31 +31,37 @@ pub(crate) const ALL: &[Bundle] = &[
         name: "canoa-claude",
         library: canoa_claude::library,
         preset: canoa_claude::PRESET,
+        access: Some(canoa_claude::ACCESS),
     },
     Bundle {
         name: "canoa-codex",
         library: canoa_codex::library,
         preset: canoa_codex::PRESET,
+        access: Some(canoa_codex::ACCESS),
     },
     Bundle {
         name: "canoa-antigravity",
         library: canoa_antigravity::library,
         preset: canoa_antigravity::PRESET,
+        access: Some(canoa_antigravity::ACCESS),
     },
     Bundle {
         name: "canoa-grok",
         library: canoa_grok::library,
         preset: canoa_grok::PRESET,
+        access: Some(canoa_grok::ACCESS),
     },
     Bundle {
         name: "canoa-opencode",
         library: canoa_opencode::library,
         preset: canoa_opencode::PRESET,
+        access: Some(canoa_opencode::ACCESS),
     },
     Bundle {
         name: "canoa-pi",
         library: canoa_pi::library,
         preset: canoa_pi::PRESET,
+        access: Some(canoa_pi::ACCESS),
     },
 ];
 
@@ -76,6 +85,13 @@ pub(crate) fn register(registry: &mut Registry, bundles: &[Bundle]) -> Result<()
         register_one(registry, bundle.name, bundle.library)?;
     }
     Ok(())
+}
+
+/// The table of words of the agent whose AOS harness id is `id`, which says what became of an access setting for it.
+pub(crate) fn access_target(id: &str) -> Option<Target> {
+    ALL.iter()
+        .filter_map(|bundle| bundle.access)
+        .find(|target| target.harness() == id)
 }
 
 /// The ids of the `acp_harness` providers the bundled agents run in the host's own process: those whose preset names one.

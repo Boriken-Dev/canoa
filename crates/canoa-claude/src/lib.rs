@@ -32,12 +32,15 @@ use canoa::vendor::{
 };
 use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_harness::Target;
 
 const BASE: &str = "https://downloads.claude.ai/claude-code-releases";
 
 /// Claude's look as the JSON document `looks/list` serves: colour tokens for each brightness, an original palette in the spirit of
 /// the product, with no logo or font of it.
 pub const LOOK: &str = include_str!("../looks/claude.json");
+/// How an access setting is said in Claude Code's own words, under the AOS harness id `claude-code`.
+pub const ACCESS: Target = acp::access::TARGET;
 
 /// How the host starts Claude Code when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Claude", "claude")

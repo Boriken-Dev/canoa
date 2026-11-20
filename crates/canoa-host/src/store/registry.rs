@@ -93,6 +93,7 @@ mod tests {
         all.push(Bundle {
             name: "test-echo-agent",
             library,
+            access: None,
             preset: SourcePreset::new("Echo", "echo"),
         });
         let ids = agent_stores(&all);

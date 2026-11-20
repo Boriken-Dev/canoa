@@ -18,6 +18,7 @@ use canoa::store::{
 };
 use canoa::vendor::{AccessTarget, AgentVendor, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_harness::Target;
 
 use canoa::status::{internal, unsupported};
 use canoa::store::recipe::{
@@ -32,6 +33,8 @@ const ASSET_HOSTS: [&str; 2] = [
     "https://release-assets.githubusercontent.com",
     "https://objects.githubusercontent.com",
 ];
+/// How an access setting is said in OpenCode's own words, under the AOS harness id `opencode`.
+pub const ACCESS: Target = coqui_acp_harness::vendors::opencode::TARGET;
 
 /// How the host starts OpenCode when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("OpenCode", "opencode")
@@ -91,8 +94,8 @@ coqui_acp_api::guatiao::local_providers!(
     id = "canoa-opencode",
     version = env!("CARGO_PKG_VERSION"),
     providers = [
-        coqui_acp_harness::stdio::OpenCodeProvider,
-        coqui_acp_harness::stdio::OpenCodeAccounts,
+        coqui_acp_harness::vendors::opencode::OpenCodeProvider,
+        coqui_acp_harness::vendors::opencode::OpenCodeAccounts,
         OpenCodeVendor,
         OpenCodeStore
     ]

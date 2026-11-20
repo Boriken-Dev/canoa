@@ -32,6 +32,7 @@ use canoa::vendor::{
 };
 use coqui_acp_api::AccountGrant;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_harness::Target;
 
 const ORIGIN: &str = "https://releases.openai.com";
 const LATEST: &str = "https://releases.openai.com/codex/channels/latest";
@@ -39,6 +40,8 @@ const LATEST: &str = "https://releases.openai.com/codex/channels/latest";
 /// ChatGPT's look as the JSON document `looks/list` serves: colour tokens for each brightness, an original palette in the spirit of
 /// the product, with no logo or font of it.
 pub const LOOK: &str = include_str!("../looks/chatgpt.json");
+/// How an access setting is said in Codex's own words, under the AOS harness id `codex`.
+pub const ACCESS: Target = acp::access::TARGET;
 
 /// How the host starts Codex when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Codex", "codex")

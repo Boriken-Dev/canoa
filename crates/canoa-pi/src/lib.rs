@@ -26,6 +26,7 @@ use canoa::vendor::{
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Map, ToValue as _, Value};
+use coqui_acp_harness::Target;
 
 use canoa::status::internal;
 use canoa::store::recipe::{dotted, get_json, measured_platforms, path_has, pinned};
@@ -35,6 +36,8 @@ const REGISTRY: &str = "https://registry.npmjs.org";
 
 /// Where Pi's own installer leaves it beyond `PATH`, which the Store's copy and the source preset both look in.
 const DIRS: &[&str] = &["~/.pi/agent/bin", "~/.local/bin"];
+/// How an access setting is said in Pi's own words, under the AOS harness id `pi`.
+pub const ACCESS: Target = acp::access::TARGET;
 
 /// How the host starts Pi when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Pi", "pi")

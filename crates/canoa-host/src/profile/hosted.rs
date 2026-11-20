@@ -725,7 +725,7 @@ impl Connection {
             .map(|(target, _)| target);
         let mut launch_args = Vec::new();
         if let Some(target) = launched_as {
-            let words = effective.access.resolved().translate(target);
+            let words = effective.access.resolved().translate(&target);
             launch_args = words.args().into_iter().map(str::to_owned).collect();
             for (name, value) in words.env() {
                 if env.iter().any(|(each, _)| each.eq_ignore_ascii_case(name)) {

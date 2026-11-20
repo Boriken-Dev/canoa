@@ -991,7 +991,7 @@ pub(super) fn parts_with(
         access: access.to_json(),
         agent_meta: connection
             .launched_as
-            .and_then(|target| access.translate(target).json())
+            .and_then(|target| access.translate(&target).json())
             .unwrap_or_default(),
         approvable,
         report: json!({
@@ -1009,7 +1009,10 @@ pub(super) fn parts_with(
 /// itself is given the access when it starts (and not in each session's request).
 pub(super) fn access_table(aos: &str) -> Option<(Target, bool)> {
     let target = crate::vendors::behave_aos(aos, |vendor| vendor.access_target())?.ok()??;
-    Some((Target::from_harness(&target.harness)?, target.at_launch))
+    Some((
+        crate::bundled::access_target(&target.harness)?,
+        target.at_launch,
+    ))
 }
 
 /// Which table of words says what became of the access: the one of the agent that reports itself as `reported` when it takes the
@@ -1021,7 +1024,7 @@ fn access_target(reported: Option<&str>, launched: Option<Target>) -> Option<Tar
         .and_then(Result::ok)
         .flatten()
         .filter(|target| !target.at_launch)
-        .and_then(|target| Target::from_harness(&target.harness));
+        .and_then(|target| crate::bundled::access_target(&target.harness));
     described.or(launched)
 }
 
@@ -1035,7 +1038,7 @@ fn access_items(
 ) -> Vec<Item> {
     use coqui_acp_harness::{Part, Sandbox};
     let own = |layer: &LayerId| layer.kind != LayerKind::BuiltIn;
-    let translation = target.map(|target| access.translate(target));
+    let translation = target.map(|target| access.translate(&target));
     // An agent no table covers is started as its entry says; its own settings decide.
     let not_passed = |own_applies: Option<&str>| match own_applies {
         Some(what) => format!(

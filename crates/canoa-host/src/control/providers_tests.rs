@@ -224,6 +224,7 @@ fn zed() -> Bundle {
     Bundle {
         name: "zed",
         library: standin::library,
+        access: None,
         preset: SourcePreset::new("Zed", "zed").agent("zed"),
     }
 }

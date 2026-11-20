@@ -22,6 +22,7 @@ use canoa::vendor::{
     AccessTarget, AgentVendor, ModeTitle, SkillsDelivery, SkillsRequest, StandardTitle, VendorInfo,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_harness::Target;
 
 use canoa::status::{bad_value, internal, unsupported};
 use canoa::store::recipe::{
@@ -30,6 +31,8 @@ use canoa::store::recipe::{
 
 const MANIFESTS: &str =
     "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests";
+/// How an access setting is said in Antigravity's own words, under the AOS harness id `antigravity`.
+pub const ACCESS: Target = coqui_acp_harness::vendors::antigravity::TARGET;
 
 /// How the host starts Antigravity when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Antigravity", "agy")

@@ -17,6 +17,7 @@ publish = false
 canoa = { workspace = true, features = ["store", "vendor"] }
 canoa-node = { path = "../canoa-node" }
 coqui-acp-api.workspace = true
+coqui-acp-harness.workspace = true
 coqui-acp-pi.workspace = true
 serde_json.workspace = true
 

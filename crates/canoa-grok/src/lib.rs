@@ -16,6 +16,7 @@ use canoa::store::{
 };
 use canoa::vendor::{AccessTarget, AgentVendor, StandardTitle, VendorInfo};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_harness::Target;
 
 use canoa::status::{bad_value, unsupported};
 use canoa::store::recipe::{
@@ -23,6 +24,8 @@ use canoa::store::recipe::{
 };
 
 const BASE: &str = "https://x.ai/cli";
+/// How an access setting is said in Grok's own words, under the AOS harness id `grok`.
+pub const ACCESS: Target = coqui_acp_harness::vendors::grok::TARGET;
 
 /// How the host starts Grok when `canoa.cfg` does not name it.
 pub const PRESET: SourcePreset = SourcePreset::new("Grok", "grok")
