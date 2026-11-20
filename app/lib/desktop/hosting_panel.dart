@@ -6,7 +6,8 @@ import 'package:flutter/services.dart';
 import '../acp/agent_commands.dart';
 import '../acp/share_path.dart';
 import '../config/canoa_config.dart';
-import '../providers/provider_catalog.dart' show providerCatalog;
+import '../forms/schema_fields.dart';
+import '../providers/provider_catalog.dart' show EntryForm, providerCatalog;
 import '../settings/setting_layers.dart' show SettingNote;
 import '../theme/look.dart';
 import 'host_supervisor.dart';
@@ -79,18 +80,24 @@ class _HostingPanelState extends State<HostingPanel> {
   }
 
   Future<void> _add() async {
-    final added = await showSelectableDialog<_NewAgent>(context: context, builder: (_) => const _AddAgentDialog());
+    final added = await showSelectableDialog<Map<String, Object?>>(context: context, builder: (_) => const _AddAgentDialog());
     if (added == null) return;
     await _run(() async {
       final port = await widget.freePort();
+      final program = added['program'] as String?;
+      final args = [if (added['args'] is List) for (final each in added['args'] as List) '$each'];
+      final roots = [if (added['working_roots'] is List) for (final each in added['working_roots'] as List) '$each'];
+      // The keys the form has no special place for are the entry's own, as the host described them.
+      const placed = {'name', 'program', 'args', 'working_roots', 'usage'};
       await _save(
         config.withHostAgent(
-          name: added.name,
-          program: added.command.program,
-          args: added.command.args,
+          name: '${added['name']}',
+          program: program,
+          args: args,
           listen: '127.0.0.1:$port',
-          workingRoots: [if (added.root.isNotEmpty) added.root],
-          usage: added.usage ?? usageFor(added.command),
+          workingRoots: roots,
+          usage: added['usage'] as String? ?? (program == null ? null : usageFor(AgentCommand(label: program, program: program, args: args))),
+          more: {for (final MapEntry(:key, :value) in added.entries) if (!placed.contains(key)) key: value},
         ),
       );
     });
@@ -448,106 +455,93 @@ class _Status extends StatelessWidget {
   }
 }
 
-final class _NewAgent {
-  const _NewAgent(this.name, this.command, this.root, this.usage);
-  final String name;
-  final AgentCommand command;
-  final String root;
-
-  /// The reader of its quota the person chose from the ones the host offers, or null to leave it to the command.
-  final String? usage;
-}
-
 class _AddAgentDialog extends StatefulWidget {
   const _AddAgentDialog();
   @override
   State<_AddAgentDialog> createState() => _AddAgentDialogState();
 }
 
+/// The dialog is drawn from what the host says an agent entry takes (`providers/list`), so it offers every key the host reads and
+/// nothing of the application's own; what it gives back is the keys the person set, by the names canoa.cfg gives them.
 class _AddAgentDialogState extends State<_AddAgentDialog> {
-  final name = TextEditingController();
-  final command = TextEditingController();
-  final root = TextEditingController();
+  Map<String, Object?> values = {};
   String? error;
-  String? usage;
 
-  @override
-  void dispose() {
-    name.dispose();
-    command.dispose();
-    root.dispose();
-    super.dispose();
-  }
+  /// What a choice the host knows the values of offers, with the first entry for leaving it unset.
+  static List<SchemaChoice> _choices(String none, Iterable<SchemaChoice> offered) => [SchemaChoice(value: '', label: none), ...offered];
 
-  void _submit() {
-    final parsed = parseCommand(command.text);
-    final folder = root.text.trim();
-    // The host says what an entry's name may hold, in its own words, when it checks the file.
-    final problem = name.text.trim().isEmpty
-        ? 'Name the agent.'
-        : parsed == null
-        ? 'That is not a command: check its quotes.'
-        : folder.isNotEmpty && !isWholeFolderPath(folder)
-        ? 'The workspace must be a whole path.'
-        : null;
+  void _submit(EntryForm form) {
+    final kept = collectSchemaValues(form.schema, form.form, values);
+    final roots = kept['working_roots'];
+    final problem =
+        schemaProblem(form.schema, form.form, values) ??
+        (kept['program'] == null && kept['harness'] == null
+            ? 'Name a program or a harness.'
+            : roots is List && roots.any((folder) => !isWholeFolderPath('$folder'))
+            ? 'The workspace must be a whole path.'
+            : null);
     if (problem != null) return setState(() => error = problem);
-    Navigator.pop(context, _NewAgent(name.text.trim(), parsed!, folder, usage));
+    Navigator.pop(context, kept);
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Add an agent'),
-    content: SizedBox(
-      width: 460,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Any program that speaks ACP on its standard streams. It runs as you, for each browser that connects.',
+  Widget build(BuildContext context) {
+    final form = providerCatalog.agentEntry;
+    return AlertDialog(
+      title: const Text('Add an agent'),
+      content: SizedBox(
+        width: 560,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Text('It runs as you, for each browser that connects.'),
+              ),
+              if (form == null)
+                const Padding(
+                  key: Key('agent-entry-unknown'),
+                  padding: EdgeInsets.all(16),
+                  child: Text('This computer has not yet said what an agent takes.'),
+                )
+              else
+                SchemaFields(
+                  schema: form.schema,
+                  form: form.form,
+                  values: values,
+                  idPrefix: 'agent',
+                  keys: const {'usage': 'usage-reader'},
+                  choices: {
+                    // What the host offers is what can be chosen: its bundled agents' readers and the ones its libraries and sources add.
+                    'usage_reader': _choices('As its command says', [
+                      for (final reader in providerCatalog.usageReaders)
+                        SchemaChoice(
+                          value: reader.id,
+                          label: reader.origin.isEmpty || reader.origin == 'bundled' ? reader.id : '${reader.id} (${reader.origin})',
+                        ),
+                    ]),
+                    'harness': _choices('None: it runs a program', [
+                      for (final each in providerCatalog.providers)
+                        if (each.harness) SchemaChoice(value: each.id, label: each.title, detail: each.id),
+                    ]),
+                  },
+                  onValues: (held) => values = held,
+                ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12, left: 16, right: 16),
+                  child: Text(error!, key: const Key('agent-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ),
+            ],
           ),
-          TextField(
-            controller: name,
-            decoration: const InputDecoration(labelText: 'Name'),
-          ),
-          TextField(
-            controller: command,
-            decoration: const InputDecoration(
-              labelText: 'Command',
-              hintText: 'agy acp',
-            ),
-          ),
-          TextField(
-            controller: root,
-            decoration: const InputDecoration(labelText: 'Only in this workspace (optional)', hintText: 'a whole path'),
-          ),
-          // What the host offers is what can be chosen: its bundled agents' readers and the ones its libraries and sources add.
-          if (providerCatalog.usageReaders.isNotEmpty)
-            DropdownButtonFormField<String?>(
-              key: const Key('usage-reader'),
-              initialValue: usage,
-              decoration: const InputDecoration(labelText: 'Read its quota with'),
-              items: [
-                const DropdownMenuItem<String?>(value: null, child: Text('As its command says')),
-                for (final reader in providerCatalog.usageReaders)
-                  DropdownMenuItem<String?>(
-                    value: reader.id,
-                    child: Text(reader.origin.isEmpty || reader.origin == 'bundled' ? reader.id : '${reader.id} (${reader.origin})'),
-                  ),
-              ],
-              onChanged: (value) => setState(() => usage = value),
-            ),
-          if (error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            ),
-        ],
+        ),
       ),
-    ),
-    actions: [
-      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-      FilledButton(onPressed: _submit, child: const Text('Add')),
-    ],
-  );
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: form == null ? null : () => _submit(form), child: const Text('Add')),
+      ],
+    );
+  }
 }

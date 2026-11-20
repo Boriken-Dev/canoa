@@ -392,27 +392,30 @@ final class CanoaConfig {
           if (value is Map) HostEntry.read('$key', kind, value),
   ];
 
-  /// This configuration with a stdio ACP agent added to `[host]`, which canoa serves on [listen].
+  /// This configuration with the agent entry [name] added to `[host.agents]`, which canoa serves on [listen]: what runs ([program] and
+  /// [args], or a `harness` in [more]), and [more], the other keys of an entry as the host describes them.
   CanoaConfig withHostAgent({
+    String? program,
     required String name,
-    required String program,
     List<String> args = const [],
     required String listen,
     List<String> workingRoots = const [],
     String? usage,
+    Map<String, Object?> more = const {},
   }) {
     if (hostEntries.any((entry) => entry.name == name)) {
       throw ArgumentError.value(name, 'name', 'Another entry has that name');
     }
-    if (program.trim().isEmpty) throw ArgumentError.value(program, 'program', 'Name a program');
+    if ((program ?? '').trim().isEmpty && more['harness'] is! String) throw ArgumentError.value(program, 'program', 'Name a program or a harness');
     final copy = _deepCopy(host ?? const {});
     final table = (copy['agents'] as Map<String, dynamic>?) ?? <String, dynamic>{};
     table[name] = <String, dynamic>{
-      'program': program,
+      'program': ?program,
       if (args.isNotEmpty) 'args': args,
       'listen': listen,
       if (workingRoots.isNotEmpty) 'working_roots': workingRoots,
       'usage': ?usage,
+      ...more,
     };
     copy['agents'] = table;
     return withHost(copy);

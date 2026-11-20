@@ -80,8 +80,9 @@ void main() {
   testWidgets('a command source added in Settings is saved to canoa.cfg and offered for a new session', (tester) async {
     final (_, _, _, written) = await _app(tester, config: const CanoaConfig(), size: const Size(1280, 1400));
     await _openSources(tester);
-    await tester.enterText(find.byKey(const Key('source-name')), 'Mine');
-    await tester.enterText(find.byKey(const Key('source-command')), 'my-agent --acp "a b"');
+    await tester.enterText(find.byKey(const Key('source-field-name')), 'Mine');
+    await tester.enterText(find.byKey(const Key('source-field-program')), 'my-agent');
+    await tester.enterText(find.byKey(const Key('source-field-args')), '--acp\na b');
     await tester.ensureVisible(find.byKey(const Key('source-add')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('source-add')));

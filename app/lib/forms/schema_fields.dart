@@ -496,7 +496,7 @@ class _SchemaFieldsState extends State<SchemaFields> {
           keyboardType: isNumber ? TextInputType.numberWithOptions(signed: true, decimal: type == 'number') : TextInputType.text,
           decoration: InputDecoration(
             isDense: true,
-            hintText: set ? 'Set. Type to replace' : (placeholder ?? (field['default'] != null && !isNumber ? '${field['default']}' : null)),
+            hintText: set ? 'Set. Type to replace' : (placeholder ?? (field['default'] != null && !isNumber && !isList ? '${field['default']}' : null)),
             suffixText: unit,
             suffixIcon: set
                 ? IconButton(

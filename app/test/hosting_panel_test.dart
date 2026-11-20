@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_host.dart';
+import 'fixtures/providers_fixture.dart';
 
 const _waiting = 'sha256:1111111111111111111111111111111111111111111111111111111111111111';
 const _paired = 'sha256:2222222222222222222222222222222222222222222222222222222222222222';
@@ -105,34 +106,39 @@ void main() {
     ]);
   });
 
-  testWidgets('an agent added by hand goes to canoa.cfg on a loopback port of its own', (tester) async {
-    final host = _Harness();
-    await host.show(tester);
+  /// Opens Add an agent, which the host's description of an entry draws, and types [values] into its boxes by member name.
+  Future<void> addDialog(WidgetTester tester, Map<String, String> values) async {
     await tester.tap(find.text('Add an agent'));
     await tester.pumpAndSettle();
-    final fields = find.descendant(of: find.byType(AlertDialog).last, matching: find.byType(TextField));
-    await tester.enterText(fields.at(0), 'bad name');
-    await tester.enterText(fields.at(1), 'node "my agent.mjs" --flag');
+    for (final MapEntry(:key, :value) in values.entries) {
+      final box = find.byKey(Key('agent-field-$key'));
+      await tester.ensureVisible(box);
+      await tester.enterText(box, value);
+    }
+  }
+
+  Future<void> addIt(WidgetTester tester) async {
+    await tester.ensureVisible(find.text('Add').last);
+    await tester.tap(find.text('Add').last);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('an agent added by hand goes to canoa.cfg on a loopback port of its own, with the keys the host says an entry takes', (tester) async {
+    final host = _Harness();
+    await host.show(tester);
+    await addDialog(tester, {'name': 'bad name', 'program': 'node', 'args': 'my agent.mjs\n--flag'});
     // What an entry's name may hold is the host's to say, and its words are shown.
     host.refuseWith = 'an entry name has 1 to 64 letters, digits, hyphens or underscores';
-    await tester.tap(find.text('Add'));
-    await tester.pumpAndSettle();
+    await addIt(tester);
     expect(find.text('an entry name has 1 to 64 letters, digits, hyphens or underscores'), findsOneWidget);
     expect(host.saved, isEmpty);
     host.refuseWith = null;
 
-    await tester.tap(find.text('Add an agent'));
-    await tester.pumpAndSettle();
-    final again = find.descendant(of: find.byType(AlertDialog).last, matching: find.byType(TextField));
-    await tester.enterText(again.at(0), 'mine');
-    await tester.enterText(again.at(1), 'node "my agent.mjs" --flag');
-    await tester.enterText(again.at(2), 'relative/dir');
-    await tester.tap(find.text('Add'));
-    await tester.pumpAndSettle();
+    await addDialog(tester, {'name': 'mine', 'program': 'node', 'args': 'my agent.mjs\n--flag', 'working_roots': 'relative/dir'});
+    await addIt(tester);
     expect(find.text('The workspace must be a whole path.'), findsOneWidget);
-    await tester.enterText(again.at(2), '/home/me/src');
-    await tester.tap(find.text('Add'));
-    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('agent-field-working_roots')), '/home/me/src');
+    await addIt(tester);
 
     final entry = (host.saved.single.host!['agents'] as Map)['mine'] as Map;
     expect(entry, {
@@ -144,19 +150,51 @@ void main() {
     expect(find.text('mine'), findsOneWidget);
   });
 
-  testWidgets("an agent is given the reader of its quota from the ones the host offers, and is offered none by a host that lists none", (tester) async {
+  testWidgets('what the host describes of an entry is what the dialog offers: a name is needed, and a program or a harness', (tester) async {
+    final host = _Harness();
+    await host.show(tester);
+    await addDialog(tester, {});
+    expect(find.text('What it runs'), findsOneWidget, reason: "the host's sections are drawn");
+    expect(find.text('Where it works'), findsOneWidget);
+    for (final member in ['name', 'program', 'args', 'working_roots', 'accounts', 'profiles']) {
+      expect(find.byKey(Key('agent-field-$member')), findsOneWidget, reason: member);
+    }
+    expect(find.byKey(const Key('agent-field-harness')), findsOneWidget, reason: 'a choice of the harnesses the host lists');
+    expect(find.byKey(const Key('agent-advanced')), findsOneWidget, reason: 'the rarer keys are folded');
+    await addIt(tester);
+    expect(find.text('Name is needed'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('agent-field-name')), 'mine');
+    await addIt(tester);
+    expect(find.text('Name a program or a harness.'), findsOneWidget);
+    expect(host.saved, isEmpty);
+
+    // A harness the host lists is chosen and written under its own key, with what an entry that runs one takes.
+    await tester.tap(find.byKey(const Key('agent-field-harness')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Codex').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('agent-field-accounts')), 'work\nhome');
+    await addIt(tester);
+    final entry = (host.saved.single.host!['agents'] as Map)['mine'] as Map;
+    expect(entry, {'harness': 'codex', 'accounts': ['work', 'home'], 'listen': '127.0.0.1:7811'});
+  });
+
+  testWidgets('a host that has not described an entry cannot have one added, and says so', (tester) async {
     addTearDown(providerCatalog.clear);
     providerCatalog.clear();
-    final bare = _Harness();
-    await bare.show(tester);
+    final host = _Harness();
+    await host.show(tester);
     await tester.tap(find.text('Add an agent'));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('usage-reader')), findsNothing);
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('agent-entry-unknown')), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Add').last).onPressed, isNull);
+  });
 
+  testWidgets('an agent is given the reader of its quota from the ones the host offers', (tester) async {
+    addTearDown(listBundledProviders);
+    final answer = bundledProvidersJson();
     providerCatalog.adopt({
-      'providers': const <Object?>[],
+      ...answer,
       'usage_readers': [
         {'id': 'antigravity', 'origin': 'bundled'},
         {'id': 'team_meter', 'origin': 'team_ext'},
@@ -164,19 +202,15 @@ void main() {
     });
     final host = _Harness();
     await host.show(tester);
-    await tester.tap(find.text('Add an agent'));
-    await tester.pumpAndSettle();
-    final fields = find.descendant(of: find.byType(AlertDialog).last, matching: find.byType(TextField));
-    await tester.enterText(fields.at(0), 'mine');
-    await tester.enterText(fields.at(1), 'node agent.mjs');
+    await addDialog(tester, {'name': 'mine', 'program': 'node', 'args': 'agent.mjs'});
+    await tester.ensureVisible(find.byKey(const Key('usage-reader')));
     await tester.tap(find.byKey(const Key('usage-reader')));
     await tester.pumpAndSettle();
     expect(find.text('As its command says'), findsWidgets);
     expect(find.text('antigravity'), findsOneWidget);
     await tester.tap(find.text('team_meter (team_ext)').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Add'));
-    await tester.pumpAndSettle();
+    await addIt(tester);
     final entry = (host.saved.single.host!['agents'] as Map)['mine'] as Map;
     expect(entry['usage'], 'team_meter');
   });
@@ -184,21 +218,17 @@ void main() {
   testWidgets('an agent may be kept to a folder on a share, but not to a device or a bare server', (tester) async {
     final host = _Harness();
     await host.show(tester);
-    await tester.tap(find.text('Add an agent'));
-    await tester.pumpAndSettle();
-    final fields = find.descendant(of: find.byType(AlertDialog).last, matching: find.byType(TextField));
-    await tester.enterText(fields.at(0), 'mine');
-    await tester.enterText(fields.at(1), 'node agent.mjs');
+    await addDialog(tester, {'name': 'mine', 'program': 'node', 'args': 'agent.mjs'});
     for (final refused in [r'\\.\pipe\x', r'\\fileserver']) {
-      await tester.enterText(fields.at(2), refused);
-      await tester.tap(find.text('Add'));
-      await tester.pumpAndSettle();
+      final box = find.byKey(const Key('agent-field-working_roots'));
+      await tester.ensureVisible(box);
+      await tester.enterText(box, refused);
+      await addIt(tester);
       expect(find.text('The workspace must be a whole path.'), findsOneWidget, reason: refused);
       expect(host.saved, isEmpty);
     }
-    await tester.enterText(fields.at(2), r'\\fileserver\projects\app');
-    await tester.tap(find.text('Add'));
-    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('agent-field-working_roots')), r'\\fileserver\projects\app');
+    await addIt(tester);
     final entry = (host.saved.single.host!['agents'] as Map)['mine'] as Map;
     expect(entry['working_roots'], [r'\\fileserver\projects\app']);
   });
@@ -206,13 +236,8 @@ void main() {
   testWidgets('what canoa finds wrong with a change is shown, and nothing is listed as hosted', (tester) async {
     final host = _Harness()..refuseWith = 'host entry mine: program not found';
     await host.show(tester);
-    await tester.tap(find.text('Add an agent'));
-    await tester.pumpAndSettle();
-    final fields = find.descendant(of: find.byType(AlertDialog).last, matching: find.byType(TextField));
-    await tester.enterText(fields.at(0), 'mine');
-    await tester.enterText(fields.at(1), 'nothing-here');
-    await tester.tap(find.text('Add'));
-    await tester.pumpAndSettle();
+    await addDialog(tester, {'name': 'mine', 'program': 'nothing-here'});
+    await addIt(tester);
     expect(find.text('host entry mine: program not found'), findsOneWidget);
     expect(find.text('None yet.'), findsOneWidget);
   });

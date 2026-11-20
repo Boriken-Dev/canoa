@@ -392,7 +392,7 @@ void main() {
       expect(find.text('v2.1.3'), findsOneWidget);
       expect(find.text('Ready'), findsWidgets);
       expect(find.text('Needs codex'), findsOneWidget);
-      expect(find.textContaining('my-agent'), findsNothing, reason: 'a program and its arguments are in the detail, not the list');
+      expect(find.descendant(of: find.byKey(const Key('source-row Mine')), matching: find.textContaining('my-agent')), findsNothing, reason: 'a program and its arguments are in the detail, not the row');
       await tester.tap(find.byKey(const Key('source-row Mine')));
       await tester.pumpAndSettle();
       expect(find.text('my-agent --acp'), findsOneWidget);
@@ -405,8 +405,9 @@ void main() {
 
     testWidgets('adding and removing a command keeps every other table', (tester) async {
       final h = await openSettings(tester, config: every, section: 'sources', presets: [claude], checkSource: check);
-      await tester.enterText(find.byKey(const Key('source-name')), 'Other');
-      await tester.enterText(find.byKey(const Key('source-command')), 'other --acp');
+      await tester.enterText(find.byKey(const Key('source-field-name')), 'Other');
+      await tester.enterText(find.byKey(const Key('source-field-program')), 'other');
+      await tester.enterText(find.byKey(const Key('source-field-args')), '--acp');
       await tester.tap(find.byKey(const Key('source-add')));
       await tester.pumpAndSettle();
       expect(h.last.agents.map((agent) => agent.label), ['Mine', 'Other']);
@@ -421,18 +422,18 @@ void main() {
       expect(changedTables(every, h.last), isEmpty);
     });
 
-    testWidgets('refuses a name taken and a command with an open quote, and applies nothing', (tester) async {
+    testWidgets('refuses a name taken and a missing program, and applies nothing', (tester) async {
       final h = await openSettings(tester, section: 'sources', presets: [claude], checkSource: check);
-      await tester.enterText(find.byKey(const Key('source-name')), 'Claude');
-      await tester.enterText(find.byKey(const Key('source-command')), 'x');
+      await tester.enterText(find.byKey(const Key('source-field-name')), 'Claude');
+      await tester.enterText(find.byKey(const Key('source-field-program')), 'x');
       await tester.tap(find.byKey(const Key('source-add')));
       await tester.pumpAndSettle();
       expect(find.text('Another source is called Claude.'), findsOneWidget);
-      await tester.enterText(find.byKey(const Key('source-name')), 'New');
-      await tester.enterText(find.byKey(const Key('source-command')), 'x "y');
+      await tester.enterText(find.byKey(const Key('source-field-name')), 'New');
+      await tester.enterText(find.byKey(const Key('source-field-program')), '');
       await tester.tap(find.byKey(const Key('source-add')));
       await tester.pumpAndSettle();
-      expect(find.textContaining('check its quotes'), findsOneWidget);
+      expect(find.text('Program is needed'), findsOneWidget);
       expect(h.applied, isEmpty);
     });
   });

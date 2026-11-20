@@ -6,9 +6,11 @@ import '../accounts/account_models.dart' show standardsText;
 import '../accounts/accounts_controller.dart';
 import '../acp/agent_commands.dart';
 import '../chat/modes.dart';
+import '../forms/schema_fields.dart';
 import '../permissions/permission_rules.dart';
 import '../permissions/protected_paths.dart';
 import '../profile/profile.dart';
+import '../providers/provider_catalog.dart' show providerCatalog;
 import '../sources/source_icons.dart';
 import '../sources/sources.dart';
 import '../store/programs.dart';
@@ -41,8 +43,9 @@ class SourcesSection extends StatefulWidget {
 }
 
 class _SourcesSectionState extends State<SourcesSection> {
-  final _name = TextEditingController();
-  final _command = TextEditingController();
+  /// What the add form holds, and which generation of its fields is shown: a new one clears them.
+  Map<String, Object?> _values = {};
+  int _generation = 0;
   String? _problem;
   final Map<AgentSource, Future<SourceCheck>> _checks = {};
   final Set<String> _open = {};
@@ -61,8 +64,6 @@ class _SourcesSectionState extends State<SourcesSection> {
   @override
   void dispose() {
     widget.programs?.removeListener(_programsChanged);
-    _name.dispose();
-    _command.dispose();
     super.dispose();
   }
 
@@ -78,24 +79,22 @@ class _SourcesSectionState extends State<SourcesSection> {
       _checks[source] ??= widget.checkSource?.call(source) ?? Future.value(const SourceCheck());
 
   void _add() {
+    final form = providerCatalog.localAgent;
+    if (form == null) return;
     final config = widget.controller.config;
-    final name = _name.text.trim();
-    final command = parseCommand(_command.text);
+    final held = collectSchemaValues(form.schema, form.form, _values);
+    final name = '${held['name'] ?? ''}'.trim();
     final taken = {for (final preset in widget.presets) preset.label, for (final agent in config.agents) agent.label};
-    final problem = name.isEmpty
-        ? 'Name it.'
-        : taken.contains(name)
-        ? 'Another source is called $name.'
-        : command == null
-        ? 'That is not a command: check its quotes.'
-        : null;
+    final problem = schemaProblem(form.schema, form.form, _values) ?? (taken.contains(name) ? 'Another source is called $name.' : null);
     setState(() => _problem = problem);
     if (problem != null) return;
-    _name.clear();
-    _command.clear();
+    setState(() {
+      _values = {};
+      _generation++;
+    });
     unawaited(widget.controller.change((c) => c.copyWith(agents: [
       ...c.agents,
-      AgentCommand(label: name, program: command!.program, args: command.args),
+      AgentCommand(label: name, program: '${held['program']}', args: [if (held['args'] is List) for (final each in held['args'] as List) '$each']),
     ])));
   }
 
@@ -246,21 +245,24 @@ class _SourcesSectionState extends State<SourcesSection> {
             const SettingsRow(title: 'No sources yet', description: 'Add a command below'),
         ]),
         SettingsGroup(title: 'Add a source', children: [
-          SettingsRow(
-            title: 'Name',
-            below: TextField(key: const Key('source-name'), controller: _name, decoration: const InputDecoration(isDense: true, border: OutlineInputBorder())),
-          ),
-          SettingsRow(
-            title: 'Command',
-            description: 'An ACP agent on standard streams',
-            below: TextField(
-              key: const Key('source-command'),
-              controller: _command,
-              decoration: InputDecoration(isDense: true, border: const OutlineInputBorder(), errorText: _problem, errorMaxLines: 3),
-              onSubmitted: (_) => _add(),
+          if (providerCatalog.localAgent case final form?) ...[
+            SchemaFields(
+              key: ValueKey('source-form-$_generation'),
+              schema: form.schema,
+              form: form.form,
+              values: _values,
+              idPrefix: 'source',
+              onValues: (held) => _values = held,
+              onSubmitted: _add,
             ),
-          ),
-          SettingsRow(title: 'Add it', control: FilledButton(key: const Key('source-add'), onPressed: _add, child: const Text('Add'))),
+            if (_problem != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(_problem!, key: const Key('source-problem'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+            SettingsRow(title: 'Add it', control: FilledButton(key: const Key('source-add'), onPressed: _add, child: const Text('Add'))),
+          ] else
+            const SettingsRow(title: 'Add a command', description: 'Waiting for canoa to say what an agent takes'),
         ]),
       ]);
     },

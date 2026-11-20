@@ -164,6 +164,19 @@ final class UsageReaderOffer {
   }
 }
 
+/// What an entry of canoa.cfg asks for, as the host describes it: a guatiao schema of the keys it takes and the guatiao-intake form that
+/// says how to show them.
+final class EntryForm {
+  const EntryForm(this.schema, this.form);
+
+  final Map<String, Object?> schema, form;
+
+  static EntryForm? parse(Object? json) {
+    if (json is! Map || json['schema'] is! Map) return null;
+    return EntryForm((json['schema'] as Map).cast<String, Object?>(), json['form'] is Map ? (json['form'] as Map).cast<String, Object?>() : const {});
+  }
+}
+
 /// A gateway the host offers for the sessions of accounts that run a model on this computer: the account kind it serves, the vendor
 /// of what runs the model, the account provider that makes the kind and the kind's name.
 final class GatewayOffer {
@@ -190,6 +203,7 @@ final class ProviderCatalog extends ChangeNotifier {
   List<AgentProvider> _providers = const [];
   List<UsageReaderOffer> _usageReaders = const [];
   List<GatewayOffer> _gateways = const [];
+  EntryForm? _agentEntry, _localAgent;
   bool _answered = false;
   String? _problem;
   int _revision = 0;
@@ -202,6 +216,11 @@ final class ProviderCatalog extends ChangeNotifier {
 
   /// The gateways the host offers for accounts that run a model on this computer.
   List<GatewayOffer> get gateways => _gateways;
+
+  /// What an agent entry the host serves (`[host.agents]`) asks for, and what an agent command of the person's own (`[agents]`) asks
+  /// for; null until the host says.
+  EntryForm? get agentEntry => _agentEntry;
+  EntryForm? get localAgent => _localAgent;
 
   /// The vendor of what runs the model of an account of [kind], when a gateway the host offers serves the kind.
   String? gatewayVendor(String kind) => _gateways.where((each) => each.kind == kind).firstOrNull?.vendor;
@@ -226,16 +245,26 @@ final class ProviderCatalog extends ChangeNotifier {
     _usageReaders = [if (readers is List) for (final each in readers) ?UsageReaderOffer.parse(each)];
     final gateways = answer is Map ? answer['gateways'] : null;
     _gateways = [if (gateways is List) for (final each in gateways) ?GatewayOffer.parse(each)];
+    _agentEntry = answer is Map ? EntryForm.parse(answer['agent_entry']) : null;
+    _localAgent = answer is Map ? EntryForm.parse(answer['local_agent']) : null;
     _answered = true;
     _problem = null;
     _changed();
   }
 
-  /// Takes the agents as they were parsed, as [adopt] does from the host's answer.
-  void replace(List<AgentProvider> providers, {List<UsageReaderOffer> usageReaders = const [], List<GatewayOffer> gateways = const []}) {
+  /// Takes the agents as they were parsed, as [adopt] does from the host's answer. What is not given stays as the host last said it.
+  void replace(
+    List<AgentProvider> providers, {
+    List<UsageReaderOffer>? usageReaders,
+    List<GatewayOffer>? gateways,
+    EntryForm? agentEntry,
+    EntryForm? localAgent,
+  }) {
     _providers = List.of(providers);
-    _usageReaders = List.of(usageReaders);
-    _gateways = List.of(gateways);
+    if (usageReaders != null) _usageReaders = List.of(usageReaders);
+    if (gateways != null) _gateways = List.of(gateways);
+    _agentEntry = agentEntry ?? _agentEntry;
+    _localAgent = localAgent ?? _localAgent;
     _answered = true;
     _problem = null;
     _changed();
@@ -252,6 +281,8 @@ final class ProviderCatalog extends ChangeNotifier {
     _providers = const [];
     _usageReaders = const [];
     _gateways = const [];
+    _agentEntry = null;
+    _localAgent = null;
     _answered = false;
     _problem = null;
     _changed();
