@@ -40,7 +40,8 @@ fn launched(script: &str, after: &str) -> (u32, String, std::process::ExitStatus
 }
 
 #[test]
-fn launch_is_replaced_by_its_program_which_reads_what_follows_the_line_and_whose_status_is_its_own() {
+fn launch_is_replaced_by_its_program_which_reads_what_follows_the_line_and_whose_status_is_its_own()
+{
     let (id, out, status) = launched(
         r#"echo "$$ $LAUNCHED_NAME"; read first; read second; echo "$first,$second"; exit 7"#,
         "one\ntwo\n",
