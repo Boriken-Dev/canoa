@@ -65,6 +65,18 @@ Future<void> _show(WidgetTester tester, AccountsController controller) async {
 void main() {
   tearDown(listBundledProviders);
 
+  test('the descriptions of an agent entry and the readers of a quota stay when the agent rows are replaced', () {
+    expect(providerCatalog.agentEntry?.schema['properties'], containsPair('program', isA<Map>()));
+    expect(providerCatalog.localAgent?.schema['required'], ['name', 'program']);
+    final readers = providerCatalog.usageReaders.map((each) => each.id).toList();
+    expect(readers, isNotEmpty);
+    providerCatalog.replace(providersOf(const ['codex']));
+    expect(providerCatalog.agentEntry, isNotNull);
+    expect(providerCatalog.localAgent, isNotNull);
+    expect(providerCatalog.usageReaders.map((each) => each.id), readers);
+    expect(providerCatalog.gateways, isNotEmpty);
+  });
+
   test('the answer is read into agents with their names, standards, mark and accounts', () {
     final claude = providerCatalog.byId('claude')!;
     expect((claude.title, claude.program, claude.vendor, claude.aos), ('Claude', 'Claude Code', 'anthropic', 'claude-code'));
