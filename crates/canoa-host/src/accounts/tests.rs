@@ -212,13 +212,7 @@ fn a_lost_login_marks_the_account_and_keeps_the_stored_copy_for_the_next_start()
     let mut info = AccountKindInfo::new("claude-login", "Claude");
     info.state_dir = true;
     let held = accounts
-        .begin(
-            "work",
-            &config,
-            &info,
-            Runs::plain(&config.harness),
-            "a test",
-        )
+        .begin("work", &config, &info, Runs::plain("claude"), "a test")
         .expect("held");
     assert_eq!(
         held.grant().credentials.expose().get("credentials_file"),
@@ -248,7 +242,7 @@ fn an_account_that_rotates_is_held_by_one_connection_at_a_time() {
             "work",
             &config,
             &rotating,
-            Runs::plain(&config.harness),
+            Runs::plain("claude"),
             "the first",
         )
         .expect("held");
@@ -256,7 +250,7 @@ fn an_account_that_rotates_is_held_by_one_connection_at_a_time() {
         "work",
         &config,
         &rotating,
-        Runs::plain(&config.harness),
+        Runs::plain("claude"),
         "the second",
     ) {
         Err(Refusal::InUse(holder)) => assert_eq!(holder, "the first"),
@@ -272,7 +266,7 @@ fn an_account_that_rotates_is_held_by_one_connection_at_a_time() {
             "work",
             &config,
             &rotating,
-            Runs::plain(&config.harness),
+            Runs::plain("claude"),
             "the second",
         )
         .expect("held after");
@@ -282,22 +276,10 @@ fn an_account_that_rotates_is_held_by_one_connection_at_a_time() {
     let mut shared = AccountKindInfo::new("claude-login", "Claude");
     shared.state_dir = true;
     let one = accounts
-        .begin(
-            "work",
-            &config,
-            &shared,
-            Runs::plain(&config.harness),
-            "one",
-        )
+        .begin("work", &config, &shared, Runs::plain("claude"), "one")
         .expect("held");
     let two = accounts
-        .begin(
-            "work",
-            &config,
-            &shared,
-            Runs::plain(&config.harness),
-            "two",
-        )
+        .begin("work", &config, &shared, Runs::plain("claude"), "two")
         .expect("held too");
     drop((one, two));
 }
@@ -313,22 +295,10 @@ fn the_files_a_provider_placed_go_with_the_last_connection() {
     let mut shared = AccountKindInfo::new("claude-login", "Claude");
     shared.state_dir = true;
     let one = accounts
-        .begin(
-            "work",
-            &config,
-            &shared,
-            Runs::plain(&config.harness),
-            "one",
-        )
+        .begin("work", &config, &shared, Runs::plain("claude"), "one")
         .expect("held");
     let two = accounts
-        .begin(
-            "work",
-            &config,
-            &shared,
-            Runs::plain(&config.harness),
-            "two",
-        )
+        .begin("work", &config, &shared, Runs::plain("claude"), "two")
         .expect("held too");
     let state = accounts.state_dir("a");
     let place = |held: &Held| {
@@ -419,7 +389,7 @@ fn an_endpoint_is_any_http_or_https_address_and_plain_http_beyond_this_machine_i
 
 fn config(id: &str) -> AccountConfig {
     AccountConfig {
-        harness: "claude".to_owned(),
+        owner: None,
         kind: "claude-login".to_owned(),
         id: id.to_owned(),
         settings: None,
@@ -837,7 +807,7 @@ fn the_local_account_of_each_harness_is_recorded_under_an_id_of_its_own() {
     let own = config("id-p");
     let key = AccountKindInfo::new("claude-login", "Claude");
     let held = accounts
-        .begin("work", &own, &key, Runs::plain(&own.harness), "a test")
+        .begin("work", &own, &key, Runs::plain("claude"), "a test")
         .expect("held");
     assert_eq!(held.usage_id(), "id-p");
     assert_eq!(own.usage_id(), "id-p");
@@ -869,7 +839,7 @@ fn a_harness_is_given_the_address_and_the_key_form_the_account_names_for_the_sta
     info.endpoints =
         vec![coqui_acp_api::EndpointSlot::new(coqui_acp_api::MODEL_API).key("base_url")];
     let account = AccountConfig {
-        harness: "pi".to_owned(),
+        owner: None,
         kind: "gateway".to_owned(),
         id: "gw".to_owned(),
         settings: Some(crate::config::Settings::new(

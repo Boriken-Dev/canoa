@@ -403,8 +403,17 @@ mod with_source {
                 ),
             )
         };
-        // The kind the library makes is in Codex's catalog: asked for no method, the command lists them.
-        let (_, listed) = canoa(&["accounts", "add", "gw", "--harness", "codex"], "");
+        // The kind the library makes is its own provider's: asked for no method, the command lists them.
+        let (_, listed) = canoa(
+            &[
+                "accounts",
+                "add",
+                "gw",
+                "--provider",
+                "standin_gateway_accounts",
+            ],
+            "",
+        );
         assert!(listed.contains("standin-key"), "{listed}");
         let address = "http://127.0.0.1:9/v1";
         let (made, said) = canoa(
@@ -412,8 +421,8 @@ mod with_source {
                 "accounts",
                 "add",
                 "gw",
-                "--harness",
-                "codex",
+                "--provider",
+                "standin_gateway_accounts",
                 "--method",
                 "standin-key",
                 "--input",

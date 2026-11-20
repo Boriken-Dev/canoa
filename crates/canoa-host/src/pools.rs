@@ -382,7 +382,7 @@ pub(crate) fn for_entry(
                     && crate::serve::keeps_key_in_environment(
                         &crate::makers::Makers::of(config),
                         &[(member.clone(), account.clone(), info)],
-                        harness,
+                        (harness, catalogs.of(harness).as_ref()),
                     )
                 {
                     return None;

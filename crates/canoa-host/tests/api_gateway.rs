@@ -134,25 +134,19 @@ impl Fixture {
         child.wait_with_output().expect("canoa ends")
     }
 
-    /// Signs in to the account `gw` through `harness`, naming `address` and `standards`, and has both entries offer it.
-    fn signed_in(self, harness: &str, address: &str, standards: &str) -> Self {
-        self.signed_in_with(harness, address, standards, &[])
+    /// Signs in to the account `gw` through the gateway provider, naming `address` and `standards`, and has both entries offer it.
+    fn signed_in(self, address: &str, standards: &str) -> Self {
+        self.signed_in_with(address, standards, &[])
     }
 
     /// As [`Fixture::signed_in`], with more inputs for the sign-in (`NAME=VALUE`).
-    fn signed_in_with(
-        self,
-        harness: &str,
-        address: &str,
-        standards: &str,
-        more: &[(&str, &str)],
-    ) -> Self {
+    fn signed_in_with(self, address: &str, standards: &str, more: &[(&str, &str)]) -> Self {
         let mut args = vec![
             "accounts".to_owned(),
             "add".to_owned(),
             "gw".to_owned(),
-            "--harness".to_owned(),
-            harness.to_owned(),
+            "--provider".to_owned(),
+            "api_gateway_accounts".to_owned(),
             "--method".to_owned(),
             "api-gateway".to_owned(),
             "--input".to_owned(),
@@ -188,7 +182,7 @@ impl Fixture {
 #[test]
 fn one_account_of_two_standards_is_made_by_signing_in_and_its_key_is_not_in_canoa_cfg() {
     let address = gateway();
-    let fixture = Fixture::new().signed_in("claude", &address, "openai-api, anthropic-api");
+    let fixture = Fixture::new().signed_in(&address, "openai-api, anthropic-api");
     let cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
     assert!(!cfg.contains(CANARY), "{cfg}");
     assert!(
@@ -202,7 +196,7 @@ fn one_account_of_two_standards_is_made_by_signing_in_and_its_key_is_not_in_cano
     let row: Value = serde_json::from_str(out.lines().next().expect("a row")).expect("JSON");
     assert_eq!(row["kind"], "api-gateway", "{row}");
     assert_eq!(
-        row["provides"],
+        row["types"],
         json!(["openai-api", "anthropic-api"]),
         "{row}"
     );
@@ -214,8 +208,8 @@ fn one_account_of_two_standards_is_made_by_signing_in_and_its_key_is_not_in_cano
                     "accounts",
                     "add",
                     "bad",
-                    "--harness",
-                    "codex",
+                    "--provider",
+                    "api_gateway_accounts",
                     "--method",
                     "api-gateway",
                     "--input",
@@ -234,8 +228,8 @@ fn one_account_of_two_standards_is_made_by_signing_in_and_its_key_is_not_in_cano
             "accounts",
             "add",
             "far",
-            "--harness",
-            "codex",
+            "--provider",
+            "api_gateway_accounts",
             "--method",
             "api-gateway",
             "--input",
@@ -266,7 +260,7 @@ fn one_account_of_two_standards_is_made_by_signing_in_and_its_key_is_not_in_cano
 #[test]
 fn it_runs_a_stand_in_of_each_harness_on_the_same_account_and_lists_the_gateways_models_for_both() {
     let address = gateway();
-    let fixture = Fixture::new().signed_in("claude", &address, "openai-api, anthropic-api");
+    let fixture = Fixture::new().signed_in(&address, "openai-api, anthropic-api");
     // The models, as `canoa options` asks for each entry on the account.
     for entry in ["Claude", "Codex"] {
         let listed = fixture.canoa(
@@ -365,7 +359,6 @@ fn an_account_that_names_an_address_and_a_key_form_for_each_standard_runs_each_h
     let openai = "http://127.0.0.1:1/openai/v1";
     let anthropic = "http://127.0.0.1:2/anthropic";
     let fixture = Fixture::new().signed_in_with(
-        "codex",
         default,
         "openai-api, anthropic-api",
         &[

@@ -25,9 +25,10 @@ use crate::profile::Profile;
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct AccountConfig {
-    /// The provider, as an entry's `harness`.
-    pub harness: String,
-    /// One of the kinds the provider's catalog lists.
+    /// The harness whose own login this is: set only on the automatic `local` account, which every harness has under one kind.
+    /// An account in `[host.accounts]` names no harness: its kind says which account provider made it.
+    pub owner: Option<String>,
+    /// One of the kinds an account provider offers; no two providers offer the same id.
     pub kind: String,
     /// The account's id, which Canoa writes when it makes the account: never reused, and the key of its stored credential.
     pub id: String,
@@ -40,7 +41,7 @@ impl AccountConfig {
     /// `[host.accounts]`.
     pub(crate) fn local(harness: &str) -> Self {
         Self {
-            harness: harness.to_owned(),
+            owner: Some(harness.to_owned()),
             kind: coqui_acp_api::HARNESS_LOGIN.to_owned(),
             id: coqui_acp_api::LOCAL_ACCOUNT.to_owned(),
             settings: None,
@@ -49,7 +50,11 @@ impl AccountConfig {
 
     /// The id the usage log and the usage reports name this account by; see [`usage_id`].
     pub(crate) fn usage_id(&self) -> String {
-        usage_id(&self.harness, &self.id, &self.kind)
+        usage_id(
+            self.owner.as_deref().unwrap_or_default(),
+            &self.id,
+            &self.kind,
+        )
     }
 }
 

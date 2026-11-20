@@ -113,10 +113,10 @@ pub(crate) fn harness_settings(
 pub(crate) fn keeps_key_in_environment(
     makers: &crate::makers::Makers,
     listed: &[kind::Offered],
-    runs: &str,
+    (runs, catalog): (&str, Option<&coqui_acp_api::AccountCatalog>),
 ) -> bool {
     listed.iter().any(|(_, account, info)| {
-        let borrowed = crate::accounts::matching::borrowed(makers, account, runs)
+        let borrowed = crate::accounts::matching::borrowed(makers, account, runs, catalog)
             && info
                 .provides
                 .iter()
@@ -142,12 +142,7 @@ pub(crate) fn offered_accounts(
     let catalog = provider
         .catalog()
         .ok_or_else(|| "the provider did not list the accounts it takes".to_owned())?;
-    let catalogs = Catalogs::with(
-        config,
-        harness,
-        (catalog, provider.listing()),
-        provider.local_account().is_some(),
-    );
+    let catalogs = Catalogs::with(config, harness, provider);
     let mut listed = Vec::new();
     for name in names {
         if name == coqui_acp_api::LOCAL_ACCOUNT {
@@ -198,14 +193,9 @@ pub(crate) fn entry_accounts(
     if !names.is_empty() {
         // A pool the entry names offers the accounts it holds that can run here.
         let accounts = match provider.catalog() {
-            Some(catalog) => crate::pools::expand(
+            Some(_) => crate::pools::expand(
                 config,
-                &Catalogs::with(
-                    config,
-                    harness,
-                    (catalog, provider.listing()),
-                    provider.local_account().is_some(),
-                ),
+                &Catalogs::with(config, harness, provider),
                 harness,
                 names,
             )?,
@@ -228,12 +218,7 @@ pub(crate) fn other_accounts(
     let Some(catalog) = provider.catalog() else {
         return Vec::new();
     };
-    let catalogs = Catalogs::with(
-        config,
-        harness,
-        (catalog, provider.listing()),
-        provider.local_account().is_some(),
-    );
+    let catalogs = Catalogs::with(config, harness, provider);
     let mut others = Vec::new();
     for (name, account) in &config.accounts {
         if listed.iter().any(|(each, ..)| each == name) {
@@ -260,7 +245,7 @@ pub(crate) fn other_accounts(
         if keeps_key_in_environment(
             &crate::makers::Makers::of(config),
             core::slice::from_ref(&one),
-            harness,
+            (harness, Some(catalog)),
         ) {
             continue;
         }
@@ -279,12 +264,7 @@ pub(crate) fn unfit_accounts(
     let Some(catalog) = provider.catalog() else {
         return Vec::new();
     };
-    let catalogs = Catalogs::with(
-        config,
-        harness,
-        (catalog, provider.listing()),
-        provider.local_account().is_some(),
-    );
+    let catalogs = Catalogs::with(config, harness, provider);
     config
         .accounts
         .iter()

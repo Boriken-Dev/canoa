@@ -596,6 +596,11 @@ pub(super) static ROUTES: &[Route] = &[
         Control::r_history,
     ),
     rpc(
+        "accounts/providers",
+        Access::Require(Grant::Accounts),
+        Control::r_accounts,
+    ),
+    rpc(
         "accounts/catalog",
         Access::Require(Grant::Accounts),
         Control::r_accounts,

@@ -395,13 +395,8 @@ pub(crate) fn offering(
     let listed =
         crate::serve::entry_accounts(config, harness, accounts, &built)?.unwrap_or_default();
     let pools = match built.catalog() {
-        Some(catalog) => {
-            let catalogs = crate::accounts::matching::Catalogs::with(
-                config,
-                harness,
-                (catalog, built.listing()),
-                built.local_account().is_some(),
-            );
+        Some(_) => {
+            let catalogs = crate::accounts::matching::Catalogs::with(config, harness, &built);
             crate::pools::for_entry(config, &catalogs, harness, accounts)?
         }
         None => Vec::new(),
@@ -421,6 +416,20 @@ pub(crate) fn offering(
         .with_unfit(unfit)
         .with_pools(pools, default_pool)
         .with_config(Arc::new(config.clone())))
+}
+
+/// The harness other than `runs` whose own account provider made the account `held`, when one did: the login of another harness, or
+/// a kind another harness's provider offers.
+fn other_harness(config: &Config, held: &crate::accounts::Held, runs: &str) -> Option<String> {
+    let kind = &held.grant().kind;
+    let owner = if kind == coqui_acp_api::HARNESS_LOGIN {
+        Some(held.owner().to_owned())
+    } else {
+        crate::accounts::matching::Catalogs::new(config)
+            .made(kind)
+            .and_then(|(made, _)| made.harness)
+    };
+    owner.filter(|owner| owner != runs)
 }
 
 /// What the harness lists on the login it has where it runs, as the automatic `local` account is.
@@ -454,8 +463,8 @@ pub(crate) fn as_account(
     if let Some(maker) = built.makers().for_kind(&held.grant().kind) {
         // A maker lists what it made, whichever harness is asked.
         owner = Some((maker.provider(), store.source()));
-    } else if held.owner() != built.id() {
-        match crate::accounts::commands::provider_for(config, held.owner()).and_then(|other| {
+    } else if let Some(made_by) = other_harness(config, &held, built.id()) {
+        match crate::accounts::commands::provider_for(config, &made_by).and_then(|other| {
             other
                 .account_provider()
                 .map(Arc::clone)
@@ -739,7 +748,8 @@ pub(crate) fn usage_report_for(
     store: &Arc<crate::accounts::Accounts>,
     endpoints: &limits::Endpoints,
 ) -> Result<UsageRead, String> {
-    let harness = account.harness.as_str();
+    let harness = crate::accounts::matching::Catalogs::new(config).reading_harness(account)?;
+    let harness = harness.as_str();
     let runs = |entry: &&crate::config::Entry| matches!(&entry.kind, EntryKind::Harness { harness: each, .. } if each == harness);
     let entry = config
         .entries

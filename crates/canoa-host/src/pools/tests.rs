@@ -9,10 +9,10 @@ fn config(text: &str) -> Config {
 
 /// Two Anthropic-API accounts, a Claude Code login, and an OpenAI-API key made through Codex's provider.
 const ACCOUNTS: &str = "\
-[host.accounts.api-one]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-one\"\n\
-[host.accounts.api-two]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-two\"\n\
-[host.accounts.login]\nharness = \"claude\"\nkind = \"claude-login\"\nid = \"id-login\"\n\
-[host.accounts.openai]\nharness = \"codex\"\nkind = \"codex-api-key\"\nid = \"id-openai\"\n";
+[host.accounts.api-one]\nkind = \"anthropic-api-key\"\nid = \"id-one\"\n\
+[host.accounts.api-two]\nkind = \"anthropic-api-key\"\nid = \"id-two\"\n\
+[host.accounts.login]\nkind = \"claude-login\"\nid = \"id-login\"\n\
+[host.accounts.openai]\nkind = \"codex-api-key\"\nid = \"id-openai\"\n";
 
 fn with(extra: &str) -> Config {
     config(&format!("{ACCOUNTS}{extra}"))
@@ -88,16 +88,14 @@ fn the_host_makes_an_any_pool_of_each_standard_and_it_follows_the_accounts() {
     assert_eq!(names(pool_named(&pools, "any-codex")), ["local"]);
     // An account added is in it; one removed is not; nothing is written for either.
     let three = config(&format!(
-        "{ACCOUNTS}[host.accounts.api-three]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-three\"\n"
+        "{ACCOUNTS}[host.accounts.api-three]\nkind = \"anthropic-api-key\"\nid = \"id-three\"\n"
     ));
     let pools = listing(&three, &Catalogs::new(&three));
     assert_eq!(
         names(pool_named(&pools, "any-anthropic-api")),
         ["api-one", "api-two", "api-three"]
     );
-    let one = config(
-        "[host.accounts.api-one]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-one\"\n",
-    );
+    let one = config("[host.accounts.api-one]\nkind = \"anthropic-api-key\"\nid = \"id-one\"\n");
     let pools = listing(&one, &Catalogs::new(&one));
     assert_eq!(names(pool_named(&pools, "any-anthropic-api")), ["api-one"]);
     assert!(
@@ -145,8 +143,7 @@ fn the_host_lists_its_any_pool_only_when_two_accounts_hold_it_and_still_resolves
         "{offered:?}"
     );
     // A Pi sign-in account makes it a pool of two, and it is listed with both.
-    let two =
-        config("[host.accounts.pi-one]\nharness = \"pi\"\nkind = \"pi-oauth\"\nid = \"id-pi\"\n");
+    let two = config("[host.accounts.pi-one]\nkind = \"pi-oauth\"\nid = \"id-pi\"\n");
     let catalogs = Catalogs::new(&two);
     assert_eq!(shown(&two, &catalogs), ["any-pi"]);
     assert_eq!(
@@ -155,7 +152,7 @@ fn the_host_lists_its_any_pool_only_when_two_accounts_hold_it_and_still_resolves
     );
     // The person's own pool is listed however many accounts it holds.
     let own = config(
-        "[host.accounts.api-one]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-one\"\n\
+        "[host.accounts.api-one]\nkind = \"anthropic-api-key\"\nid = \"id-one\"\n\
          [host.pools.mine]\nstandard = \"anthropic-api\"\naccounts = [\"api-one\"]\n",
     );
     assert_eq!(shown(&own, &Catalogs::new(&own)), ["mine"]);
@@ -164,14 +161,14 @@ fn the_host_lists_its_any_pool_only_when_two_accounts_hold_it_and_still_resolves
 #[test]
 fn a_pi_provider_key_is_in_the_pool_of_the_api_its_variable_names_beside_an_api_key_account() {
     let both = config(
-        "[host.accounts.api-one]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-one\"\n\
-         [host.accounts.pi-key]\nharness = \"pi\"\nkind = \"pi-api-key\"\nid = \"id-key\"\nsettings = { variable = \"ANTHROPIC_API_KEY\" }\n\
-         [host.accounts.pi-other]\nharness = \"pi\"\nkind = \"pi-api-key\"\nid = \"id-other\"\nsettings = { variable = \"MISTRAL_API_KEY\" }\n\
+        "[host.accounts.api-one]\nkind = \"anthropic-api-key\"\nid = \"id-one\"\n\
+         [host.accounts.pi-key]\nkind = \"pi-api-key\"\nid = \"id-key\"\nsettings = { variable = \"ANTHROPIC_API_KEY\" }\n\
+         [host.accounts.pi-other]\nkind = \"pi-api-key\"\nid = \"id-other\"\nsettings = { variable = \"MISTRAL_API_KEY\" }\n\
          [host.pools.mixed]\nstandard = \"anthropic-api\"\naccounts = [\"api-one\", \"pi-key\"]\n",
     );
     // Pi lists the kind as its harness applies it; the kind, not Canoa, says the variable picks the standard.
     let pi = canoa_pi::acp::accounts::catalog();
-    let catalogs = Catalogs::with(&both, "pi", (&pi, &pi), true);
+    let catalogs = Catalogs::with_known(&both, "pi", (&pi, &pi), (Some("pi_accounts"), true));
     check(&both, &catalogs).expect("the key of the Anthropic variable provides the Anthropic API");
     let pools = listed(&both, &catalogs);
     assert_eq!(
@@ -196,11 +193,14 @@ fn a_pi_provider_key_is_in_the_pool_of_the_api_its_variable_names_beside_an_api_
         ["api-one", "pi-key"]
     );
     let other = config(
-        "[host.accounts.pi-other]\nharness = \"pi\"\nkind = \"pi-api-key\"\nid = \"id-other\"\nsettings = { variable = \"MISTRAL_API_KEY\" }\n\
+        "[host.accounts.pi-other]\nkind = \"pi-api-key\"\nid = \"id-other\"\nsettings = { variable = \"MISTRAL_API_KEY\" }\n\
          [host.pools.mixed]\nstandard = \"anthropic-api\"\naccounts = [\"pi-other\"]\n",
     );
-    let why =
-        check(&other, &Catalogs::with(&other, "pi", (&pi, &pi), true)).expect_err("provides none");
+    let why = check(
+        &other,
+        &Catalogs::with_known(&other, "pi", (&pi, &pi), (Some("pi_accounts"), true)),
+    )
+    .expect_err("provides none");
     assert!(why.contains("pi-other") && why.contains("none"), "{why}");
 }
 
@@ -208,7 +208,7 @@ fn a_pi_provider_key_is_in_the_pool_of_the_api_its_variable_names_beside_an_api_
 fn an_account_in_the_pools_of_two_standards_is_one_account() {
     // Foundry Local's kind provides both wire formats, so the one account is in both of the host's pools.
     let both = config(
-        "[host.accounts.chat]\nharness = \"claude\"\nkind = \"foundry-local\"\nid = \"id-chat\"\n\
+        "[host.accounts.chat]\nkind = \"foundry-local\"\nid = \"id-chat\"\n\
          [host.pools.mine]\nstandard = \"openai-api\"\naccounts = [\"chat\"]\n\
          [host.pools.yours]\nstandard = \"anthropic-api\"\naccounts = [\"chat\"]\n",
     );

@@ -92,8 +92,8 @@ fn login_of(token: &str) -> String {
 }
 
 const CONFIG: &str = "[host.agents.Claude]\nharness = \"claude\"\naccounts = [\"both\"]\n\
-    [host.accounts.work]\nharness = \"claude\"\nkind = \"claude-login\"\nid = \"id-work\"\n\
-    [host.accounts.work2]\nharness = \"claude\"\nkind = \"claude-login\"\nid = \"id-work2\"\n\
+    [host.accounts.work]\nkind = \"claude-login\"\nid = \"id-work\"\n\
+    [host.accounts.work2]\nkind = \"claude-login\"\nid = \"id-work2\"\n\
     [host.pools.both]\nstandard = \"claude-code\"\naccounts = [\"work\", \"work2\"]\n";
 
 /// The pool's accounts as candidates, read against the stand-in: `work` reports `work_doc` and `work2` reports `work2_doc`.

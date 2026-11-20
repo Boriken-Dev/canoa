@@ -162,8 +162,8 @@ impl<'a> Lend<'a> {
         let kinds = Catalogs::new(&config);
         Some(
             kinds
-                .listing(&account.harness)
-                .and_then(|listing| listing.kind(&account.kind).map(|kind| kind.title.clone()))
+                .made(&account.kind)
+                .map(|(_, kind)| kind.title)
                 .unwrap_or_else(|| account.kind.clone()),
         )
     }

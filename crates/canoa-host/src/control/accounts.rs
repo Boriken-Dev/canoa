@@ -1,4 +1,4 @@
-//! Accounts on the control channel, the owner's alone: `accounts/catalog`, `accounts/list`, `accounts/remove`, and the two
+//! Accounts on the control channel, the owner's alone: `accounts/providers`, `accounts/catalog`, `accounts/list`, `accounts/remove`, and the two
 //! sign-ins, `accounts/add` and `accounts/login`, which carry their progress and put the form a sign-in asks (a key, a pasted
 //! code) to the application sealed, as an agent's `secret_request` is, so no typed value crosses the link in the clear.
 #![allow(
@@ -110,6 +110,31 @@ fn pools_of(
         .collect()
 }
 
+/// `accounts/providers`: every account provider this host carries, once: each agent's own and each maker. A row says its id, its title
+/// and what it is, the agent it belongs to (`harness`, `null` for a maker, which no agent owns), the kinds it makes and its own
+/// ways to sign in, and which kinds report usage.
+fn providers_of(config: &Config) -> Vec<Value> {
+    crate::accounts::providers::all(config)
+        .into_iter()
+        .map(|listed| {
+            json!({
+                "id": listed.id,
+                "title": listed.title,
+                "description": listed.description,
+                "harness": listed.harness,
+                "kinds": listed.offer.kinds.iter()
+                    .map(|kind| json!({"id": kind.id, "title": kind.title, "types": kind.provides}))
+                    .collect::<Vec<_>>(),
+                "logins": listed.offer.logins.iter()
+                    .map(|login| json!({"id": login.id, "title": login.title, "produces": login.produces}))
+                    .collect::<Vec<_>>(),
+                "usage": listed.offer.usage,
+                "local": listed.offer.local,
+            })
+        })
+        .collect()
+}
+
 /// The keys an entry made by an offer starts with. A built-in source keeps what it was (its title) and reaches no paired key
 /// unless the host is a portal's; any other entry made here is titled by its name and no paired key reaches it.
 fn made_keys(entry: &str, built_in: bool, portal: bool) -> Vec<(&'static str, toml::Value)> {
@@ -162,8 +187,8 @@ fn offer(
             .get(name)
             .ok_or((NOT_FOUND, format!("no account called {name}")))?;
         let makers = crate::makers::Makers::of(config);
-        if matching::borrowed(&makers, account, harness) {
-            let catalogs = catalogs.get_or_insert_with(|| Catalogs::new(config));
+        let catalogs = catalogs.get_or_insert_with(|| Catalogs::new(config));
+        if matching::borrowed(&makers, account, harness, catalogs.of(harness).as_ref()) {
             let fit = match (catalogs.of(harness), catalogs.kind(account)) {
                 (Some(catalog), Some(info)) => {
                     matching::fits(&makers, &catalog, harness, account, &info)
@@ -177,8 +202,8 @@ fn offer(
                 return Err((
                     REFUSED,
                     format!(
-                        "{name} signs in to {}, and {entry} runs {harness}: {why}",
-                        account.harness
+                        "{name} is a {} account, and {entry} runs {harness}: {why}",
+                        account.kind
                     ),
                 ));
             }
@@ -289,18 +314,20 @@ impl Accounts {
             home: &home,
         };
         match method {
+            "accounts/providers" => Ok(json!({"providers": providers_of(&config)})),
             "accounts/catalog" => {
-                let harness = text(params, "harness")?;
-                let (kinds, logins) = commands::catalog_of(&config, harness).map_err(|failed| {
-                    if failed.status == 2 {
-                        (NOT_FOUND, failed.why)
-                    } else {
-                        refusal(&failed)
-                    }
-                })?;
+                let provider = text(params, "provider")?;
+                let (kinds, logins) =
+                    commands::catalog_of(&config, provider).map_err(|failed| {
+                        if failed.status == 2 {
+                            (NOT_FOUND, failed.why)
+                        } else {
+                            refusal(&failed)
+                        }
+                    })?;
                 let kinds = kinds.iter().map(json_of).collect::<Result<Vec<_>, _>>()?;
                 let logins = logins.iter().map(json_of).collect::<Result<Vec<_>, _>>()?;
-                Ok(json!({"harness": harness, "kinds": kinds, "logins": logins}))
+                Ok(json!({"provider": provider, "kinds": kinds, "logins": logins}))
             }
             "accounts/list" => {
                 let rows = commands::rows(cfg).map_err(|failed| refusal(&failed))?;
@@ -341,8 +368,8 @@ impl Accounts {
                     .to_owned(),
             ))?;
             let name = text(&params, "name")?.to_owned();
-            let harness = match long {
-                Long::Add => Some(text(&params, "harness")?.to_owned()),
+            let provider = match long {
+                Long::Add => Some(text(&params, "provider")?.to_owned()),
                 Long::Login => None,
             };
             let method = match long {
@@ -355,13 +382,13 @@ impl Accounts {
             Ok::<_, Refusal>((
                 asker,
                 name,
-                harness,
+                provider,
                 method,
                 inputs_of(&params)?,
                 self.config()?,
             ))
         })();
-        let (asker, name, harness, method, inputs, config) = match started {
+        let (asker, name, provider, method, inputs, config) = match started {
             Ok(started) => started,
             Err((code, message)) => return error_line(&id, code, &message),
         };
@@ -378,7 +405,7 @@ impl Accounts {
                     home: &home,
                 };
                 let mut sign = |accounts: &crate::accounts::Accounts,
-                                provider: &crate::kind::Harness,
+                                provider: &commands::Signing<'_>,
                                 method: &str| {
                     commands::sign_in_relayed(
                         accounts,
@@ -388,11 +415,11 @@ impl Accounts {
                         Arc::clone(&relay),
                     )
                 };
-                match (long, harness.as_deref()) {
-                    (Long::Add, Some(harness)) => commands::add_with(
+                match (long, provider.as_deref()) {
+                    (Long::Add, Some(provider)) => commands::add_with(
                         cfg,
                         &name,
-                        harness,
+                        provider,
                         method.as_deref(),
                         &inputs,
                         &mut sign,
@@ -588,7 +615,7 @@ struct Pending {
 mod offer_tests {
     use super::*;
 
-    const ACCOUNTS: &str = "[host.accounts.c]\nharness = \"codex\"\nkind = \"openai-api-key\"\nid = \"id-c\"\n\n[host.accounts.w]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-w\"\n";
+    const ACCOUNTS: &str = "[host.accounts.c]\nkind = \"codex-api-key\"\nid = \"id-c\"\n\n[host.accounts.w]\nkind = \"anthropic-api-key\"\nid = \"id-w\"\n";
 
     fn scratch(name: &str) -> std::path::PathBuf {
         static NEXT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
@@ -653,7 +680,6 @@ mod offer_tests {
         let text = format!(
             "{ACCOUNTS}
 [host.accounts.p]
-harness = \"pi\"
 kind = \"pi-oauth\"
 id = \"id-p\"
 "

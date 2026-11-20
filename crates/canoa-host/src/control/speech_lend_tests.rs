@@ -131,9 +131,9 @@ fn home(name: &str, accounts: &[(&str, &str, &str, &str)], key: Option<&str>, ex
     let root = dir(name);
     let cfg = root.join("canoa.cfg");
     let mut text = String::from("[secrets]\naccounts = \"file\"\n\n");
-    for (account, harness, kind, settings) in accounts {
+    for (account, _harness, kind, settings) in accounts {
         text.push_str(&format!(
-            "[host.accounts.{account}]\nharness = \"{harness}\"\nkind = \"{kind}\"\nid = \"id-{account}\"\n{settings}\n"
+            "[host.accounts.{account}]\nkind = \"{kind}\"\nid = \"id-{account}\"\n{settings}\n"
         ));
     }
     text.push_str(extra);

@@ -85,7 +85,7 @@ fn an_entry_is_asked_as_an_account_it_offers_and_not_as_one_it_does_not_have() {
     let link = host.local.open("@control").expect("a link");
     let secret = host.local.link_secret().expect("the host minted a secret");
     let app = App::new(&secret[..]);
-    let params = json!({"name": "work", "harness": "claude", "method": "api-key"});
+    let params = json!({"name": "work", "provider": "claude_accounts", "method": "api-key"});
     let line = json!({"jsonrpc": "2.0", "id": 1, "method": "accounts/add", "params": params});
     send(&link, &line);
     let typed = Typed::Fills(&[("api_key", "sk-ant-test-0123456789")]);
@@ -139,7 +139,7 @@ fn an_account_with_no_session_is_read_on_demand_and_a_name_the_host_lacks_is_ref
     send(
         &link,
         &json!({"jsonrpc": "2.0", "id": 1, "method": "accounts/add",
-            "params": {"name": "work", "harness": "claude", "method": "api-key"}}),
+            "params": {"name": "work", "provider": "claude_accounts", "method": "api-key"}}),
     );
     let typed = Typed::Fills(&[("api_key", "sk-ant-test-0123456789")]);
     loop {

@@ -429,7 +429,11 @@ fn bind_harness_entry(
     };
     if let Some(listed) = &listed
         && kind::declares_setting(&registry, harness, "setting_sources")
-        && keeps_key_in_environment(&crate::makers::Makers::of(state.config), listed, harness)
+        && keeps_key_in_environment(
+            &crate::makers::Makers::of(state.config),
+            listed,
+            (harness, provider.catalog()),
+        )
     {
         let named = asks.setting_sources.is_some()
             || settings.is_some_and(|own| own.as_map().contains_key("setting_sources"));
@@ -463,14 +467,9 @@ fn bind_harness_entry(
         if !listed.is_empty() || !others.is_empty() {
             let unfit = unfit_accounts(state.config, harness, &provider);
             let pools = match provider.catalog() {
-                Some(catalog) => crate::pools::for_entry(
+                Some(_) => crate::pools::for_entry(
                     state.config,
-                    &Catalogs::with(
-                        state.config,
-                        harness,
-                        (catalog, provider.listing()),
-                        provider.local_account().is_some(),
-                    ),
+                    &Catalogs::with(state.config, harness, &provider),
                     harness,
                     offered,
                 )

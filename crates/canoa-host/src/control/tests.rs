@@ -742,7 +742,8 @@ fn a_key_manages_accounts_only_with_the_accounts_grant() {
     );
     let granted = peer("sha256:def", &[Grant::Accounts]);
     for (method, params) in [
-        ("accounts/catalog", json!({"harness": "claude"})),
+        ("accounts/providers", json!({})),
+        ("accounts/catalog", json!({"provider": "claude_accounts"})),
         ("accounts/list", json!({})),
         ("accounts/remove", json!({"name": "work"})),
         ("accounts/entries", json!({})),

@@ -2221,7 +2221,6 @@ fn a_harness_entry_configures_its_account_provider_apart_from_the_harness() {
 fn the_name_local_is_taken_by_the_automatic_account_and_an_entry_may_name_it() {
     let refused = parse(
         "[host.accounts.local]
-harness = \"claude\"
 kind = \"claude-login\"
 id = \"id-local\"
 ",
@@ -2230,7 +2229,6 @@ id = \"id-local\"
     assert!(refused.to_string().contains("taken"), "{refused}");
     let config = parse(
         "[host.accounts.work]
-harness = \"claude\"
 kind = \"claude-login\"
 id = \"id-work\"
 [host.agents.Claude]
@@ -2246,11 +2244,9 @@ accounts = [\"work\", \"local\"]
 }
 
 const TWO_ACCOUNTS: &str = "[host.accounts.one]
-harness = \"claude\"
 kind = \"anthropic-api-key\"
 id = \"id-one\"
 [host.accounts.two]
-harness = \"claude\"
 kind = \"anthropic-api-key\"
 id = \"id-two\"
 ";
@@ -2305,10 +2301,8 @@ fn a_pool_that_names_what_does_not_exist_or_is_taken_is_refused_by_name() {
     assert!(why.contains("pool local"), "{why}");
     let why = refused("[host.pools.any-openai-api]\nstandard = \"openai-api\"\n");
     assert!(why.contains("taken"), "{why}");
-    let taken = parse(
-        "[host.accounts.any-openai-api]\nharness = \"codex\"\nkind = \"codex-api-key\"\nid = \"id-a\"\n",
-    )
-    .expect_err("an account may not take the host's pool's name");
+    let taken = parse("[host.accounts.any-openai-api]\nkind = \"codex-api-key\"\nid = \"id-a\"\n")
+        .expect_err("an account may not take the host's pool's name");
     assert!(taken.to_string().contains("taken"), "{taken}");
     // The standard is any id the standards vocabulary allows, and the file has to say it.
     let why = refused("[host.pools.p]\n");

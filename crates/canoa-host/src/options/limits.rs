@@ -170,7 +170,8 @@ fn renew(
         .hold_account(name, "usage", false)
         .map_err(|refusal| refusal.client_reason())?;
     let grant = held.provider_grant();
-    if let Some(login) = login_file(held.owner(), &grant.kind) {
+    // The harness a call is read through is the one whose provider made an own kind, so it is the one that knows where that login lives.
+    if let Some(login) = login_file(built.id(), &grant.kind) {
         let (key, file) = (login.key.as_str(), login.file.as_str());
         let text = grant
             .credentials

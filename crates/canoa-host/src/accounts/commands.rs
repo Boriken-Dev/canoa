@@ -11,9 +11,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use coqui_acp_api::guatiao::schema::{SchemaRef, inline_refs};
-use coqui_acp_api::{AccountKindInfo, LoginMethodInfo};
+use coqui_acp_api::{AccountKindInfo, AccountProvider, LoginMethodInfo};
 
 use super::login;
+use super::providers::{self, Listed};
 use super::{Accounts, Refusal, check_settings};
 use crate::cli::{Failed, Format, Front};
 use crate::config::{AccountConfig, Config, EntryKind, Settings, check_label, is_built_in_harness};
@@ -22,6 +23,21 @@ use crate::{kind, serve};
 
 mod cfg;
 mod interact;
+
+/// What a sign-in runs through: an account provider, and the makers that route a method it does not list itself.
+pub(crate) struct Signing<'a> {
+    pub(crate) provider: &'a dyn AccountProvider,
+    pub(crate) makers: &'a crate::makers::Makers,
+}
+
+impl<'a> From<&'a Listed> for Signing<'a> {
+    fn from(listed: &'a Listed) -> Self {
+        Self {
+            provider: &*listed.provider,
+            makers: &listed.makers,
+        }
+    }
+}
 
 #[cfg(test)]
 pub(crate) use cfg::remove_entry;
@@ -113,10 +129,6 @@ pub(crate) fn provider_for(config: &Config, harness: &str) -> Result<kind::Harne
     .map_err(|error| Failed::run(format!("the {harness} provider is unusable: {error}")))
 }
 
-fn methods_of(provider: &kind::Harness) -> Result<Vec<LoginMethodInfo>, Failed> {
-    Ok(provider.listing().logins.clone())
-}
-
 fn describe_methods(methods: &[LoginMethodInfo]) -> String {
     if methods.is_empty() {
         return "it has none".to_owned();
@@ -191,14 +203,19 @@ fn state_of(accounts: &Accounts, account: &AccountConfig) -> (String, u64, Optio
 /// One account as `list` shows it.
 pub(crate) struct Row {
     pub(crate) name: String,
-    pub(crate) harness: String,
+    /// The id of the account provider that made the account; empty when no provider this host can build makes its kind.
+    pub(crate) provider: String,
+    /// The harness the provider belongs to when it is an agent's own; `None` for a maker's account.
+    pub(crate) agent: Option<String>,
     pub(crate) kind: String,
     pub(crate) id: String,
     pub(crate) state: String,
     pub(crate) revision: u64,
     pub(crate) expires_at: Option<String>,
-    /// The standards the account's kind provides, which say the harnesses that can run a session on it.
-    pub(crate) provides: Vec<String>,
+    /// The account's types: every standard it works for, as its provider answers them for this account.
+    pub(crate) types: Vec<String>,
+    /// The harnesses that can run a session on the account: those that take one of its types, by the rule a session is started with.
+    pub(crate) fits: Vec<String>,
     /// Whether the host makes the account itself (the `local` of a harness that has a login of its own) and no canoa.cfg names
     /// it, so it can be neither removed nor signed in again.
     pub(crate) automatic: bool,
@@ -209,9 +226,10 @@ pub(crate) struct Row {
 impl Row {
     pub(crate) fn json(&self) -> serde_json::Value {
         serde_json::json!({
-            "name": self.name, "harness": self.harness, "kind": self.kind, "id": self.id,
-            "state": self.state, "revision": self.revision, "expires_at": self.expires_at,
-            "provides": self.provides, "automatic": self.automatic, "warnings": self.warnings,
+            "name": self.name, "provider": self.provider, "agent": self.agent, "kind": self.kind,
+            "id": self.id, "state": self.state, "revision": self.revision, "expires_at": self.expires_at,
+            "types": self.types, "fits": self.fits, "automatic": self.automatic,
+            "warnings": self.warnings,
         })
     }
 }
@@ -231,17 +249,23 @@ fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
         .map(|(name, account)| {
             let (state, revision, expires_at) = state_of(accounts, account);
             let kind = catalogs.kind(account);
+            let made = catalogs.made(&account.kind).map(|(made, _)| made);
             Row {
                 name: name.clone(),
-                harness: account.harness.clone(),
+                agent: made.as_ref().and_then(|made| made.harness.clone()),
+                provider: made.map(|made| made.provider).unwrap_or_default(),
                 kind: account.kind.clone(),
                 id: account.id.clone(),
                 state,
                 revision,
                 expires_at,
-                provides: kind
+                types: kind
                     .as_ref()
                     .map(|info| info.provides.clone())
+                    .unwrap_or_default(),
+                fits: kind
+                    .as_ref()
+                    .map(|info| super::matching::fitting(&catalogs, account, info))
                     .unwrap_or_default(),
                 warnings: kind
                     .as_ref()
@@ -258,8 +282,10 @@ fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
             name: coqui_acp_api::LOCAL_ACCOUNT.to_owned(),
             id: account.usage_id(),
             kind: kind.id,
-            provides: catalogs.login_standard(&harness).into_iter().collect(),
-            harness,
+            types: catalogs.login_standard(&harness).into_iter().collect(),
+            provider: catalogs.provider_id_of(&harness).unwrap_or_default(),
+            agent: Some(harness.clone()),
+            fits: vec![harness],
             state,
             revision,
             expires_at,
@@ -276,7 +302,7 @@ pub(crate) fn list(env: &Env<'_>, format: Format) -> Result<(), Failed> {
     for row in rows_of(env.cfg(), &accounts) {
         let line = match format {
             Format::Json => row.json().to_string(),
-            Format::Text => format!("{} {} {} {}", row.name, row.harness, row.kind, row.state),
+            Format::Text => format!("{} {} {} {}", row.name, row.provider, row.kind, row.state),
         };
         env.front.print(&line).map_err(Failed::run)?;
         if format == Format::Text {
@@ -291,6 +317,28 @@ pub(crate) fn list(env: &Env<'_>, format: Format) -> Result<(), Failed> {
         && let Some(note) = accounts.note()
     {
         env.front.print(note).map_err(Failed::run)?;
+    }
+    Ok(())
+}
+
+/// `canoa accounts providers`: each account provider with the ways it signs in.
+pub(crate) fn providers(env: &Env<'_>, format: Format) -> Result<(), Failed> {
+    for listed in providers::all(&env.config) {
+        let methods: Vec<&str> = listed
+            .offer
+            .logins
+            .iter()
+            .map(|method| method.id.as_str())
+            .collect();
+        let line = match format {
+            Format::Json => serde_json::json!({
+                "id": listed.id, "title": listed.title, "harness": listed.harness,
+                "logins": methods,
+            })
+            .to_string(),
+            Format::Text => format!("{} {} ({})", listed.id, listed.title, methods.join(", ")),
+        };
+        env.front.print(&line).map_err(Failed::run)?;
     }
     Ok(())
 }
@@ -325,7 +373,7 @@ fn settings_of(
 /// What a sign-in made or renewed, for the line that tells it.
 pub(crate) struct Added {
     pub(crate) name: String,
-    pub(crate) harness: String,
+    pub(crate) provider: String,
     pub(crate) kind: String,
     pub(crate) id: String,
     pub(crate) label: Option<String>,
@@ -335,20 +383,20 @@ pub(crate) struct Added {
 impl Added {
     pub(crate) fn json(&self) -> serde_json::Value {
         serde_json::json!({"account": {
-            "name": self.name, "harness": self.harness, "kind": self.kind, "id": self.id,
+            "name": self.name, "provider": self.provider, "kind": self.kind, "id": self.id,
             "label": self.label, "checked": self.checked}})
     }
 }
 
 /// What runs a sign-in: the stored accounts, the provider and the method's id, and what it made.
 pub(crate) type Signer<'a> =
-    dyn FnMut(&Accounts, &kind::Harness, &str) -> Result<coqui_acp_api::LoginOutcome, Failed> + 'a;
+    dyn FnMut(&Accounts, &Signing<'_>, &str) -> Result<coqui_acp_api::LoginOutcome, Failed> + 'a;
 
 /// `canoa accounts add NAME`.
 pub(crate) fn add(
     env: &Env<'_>,
     name: &str,
-    harness: &str,
+    provider: &str,
     method: Option<&str>,
     inputs: &serde_json::Map<String, serde_json::Value>,
     (format, until_stdin_closes): (Format, bool),
@@ -356,7 +404,7 @@ pub(crate) fn add(
     let added = add_with(
         env.cfg(),
         name,
-        harness,
+        provider,
         method,
         inputs,
         &mut |accounts, provider, method| {
@@ -371,11 +419,12 @@ pub(crate) fn add(
     env.front.print(&line).map_err(Failed::run)
 }
 
-/// Adds the account `name` of `harness` by the method `method`, signing in through `signer`.
+/// Adds the account `name` through the account provider `provider`, by one of its own ways to sign in `method`, signing in through
+/// `signer`.
 pub(crate) fn add_with(
     cfg: Cfg<'_>,
     name: &str,
-    harness: &str,
+    provider: &str,
     method: Option<&str>,
     inputs: &serde_json::Map<String, serde_json::Value>,
     signer: &mut Signer<'_>,
@@ -389,18 +438,19 @@ pub(crate) fn add_with(
     if cfg.config.accounts.contains_key(name) {
         return Err(Failed::usage(format!("an account called {name} exists")));
     }
-    let provider = provider_for(cfg.config, harness)?;
-    let methods = methods_of(&provider)?;
+    let listed = providers::find(cfg.config, provider)?;
+    let methods = &listed.offer.logins;
     let Some(method) = method.and_then(|id| methods.iter().find(|method| method.id == id)) else {
         return Err(Failed::usage(format!(
-            "--method is one of the ways {harness} signs in: {}",
-            describe_methods(&methods)
+            "--method is one of the ways {} signs in: {}",
+            listed.title,
+            describe_methods(methods)
         )));
     };
     check_inputs(method, inputs)?;
     let accounts = accounts_of(cfg)?;
-    let outcome = signer(&accounts, &provider, &method.id)?;
-    let kind = provider.listing().kind(&outcome.kind).ok_or_else(|| {
+    let outcome = signer(&accounts, &Signing::from(&listed), &method.id)?;
+    let kind = listed.offer.kind(&outcome.kind).ok_or_else(|| {
         Failed::run(format!(
             "the sign-in made a {} account, which the provider does not list",
             outcome.kind
@@ -414,7 +464,7 @@ pub(crate) fn add_with(
         .store_login(&id, outcome.credentials.expose(), expires)
         .map_err(|error| Failed::run(error.to_string()))?;
     let account = AccountConfig {
-        harness: harness.to_owned(),
+        owner: None,
         kind: outcome.kind.clone(),
         id: id.clone(),
         settings: (!settings.is_empty()).then(|| Settings::new(settings)),
@@ -426,7 +476,7 @@ pub(crate) fn add_with(
     }
     Ok(Added {
         name: name.to_owned(),
-        harness: harness.to_owned(),
+        provider: listed.id.clone(),
         kind: outcome.kind.clone(),
         id,
         label: outcome.label.clone(),
@@ -480,9 +530,17 @@ pub(crate) fn login_with(
         .accounts
         .get(name)
         .ok_or_else(|| Failed::usage(format!("no account called {name}")))?;
-    let provider = provider_for(cfg.config, &account.harness)?;
-    let methods = methods_of(&provider)?;
-    let making: Vec<&LoginMethodInfo> = methods
+    let catalogs = super::matching::Catalogs::new(cfg.config);
+    let (made, _) = catalogs.made(&account.kind).ok_or_else(|| {
+        Failed::usage(format!(
+            "no account provider this host can build makes a {} account",
+            account.kind
+        ))
+    })?;
+    let listed = providers::find(cfg.config, &made.provider)?;
+    let making: Vec<&LoginMethodInfo> = listed
+        .offer
+        .logins
         .iter()
         .filter(|method| method.produces == account.kind)
         .collect();
@@ -505,7 +563,7 @@ pub(crate) fn login_with(
     check_inputs(method, inputs)?;
     let accounts = accounts_of(cfg)?;
     let _lease = accounts.exclusive(&account.id).map_err(refused)?;
-    let outcome = signer(&accounts, &provider, &method.id)?;
+    let outcome = signer(&accounts, &Signing::from(&listed), &method.id)?;
     if outcome.kind != account.kind {
         return Err(Failed::run(format!(
             "the sign-in made a {} account, and {name} is a {} one",
@@ -521,7 +579,7 @@ pub(crate) fn login_with(
         .map_err(|error| Failed::run(error.to_string()))?;
     Ok(Added {
         name: name.to_owned(),
-        harness: account.harness.clone(),
+        provider: listed.id.clone(),
         kind: account.kind.clone(),
         id: account.id.clone(),
         label: outcome.label.clone(),
@@ -588,28 +646,27 @@ pub(crate) fn remove_with(cfg: Cfg<'_>, name: &str) -> Result<(), Failed> {
     Ok(())
 }
 
-/// The kinds and the sign-in methods the provider of `harness` lists.
+/// The kinds and the sign-in methods the account provider `provider` offers, and no other provider's.
 pub(crate) fn catalog_of(
     config: &Config,
-    harness: &str,
+    provider: &str,
 ) -> Result<(Vec<AccountKindInfo>, Vec<LoginMethodInfo>), Failed> {
-    let provider = provider_for(config, harness)?;
-    let listing = provider.listing();
-    Ok((listing.kinds.clone(), listing.logins.clone()))
+    let listed = providers::find(config, provider)?;
+    Ok((listed.offer.kinds, listed.offer.logins))
 }
 
 /// Runs a sign-in whose prompts a [`Relay`] carries, for a caller that shows them itself.
 pub(crate) fn sign_in_relayed(
     accounts: &Accounts,
-    provider: &kind::Harness,
+    provider: &Signing<'_>,
     method: &str,
     inputs: &serde_json::Map<String, serde_json::Value>,
     relay: Arc<Relay>,
 ) -> Result<coqui_acp_api::LoginOutcome, Failed> {
     login::sign_in(
         accounts,
-        provider.makers(),
-        &**provider.account_provider().map_err(Failed::run)?,
+        provider.makers,
+        provider.provider,
         method,
         inputs,
         relay,

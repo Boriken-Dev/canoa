@@ -153,9 +153,14 @@ fn a_planted_key_is_found_where_it_is_and_in_every_form() {
 fn the_catalog_names_the_kinds_and_the_ways_to_sign_in() {
     let host = host();
     let link = host.local.open("@control").expect("a link");
-    let catalog =
-        plain_call(&link, 1, "accounts/catalog", json!({"harness": "claude"})).expect("catalog");
-    assert_eq!(catalog["harness"], "claude");
+    let catalog = plain_call(
+        &link,
+        1,
+        "accounts/catalog",
+        json!({"provider": "claude_accounts"}),
+    )
+    .expect("catalog");
+    assert_eq!(catalog["provider"], "claude_accounts");
     let kinds: Vec<&str> = catalog["kinds"]
         .as_array()
         .expect("kinds")
@@ -205,8 +210,13 @@ fn the_catalog_names_the_kinds_and_the_ways_to_sign_in() {
     ] {
         assert!(catalog["logins"][0].get(field).is_some(), "{field}");
     }
-    let unknown = plain_call(&link, 2, "accounts/catalog", json!({"harness": "nobody"}))
-        .expect_err("unknown");
+    let unknown = plain_call(
+        &link,
+        2,
+        "accounts/catalog",
+        json!({"provider": "nobody_accounts"}),
+    )
+    .expect_err("unknown");
     assert!(unknown.contains("-32003"), "{unknown}");
     host.stop();
 }
@@ -215,8 +225,13 @@ fn the_catalog_names_the_kinds_and_the_ways_to_sign_in() {
 fn opencodes_kinds_and_its_sign_ins_are_listed_and_its_source_can_be_offered_accounts() {
     let host = host();
     let link = host.local.open("@control").expect("a link");
-    let catalog =
-        plain_call(&link, 1, "accounts/catalog", json!({"harness": "opencode"})).expect("catalog");
+    let catalog = plain_call(
+        &link,
+        1,
+        "accounts/catalog",
+        json!({"provider": "opencode_accounts"}),
+    )
+    .expect("catalog");
     let kinds: Vec<&str> = catalog["kinds"]
         .as_array()
         .expect("kinds")
@@ -275,7 +290,7 @@ fn an_account_is_added_by_a_key_asked_sealed_and_the_key_is_kept_nowhere_in_the_
         &link,
         1,
         "accounts/add",
-        &json!({"name": "work", "harness": "claude", "method": "api-key"}),
+        &json!({"name": "work", "provider": "claude_accounts", "method": "api-key"}),
         &Typed::Fills(&[("api_key", KEY)]),
     );
     let added = added.expect("the account is added");
@@ -316,7 +331,7 @@ fn an_opencode_key_account_names_any_variable_but_the_hosts_own() {
         &link,
         1,
         "accounts/add",
-        &json!({"name": "gateway", "harness": "opencode", "method": "api-key",
+        &json!({"name": "gateway", "provider": "opencode_accounts", "method": "api-key",
                 "inputs": {"variable": "ACME_GATEWAY_KEY"}}),
         &Typed::Fills(&[("api_key", KEY)]),
     );
@@ -328,7 +343,7 @@ fn an_opencode_key_account_names_any_variable_but_the_hosts_own() {
         &link,
         2,
         "accounts/add",
-        &json!({"name": "owned", "harness": "opencode", "method": "api-key",
+        &json!({"name": "owned", "provider": "opencode_accounts", "method": "api-key",
                 "inputs": {"variable": "AOS_OVERLAY_NAME"}}),
         &Typed::Fills(&[("api_key", KEY)]),
     );
@@ -347,7 +362,7 @@ fn a_sign_in_the_person_walks_away_from_makes_no_account_and_leaves_no_directory
         &link,
         1,
         "accounts/add",
-        &json!({"name": "work", "harness": "claude", "method": "subscription"}),
+        &json!({"name": "work", "provider": "claude_accounts", "method": "subscription"}),
         &Typed::Leaves,
     );
     assert!(outcome.is_err());
@@ -379,7 +394,7 @@ fn a_declined_form_and_an_answer_bound_to_another_secret_make_no_account() {
     let host = host();
     let link = host.local.open("@control").expect("a link");
     let mut app = app_of(&host);
-    let params = json!({"name": "work", "harness": "claude", "method": "api-key"});
+    let params = json!({"name": "work", "provider": "claude_accounts", "method": "api-key"});
     let (_, declined) = app.drive(&link, 1, "accounts/add", &params, &Typed::Declines);
     let declined = declined.expect_err("declined");
     assert_eq!(declined["code"], -32002, "{declined}");
@@ -411,7 +426,7 @@ fn an_account_signs_in_again_and_is_removed() {
         &link,
         1,
         "accounts/add",
-        &json!({"name": "work", "harness": "claude", "method": "subscription"}),
+        &json!({"name": "work", "provider": "claude_accounts", "method": "subscription"}),
         &Typed::Fills(&[("code", "123456")]),
     );
     let added = added.expect("added by a pasted code");
@@ -446,7 +461,7 @@ fn the_login_each_harness_has_is_listed_as_its_local_account_and_cannot_be_remov
         &link,
         1,
         "accounts/add",
-        &json!({"name": "work", "harness": "claude", "method": "api-key"}),
+        &json!({"name": "work", "provider": "claude_accounts", "method": "api-key"}),
         &Typed::Fills(&[("api_key", KEY)]),
     );
     added.expect("the account is added");
@@ -459,7 +474,7 @@ fn the_login_each_harness_has_is_listed_as_its_local_account_and_cannot_be_remov
     for harness in ["claude", "codex", "pi"] {
         let one = locals
             .iter()
-            .find(|row| row["harness"] == harness)
+            .find(|row| row["fits"] == json!([harness]))
             .unwrap_or_else(|| panic!("{harness} lists its login: {listed}"));
         assert_eq!(one["name"], "local", "{one}");
         assert_eq!(one["kind"], "harness-login", "{one}");
@@ -523,8 +538,8 @@ fn the_list_reads_canoa_cfg_again_so_an_account_the_command_line_added_shows() {
             "accounts",
             "add",
             "late",
-            "--harness",
-            "claude",
+            "--provider",
+            "claude_accounts",
             "--method",
             "subscription",
             "--config",
@@ -562,7 +577,7 @@ fn an_entry_is_offered_the_accounts_the_person_picks_and_the_host_says_it_must_s
         &link,
         1,
         "accounts/add",
-        &json!({"name": "work", "harness": "claude", "method": "api-key"}),
+        &json!({"name": "work", "provider": "claude_accounts", "method": "api-key"}),
         &Typed::Fills(&[("api_key", KEY)]),
     );
     added.expect("the account is added");
@@ -696,7 +711,7 @@ fn the_hosts_pool_of_a_standard_is_listed_once_two_accounts_hold_it() {
         &link,
         3,
         "accounts/add",
-        &json!({"name": "one", "harness": "claude", "method": "api-key"}),
+        &json!({"name": "one", "provider": "claude_accounts", "method": "api-key"}),
         &Typed::Fills(&[("api_key", KEY)]),
     );
     added.expect("a key account");
@@ -714,7 +729,7 @@ fn the_hosts_pool_of_a_standard_is_listed_once_two_accounts_hold_it() {
         &link,
         6,
         "accounts/add",
-        &json!({"name": "two", "harness": "claude", "method": "api-key"}),
+        &json!({"name": "two", "provider": "claude_accounts", "method": "api-key"}),
         &Typed::Fills(&[("api_key", KEY)]),
     );
     added.expect("a second key account");
@@ -748,7 +763,7 @@ fn a_pool_is_made_edited_and_removed_over_the_link_and_an_entry_offers_it() {
             &link,
             1,
             "accounts/add",
-            &json!({"name": name, "harness": "claude", "method": "api-key"}),
+            &json!({"name": name, "provider": "claude_accounts", "method": "api-key"}),
             &Typed::Fills(&[("api_key", KEY)]),
         );
         added.expect("a key account");
@@ -757,7 +772,7 @@ fn a_pool_is_made_edited_and_removed_over_the_link_and_an_entry_offers_it() {
         &link,
         2,
         "accounts/add",
-        &json!({"name": "login", "harness": "claude", "method": "subscription"}),
+        &json!({"name": "login", "provider": "claude_accounts", "method": "subscription"}),
         &Typed::Fills(&[("code", "123456")]),
     );
     login.expect("a login");
@@ -958,7 +973,7 @@ fn the_next_turn_of_a_pool_session_is_asked_of_the_host_and_a_single_account_is_
             &link,
             1,
             "accounts/add",
-            &json!({"name": name, "harness": "claude", "method": "api-key"}),
+            &json!({"name": name, "provider": "claude_accounts", "method": "api-key"}),
             &Typed::Fills(&[("api_key", KEY)]),
         );
         added.expect("a key account");
@@ -1096,12 +1111,12 @@ fn an_account_says_what_it_provides_an_entry_what_it_accepts_and_an_offer_follow
         &link,
         1,
         "accounts/add",
-        &json!({"name": "work", "harness": "claude", "method": "api-key"}),
+        &json!({"name": "work", "provider": "claude_accounts", "method": "api-key"}),
         &Typed::Fills(&[("api_key", KEY)]),
     );
     added.expect("the account is added");
     let listed = plain_call(&link, 2, "accounts/list", json!({})).expect("listed");
-    assert_eq!(listed["accounts"][0]["provides"], json!(["anthropic-api"]));
+    assert_eq!(listed["accounts"][0]["types"], json!(["anthropic-api"]));
 
     let entries = plain_call(&link, 3, "accounts/entries", json!({})).expect("entries");
     let of = |name: &str| {

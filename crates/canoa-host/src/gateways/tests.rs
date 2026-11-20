@@ -147,9 +147,14 @@ fn stand_in(refuses: Option<&str>) -> (Offer, Arc<Record>) {
     (offer, record)
 }
 
-fn catalog_of(harness: &str) -> AccountCatalog {
+/// What the maker of the gateway's kind offers: the kind and its sign-in method, whichever harness asks.
+fn catalog_of(_harness: &str) -> AccountCatalog {
     let mut catalog = AccountCatalog::new();
-    crate::makers::Makers::default().extend(&mut catalog, harness, None);
+    let maker = crate::makers::Makers::default()
+        .for_kind(KIND)
+        .expect("a maker of the kind");
+    catalog.kinds.extend(maker.accounts.kinds.clone());
+    catalog.logins.clone_from(&maker.accounts.logins);
     catalog
 }
 
@@ -159,9 +164,9 @@ fn settings(model: &str) -> Settings {
     Settings::new(map)
 }
 
-fn config(harness: &str) -> AccountConfig {
+fn config(_harness: &str) -> AccountConfig {
     AccountConfig {
-        harness: harness.to_owned(),
+        owner: None,
         kind: KIND.to_owned(),
         id: "id-local".to_owned(),
         settings: Some(settings("local-model")),
@@ -276,19 +281,18 @@ impl AccountProvider for Plain {
 }
 
 #[test]
-fn the_kind_and_its_method_join_the_catalogs_of_the_harnesses_that_can_be_given_a_gateway() {
-    for harness in ["claude", "codex"] {
-        let catalog = catalog_of(harness);
-        let kind = catalog.kind(KIND).expect("the kind");
-        assert!(kind.state_dir && kind.notices.len() == 2);
-        assert_eq!(catalog.logins[0].produces, KIND);
-        let mut again = catalog.clone();
-        crate::makers::Makers::default().extend(&mut again, harness, None);
-        assert_eq!(again, catalog, "adding it twice changes nothing");
+fn the_kind_and_its_method_are_the_makers_and_only_a_harness_that_can_be_given_a_gateway_runs_it() {
+    let catalog = catalog_of("claude");
+    let kind = catalog.kind(KIND).expect("the kind");
+    assert!(kind.state_dir && kind.notices.len() == 2);
+    assert_eq!(catalog.logins[0].produces, KIND);
+    for harness in ["claude", "codex", "pi"] {
+        assert!(
+            crate::vendors::gateway_route(harness).is_some(),
+            "{harness}"
+        );
     }
-    assert!(catalog_of("grok").kind(KIND).is_none());
-    assert!(catalog_of("pi").kind(KIND).is_some());
-    assert!(catalog_of("antigravity").logins.is_empty());
+    assert!(crate::vendors::gateway_route("grok").is_none());
 }
 
 #[test]
@@ -562,7 +566,7 @@ fn an_account_made_for_one_harness_runs_another_in_that_harness_s_own_kind_and_k
     // A grant of another provider's kind carries what it provides, so the harness can apply it by a standard it accepts.
     let key = AccountKindInfo::new("anthropic-api-key", "Key").provides([standard::ANTHROPIC_API]);
     let plain = AccountConfig {
-        harness: "claude".to_owned(),
+        owner: None,
         kind: "anthropic-api-key".to_owned(),
         id: "id-key".to_owned(),
         settings: None,

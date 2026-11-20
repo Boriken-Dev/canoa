@@ -1,5 +1,5 @@
-//! Which accounts a harness can run a session on. An account's kind says the standards it provides, a harness's catalog the
-//! standards it accepts, and the account fits where the two meet. An account of the harness's own provider always fits.
+//! Which accounts a harness can run a session on. An account's types are the standards it provides, a harness's catalog the
+//! standards it accepts, and the account fits where the two meet. An account of a kind the harness's own provider makes always fits.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -14,15 +14,39 @@ use coqui_acp_api::{AccountCatalog, AccountKindInfo};
 
 use super::commands::provider_for;
 use crate::config::{AccountConfig, Config};
+use crate::kind::Harness;
 use crate::makers::Makers;
 
 /// What a provider says of its accounts: the standards it accepts, and the kinds and sign-in methods its account provider offers.
 #[derive(Clone)]
 struct Known {
     catalog: AccountCatalog,
+    /// The kinds and sign-in methods of the harness's own account provider, with nothing of any other.
     listing: AccountCatalog,
+    /// The id of the harness's account provider, when it has one.
+    provider: Option<String>,
     /// Whether the provider offers the harness's own login as the automatic `local` account.
     local: bool,
+}
+
+impl Known {
+    fn of(harness: &Harness) -> Option<Self> {
+        Some(Self {
+            catalog: harness.catalog().cloned()?,
+            listing: harness.listing().clone(),
+            provider: harness.account_provider_id().map(str::to_owned),
+            local: harness.local_account().is_some(),
+        })
+    }
+}
+
+/// Who made accounts of a kind: an account provider, and the agent it belongs to when an agent's own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Made {
+    /// The id of the account provider.
+    pub(crate) provider: String,
+    /// The harness whose own provider it is; `None` for a maker, which no agent owns.
+    pub(crate) harness: Option<String>,
 }
 
 /// The account catalogs of the providers canoa.cfg's accounts and entries name, each read once.
@@ -40,20 +64,32 @@ impl<'a> Catalogs<'a> {
         }
     }
 
-    /// As [`Catalogs::new`], with what the provider `harness` says already in hand: the standards it accepts and the kinds
-    /// its account provider offers.
-    pub(crate) fn with(
+    /// As [`Catalogs::new`], with what the provider `harness` (named `id`) says already in hand: the standards it accepts and the
+    /// kinds its account provider offers.
+    pub(crate) fn with(config: &'a Config, id: &str, harness: &Harness) -> Self {
+        let catalogs = Self::new(config);
+        catalogs
+            .known
+            .borrow_mut()
+            .insert(id.to_owned(), Known::of(harness));
+        catalogs
+    }
+
+    /// As [`Catalogs::new`], with what the provider `id` says given as it is, for a test with no provider to build.
+    #[cfg(test)]
+    pub(crate) fn with_known(
         config: &'a Config,
-        harness: &str,
+        id: &str,
         (catalog, listing): (&AccountCatalog, &AccountCatalog),
-        local: bool,
+        (provider, local): (Option<&str>, bool),
     ) -> Self {
         let catalogs = Self::new(config);
         catalogs.known.borrow_mut().insert(
-            harness.to_owned(),
+            id.to_owned(),
             Some(Known {
                 catalog: catalog.clone(),
                 listing: listing.clone(),
+                provider: provider.map(str::to_owned),
                 local,
             }),
         );
@@ -64,14 +100,7 @@ impl<'a> Catalogs<'a> {
         self.known
             .borrow_mut()
             .entry(harness.to_owned())
-            .or_insert_with(|| {
-                let provider = provider_for(self.config, harness).ok()?;
-                Some(Known {
-                    catalog: provider.catalog().cloned()?,
-                    listing: provider.listing().clone(),
-                    local: provider.local_account().is_some(),
-                })
-            })
+            .or_insert_with(|| Known::of(&provider_for(self.config, harness).ok()?))
             .clone()
     }
 
@@ -80,29 +109,72 @@ impl<'a> Catalogs<'a> {
         Makers::of(self.config)
     }
 
-    /// The kinds of account and ways to sign in that the provider `harness` offers; `None` when it cannot be built.
-    pub(crate) fn listing(&self, harness: &str) -> Option<AccountCatalog> {
-        self.known(harness).map(|known| known.listing)
-    }
-
     /// The catalog of the provider `harness`; `None` when it cannot be built or lists none.
     pub(crate) fn of(&self, harness: &str) -> Option<AccountCatalog> {
         self.known(harness).map(|known| known.catalog)
     }
 
-    /// The kind `account` is of, as the account provider of the provider that made it offers it, providing the standards the account
-    /// provides.
+    /// The kind `account` is of, as the account provider that made it offers it, providing the standards the account provides. The
+    /// automatic `local` account is of its harness's own provider; any other is found by its kind, which no two providers share.
     pub(crate) fn kind(&self, account: &AccountConfig) -> Option<AccountKindInfo> {
-        self.known(&account.harness)
-            .and_then(|known| known.listing.kind(&account.kind).cloned())
-            .or_else(|| {
-                // A kind a maker makes is the same whichever harness the account names, or none that can be built.
-                self.makers()
-                    .for_kind(&account.kind)
-                    .and_then(|maker| maker.kind(&account.kind).cloned())
+        let info = match &account.owner {
+            Some(harness) => self.known(harness)?.listing.kind(&account.kind).cloned()?,
+            None => self.made(&account.kind)?.1,
+        };
+        Some(super::standards::of_account(
+            info,
+            account.settings.as_ref(),
+        ))
+    }
+
+    /// Every kind of the account provider that makes accounts of `kind`; none when no provider makes it.
+    pub(crate) fn kinds_beside(&self, kind: &str) -> Vec<AccountKindInfo> {
+        if let Some(maker) = self.makers().for_kind(kind) {
+            return maker.accounts.kinds;
+        }
+        self.made(kind)
+            .and_then(|(made, _)| self.known(&made.harness?))
+            .map(|known| known.listing.kinds)
+            .unwrap_or_default()
+    }
+
+    /// The account provider that makes accounts of `kind`, and the kind as it offers it: a maker's, else the one a harness's own
+    /// account provider offers. `None` when no provider this host can build makes it.
+    pub(crate) fn made(&self, kind: &str) -> Option<(Made, AccountKindInfo)> {
+        if let Some(maker) = self.makers().for_kind(kind) {
+            let info = maker.kind(kind).cloned()?;
+            return Some((
+                Made {
+                    provider: maker.provider,
+                    harness: None,
+                },
+                info,
+            ));
+        }
+        if kind == coqui_acp_api::HARNESS_LOGIN {
+            return None;
+        }
+        // The harnesses already read first, so that a caller that has its own in hand builds no other.
+        let read: Vec<String> = self
+            .known
+            .borrow()
+            .iter()
+            .filter(|(_, known)| known.is_some())
+            .map(|(harness, _)| harness.clone())
+            .collect();
+        read.into_iter()
+            .chain(self.harnesses())
+            .find_map(|harness| {
+                let known = self.known(&harness)?;
+                let info = known.listing.kind(kind)?.clone();
+                Some((
+                    Made {
+                        provider: known.provider?,
+                        harness: Some(harness),
+                    },
+                    info,
+                ))
             })
-            // The standards an account provides are its own where its kind says so.
-            .map(|info| super::standards::of_account(info, account.settings.as_ref()))
     }
 
     /// Every harness whose accounts this host can make or run: the bundled agents' and those canoa.cfg's entries run.
@@ -118,6 +190,39 @@ impl<'a> Catalogs<'a> {
             }
         }
         found
+    }
+
+    /// The harness a call that has to go through one reads `account` with: its own login's harness, the harness whose provider made
+    /// its kind, or for a maker's account the first harness that can run it. The reason when there is none.
+    pub(crate) fn reading_harness(&self, account: &AccountConfig) -> Result<String, String> {
+        if let Some(owner) = &account.owner {
+            return Ok(owner.clone());
+        }
+        if let Some((made, _)) = self.made(&account.kind)
+            && let Some(harness) = made.harness
+        {
+            return Ok(harness);
+        }
+        let info = self.kind(account).ok_or_else(|| {
+            format!(
+                "no account provider this host can build makes a {} account",
+                account.kind
+            )
+        })?;
+        fitting(self, account, &info)
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                format!(
+                    "no agent this host runs takes a {} account, so it is read through none",
+                    account.kind
+                )
+            })
+    }
+
+    /// The id of the account provider of `harness`; `None` when it has none.
+    pub(crate) fn provider_id_of(&self, harness: &str) -> Option<String> {
+        self.known(harness)?.provider
     }
 
     /// The kind of the automatic `local` account of `harness`; `None` when its provider does not offer its own login.
@@ -172,10 +277,23 @@ impl<'a> Catalogs<'a> {
     }
 }
 
-/// Whether `runs` applies `account` as an account of a standard it accepts, not as one of its own kinds: another provider made it,
-/// or a maker did, whichever harness it names.
-pub(crate) fn borrowed(makers: &Makers, account: &AccountConfig, runs: &str) -> bool {
-    account.harness != runs || makers.makes(&account.kind)
+/// Whether `runs`, whose catalog is `catalog` when the caller has it, applies `account` as an account of a standard it accepts, not
+/// as one of its own kinds. A maker's accounts are always applied so; the automatic `local` account is its harness's own; any other
+/// is its own when the harness's catalog lists its kind. A caller with no catalog makes no claim that the account is applied as a
+/// standard.
+pub(crate) fn borrowed(
+    makers: &Makers,
+    account: &AccountConfig,
+    runs: &str,
+    catalog: Option<&AccountCatalog>,
+) -> bool {
+    if makers.makes(&account.kind) {
+        return true;
+    }
+    if account.kind == coqui_acp_api::HARNESS_LOGIN {
+        return account.owner.as_deref() != Some(runs);
+    }
+    catalog.is_some_and(|catalog| catalog.kind(&account.kind).is_none())
 }
 
 /// Why `account`, of the kind `info`, cannot run a session on `runs`, whose catalog is `catalog`; `Ok` when it can. The reason
@@ -191,7 +309,7 @@ pub(crate) fn fits(
     account: &AccountConfig,
     info: &AccountKindInfo,
 ) -> Result<(), String> {
-    if !borrowed(makers, account, runs) {
+    if !borrowed(makers, account, runs, Some(catalog)) {
         return Ok(());
     }
     let list = |ids: Vec<&str>| {
@@ -244,6 +362,24 @@ pub(crate) fn fits(
     Ok(())
 }
 
+/// The harnesses `account`, of the kind `info`, can run a session on, in the order the harnesses are listed.
+pub(crate) fn fitting(
+    catalogs: &Catalogs<'_>,
+    account: &AccountConfig,
+    info: &AccountKindInfo,
+) -> Vec<String> {
+    let makers = catalogs.makers();
+    catalogs
+        .harnesses()
+        .into_iter()
+        .filter(|harness| {
+            catalogs
+                .of(harness)
+                .is_some_and(|catalog| fits(&makers, &catalog, harness, account, info).is_ok())
+        })
+        .collect()
+}
+
 /// The setting of an account that names the address of the API it is a key for: what a harness's slot moves to its own endpoint
 /// setting.
 pub(crate) const BASE_URL: &str = "base_url";
@@ -285,6 +421,7 @@ impl<'a> Runs<'a> {
             self.makers.unwrap_or(&Makers::default()),
             account,
             self.harness,
+            self.catalog,
         )
     }
 
@@ -335,7 +472,7 @@ pub(crate) fn usable(config: &Config, catalogs: &Catalogs<'_>, harness: &str) ->
         .accounts
         .iter()
         .filter(|(_, account)| {
-            !borrowed(&makers, account, harness)
+            !borrowed(&makers, account, harness, catalog.as_ref())
                 || catalog.as_ref().is_some_and(|catalog| {
                     catalogs
                         .kind(account)
@@ -353,15 +490,16 @@ mod tests {
 
     use super::*;
 
-    fn account(harness: &str, kind: &str) -> AccountConfig {
+    fn account(kind: &str) -> AccountConfig {
         AccountConfig {
-            harness: harness.to_owned(),
+            owner: None,
             kind: kind.to_owned(),
             id: "id".to_owned(),
             settings: None,
         }
     }
 
+    /// A catalog that accepts `accepts`, and lists the kind `k` as one it applies itself when `own`.
     fn catalog(accepts: &[&str]) -> AccountCatalog {
         let mut catalog = AccountCatalog::new();
         catalog.accepts = accepts.iter().map(|id| Accepted::new(*id)).collect();
@@ -374,13 +512,26 @@ mod tests {
 
     #[test]
     fn an_account_of_the_harness_s_own_provider_always_fits() {
-        let own = account("codex", "k");
-        assert!(fits(&Makers::default(), &catalog(&[]), "codex", &own, &kind(&[])).is_ok());
+        let own = account("k");
+        let mut codex = catalog(&[]);
+        codex.kinds.push(AccountKindInfo::new("k", "K"));
+        assert!(fits(&Makers::default(), &codex, "codex", &own, &kind(&[])).is_ok());
+        assert!(
+            fits(
+                &Makers::default(),
+                &catalog(&[]),
+                "claude",
+                &own,
+                &kind(&[])
+            )
+            .is_err(),
+            "a harness that does not list the kind applies it as a standard"
+        );
     }
 
     #[test]
     fn another_providers_account_fits_when_a_standard_it_provides_is_accepted() {
-        let key = account("claude", "k");
+        let key = account("k");
         let info = kind(&[standard::ANTHROPIC_API]);
         let pi = catalog(&[standard::OPENAI_API, standard::ANTHROPIC_API]);
         assert!(fits(&Makers::default(), &pi, "pi", &key, &info).is_ok());
@@ -394,7 +545,7 @@ mod tests {
 
     #[test]
     fn a_kind_that_provides_nothing_is_taken_only_by_its_own_provider() {
-        let key = account("claude", "k");
+        let key = account("k");
         let why = fits(
             &Makers::default(),
             &catalog(&[standard::ANTHROPIC_API]),
@@ -408,7 +559,7 @@ mod tests {
 
     #[test]
     fn a_gateway_account_fits_only_where_a_gateway_can_be_given() {
-        let gateway = account("claude", FOUNDRY);
+        let gateway = account(FOUNDRY);
         let info = kind(&[standard::ANTHROPIC_API, standard::OPENAI_API]);
         assert!(
             fits(
@@ -447,11 +598,11 @@ mod tests {
             catalog: Some(&harness),
             makers: None,
         };
-        assert!(runs.directory(&account("claude", "k"), &info));
+        assert!(runs.directory(&account("k"), &info));
         assert!(
-            !runs.directory(&account("pi", "k"), &info),
+            !runs.directory(&account("own-key"), &info),
             "its own kind says"
         );
-        assert!(!Runs::plain("pi").directory(&account("claude", "k"), &info));
+        assert!(!Runs::plain("pi").directory(&account("k"), &info));
     }
 }

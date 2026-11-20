@@ -80,9 +80,11 @@ pub(crate) struct Harness {
     departures: Vec<Departure>,
     /// What the provider says of the accounts it applies: the standards it accepts and how; `None` when it could not say.
     catalog: Option<AccountCatalog>,
-    /// The account kinds and sign-in methods the harness's account provider offers, with the host's own beside them: what an
-    /// account of this provider can be, and how it is made.
+    /// The account kinds and sign-in methods the harness's own account provider offers, and no maker's: what an account of this
+    /// provider can be, and how it is made.
     listing: AccountCatalog,
+    /// The id of the account provider the harness declares.
+    account_provider_id: Option<String>,
     /// The harness's account provider, which signs in, renews, watches, reads plan limits and lists models; `None` when it offers none.
     accounts_of: Option<Arc<dyn AccountProvider>>,
     /// Whether the account provider offers the harness's own login as the automatic `local` account.
@@ -168,14 +170,8 @@ impl Harness {
             })?;
         let catalog = plain.accounts().ok();
         let link = plain.describe().ok().and_then(|info| info.accounts);
-        let (accounts_of, listing, local) = account_side(
-            registry,
-            id,
-            link.as_ref(),
-            (settings, account_settings),
-            catalog.as_ref(),
-            &makers,
-        )?;
+        let (accounts_of, listing, local) =
+            account_side(registry, link.as_ref(), (settings, account_settings))?;
         let profiled = if profiles {
             let mut map = settings.as_map().clone();
             map.insert(CLIENT_PLUGINS.to_owned(), serde_json::Value::Bool(true));
@@ -196,6 +192,7 @@ impl Harness {
             departures,
             catalog,
             listing,
+            account_provider_id: link.map(|link| link.provider),
             accounts_of,
             local,
             makers,
@@ -295,10 +292,15 @@ impl Harness {
         &self.makers
     }
 
-    /// The kinds of account and the ways to sign in that the harness's account provider offers, with the host's own beside
-    /// them, each kind saying the standards it provides.
+    /// The kinds of account and the ways to sign in that the harness's own account provider offers, each kind saying the standards
+    /// it provides.
     pub(crate) const fn listing(&self) -> &AccountCatalog {
         &self.listing
+    }
+
+    /// The id of the account provider the harness declares; `None` when it declares none.
+    pub(crate) fn account_provider_id(&self) -> Option<&str> {
+        self.account_provider_id.as_deref()
     }
 
     /// The automatic `local` account: the harness run on its own login, as its configuration stands, when its account provider
@@ -663,7 +665,8 @@ impl Harness {
     /// provider's account provider is the one that reads it.
     fn watcher(&self, held: &Held, source: u64) -> Option<Watcher> {
         let grant = held.grant();
-        if !held.rotates() || held.owner() != self.id || grant.state_dir.is_none() {
+        if !held.rotates() || self.listing.kind(&grant.kind).is_none() || grant.state_dir.is_none()
+        {
             return None;
         }
         let provider = Arc::clone(self.accounts_of.as_ref()?);
@@ -775,11 +778,8 @@ type AccountSide = (Option<Arc<dyn AccountProvider>>, AccountCatalog, bool);
 /// accounts to make, and its listing holds only the login a program has where it runs.
 fn account_side(
     registry: &Registry,
-    harness: &str,
     link: Option<&AccountsLink>,
     (settings, own): (&Settings, &Settings),
-    accepts: Option<&AccountCatalog>,
-    makers: &Makers,
 ) -> Result<AccountSide, ProviderError> {
     let mut listing = AccountCatalog::new();
     let provider = match link {
@@ -795,7 +795,6 @@ fn account_side(
         listing.kinds.extend(offer.kinds);
         listing.logins = offer.logins;
     }
-    makers.extend(&mut listing, harness, accepts);
     Ok((provider, listing, local))
 }
 

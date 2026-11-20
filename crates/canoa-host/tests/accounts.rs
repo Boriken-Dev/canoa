@@ -76,8 +76,8 @@ impl Fixture {
                 "accounts",
                 "add",
                 "work",
-                "--harness",
-                "claude",
+                "--provider",
+                "claude_accounts",
                 "--method",
                 "subscription",
             ],
@@ -292,8 +292,8 @@ fn with_a_pool(accounts: &str) -> Fixture {
             "accounts",
             "add",
             "work2",
-            "--harness",
-            "claude",
+            "--provider",
+            "claude_accounts",
             "--method",
             "subscription",
         ],
@@ -478,8 +478,8 @@ fn signing_in_makes_an_account_whose_credential_is_in_the_store_and_not_in_canoa
             "accounts",
             "add",
             "work",
-            "--harness",
-            "claude",
+            "--provider",
+            "claude_accounts",
             "--method",
             "subscription",
         ],
@@ -497,9 +497,7 @@ fn signing_in_makes_an_account_whose_credential_is_in_the_store_and_not_in_canoa
 
     let cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
     assert!(
-        cfg.contains(
-            "[host.accounts.work]\nharness = \"claude\"\nkind = \"claude-login\"\nid = \""
-        ),
+        cfg.contains("[host.accounts.work]\nkind = \"claude-login\"\nid = \""),
         "{cfg}"
     );
     assert!(!cfg.contains(CANARY) && !cfg.contains("123456"), "{cfg}");
@@ -534,8 +532,8 @@ fn signing_in_makes_an_account_whose_credential_is_in_the_store_and_not_in_canoa
             "accounts",
             "add",
             "work",
-            "--harness",
-            "claude",
+            "--provider",
+            "claude_accounts",
             "--method",
             "subscription",
         ],
@@ -555,14 +553,15 @@ fn the_login_each_harness_has_is_listed_after_the_accounts_of_canoa_cfg() {
     assert!(
         ["claude", "codex", "pi"].iter().all(|harness| locals
             .iter()
-            .any(|row| row["harness"] == *harness
+            .any(|row| row["fits"] == json!([harness])
                 && row["name"] == "local"
                 && row["id"] == format!("local:{harness}"))),
         "{rows:?}"
     );
     let listing = fixture.canoa(&["accounts", "list"], None);
     assert!(
-        text(&listing.stdout).contains("local claude harness-login signed in where it runs"),
+        text(&listing.stdout)
+            .contains("local claude_accounts harness-login signed in where it runs"),
         "{}",
         text(&listing.stdout)
     );
@@ -586,8 +585,8 @@ fn a_code_the_cli_refuses_makes_no_account() {
             "accounts",
             "add",
             "work",
-            "--harness",
-            "claude",
+            "--provider",
+            "claude_accounts",
             "--method",
             "subscription",
         ],
@@ -602,7 +601,10 @@ fn a_code_the_cli_refuses_makes_no_account() {
 #[test]
 fn the_method_is_named_from_the_providers_list() {
     let fixture = Fixture::bare();
-    let added = fixture.canoa(&["accounts", "add", "work", "--harness", "claude"], None);
+    let added = fixture.canoa(
+        &["accounts", "add", "work", "--provider", "claude_accounts"],
+        None,
+    );
     assert_eq!(added.status.code(), Some(2));
     let err = text(&added.stderr);
     assert!(
@@ -848,7 +850,7 @@ fn a_credential_written_in_canoa_cfg_is_refused_naming_its_key() {
     let cfg = std::fs::read_to_string(&fixture.config).expect("canoa.cfg");
     std::fs::write(
         &fixture.config,
-        format!("{cfg}\n[host.accounts.work]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"x\"\napi_key = \"CANARY-in-clear\"\n"),
+        format!("{cfg}\n[host.accounts.work]\nkind = \"anthropic-api-key\"\nid = \"x\"\napi_key = \"CANARY-in-clear\"\n"),
     )
     .expect("written");
     let refused = fixture.canoa(&["accounts", "list"], None);
@@ -865,7 +867,7 @@ fn a_credential_written_in_canoa_cfg_is_refused_naming_its_key() {
     );
     std::fs::write(
         &fixture.config,
-        format!("{cfg}\n[host.accounts.work]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"x\"\nsettings = {{ api_key = \"CANARY-in-clear\" }}\n"),
+        format!("{cfg}\n[host.accounts.work]\nkind = \"anthropic-api-key\"\nid = \"x\"\nsettings = {{ api_key = \"CANARY-in-clear\" }}\n"),
     )
     .expect("written");
     let served = Command::new(host_binary())
@@ -935,8 +937,8 @@ fn offering(method: &str, input: &str, extra: &str) -> Fixture {
             "accounts",
             "add",
             "one",
-            "--harness",
-            "claude",
+            "--provider",
+            "claude_accounts",
             "--method",
             method,
         ],
@@ -1037,8 +1039,8 @@ accounts = \"file\"
             "accounts",
             "add",
             "work",
-            "--harness",
-            "claude",
+            "--provider",
+            "claude_accounts",
             "--method",
             "subscription",
         ],
@@ -1119,8 +1121,8 @@ fn pi_on_a_claude_key(extra: &str) -> Fixture {
             "accounts",
             "add",
             "one",
-            "--harness",
-            "claude",
+            "--provider",
+            "claude_accounts",
             "--method",
             "api-key",
         ],
@@ -1144,9 +1146,9 @@ fn pi_on_a_claude_key(extra: &str) -> Fixture {
 #[test]
 fn an_account_says_which_standards_it_provides() {
     let fixture = Fixture::signed_in();
-    assert_eq!(fixture.account()["provides"], json!(["claude-code"]));
+    assert_eq!(fixture.account()["types"], json!(["claude-code"]));
     let fixture = offering("api-key", "sk-test-key-0000\n", "");
-    assert_eq!(fixture.account()["provides"], json!(["anthropic-api"]));
+    assert_eq!(fixture.account()["types"], json!(["anthropic-api"]));
 }
 
 #[test]

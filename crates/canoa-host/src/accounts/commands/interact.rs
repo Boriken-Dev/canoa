@@ -15,9 +15,8 @@ use coqui_acp_api::{LoginAnswer, LoginForm, OpenUrl};
 
 use super::super::Accounts;
 use super::super::login::{self, Interaction};
-use super::Env;
+use super::{Env, Signing};
 use crate::cli::{Failed, Format, Front};
-use crate::kind;
 
 /// What a sign-in asks of its front, passed to the thread that owns it.
 pub(crate) enum Event {
@@ -85,12 +84,12 @@ impl Interaction for Relay {
 /// Why a typed answer cannot be taken, when the front has no way to take one.
 const NO_TYPING: &str = "this way of running canoa cannot take a typed secret: sealed prompts are not available to it yet, so run `canoa accounts add` in a terminal, or add the account in the app";
 
-/// Runs the sign-in `method` of `harness` and answers what it made, showing its prompts through `env.front`. `cancel` is set
-/// when the person gives up.
+/// Runs the sign-in `method` of an account provider and answers what it made, showing its prompts through `env.front`. `cancel` is
+/// set when the person gives up.
 pub(super) fn sign_in(
     env: &Env<'_>,
     accounts: &Accounts,
-    provider: &kind::Harness,
+    provider: &Signing<'_>,
     method: &str,
     inputs: &serde_json::Map<String, serde_json::Value>,
     format: Format,
@@ -125,8 +124,8 @@ pub(super) fn sign_in(
         });
         let outcome = login::sign_in(
             accounts,
-            provider.makers(),
-            &**provider.account_provider().map_err(Failed::run)?,
+            provider.makers,
+            provider.provider,
             method,
             inputs,
             relay.clone(),

@@ -100,23 +100,17 @@ impl Fixture {
         child.wait_with_output().expect("canoa ends")
     }
 
-    /// `canoa accounts add gw --harness H --method M`, where the person is the test: each page the sign-in asks to open is
+    /// `canoa accounts add gw --provider litellm_accounts --method M`, where the person is the test: each page the sign-in asks to open is
     /// "visited" by `browse`. Answers what it printed and whether it succeeded.
-    fn add_as(
-        &self,
-        harness: &str,
-        method: &str,
-        address: &str,
-        browse: impl Fn(&str),
-    ) -> (bool, String, bool) {
+    fn add_as(&self, method: &str, address: &str, browse: impl Fn(&str)) -> (bool, String, bool) {
         let input = format!("base_url={address}");
         let mut child = self
             .command(&[
                 "accounts",
                 "add",
                 "gw",
-                "--harness",
-                harness,
+                "--provider",
+                "litellm_accounts",
                 "--method",
                 method,
                 "--input",
@@ -186,7 +180,7 @@ impl Fixture {
 fn signing_in_through_the_proxys_sso_makes_the_account_and_the_key_rests_in_the_store_alone() {
     let proxy = Proxy::start();
     let fixture = Fixture::new();
-    let (made, said, opened) = fixture.add_as("codex", "litellm-sso", &proxy.address, |page| {
+    let (made, said, opened) = fixture.add_as("litellm-sso", &proxy.address, |page| {
         // The page is the proxy's, and the person's browser would go on to the address it redirects to.
         let page = page.to_owned();
         let proxy_address = proxy.address.clone();
@@ -214,9 +208,10 @@ fn signing_in_through_the_proxys_sso_makes_the_account_and_the_key_rests_in_the_
     );
     let row = fixture.listed();
     assert_eq!(row["kind"], "litellm", "{row}");
-    assert_eq!(row["harness"], "codex", "{row}");
+    assert_eq!(row["provider"], "litellm_accounts", "{row}");
+    assert_eq!(row["fits"], json!(["claude", "codex"]), "{row}");
     assert_eq!(
-        row["provides"],
+        row["types"],
         json!(["openai-api", "anthropic-api"]),
         "{row}"
     );
@@ -249,7 +244,7 @@ fn signing_in_through_the_proxys_sso_makes_the_account_and_the_key_rests_in_the_
     // A proxy with no such sign-in refuses it and no account is made.
     let old = Proxy::start_with(false);
     let other = Fixture::new();
-    let (made, said, opened) = other.add_as("codex", "litellm-sso", &old.address, |_| {});
+    let (made, said, opened) = other.add_as("litellm-sso", &old.address, |_| {});
     assert!(
         !made && !opened && said.contains("offers no sign-in"),
         "{said}"
@@ -271,8 +266,8 @@ fn one_litellm_account_set_by_a_key_runs_a_stand_in_of_each_harness_and_both_lis
             "accounts",
             "add",
             "gw",
-            "--harness",
-            "claude",
+            "--provider",
+            "litellm_accounts",
             "--method",
             "litellm-key",
             "--input",

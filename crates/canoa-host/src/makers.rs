@@ -16,7 +16,7 @@ use std::sync::{Arc, OnceLock};
 
 use canoa::vendor::AgentVendor;
 use coqui_acp_api::guatiao::library::Registry;
-use coqui_acp_api::{AccountCatalog, AccountKindInfo, AccountOffer, AccountProvider, AcpHarness};
+use coqui_acp_api::{AccountKindInfo, AccountOffer, AccountProvider, AcpHarness};
 
 use crate::config::Config;
 
@@ -242,6 +242,16 @@ impl Makers {
         }
     }
 
+    /// Every maker in force: in a test the stand-ins the test's thread named, the bundled ones, then those canoa.cfg's libraries add.
+    pub(crate) fn all(&self) -> Vec<Maker> {
+        let mut found = Vec::new();
+        self.visit(|maker| {
+            found.push(maker.clone());
+            true
+        });
+        found
+    }
+
     /// The maker that makes accounts of `kind`.
     pub(crate) fn for_kind(&self, kind: &str) -> Option<Maker> {
         let mut found = None;
@@ -294,58 +304,6 @@ impl Makers {
             true
         });
         found
-    }
-
-    /// Adds the kinds and sign-in methods the makers offer to `listing`, the harness `harness`'s own: a kind a gateway serves joins when
-    /// the harness can be given a gateway, any other when the harness accepts a standard the kind provides (any it accepts, for a kind whose accounts name their own) and, for a
-    /// kind that names an address, can point it there. `catalog` is what the harness accepts; a harness that lists none takes none.
-    pub(crate) fn extend(
-        &self,
-        listing: &mut AccountCatalog,
-        harness: &str,
-        catalog: Option<&AccountCatalog>,
-    ) {
-        self.visit(|maker| {
-            for kind in &maker.accounts.kinds {
-                if listing.kinds.iter().any(|each| each.id == kind.id) {
-                    continue;
-                }
-                let joins = if crate::gateways::for_kind(&kind.id).is_some() {
-                    crate::vendors::gateway_route(harness).is_some()
-                } else {
-                    // A kind whose accounts name their own standards is open to any harness that accepts one, whichever it is. A kind
-                    // that names the address of its API (a key for that address) needs a harness that can point the standard at it.
-                    let own = crate::accounts::standards::property(kind).is_some();
-                    let addressed = kind
-                        .endpoints
-                        .iter()
-                        .any(|slot| slot.purpose == coqui_acp_api::MODEL_API && slot.key.is_some());
-                    catalog.is_some_and(|catalog| {
-                        catalog.accepts.iter().any(|accepted| {
-                            (own || kind.provides.contains(&accepted.standard))
-                                && (!addressed
-                                    || accepted
-                                        .slots
-                                        .iter()
-                                        .any(|slot| slot.base_url_setting.is_some()))
-                        })
-                    })
-                };
-                if !joins {
-                    continue;
-                }
-                listing.kinds.push(kind.clone());
-                listing.logins.extend(
-                    maker
-                        .accounts
-                        .logins
-                        .iter()
-                        .filter(|method| method.produces == kind.id)
-                        .cloned(),
-                );
-            }
-            true
-        });
     }
 }
 

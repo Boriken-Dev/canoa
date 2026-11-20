@@ -134,13 +134,11 @@ fn verdict(
     kinds: &Catalogs<'_>,
     account: &AccountConfig,
 ) -> Option<Result<(), String>> {
-    let listing = kinds.listing(&account.harness)?;
-    listing
-        .kinds
+    let beside = kinds.kinds_beside(&account.kind);
+    beside.iter().find(|kind| is_key_for(service, kind))?;
+    let Some(kind) = beside
         .iter()
-        .find(|kind| is_key_for(service, kind))?;
-    let Some(kind) = listing
-        .kind(&account.kind)
+        .find(|kind| kind.id == account.kind)
         .filter(|kind| is_key_for(service, kind))
     else {
         return Some(Err(format!(

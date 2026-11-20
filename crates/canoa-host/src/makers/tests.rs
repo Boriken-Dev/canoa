@@ -159,7 +159,7 @@ fn maker(asked: &Arc<AtomicUsize>, used_up: &Arc<AtomicBool>) -> Maker {
 const CONFIG: &str = "\
 [host.agents.Claude]\nharness = \"claude\"\naccounts = [\"shared\"]\n\
 [host.agents.Codex]\nharness = \"codex\"\naccounts = [\"shared\"]\n\
-[host.accounts.shared]\nharness = \"claude\"\nkind = \"standin-two\"\nid = \"id-shared\"\n";
+[host.accounts.shared]\nkind = \"standin-two\"\nid = \"id-shared\"\n";
 
 fn store(dir: &Dir) -> Arc<Accounts> {
     let root = dir.0.join("accounts");
@@ -205,7 +205,7 @@ fn one_account_of_two_standards_runs_both_harnesses_sits_in_both_pools_and_one_r
         let (_, account, info) = harness
             .account_named("shared", false)
             .expect("offered here");
-        assert_eq!(account.harness, "claude", "made through one harness");
+        assert_eq!(account.owner, None, "an account names no harness");
         assert_eq!(
             info.provides,
             [standard::ANTHROPIC_API, standard::OPENAI_API]
@@ -279,44 +279,6 @@ fn one_account_of_two_standards_runs_both_harnesses_sits_in_both_pools_and_one_r
 }
 
 #[test]
-fn a_maker_s_kind_joins_only_the_harnesses_that_accept_a_standard_it_provides() {
-    let (asked, used_up) = (
-        Arc::new(AtomicUsize::new(0)),
-        Arc::new(AtomicBool::new(false)),
-    );
-    let _serving = stand_ins::serving(vec![maker(&asked, &used_up)]);
-    let join = |harness: &str, accepts: &[&str]| {
-        let mut catalog = coqui_acp_api::AccountCatalog::new();
-        catalog.accepts = accepts
-            .iter()
-            .map(|id| coqui_acp_api::Accepted::new(*id))
-            .collect();
-        let mut listing = coqui_acp_api::AccountCatalog::new();
-        Makers::default().extend(&mut listing, harness, Some(&catalog));
-        listing
-    };
-    let both = join("h", &[standard::OPENAI_API]);
-    assert!(both.kind(KIND).is_some());
-    assert_eq!(
-        both.logins
-            .iter()
-            .filter(|method| method.produces == KIND)
-            .count(),
-        1
-    );
-    assert!(join("h", &[standard::XAI_API]).kind(KIND).is_none());
-    assert!(join("h", &[]).kind(KIND).is_none());
-    let again = {
-        let mut listing = both.clone();
-        let mut catalog = coqui_acp_api::AccountCatalog::new();
-        catalog.accepts = vec![coqui_acp_api::Accepted::new(standard::OPENAI_API)];
-        Makers::default().extend(&mut listing, "h", Some(&catalog));
-        listing
-    };
-    assert_eq!(again, both, "joining twice changes nothing");
-}
-
-#[test]
 fn an_account_of_two_standards_is_listed_once_for_every_harness_that_runs_it() {
     let (asked, used_up) = (
         Arc::new(AtomicUsize::new(0)),
@@ -357,13 +319,18 @@ fn an_account_a_maker_made_fits_only_where_a_standard_it_provides_is_accepted_th
     );
     let _serving = stand_ins::serving(vec![maker(&asked, &used_up)]);
     let account = crate::config::AccountConfig {
-        harness: "claude".to_owned(),
+        owner: None,
         kind: KIND.to_owned(),
         id: "id".to_owned(),
         settings: None,
     };
+    let lists = |kind: &str| {
+        let mut catalog = coqui_acp_api::AccountCatalog::new();
+        catalog.kinds.push(AccountKindInfo::new(kind, "K"));
+        catalog
+    };
     assert!(
-        borrowed(&Makers::default(), &account, "claude"),
+        borrowed(&Makers::default(), &account, "claude", Some(&lists(KIND))),
         "a maker's kind is applied as a standard, by every harness"
     );
     let own = crate::config::AccountConfig {
@@ -371,8 +338,17 @@ fn an_account_a_maker_made_fits_only_where_a_standard_it_provides_is_accepted_th
         ..account.clone()
     };
     assert!(
-        !borrowed(&Makers::default(), &own, "claude")
-            && borrowed(&Makers::default(), &own, "codex")
+        !borrowed(
+            &Makers::default(),
+            &own,
+            "claude",
+            Some(&lists("claude-login"))
+        ) && borrowed(
+            &Makers::default(),
+            &own,
+            "codex",
+            Some(&lists("codex-chatgpt"))
+        )
     );
     let mut catalog = coqui_acp_api::AccountCatalog::new();
     catalog.accepts = vec![coqui_acp_api::Accepted::new(standard::ANTHROPIC_API)];
@@ -392,7 +368,7 @@ fn an_account_a_maker_made_fits_only_where_a_standard_it_provides_is_accepted_th
 }
 
 #[test]
-fn a_kind_that_names_an_address_joins_and_fits_only_a_harness_that_can_point_its_standard_at_it() {
+fn a_kind_that_names_an_address_fits_only_a_harness_that_can_point_its_standard_at_it() {
     use crate::accounts::matching::fits;
     use coqui_acp_api::{Accepted, AcceptedSlot, AccountCatalog};
     let catalog = |slot: AcceptedSlot| {
@@ -402,19 +378,8 @@ fn a_kind_that_names_an_address_joins_and_fits_only_a_harness_that_can_point_its
     };
     let moves = catalog(AcceptedSlot::new("api_key", "own-key").base_url("openai_base_url", None));
     let fixed = catalog(AcceptedSlot::new("api_key", "own-key"));
-    let joined = |catalog: &AccountCatalog| {
-        let mut listing = AccountCatalog::new();
-        Makers::default().extend(&mut listing, "h", Some(catalog));
-        let ids: Vec<String> = listing.kinds.iter().map(|kind| kind.id.clone()).collect();
-        ids
-    };
-    // The bundled gateway and proxy kinds are keys for an address of the person's.
-    for kind in ["api-gateway", "litellm"] {
-        assert!(joined(&moves).iter().any(|id| id == kind), "{kind}");
-        assert!(!joined(&fixed).iter().any(|id| id == kind), "{kind}");
-    }
     let account = crate::config::AccountConfig {
-        harness: "codex".to_owned(),
+        owner: None,
         kind: "litellm".to_owned(),
         id: "id".to_owned(),
         settings: Some(crate::config::Settings::new(

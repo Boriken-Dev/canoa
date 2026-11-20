@@ -34,12 +34,10 @@ harness = \"claude\"
 title = \"Mine\"
 
 [host.accounts.work] # the work login
-harness = \"claude\"
 kind = \"api\"
 id = \"id-work\"
 
 [host.accounts.spare]
-harness = \"claude\"
 kind = \"api\"
 id = \"id-spare\"
 
@@ -121,7 +119,7 @@ fn a_table_removed_leaves_the_rest_of_the_text_as_written() {
     assert_eq!(
         written,
         PERSON.replacen(
-            "\n[host.accounts.spare]\nharness = \"claude\"\nkind = \"api\"\nid = \"id-spare\"\n",
+            "\n[host.accounts.spare]\nkind = \"api\"\nid = \"id-spare\"\n",
             "",
             1
         ),

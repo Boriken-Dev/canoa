@@ -287,15 +287,15 @@ fn a_provider_command_line_holds_no_setting() {
     );
 }
 
-/// An offered account as the entry's harness would see it: made by `harness`, of a kind that keeps nothing in a directory.
-fn offered(harness: &str, provides: &[&str], endpoint: bool) -> kind::Offered {
+/// An offered account of the kind `k`, which keeps nothing in a directory.
+fn offered(provides: &[&str], endpoint: bool) -> kind::Offered {
     let mut info = coqui_acp_api::AccountKindInfo::new("k", "K").provides(provides.iter().copied());
     if endpoint {
         info.endpoints =
             vec![coqui_acp_api::EndpointSlot::new(coqui_acp_api::MODEL_API).key("base_url")];
     }
     let account = crate::config::AccountConfig {
-        harness: harness.to_owned(),
+        owner: None,
         kind: "k".to_owned(),
         id: "id".to_owned(),
         settings: None,
@@ -306,24 +306,29 @@ fn offered(harness: &str, provides: &[&str], endpoint: bool) -> kind::Offered {
 #[test]
 fn a_key_another_provider_made_is_a_key_in_the_environment_whatever_its_kind_says_of_an_address() {
     // Its own provider's key says it by its address; an API standard's account made elsewhere says it by what it provides.
+    let mut lists_k = coqui_acp_api::AccountCatalog::new();
+    lists_k
+        .kinds
+        .push(coqui_acp_api::AccountKindInfo::new("k", "K"));
+    let lists_nothing = coqui_acp_api::AccountCatalog::new();
     assert!(keeps_key_in_environment(
         &crate::makers::Makers::default(),
-        &[offered("claude", &["anthropic-api"], true)],
-        "claude"
+        &[offered(&["anthropic-api"], true)],
+        ("claude", Some(&lists_k))
     ));
     assert!(!keeps_key_in_environment(
         &crate::makers::Makers::default(),
-        &[offered("claude", &["claude-code"], false)],
-        "claude"
+        &[offered(&["claude-code"], false)],
+        ("claude", Some(&lists_k))
     ));
     assert!(keeps_key_in_environment(
         &crate::makers::Makers::default(),
-        &[offered("claude", &["anthropic-api"], false)],
-        "pi"
+        &[offered(&["anthropic-api"], false)],
+        ("pi", Some(&lists_nothing))
     ));
     assert!(!keeps_key_in_environment(
         &crate::makers::Makers::default(),
-        &[offered("pi", &["pi"], false)],
-        "claude"
+        &[offered(&["pi"], false)],
+        ("claude", Some(&lists_k))
     ));
 }

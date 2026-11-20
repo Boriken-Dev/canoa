@@ -96,7 +96,7 @@ fn an_account_a_gateway_serves_lists_the_models_of_the_gateway_through_the_same_
         .expect("the account is made, and holds no credential");
     let config = Config::from_str_in(
         "[host.agents.Claude]\nharness = \"claude\"\naccounts = [\"chat\"]\n\
-         [host.accounts.chat]\nharness = \"claude\"\nkind = \"foundry-local\"\nid = \"id-foundry\"\n\
+         [host.accounts.chat]\nkind = \"foundry-local\"\nid = \"id-foundry\"\n\
          settings = { model = \"local-small\" }\n",
         std::path::Path::new(""),
     )
@@ -175,9 +175,9 @@ fn the_models_of_a_pool_show_each_model_once_with_every_account_that_lists_it() 
     }
     let config = Config::from_str_in(
         "[host.agents.Claude]\nharness = \"claude\"\naccounts = [\"both\"]\n\
-         [host.accounts.a]\nharness = \"claude\"\nkind = \"foundry-local\"\nid = \"id-a\"\n\
+         [host.accounts.a]\nkind = \"foundry-local\"\nid = \"id-a\"\n\
          settings = { model = \"shared\" }\n\
-         [host.accounts.b]\nharness = \"claude\"\nkind = \"foundry-local\"\nid = \"id-b\"\n\
+         [host.accounts.b]\nkind = \"foundry-local\"\nid = \"id-b\"\n\
          settings = { model = \"shared\" }\n\
          [host.pools.both]\nstandard = \"anthropic-api\"\naccounts = [\"a\", \"b\"]\n",
         std::path::Path::new(""),
@@ -252,7 +252,7 @@ fn an_account_another_harness_made_is_listed_by_the_account_provider_that_made_i
         &format!(
             "[host.agents.Pi]\nharness = \"pi\"\naccounts = [\"shared\"]\n\
              [host.agents.Claude]\nharness = \"claude\"\nexecutable = {}\n\
-             [host.accounts.shared]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-shared\"\n",
+             [host.accounts.shared]\nkind = \"anthropic-api-key\"\nid = \"id-shared\"\n",
             toml_string(&missing.to_string_lossy())
         ),
         std::path::Path::new(""),

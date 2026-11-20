@@ -107,10 +107,6 @@ pub(super) fn append_account(
     account: &AccountConfig,
 ) -> Result<(), Failed> {
     let mut block = toml::Table::new();
-    block.insert(
-        "harness".into(),
-        toml::Value::String(account.harness.clone()),
-    );
     block.insert("kind".into(), toml::Value::String(account.kind.clone()));
     block.insert("id".into(), toml::Value::String(account.id.clone()));
     if let Some(settings) = &account.settings
@@ -440,7 +436,7 @@ mod format_tests {
 
     fn account() -> AccountConfig {
         AccountConfig {
-            harness: "claude".to_owned(),
+            owner: None,
             kind: "api".to_owned(),
             id: "id-1".to_owned(),
             settings: None,

@@ -490,7 +490,6 @@ pub(super) struct RawControl {
 /// there is never quoted.
 #[derive(Deserialize)]
 pub(super) struct RawAccount {
-    pub(super) harness: Option<String>,
     pub(super) kind: Option<String>,
     pub(super) id: Option<String>,
     pub(super) settings: Option<toml::Table>,

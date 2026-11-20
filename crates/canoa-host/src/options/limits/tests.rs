@@ -112,8 +112,8 @@ const FAR: i64 = 4_102_444_800_000;
 
 fn claude_config() -> Config {
     config(
-        "[host.accounts.work]\nharness = \"claude\"\nkind = \"claude-login\"\nid = \"id-work\"\n\
-         [host.accounts.key]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-key\"\n",
+        "[host.accounts.work]\nkind = \"claude-login\"\nid = \"id-work\"\n\
+         [host.accounts.key]\nkind = \"anthropic-api-key\"\nid = \"id-key\"\n",
     )
 }
 
@@ -182,7 +182,6 @@ fn an_api_key_behind_a_gateway_reports_the_gateways_budget_and_the_key_goes_only
     );
     let config = config(&format!(
         "[host.accounts.key]
-harness = \"claude\"
 kind = \"anthropic-api-key\"
 id = \"id-key\"
          settings = {{ base_url = \"{}\" }}
@@ -226,7 +225,7 @@ fn a_refused_login_is_told_to_renew_and_a_failed_renewal_is_said() {
     let endpoints = Endpoints::default().with("claude", server.address.clone());
     // A `claude` program that does not exist: the renewal cannot run, which the answer says after the refusal.
     let config = config(
-        "[host.agents]\n[host.accounts.work]\nharness = \"claude\"\nkind = \"claude-login\"\nid = \"id-work\"\n\
+        "[host.agents]\n[host.accounts.work]\nkind = \"claude-login\"\nid = \"id-work\"\n\
          [host.agents.Claude]\nharness = \"claude\"\nexecutable = \"canoa-no-such-claude\"\naccounts = [\"work\"]\n",
     );
     let why = super::super::usage_at(&config, "work", &store, &endpoints).expect_err("refused");
@@ -262,8 +261,8 @@ fn a_codex_chatgpt_login_reads_and_pi_says_it_offers_none() {
             "secondary_window": {"used_percent": 42, "limit_window_seconds": 604_800, "reset_at": 4_102_444_800_i64}}}),
     );
     let config = config(
-        "[host.accounts.chat]\nharness = \"codex\"\nkind = \"codex-chatgpt\"\nid = \"id-codex\"\n\
-         [host.accounts.pi]\nharness = \"pi\"\nkind = \"pi-oauth\"\nid = \"id-pi\"\n",
+        "[host.accounts.chat]\nkind = \"codex-chatgpt\"\nid = \"id-codex\"\n\
+         [host.accounts.pi]\nkind = \"pi-oauth\"\nid = \"id-pi\"\n",
     );
     let endpoints = Endpoints::default().with("codex", server.address.clone());
     let row = super::super::usage_at(&config, "chat", &store, &endpoints).expect("read");
@@ -299,7 +298,7 @@ fn a_refused_login_is_renewed_from_the_directory_the_stored_copy_was_written_to(
     let endpoints = Endpoints::default().with("claude", server.address.clone());
     let config = config(
         "[host.agents.Claude]\nharness = \"claude\"\nexecutable = \"canoa-no-such-claude\"\naccounts = [\"work\"]\n\
-         [host.accounts.work]\nharness = \"claude\"\nkind = \"claude-login\"\nid = \"id-work\"\n",
+         [host.accounts.work]\nkind = \"claude-login\"\nid = \"id-work\"\n",
     );
     let why = super::super::usage_at(&config, "work", &store, &endpoints).expect_err("refused");
     // The login was there for the account provider to look at, so what stopped it was the program, not a missing login.

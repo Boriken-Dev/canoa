@@ -40,10 +40,7 @@ fn an_account_called_anything_a_person_can_read_is_written_found_and_removed() {
             &path,
             &["host", "accounts"],
             name,
-            &table(&format!(
-                "harness = \"claude\"\nkind = \"api\"\nid = \"id-{}\"\n",
-                name.len()
-            )),
+            &table(&format!("kind = \"api\"\nid = \"id-{}\"\n", name.len())),
         )
         .expect(name);
     }
@@ -84,12 +81,11 @@ fn an_account_called_anything_a_person_can_read_is_written_found_and_removed() {
 fn names_that_are_keys_take_any_text_and_names_that_are_addresses_do_not() {
     for name in ["work", "my work", "café", "a.b"] {
         let text = format!(
-            "[host.accounts.\"{name}\"]\nharness = \"claude\"\nkind = \"api\"\nid = \"i\"\n\n[host.pools.\"pool {name}\"]\nstandard = \"anthropic-api\"\naccounts = [\"{name}\"]\n"
+            "[host.accounts.\"{name}\"]\nkind = \"api\"\nid = \"i\"\n\n[host.pools.\"pool {name}\"]\nstandard = \"anthropic-api\"\naccounts = [\"{name}\"]\n"
         );
         Config::from_str_named(&text, "canoa.cfg", Path::new(".")).expect(name);
     }
-    let control =
-        "[host.accounts.\"a\\u0001b\"]\nharness = \"claude\"\nkind = \"api\"\nid = \"i\"\n";
+    let control = "[host.accounts.\"a\\u0001b\"]\nkind = \"api\"\nid = \"i\"\n";
     assert!(Config::from_str_named(control, "canoa.cfg", Path::new(".")).is_err());
     let entry = "[host.agents.\"my agent\"]\nharness = \"claude\"\n";
     assert!(Config::from_str_named(entry, "canoa.cfg", Path::new(".")).is_err());

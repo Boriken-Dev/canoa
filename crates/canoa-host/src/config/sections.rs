@@ -186,6 +186,11 @@ pub(super) fn account_of(name: &str, raw: RawAccount) -> Result<AccountConfig, C
         entry: None,
         what: format!("account {name}: {what}"),
     };
+    if raw.rest.contains_key("harness") {
+        return Err(refused(
+            "harness is not a key of an account: it names its kind, and the account provider that offers the kind made it".to_owned(),
+        ));
+    }
     if let Some(key) = raw.rest.keys().next() {
         return Err(refused(format!(
             "{key} is not a key of an account, and a credential never goes in canoa.cfg: `canoa accounts add` keeps it in the account store"
@@ -206,7 +211,7 @@ pub(super) fn account_of(name: &str, raw: RawAccount) -> Result<AccountConfig, C
         .map(|table| settings_of(name, table))
         .transpose()?;
     Ok(AccountConfig {
-        harness: text(raw.harness, "harness")?,
+        owner: None,
         kind: text(raw.kind, "kind")?,
         id,
         settings,

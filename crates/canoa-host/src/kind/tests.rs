@@ -126,7 +126,7 @@ harness = \"pi\"
         let (name, account, info) = built.local_account().expect("it offers its own login");
         assert_eq!(name, coqui_acp_api::LOCAL_ACCOUNT, "{id}");
         assert_eq!(account.kind, HARNESS_LOGIN);
-        assert_eq!(account.harness, id);
+        assert_eq!(account.owner.as_deref(), Some(id));
         assert_eq!(info.id, HARNESS_LOGIN);
         // An entry that names no account offers it, and one that names others offers those alone.
         let none = crate::serve::entry_accounts(&config, id, &[], &built)
@@ -147,7 +147,7 @@ fn only_a_kind_the_account_provider_offers_is_accepted_for_an_account() {
     let config = |kind: &str| {
         crate::config::Config::from_str_in(
             &format!(
-                "[host.accounts.p]\nharness = \"pi\"\nkind = \"{kind}\"\nid = \"id-p\"\n[host.agents.Pi]\nharness = \"pi\"\n"
+                "[host.accounts.p]\nkind = \"{kind}\"\nid = \"id-p\"\n[host.agents.Pi]\nharness = \"pi\"\n"
             ),
             std::path::Path::new(""),
         )

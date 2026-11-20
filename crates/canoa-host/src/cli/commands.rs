@@ -477,9 +477,12 @@ pub(super) fn accounts(command: AccountsCommand, front: &dyn Front) -> Result<()
     use crate::accounts::commands as run;
     match command {
         AccountsCommand::List { config } => run::list(&account_env(&config, front)?, config.format),
+        AccountsCommand::Providers { config } => {
+            run::providers(&account_env(&config, front)?, config.format)
+        }
         AccountsCommand::Add {
             name,
-            harness,
+            provider,
             method,
             inputs,
             until_stdin_closes,
@@ -487,7 +490,7 @@ pub(super) fn accounts(command: AccountsCommand, front: &dyn Front) -> Result<()
         } => run::add(
             &account_env(&config, front)?,
             &name,
-            &harness,
+            &provider,
             method.as_deref(),
             &run::inputs_of(&inputs)?,
             (config.format, until_stdin_closes),

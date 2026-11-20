@@ -21,6 +21,9 @@ pub(crate) mod matching;
 #[cfg(test)]
 mod names_tests;
 mod private;
+pub(crate) mod providers;
+#[cfg(test)]
+mod providers_tests;
 mod spawner;
 pub(crate) mod standards;
 pub(crate) mod store;
@@ -596,7 +599,7 @@ impl Accounts {
             .provides(info.provides.iter().cloned());
         if config.kind == HARNESS_LOGIN {
             let mut held = Held::new(self, name, grant, None, Arc::default(), false);
-            held.owner.clone_from(&config.harness);
+            held.owner = config.owner.clone().unwrap_or_default();
             return Ok(held);
         }
         let gateway = self.gateways.serves(&config.kind);
@@ -645,7 +648,6 @@ impl Accounts {
         }
         let keys = standards::keys_for(&info.provides, borrowed, grant.credentials.expose());
         let mut held = Held::new(self, name, grant, Some(lock), files, rotates);
-        held.owner.clone_from(&config.harness);
         held.session = session;
         held.keys = keys;
         held.credential = applied.credential;

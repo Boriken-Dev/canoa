@@ -380,15 +380,20 @@ pub(super) enum AccountsCommand {
         #[command(flatten)]
         config: ConfigArgs,
     },
+    /// List the account providers this host carries, each with its own ways to sign in.
+    Providers {
+        #[command(flatten)]
+        config: ConfigArgs,
+    },
     /// Make an account by signing in. A secret it asks for is typed without echo, or read from standard input when that is
     /// not a terminal, and never taken from the command line. Appends `[host.accounts.NAME]` to canoa.cfg.
     Add {
         /// The account's name, as an entry's `accounts` names it.
         name: String,
-        /// The provider the account is for, as an entry's `harness`.
+        /// The account provider that makes the account, by the id `canoa accounts providers` lists (`claude_accounts`, `litellm_accounts`).
         #[arg(long)]
-        harness: String,
-        /// How to sign in, one of the provider's login methods (naming none lists them).
+        provider: String,
+        /// How to sign in, one of the provider's own login methods (naming none lists them).
         #[arg(long)]
         method: Option<String>,
         /// An input the method asks before it runs (an email, an issuer), as KEY=VALUE.

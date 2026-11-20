@@ -52,7 +52,7 @@ fn config(address: &str) -> Config {
     let text = format!(
         "[host.agents.Claude]\nharness = \"claude\"\naccounts = [\"lite\"]\n\
          [host.agents.Codex]\nharness = \"codex\"\naccounts = [\"lite\"]\n\
-         [host.accounts.lite]\nharness = \"claude\"\nkind = \"litellm\"\nid = \"id-lite\"\nsettings = {{ base_url = \"{address}\" }}\n"
+         [host.accounts.lite]\nkind = \"litellm\"\nid = \"id-lite\"\nsettings = {{ base_url = \"{address}\" }}\n"
     );
     Config::from_str_in(&text, std::path::Path::new("")).expect("parses")
 }
