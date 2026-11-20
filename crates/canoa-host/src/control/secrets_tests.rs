@@ -535,3 +535,146 @@ fn an_entry_is_removed_unless_a_name_or_the_default_still_points_at_it() {
     );
     assert!(missing["error"].is_object(), "{missing}");
 }
+
+/// The person's other programs' credentials, in the in-memory store that stands for the operating system's in a test: the real
+/// listing code runs over it, and no test reaches the real store.
+fn foreign(service: &str, users: &[(&str, &[u8])]) {
+    let store = crate::accounts::store::KeyringStore::new(service);
+    for (user, bytes) in users {
+        store
+            .entry(user)
+            .expect("an entry")
+            .set_secret(bytes)
+            .expect("kept");
+    }
+}
+
+#[test]
+fn the_system_vault_lists_what_canoa_holds_and_what_the_stores_other_programs_hold_and_reveals_either()
+ {
+    let (rig, _config) = rig_in("os_entries", true);
+    let tag = format!("outside-{}", std::process::id());
+    let own = format!("{tag}.canoa");
+    // The in-memory store stands for the operating system's: a vault lists as another program's what is under its service and `.others`.
+    let service = format!("{own}.others");
+    foreign(
+        &service,
+        &[
+            ("alice", b"hunter2"),
+            ("bob", b"second"),
+            ("device", &[0xff, 0x00, 0xfe, 0x80, 0x01]),
+        ],
+    );
+    let set = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/configure",
+        json!({"name": "os", "provider": "system", "settings": {"service": own}}),
+    );
+    assert_eq!(set["result"]["saved"], true, "{set}");
+    rig.hub.vault().put_in("os", "deploy", VALUE).expect("kept");
+    rig.hub.vault().put_in("os", "token", "t0k").expect("kept");
+
+    let listed = ask(&rig.control, &Caller::Owner, "secrets/list", json!({}));
+    let rows: Vec<&Value> = listed["result"]["secrets"]
+        .as_array()
+        .expect("secrets")
+        .iter()
+        .filter(|row| {
+            row["provider"] == "os"
+                && row["name"].as_str().is_some_and(|name| {
+                    name == "deploy" || name == "token" || name.starts_with(&service)
+                })
+        })
+        .collect();
+    let by_name: Vec<(&str, bool)> = rows
+        .iter()
+        .map(|row| {
+            (
+                row["name"].as_str().unwrap(),
+                row["foreign"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        by_name,
+        [
+            ("deploy", false),
+            (format!("{service}/alice").as_str(), true),
+            (format!("{service}/bob").as_str(), true),
+            (format!("{service}/device").as_str(), true),
+            ("token", false),
+        ],
+        "five entries, three of them another program's"
+    );
+    assert!(
+        !listed.to_string().contains("hunter2"),
+        "a list holds no value"
+    );
+
+    let alice = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/reveal",
+        json!({"provider": "os", "name": format!("{service}/alice")}),
+    );
+    assert_eq!(alice["result"]["value"], "hunter2", "{alice}");
+    let binary = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/reveal",
+        json!({"provider": "os", "name": format!("{service}/device")}),
+    );
+    assert!(
+        binary["error"]["message"]
+            .as_str()
+            .is_some_and(|why| why.contains("not text")),
+        "{binary}"
+    );
+
+    // A key with no grant reaches none of it.
+    let denied = peer(&[Grant::ConfigRead]);
+    for method in ["secrets/list", "secrets/reveal"] {
+        let answer = ask(
+            &rig.control,
+            &denied,
+            method,
+            json!({"provider": "os", "name": format!("{service}/alice")}),
+        );
+        assert_eq!(answer["error"]["code"], DENIED, "{method}: {answer}");
+        assert!(!answer.to_string().contains("hunter2"));
+    }
+    // An agent's request for the same name is answered by no vault unless the person routed names to this one.
+    assert!(
+        rig.hub
+            .vault()
+            .recall("s1", &format!("{service}/alice"))
+            .is_none()
+    );
+
+    let gone = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/forget",
+        json!({"provider": "os", "name": format!("{service}/bob")}),
+    );
+    assert_eq!(gone["result"]["forgot"], true, "{gone}");
+    let again = ask(
+        &rig.control,
+        &Caller::Owner,
+        "secrets/reveal",
+        json!({"provider": "os", "name": format!("{service}/bob")}),
+    );
+    assert_eq!(again["error"]["code"], NOT_FOUND, "{again}");
+    for name in ["deploy", "token"] {
+        rig.hub.vault().forget_in("os", name).expect("forgotten");
+    }
+    let store = crate::accounts::store::KeyringStore::new(service);
+    for user in ["alice", "device"] {
+        store
+            .entry(user)
+            .expect("an entry")
+            .delete_credential()
+            .expect("removed");
+    }
+}

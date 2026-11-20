@@ -368,6 +368,7 @@ fn remember_keeps_a_secret_in_the_provider_that_keeps_and_it_is_read_from_there_
     assert_eq!(
         rig.vault
             .reveal("kept", "deploy")
+            .unwrap()
             .as_deref()
             .map(String::as_str),
         Some(VALUE)
@@ -510,7 +511,11 @@ fn an_accounts_credentials_are_a_named_secret_the_table_lists_and_removing_the_a
         Some(VALUE)
     );
     // The person can ask to see it, as any secret of the table.
-    let shown = rig.vault.reveal("kept", "accounts/acc-1").expect("shown");
+    let shown = rig
+        .vault
+        .reveal("kept", "accounts/acc-1")
+        .expect("asked")
+        .expect("shown");
     assert!(shown.contains(VALUE));
     // Removing the account forgets it.
     accounts.forget_credentials("acc-1").expect("forgotten");

@@ -135,13 +135,14 @@ pub(crate) fn call(vault: &Arc<Vault>, files: &Files, method: &str, params: &Val
         "secrets/reveal" => {
             let (provider, name) = target(params)?;
             // The value is read for the person who asked, and goes nowhere else.
-            vault
-                .reveal(provider, name)
-                .map(|value| json!({"value": value.as_str()}))
-                .ok_or((
+            match vault.reveal(provider, name) {
+                Ok(Some(value)) => Ok(json!({"value": value.as_str()})),
+                Ok(None) => Err((
                     NOT_FOUND,
                     format!("{provider} holds no secret called {name}"),
-                ))
+                )),
+                Err(why) => Err((REFUSED, why)),
+            }
         }
         "secrets/forget" => {
             let (provider, name) = target(params)?;

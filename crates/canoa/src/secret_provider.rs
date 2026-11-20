@@ -145,6 +145,28 @@ impl Held {
     }
 }
 
+/// A name a provider lists that it did not make: an entry of a store other programs keep too, which the person can see and read.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct Other {
+    /// The name, as the store spells it, so asking for it by this name reads that entry.
+    pub name: String,
+    /// What the store says of the entry besides its name (the user name of a credential), or absent.
+    pub summary: Option<String>,
+}
+
+impl Other {
+    /// This name, with what the store says of it.
+    #[must_use]
+    pub fn new(name: impl Into<String>, summary: Option<String>) -> Self {
+        Self {
+            name: name.into(),
+            summary,
+        }
+    }
+}
+
 /// The names a provider holds.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(deny_unknown_fields)]
@@ -152,13 +174,27 @@ impl Held {
 pub struct Names {
     /// Every name the provider holds, each one [`name_problem`] accepts.
     pub names: Vec<String>,
+    /// The names of entries of the same store that the provider did not make, each one [`name_problem`] accepts and none of them in
+    /// `names`. Absent for a provider that holds only what it keeps.
+    #[map(default)]
+    pub others: Vec<Other>,
 }
 
 impl Names {
-    /// These names.
+    /// These names, and no others.
     #[must_use]
     pub fn new(names: Vec<String>) -> Self {
-        Self { names }
+        Self {
+            names,
+            others: Vec::new(),
+        }
+    }
+
+    /// These names, and these entries of the store that another program wrote.
+    #[must_use]
+    pub fn with_others(mut self, others: Vec<Other>) -> Self {
+        self.others = others;
+        self
     }
 }
 

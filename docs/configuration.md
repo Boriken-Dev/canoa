@@ -875,7 +875,7 @@ you or code an extension supplied, so it is the same trust as naming a library.
 
 ### Secrets
 
-When an agent needs a password or a key it asks for it by name, and Canoa answers from what it already holds before it asks you. Where a secret comes from is a provider: **the form** (you type it in the app), **the system store** (Windows' Credential Manager, the Secret Service on Linux, the Keychain on a Mac) and any a library adds, such as a Bitwarden one written as a script. The form that asks you also asks how long to keep what you type: this once, for this session, until Canoa closes, for 15 minutes, an hour, 8 hours or a day, or **Remember** in the system store. An agent never sees the value, only a handle, and using it still asks you as any command does.
+When an agent needs a password or a key it asks for it by name, and Canoa answers from what it already holds before it asks you. Where a secret comes from is a provider: **the form** (you type it in the app), **the system store** (Windows' Credential Manager, the Secret Service on Linux, the Keychain on a Mac: besides what Canoa keeps there, the Secrets section lists the other entries your account can read, such as the credentials of other programs, marks them as not Canoa's and shows one only when you press Show; Forget on one of those asks first and deletes it from the store) and any a library adds, such as a Bitwarden one written as a script. The form that asks you also asks how long to keep what you type: this once, for this session, until Canoa closes, for 15 minutes, an hour, 8 hours or a day, or **Remember** in the system store. An agent never sees the value, only a handle, and using it still asks you as any command does.
 
 ```toml
 [secrets]

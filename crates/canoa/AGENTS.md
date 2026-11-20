@@ -124,7 +124,8 @@ ProviderInfo::new(title); .problem() -> Option<String>
 #[non_exhaustive] pub struct Named { pub name: String }                              // Named::new(name)
 #[non_exhaustive] pub struct Keeping { pub name: String, pub value: Secret<String> } // Keeping::new(name, value)
 #[non_exhaustive] pub struct Held { pub value: Option<Secret<String>>, pub expires_in: Option<u64> }   // Held::none(), Held::of(value), .expiring(seconds)
-#[non_exhaustive] pub struct Names { pub names: Vec<String> }                        // Names::new(names)
+#[non_exhaustive] pub struct Names { pub names: Vec<String>, pub others: Vec<Other> }       // Names::new(names), .with_others(others); `others` defaults to none
+#[non_exhaustive] pub struct Other { pub name: String, pub summary: Option<String> }  // Other::new(name, summary): an entry of a shared store (the operating system's) that the provider did not make; the person sees and reads it by its name
 #[guatiao::kind(name = "secret_provider")] pub trait SecretProvider: Send + Sync {
     fn describe(&self) -> Result<ProviderInfo, ProviderError>;
     fn names(&self, spawner: Object<dyn ProcessSpawner>) -> Result<Names, ProviderError>;          // the names it holds, never values; UNSUPPORTED unless can_list

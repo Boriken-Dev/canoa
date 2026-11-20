@@ -71,6 +71,10 @@ pub(crate) struct Row {
     pub(crate) kept: Kept,
     /// Seconds until it stops being good, rounded up; none when it lasts as long as it is kept.
     pub(crate) expires_in: Option<u64>,
+    /// Whether another program wrote it: an entry of the store the provider shares, which Canoa lists and reads but did not make.
+    pub(crate) foreign: bool,
+    /// What the store says of a foreign entry besides its name.
+    pub(crate) summary: Option<String>,
 }
 
 impl Row {
@@ -83,6 +87,7 @@ impl Row {
         json!({
             "provider": self.provider, "name": self.name, "kept": scope,
             "session": session, "expires_in": self.expires_in,
+            "foreign": self.foreign, "summary": self.summary,
         })
     }
 }
@@ -651,6 +656,8 @@ impl Vault {
                 expires_in: cached
                     .until
                     .map(|until| until.saturating_sub(now).div_ceil(1000)),
+                foreign: false,
+                summary: None,
             })
             .collect();
         let settings = self.settings();
@@ -674,6 +681,21 @@ impl Vault {
                     name,
                     kept: Kept::Stored,
                     expires_in: None,
+                    foreign: false,
+                    summary: None,
+                });
+            }
+            for other in names.others {
+                if name_problem(&other.name).is_some() {
+                    continue;
+                }
+                rows.push(Row {
+                    provider: entry_name.clone(),
+                    name: other.name,
+                    kept: Kept::Stored,
+                    expires_in: None,
+                    foreign: true,
+                    summary: other.summary,
                 });
             }
         }
@@ -681,18 +703,47 @@ impl Vault {
         rows
     }
 
-    /// The value of the secret `name` in `provider`'s entry, for the person who asked to see it.
-    pub(crate) fn reveal(&self, provider: &str, name: &str) -> Option<Zeroizing<String>> {
+    /// The value of the secret `name` in `provider`'s entry, for the person who asked to see it: none when it holds nothing by that
+    /// name.
+    ///
+    /// # Errors
+    ///
+    /// The provider's words (which hold no value) when it holds the entry and cannot show it, such as a value that is not text.
+    pub(crate) fn reveal(
+        &self,
+        provider: &str,
+        name: &str,
+    ) -> Result<Option<Zeroizing<String>>, String> {
         if let Some(cached) = self
             .live()
             .get(name)
             .filter(|cached| cached.entry == provider)
         {
-            return Some(cached.value.clone());
+            return Ok(Some(cached.value.clone()));
         }
         let settings = self.settings();
-        self.ask_entry(&settings, provider, name, 0)
-            .map(|answer| answer.value)
+        let Some(entry) = settings.entries.get(provider) else {
+            return Ok(None);
+        };
+        let catalog = self.catalog();
+        if catalog
+            .info(&entry.provider)
+            .is_none_or(|info| info.needs_person)
+        {
+            return Ok(None);
+        }
+        let Some(instance) = self.instance(&catalog, &settings, entry, 0) else {
+            return Ok(None);
+        };
+        let held = instance
+            .get(Named::new(name), self.spawner())
+            .map_err(|error| error.message().to_owned())?;
+        Ok(match held.value {
+            Some(value) if held.expires_in != Some(0) => {
+                Some(Zeroizing::new(value.expose().clone()))
+            }
+            _ => None,
+        })
     }
 
     /// Sets a secret by hand: in `provider`'s entry when it keeps, else in memory as `keep` says.

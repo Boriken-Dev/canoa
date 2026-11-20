@@ -788,5 +788,7 @@ impl SecretStore for FileStore {
     }
 }
 
+pub(crate) mod outside;
+
 #[cfg(test)]
 pub(crate) mod real_store;
