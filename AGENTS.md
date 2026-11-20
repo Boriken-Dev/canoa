@@ -93,6 +93,9 @@ cargo build -p canoa-ffi --lib
 # a real voice's audio (Piper's `--output_raw`, 22050 Hz) played by the web app's own Web Audio player in a real browser; CANOA_E2E_TELL_RATE=44100 is the control that must fail
 (cd app && dart compile js -O1 -o <dir>/page.js tool/voice_page.dart)
 (cd clients/browser/chromium && CANOA_E2E_BROWSER=<Edge> CANOA_E2E_PAGE=<dir> CANOA_E2E_PCM=<voice.pcm> node e2e/voice_pcm.mjs)
+# copy and paste in the terminal of the web app, in a real browser: key events through the engine, the browser's paste event with no clipboard permission, Ctrl+Shift+C and Ctrl+C
+(cd app && flutter build web --release --no-web-resources-cdn -t tool/terminal_page.dart -o <dir>)
+(cd clients/browser/chromium && CANOA_E2E_BROWSER=<Edge> CANOA_E2E_PAGE=<dir> node e2e/terminal_clipboard.mjs)
 # providers written with the SDKs, loaded through the host (Python needs its shared library; JavaScript needs a C compiler for QuickJS)
 CANOA_TEST_PYTHON=python3 CANOA_TEST_JS=1 cargo test -p canoa-host --test script_providers   # needs `cargo build -p canoa-host --example stdio_agent`
 (cd bindings/python/canoa-sdk && GUATIAO_LIBRARY=<guatiao_source_py built by the test> PYTHONPATH=<guatiao>/bindings/python/guatiao/src pytest)
