@@ -273,6 +273,37 @@ impl IOleInPlaceSite_Impl for FakeSite_Impl {
     }
 }
 
+/// Office drops a ribbon whose XML does not parse and says nothing: PowerShell's XML parser stands in for Office's.
+fn assert_well_formed(xml: &str) {
+    assert!(
+        !xml.contains("'"),
+        "the check quotes the XML in single quotes"
+    );
+    let shell = ["pwsh", "powershell"]
+        .into_iter()
+        .find(|name| {
+            std::process::Command::new(name)
+                .args(["-NoProfile", "-Command", "exit 0"])
+                .status()
+                .is_ok_and(|s| s.success())
+        })
+        .expect("the tests need PowerShell");
+    let done = std::process::Command::new(shell)
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &format!("[xml]'{xml}' | Out-Null"),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        done.status.success(),
+        "not well-formed XML: {}",
+        String::from_utf8_lossy(&done.stderr)
+    );
+}
+
 fn class_factory(clsid: &GUID) -> IClassFactory {
     let mut out: *mut c_void = ptr::null_mut();
     // SAFETY: valid GUIDs and a writable slot.
@@ -391,6 +422,7 @@ fn the_add_in_and_the_pane_work_through_com() {
             "{id}: {xml}"
         );
         assert_eq!(xml, canoa_office::ribbon_xml(id).unwrap());
+        assert_well_formed(&xml);
     }
     assert_eq!(ask("Microsoft.Outlook.Appointment"), "");
 
