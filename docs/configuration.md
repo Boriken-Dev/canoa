@@ -367,6 +367,10 @@ value, and never empty; a value already set in the host's own environment is kep
 | `AGENTS_ROLE` | `delegate` when another agent started the session as a task |
 | `AGENTS_PROJECT_ROOT`, `AGENTS_SESSION_ID` | the session's folder and id, for the hooks that run for it |
 
+An agent entry with no profile (neither `profiles` nor `own_profile`) has no overlays and so no `<NAME>_OVERLAY_ROOT`, no
+profile and no loadout, but its agent is still given the identity variables above that do not depend on a profile
+(`AGENTS_HOST`, `AGENTS_HARNESS`, `AGENT`, `AGENTS_VENDOR`, the account's).
+
 The names and the harness ids and vendors are dotagents'. One overlay then adapts to every harness:
 
 ```toml
