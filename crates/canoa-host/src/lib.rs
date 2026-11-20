@@ -73,6 +73,7 @@ pub use config::{
     StoreConfig, TransportListen, UnknownLoadout, UnknownPreset, WebConfig, WebMode,
     cache_lifetime_label, cache_lifetime_name, cache_lifetime_named, merge_into,
 };
+pub use serve::MAX_MESSAGE_META;
 /// The `_meta` key of `initialize` that asks a host for the delegation tools, and that a task's permission request carries
 /// with its task id, title and source.
 pub const DELEGATE_META: &str = delegate::META;

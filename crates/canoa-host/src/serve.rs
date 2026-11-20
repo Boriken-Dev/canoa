@@ -17,6 +17,7 @@ use std::thread;
 use crate::portal_link::PortalSockets;
 mod door;
 mod kept;
+mod limit;
 mod sessions;
 use canoa::{Capability, ClientId, Registry, Service, ServiceId};
 use coqui_acp_api::guatiao::library::Registry as GuatiaoRegistry;
@@ -32,6 +33,7 @@ use coqui_transport_web::Limits;
 use coqui_transport_web::websocket::{self, Frames};
 use door::Door;
 use indexmap::IndexMap;
+pub use limit::MAX_MESSAGE_META;
 
 use crate::accounts::matching::{Catalogs, fits};
 use crate::accounts::{Accounts, Gated, Held};
@@ -2863,7 +2865,7 @@ fn serve_proven<C: Channel>(
             give_agent(
                 shared,
                 served,
-                &Prefilled::new(sealed, first),
+                &Prefilled::new(&limit::Naming::new(sealed, shared.max_line), first),
                 (&copy, peer),
                 (context, in_process),
             );

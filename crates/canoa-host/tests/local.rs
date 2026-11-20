@@ -160,3 +160,36 @@ fn a_prompt_over_the_default_is_taken_when_the_host_setting_is_raised() {
     drop(link);
     host.stop();
 }
+
+fn initialize_meta(config: &str) -> serde_json::Value {
+    let host = Hosted::start(config);
+    let link = host.local.open("fixture").expect("a link");
+    let (answer, _) = ask(
+        &link,
+        1,
+        "initialize",
+        json!({"protocolVersion": 1, "clientCapabilities": {}}),
+    )
+    .expect("initialize is answered");
+    drop(link);
+    host.stop();
+    answer["_meta"][canoa_host::MAX_MESSAGE_META].clone()
+}
+
+#[test]
+fn the_answer_to_initialize_names_the_default_message_limit() {
+    assert_eq!(
+        initialize_meta(&entry("fixture", "")),
+        json!(16 * 1024 * 1024)
+    );
+}
+
+#[test]
+fn the_answer_to_initialize_names_a_raised_message_limit() {
+    let config = format!(
+        "[host]\nmax_message_bytes = {}\n{}",
+        32 * 1024 * 1024,
+        entry("fixture", "")
+    );
+    assert_eq!(initialize_meta(&config), json!(32 * 1024 * 1024));
+}
