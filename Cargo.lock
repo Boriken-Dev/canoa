@@ -863,6 +863,7 @@ dependencies = [
  "canoa-litellm",
  "canoa-opencode",
  "canoa-pi",
+ "canoa-whisper",
  "clap",
  "coqui-a2a",
  "coqui-access",
@@ -982,6 +983,16 @@ dependencies = [
  "coqui-acp-api",
  "coqui-acp-pi",
  "serde_json",
+]
+
+[[package]]
+name = "canoa-whisper"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+ "serde_json",
+ "time",
 ]
 
 [[package]]

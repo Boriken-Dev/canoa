@@ -1,4 +1,4 @@
-//! The Runtimes type's stores (Node, Python, Foundry Local, Git Bash and PowerShell) against stand-in archives served from a world
+//! The Runtimes type's stores (Node, Python, Foundry Local, whisper.cpp, Git Bash and PowerShell) against stand-in archives served from a world
 //! of documents: the store contract suite, what each plan fetches and checks, and the folder a managed copy puts on a search path.
 //! No runtime is downloaded.
 #![allow(
@@ -31,7 +31,7 @@ use canoa_host::store::shell_stores::{
     PowerShellRecipe,
 };
 use canoa_host::store::tools::LocalTools;
-use canoa_host::store::whisper::{
+use canoa_whisper::store::{
     DOWNLOADS as WHISPER_DOWNLOADS, MODELS, MODELS_ORIGIN, Model, RELEASES_API as WHISPER_RELEASES,
     WhisperRecipe,
 };
@@ -1366,7 +1366,7 @@ fn an_installed_whisper_copy_lays_out_its_program_and_the_chosen_model_where_a_s
  {
     use canoa_host::store::programs::{Options, Programs, Recorder};
     use canoa_host::store::shelf::Shelf;
-    use canoa_host::store::whisper::{held_model, model_path, program_file};
+    use canoa_whisper::store::{held_model, model_path, program_file};
 
     let _alone = ONE_SUITE
         .lock()

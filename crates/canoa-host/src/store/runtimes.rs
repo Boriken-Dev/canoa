@@ -38,10 +38,9 @@ const GITHUB_ASSET_HOSTS: [&str; 2] = [
 ];
 
 /// The provider ids of the runtimes' stores, in the order the app lists them.
-pub const RUNTIMES: [&str; 6] = [
+pub const RUNTIMES: [&str; 5] = [
     "node_store",
     "python_store",
-    "whisper_store",
     "piper_store",
     "git_bash_store",
     "powershell_store",

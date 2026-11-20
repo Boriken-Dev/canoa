@@ -1,0 +1,29 @@
+[package]
+name = "canoa-whisper"
+description = "whisper.cpp for Canoa: its speech-to-text program and models as a Store type, and the speech offer that runs them"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["canoa", "speech-to-text", "whisper"]
+categories = ["development-tools"]
+exclude = [".*", "*.local.*"]
+# Canoa itself is not published yet.
+publish = false
+
+[dependencies]
+canoa = { workspace = true, features = ["store"] }
+coqui-acp-api.workspace = true
+serde_json.workspace = true
+time.workspace = true
+
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

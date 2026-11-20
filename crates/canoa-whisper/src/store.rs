@@ -11,7 +11,7 @@
 //! the SHA-256 that revision's listing gives. Both the program and the model are MIT licensed.
 //!
 //! The program reads a WAV stream on its standard input (`-f -`) and prints the text, which is how the speech command provider
-//! runs it; `speech/enable` writes that provider's settings from the copy installed here.
+//! runs it; [`crate::WhisperModels`] says how to run the copy installed here.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -31,8 +31,6 @@ use canoa::store::{
     Updatable,
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-
-use canoa::store_provider;
 
 /// The release listing of the publisher's repository.
 pub const RELEASES_API: &str = "https://api.github.com/repos/ggml-org/whisper.cpp/releases";
@@ -59,11 +57,6 @@ const LISTED: u32 = 40;
 
 /// The longest a `vX.Y.Z` release comes after the build release that carries its files, in seconds.
 const PAIRING_WINDOW: i64 = 6 * 60 * 60;
-
-store_provider!(
-    /// The whisper.cpp store.
-    WhisperStore, WhisperRecipe, "whisper_store"
-);
 
 /// One model of the publisher's list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,7 +155,7 @@ pub fn held_model(version: &std::path::Path) -> Option<&'static Model> {
 }
 
 /// The folder of a copy's program, relative to the version's folder.
-const PROGRAM_DIR: &str = "bin";
+pub const PROGRAM_DIR: &str = "bin";
 
 /// The program's file name on `os`.
 #[must_use]

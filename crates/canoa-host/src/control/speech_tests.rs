@@ -270,13 +270,15 @@ fn a_recording_nobody_has_called_for_is_ended() {
 fn control_with_empty_store(tmp: &std::path::Path) -> Control {
     use crate::store::runtimes::RUNTIMES;
     use crate::store::shelf::Shelf;
+    let registry = crate::store::registry::built_in().expect("the built-in stores");
     let programs = crate::store::programs::Programs::new(
         Shelf::unchecked(tmp.join("programs")),
-        crate::store::registry::built_in().expect("the built-in stores"),
+        Arc::clone(&registry),
     );
     control(tmp).with_stores(
         Stores::new(Arc::new(programs), Vec::new())
-            .with_runtimes(RUNTIMES.iter().map(|id| (*id).to_owned()).collect()),
+            .with_runtimes(RUNTIMES.iter().map(|id| (*id).to_owned()).collect())
+            .with_included_extensions(&registry),
     )
 }
 

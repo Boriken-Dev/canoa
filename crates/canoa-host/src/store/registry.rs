@@ -17,7 +17,6 @@ use super::bitwarden::BitwardenStore;
 use super::piper::PiperStore;
 use super::runtimes::{NodeStore, PythonStore};
 use super::shell_stores::{GitBashStore, PowerShellStore};
-use super::whisper::WhisperStore;
 use crate::bundled::{self, Bundle};
 
 coqui_acp_api::guatiao::local_providers!(
@@ -26,7 +25,6 @@ coqui_acp_api::guatiao::local_providers!(
     providers = [
         NodeStore,
         PythonStore,
-        WhisperStore,
         PiperStore,
         BitwardenStore,
         GitBashStore,

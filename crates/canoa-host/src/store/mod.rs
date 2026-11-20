@@ -21,4 +21,3 @@ pub mod shelf;
 pub mod shell_stores;
 pub(crate) mod sources;
 pub mod tools;
-pub mod whisper;

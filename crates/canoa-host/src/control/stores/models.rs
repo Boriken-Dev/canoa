@@ -285,8 +285,19 @@ impl Stores {
             .collect()
     }
 
-    /// Where the service of the type `type_id` is now, and with `models` which of its models can transcribe; the reason when the
-    /// provider could not say.
+    /// The store a type's program is installed as when its speech service is that program: the type's first.
+    pub(crate) fn speech_store(&self, type_id: &str) -> Option<String> {
+        self.types
+            .iter()
+            .find(|each| each.info.id == type_id)?
+            .info
+            .stores
+            .first()
+            .cloned()
+    }
+
+    /// Where the service of the type `type_id` is now, and with `models` which of its models can transcribe; for a program, how its copy
+    /// is run. The reason when the provider could not say.
     pub(crate) fn speech_report(
         &self,
         type_id: &str,
@@ -300,6 +311,17 @@ impl Stores {
         let mut query = ServiceQuery::default();
         query.home = self.home_text();
         query.models = models;
+        if held
+            .info
+            .speech
+            .as_ref()
+            .is_some_and(|speech| speech.command)
+        {
+            query.program = match self.speech_store(type_id) {
+                Some(store) => self.managed_launch(&store).map_err(|failed| failed.1)?,
+                None => None,
+            };
+        }
         held.ask(|store, spawner| store.service(query, spawner))
             .map_err(|error| failure(&error).1)
     }

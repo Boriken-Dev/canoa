@@ -1,6 +1,6 @@
-//! `speech/offers` and `speech/enable`: the speech-to-text providers Canoa offers out of the box, and the one that is made from a
-//! program the host's Store installed. An offer is not a provider until the person adds it: a local one is installed through the
-//! Store (`store/apply`) and then enabled here; a named service is added through `speech/configure` with the settings the offer
+//! `speech/offers` and `speech/enable`: the speech-to-text providers Canoa offers out of the box. An offer is not a provider until the
+//! person adds it: a program a Store type's library runs is installed through the Store (`store/apply`) and then enabled here, and
+//! the type's library says how to run the copy; a named service is added through `speech/configure` with the settings the offer
 //! carries, and a key of the person's.
 //!
 //! The same file says which models a provider's service has, for a provider whose address names a service Canoa knows, and
@@ -18,7 +18,7 @@
 
 use std::path::Path;
 
-use canoa::store::models::ServiceReport;
+use canoa::store::models::{ServiceReport, SpeechRun, SpeechService};
 use coqui_acp_api::{AccountKindInfo, EndpointSlot, MODEL_API, standard};
 use serde_json::{Map, Value, json};
 
@@ -27,15 +27,11 @@ use super::files::Files;
 use super::{Caller, Grant, NOT_FOUND, REFUSED, Stores, allow, bad, text_param};
 use crate::accounts::matching::Catalogs;
 use crate::config::{AccountConfig, Config, Layers};
-use crate::store::whisper::{MODELS, held_model, model_path};
 
 type Outcome = Result<Value, (i32, String)>;
 
 /// The table of canoa.cfg the providers are in.
 const SECTION: &str = "speech";
-
-/// The Store program whisper.cpp is kept as.
-const WHISPER_STORE: &str = "whisper_store";
 
 /// The address OpenAI's speech-to-text is called at.
 const OPENAI_URL: &str = "https://api.openai.com/v1/audio/transcriptions";
@@ -75,7 +71,7 @@ pub(super) const HOST_KEYS: [&str; 8] = [
 ];
 
 /// The offers that are the host's own, whose ids no Store type's service may take.
-const OWN_OFFERS: [&str; 2] = ["whisper", "openai"];
+const OWN_OFFERS: [&str; 1] = ["openai"];
 
 /// The offer made of one of the person's accounts is `openai_account:NAME`.
 const ACCOUNT_OFFER: &str = "openai_account";
@@ -93,15 +89,14 @@ const MAX_MODEL: usize = 100;
 pub(super) fn call(
     caller: &Caller,
     files: &Files,
-    stores: Result<&Stores, (i32, String)>,
     lend: &Lend<'_>,
     method: &str,
     params: &Value,
 ) -> Outcome {
     match method {
-        "speech/offers" => allow(caller, Grant::Voice).and_then(|()| offers(files, stores, lend)),
+        "speech/offers" => allow(caller, Grant::Voice).and_then(|()| offers(files, lend)),
         "speech/enable" => {
-            allow(caller, Grant::VoiceSetup).and_then(|()| enable(files, stores, lend, params))
+            allow(caller, Grant::VoiceSetup).and_then(|()| enable(files, lend, params))
         }
         _ => Err((super::NO_METHOD, "this host has no such method".to_owned())),
     }
@@ -356,42 +351,103 @@ fn account_offers(files: &Files, lend: &Lend<'_>) -> Result<Vec<Value>, (i32, St
     Ok(rows)
 }
 
-/// The offers of the services the Store types' libraries run models in on this computer: ready when the service is running and lists
-/// a model that transcribes, else saying what is missing (the library's words).
-fn service_offers(files: &Files, lend: &Lend<'_>) -> Result<Vec<Value>, (i32, String)> {
+/// The offers of what the Store types' libraries run on this computer, the programs before the services. A program is installed
+/// through its type's first store, with the model chosen as the channel, and is ready when the host has a copy the library can run;
+/// a service is ready when it is running and lists a model that transcribes. Each says what is missing in the library's words.
+fn store_offers(files: &Files, lend: &Lend<'_>) -> Result<Vec<Value>, (i32, String)> {
     let Some(stores) = lend.stores else {
         return Ok(Vec::new());
     };
     let mut rows = Vec::new();
-    for (id, how) in stores.speech_services() {
-        if OWN_OFFERS.contains(&id.as_str()) {
-            continue;
-        }
-        let report = stores.speech_report(&id, true);
-        let (models, unavailable) = match &report {
-            Ok(report) => (report.models.clone(), report.unavailable.clone()),
-            Err(why) => (Vec::new(), Some(why.clone())),
-        };
-        let listed: Vec<Value> = models
-            .iter()
-            .map(|model| json!({"id": model.id, "label": model.label}))
-            .collect();
-        rows.push(json!({
-            "id": id,
-            "title": how.title,
-            "summary": how.summary,
-            "license": how.license,
-            "local": true,
-            "where": how.location,
-            "service": id,
-            "models": listed,
-            "default_model": models.first().map(|model| model.id.clone()),
-            "installed": unavailable.is_none(),
-            "unavailable": unavailable,
-            "provider": enabled(files, &id)?,
-        }));
+    let (programs, services): (Vec<_>, Vec<_>) = stores
+        .speech_services()
+        .into_iter()
+        .filter(|(id, _)| !OWN_OFFERS.contains(&id.as_str()))
+        .partition(|(_, how)| how.command);
+    for (id, how) in programs {
+        rows.push(program_offer(files, stores, &id, &how)?);
+    }
+    for (id, how) in services {
+        rows.push(service_offer(files, stores, &id, &how)?);
     }
     Ok(rows)
+}
+
+fn model_choices(report: &Result<ServiceReport, String>) -> Vec<Value> {
+    report
+        .as_ref()
+        .map(|report| {
+            report
+                .models
+                .iter()
+                .map(|model| json!({"id": model.id, "label": model.label}))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The offer of a program the type's library runs: not installed until the Store has a copy, and then ready or saying why not.
+fn program_offer(
+    files: &Files,
+    stores: &Stores,
+    id: &str,
+    how: &SpeechService,
+) -> Result<Value, (i32, String)> {
+    let store = stores.speech_store(id);
+    let installed = store
+        .as_deref()
+        .and_then(|store| stores.managed_version(store).ok().flatten());
+    let report = stores.speech_report(id, true);
+    let models = model_choices(&report);
+    let unavailable = match (&installed, &report) {
+        (None, _) => None,
+        (Some(_), Ok(report)) => report.unavailable.clone(),
+        (Some(_), Err(why)) => Some(why.clone()),
+    };
+    Ok(json!({
+        "id": id,
+        "title": how.title,
+        "summary": how.summary,
+        "license": how.license,
+        "local": true,
+        "where": how.location,
+        "store": store,
+        "default_model": models.first().map(|model| model["id"].clone()),
+        "models": models,
+        "installed": installed.is_some(),
+        "version": installed,
+        "unavailable": unavailable,
+        "provider": enabled(files, id)?,
+    }))
+}
+
+/// The offer of the service a type's library runs models in: ready when the service is running and lists a model that transcribes.
+fn service_offer(
+    files: &Files,
+    stores: &Stores,
+    id: &str,
+    how: &SpeechService,
+) -> Result<Value, (i32, String)> {
+    let report = stores.speech_report(id, true);
+    let unavailable = match &report {
+        Ok(report) => report.unavailable.clone(),
+        Err(why) => Some(why.clone()),
+    };
+    let models = model_choices(&report);
+    Ok(json!({
+        "id": id,
+        "title": how.title,
+        "summary": how.summary,
+        "license": how.license,
+        "local": true,
+        "where": how.location,
+        "service": id,
+        "default_model": models.first().map(|model| model["id"].clone()),
+        "models": models,
+        "installed": unavailable.is_none(),
+        "unavailable": unavailable,
+        "provider": enabled(files, id)?,
+    }))
 }
 
 /// The name of the provider canoa.cfg has that was made from the offer `id`, if any.
@@ -405,102 +461,33 @@ fn enabled(files: &Files, id: &str) -> Result<Option<String>, (i32, String)> {
     })
 }
 
-fn offers(files: &Files, stores: Result<&Stores, (i32, String)>, lend: &Lend<'_>) -> Outcome {
-    let installed = stores
-        .and_then(|stores| stores.managed_version(WHISPER_STORE))
-        .ok()
-        .flatten();
-    let models: Vec<Value> = MODELS
-        .iter()
-        .map(|model| json!({"id": model.id, "label": model.label, "bytes": model.bytes}))
-        .collect();
-    let mut offers = vec![
-        json!({
-            "id": "whisper",
-            "title": "whisper.cpp",
-            "summary": "Speech to text on this host's own processor, in every language the model knows. The program and the model are downloaded once, checked against their publishers' checksums.",
-            "license": "MIT",
-            "local": true,
-            "where": "The audio goes to your host and is turned into text there by a program Canoa installed: nothing is sent to another service.",
-            "store": WHISPER_STORE,
-            "models": models,
-            "default_model": MODELS[0].id,
-            "installed": installed.is_some(),
-            "version": installed,
-            "provider": enabled(files, "whisper")?,
-        }),
-        json!({
-            "id": "openai",
-            "title": "OpenAI",
-            "summary": "Speech to text by OpenAI's service, under your own API key.",
-            "local": false,
-            "where": "The audio goes over the internet to api.openai.com, under the key you enter here, and OpenAI's terms say what it does with it.",
-            "kind": "speech_endpoint",
-            "settings": {"url": OPENAI_URL, "model": OPENAI_MODELS[0].0},
-            "models": model_rows(&OPENAI_MODELS),
-            "default_model": OPENAI_MODELS[0].0,
-            "provider": enabled(files, "openai")?,
-        }),
-    ];
-    offers.extend(service_offers(files, lend)?);
+fn offers(files: &Files, lend: &Lend<'_>) -> Outcome {
+    let mut offers = vec![json!({
+        "id": "openai",
+        "title": "OpenAI",
+        "summary": "Speech to text by OpenAI's service, under your own API key.",
+        "local": false,
+        "where": "The audio goes over the internet to api.openai.com, under the key you enter here, and OpenAI's terms say what it does with it.",
+        "kind": "speech_endpoint",
+        "settings": {"url": OPENAI_URL, "model": OPENAI_MODELS[0].0},
+        "models": model_rows(&OPENAI_MODELS),
+        "default_model": OPENAI_MODELS[0].0,
+        "provider": enabled(files, "openai")?,
+    })];
+    offers.extend(store_offers(files, lend)?);
     offers.extend(account_offers(files, lend)?);
     Ok(json!({"offers": offers}))
 }
 
-/// The arguments that make `whisper-cli` read a WAV stream on its standard input and print the text alone: no timestamps and none
-/// of its log, the language the person said or its own detection, and their words as the prompt. `-of` names a file only so the
-/// program prints to its standard output, which it does not for a stream otherwise.
-fn whisper_args(model: &str) -> Vec<String> {
-    [
-        "-m",
-        model,
-        "-f",
-        "-",
-        "-of",
-        "canoa",
-        "-nt",
-        "-np",
-        "-l",
-        "{language_code|auto}",
-        "--prompt",
-        "{vocabulary}",
-    ]
-    .map(str::to_owned)
-    .into()
-}
-
-/// A provider's table and the id of the model it was made for.
-type Made = (Map<String, Value>, &'static str);
-
-/// The table of a whisper.cpp provider for the copy whose program is `program`, and the model that copy holds. The program is in
-/// `bin` beside the version's `models` folder.
-fn whisper_table(program: &str) -> Result<Made, (i32, String)> {
-    let version = Path::new(program)
-        .parent()
-        .and_then(Path::parent)
-        .ok_or_else(|| {
-            (
-                REFUSED,
-                "the installed copy has an unexpected layout".to_owned(),
-            )
-        })?;
-    let held = held_model(version).ok_or_else(|| {
-        (
-            REFUSED,
-            "the installed copy holds no model: install whisper.cpp again".to_owned(),
-        )
-    })?;
-    let model = version.join(model_path(held));
+/// The table of a program's provider, from how its library says to run the copy.
+fn program_table(run: &SpeechRun, offer: &str) -> Map<String, Value> {
     let mut table = Map::new();
     table.insert("provider".to_owned(), json!("speech_command"));
-    table.insert("program".to_owned(), json!(program));
-    table.insert(
-        "args".to_owned(),
-        json!(whisper_args(&model.to_string_lossy())),
-    );
-    table.insert("input".to_owned(), json!("wav"));
-    table.insert(OFFER_KEY.to_owned(), json!("whisper"));
-    Ok((table, held.id))
+    table.insert("program".to_owned(), json!(run.program));
+    table.insert("args".to_owned(), json!(run.args));
+    table.insert("input".to_owned(), json!(run.input));
+    table.insert(OFFER_KEY.to_owned(), json!(offer));
+    table
 }
 
 /// Writes the provider `name` as `table`, in place of one of that name.
@@ -534,22 +521,24 @@ fn name_of<'a>(params: &'a Value, fallback: &'a str) -> Result<&'a str, (i32, St
     }
 }
 
-/// `speech/enable` `{offer, name?, model?}`: makes (or remakes) the provider of an offer that needs no form. `whisper` is made
-/// from the copy the Store has installed, whose model is the one the copy holds (another is installed through the Store, and this
-/// is called again). The id of a Store type whose models run in a service takes the model `model` of that service, which the person
-/// loads, and `openai_account:NAME` the API key of the account `NAME`.
-fn enable(
-    files: &Files,
-    stores: Result<&Stores, (i32, String)>,
-    lend: &Lend<'_>,
-    params: &Value,
-) -> Outcome {
+/// `speech/enable` `{offer, name?, model?}`: makes (or remakes) the provider of an offer that needs no form. The id of a Store type
+/// whose library runs a program is made from the copy the Store has installed, whose model is the one the copy holds (another is
+/// installed through the Store, and this is called again). The id of a type whose models run in a service takes the model `model`
+/// of that service, which the person loads, and `openai_account:NAME` the API key of the account `NAME`.
+fn enable(files: &Files, lend: &Lend<'_>, params: &Value) -> Outcome {
     let offer = text_param(params, "offer")?.ok_or_else(|| bad("offer is needed"))?;
     if let Some(stores) = lend.stores
         && !OWN_OFFERS.contains(&offer)
-        && stores.speech_services().iter().any(|(id, _)| id == offer)
+        && let Some((_, how)) = stores
+            .speech_services()
+            .into_iter()
+            .find(|(id, _)| id == offer)
     {
-        return enable_service(files, offer, params);
+        return if how.command {
+            enable_program(files, stores, offer, params)
+        } else {
+            enable_service(files, offer, params)
+        };
     }
     if let Some(account) = offer
         .strip_prefix(ACCOUNT_OFFER)
@@ -557,22 +546,28 @@ fn enable(
     {
         return enable_account(files, lend, offer, account, params);
     }
-    if offer != "whisper" {
-        return Err((
-            NOT_FOUND,
-            format!("{offer} is added with speech/configure, not enabled"),
-        ));
-    }
-    let name = name_of(params, "whisper")?;
-    let program = stores?.managed_launch(WHISPER_STORE)?.ok_or_else(|| {
+    Err((
+        NOT_FOUND,
+        format!("{offer} is added with speech/configure, not enabled"),
+    ))
+}
+
+/// The provider that runs the copy of the program of the Store type `service` the host has installed, as its library says.
+fn enable_program(files: &Files, stores: &Stores, service: &str, params: &Value) -> Outcome {
+    let name = name_of(params, service)?;
+    let report = stores
+        .speech_report(service, false)
+        .map_err(|why| (REFUSED, why))?;
+    let run = report.command.ok_or_else(|| {
         (
             REFUSED,
-            "whisper.cpp is not installed: install it in the Store first".to_owned(),
+            report
+                .unavailable
+                .unwrap_or_else(|| format!("{service} has no copy that can be run")),
         )
     })?;
-    let (table, model) = whisper_table(&program)?;
-    write_table(files, name, table)?;
-    Ok(json!({"name": name, "provider": "speech_command", "model": model, "saved": true}))
+    write_table(files, name, program_table(&run, service))?;
+    Ok(json!({"name": name, "provider": "speech_command", "model": run.model, "saved": true}))
 }
 
 /// The provider that calls the model `model` of the service of the Store type `service`. The model is not loaded, checked or looked
@@ -621,60 +616,25 @@ fn enable_account(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::whisper::program_file;
-
-    fn copy(model: Option<&str>) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "canoa-offers-{}-{}",
-            std::process::id(),
-            model.unwrap_or("none")
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("bin")).expect("bin");
-        std::fs::create_dir_all(root.join("models")).expect("models");
-        std::fs::write(
-            root.join("bin").join(program_file(std::env::consts::OS)),
-            b"p",
-        )
-        .expect("program");
-        if let Some(file) = model {
-            std::fs::write(root.join("models").join(file), b"m").expect("model");
-        }
-        root
-    }
 
     #[test]
-    fn the_provider_made_of_a_copy_reads_a_wav_stream_and_names_the_model_the_copy_holds() {
-        let root = copy(Some("ggml-small.en.bin"));
-        let program = root.join("bin").join(program_file(std::env::consts::OS));
-        let (table, model) = whisper_table(&program.to_string_lossy()).expect("a table");
-        assert_eq!(model, "small.en");
+    fn the_provider_of_a_program_runs_it_as_its_library_says_and_names_its_offer() {
+        let run = SpeechRun::new(
+            "/programs/stt",
+            ["-m", "/models/m.bin", "-f", "-"],
+            "wav",
+            "m",
+        );
+        let table = program_table(&run, "talk");
         assert_eq!(table["provider"], "speech_command");
+        assert_eq!(table["program"], "/programs/stt");
+        assert_eq!(table["args"], json!(["-m", "/models/m.bin", "-f", "-"]));
         assert_eq!(table["input"], "wav");
-        assert_eq!(table[OFFER_KEY], "whisper");
-        let args: Vec<&str> = table["args"]
-            .as_array()
-            .expect("args")
-            .iter()
-            .filter_map(Value::as_str)
-            .collect();
-        let held = root
-            .join("models/ggml-small.en.bin")
-            .to_string_lossy()
-            .into_owned();
-        assert_eq!(args[..2], ["-m", held.as_str()]);
-        assert!(args.windows(2).any(|pair| pair == ["-f", "-"]), "{args:?}");
-        assert!(args.contains(&"{language_code|auto}"), "{args:?}");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_copy_with_no_model_makes_no_provider() {
-        let root = copy(None);
-        let program = root.join("bin").join(program_file(std::env::consts::OS));
-        let refused = whisper_table(&program.to_string_lossy()).expect_err("no model");
-        assert!(refused.1.contains("no model"), "{}", refused.1);
-        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(table[OFFER_KEY], "talk");
+        assert!(
+            !table.contains_key("model"),
+            "the model is in the arguments, not a setting of the kind"
+        );
     }
 
     #[test]

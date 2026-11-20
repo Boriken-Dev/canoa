@@ -1186,7 +1186,6 @@ impl Control {
                 Some(method @ ("speech/offers" | "speech/enable")) => speech_offers::call(
                     caller,
                     &self.files,
-                    self.stores(),
                     &speech_offers::Lend::new(self.accounts.as_ref(), self.stores().ok()),
                     method,
                     &params,

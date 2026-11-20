@@ -915,7 +915,6 @@ mod runtimes_tests {
         let every = [
             ("node_store", "node", "nodes"),
             ("python_store", "python", "indent"),
-            ("whisper_store", "whisper", "chip"),
             ("piper_store", "piper", "speaker"),
             ("git_bash_store", "git-bash", "branch"),
             ("powershell_store", "powershell", "prompt"),
@@ -999,6 +998,43 @@ mod runtimes_tests {
         }
         let report = stores.read("store/report", &json!({"provider": "foundry_store"}), None);
         assert!(report.is_ok(), "{report:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_speech_program_is_a_type_its_library_adds_and_no_runtime() {
+        let (stores, root) = stores();
+        let types = stores
+            .read("store/extensions", &json!({}), None)
+            .expect("the types");
+        let added = types["types"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .find(|each| each["id"] == canoa_whisper::STORE_TYPE)
+            .expect("the type the library adds is listed");
+        assert_eq!(added["stores"], json!(["whisper_store"]));
+        assert_eq!(added["models"]["provider"], "whisper_models");
+        let listed = stores
+            .read(
+                "store/list",
+                &json!({"kind": "extension", "type": canoa_whisper::STORE_TYPE}),
+                None,
+            )
+            .expect("the type's stores");
+        assert_eq!(
+            programs_of(&listed),
+            [("whisper_store".to_owned(), "whisper".to_owned())]
+        );
+        let runtimes = stores
+            .read("store/list", &json!({"kind": "runtimes"}), None)
+            .expect("the runtimes");
+        assert!(
+            programs_of(&runtimes)
+                .iter()
+                .all(|(id, _)| id != "whisper_store"),
+            "a library's program is its type's alone"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -153,7 +153,6 @@ fn offers(files: &Files, lend: &Lend<'_>) -> Vec<Value> {
     speech_offers::call(
         &Caller::Owner,
         files,
-        Err((REFUSED, "no stores".to_owned())),
         lend,
         "speech/offers",
         &json!({}),
@@ -165,14 +164,7 @@ fn offers(files: &Files, lend: &Lend<'_>) -> Vec<Value> {
 }
 
 fn enable(files: &Files, lend: &Lend<'_>, params: &Value) -> Result<Value, (i32, String)> {
-    speech_offers::call(
-        &Caller::Owner,
-        files,
-        Err((REFUSED, "no stores".to_owned())),
-        lend,
-        "speech/enable",
-        params,
-    )
+    speech_offers::call(&Caller::Owner, files, lend, "speech/enable", params)
 }
 
 fn speak(
@@ -596,9 +588,32 @@ fn a_service_offer_takes_a_models_name_and_an_offer_nothing_serves_is_not_found(
     assert!(
         offers(&files, &bare)
             .iter()
-            .all(|row| row["service"].is_null())
+            .all(|row| row["service"].is_null() && row["store"].is_null())
     );
     let _ = fs::remove_dir_all(&home.root);
+}
+
+#[test]
+fn a_build_whose_libraries_run_no_speech_offers_no_local_engine() {
+    let home = home("no-engine", &[], None, "");
+    let files = files(&home);
+    let root = dir("no-engine-stores");
+    let registry = Arc::new(coqui_acp_api::guatiao::library::Registry::new(
+        "canoa",
+        env!("CARGO_PKG_VERSION"),
+    ));
+    let programs = Programs::new(Shelf::unchecked(&root), Arc::clone(&registry));
+    let held = Stores::new(Arc::new(programs), Vec::new()).with_included_extensions(&registry);
+    let lend = Lend::from(&home.layers, &home.root, Some(&held));
+    assert!(
+        offers(&files, &lend).iter().all(|row| row["local"] != true),
+        "a build that carries no such library offers no engine that runs on this computer"
+    );
+    let err = enable(&files, &lend, &json!({"offer": "whisper"})).expect_err("none");
+    assert_eq!(err.0, NOT_FOUND);
+    for path in [&home.root, &root] {
+        let _ = fs::remove_dir_all(path);
+    }
 }
 
 #[test]
@@ -634,4 +649,300 @@ fn saving_a_providers_settings_keeps_its_account_and_service() {
     assert!(written.contains("service = \"foundry\""), "{written}");
     assert!(written.contains("model = \"other\""), "{written}");
     let _ = fs::remove_dir_all(&home.root);
+}
+
+/// A library that is nobody's vendor, whose Store type runs a program for each recording: the echo program stands for it.
+mod talk {
+    use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtension};
+    use canoa::store::models::{
+        ModelAct, ModelActed, ModelKeep, ModelKept, ModelList, ModelQuery, ModelStore,
+        ModelStoreInfo, ServedModel, ServiceQuery, ServiceReport, SpeechRun, SpeechService,
+    };
+    use coqui_acp_api::ProcessSpawner;
+    use coqui_acp_api::guatiao::library::{Object, ProviderError};
+    use coqui_acp_api::guatiao::{Provider, Status};
+
+    use crate::store::builtin::EchoStore;
+
+    #[derive(Default, Debug, Clone, Copy, Provider)]
+    #[provider(StoreExtension, id = "talk_extension", crate = ::coqui_acp_api::guatiao)]
+    pub(super) struct TalkExtension;
+
+    impl StoreExtension for TalkExtension {
+        fn describe(&self) -> Result<ExtensionInfo, ProviderError> {
+            let mut talk = ExtensionType::new("talk", "Talk", ["echo_store"]);
+            talk.models = Some("talk_models".to_owned());
+            Ok(ExtensionInfo::new("Talk", "Acme", vec![talk]))
+        }
+    }
+
+    #[derive(Default, Debug, Clone, Copy, Provider)]
+    #[provider(ModelStore, id = "talk_models", crate = ::coqui_acp_api::guatiao)]
+    pub(super) struct TalkModels;
+
+    fn nothing(what: &str) -> ProviderError {
+        ProviderError::new(Status::GUATIAO_ERR_UNSUPPORTED, what)
+    }
+
+    impl ModelStore for TalkModels {
+        fn describe(&self) -> Result<ModelStoreInfo, ProviderError> {
+            let mut info = ModelStoreInfo::new("Talk models", "Talk", "Acme", "No models.");
+            let mut speech = SpeechService::program(
+                "Talk",
+                "Speech to text by a program.",
+                "The audio goes to a program on your host.",
+            );
+            speech.license = Some("MIT".to_owned());
+            info.speech = Some(speech);
+            Ok(info)
+        }
+
+        fn list(
+            &self,
+            _query: ModelQuery,
+            _spawner: Object<dyn ProcessSpawner>,
+        ) -> Result<ModelList, ProviderError> {
+            Ok(ModelList::default())
+        }
+
+        fn act(
+            &self,
+            _request: ModelAct,
+            _spawner: Object<dyn ProcessSpawner>,
+        ) -> Result<ModelActed, ProviderError> {
+            Err(nothing("no action"))
+        }
+
+        fn keep(
+            &self,
+            _request: ModelKeep,
+            _spawner: Object<dyn ProcessSpawner>,
+        ) -> Result<ModelKept, ProviderError> {
+            Err(nothing("no setting"))
+        }
+
+        fn service(
+            &self,
+            query: ServiceQuery,
+            _spawner: Object<dyn ProcessSpawner>,
+        ) -> Result<ServiceReport, ProviderError> {
+            let mut report = ServiceReport::default();
+            if query.models {
+                report.models = vec![
+                    ServedModel::new("tiny", "Tiny"),
+                    ServedModel::new("large", "Large"),
+                ];
+            }
+            match query.program {
+                None => {
+                    report.unavailable = Some("talk has no program here: install it".to_owned());
+                }
+                Some(program) => {
+                    report.command = Some(SpeechRun::new(
+                        program,
+                        ["--language", "{language_code|auto}"],
+                        "pcm",
+                        "tiny",
+                    ));
+                }
+            }
+            Ok(report)
+        }
+    }
+
+    coqui_acp_api::guatiao::local_providers!(
+        id = "test-talk",
+        version = env!("CARGO_PKG_VERSION"),
+        providers = [EchoStore, TalkExtension, TalkModels]
+    );
+}
+
+/// The echo program's version stand-in, built beside the tests.
+fn echo_standin() -> PathBuf {
+    let exe = std::env::current_exe().expect("test path");
+    let dir = exe.parent().expect("deps").parent().expect("debug");
+    let path = dir.join("examples").join(if cfg!(windows) {
+        "version_standin.exe"
+    } else {
+        "version_standin"
+    });
+    assert!(
+        path.is_file(),
+        "build the examples first: cargo build -p canoa-host --examples ({})",
+        path.display()
+    );
+    path
+}
+
+/// A Store whose only library is `talk`, over a shelf and a home of its own, with the echo program published in a world of
+/// documents. Nothing is downloaded.
+fn talk_stores(name: &str) -> (Stores, Arc<Programs>, PathBuf) {
+    use crate::store::contract::{Fixture as _, Variant, WorldTransport};
+    use crate::store::echo::EchoFixture;
+    use crate::store::programs::Options;
+
+    let root = dir(name);
+    let home = root.join("home");
+    fs::create_dir_all(&home).expect("a home");
+    let mut registry =
+        coqui_acp_api::guatiao::library::Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    registry
+        .register_local("test-talk", talk::library)
+        .expect("registered");
+    let registry = Arc::new(registry);
+    let fixture = EchoFixture {
+        standin: echo_standin(),
+        archive: false,
+    };
+    let mut options = Options::default();
+    options.home = Some(home.clone());
+    options.watch_registry = false;
+    options.allow_elevated = true;
+    options.settle = Duration::from_millis(100);
+    options.environment = {
+        let mut env = coqui_acp_api::Environment::new();
+        for name in ["PATH", "Path", "SystemRoot"] {
+            if let Ok(value) = std::env::var(name) {
+                env.insert(name, value);
+            }
+        }
+        env
+    };
+    let programs = Arc::new(
+        Programs::new(
+            Shelf::unchecked(root.join("programs")),
+            Arc::clone(&registry),
+        )
+        .transport(WorldTransport::new(fixture.world(Variant::Normal)))
+        .options(options),
+    );
+    let stores = Stores::new(Arc::clone(&programs), Vec::new())
+        .with_included_extensions(&registry)
+        .with_home(Some(home));
+    (stores, programs, root)
+}
+
+/// Installs the echo program through the store, as the Store does for the person.
+fn install_echo(programs: &Programs) {
+    use canoa::store::{Action, StoreSettings};
+
+    use crate::store::programs::Recorder;
+
+    let store = programs
+        .store("echo_store", &StoreSettings::default())
+        .expect("the store");
+    let plan = programs
+        .plan("echo_store", &*store, Action::Install, None, None)
+        .expect("a plan");
+    programs
+        .apply_store(
+            store,
+            "echo_store",
+            &plan,
+            Arc::new(Recorder::default()),
+            Arc::new(core::sync::atomic::AtomicBool::new(false)),
+        )
+        .expect("installed");
+}
+
+#[test]
+fn a_library_that_runs_a_program_is_offered_for_install_and_is_not_enabled_before_it_is() {
+    let home = home("program-offer", &[], None, "");
+    let files = files(&home);
+    let (stores, _programs, root) = talk_stores("program-offer-stores");
+    let lend = Lend::from(&home.layers, &home.root, Some(&stores));
+    let rows = offers(&files, &lend);
+    let talk = by_id(&rows, "talk");
+    assert_eq!(talk["local"], true);
+    assert_eq!(
+        talk["store"], "echo_store",
+        "it is installed as the type's store"
+    );
+    assert_eq!(talk["installed"], false);
+    assert!(
+        talk["unavailable"].is_null(),
+        "not installed is Install, not a reason: {talk}"
+    );
+    assert_eq!(
+        talk["models"],
+        json!([{"id": "tiny", "label": "Tiny"}, {"id": "large", "label": "Large"}])
+    );
+    assert_eq!(talk["default_model"], "tiny");
+    assert!(
+        talk["service"].is_null() && talk["provider"].is_null(),
+        "{talk}"
+    );
+    assert_eq!(talk["license"], "MIT");
+
+    let err = enable(&files, &lend, &json!({"offer": "talk"})).expect_err("nothing installed");
+    assert_eq!(err.0, REFUSED);
+    assert!(
+        err.1.contains("install it"),
+        "the library's words: {}",
+        err.1
+    );
+    assert!(
+        !fs::read_to_string(&home.cfg)
+            .expect("canoa.cfg")
+            .contains("[speech."),
+        "nothing was written"
+    );
+    for path in [&home.root, &root] {
+        let _ = fs::remove_dir_all(path);
+    }
+}
+
+#[test]
+fn an_installed_program_is_enabled_as_the_command_its_library_describes_and_is_then_the_offers_provider()
+ {
+    let home = home("program-enable", &[], None, "");
+    let files = files(&home);
+    let (stores, programs, root) = talk_stores("program-enable-stores");
+    install_echo(&programs);
+    let lend = Lend::from(&home.layers, &home.root, Some(&stores));
+    let rows = offers(&files, &lend);
+    let talk = by_id(&rows, "talk");
+    assert_eq!(talk["installed"], true, "{talk}");
+    assert!(talk["version"].is_string(), "{talk}");
+    assert!(talk["unavailable"].is_null(), "{talk}");
+
+    let made = enable(
+        &files,
+        &lend,
+        &json!({"offer": "talk", "name": "dictation"}),
+    )
+    .expect("enabled");
+    assert_eq!(made["name"], "dictation");
+    assert_eq!(made["provider"], "speech_command");
+    assert_eq!(
+        made["model"], "tiny",
+        "the model the library says the copy runs"
+    );
+    let store = programs
+        .store("echo_store", &canoa::store::StoreSettings::default())
+        .expect("the store");
+    let launch = programs
+        .launch(&*store)
+        .expect("a copy that checks out")
+        .path;
+    let written = fs::read_to_string(&home.cfg).expect("canoa.cfg");
+    assert!(written.contains("[speech.dictation]"), "{written}");
+    assert!(
+        written.contains("provider = \"speech_command\"")
+            && written.contains("input = \"pcm\"")
+            && written.contains("offer = \"talk\"")
+            && written.contains("{language_code|auto}"),
+        "{written}"
+    );
+    let config: toml::Table = toml::from_str(&written).expect("canoa.cfg is TOML");
+    assert_eq!(
+        config["speech"]["dictation"]["program"].as_str(),
+        Some(launch.as_str()),
+        "the library is handed the host's own copy, and what it says to run is written"
+    );
+    let rows = offers(&files, &lend);
+    assert_eq!(by_id(&rows, "talk")["provider"], "dictation");
+    for path in [&home.root, &root] {
+        let _ = fs::remove_dir_all(path);
+    }
 }
