@@ -16,21 +16,29 @@ import 'overlay_page.dart' show oneLine;
 import 'store.dart';
 import 'store_settings.dart';
 
-/// Asks before a catalog is taken out of canoa.cfg, naming it and what stays as it is; true when the person says so.
-Future<bool> confirmCatalogRemoval(BuildContext context, String label) async =>
+/// Asks before something the person set up is taken away: `title` says what, `body` what is taken out and what stays as it is.
+/// True when the person says remove, false on Keep it or on dismissing the dialog.
+Future<bool> confirmRemoval(BuildContext context, {required String title, required String body}) async =>
     await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        key: const Key('confirm-remove-catalog'),
-        title: Text('Stop reading $label?'),
-        content: const Text('It is taken out of canoa.cfg. What was installed from it stays installed, and adding it again reads it once more.'),
+        key: const Key('confirm-remove'),
+        title: Text(title),
+        content: Text(body),
         actions: [
-          TextButton(key: const Key('confirm-remove-catalog-no'), onPressed: () => Navigator.pop(context, false), child: const Text('Keep it')),
-          FilledButton(key: const Key('confirm-remove-catalog-yes'), onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
+          TextButton(key: const Key('confirm-remove-no'), onPressed: () => Navigator.pop(context, false), child: const Text('Keep it')),
+          FilledButton(key: const Key('confirm-remove-yes'), onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
         ],
       ),
     ) ??
     false;
+
+/// Asks before a catalog is taken out of canoa.cfg.
+Future<bool> confirmCatalogRemoval(BuildContext context, String label) => confirmRemoval(
+  context,
+  title: 'Stop reading $label?',
+  body: 'It is taken out of canoa.cfg. What was installed from it stays installed, and adding it again reads it once more.',
+);
 
 /// Store settings of one type: the catalogs that type reads, added, listed with what each said and removed. What the type calls them
 /// and the forms that add one are the host's to say (`store/catalogs`), so a type an extension adds has them too. Where the limits

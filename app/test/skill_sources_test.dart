@@ -243,6 +243,13 @@ void main() {
       expect(find.byKey(const Key('store-source-skill-addyosmani-web-quality-skills-performance')), findsOneWidget);
 
       await tapKey(tester, 'skills-source-remove');
+      expect(find.byKey(const Key('confirm-remove')), findsOneWidget);
+      final before = saved.length;
+      await tapKey(tester, 'confirm-remove-no');
+      expect(saved.length, before, reason: 'Keep it writes nothing');
+      expect(find.byKey(const Key('skills-source-addyosmani-web-quality-skills')), findsOneWidget);
+      await tapKey(tester, 'skills-source-remove');
+      await tapKey(tester, 'confirm-remove-yes');
       expect(saved.last.skillSources.keys, ['anthropics']);
       expect(find.byKey(const Key('skills-source-addyosmani-web-quality-skills')), findsNothing);
       expect(find.byKey(const Key('skills-choose-source')), findsOneWidget, reason: 'removing the source it was reading puts Discover back on the choice of one');
@@ -263,6 +270,7 @@ void main() {
       await tapKey(tester, 'skills-source-anthropics');
       expect(find.byKey(const Key('store-source-skill-anthropics-pdf')), findsOneWidget);
       await tapKey(tester, 'skills-source-remove');
+      await tapKey(tester, 'confirm-remove-yes');
       expect(saved.last.encode(), contains('anthropics = false'));
       expect(saved.last.skillSources, isEmpty);
       expect(find.byKey(const Key('skills-source-anthropics')), findsNothing);

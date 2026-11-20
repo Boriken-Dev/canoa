@@ -10,6 +10,7 @@ import '../selectable.dart';
 import 'entry_details.dart';
 import 'overlay_page.dart' show oneLine;
 import 'store_cards.dart';
+import 'store_catalogs.dart' show confirmRemoval;
 import 'store_view.dart';
 
 /// The MCPs type: the MCP servers the profile defines, and the servers a registry lists.
@@ -38,6 +39,30 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
   void dispose() {
     address.dispose();
     super.dispose();
+  }
+
+  Future<void> _removeServer(BuildContext context, String name) async {
+    if (!await confirmRemoval(
+      context,
+      title: 'Remove $name?',
+      body: 'Its entry is taken out of canoa.cfg, with which agents may start it. The program and files it runs are not touched, and adding it again installs it once more.',
+    )) {
+      return;
+    }
+    if (!mounted) return;
+    await c.removeMcp(name);
+  }
+
+  Future<void> _removeRegistry(BuildContext context, String address) async {
+    if (!await confirmRemoval(
+      context,
+      title: 'Stop reading ${registryShown(address)}?',
+      body: 'It is taken out of canoa.cfg. The servers installed from it stay installed, and adding it again reads it once more.',
+    )) {
+      return;
+    }
+    if (!mounted) return;
+    await c.removeRegistry(address);
   }
 
   @override
@@ -118,7 +143,7 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
               alignment: Alignment.centerLeft,
               child: TextButton(
                 key: Key('mcp-remove-${server.name}'),
-                onPressed: c.busy != null ? null : () => unawaited(c.removeMcp(server.name)),
+                onPressed: c.busy != null ? null : () => unawaited(_removeServer(context, server.name)),
                 child: const Text('Remove'),
               ),
             ),
@@ -173,7 +198,7 @@ class _McpsBodyState extends State<McpsBody> with AutomaticKeepAliveClientMixin 
         if (added.contains(c.selectedRegistry) || c.generatedRegistryOf(c.selectedRegistry) != null)
           TextButton(
             key: const Key('mcps-registry-remove'),
-            onPressed: c.busy != null ? null : () => unawaited(c.removeRegistry(c.selectedRegistry)),
+            onPressed: c.busy != null ? null : () => unawaited(_removeRegistry(context, c.selectedRegistry)),
             child: const Text('Remove this registry'),
           ),
       ]),

@@ -160,6 +160,10 @@ void main() {
     expect(find.byKey(const Key('mcps-registry-remove')), findsOneWidget);
 
     await tapKey(tester, 'mcps-registry-remove');
+    await tapKey(tester, 'confirm-remove-no');
+    expect(find.byKey(const Key('mcps-registry-store:made')), findsOneWidget, reason: 'Keep it removes nothing');
+    await tapKey(tester, 'mcps-registry-remove');
+    await tapKey(tester, 'confirm-remove-yes');
     expect(saved.last.catalogSpecs('mcps').keys, ['team'], reason: 'its entry is gone from canoa.cfg, and the registry added by address stays');
     expect(find.byKey(const Key('mcps-registry-store:made')), findsNothing);
   });

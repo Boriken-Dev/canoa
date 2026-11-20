@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../settings/settings_row.dart';
+import '../store/store_catalogs.dart' show confirmRemoval;
 import 'host_speech.dart';
 import 'provider_form.dart';
 
@@ -35,6 +36,14 @@ class _HostProvidersGroupState extends State<HostProvidersGroup> {
   }
 
   Future<void> _remove(String name) async {
+    if (!await confirmRemoval(
+      context,
+      title: 'Remove $name?',
+      body: 'This speech provider, with its address and settings, is taken away from this host. Any program or account it used stays as it is.',
+    )) {
+      return;
+    }
+    if (!mounted) return;
     try {
       await widget.catalog.remove(name);
       if (mounted) setState(() => _editing = _editing == name ? null : _editing);

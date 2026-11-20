@@ -420,12 +420,12 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
       await open(tester, 'mcps');
       await tester.tap(find.byKey(const Key('store-remove-catalog-corp')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('confirm-remove-catalog-no')));
+      await tester.tap(find.byKey(const Key('confirm-remove-no')));
       await tester.pumpAndSettle();
       expect(stored.catalogSpecs('mcps').keys, ['corp'], reason: 'keeping it removes nothing');
       await tester.tap(find.byKey(const Key('store-remove-catalog-corp')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('confirm-remove-catalog-yes')));
+      await tester.tap(find.byKey(const Key('confirm-remove-yes')));
       await tester.pumpAndSettle();
       expect(stored.catalogSpecs('mcps'), isEmpty);
       expect(stored.catalogSpecs('skills').keys, ['mine']);
@@ -433,7 +433,7 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
       expect(shown(tester), {'boriken', 'team'});
       await tester.tap(find.byKey(const Key('store-remove-catalog-boriken')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('confirm-remove-catalog-yes')));
+      await tester.tap(find.byKey(const Key('confirm-remove-yes')));
       await tester.pumpAndSettle();
       expect(stored.catalogTable('overlays'), {'team': 'https://example.invalid/team.git@main#catalog.toml', 'boriken': false});
     });

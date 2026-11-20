@@ -14,6 +14,7 @@ import 'skill_sources.dart';
 import 'skills.dart';
 import 'store_banner.dart';
 import 'store_cards.dart';
+import 'store_catalogs.dart' show confirmRemoval;
 import 'store_view.dart';
 
 /// The Skills type: the skills fetched on this computer, and the skills the catalogs offer.
@@ -229,6 +230,14 @@ class _SkillsBodyState extends State<SkillsBody> with AutomaticKeepAliveClientMi
   }
 
   Future<void> _removeSource(String label) async {
+    if (!await confirmRemoval(
+      context,
+      title: 'Stop reading $label?',
+      body: 'It is taken out of canoa.cfg. The skills installed from it stay installed, and adding it again reads it once more.',
+    )) {
+      return;
+    }
+    if (!mounted) return;
     await c.removeSkillSource(label);
     if (view.source == label) view.source = null;
     view.changed();

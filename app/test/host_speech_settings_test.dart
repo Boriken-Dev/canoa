@@ -135,6 +135,21 @@ void main() {
     expect(sent.containsKey('clear'), isFalse);
   });
 
+  testWidgets('keeping a provider at the question removes nothing', (tester) async {
+    final link = _Host();
+    final catalog = HostSpeechCatalog(HostControl.dialing(() async => link));
+    await tester.runAsync(catalog.refresh);
+    await openSettings(tester, section: 'voice', hostSpeech: catalog);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('speech-remove-cloud')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('confirm-remove')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('confirm-remove-no')));
+    await tester.pumpAndSettle();
+    expect(link.configured, isEmpty);
+    expect(find.byKey(const Key('speech-provider-cloud')), findsOneWidget);
+  });
+
   testWidgets('a provider can be removed from the page', (tester) async {
     final link = _Host();
     final catalog = HostSpeechCatalog(HostControl.dialing(() async => link));
@@ -142,6 +157,8 @@ void main() {
     await openSettings(tester, section: 'voice', hostSpeech: catalog);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('speech-remove-cloud')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm-remove-yes')));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pumpAndSettle();
     expect(link.configured.single, {'name': 'cloud', 'remove': true});

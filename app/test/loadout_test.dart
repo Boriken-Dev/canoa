@@ -513,6 +513,12 @@ void main() {
       expect(saved.last.agentMcp, {'Claude': {'files': true}, 'Codex': {'files': true}});
       expect(find.textContaining('Allowed for 2 of 2 agents'), findsOneWidget);
       await tapKey(tester, 'mcp-remove-files');
+      expect(find.byKey(const Key('confirm-remove')), findsOneWidget);
+      await tapKey(tester, 'confirm-remove-no');
+      expect(saved.last.profile.mcp.keys, ['files'], reason: 'Keep it removes nothing');
+      expect(find.byKey(const Key('mcp-remove-files')), findsOneWidget);
+      await tapKey(tester, 'mcp-remove-files');
+      await tapKey(tester, 'confirm-remove-yes');
       expect(saved.last.profile.mcp, isEmpty);
       expect(saved.last.agentMcp, isEmpty);
     });
@@ -568,6 +574,11 @@ void main() {
       expect(find.byKey(const Key('mcp-entry-io.github.ana/files')), findsOneWidget);
       await tapKey(tester, 'mcps-registry-registry.team.test');
       await tapKey(tester, 'mcps-registry-remove');
+      expect(find.byKey(const Key('confirm-remove')), findsOneWidget);
+      await tapKey(tester, 'confirm-remove-no');
+      expect(find.byKey(const Key('mcps-registry-remove')), findsOneWidget, reason: 'Keep it leaves the registry chosen');
+      await tapKey(tester, 'mcps-registry-remove');
+      await tapKey(tester, 'confirm-remove-yes');
       expect(saved.last.storeRegistries, isEmpty);
       expect(find.byKey(const Key('mcp-entry-io.github.ana/files')), findsOneWidget, reason: 'back to the official registry');
     });

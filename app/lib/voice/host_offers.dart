@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../desktop/host_grants.dart';
 import '../settings/settings_row.dart';
 import '../store/programs_view.dart' show runProgramAction;
+import '../store/store_catalogs.dart' show confirmRemoval;
 import 'host_speech.dart';
 import 'provider_form.dart';
 import 'speech_backend.dart';
@@ -82,7 +83,17 @@ class _HostOffersGroupState extends State<HostOffersGroup> {
     widget.onChosen(hostSpeechId(name));
   });
 
-  Future<void> _remove(String name) => _run(name, () => _catalog.remove(name));
+  Future<void> _remove(String name) async {
+    if (!await confirmRemoval(
+      context,
+      title: 'Remove $name?',
+      body: 'This speech provider, with its address and settings, is taken away from this host. Any program or account it used stays as it is.',
+    )) {
+      return;
+    }
+    if (!mounted) return;
+    await _run(name, () => _catalog.remove(name));
+  }
 
   Widget _modelChoice(SpeechOffer offer, {bool enabled = true}) => DropdownButton<String>(
     key: Key('offer-model-${offer.id}'),

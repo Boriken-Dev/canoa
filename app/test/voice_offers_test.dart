@@ -162,6 +162,27 @@ void main() {
     expect(harness.applied, isEmpty, reason: 'audio goes to a named service only when the person chooses it');
   });
 
+  testWidgets('removing a service asks first: Keep it leaves it, Remove takes it away', (tester) async {
+    final speech = OffersHost(more: [_account('work')]);
+    await _page(tester, host: speech);
+    await tester.tap(find.byKey(const Key('offer-enable-openai:work')));
+    await _settle(tester);
+
+    await tester.tap(find.byKey(const Key('offer-remove-openai:work')));
+    await _settle(tester);
+    expect(find.byKey(const Key('confirm-remove')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('confirm-remove-no')));
+    await _settle(tester);
+    expect(speech.configured, isEmpty, reason: 'Keep it sends nothing');
+    expect(find.byKey(const Key('offer-remove-openai:work')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('offer-remove-openai:work')));
+    await _settle(tester);
+    await tester.tap(find.byKey(const Key('confirm-remove-yes')));
+    await _settle(tester);
+    expect(speech.configured.single, {'name': 'openai-work', 'remove': true});
+  });
+
   testWidgets('a key the host has not given the grants says what is missing instead of failing later', (tester) async {
     // The host says this key may list and use providers and nothing else.
     final speech = OffersHost();
