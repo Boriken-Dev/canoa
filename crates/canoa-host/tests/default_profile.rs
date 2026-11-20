@@ -340,3 +340,16 @@ program = \"x\"
     .expect("written");
     assert!(run(&path)["Plain"].starts_with("none"));
 }
+
+#[test]
+fn an_entry_that_sets_own_profile_is_refused_naming_the_key() {
+    let parsed = canoa_host::Config::from_str_in(
+        "[host.agents.a]
+program = \"x\"
+own_profile = true
+",
+        Path::new("."),
+    );
+    let error = parsed.expect_err("an unknown key").to_string();
+    assert!(error.contains("own_profile"), "{error}");
+}

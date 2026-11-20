@@ -2205,9 +2205,6 @@ struct RawAgent {
     cache_lifetime: Option<String>,
     shell: Option<String>,
     profiles: Option<Vec<String>>,
-    /// Read and ignored: every entry that names no `profiles` gets canoa.cfg's top level, so the key that once asked for it changes nothing.
-    #[allow(dead_code)]
-    own_profile: Option<bool>,
     accounts: Option<Vec<String>>,
     usage: Option<String>,
     title: Option<String>,
@@ -4653,6 +4650,9 @@ fn unknown_key(table: &str, key: &str) -> String {
     match (table, key) {
         ("host", "account_store") => format!(
             "{key} is not a setting this host knows; `accounts` under `[secrets]` replaced it (`file` is `file`, `os` is `system`)"
+        ),
+        (table, "own_profile") if table.starts_with("host.agents.") => format!(
+            "{key} is not a setting this host knows; an entry that names no `profiles` gets canoa.cfg's top level, and one that should run bare names an empty profile"
         ),
         _ => "a setting this host does not know".to_owned(),
     }
