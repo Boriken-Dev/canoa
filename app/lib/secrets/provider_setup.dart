@@ -5,7 +5,7 @@ import 'secrets_controller.dart';
 import 'secrets_host.dart';
 import 'secrets_section.dart' show SetSecretDialog;
 
-/// Sets up a secret provider: its settings are drawn from the schema and the form the host serves for it, and a setting that is another
+/// Sets up a vault (an entry of a secret provider): its settings are drawn from the schema and the form the host serves for it, and a setting that is another
 /// secret (the key that unlocks a vault) is a choice of the provider that gives it, never a box to type it in. Then, for each such
 /// secret the person gives by typing, the form that asks for it is opened. [providerId] starts the choice on that provider, and
 /// [editing] is the entry being changed.
@@ -68,11 +68,11 @@ class _SecretProviderSetupDialogState extends State<SecretProviderSetupDialog> {
     final name = _name.text.trim();
     return AlertDialog(
       key: const Key('secret-provider-dialog'),
-      title: Text(editing == null ? 'Set up a secret provider' : 'Change ${editing.name}'),
+      title: Text(editing == null ? 'Set up a vault' : 'Change ${editing.name}'),
       content: SizedBox(
         width: 520,
         child: info == null
-            ? const Text('This host offers no provider that has anything to set up.', key: Key('secret-provider-none'))
+            ? const Text('This host offers no kind of vault that has anything to set up.', key: Key('secret-provider-none'))
             : SingleChildScrollView(
                 child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   if (editing == null)
@@ -91,7 +91,7 @@ class _SecretProviderSetupDialogState extends State<SecretProviderSetupDialog> {
                     key: const Key('secret-provider-name'),
                     controller: _name,
                     enabled: editing == null,
-                    decoration: const InputDecoration(labelText: 'Name of this setup', helperText: 'What canoa.cfg and the Secrets list call it'),
+                    decoration: const InputDecoration(labelText: 'Name of this vault', helperText: 'What canoa.cfg and the Secrets list call it'),
                     onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: 8),

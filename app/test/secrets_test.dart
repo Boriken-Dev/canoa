@@ -4,6 +4,7 @@
 import 'package:canoa/desktop/control_client.dart';
 import 'package:canoa/secrets/secrets_controller.dart';
 import 'package:canoa/secrets/secrets_host.dart';
+import 'package:canoa/secrets/secrets_index.dart';
 import 'package:canoa/secrets/secrets_section.dart';
 import 'package:canoa/forms/schema_fields.dart' show SecretSource;
 import 'package:flutter/material.dart';
@@ -112,7 +113,7 @@ Future<(SecretsController, _FakeSecrets)> _page(WidgetTester tester, List<Secret
   final controller = SecretsController(host: host);
   await tester.binding.setSurfaceSize(const Size(1200, 700));
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester.pumpWidget(MaterialApp(home: Scaffold(body: SecretsPage(controller: controller, refreshEvery: null))));
+  await tester.pumpWidget(MaterialApp(home: Scaffold(body: Row(children: [SizedBox(width: 260, child: SecretsIndex(controller: controller)), Expanded(child: SecretsPage(controller: controller, refreshEvery: null))]))));
   await tester.pump();
   await tester.pump();
   return (controller, host);
@@ -121,7 +122,7 @@ Future<(SecretsController, _FakeSecrets)> _page(WidgetTester tester, List<Secret
 void main() {
   testWidgets('a provider is set up from the form the host describes, and a secret setting is a choice of where it comes from, never a box to type it in', (tester) async {
     final (_, host) = await _page(tester, const []);
-    await tester.tap(find.byKey(const Key('secret-add-provider')));
+    await tester.tap(find.byKey(const Key('secret-add-vault')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('secret-provider-dialog')), findsOneWidget);
     expect(find.byKey(const Key('secret-provider-field-command')), findsOneWidget);
@@ -151,7 +152,7 @@ void main() {
   testWidgets('a refusal of the host is shown in the form and the dialog stays', (tester) async {
     final (_, host) = await _page(tester, const []);
     host.configureFails = 'those settings cannot be used: nope';
-    await tester.tap(find.byKey(const Key('secret-add-provider')));
+    await tester.tap(find.byKey(const Key('secret-add-vault')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('secret-provider-save')));
     await tester.pumpAndSettle();
@@ -162,15 +163,21 @@ void main() {
 
   testWidgets('a setup that was made is listed, changed from what it holds, and removed after a yes', (tester) async {
     final (_, host) = await _page(tester, const []);
-    expect(find.byKey(const Key('secret-provider work')), findsOneWidget);
+    expect(find.byKey(const Key('secret-provider work')), findsNothing, reason: 'a vault is changed from its own page');
+    await tester.tap(find.byKey(const Key('secrets-index vault form')));
+    await tester.pump();
     expect(find.byKey(const Key('secret-provider form')), findsNothing, reason: 'the form and the system store are there without being set up');
+    expect(find.text('Built in: nothing to set up.'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('secrets-index vault work')));
+    await tester.pump();
+    expect(find.byKey(const Key('secrets-vault-setting work command: bw')), findsOneWidget);
     await tester.tap(find.byKey(const Key('secret-provider work')));
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(const Key('secret-provider-field-command'))).controller!.text, 'bw');
     expect(tester.widget<TextField>(find.byKey(const Key('secret-provider-from-name-session'))).controller!.text, 'bw_session');
     await tester.tap(find.byKey(const Key('secret-provider-cancel')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Remove this setup'));
+    await tester.tap(find.byKey(const Key('secret-vault-remove work')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('secret-provider-remove-yes')));
     await tester.pumpAndSettle();
@@ -185,6 +192,7 @@ void main() {
       SecretRow(provider: 'form', name: 'mine', kept: 'session', session: 's1'),
     ]);
     expect(find.byKey(const Key('secrets-table')), findsOneWidget);
+    expect(find.text('Vault'), findsOneWidget, reason: 'All vaults names the vault of each secret');
     expect(find.byKey(const Key('secret-name form/api_key')), findsOneWidget);
     expect(find.text('Until Canoa closes'), findsOneWidget);
     expect(find.text('14 min left'), findsOneWidget);
@@ -297,6 +305,60 @@ void main() {
     await tester.pumpAndSettle();
     expect(host.sets.last.cancelled, isTrue);
     expect(find.byKey(const Key('secret-set-dialog')), findsNothing);
+  });
+
+  testWidgets('the index lists All vaults and each vault with its count, and choosing one shows only its secrets', (tester) async {
+    await _page(tester, const [
+      SecretRow(provider: 'form', name: 'api_key', kept: 'process'),
+      SecretRow(provider: 'system', name: 'deploy', kept: 'stored'),
+      SecretRow(provider: 'system', name: 'other', kept: 'stored'),
+    ]);
+    expect(find.text('All vaults'), findsNWidgets(2), reason: 'the index row and the page title');
+    expect(find.descendant(of: find.byKey(const Key('secrets-index all')), matching: find.text('3 secrets')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('secrets-index vault form')), matching: find.text('Form · 1 secret')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('secrets-index vault system')), matching: find.text('System store · 2 secrets')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('secrets-index vault work')), matching: find.text('Bitwarden · 0 secrets')), findsOneWidget);
+    expect(find.byKey(const Key('secret-add-vault')), findsOneWidget);
+    expect(find.byKey(const Key('secret-name system/deploy')), findsOneWidget);
+    expect(find.byKey(const Key('secret-name form/api_key')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('secrets-index vault system')));
+    await tester.pump();
+    expect(tester.widget<Text>(find.byKey(const Key('secrets-title'))).data, 'system');
+    expect(find.byKey(const Key('secret-name system/deploy')), findsOneWidget);
+    expect(find.byKey(const Key('secret-name system/other')), findsOneWidget);
+    expect(find.byKey(const Key('secret-name form/api_key')), findsNothing);
+    expect(find.text('Vault'), findsNothing, reason: 'inside a vault the column would repeat its name');
+
+    await tester.tap(find.byKey(const Key('secrets-index vault work')));
+    await tester.pump();
+    expect(find.byKey(const Key('secrets-empty')), findsOneWidget);
+    expect(find.text('Nothing is kept in this vault.'), findsOneWidget);
+    expect(find.byKey(const Key('secret-set')), findsNothing, reason: 'a vault that is only read takes no value by hand');
+
+    await tester.tap(find.byKey(const Key('secrets-index all')));
+    await tester.pump();
+    expect(find.byKey(const Key('secret-name form/api_key')), findsOneWidget);
+  });
+
+  testWidgets('a secret set from a vault page starts on that vault and stays there when it is kept', (tester) async {
+    final (controller, host) = await _page(tester, const [SecretRow(provider: 'form', name: 'api_key', kept: 'process')]);
+    await tester.tap(find.byKey(const Key('secrets-index vault system')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('secret-set')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('secret-set-name')), 'deploy_token');
+    await tester.tap(find.byKey(const Key('secret-set-continue')));
+    await tester.pump();
+    expect(host.sets.single.provider, 'system', reason: 'the dialog opened on the chosen vault');
+    host.rows = [...host.rows, const SecretRow(provider: 'system', name: 'deploy_token', kept: 'stored')];
+    host.sets.single.complete();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('secret-set-close')));
+    await tester.pumpAndSettle();
+    expect(controller.vault, 'system');
+    expect(find.byKey(const Key('secret-name system/deploy_token')), findsOneWidget);
+    expect(find.byKey(const Key('secret-name form/api_key')), findsNothing);
   });
 
   test('a row is read from what the host lists, and one that is not a row is left out', () {

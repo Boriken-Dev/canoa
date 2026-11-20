@@ -911,9 +911,9 @@ A script of your own is added as an extension that names the JavaScript Canoa ca
 
 The vault is never unlocked for you: until the key is given, a request for a name Bitwarden answers falls back to asking you, and a wrong or expired key does the same. The key goes to `bw` in its environment, never on a command line.
 
-**Set up a provider** in the app: Secrets, Set up a provider (or, after the Store installs `bw`, it opens by itself) draws the provider's settings from the form the host describes. A setting that is a secret, such as Bitwarden's session key, is never a box to type in: you choose where it comes from, another setup or the form (you type it when Canoa asks, and the form that asks opens next), and what you choose is saved in canoa.cfg as a reference, never as the secret.
+**Set up a vault** in the app: Secrets, Set up a vault, at the foot of its index (or, after the Store installs `bw`, it opens by itself) draws the provider's settings from the form the host describes. A setting that is a secret, such as Bitwarden's session key, is never a box to type in: you choose where it comes from, another setup or the form (you type it when Canoa asks, and the form that asks opens next), and what you choose is saved in canoa.cfg as a reference, never as the secret.
 
-The **Secrets** section of the app lists what Canoa holds: each secret's provider and name, its value hidden until you press Show, and how long it is kept. Forget takes one out (of the system store too, when it was kept there), and Set a secret asks for a value in a form only the app and the host can read.
+The **Secrets** section of the app has an index like the Store's: All vaults, then one row per vault (the form, the system store and each setup you made) with how many secrets it holds. All vaults lists what Canoa holds, each secret's vault and name, its value hidden until you press Show, and how long it is kept. Forget takes one out (of the system store too, when it was kept there), and Set a secret asks for a value in a form only the app and the host can read.
 
 An agent can say how long it can wait for your answer; Canoa never waits longer than `max_wait`, and when you are not connected at all it tells the agent so at once instead of waiting. A question nobody answered in time disappears from your screen.
 

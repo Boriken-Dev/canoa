@@ -19,6 +19,9 @@ class SecretsController extends ChangeNotifier {
   List<SecretProviderInfo> providers = const [];
   bool loading = false;
 
+  /// The vault (a provider entry's name) the page shows; null shows all of them.
+  String? vault;
+
   /// Why the last call failed, in the host's words, which never hold a value.
   String? problem;
   final _shown = <String, String>{};
@@ -36,6 +39,7 @@ class SecretsController extends ChangeNotifier {
       rows = listing.rows;
       keeps = listing.keeps;
       this.entries = entries;
+      if (vault != null && !entries.any((entry) => entry.name == vault)) vault = null;
       problem = null;
       _shown.removeWhere((key, _) => !rows.any((row) => row.key == key));
     } on ControlFailed catch (error) {
@@ -47,6 +51,25 @@ class SecretsController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Shows the vault [name], or all of them when it is null.
+  void select(String? name) {
+    if (vault == name) return;
+    vault = name;
+    notifyListeners();
+  }
+
+  /// The entry of the vault the page shows, or null when it shows all of them.
+  SecretEntry? get chosen => vault == null ? null : entries.where((entry) => entry.name == vault).firstOrNull;
+
+  /// The secrets of the vault the page shows, or every secret.
+  List<SecretRow> get visible => vault == null ? rows : [for (final row in rows) if (row.provider == vault) row];
+
+  /// How many secrets the vault [name] holds.
+  int countIn(String name) => rows.where((row) => row.provider == name).length;
+
+  /// The provider the vault [entry] is an entry of, as the host describes it.
+  SecretProviderInfo? infoOf(SecretEntry entry) => providers.where((each) => each.id == entry.provider).firstOrNull;
 
   /// Asks the host for the value of [row], or hides it when it is shown.
   Future<void> toggle(SecretRow row) async {

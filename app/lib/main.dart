@@ -125,6 +125,7 @@ import 'secrets/secrets_controller.dart';
 import 'secrets/secrets_host.dart';
 import 'secrets/provider_setup.dart';
 import 'secrets/secrets_section.dart';
+import 'secrets/secrets_index.dart';
 import 'settings/extension_settings.dart';
 import 'settings/host_sections.dart';
 import 'shell/panel_tabs.dart';
@@ -792,6 +793,8 @@ class _CanoaAppState extends State<CanoaApp> {
   Widget? _usageIndex() => _usage == null ? null : UsageIndex(controller: _usage!);
 
   /// The Secrets section: what the host holds for the agents, which the section shows when the host grants `secrets`.
+  Widget? _secretsIndex() => _secrets == null ? null : SecretsIndex(controller: _secrets!);
+
   Widget? _secretsPage() => _secrets == null ? null : SecretsPage(controller: _secrets!);
 
   Widget? _usagePage() => _usage == null
@@ -3500,7 +3503,7 @@ class _CanoaAppState extends State<CanoaApp> {
           layout: _layout, surfaces: _surfaces, settings: _settingsPage(), loadout: _loadoutPage(), loadouts: _loadoutsPage(),
           hostsIndex: _hostsIndex(), hostsPage: _hostsPage(), storeIndex: StoreIndex(selection: _storeSelection),
           loadoutsIndex: LoadoutsIndex(selection: _loadoutsSelection, config: config),
-          usageIndex: _usageIndex(), usagePage: _usagePage(), secretsPage: _secretsPage(), sessionSpend: _usage?.sessionSpend,
+          usageIndex: _usageIndex(), usagePage: _usagePage(), secretsIndex: _secretsIndex(), secretsPage: _secretsPage(), sessionSpend: _usage?.sessionSpend,
           terminalIndex: TerminalIndex(controller: _terminalSection), terminalMain: TerminalMain(controller: _terminalSection),
           conversation: _conversation,
           localHost: _localHost,
@@ -3531,7 +3534,7 @@ class _CanoaHome extends StatelessWidget {
     this.onHosts, this.onLoadout, this.onLoadouts, this.account, this.onSignOut, this.onReopen, this.running, this.onAttach, required this.conversation, this.kit = const ComposerKit(),
     this.renderers = chat.ChatRenderers.none, required this.welcome, this.noAgent = false, this.localHost, required this.grouping,
     required this.layout, required this.surfaces, required this.settings, required this.loadout, required this.loadouts,
-    required this.hostsIndex, required this.hostsPage, required this.storeIndex, required this.loadoutsIndex, this.usageIndex, this.usagePage, this.secretsPage, this.sessionSpend,
+    required this.hostsIndex, required this.hostsPage, required this.storeIndex, required this.loadoutsIndex, this.usageIndex, this.usagePage, this.secretsIndex, this.secretsPage, this.sessionSpend,
     required this.terminalIndex, required this.terminalMain,
     this.chatOnly = false, this.relations, required this.onNewRelated, required this.onResumeRelated, this.onOpenFullApp, this.startOptions,
   });
@@ -3553,7 +3556,7 @@ class _CanoaHome extends StatelessWidget {
   final Widget? usageIndex, usagePage;
 
   /// The Secrets section's main view; none where the host does not grant secrets.
-  final Widget? secretsPage;
+  final Widget? secretsIndex, secretsPage;
 
   /// The Terminal section's index and main view.
   final Widget terminalIndex, terminalMain;
@@ -3766,7 +3769,7 @@ class _CanoaHome extends StatelessWidget {
           AppSection(id: HostsController.section, label: 'Hosts', icon: Icons.lan_outlined, index: hostsIndex, main: hostsPage),
           AppSection(id: 'terminal', label: 'Terminal', icon: Icons.terminal, index: terminalIndex, main: terminalMain),
           if (usagePage != null) AppSection(id: 'usage', label: 'Usage', icon: Icons.speed, index: usageIndex, main: usagePage!),
-          if (secretsPage != null) AppSection(id: 'secrets', label: 'Secrets', icon: Icons.key_outlined, main: secretsPage!),
+          if (secretsPage != null) AppSection(id: 'secrets', label: 'Secrets', icon: Icons.key_outlined, index: secretsIndex, main: secretsPage!),
           AppSection(id: 'loadouts', label: 'Loadouts', icon: Icons.inventory_2_outlined, index: loadoutsIndex, main: loadouts),
           AppSection(id: 'store', label: 'Store', icon: Icons.storefront_outlined, index: storeIndex, main: loadout, ownsLayoutControls: true),
           AppSection(id: 'settings', label: 'Settings', tooltip: 'Canoa settings', icon: Icons.settings_outlined, main: settings, atFoot: true),

@@ -24,7 +24,7 @@ String _span(int seconds) {
   return '$seconds s';
 }
 
-/// The Secrets section: what the host holds for the agents (where each is kept, what it is called, how long it has left), with the value
+/// The Secrets section's page: the vault the index chose (or all of them), with what the host holds for the agents (where each is kept, what it is called, how long it has left), with the value
 /// hidden until the person asks to see it, forget, and a way to set one by hand. A list never holds a value.
 class SecretsPage extends StatefulWidget {
   const SecretsPage({super.key, required this.controller, this.refreshEvery = const Duration(seconds: 30)});
@@ -71,7 +71,7 @@ class _SecretsPageState extends State<SecretsPage> {
         title: Text('Forget ${row.name}?'),
         content: Text(
           row.kept == 'stored'
-              ? '${row.name} is taken out of the ${row.provider} store. An agent that asks for it again will ask you.'
+              ? '${row.name} is taken out of the ${row.provider} vault. An agent that asks for it again will ask you.'
               : 'Canoa stops holding ${row.name}. An agent that asks for it again will ask you.',
         ),
         actions: [
@@ -81,11 +81,6 @@ class _SecretsPageState extends State<SecretsPage> {
       ),
     );
     if (sure ?? false) await _secrets.forget(row);
-  }
-
-  Future<void> _addProvider() async {
-    await showSecretProviderSetup(context, _secrets);
-    if (mounted) unawaited(_secrets.refresh());
   }
 
   Future<void> _editProvider(SecretEntry entry) async {
@@ -109,27 +104,37 @@ class _SecretsPageState extends State<SecretsPage> {
     if (sure ?? false) await _secrets.removeEntry(entry.name);
   }
 
-  /// The providers the person set up, each to change or take away.
-  Widget _providers(ThemeData theme, ColorScheme scheme) {
+  /// What the chosen vault is: what it can do, its settings and, for one the person set up, a way to change or take it away.
+  Widget _vault(SecretEntry entry, ThemeData theme, ColorScheme scheme) {
+    final info = _secrets.infoOf(entry);
+    final can = [if (entry.canStore) 'keeps what you give it', if (entry.canList) 'lists what it holds', if (entry.needsPerson) 'asks you for a value'];
+    final settings = <String>[
+      for (final each in entry.settings.entries) '${each.key}: ${each.value}',
+      for (final each in entry.from.entries) '${each.key}: the secret ${each.value.name} of ${each.value.entry}',
+    ];
     return Padding(
+      key: Key('secrets-vault ${entry.name}'),
       padding: const EdgeInsets.only(bottom: 12),
-      child: Wrap(spacing: 8, runSpacing: 8, children: [
-        for (final entry in _secrets.entries)
-          if (entry.setUp)
-            InputChip(
-              key: Key('secret-provider ${entry.name}'),
-              avatar: const Icon(Icons.lock_outline, size: 16),
-              label: Text('${entry.name}: ${entry.title}'),
-              onPressed: () => unawaited(_editProvider(entry)),
-              onDeleted: () => unawaited(_removeProvider(entry)),
-              deleteButtonTooltipMessage: 'Remove this setup',
-            ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('${entry.title}${can.isEmpty ? '' : ': ${can.join(', ')}'}', style: theme.textTheme.bodyMedium),
+        if (info?.description case final description?) Text(description, style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+        const SizedBox(height: 8),
+        for (final line in settings) Text(line, key: Key('secrets-vault-setting ${entry.name} $line'), style: theme.textTheme.bodySmall),
+        if (entry.setUp)
+          Wrap(spacing: 8, children: [
+            if (info?.hasSettings ?? true)
+              OutlinedButton.icon(key: Key('secret-provider ${entry.name}'), onPressed: () => unawaited(_editProvider(entry)), icon: const Icon(Icons.tune, size: 18), label: const Text('Change its settings')),
+            TextButton.icon(key: Key('secret-vault-remove ${entry.name}'), onPressed: () => unawaited(_removeProvider(entry)), icon: Icon(Icons.delete_outline, size: 18, color: scheme.error), label: const Text('Remove this vault')),
+          ])
+        else
+          Text('Built in: nothing to set up.', style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
       ]),
     );
   }
 
   Future<void> _set() async {
-    await showDialog<void>(context: context, builder: (_) => SetSecretDialog(controller: _secrets));
+    final chosen = _secrets.chosen;
+    await showDialog<void>(context: context, builder: (_) => SetSecretDialog(controller: _secrets, initialEntry: chosen != null && chosen.acceptsValues ? chosen.name : null));
     if (mounted) unawaited(_secrets.refresh());
   }
 
@@ -137,16 +142,16 @@ class _SecretsPageState extends State<SecretsPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final chosen = _secrets.chosen;
+    final rows = _secrets.visible;
     return Padding(
       key: const Key('secrets-page'),
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Expanded(child: Text('Secrets', style: theme.textTheme.titleLarge)),
+          Expanded(child: Text(chosen?.name ?? 'All vaults', key: const Key('secrets-title'), style: theme.textTheme.titleLarge)),
           IconButton(key: const Key('secrets-refresh'), tooltip: 'Read the list again', icon: const Icon(Icons.refresh), onPressed: () => unawaited(_secrets.refresh())),
-          OutlinedButton.icon(key: const Key('secret-add-provider'), onPressed: _addProvider, icon: const Icon(Icons.add_moderator_outlined), label: const Text('Set up a provider')),
-          const SizedBox(width: 8),
-          FilledButton.icon(key: const Key('secret-set'), onPressed: _set, icon: const Icon(Icons.add), label: const Text('Set a secret')),
+          if (chosen == null || chosen.acceptsValues) FilledButton.icon(key: const Key('secret-set'), onPressed: _set, icon: const Icon(Icons.add), label: const Text('Set a secret')),
         ]),
         const SizedBox(height: 4),
         Text(
@@ -154,12 +159,15 @@ class _SecretsPageState extends State<SecretsPage> {
           style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 12),
-        if (_secrets.entries.any((entry) => entry.setUp)) _providers(theme, scheme),
+        if (chosen != null) _vault(chosen, theme, scheme),
         if (_secrets.problem case final problem?) Padding(padding: const EdgeInsets.only(bottom: 8), child: SelectableText(problem, key: const Key('secrets-problem'), style: TextStyle(color: scheme.error))),
-        if (_secrets.loading && _secrets.rows.isEmpty) const LinearProgressIndicator(),
-        if (!_secrets.loading && _secrets.rows.isEmpty && _secrets.problem == null)
-          const Text('Nothing is kept. A secret an agent asks you for and you choose to keep appears here.', key: Key('secrets-empty')),
-        if (_secrets.rows.isNotEmpty)
+        if (_secrets.loading && rows.isEmpty) const LinearProgressIndicator(),
+        if (!_secrets.loading && rows.isEmpty && _secrets.problem == null)
+          Text(
+            chosen == null ? 'Nothing is kept. A secret an agent asks you for and you choose to keep appears here.' : 'Nothing is kept in this vault.',
+            key: const Key('secrets-empty'),
+          ),
+        if (rows.isNotEmpty)
           Expanded(
             child: SingleChildScrollView(
               child: SingleChildScrollView(
@@ -167,14 +175,14 @@ class _SecretsPageState extends State<SecretsPage> {
                 child: DataTable(
                   key: const Key('secrets-table'),
                   columnSpacing: 20,
-                  columns: const [
-                    DataColumn(label: Text('Provider')),
-                    DataColumn(label: Text('Name')),
-                    DataColumn(label: Text('Value')),
-                    DataColumn(label: Text('Kept')),
-                    DataColumn(label: Text('')),
+                  columns: [
+                    if (chosen == null) const DataColumn(label: Text('Vault')),
+                    const DataColumn(label: Text('Name')),
+                    const DataColumn(label: Text('Value')),
+                    const DataColumn(label: Text('Kept')),
+                    const DataColumn(label: Text('')),
                   ],
-                  rows: [for (final row in _secrets.rows) _row(row, scheme)],
+                  rows: [for (final row in rows) _row(row, scheme, showVault: chosen == null)],
                 ),
               ),
             ),
@@ -183,10 +191,10 @@ class _SecretsPageState extends State<SecretsPage> {
     );
   }
 
-  DataRow _row(SecretRow row, ColorScheme scheme) {
+  DataRow _row(SecretRow row, ColorScheme scheme, {required bool showVault}) {
     final value = _secrets.shown(row);
     return DataRow(key: ValueKey('secret ${row.key}'), cells: [
-      DataCell(Text(row.provider)),
+      if (showVault) DataCell(Text(row.provider)),
       DataCell(Text(row.name, key: Key('secret-name ${row.key}'))),
       DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
         ConstrainedBox(
@@ -213,7 +221,7 @@ class _SecretsPageState extends State<SecretsPage> {
   }
 }
 
-/// Sets a secret by hand: which provider entry and what name, then the host's own form, sealed, for the value.
+/// Sets a secret by hand: which vault and what name, then the host's own form, sealed, for the value.
 class SetSecretDialog extends StatefulWidget {
   const SetSecretDialog({super.key, required this.controller, this.initialEntry, this.initialName});
 
@@ -285,7 +293,7 @@ class _SetSecretDialogState extends State<SetSecretDialog> {
       DropdownButtonFormField<String>(
         key: const Key('secret-set-provider'),
         initialValue: chosen,
-        decoration: const InputDecoration(labelText: 'Provider'),
+        decoration: const InputDecoration(labelText: 'Vault'),
         items: [for (final entry in entries) DropdownMenuItem(value: entry.name, child: Text('${entry.name} (${entry.title})'))],
         onChanged: (value) => setState(() => _entry = value),
       ),
