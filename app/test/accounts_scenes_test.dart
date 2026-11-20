@@ -76,7 +76,7 @@ void main() {
       }
 
       Future<void> startAddAccount(WidgetTester tester, String method) async {
-        await tester.tap(find.byKey(const Key('add-account-claude')));
+        await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(Key('login-method $method')));
         await tester.pump();

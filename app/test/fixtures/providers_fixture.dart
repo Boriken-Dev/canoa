@@ -56,4 +56,4 @@ AgentProvider extraProvider() => AgentProvider.parse({
 
 /// An account of [provider] as the host lists it.
 AccountInfo accountOf(String provider, String name) =>
-    AccountInfo.parse({'name': name, 'harness': provider, 'kind': '$provider-key', 'id': 'id-$name', 'state': 'signed in'})!;
+    AccountInfo.parse({'name': name, 'provider': '${provider}_accounts', 'agent': provider, 'fits': [provider], 'kind': '$provider-key', 'id': 'id-$name', 'state': 'signed in'})!;

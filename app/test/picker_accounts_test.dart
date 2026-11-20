@@ -181,6 +181,18 @@ void main() {
     expect(find.byKey(const Key('option-account')), findsNothing);
     await finish(tester);
   });
+
+  testWidgets('an account no agent made is offered to the agents the host says it fits, and to no other', (tester) async {
+    final host = FakeAccountsHost(accounts: [
+      account('proxy', kind: 'litellm', provider: 'litellm_accounts', fits: ['claude', 'codex'], provides: ['anthropic-api', 'openai-api']),
+      account('only-codex', kind: 'litellm', provider: 'litellm_accounts', fits: ['codex'], provides: ['openai-api']),
+    ]);
+    await _open(tester, 'Claude', host: host);
+    await tester.tap(find.byKey(const Key('option-account')));
+    await frames(tester);
+    expect(find.byKey(const Key('account-choice proxy')), findsOneWidget);
+    expect(find.byKey(const Key('account-choice only-codex')), findsNothing);
+  });
 }
 
 const machineLoginText = "This machine's login";

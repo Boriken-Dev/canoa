@@ -12,7 +12,7 @@ import 'add_account_dialog.dart';
 import 'pools_section.dart';
 import 'usage_view.dart';
 
-/// Settings › Accounts: a group per provider listing its accounts (name, kind, endpoint, whether it is signed in or a session holds
+/// Settings › Accounts: a group per account provider (an agent's own sign-ins, or a maker such as LiteLLM) listing its accounts (name, kind, endpoint, whether it is signed in or a session holds
 /// it, and what the sessions on it last heard of its allowances), with Add account, sign in again, which entries offer it, and
 /// Remove. Management is the host's of this computer: a client on the network only picks among what an entry offers.
 class AccountsSection extends StatefulWidget {
@@ -47,8 +47,8 @@ class _AccountsSectionState extends State<AccountsSection> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _add(String harness) async {
-    await showDialog<AccountInfo>(context: context, builder: (_) => AddAccountDialog(accounts: _accounts, harness: harness));
+  Future<void> _add(String provider) async {
+    await showDialog<AccountInfo>(context: context, builder: (_) => AddAccountDialog(accounts: _accounts, provider: provider));
     if (mounted) unawaited(_accounts.refresh());
   }
 
@@ -92,7 +92,7 @@ class _AccountsSectionState extends State<AccountsSection> {
       title: 'Remove ${account.name}?',
       body: 'Canoa forgets the login it stored for ${account.name} on this computer'
           '${offered.isEmpty ? '' : ' and stops offering it in ${offered.join(', ')}'}. '
-          'It does not sign out at ${harnessTitle(account.harness)}: a login there stays until you end it.',
+          'It does not sign out at ${_accounts.providerNamed(account.provider)?.label ?? account.provider}: a login there stays until you end it.',
       dialogKey: const Key('remove-account'),
       cancelKey: null,
       confirmKey: const Key('remove-account-confirm'),
@@ -122,24 +122,26 @@ class _AccountsSectionState extends State<AccountsSection> {
       ),
       if (_accounts.problem case final problem?)
         Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(problem, key: const Key('accounts-problem'), style: TextStyle(color: scheme.error))),
-      for (final harness in _accounts.providers)
+      for (final provider in _accounts.providers)
         SettingsGroup(
-          key: Key('accounts-$harness'),
-          title: harnessTitle(harness),
-          leading: SourceMark.provider(harness, size: 20),
+          key: Key('accounts-${provider.id}'),
+          title: provider.label,
+          leading: SourceMark.provider(provider.groupId, size: 20),
           trailing: TextButton.icon(
-            key: Key('add-account-$harness'),
-            onPressed: () => unawaited(_add(harness)),
+            key: Key('add-account-${provider.id}'),
+            onPressed: () => unawaited(_add(provider.id)),
             icon: const Icon(Icons.add, size: 18),
             label: const Text('Add account'),
           ),
           children: [
-            if (_accounts.of(harness).isEmpty)
+            if (_accounts.of(provider.id).isEmpty)
               SettingsRow(
                 title: 'No account',
-                description: '${harnessTitle(harness)} runs on the login it has where it runs, as before.',
+                description: provider.agent != null
+                    ? '${provider.label} runs on the login it has where it runs, as before.'
+                    : provider.description,
               ),
-            for (final account in _accounts.of(harness)) _row(account),
+            for (final account in _accounts.of(provider.id)) _row(account),
           ],
         ),
       PoolsGroup(controller: _accounts),
@@ -147,7 +149,7 @@ class _AccountsSectionState extends State<AccountsSection> {
   }
 
   Widget _row(AccountInfo account) {
-    final catalog = _accounts.catalogIfKnown(account.harness);
+    final catalog = _accounts.catalogIfKnown(account.provider);
     final kind = catalog?.kind(account.kind);
     final held = _accounts.heldBy(account.name);
     final scheme = Theme.of(context).colorScheme;
@@ -157,17 +159,17 @@ class _AccountsSectionState extends State<AccountsSection> {
       account.statusLabel,
       if (held != null) 'held by "$held"',
     ].join(' · ');
-    final entries = [for (final entry in _accounts.entriesRunning(account.harness)) entry];
+    final entries = _accounts.entriesFor(account);
     final logins = [if (catalog != null) for (final login in catalog.logins) if (login.produces == account.kind) login];
     final report = _accounts.usageOf(account);
     final open = _usageOpen.contains(account.name);
     return Column(key: Key('account ${account.name}'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       SettingsRow(
         title: account.name,
-        leading: SourceMark.provider(accountMarkId(account.harness, account.kind), size: 24, key: Key('account-mark ${account.name}')),
+        leading: SourceMark.provider(accountMarkId(account.groupId, account.kind), size: 24, key: Key('account-mark ${account.name}')),
         description: detail,
         // The standards it supports say which agents can run on it; the usage opens under them.
-        below: account.provides.isEmpty && !open && account.warnings.isEmpty
+        below: account.types.isEmpty && account.fits.isEmpty && !open && account.warnings.isEmpty
             ? null
             : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 for (var i = 0; i < account.warnings.length; i++)
@@ -182,10 +184,16 @@ class _AccountsSectionState extends State<AccountsSection> {
                       ),
                     ),
                   ]),
-                if (account.provides.isNotEmpty)
+                if (account.types.isNotEmpty)
                   Text(
-                    'Supports ${standardsText(account.provides)}',
+                    'Supports ${standardsText(account.types)}',
                     key: Key('account-supports ${account.name}'),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                if (account.fits.isNotEmpty)
+                  Text(
+                    'Agents: ${account.fits.map(harnessTitle).join(', ')}',
+                    key: Key('account-agents ${account.name}'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
                   ),
                 if (open)

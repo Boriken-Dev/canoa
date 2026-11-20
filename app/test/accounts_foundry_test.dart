@@ -35,7 +35,7 @@ void main() {
     await _show(tester, _controller(host));
     expect(find.text('Foundry Local · Signed in'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('login-method foundry-local')), findsOneWidget);
     expect(find.text('Use a Foundry Local model'), findsOneWidget);

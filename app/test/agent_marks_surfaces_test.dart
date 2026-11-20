@@ -6,6 +6,7 @@ library;
 
 import 'dart:io';
 
+import 'package:canoa/accounts/account_models.dart';
 import 'package:canoa/accounts/accounts_controller.dart';
 import 'package:canoa/accounts/accounts_section.dart';
 import 'package:canoa/chat/session_picker.dart' show machineLoginLabel;
@@ -41,7 +42,7 @@ final _accounts = [
   account('metered'),
   account('team', kind: 'openai-api-key', harness: 'codex'),
   account('chatgpt', kind: 'codex-login', harness: 'codex'),
-  account('local', kind: 'foundry-local', harness: 'foundry'),
+  account('local', kind: 'foundry-local', provider: 'foundry_accounts', fits: ['claude', 'codex']),
 ];
 
 void main() {
@@ -110,6 +111,7 @@ void main() {
     testWidgets('each provider and each account shows its agent\'s mark, and a local model the generic icon', (tester) async {
       final host = FakeAccountsHost(accounts: _accounts);
       host.catalogs['claude'] = claudeCatalog;
+      host.makers.add(const AccountProviderInfo(id: 'foundry_accounts', title: 'Foundry Local'));
       tester.view
         ..physicalSize = const Size(900, 1400)
         ..devicePixelRatio = 1;
@@ -125,12 +127,12 @@ void main() {
       expect(_markAt(tester, find.byKey(const Key('account-mark team'))), 'codex', reason: 'an OpenAI key is Codex\'s');
       expect(_markAt(tester, find.byKey(const Key('account-mark chatgpt'))), 'codex');
       expect(_markAt(tester, find.byKey(const Key('account-mark local'))), isNull);
-      expect(find.descendant(of: find.byKey(const Key('accounts-claude')), matching: find.byType(SourceMark)), findsNWidgets(3), reason: 'the provider and its two accounts');
-      expect(find.descendant(of: find.byKey(const Key('accounts-codex')), matching: find.byType(SourceMark)), findsNWidgets(3));
+      expect(find.descendant(of: find.byKey(const Key('accounts-claude_accounts')), matching: find.byType(SourceMark)), findsNWidgets(3), reason: 'the provider and its two accounts');
+      expect(find.descendant(of: find.byKey(const Key('accounts-codex_accounts')), matching: find.byType(SourceMark)), findsNWidgets(3));
       expect(tester.takeException(), isNull);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/agent_marks_accounts.png'));
 
-      await tester.tap(find.byKey(const Key('add-account-claude')));
+      await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
       await tester.pumpAndSettle();
       expect(_markAt(tester, find.byKey(const Key('method-mark subscription'))), 'claude');
       expect(_markAt(tester, find.byKey(const Key('method-mark api-key'))), 'claude');

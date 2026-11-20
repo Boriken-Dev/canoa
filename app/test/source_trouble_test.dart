@@ -107,7 +107,7 @@ void main() {
     await tester.tap(find.byKey(const Key('source-trouble-action')));
     await frames(tester);
     expect(find.byType(AddAccountDialog), findsOneWidget);
-    expect(tester.widget<AddAccountDialog>(find.byType(AddAccountDialog)).harness, 'claude');
+    expect(tester.widget<AddAccountDialog>(find.byType(AddAccountDialog)).provider, 'claude_accounts');
     await finish(tester);
   });
 

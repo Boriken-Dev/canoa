@@ -312,8 +312,22 @@ final class FakeAccountsHost implements AccountsHost {
   @override
   Future<List<AgentProvider>> providersLoaded() async => List.of(providers);
 
+  /// The account providers that are no agent's: makers, which a test names when it wants some.
+  final List<AccountProviderInfo> makers = [];
+
   @override
-  Future<AccountCatalog> catalog(String harness) async => AccountCatalog.parse(catalogs[harness] ?? {'harness': harness});
+  Future<List<AccountProviderInfo>> accountProviders() async => [
+    for (final each in providers)
+      if (each.accounts != null) AccountProviderInfo(id: each.accounts!.provider, title: each.accounts!.title, agent: each.id),
+    ...makers,
+  ];
+
+  /// The catalog of a provider is kept under the agent's id, or the maker's own.
+  @override
+  Future<AccountCatalog> catalog(String provider) async {
+    final key = catalogs.containsKey(provider) ? provider : provider.replaceAll('_accounts', '');
+    return AccountCatalog.parse({...?(catalogs[key] as Map<String, Object?>?), 'provider': provider});
+  }
 
   @override
   Future<List<AccountInfo>> list() async => List.of(accounts);
@@ -353,16 +367,42 @@ final class FakeAccountsHost implements AccountsHost {
   }
 
   @override
-  SignIn signIn({required String name, required String harness, String? method, Map<String, String> inputs = const {}, bool again = false}) {
+  SignIn signIn({required String name, required String provider, String? method, Map<String, String> inputs = const {}, bool again = false}) {
     inputsGiven.add(inputs);
-    final run = SignIn(name: name, harness: harness, method: method, onCancel: () => cancelled++);
+    final run = SignIn(name: name, provider: provider, method: method, onCancel: () => cancelled++);
     signIns.add(run);
     return run;
   }
 }
 
-AccountInfo account(String name, {String kind = 'anthropic-api-key', String state = 'signed in', String harness = 'claude', String id = '', List<String> provides = const [], bool automatic = false, List<String> warnings = const []}) =>
-    AccountInfo.parse({'name': name, 'harness': harness, 'kind': kind, 'id': id.isEmpty ? 'id-$name' : id, 'state': state, if (provides.isNotEmpty) 'provides': provides, if (automatic) 'automatic': true, if (warnings.isNotEmpty) 'warnings': warnings})!;
+/// An account as the host lists it. [harness] stands for the agent whose own provider made it, which it fits; a maker's account names
+/// its [provider] and the agents it [fits] instead, and no agent.
+AccountInfo account(
+  String name, {
+  String kind = 'anthropic-api-key',
+  String state = 'signed in',
+  String harness = 'claude',
+  String? provider,
+  List<String>? fits,
+  String id = '',
+  List<String> provides = const [],
+  bool automatic = false,
+  List<String> warnings = const [],
+}) {
+  final maker = provider != null;
+  return AccountInfo.parse({
+    'name': name,
+    'provider': provider ?? '${harness}_accounts',
+    if (!maker) 'agent': harness,
+    'fits': fits ?? [harness],
+    'kind': kind,
+    'id': id.isEmpty ? 'id-$name' : id,
+    'state': state,
+    if (provides.isNotEmpty) 'types': provides,
+    if (automatic) 'automatic': true,
+    if (warnings.isNotEmpty) 'warnings': warnings,
+  })!;
+}
 
 /// The automatic account of [harness] as the host lists it: `local`, of the kind a login the harness has where it runs is, under an id
 /// that names the harness.

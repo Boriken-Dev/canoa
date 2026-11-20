@@ -58,7 +58,7 @@ void main() {
     expect(entry.accepts, ['openai-api', 'anthropic-api']);
     expect(entry.usable, ['a']);
     expect(AccountEntry.parse({'name': 'Pi', 'harness': 'pi'})!.usable, isNull, reason: 'a host that does not say leaves it to the provider');
-    expect(account('k', provides: ['codex']).provides, ['codex']);
+    expect(account('k', provides: ['codex']).types, ['codex']);
     expect(AccountKindInfo.parse({'id': 'k', 'provides': ['xai-api']}).provides, ['xai-api']);
     expect(standardsText(['claude-code', 'anthropic-api', 'a-new-one']), 'Claude Code, Anthropic API, a-new-one');
   });
@@ -84,7 +84,7 @@ void main() {
 
   testWidgets('Add account says what each way to sign in makes, by its standard', (tester) async {
     await _show(tester, AccountsSection(controller: _controller(FakeAccountsHost())));
-    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
     await tester.pumpAndSettle();
     expect(find.descendant(of: find.byKey(const Key('login-method subscription')), matching: find.text('Supports Claude Code')), findsOneWidget);
     expect(find.descendant(of: find.byKey(const Key('login-method api-key')), matching: find.text('Supports Anthropic API')), findsOneWidget);

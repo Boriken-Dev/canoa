@@ -253,7 +253,7 @@ class UsageController extends ChangeNotifier {
           for (final account in listed)
             () async {
               try {
-                final row = await (source as UsageReader).read(account.name, harness: account.automatic ? account.harness : null);
+                final row = await (source as UsageReader).read(account.name, harness: account.automatic ? account.fits.firstOrNull : null);
                 final heard = _Heard.parse(row is Map ? {'account': account.id, ...row.cast<String, Object?>()} : null);
                 if (heard == null) return;
                 (_read[source.name] ??= {})[account.id] = heard;
@@ -295,7 +295,7 @@ class UsageController extends ChangeNotifier {
       for (final source in sources) {
         note ??= _notes[source.name]?[each.id];
       }
-      merged.add(AccountLimits(id: each.id, name: _label(each), provider: each.harness, hosts: const [], report: UsageReport.parse({'supported': true})!, readAt: 0, note: note, who: _whoOf(each.id), automatic: each.automatic));
+      merged.add(AccountLimits(id: each.id, name: _label(each), provider: each.groupId, hosts: const [], report: UsageReport.parse({'supported': true})!, readAt: 0, note: note, who: _whoOf(each.id), automatic: each.automatic));
     }
     for (final MapEntry(:key, :value) in byId.entries) {
       var newest = value.first.$2;
@@ -309,7 +309,7 @@ class UsageController extends ChangeNotifier {
         AccountLimits(
           id: key,
           name: info == null ? key : _label(info),
-          provider: info?.harness ?? otherProvider,
+          provider: info?.groupId ?? otherProvider,
           hosts: {for (final (host, _) in value) host}.toList(),
           report: newest.report,
           readAt: newest.readAt,

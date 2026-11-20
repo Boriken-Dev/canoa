@@ -141,10 +141,10 @@ peers = [${jsonEncode(browserId)}]
     }
   });
 
-  test("a harness's accounts catalog names its kinds and the ways to sign in, as the app's dialog reads them", () async {
+  test("an account provider's catalog names its kinds and the ways to sign in, as the app's dialog reads them", () async {
     final accounts = ControlAccountsHost(control);
-    final catalog = await accounts.catalog('claude');
-    expect(catalog.harness, 'claude');
+    final catalog = await accounts.catalog('claude_accounts');
+    expect(catalog.provider, 'claude_accounts');
     expect(catalog.kinds, isNotEmpty);
     for (final kind in catalog.kinds) {
       expect(kind.id, isNotEmpty);
@@ -153,7 +153,7 @@ peers = [${jsonEncode(browserId)}]
     for (final login in catalog.logins) {
       expect(login.id, isNotEmpty);
     }
-    await expectLater(accounts.catalog('nobody'), throwsA(anything), reason: 'a harness the host has none of');
+    await expectLater(accounts.catalog('nobody'), throwsA(anything), reason: 'a provider the host has none of');
   });
 
   test("a Store type's models are listed by the library of the type, with where each stands, what + does and the settings form", () async {

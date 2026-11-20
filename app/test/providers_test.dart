@@ -146,11 +146,11 @@ void main() {
       final host = FakeAccountsHost(providers: providersOf(const ['codex']));
       final controller = _controller(host);
       await _show(tester, controller);
-      expect(controller.providers, ['codex']);
-      expect(find.byKey(const Key('add-account-codex')), findsOneWidget);
-      expect(find.byKey(const Key('add-account-claude')), findsNothing);
+      expect(controller.providers.map((each) => each.agent), ['codex']);
+      expect(find.byKey(const Key('add-account-codex_accounts')), findsOneWidget);
+      expect(find.byKey(const Key('add-account-claude_accounts')), findsNothing);
       expect(find.text('Claude'), findsNothing);
-      await tester.tap(find.byKey(const Key('add-account-codex')));
+      await tester.tap(find.byKey(const Key('add-account-codex_accounts')));
       await tester.pumpAndSettle();
       expect(find.text('Claude'), findsNothing);
       expect(find.byType(DropdownButton<String>), findsNothing, reason: 'one provider is no choice');
@@ -172,7 +172,7 @@ void main() {
 
     testWidgets('is offered in Add account with its name, mark and kinds, and its accounts are listed under it', (tester) async {
       final host = FakeAccountsHost(providers: [...providersOf(const ['claude', 'codex']), extraProvider()], accounts: [accountOf('zed', 'mine')]);
-      host.catalogs['zed'] = {
+      host.catalogs['zed_accounts'] = {
         'harness': 'zed',
         'kinds': [
           {'id': 'zed-key', 'title': 'Zed key'},
@@ -183,13 +183,13 @@ void main() {
       };
       final controller = _controller(host);
       await _show(tester, controller);
-      expect(controller.providers, ['claude', 'codex', 'zed']);
-      expect(find.byKey(const Key('add-account-zed')), findsOneWidget);
+      expect(controller.providers.map((each) => each.agent), ['claude', 'codex', 'zed']);
+      expect(find.byKey(const Key('add-account-zed_accounts')), findsOneWidget);
       expect(find.text('Zed'), findsWidgets);
       expect(find.text('mine'), findsOneWidget);
       expect(markIdOf('zed'), 'zed');
       expect(markIdOf('zed-api'), 'zed', reason: 'a standard of the new agent is its own');
-      await tester.tap(find.byKey(const Key('add-account-zed')));
+      await tester.tap(find.byKey(const Key('add-account-zed_accounts')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('login-method key')), findsOneWidget);
       expect(find.text('Paste a key'), findsOneWidget);

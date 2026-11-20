@@ -54,6 +54,7 @@ class AccountsController extends ChangeNotifier {
   List<AccountEntry> _entries = const [];
   List<PoolInfo> _pools = const [];
   final _catalogs = <String, AccountCatalog>{};
+  List<AccountProviderInfo>? _accountProviders;
   String? _problem;
   bool _loading = false;
   bool _disposed = false;
@@ -79,15 +80,20 @@ class AccountsController extends ChangeNotifier {
   String? get problem => _problem;
   bool get loading => _loading;
 
-  /// Every provider an account can be added to: those the host has loaded that make accounts, then any an account is already
-  /// held for.
-  List<String> get providers => {
-    for (final each in _agents ?? providerCatalog.providers) if (each.accounts != null) each.id,
-    ..._accounts.map((each) => each.harness),
-  }.toList();
+  /// Every account provider an account can be added through: the host's own list, an agent's own first and then the makers. Where the
+  /// host lists none, the agents it has loaded that make accounts, each standing for its own provider.
+  List<AccountProviderInfo> get providers =>
+      _accountProviders ??
+      [
+        for (final each in _agents ?? providerCatalog.providers)
+          if (each.accounts != null) AccountProviderInfo(id: each.accounts!.provider, title: each.title, agent: each.id),
+      ];
 
-  /// The accounts of [harness], in canoa.cfg's order.
-  List<AccountInfo> of(String harness) => [for (final each in _accounts) if (each.harness == harness) each];
+  /// The account provider [id], or null when the host lists none of that id.
+  AccountProviderInfo? providerNamed(String id) => providers.where((each) => each.id == id).firstOrNull;
+
+  /// The accounts the account provider [provider] made, in canoa.cfg's order.
+  List<AccountInfo> of(String provider) => [for (final each in _accounts) if (each.provider == provider) each];
 
   AccountInfo? named(String name) => _accounts.where((each) => each.name == name).firstOrNull;
 
@@ -113,7 +119,7 @@ class AccountsController extends ChangeNotifier {
 
   /// Every standard some account provides or a pool of the host is of, in the order the accounts are, for a new pool to be of.
   List<String> get standards => {
-    for (final each in _accounts) ...each.provides,
+    for (final each in _accounts) ...each.types,
     for (final each in _pools) each.standard,
   }.toList();
 
@@ -122,13 +128,13 @@ class AccountsController extends ChangeNotifier {
   List<String> membersFor(String standard) => [
     if (_pools.any((each) => each.automatic && each.standard == standard && each.accounts.contains(localAccount))) localAccount,
     for (final each in _accounts)
-      if (each.provides.contains(standard)) each.name,
+      if (each.types.contains(standard)) each.name,
   ];
 
   /// The provider the agent entry [entry] runs, which takes accounts; null for an entry that runs a program of its own.
   String? harnessOf(String entry) {
     final harness = _view.hostHarnessOf(entry);
-    return harness != null && providers.contains(harness) ? harness : null;
+    return harness != null && providers.any((each) => each.agent == harness) ? harness : null;
   }
 
   /// What the host lists of [entry], or null for one it does not list.
@@ -146,14 +152,16 @@ class AccountsController extends ChangeNotifier {
     if (harness == null) return const [];
     final listed = offeredBy(entry);
     final usable = hostEntry(entry)?.usable;
-    final rest = usable == null ? of(harness) : [for (final each in _accounts) if (usable.contains(each.name)) each];
+    final rest = usable == null
+        ? [for (final each in _accounts) if (each.fits.contains(harness)) each]
+        : [for (final each in _accounts) if (usable.contains(each.name)) each];
     return [...listed, for (final each in rest) if (!listed.any((one) => one.name == each.name)) each];
   }
 
   /// Whether the credential of [account] reaches the agent in its environment (an API key or a token, not a login kept in a folder
   /// of its own), so a repository's settings could redirect it unless the entry that runs it lists it and limits them.
   bool keyReachesAgent(AccountInfo account) {
-    final kind = catalogIfKnown(account.harness)?.kind(account.kind);
+    final kind = catalogIfKnown(account.provider)?.kind(account.kind);
     return kind != null && !kind.stateDir && kind.endpoints.any((each) => each.purpose == 'model_api' && each.key != null);
   }
 
@@ -162,6 +170,12 @@ class AccountsController extends ChangeNotifier {
 
   /// The agent entries that run the provider [harness], which can offer its accounts.
   List<String> entriesRunning(String harness) => _view.hostEntriesRunning(harness);
+
+  /// The agent entries that can offer [account]: those that run an agent it fits.
+  List<String> entriesFor(AccountInfo account) => [
+    for (final harness in account.fits)
+      for (final entry in entriesRunning(harness)) entry,
+  ];
 
   /// Whether the entry [entry] is open to every paired key, so an account offered there reaches them all.
   bool isOpen(String entry) => _view.hostEntryIsOpen(entry);
@@ -172,10 +186,10 @@ class AccountsController extends ChangeNotifier {
       if (_view.hostAccountsOf(entry.name).contains(account)) entry.name,
   ];
 
-  /// What the host last said of each kind and sign-in method of [harness], asked once.
-  Future<AccountCatalog> catalog(String harness) async => _catalogs[harness] ??= await host.catalog(harness);
+  /// What the host last said of each kind and sign-in method of the account provider [provider], asked once.
+  Future<AccountCatalog> catalog(String provider) async => _catalogs[provider] ??= await host.catalog(provider);
 
-  AccountCatalog? catalogIfKnown(String harness) => _catalogs[harness];
+  AccountCatalog? catalogIfKnown(String provider) => _catalogs[provider];
 
   /// The title of the session holding [account], if one does.
   String? heldBy(String account) => holder?.call(account);
@@ -214,9 +228,14 @@ class AccountsController extends ChangeNotifier {
         // A host with no pools lists none.
       }
       _problem = null;
-      for (final harness in {..._accounts.map((each) => each.harness)}) {
+      try {
+        _accountProviders = await host.accountProviders();
+      } on Object {
+        // A host with no list of its account providers leaves the agents' own.
+      }
+      for (final provider in {..._accounts.map((each) => each.provider)}) {
         try {
-          await catalog(harness);
+          await catalog(provider);
         } on Object {
           // The kind of one provider is unknown: its accounts are listed all the same.
         }
@@ -235,22 +254,27 @@ class AccountsController extends ChangeNotifier {
 
   bool _again = false;
 
-  /// Signs in and makes [name]; the account is offered by an entry running [harness] once it is made.
-  SignIn add({required String name, required String harness, required String method, Map<String, String> inputs = const {}}) {
-    final run = host.signIn(name: name, harness: harness, method: method, inputs: inputs);
+  /// Signs in through the account provider [provider] and makes [name]; the account is offered by an entry running an agent it fits
+  /// once it is made.
+  SignIn add({required String name, required String provider, required String method, Map<String, String> inputs = const {}}) {
+    final run = host.signIn(name: name, provider: provider, method: method, inputs: inputs);
     void ended() {
       if (run.phase != SignInPhase.done) return;
       run.removeListener(ended);
-      unawaited(_made(name, harness));
+      unawaited(_made(name, run.account));
     }
 
     run.addListener(ended);
     return run;
   }
 
-  Future<void> _made(String name, String harness) async {
+  Future<void> _made(String name, AccountInfo? made) async {
     try {
-      await change((config) => config.withAccountOffered(account: name, harness: harness));
+      // What the host says the account fits is known once it is listed.
+      await refresh();
+      final known = named(name) ?? made;
+      final harness = known?.fits.firstOrNull ?? known?.agent;
+      if (harness != null) await change((config) => config.withAccountOffered(account: name, harness: harness));
     } on Object catch (error) {
       _problem = 'Canoa could not offer $name to a source: $error';
     }
@@ -259,7 +283,7 @@ class AccountsController extends ChangeNotifier {
 
   /// Signs in again to [account], which needs it or is being replaced.
   SignIn signInAgain(AccountInfo account, {String? method}) {
-    final run = host.signIn(name: account.name, harness: account.harness, method: method, again: true);
+    final run = host.signIn(name: account.name, provider: account.provider, method: method, again: true);
     void ended() {
       if (run.phase != SignInPhase.done) return;
       run.removeListener(ended);
@@ -274,7 +298,7 @@ class AccountsController extends ChangeNotifier {
   Future<void> setOffered(AccountInfo account, String entry, {required bool offered}) async {
     await change(
       (config) => offered
-          ? config.withAccountOffered(account: account.name, harness: account.harness, entry: entry)
+          ? config.withAccountOffered(account: account.name, harness: harnessOf(entry) ?? account.fits.firstOrNull ?? '', entry: entry)
           : config.withoutAccountOffered(account.name, only: entry),
     );
     _notify();

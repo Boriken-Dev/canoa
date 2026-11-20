@@ -19,19 +19,21 @@ String harnessTitle(String harness) => providerCatalog.titleOf(harness);
 /// Adds an account: the provider and a name, then one of the provider's own ways to sign in, then what that way asks. A key or
 /// a code is typed into the sealed form the host asks for, which goes to the host and is never held here.
 class AddAccountDialog extends StatefulWidget {
-  const AddAccountDialog({super.key, required this.accounts, this.harness});
+  const AddAccountDialog({super.key, required this.accounts, this.provider});
 
   final AccountsController accounts;
 
-  /// The provider to add to; the first the host has when null.
-  final String? harness;
+  /// The account provider to add through (an id `accounts/providers` lists); the first the host has when null.
+  final String? provider;
 
   @override
   State<AddAccountDialog> createState() => _AddAccountDialogState();
 }
 
 class _AddAccountDialogState extends State<AddAccountDialog> {
-  late String _harness = widget.harness ?? widget.accounts.providers.firstOrNull ?? '';
+  late String _provider = widget.provider ?? widget.accounts.providers.firstOrNull?.id ?? '';
+
+  String get _title => widget.accounts.providerNamed(_provider)?.label ?? _provider;
   final _name = TextEditingController();
   Future<AccountCatalog>? _catalog;
   String? _method;
@@ -46,16 +48,17 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
   }
 
   String _suggest() {
-    var name = _harness.toLowerCase(), n = 2;
+    final base = (widget.accounts.providerNamed(_provider)?.groupId ?? _provider).toLowerCase().replaceAll('_accounts', '');
+    var name = base, n = 2;
     while (widget.accounts.named(name) != null) {
-      name = '${_harness.toLowerCase()}-${n++}';
+      name = '$base-${n++}';
     }
     return name;
   }
 
   void _load() {
     _method = null;
-    final catalog = _catalog = widget.accounts.catalog(_harness);
+    final catalog = _catalog = widget.accounts.catalog(_provider);
     // Chosen before the person chooses, unless they have by the time the host answers or have moved to another provider.
     unawaited(catalog.then<void>((made) {
       if (!mounted || _catalog != catalog || _method != null) return;
@@ -96,7 +99,7 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
       if (given == null || !mounted) return;
       inputs = {for (final MapEntry(:key, :value) in given.values.entries) key: '$value'};
     }
-    final run = widget.accounts.add(name: _name.text, harness: _harness, method: method.id, inputs: inputs);
+    final run = widget.accounts.add(name: _name.text, provider: _provider, method: method.id, inputs: inputs);
     run.addListener(_changed);
     setState(() => _run = run);
   }
@@ -124,11 +127,11 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
         if (providers.length > 1)
           DropdownButtonFormField<String>(
             key: const Key('add-account-harness'),
-            initialValue: _harness,
+            initialValue: _provider,
             decoration: const InputDecoration(labelText: 'Provider', border: OutlineInputBorder(), isDense: true),
-            items: [for (final each in providers) DropdownMenuItem(value: each, child: Row(children: [SourceMark.provider(each, size: 18), const SizedBox(width: 8), Text(harnessTitle(each))]))],
+            items: [for (final each in providers) DropdownMenuItem(value: each.id, child: Row(children: [SourceMark.provider(each.groupId, size: 18), const SizedBox(width: 8), Text(each.label)]))],
             onChanged: (value) => setState(() {
-              _harness = value ?? _harness;
+              _provider = value ?? _provider;
               _name.text = _suggest();
               _load();
             }),
@@ -158,17 +161,17 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
             final catalog = snapshot.data;
             if (snapshot.hasError || catalog == null) {
               return Text(
-                'The host could not say how ${harnessTitle(_harness)} signs in: ${snapshot.error}',
+                'The host could not say how $_title signs in: ${snapshot.error}',
                 key: const Key('add-account-catalog-problem'),
                 style: TextStyle(color: scheme.error),
               );
             }
-            if (catalog.logins.isEmpty) return Text('${harnessTitle(_harness)} offers no way to sign in from here.');
+            if (catalog.logins.isEmpty) return Text('$_title offers no way to sign in from here.');
             return RadioGroup<String>(
               groupValue: _method,
               onChanged: (value) => setState(() => _method = value),
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                for (final method in catalog.logins) _MethodTile(method: method, kind: catalog.kind(method.produces), harness: _harness),
+                for (final method in catalog.logins) _MethodTile(method: method, kind: catalog.kind(method.produces), mark: widget.accounts.providerNamed(_provider)?.groupId ?? _provider),
               ]),
             );
           },
@@ -210,11 +213,13 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
 }
 
 class _MethodTile extends StatelessWidget {
-  const _MethodTile({required this.method, required this.kind, required this.harness});
+  const _MethodTile({required this.method, required this.kind, required this.mark});
 
   final LoginMethodInfo method;
   final AccountKindInfo? kind;
-  final String harness;
+
+  /// The id the provider's mark is named by.
+  final String mark;
 
   @override
   Widget build(BuildContext context) {
@@ -225,7 +230,7 @@ class _MethodTile extends StatelessWidget {
       contentPadding: EdgeInsets.zero,
       dense: true,
       value: method.id,
-      secondary: SourceMark.provider(accountMarkId(harness, method.produces), size: 24, key: Key('method-mark ${method.id}')),
+      secondary: SourceMark.provider(accountMarkId(mark, method.produces), size: 24, key: Key('method-mark ${method.id}')),
       title: Text(method.title),
       subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         if (method.description.isNotEmpty) Text(method.description, style: small),
@@ -271,7 +276,7 @@ class SignInPanel extends StatelessWidget {
               ]),
             ),
           if (run.phase == SignInPhase.done)
-            SelectableText('Added ${run.name}. Canoa offers it to new sessions of ${harnessTitle(run.harness)}.', key: const Key('sign-in-done')),
+            SelectableText('Added ${run.name}. Canoa offers it to new sessions of the agents it runs on.', key: const Key('sign-in-done')),
           if (run.phase == SignInPhase.failed)
             SelectableText('It did not sign in: ${run.problem}', key: const Key('sign-in-failed'), style: TextStyle(color: scheme.error)),
         ]),

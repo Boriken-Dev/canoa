@@ -152,10 +152,10 @@ void main() {
     expect([for (final each in accounts.listed) each.id], ['id-work', 'local:claude', 'local:codex']);
     // What Settings, the pools and the new-session picker read stays what canoa.cfg names.
     expect([for (final each in accounts.accounts) each.name], ['work']);
-    expect(accounts.of('claude').map((each) => each.name), ['work']);
-    expect(accounts.of('codex'), isEmpty);
+    expect(accounts.of('claude_accounts').map((each) => each.name), ['work']);
+    expect(accounts.of('codex_accounts'), isEmpty);
     expect(accounts.named('local'), isNull);
-    expect([for (final each in accounts.logins) (each.harness, each.id)], [('claude', 'local:claude'), ('codex', 'local:codex')]);
+    expect([for (final each in accounts.logins) (each.agent, each.id)], [('claude', 'local:claude'), ('codex', 'local:codex')]);
     expect(accounts.logins.every((each) => each.automatic), isTrue);
   });
 }

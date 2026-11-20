@@ -35,10 +35,10 @@ enum SignInPhase { running, done, failed, cancelled }
 /// One sign-in running in the host: what it says, the page it wants opened, the form it asks and how it ended. The host's side
 /// calls [say], [showPage], [ask], [complete] and [fail]; the person's side calls [answer] and [cancel].
 class SignIn extends ChangeNotifier {
-  SignIn({required this.name, required this.harness, this.method, this.onCancel});
+  SignIn({required this.name, required this.provider, this.method, this.onCancel});
 
-  /// The account's name, and the provider it signs in to.
-  final String name, harness;
+  /// The account's name, and the account provider it signs in through.
+  final String name, provider;
 
   /// The way it signs in; null for a sign-in again that has one.
   final String? method;
@@ -125,8 +125,11 @@ abstract interface class AccountsHost {
   /// The agents the host has loaded: which have accounts to add, and what each is called and looks like.
   Future<List<AgentProvider>> providersLoaded();
 
-  /// The kinds and sign-in methods of [harness]'s provider.
-  Future<AccountCatalog> catalog(String harness);
+  /// The account providers the host carries, each with the kinds it makes and its own ways to sign in.
+  Future<List<AccountProviderInfo>> accountProviders();
+
+  /// The kinds and sign-in methods of the account provider [provider], and no other provider's.
+  Future<AccountCatalog> catalog(String provider);
 
   /// The accounts in canoa.cfg, as the host reads them now.
   Future<List<AccountInfo>> list();
@@ -171,7 +174,7 @@ abstract interface class AccountsHost {
   Future<AccountMove> moveSession({required String entry, required String session, required String cwd, String? from, required String to});
 
   /// Signs in by [method] and makes the account [name], or signs in again to it when [again].
-  SignIn signIn({required String name, required String harness, String? method, Map<String, String> inputs = const {}, bool again = false});
+  SignIn signIn({required String name, required String provider, String? method, Map<String, String> inputs = const {}, bool again = false});
 }
 
 /// How long a sign-in may wait for the person: the host gives up on a question after four minutes.
@@ -195,7 +198,14 @@ final class ControlAccountsHost implements AccountsHost {
   }
 
   @override
-  Future<AccountCatalog> catalog(String harness) async => AccountCatalog.parse(await _call('accounts/catalog', {'harness': harness}));
+  Future<List<AccountProviderInfo>> accountProviders() async {
+    final result = await _call('accounts/providers', const {});
+    final listed = result is Map ? result['providers'] : null;
+    return [if (listed is List) for (final each in listed) ?AccountProviderInfo.parse(each)];
+  }
+
+  @override
+  Future<AccountCatalog> catalog(String provider) async => AccountCatalog.parse(await _call('accounts/catalog', {'provider': provider}));
 
   @override
   Future<List<AccountInfo>> list() async {
@@ -278,9 +288,9 @@ final class ControlAccountsHost implements AccountsHost {
   }
 
   @override
-  SignIn signIn({required String name, required String harness, String? method, Map<String, String> inputs = const {}, bool again = false}) {
+  SignIn signIn({required String name, required String provider, String? method, Map<String, String> inputs = const {}, bool again = false}) {
     ControlClient? client;
-    final run = SignIn(name: name, harness: harness, method: method, onCancel: () => unawaited(client?.close()));
+    final run = SignIn(name: name, provider: provider, method: method, onCancel: () => unawaited(client?.close()));
     unawaited(() async {
       try {
         // A link of its own: closing it is how the host is told to stop.
@@ -289,7 +299,7 @@ final class ControlAccountsHost implements AccountsHost {
         final secrets = await client!.linkSecrets();
         final result = await client!.call(
           again ? 'accounts/login' : 'accounts/add',
-          {'name': name, if (!again) 'harness': harness, 'method': ?method, if (inputs.isNotEmpty) 'inputs': inputs},
+          {'name': name, if (!again) 'provider': provider, 'method': ?method, if (inputs.isNotEmpty) 'inputs': inputs},
           ControlListener(
             onNotification: (method, params) => _heard(run, method, params),
             onRequest: (method, params) => _asked(run, secrets, method, params),

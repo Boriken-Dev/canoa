@@ -135,7 +135,7 @@ peers = []
     await until(() => !controller.loading, 'the host to list accounts');
 
     Future<void> add(String name, String method) async {
-      await tester.tap(find.byKey(const Key('add-account-claude')));
+      await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('add-account-name')), name);
       await tester.tap(find.byKey(Key('login-method $method')));

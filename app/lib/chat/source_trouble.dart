@@ -99,7 +99,7 @@ Future<void> actOnTrouble(BuildContext context, SessionStore store, ComposerKit 
       if (accounts == null || !context.mounted) return;
       await showDialog<void>(
         context: context,
-        builder: (_) => AddAccountDialog(accounts: accounts, harness: trouble.source.harness),
+        builder: (_) => AddAccountDialog(accounts: accounts, provider: accounts.providers.where((each) => each.agent == trouble.source.harness).firstOrNull?.id),
       );
       unawaited(accounts.refresh());
     case TroubleKind.failed:

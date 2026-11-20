@@ -157,20 +157,67 @@ Map<String, Map<String, Object?>> schemaFields(Map<String, Object?> schema) => {
   for (final MapEntry(:key, :value) in _map(schema['properties']).entries) key: _map(value),
 };
 
+/// One account provider the host carries: an agent's own (Claude's sign-ins) or a maker's (LiteLLM, Foundry Local, an API gateway), with
+/// the kinds it makes and its own ways to sign in. Nothing of another provider's is listed under it.
+final class AccountProviderInfo {
+  const AccountProviderInfo({
+    required this.id,
+    required this.title,
+    this.description = '',
+    this.agent,
+    this.kinds = const [],
+    this.logins = const [],
+  });
+
+  /// One object of `accounts/providers`, or null when it is not one.
+  static AccountProviderInfo? parse(Object? json) {
+    if (json is! Map) return null;
+    final id = json['id'];
+    if (id is! String) return null;
+    return AccountProviderInfo(
+      id: id,
+      title: _text(json['title'], id),
+      description: _text(json['description']),
+      agent: json['harness'] as String?,
+      kinds: [if (json['kinds'] is List) for (final each in json['kinds'] as List) if (each is Map) _text(each['id'])],
+      logins: [if (json['logins'] is List) for (final each in json['logins'] as List) if (each is Map) _text(each['id'])],
+    );
+  }
+
+  /// The id the host calls it by.
+  final String id;
+
+  /// What the provider calls itself.
+  final String title;
+  final String description;
+
+  /// The agent it belongs to when it is an agent's own; null for a maker, which no agent owns.
+  final String? agent;
+
+  /// The ids of the kinds it makes and of its own ways to sign in.
+  final List<String> kinds, logins;
+
+  /// The id its mark and its group are named by: the agent's, else its own.
+  String get groupId => agent ?? id;
+
+  /// What a person reads: the agent's name for an agent's own, the provider's title for a maker.
+  String get label => agent != null ? providerCatalog.titleOf(agent!) : title;
+}
+
 /// What one provider takes: [kinds], and the [logins] that make them.
 final class AccountCatalog {
-  const AccountCatalog({required this.harness, this.kinds = const [], this.logins = const []});
+  const AccountCatalog({required this.provider, this.kinds = const [], this.logins = const []});
 
   factory AccountCatalog.parse(Object? json) {
     final map = _map(json);
     return AccountCatalog(
-      harness: _text(map['harness']),
+      provider: _text(map['provider']),
       kinds: [if (map['kinds'] is List) for (final each in map['kinds'] as List) if (each is Map) AccountKindInfo.parse(_map(each))],
       logins: [if (map['logins'] is List) for (final each in map['logins'] as List) if (each is Map) LoginMethodInfo.parse(_map(each))],
     );
   }
 
-  final String harness;
+  final String provider;
   final List<AccountKindInfo> kinds;
   final List<LoginMethodInfo> logins;
 
@@ -410,14 +457,16 @@ final class AccountEntry {
 final class AccountInfo {
   const AccountInfo({
     required this.name,
-    required this.harness,
+    required this.provider,
     required this.kind,
     required this.id,
+    this.agent,
+    this.fits = const [],
     this.status = AccountStatus.signedIn,
     this.stateText = '',
     this.revision = 0,
     this.expiresAt,
-    this.provides = const [],
+    this.types = const [],
     this.automatic = false,
     this.warnings = const [],
   });
@@ -425,12 +474,14 @@ final class AccountInfo {
   /// One object of `accounts list --format json`, or null when it is not one.
   static AccountInfo? parse(Object? json) {
     final map = _map(json);
-    final [name, harness, kind, id] = [map['name'], map['harness'], map['kind'], map['id']];
-    if (name is! String || harness is! String || kind is! String || id is! String) return null;
+    final [name, provider, kind, id] = [map['name'], map['provider'], map['kind'], map['id']];
+    if (name is! String || provider is! String || kind is! String || id is! String) return null;
     final state = _text(map['state']);
     return AccountInfo(
       name: name,
-      harness: harness,
+      provider: provider,
+      agent: map['agent'] as String?,
+      fits: _texts(map['fits']),
       kind: kind,
       id: id,
       status: switch (state) {
@@ -443,13 +494,20 @@ final class AccountInfo {
       stateText: state,
       revision: map['revision'] is int ? map['revision'] as int : 0,
       expiresAt: map['expires_at'] as String?,
-      provides: _texts(map['provides']),
+      types: _texts(map['types']),
       automatic: map['automatic'] == true,
       warnings: _texts(map['warnings']),
     );
   }
 
-  final String name, harness, kind;
+  /// The account's name, the id of the account provider that made it, and its kind.
+  final String name, provider, kind;
+
+  /// The agent the provider belongs to when it is an agent's own; null for a maker's account.
+  final String? agent;
+
+  /// The agents that can run a session on the account, by id, as the host works them out from its types.
+  final List<String> fits;
 
   /// What the host tells the person of its settings, such as an address that is plain http beyond this computer. Never a refusal.
   final List<String> warnings;
@@ -459,8 +517,11 @@ final class AccountInfo {
   /// one harness's from another's: its [id] does.
   final bool automatic;
 
-  /// The credential standards the account's kind provides (`claude-code`, `anthropic-api`), which say the agents it can run.
-  final List<String> provides;
+  /// The credential standards the account works for (`claude-code`, `anthropic-api`), as its provider answers them for this account.
+  final List<String> types;
+
+  /// The id its group and mark are named by: its provider's agent, else the provider.
+  String get groupId => agent ?? provider;
 
   /// The host's id for the account, which usage reports are named by. Opaque: shown nowhere.
   final String id;

@@ -518,7 +518,7 @@ class _SessionPickerState extends State<SessionPicker> {
             avatar: const Icon(Icons.add, size: 16),
             label: const Text('Add account…'),
             onPressed: () async {
-              await showDialog<AccountInfo>(context: context, builder: (_) => AddAccountDialog(accounts: accounts, harness: harness));
+              await showDialog<AccountInfo>(context: context, builder: (_) => AddAccountDialog(accounts: accounts, provider: accounts.providers.where((each) => each.agent == harness).firstOrNull?.id));
               unawaited(accounts.refresh());
             },
           ),
@@ -656,7 +656,7 @@ class _SessionPickerState extends State<SessionPicker> {
               Opacity(
                 opacity: usable ? 1 : 0.5,
                 child: SourceMark.provider(
-                  account == null ? accounts.harnessOf(entry) : accountMarkId(account.harness, account.kind),
+                  account == null ? accounts.harnessOf(entry) : accountMarkId(account.groupId, account.kind),
                   size: 16,
                   key: Key('account-mark $name'),
                 ),
@@ -665,7 +665,7 @@ class _SessionPickerState extends State<SessionPicker> {
               Text(name, style: TextStyle(fontSize: 13, color: usable || !draft ? null : look.muted)),
               if (chosen) ...[const SizedBox(width: 4), const Icon(Icons.check, size: 14)],
             ]),
-            Text(account != null && account.provides.isNotEmpty ? '${standardsText(account.provides)} · $state' : state, key: Key('account-state $name'), style: TextStyle(fontSize: 11, color: usable ? look.muted : look.danger)),
+            Text(account != null && account.types.isNotEmpty ? '${standardsText(account.types)} · $state' : state, key: Key('account-state $name'), style: TextStyle(fontSize: 11, color: usable ? look.muted : look.danger)),
             if (summary != null) Text(summary, key: Key('account-left-summary $name'), style: TextStyle(fontSize: 11, color: look.muted)),
             if (offerFirst && draft)
               TextButton(

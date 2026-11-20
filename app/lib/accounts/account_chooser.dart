@@ -43,7 +43,7 @@ class AccountChooser extends StatelessWidget {
               leading: pool != null
                   ? const Icon(Icons.layers_outlined, size: 16, key: Key('account-chip-pool'))
                   : SourceMark.provider(
-                      chosen == null ? accounts.harnessOf(entry) : accountMarkId(chosen.harness, chosen.kind),
+                      chosen == null ? accounts.harnessOf(entry) : accountMarkId(chosen.groupId, chosen.kind),
                       size: 16,
                       key: const Key('account-chip-mark'),
                     ),

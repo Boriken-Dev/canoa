@@ -65,7 +65,7 @@ void main() {
   testWidgets('Add account renders the provider\'s sign-in methods and what their kinds weaken, from the catalog alone', (tester) async {
     final host = FakeAccountsHost();
     await _show(tester, _controller(host));
-    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('login-method subscription')), findsOneWidget);
     expect(find.byKey(const Key('login-method api-key')), findsOneWidget);
@@ -93,13 +93,13 @@ void main() {
     final host = FakeAccountsHost();
     final controller = _controller(host);
     await _show(tester, controller);
-    expect(find.byKey(const Key('accounts-opencode')), findsOneWidget);
+    expect(find.byKey(const Key('accounts-opencode_accounts')), findsOneWidget);
     expect(find.text('OpenCode'), findsWidgets);
     expect(find.text('Opencode'), findsNothing);
-    await tester.tap(find.byKey(const Key('add-account-opencode')));
+    await tester.tap(find.byKey(const Key('add-account-opencode_accounts')));
     await tester.pumpAndSettle();
-    expect(controller.catalogIfKnown('opencode')?.kind('opencode-provider-key')?.title, 'OpenCode provider key');
-    expect(controller.catalogIfKnown('opencode')?.kind('opencode-login')?.provides, ['opencode']);
+    expect(controller.catalogIfKnown('opencode_accounts')?.kind('opencode-provider-key')?.title, 'OpenCode provider key');
+    expect(controller.catalogIfKnown('opencode_accounts')?.kind('opencode-login')?.provides, ['opencode']);
     expect(find.byKey(const Key('login-method api-key')), findsOneWidget);
     expect(find.text('Provider API key'), findsOneWidget);
     expect(find.textContaining('the credential is in the environment of every program the agent runs'), findsWidgets);
@@ -161,7 +161,7 @@ void main() {
     final host = FakeAccountsHost();
     final controller = _controller(host);
     await _show(tester, controller);
-    await tester.tap(find.byKey(const Key('add-account-opencode')));
+    await tester.tap(find.byKey(const Key('add-account-opencode_accounts')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('login-method provider-code')), findsOneWidget);
     await tester.enterText(find.byKey(const Key('add-account-name')), 'chatgpt');
@@ -183,7 +183,7 @@ void main() {
   testWidgets('away from the host Codex signs in by a device code unless the person chooses the browser', (tester) async {
     final host = FakeAccountsHost();
     await _show(tester, _controller(host, hostIsHere: false));
-    await tester.tap(find.byKey(const Key('add-account-codex')));
+    await tester.tap(find.byKey(const Key('add-account-codex_accounts')));
     await tester.pumpAndSettle();
     // Nothing was touched, and Sign in is ready: the device code is what it runs.
     expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNotNull);
@@ -195,7 +195,7 @@ void main() {
   testWidgets('away from the host the person can still choose the browser sign-in', (tester) async {
     final host = FakeAccountsHost();
     await _show(tester, _controller(host, hostIsHere: false));
-    await tester.tap(find.byKey(const Key('add-account-codex')));
+    await tester.tap(find.byKey(const Key('add-account-codex_accounts')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('login-method chatgpt')));
     await tester.pump();
@@ -207,13 +207,13 @@ void main() {
   testWidgets('on the host\'s own machine no method is chosen first, and away from it a provider with no device code leaves the choice', (tester) async {
     final host = FakeAccountsHost();
     await _show(tester, _controller(host));
-    await tester.tap(find.byKey(const Key('add-account-codex')));
+    await tester.tap(find.byKey(const Key('add-account-codex_accounts')));
     await tester.pumpAndSettle();
     expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNull);
     await tester.tap(find.byKey(const Key('add-account-cancel')));
     await tester.pumpAndSettle();
     await _show(tester, _controller(FakeAccountsHost(), hostIsHere: false));
-    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
     await tester.pumpAndSettle();
     expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNull);
   });
@@ -222,7 +222,7 @@ void main() {
     const address = 'http://127.0.0.1:1455/auth/callback?code=CODE-4f9a2c71&state=abc';
     final host = FakeAccountsHost();
     await _show(tester, _controller(host, hostIsHere: false));
-    await tester.tap(find.byKey(const Key('add-account-codex')));
+    await tester.tap(find.byKey(const Key('add-account-codex_accounts')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('login-method chatgpt')));
     await tester.pump();
@@ -262,7 +262,7 @@ void main() {
   testWidgets('a method that asks something first shows that form, and what is answered is what the host is given', (tester) async {
     final host = FakeAccountsHost();
     await _show(tester, _controller(host));
-    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('login-method sso')));
     await tester.pump();
@@ -287,7 +287,7 @@ void main() {
     addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
     final host = FakeAccountsHost();
     await _show(tester, _controller(host));
-    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('add-account-name')), 'metered');
     await tester.tap(find.byKey(const Key('login-method api-key')));
@@ -313,7 +313,7 @@ void main() {
     final saved = <CanoaConfig>[];
     final controller = _controller(host, saved: saved);
     await _show(tester, controller);
-    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('add-account-name')), 'metered');
     await tester.tap(find.byKey(const Key('login-method api-key')));
@@ -367,7 +367,7 @@ void main() {
   testWidgets('Cancel gives up a sign-in: the host is told to stop and the form it asked is cancelled', (tester) async {
     final host = FakeAccountsHost();
     await _show(tester, _controller(host));
-    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('login-method api-key')));
     await tester.pump();
@@ -388,7 +388,7 @@ void main() {
   testWidgets('a sign-in that fails says why, in the host\'s words', (tester) async {
     final host = FakeAccountsHost();
     await _show(tester, _controller(host));
-    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('login-method subscription')));
     await tester.pump();
@@ -574,7 +574,7 @@ void main() {
   testWidgets('a sign-in that would ask a secret before it starts is refused, not run with the secret dropped', (tester) async {
     final host = FakeAccountsHost();
     await _show(tester, _controller(host));
-    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('login-method token-first')));
     await tester.pump();
@@ -588,7 +588,7 @@ void main() {
   testWidgets('a page that is not a plain web link is shown but never opened', (tester) async {
     final host = FakeAccountsHost();
     await _show(tester, _controller(host));
-    await tester.tap(find.byKey(const Key('add-account-claude')));
+    await tester.tap(find.byKey(const Key('add-account-claude_accounts')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('login-method subscription')));
     await tester.pump();
