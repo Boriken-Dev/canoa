@@ -8,6 +8,7 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No C
 
 ```rust
 pub const PRESET: SourcePreset;
+pub const ACCESS: Target;   // coqui_acp_harness::Target
 // = SourcePreset::new("Antigravity", "agy").args(&["acp"]).search(&["%LOCALAPPDATA%/agy/bin"]).usage("antigravity")
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -16,6 +17,7 @@ impl canoa::store::recipe::Recipe for AgyRecipe { /* every required method */ }
 ```
 
 - `PRESET`: how the host starts Antigravity when `canoa.cfg` does not name it: runs `agy acp`, searched for in `%LOCALAPPDATA%/agy/bin`, with the `antigravity` usage reader.
+- `ACCESS`: how an access setting (sandbox, network, approvals) is said in Antigravity's own words, under the AOS harness id `antigravity`; `canoa-host` finds it by that id (`bundled.rs`) to say what became of each setting.
 - `AgyRecipe`: Antigravity's Store recipe: the build the publisher's manifest names, SHA-512 from it; only the newest build (a pinned version is unsupported).
 
 Each item is public at this one path. `AgyRecipe` is made a Store provider by `canoa::store_provider!`: `AgyStore` is the guatiao provider `agy_store` over it, offered by this crate's library.

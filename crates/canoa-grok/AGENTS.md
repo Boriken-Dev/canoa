@@ -8,6 +8,7 @@ MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published (`publish = false`). No C
 
 ```rust
 pub const PRESET: SourcePreset;
+pub const ACCESS: Target;   // coqui_acp_harness::Target
 // = SourcePreset::new("Grok", "grok").args(&["agent", "stdio"]).search(&["~/.grok/bin"])
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -16,6 +17,7 @@ impl canoa::store::recipe::Recipe for GrokRecipe { /* every required method */ }
 ```
 
 - `PRESET`: how the host starts Grok when `canoa.cfg` does not name it: runs `grok agent stdio`, searched for in `~/.grok/bin`.
+- `ACCESS`: how an access setting (sandbox, network, approvals) is said in Grok's own words, under the AOS harness id `grok`; `canoa-host` finds it by that id (`bundled.rs`) to say what became of each setting.
 - `GrokRecipe`: Grok's Store recipe: one binary per platform from the publisher's storage; the publisher gives no checksum, so the plan says the download is not verified; channels `stable`, `alpha`, `enterprise`.
 
 Each item is public at this one path. `GrokRecipe` is made a Store provider by `canoa::store_provider!`: `GrokStore` is the guatiao provider `grok_store` over it, offered by this crate's library.

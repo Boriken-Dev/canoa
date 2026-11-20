@@ -13,6 +13,7 @@ pub const LOOK: &str;
 // = the contents of looks/claude.json: Claude's look as the JSON document `looks/list` serves
 
 pub const PRESET: SourcePreset;
+pub const ACCESS: Target;   // coqui_acp_harness::Target
 // = SourcePreset::new("Claude", "claude").harness("claude")
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -24,6 +25,7 @@ pub use coqui_acp_claude as acp;   // the provider crate, whole: `acp::ClaudePro
 ```
 
 - `PRESET`: how the host starts Claude Code when `canoa.cfg` does not name it: run in process as the `claude` harness.
+- `ACCESS`: how an access setting (sandbox, network, approvals) is said in Claude Code's own words, under the AOS harness id `claude-code`; `canoa-host` finds it by that id (`bundled.rs`) to say what became of each setting.
 - `ClaudeRecipe`: Claude Code's Store recipe: one binary per platform from the publisher's release bucket, named by its manifest with a SHA-256 (the manifest's detached signature is not checked); channels `latest` and `stable`.
 - `acp`: the `coqui-acp-claude` crate re-exported whole, so a host reaches the provider and its history helpers through this crate and needs no direct dependency. It is the only path to them.
 

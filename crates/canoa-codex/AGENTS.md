@@ -13,6 +13,7 @@ pub const LOOK: &str;
 // = the contents of looks/chatgpt.json: ChatGPT's look as the JSON document `looks/list` serves
 
 pub const PRESET: SourcePreset;
+pub const ACCESS: Target;   // coqui_acp_harness::Target
 // = SourcePreset::new("Codex", "codex").harness("codex")
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -23,6 +24,7 @@ pub use coqui_acp_codex as acp;   // the provider crate, whole: `acp::CodexProvi
 ```
 
 - `PRESET`: how the host starts Codex when `canoa.cfg` does not name it: run in process as the `codex` harness.
+- `ACCESS`: how an access setting (sandbox, network, approvals) is said in Codex's own words, under the AOS harness id `codex`; `canoa-host` finds it by that id (`bundled.rs`) to say what became of each setting.
 - `CodexRecipe`: Codex's Store recipe: the `codex-package` tar.gz from the release site, SHA-256 from the release's checksums and the channel's digest; no setting stops its own updater.
 - `acp`: the `coqui-acp-codex` crate re-exported whole, so a host reaches the provider and its history helpers through this crate and needs no direct dependency. It is the only path to them.
 
