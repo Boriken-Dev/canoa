@@ -72,8 +72,8 @@ impl Registry {
         self
     }
 
-    /// `registry/fetch` `{"url"}` -> `{"body"}`: one page of a registry's list. The address must be a registry's list endpoint,
-    /// `<base>/v0.1/servers` with at most the `limit`, `cursor` and `search` parameters, over https (or http to this computer),
+    /// `registry/fetch` `{"url"}` -> `{"body", "warning"?}`: one page of a registry's list. The address must be a registry's list endpoint,
+    /// `<base>/v0.1/servers` with at most the `limit`, `cursor` and `search` parameters, over https or http,
     /// with no user information; no redirect is followed. `bases` is where a key may read, or `None` for the person running the host.
     pub(crate) fn fetch(&self, params: &Value, bases: Option<&[String]>) -> Outcome {
         let url = text_param(params, "url")?.ok_or_else(|| bad("url is needed"))?;
@@ -87,7 +87,11 @@ impl Registry {
             ));
         }
         let body = self.read(url, "registry", REGISTRY_TIME, MAX_REGISTRY_BYTES)?;
-        Ok(json!({"body": String::from_utf8_lossy(&body)}))
+        let mut answer = json!({"body": String::from_utf8_lossy(&body)});
+        if let Some(note) = canoa::address::plain_http_note("the registry", &base) {
+            answer["warning"] = Value::String(note);
+        }
+        Ok(answer)
     }
 
     /// One answer of `url` as bytes, with no redirect followed: `what` names the service in the words of a refusal, `time` is how
@@ -317,8 +321,8 @@ fn file_safe(text: &str, most: usize) -> String {
         .collect()
 }
 
-/// The registry base a list endpoint address belongs to, when the address is one a registry serves: `https` (or `http` to this
-/// computer), no user information or fragment, a path ending `/v0.1/servers`, and only `limit`, `cursor` and `search` asked.
+/// The registry base a list endpoint address belongs to, when the address is one a registry serves: `https` or `http` (plain
+/// http is the person's choice wherever it goes), no user information or fragment, a path ending `/v0.1/servers`, and only `limit`, `cursor` and `search` asked.
 fn list_endpoint_base(url: &str) -> Result<String, (i32, String)> {
     let refused = |why: &str| (REFUSED, format!("not a registry's list address: {why}"));
     if url.len() > 2048
@@ -345,10 +349,10 @@ fn list_endpoint_base(url: &str) -> Result<String, (i32, String)> {
     }
     .unwrap_or_default()
     .to_ascii_lowercase();
-    let loopback = matches!(host.as_str(), "localhost" | "127.0.0.1" | "[::1]");
-    if !(scheme.eq_ignore_ascii_case("https") || (scheme.eq_ignore_ascii_case("http") && loopback))
+    if host.is_empty()
+        || !(scheme.eq_ignore_ascii_case("https") || scheme.eq_ignore_ascii_case("http"))
     {
-        return Err(refused("it is https, or http to this computer"));
+        return Err(refused("it is an http or https address"));
     }
     let (path, query) = tail
         .split_once('?')

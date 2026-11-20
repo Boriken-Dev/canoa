@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::{Value, json};
-use url::{Host, Url};
+use url::Url;
 
 use super::{Control, REFUSED, bad, text_param};
 
@@ -46,7 +46,8 @@ pub(crate) fn search_base(store: &Value) -> Result<String, (i32, String)> {
     }
 }
 
-/// `address` as the directory's base: https (or http to this computer), no user information, query or fragment.
+/// `address` as the directory's base: an http or https address, no user information, query or fragment. Plain http is the person's
+/// choice wherever it goes, and the answer to a search says so.
 fn directory_base(address: &str) -> Result<String, (i32, String)> {
     let refused = |why: &str| {
         (
@@ -62,14 +63,11 @@ fn directory_base(address: &str) -> Result<String, (i32, String)> {
         return Err(refused("it holds a space, control character or backslash"));
     }
     let url = Url::parse(address).map_err(|_| refused("it is not an address"))?;
-    let loopback = match url.host() {
-        Some(Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
-        Some(Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(Host::Ipv6(ip)) => ip.is_loopback(),
-        None => return Err(refused("it has no host")),
-    };
-    if !(url.scheme() == "https" || (url.scheme() == "http" && loopback)) {
-        return Err(refused("it is https, or http to this computer"));
+    if url.host().is_none() {
+        return Err(refused("it has no host"));
+    }
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(refused("it is an http or https address"));
     }
     if !url.username().is_empty()
         || url.password().is_some()
@@ -134,10 +132,10 @@ fn clean_results(answer: &Value, limit: usize) -> Option<Vec<Value>> {
 }
 
 impl Control {
-    /// `skill/search` `{"query", "limit"?}` -> `{"from", "skills": [{"id", "source", "skillId", "name", "installs"}]}`: skills
+    /// `skill/search` `{"query", "limit"?}` -> `{"from", "skills": [{"id", "source", "skillId", "name", "installs"}], "warning"?}`: skills
     /// whose names match `query` (two characters at least), as the directory `[store] skills_search` names lists them, most
     /// installed first. Refused while that key is absent or false. `source` is the repository the skill lives in, as
-    /// `owner/repo`.
+    /// `owner/repo`. `warning` is there when the directory is plain http beyond this computer.
     pub(super) fn skill_search(&self, params: &Value) -> Outcome {
         let query = text_param(params, "query")?
             .ok_or_else(|| bad("query is needed"))?
@@ -177,7 +175,11 @@ impl Control {
                     "The skills search gave an answer Canoa cannot read".to_owned(),
                 )
             })?;
-        Ok(json!({"from": base, "skills": skills}))
+        let mut answer = json!({"from": base, "skills": skills});
+        if let Some(note) = canoa::address::plain_http_note("[store] skills_search", &base) {
+            answer["warning"] = Value::String(note);
+        }
+        Ok(answer)
     }
 }
 

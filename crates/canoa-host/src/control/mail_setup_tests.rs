@@ -220,8 +220,8 @@ fn what_the_host_would_refuse_is_refused_with_its_words_and_changes_nothing() {
     let before = dir.cfg();
     for (params, why) in [
         (
-            json!({"name": "work", "backend": "ews", "server": "http://mail.example.com/EWS/Exchange.asmx", "user": "u", "password": "p"}),
-            "in the clear",
+            json!({"name": "work", "backend": "ews", "server": "ftp://mail.example.com/EWS/Exchange.asmx", "user": "u", "password": "p"}),
+            "http or https address",
         ),
         (
             json!({"name": "work", "backend": "ews", "server": "https://mail.example.com/EWS", "user": "u"}),

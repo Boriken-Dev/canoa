@@ -48,7 +48,7 @@ gateway = ["dep:coqui-acp-api"]
 # through the person's network, the OpenAI model list, the sign-in form of a key.
 api-gateway = ["network", "dep:coqui-acp-api", "dep:guatiao", "dep:guatiao-serde", "dep:serde_json", "dep:percent-encoding"]
 # How Canoa reaches the network: the system's proxy, proxy login, certificate verifier and client certificates, with the person's overrides.
-network = ["dep:coqui-syshttp", "dep:ureq", "dep:rustls", "dep:tracing"]
+network = ["dep:coqui-syshttp", "dep:ureq", "dep:rustls", "dep:tracing", "dep:url"]
 
 [dependencies]
 coqui-acp-api = { workspace = true, optional = true }
@@ -56,6 +56,7 @@ serde_json = { workspace = true, optional = true }
 guatiao = { workspace = true, optional = true }
 guatiao-intake = { workspace = true, optional = true }
 ureq = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
 coqui-syshttp = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }

@@ -207,16 +207,10 @@ impl EndpointSaySettings {
 }
 
 /// The host part of an `http` or `https` address.
-fn host_of(url: &str) -> Option<&str> {
-    let rest = url.split_once("://")?.1;
-    let authority = rest.split(['/', '?', '#']).next()?;
-    let authority = authority.rsplit('@').next()?;
-    Some(
-        authority
-            .rsplit_once(':')
-            .filter(|(_, port)| port.bytes().all(|b| b.is_ascii_digit()))
-            .map_or(authority, |(host, _)| host),
-    )
+fn host_of(url: &str) -> Option<String> {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
 }
 
 /// The endpoint provider for speech output.
@@ -268,7 +262,7 @@ impl SpeechOutput for EndpointSay {
         info.endpoint = Some(settings.url.clone());
         info.words = Some(alloc::format!(
             "The text goes to {}{}, which turns it into audio and sends it back.",
-            host_of(&settings.url).unwrap_or("the address you named"),
+            host_of(&settings.url).unwrap_or_else(|| "the address you named".into()),
             if settings.api_key.is_some() {
                 ", with your key"
             } else {

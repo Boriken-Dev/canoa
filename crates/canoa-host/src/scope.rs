@@ -306,7 +306,7 @@ impl Scope {
 }
 
 /// An MCP server the agent would reach over the network, which starts nothing here. One with a command, or of any type
-/// but these, is refused whole.
+/// but these, is refused whole; an `http` or `sse` one may be at any http or https address.
 fn check_server(server: &Value) -> Result<(), &'static str> {
     const STDIO: &str = "a stdio MCP server would start a program on this machine, which this host does not do for a client";
     let server = server.as_object().ok_or("an MCP server is not an object")?;
@@ -316,15 +316,18 @@ fn check_server(server: &Value) -> Result<(), &'static str> {
     match server.get("type").and_then(Value::as_str) {
         Some("http" | "sse") => {
             let url = server.get("url").and_then(Value::as_str).unwrap_or("");
-            if url.len() > 8
-                && url
-                    .get(..8)
-                    .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))
-            {
-                Ok(())
-            } else {
-                Err("an http or sse MCP server must be https")
+            let parsed = url::Url::parse(url)
+                .ok()
+                .filter(|url| matches!(url.scheme(), "http" | "https") && url.host().is_some())
+                .ok_or("an http or sse MCP server is an http or https address")?;
+            // The client is the person's own, and so is its choice of address: plain http beyond this computer is told of, not refused.
+            if canoa::address::plain_beyond_loopback(&parsed) {
+                tracing::info!(
+                    "non-default: a client's MCP server is plain http to {}: what the agent sends it crosses the network unprotected",
+                    parsed.host_str().unwrap_or("another computer")
+                );
             }
+            Ok(())
         }
         Some("acp") => Ok(()),
         _ => Err(STDIO),

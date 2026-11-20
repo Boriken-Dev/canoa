@@ -163,6 +163,8 @@ mod tests {
             ("https://llm.example.com/v1", "https://llm.example.com"),
             ("https://llm.example.com/v1/", "https://llm.example.com"),
             ("http://127.0.0.1:4000/v1", "http://127.0.0.1:4000"),
+            ("http://192.0.2.11:4000/v1", "http://192.0.2.11:4000"),
+            ("http://llm.example.com", "http://llm.example.com"),
             ("https://example.com/litellm", "https://example.com/litellm"),
         ] {
             let read = Settings::from_map(&table(json!({"base_url": given}))).expect(given);
@@ -170,7 +172,7 @@ mod tests {
         }
         for bad in [
             json!({}),
-            json!({"base_url": "http://llm.example.com"}),
+            json!({"base_url": "ftp://llm.example.com"}),
             json!({"base_url": "https://u:p@llm.example.com"}),
             json!({"base_url": "https://llm.example.com", "api_key": "k"}),
         ] {

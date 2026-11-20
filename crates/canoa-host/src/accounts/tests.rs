@@ -354,27 +354,67 @@ fn the_files_a_provider_placed_go_with_the_last_connection() {
     );
 }
 
+fn endpoint_kind() -> AccountKindInfo {
+    use serde_json::json;
+    let mut info = AccountKindInfo::new("gateway", "Gateway");
+    info.settings = guatiao_serde::from_serde(json!({
+        "type": "object",
+        "properties": {"base_url": {"type": "string"}},
+    }))
+    .expect("a schema");
+    info.endpoints =
+        vec![coqui_acp_api::EndpointSlot::new(coqui_acp_api::MODEL_API).key("base_url")];
+    info
+}
+
+fn settings_of_address(address: &str) -> crate::config::Settings {
+    use serde_json::json;
+    crate::config::Settings::new(
+        json!({"base_url": address})
+            .as_object()
+            .cloned()
+            .expect("a table"),
+    )
+}
+
 #[test]
-fn an_endpoint_is_https_or_http_to_this_machine() {
+fn an_endpoint_is_any_http_or_https_address_and_plain_http_beyond_this_machine_is_told_of() {
+    let info = endpoint_kind();
     for good in [
         "https://llm.example",
         "https://llm.example:8443/v1",
         "http://127.0.0.1:8080",
         "http://localhost/x",
         "http://[::1]:9",
+        "http://192.0.2.11:4000",
+        "http://llm.example",
     ] {
-        assert!(is_endpoint(good), "{good}");
+        let settings = settings_of_address(good);
+        assert_eq!(check_settings(&info, Some(&settings)), Ok(()), "{good}");
     }
     for bad in [
-        "http://llm.example",
         "ftp://llm.example",
         "llm.example",
         "https://",
         "https://user@llm.example",
-        "http://127.0.0.1.example.com",
     ] {
-        assert!(!is_endpoint(bad), "{bad}");
+        let settings = settings_of_address(bad);
+        assert!(check_settings(&info, Some(&settings)).is_err(), "{bad}");
     }
+    for quiet in ["https://llm.example", "http://127.0.0.1:8080"] {
+        let settings = settings_of_address(quiet);
+        assert!(
+            address_notes("gw", &info, Some(&settings)).is_empty(),
+            "{quiet}"
+        );
+    }
+    let settings = settings_of_address("http://192.0.2.11:4000");
+    let notes = address_notes("gw", &info, Some(&settings));
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].starts_with("account gw: base_url is plain http to 192.0.2.11"),
+        "{notes:?}"
+    );
 }
 
 fn config(id: &str) -> AccountConfig {

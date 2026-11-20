@@ -204,38 +204,14 @@ pub fn check_credential(standard: &str, key: &str) -> Result<(), String> {
     }
 }
 
-/// Whether `url` is an address a key may be sent to: an `https` one, or an `http` one to this computer.
+/// Whether `url` is an address a key may be sent to: an `http` or `https` one with a host and no login in it. Plain `http` is the
+/// person's choice wherever it goes; [`crate::address::plain_http_note`] says what it costs.
 ///
 /// # Errors
 ///
 /// Why it is not.
 pub fn check_address(url: &str) -> Result<(), String> {
-    let (secure, rest) = if let Some(rest) = url.strip_prefix("https://") {
-        (true, rest)
-    } else if let Some(rest) = url.strip_prefix("http://") {
-        (false, rest)
-    } else {
-        return Err("the address starts with https:// (or http:// to this computer)".to_owned());
-    };
-    if rest.is_empty() || rest.starts_with(['/', '?', '#']) {
-        return Err("the address names no host".to_owned());
-    }
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if authority.contains(['@', ' ']) || authority.chars().any(char::is_control) {
-        return Err(
-            "the address holds a login or a space: the key goes in the key field".to_owned(),
-        );
-    }
-    let host = if let Some(bracketed) = authority.strip_prefix('[') {
-        bracketed.split(']').next().unwrap_or("")
-    } else {
-        authority.split(':').next().unwrap_or("")
-    };
-    if secure || matches!(host, "localhost" | "127.0.0.1" | "::1") {
-        Ok(())
-    } else {
-        Err("a key is sent only to an https address, or an http one on this computer".to_owned())
-    }
+    crate::address::parse(url).map(|_| ())
 }
 
 /// The address of the model list of an OpenAI-API address `base`: `/v1/models`, or `/models` when `base` already ends in `/v1`.

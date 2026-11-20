@@ -766,6 +766,7 @@ dependencies = [
  "sha2 0.11.1",
  "tracing",
  "ureq",
+ "url",
 ]
 
 [[package]]

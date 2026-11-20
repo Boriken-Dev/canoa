@@ -335,17 +335,17 @@ fn nothing_is_stored_when_the_account_or_the_password_is_refused() {
     })
     .expect_err("refused");
     assert!(bad.why.contains("would not be read"), "{}", bad.why);
-    // So is an address that would send the password in the clear.
+    // So is an address that is no http or https one; plain http beyond this computer is the person's choice.
     let clear = with_cfg(&dir, |cfg| {
         add_with(
             cfg,
             "work",
-            &exchange("http://mail.example.com/EWS/Exchange.asmx".to_owned()),
+            &exchange("ftp://mail.example.com/EWS/Exchange.asmx".to_owned()),
             &mut never_asked,
         )
     })
     .expect_err("refused");
-    assert!(clear.why.contains("in the clear"), "{}", clear.why);
+    assert!(clear.why.contains("http or https address"), "{}", clear.why);
     // An empty password is no password.
     let empty = with_cfg(&dir, |cfg| {
         add_with(

@@ -1864,19 +1864,10 @@ struct RawMailAccount {
     timeout_secs: Option<u64>,
 }
 
-/// Whether `address` is an http or https address a mailbox may be reached at: https anywhere, http only on this computer, since
-/// a password sent over plain http crosses the network in the clear.
+/// Whether `address` is an http or https address a mailbox may be reached at, wherever it is: plain http beyond this computer is the
+/// person's choice, and `canoa check` and the log tell it (`addresses::notes`).
 fn mail_address(address: &str) -> bool {
-    let Ok(parsed) = url::Url::parse(address) else {
-        return false;
-    };
-    match (parsed.scheme(), parsed.host()) {
-        ("https", Some(_)) => true,
-        ("http", Some(url::Host::Domain(name))) => name.eq_ignore_ascii_case("localhost"),
-        ("http", Some(url::Host::Ipv4(ip))) => ip.is_loopback(),
-        ("http", Some(url::Host::Ipv6(ip))) => ip.is_loopback(),
-        _ => false,
-    }
+    canoa::address::parse(address).is_ok()
 }
 
 impl RawMail {
@@ -1938,9 +1929,7 @@ impl RawMail {
                         .as_deref()
                         .is_some_and(|address| !mail_address(address))
                     {
-                        return Err(invalid(
-                            "server is an https address (http only on this computer, since a token would cross the network in the clear)",
-                        ));
+                        return Err(invalid("server is an http or https address"));
                     }
                     if raw
                         .command
@@ -1986,9 +1975,7 @@ impl RawMail {
                         [("server", &raw.server), ("autodiscover", &raw.autodiscover)]
                     {
                         if address.as_deref().is_some_and(|a| !mail_address(a)) {
-                            return Err(invalid(&format!(
-                                "{key} is an https address (http only on this computer, since a password would cross the network in the clear)"
-                            )));
+                            return Err(invalid(&format!("{key} is an http or https address")));
                         }
                     }
                     let auth = match raw.auth.as_deref() {

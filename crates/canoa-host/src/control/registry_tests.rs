@@ -71,7 +71,6 @@ fn only_a_registrys_list_address_is_read() {
         "https://registry.example/v0.1/servers?token=1",
         "https://u:p@registry.example/v0.1/servers",
         "https://registry.example/v0.1/servers#frag",
-        "http://registry.example/v0.1/servers",
         "ftp://registry.example/v0.1/servers",
         "file:///etc/passwd",
         "https://169.254.169.254/latest/meta-data",
@@ -92,6 +91,20 @@ fn only_a_registrys_list_address_is_read() {
         json!({"url": "http://127.0.0.1:9/v0.1/servers"}),
     );
     assert!(loopback.get("result").is_some(), "{loopback}");
+    for plain in [
+        "http://registry.example/v0.1/servers",
+        "http://192.0.2.11:8080/v0.1/servers?limit=3",
+    ] {
+        let answer = ask(
+            &control,
+            &Caller::Owner,
+            "registry/fetch",
+            json!({"url": plain}),
+        );
+        assert!(answer.get("result").is_some(), "{plain}: {answer}");
+        assert!(answer["result"]["warning"].is_string(), "{plain}: {answer}");
+    }
+    assert!(loopback["result"].get("warning").is_none(), "{loopback}");
 }
 
 #[test]

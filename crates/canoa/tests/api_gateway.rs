@@ -197,7 +197,7 @@ fn settings_name_an_address_and_standards_and_nothing_else() {
     .expect("a list reads");
     assert_eq!(listed.standards, [OPENAI_API, "x-api"]);
     for bad in [
-        json!({"base_url": "http://llm.example.com", "standards": "openai-api"}),
+        json!({"base_url": "ftp://llm.example.com", "standards": "openai-api"}),
         json!({"base_url": "https://u:p@llm.example.com", "standards": "openai-api"}),
         json!({"base_url": "https://llm.example.com", "standards": ""}),
         json!({"base_url": "https://llm.example.com", "standards": "Not An Id"}),
@@ -246,20 +246,37 @@ fn signing_in_makes_an_account_of_the_standards_named_and_keeps_the_key_out_of_i
 }
 
 #[test]
-fn a_sign_in_that_gives_no_key_or_a_far_plain_address_makes_nothing_and_says_which() {
+fn a_sign_in_that_gives_no_key_or_an_address_with_a_login_makes_nothing_and_says_which() {
     let empty = sign_in(
         &json!({"base_url": "https://llm.example.com", "standards": "openai-api"}),
         "  ",
     )
     .expect_err("no key");
     assert_eq!(empty.status, Status::GUATIAO_ERR_BAD_VALUE);
-    let far = sign_in(
-        &json!({"base_url": "http://llm.example.com", "standards": "openai-api"}),
+    let login = sign_in(
+        &json!({"base_url": "https://u:p@llm.example.com", "standards": "openai-api"}),
         CANARY,
     )
-    .expect_err("a key is not sent in the clear");
-    assert!(far.message().contains("https"), "{}", far.message());
-    assert!(!far.message().contains(CANARY));
+    .expect_err("a login in the address is refused");
+    assert!(!login.message().contains(CANARY));
+}
+
+#[test]
+fn a_far_plain_address_is_the_persons_choice() {
+    let table =
+        |value: Value| -> Map<String, Value> { value.as_object().cloned().expect("a table") };
+    for address in [
+        "http://llm.example.com",
+        "http://192.0.2.11:4000",
+        "http://127.0.0.2:4000",
+    ] {
+        let read = Settings::from_map(&table(
+            json!({"base_url": address, "standards": "openai-api", "addresses": format!("openai-api={address}/v1")}),
+        ))
+        .unwrap_or_else(|why| panic!("{address} is refused: {why}"));
+        assert_eq!(read.base_url, address);
+        assert_eq!(read.address_for("openai-api"), format!("{address}/v1"));
+    }
 }
 
 #[test]
@@ -372,8 +389,8 @@ fn an_account_names_an_address_and_a_key_form_for_each_standard_and_nothing_a_st
         json!({"base_url": "https://g.example", "standards": "openai-api", "addresses": "anthropic-api=https://g.example"}),
         // A key a well-known standard does not take.
         json!({"base_url": "https://g.example", "standards": "openai-api", "credentials": "openai-api=auth_token"}),
-        // A far plain address, and a pair with no value.
-        json!({"base_url": "https://g.example", "standards": "openai-api", "addresses": "openai-api=http://far.example/v1"}),
+        // An address that is none, and a pair with no value.
+        json!({"base_url": "https://g.example", "standards": "openai-api", "addresses": "openai-api=ftp://far.example/v1"}),
         json!({"base_url": "https://g.example", "standards": "openai-api", "addresses": "openai-api"}),
         json!({"base_url": "https://g.example", "standards": "openai-api", "by_standard": {"openai-api": {"key": "x"}}}),
     ] {

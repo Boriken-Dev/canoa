@@ -196,7 +196,14 @@ fn another_directory_is_named_by_its_address() {
             "\"http://localhost:9/x\"",
             Some("http://localhost:9/x/api/search?q=pdf&limit=20"),
         ),
-        ("\"http://find.example\"", None),
+        (
+            "\"http://find.example\"",
+            Some("http://find.example/api/search?q=pdf&limit=20"),
+        ),
+        (
+            "\"http://192.0.2.11:8080/skills\"",
+            Some("http://192.0.2.11:8080/skills/api/search?q=pdf&limit=20"),
+        ),
         ("\"https://u:p@find.example\"", None),
         ("\"https://find.example/?token=1\"", None),
         ("\"https://find.example/#x\"", None),
@@ -215,6 +222,14 @@ fn another_directory_is_named_by_its_address() {
             Some(url) => {
                 assert!(answer.get("result").is_some(), "{value}: {answer}");
                 assert_eq!(*transport.asked.lock().expect("lock"), [url], "{value}");
+                let plain_far = url.starts_with("http://")
+                    && !url.contains("127.0.0.1")
+                    && !url.contains("localhost");
+                assert_eq!(
+                    answer["result"]["warning"].is_string(),
+                    plain_far,
+                    "{value}: {answer}"
+                );
             }
             None => {
                 assert_eq!(answer["error"]["code"], -32002, "{value}: {answer}");

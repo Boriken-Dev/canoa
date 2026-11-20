@@ -1116,15 +1116,31 @@ pub(crate) fn check_settings(
     }
     for slot in &info.endpoints {
         let Some(key) = &slot.key else { continue };
-        if let Some(url) = map.get(key).and_then(serde_json::Value::as_str)
-            && !is_endpoint(url)
-        {
-            return Err(format!(
-                "{key} is not an https address (or an http one to this machine)"
-            ));
+        if let Some(url) = map.get(key).and_then(serde_json::Value::as_str) {
+            canoa::address::parse(url).map_err(|why| format!("{key}: {why}"))?;
         }
     }
     Ok(())
+}
+
+/// What the person is told of the addresses `settings` give `info`'s endpoint slots: each that is plain http beyond this computer.
+/// None of it is refused; `account` names the account in the words.
+pub(crate) fn address_notes(
+    account: &str,
+    info: &AccountKindInfo,
+    settings: Option<&Settings>,
+) -> Vec<String> {
+    let Some(settings) = settings else {
+        return Vec::new();
+    };
+    info.endpoints
+        .iter()
+        .filter_map(|slot| slot.key.as_deref())
+        .filter_map(|key| {
+            let address = settings.as_map().get(key)?.as_str()?;
+            canoa::address::plain_http_note(&format!("account {account}: {key}"), address)
+        })
+        .collect()
 }
 
 /// `value` against the field `key` of `schema`; the reason names the key and never the value.
@@ -1144,28 +1160,4 @@ pub(crate) fn check_key(
         .and_then(|m| m.get(key))
         .ok_or_else(|| format!("{key} cannot be set"))?;
     validate_value(field, typed).map_err(|error| format!("{key}: {error}"))
-}
-
-/// Whether `url` is an `https` address, or an `http` one to this machine.
-pub(crate) fn is_endpoint(url: &str) -> bool {
-    let (secure, rest) = if let Some(rest) = url.strip_prefix("https://") {
-        (true, rest)
-    } else if let Some(rest) = url.strip_prefix("http://") {
-        (false, rest)
-    } else {
-        return false;
-    };
-    if rest.is_empty() || rest.starts_with(['/', '?', '#']) {
-        return false;
-    }
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if authority.contains(['@', ' ']) || authority.chars().any(char::is_control) {
-        return false;
-    }
-    let host = if let Some(bracketed) = authority.strip_prefix('[') {
-        bracketed.split(']').next().unwrap_or("")
-    } else {
-        authority.split(':').next().unwrap_or("")
-    };
-    secure || matches!(host, "localhost" | "127.0.0.1" | "::1")
 }

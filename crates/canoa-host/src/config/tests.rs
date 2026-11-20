@@ -2078,12 +2078,19 @@ fn host_mail_names_accounts_that_hold_no_password_and_refuses_what_would_send_on
     let local = parse(
         "[host.mail.accounts.t]\nbackend = \"ews\"\nserver = \"http://127.0.0.1:9/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n",
     );
-    assert!(local.is_ok(), "plain http is for this computer");
+    assert!(local.is_ok(), "plain http on this computer");
+    let lan = parse(
+        "[host.mail.accounts.t]\nbackend = \"ews\"\nserver = \"http://mail.example.com/EWS/Exchange.asmx\"\nautodiscover = \"http://192.0.2.9/autodiscover/autodiscover.xml\"\nuser = \"u\"\npassword_env = \"P\"\n",
+    );
+    assert!(
+        lan.is_ok(),
+        "plain http beyond this computer is the person's choice: {lan:?}"
+    );
 
     for (bad, why) in [
         (
-            "backend = \"ews\"\nserver = \"http://mail.example.com/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"",
-            "in the clear",
+            "backend = \"ews\"\nserver = \"ftp://mail.example.com/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"",
+            "http or https address",
         ),
         (
             "backend = \"ews\"\nuser = \"u\"\npassword_env = \"P\"",
@@ -2127,8 +2134,8 @@ fn host_mail_names_accounts_that_hold_no_password_and_refuses_what_would_send_on
             "not autodiscover",
         ),
         (
-            "backend = \"graph\"\nclient_id = \"c\"\nserver = \"http://graph.example.com/v1.0\"",
-            "https address",
+            "backend = \"graph\"\nclient_id = \"c\"\nserver = \"graph.example.com/v1.0\"",
+            "http or https address",
         ),
         (
             "backend = \"ews\"\nemail = \"a@b\"\nclient_id = \"c\"",
@@ -2155,7 +2162,11 @@ fn host_mail_names_accounts_that_hold_no_password_and_refuses_what_would_send_on
     assert!(cloud.server.is_none(), "Graph's own address is the default");
     assert!(
         parse("[host.mail.accounts.g]\nbackend = \"graph\"\nclient_id = \"c\"\nserver = \"http://localhost:9/v1.0\"\n").is_ok(),
-        "plain http is for this computer"
+        "plain http on this computer"
+    );
+    assert!(
+        parse("[host.mail.accounts.g]\nbackend = \"graph\"\nclient_id = \"c\"\nserver = \"http://graph.example.com/v1.0\"\n").is_ok(),
+        "plain http beyond this computer is the person's choice"
     );
     assert!(parse("[host.mail.accounts.Bad_Name]\nbackend = \"outlook\"\n").is_err());
     assert!(

@@ -45,7 +45,7 @@ fn a_stdio_mcp_server_never_reaches_the_agent() {
 }
 
 #[test]
-fn a_network_mcp_server_passes_only_over_https() {
+fn a_network_mcp_server_passes_over_http_or_https_and_nothing_else() {
     let scope = Scope::default();
     let https =
         json!([{"type": "http", "name": "x", "url": "https://a.example/mcp", "headers": []}]);
@@ -60,11 +60,21 @@ fn a_network_mcp_server_passes_only_over_https() {
         &scope,
         &new_session(json!([{"type": "acp", "name": "x", "id": "browser"}])),
     );
-    let plain = serde_json::to_vec(&new_session(
-        json!([{"type": "http", "name": "x", "url": "http://10.0.0.1", "headers": []}]),
+    for plain in [
+        "http://10.0.0.1",
+        "http://127.0.0.1:9/mcp",
+        "http://mcp.lan/sse",
+    ] {
+        forwarded(
+            &scope,
+            &new_session(json!([{"type": "sse", "name": "x", "url": plain, "headers": []}])),
+        );
+    }
+    let elsewhere = serde_json::to_vec(&new_session(
+        json!([{"type": "http", "name": "x", "url": "ftp://10.0.0.1", "headers": []}]),
     ))
     .expect("JSON");
-    assert!(refused(&scope, &plain).is_some());
+    assert!(refused(&scope, &elsewhere).is_some());
     let multibyte = serde_json::to_vec(&new_session(
         json!([{"type": "http", "name": "x", "url": "httpé://x", "headers": []}]),
     ))
