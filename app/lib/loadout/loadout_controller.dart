@@ -104,7 +104,6 @@ class LoadoutController extends ChangeNotifier {
     required this.home,
     required this.save,
     this.agents = const [],
-    this.registry = officialRegistry,
     this.findProgram,
     this.overlayNeeds,
     this.index,
@@ -142,8 +141,10 @@ class LoadoutController extends ChangeNotifier {
 
   /// The agents the app offers, which an MCP server is allowed or turned off for.
   final List<String> agents;
-  /// The official registry, which is always offered first.
-  final String registry;
+  /// The official registry, which is always offered first: the fixed catalog of the MCP servers type, as the host says it. Empty
+  /// until the host has answered; the host reads it by its label, so a read before then still reaches it.
+  String get registry =>
+      typeOf('mcps')?.rows.where((row) => row.fixed).map((row) => row.spec?.source).whereType<String>().firstOrNull ?? '';
   final FindProgram? findProgram;
 
   /// Asks the host what an installed overlay needs of this computer; none where the app has no host.
@@ -172,11 +173,12 @@ class LoadoutController extends ChangeNotifier {
   ProfileLayers? layers;
 
   /// The registry the Discover list reads: [registry] or one the person added.
-  late String selectedRegistry = registry;
+  String get selectedRegistry => _selectedRegistry ?? registry;
+  String? _selectedRegistry;
 
   /// The registries offered: the official one, then those `[store.mcps.catalogs]` names.
   List<String> get registries => [
-    registry,
+    if (registry.isNotEmpty) registry,
     ...config.storeRegistries.where((address) => address != registry),
     for (final label in generatedRegistryLabels) '$generatedRegistryPrefix$label',
   ];
@@ -727,7 +729,7 @@ class LoadoutController extends ChangeNotifier {
 
   /// Lists [address]'s servers in Discover.
   Future<void> selectRegistry(String address) {
-    selectedRegistry = address;
+    _selectedRegistry = address;
     return loadRegistry();
   }
 
@@ -749,6 +751,13 @@ class LoadoutController extends ChangeNotifier {
   Future<void> loadRegistry({String? search, bool more = false}) async {
     if (readCatalog == null) {
       registryProblem = 'Registries are read through the host, and this app has none';
+      registryRead = true;
+      notifyListeners();
+      return;
+    }
+    if (registry.isEmpty) await loadTypes();
+    if (registry.isEmpty) {
+      registryProblem = 'The host has not said which registry is the official one';
       registryRead = true;
       notifyListeners();
       return;

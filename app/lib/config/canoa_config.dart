@@ -139,12 +139,9 @@ final class VoiceSettings {
 /// The id of the operating system's speech service, which `[voice] backend` names unless the person chose another.
 const defaultVoiceBackend = 'system';
 
-/// The kinds of client that tell their host which they are, and so can have a default loadout of their own in
-/// `[defaults.clients]`: the browser's side panel, and the task panes of Outlook, Word, Excel and PowerPoint.
-const clientKinds = ['browser', 'outlook', 'word', 'excel', 'powerpoint'];
-
 /// The label and source of the catalog Canoa offers first, until the person removes it (`[store.overlays.catalogs] boriken = false`) or gives
-/// that label a catalog of their own. The host reads the same pair.
+/// that label a catalog of their own. The host reads the same pair. The app keeps its own because it shows a profile's effective view
+/// while its host is stopped; `host_constants_test.dart` holds the pair equal to the host's.
 const defaultCatalogLabel = 'boriken';
 const defaultCatalogSpec = 'https://github.com/Boriken-Dev/agent-overlays.git@main#catalog.toml';
 
@@ -590,7 +587,8 @@ final class CanoaConfig {
   }
 
   /// `[host.kb]`: where the knowledge tools get meaning and ordering, as the file holds it. Only the four the app edits are
-  /// named here; the others the host reads stay in the file.
+  /// named here; the others the host reads stay in the file. The list is the knowledge panel's own choice of fields, which the host
+  /// does not say; `host_constants_test.dart` holds each to a key the host reads.
   static const hostKbKeys = ['embeddings', 'model', 'llm_endpoint', 'llm_model'];
 
   /// The values of [hostKbKeys] that `[host.kb]` holds.
@@ -757,8 +755,8 @@ final class CanoaConfig {
   /// session with every overlay `[overlays]` names and every MCP server, as before there were loadouts.
   String? get defaultLoadout => _defaultLoadout(tables['defaults'], loadouts);
 
-  /// `[defaults.clients]`: the loadout a session starts with when it names none and its client is of that kind (see [clientKinds]),
-  /// by kind, as written: a name `[loadouts]` no longer holds (deleted by hand) is kept, and is no default. A kind with none starts
+  /// `[defaults.clients]`: the loadout a session starts with when it names none and its client is of that kind,
+  /// by kind, as written (which kinds the host knows is the host's to say): a name `[loadouts]` no longer holds (deleted by hand) is kept, and is no default. A kind with none starts
   /// with [defaultLoadout].
   Map<String, String> get clientLoadouts => _clientLoadouts(tables['defaults']);
 
@@ -846,9 +844,6 @@ final class CanoaConfig {
     if (clients is! Map) throw const FormatException('canoa.cfg: defaults.clients must be a table');
     final out = <String, String>{};
     for (final MapEntry(:key, :value) in clients.entries) {
-      if (!clientKinds.contains(key)) {
-        throw FormatException('canoa.cfg: defaults.clients.$key is not a kind of client: ${clientKinds.join(', ')}');
-      }
       if (value is! String) throw FormatException('canoa.cfg: defaults.clients.$key is the name of a loadout');
       out['$key'] = value;
     }
@@ -1078,7 +1073,8 @@ final class CanoaConfig {
   /// Null when off.
   String? get skillsSearch => _skillsSearch((tables['store'] as Map?)?['skills_search']);
 
-  /// The directory `skills_search = true` names.
+  /// The directory `skills_search = true` names, which the Skills page shows by name while the host is not asked. The host reads
+  /// the same address; `host_constants_test.dart` holds them equal.
   static const defaultSkillsSearch = 'https://skills.sh';
 
   static String? _skillsSearch(Object? raw) {

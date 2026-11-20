@@ -9,12 +9,27 @@ import 'package:canoa/loadout/mcp_registry.dart';
 import 'package:canoa/profile/aos_support.dart';
 import 'package:canoa/profile/overlays.dart';
 import 'package:canoa/profile/profile.dart';
-import 'package:canoa/store/catalog_types.dart' show CatalogRead, CatalogReadFailed;
+import 'package:canoa/config/catalog_specs.dart' show CatalogSpec;
+import 'package:canoa/store/catalog_types.dart' show CatalogRead, CatalogReadFailed, CatalogRow, CatalogType, CatalogWords;
 import 'package:canoa/store/skill_sources.dart';
 import 'package:canoa/store/store.dart';
 import 'package:canoa/store/store_index.dart';
 import 'package:canoa/store/store_settings.dart';
 import 'package:coqui_aos/coqui_aos.dart' as aos;
+
+/// The official MCP registry, as the host's own is, which the app learns from the host's `store/catalogs`.
+const officialRegistry = 'https://registry.modelcontextprotocol.io';
+
+/// The one Store type a controller needs to find the official registry: the MCP servers type, whose fixed row is that registry,
+/// as `store/catalogs` answers it.
+Future<List<CatalogType>> standInCatalogTypes() async => [
+  CatalogType(
+    id: 'mcps',
+    title: 'MCP servers',
+    words: const CatalogWords(noun: 'registry', plural: 'registries', lists: 'MCP servers'),
+    rows: [CatalogRow(label: 'official', spec: CatalogSpec.read(officialRegistry), isDefault: true, fixed: true)],
+  ),
+];
 
 /// The catalogs of [config] as [overlays] holds them: what `store/index` would answer.
 Future<List<LoadedCatalog>> standInCatalogs(OverlayManager overlays, CanoaConfig config) async => [

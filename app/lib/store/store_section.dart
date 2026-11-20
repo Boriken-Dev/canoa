@@ -40,7 +40,6 @@ class StoreSection extends StatefulWidget {
     this.programs,
     this.findProgram,
     this.overlayNeeds,
-    this.registry = officialRegistry,
     this.embedded = false,
     this.index,
     this.catalogTypes,
@@ -73,7 +72,6 @@ class StoreSection extends StatefulWidget {
 
   /// Asks the host what an installed overlay needs of this computer; none where the app has no host.
   final OverlayNeeds? overlayNeeds;
-  final String registry;
 
   /// The host's catalog index; none where the app has no host, which leaves the catalogs empty.
   final CatalogIndex? index;
@@ -116,7 +114,6 @@ class StoreSectionState extends State<StoreSection> with TickerProviderStateMixi
     home: widget.home,
     save: widget.onSave,
     agents: widget.agents,
-    registry: widget.registry,
     findProgram: widget.findProgram,
     overlayNeeds: widget.overlayNeeds,
     index: widget.index,

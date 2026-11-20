@@ -14,9 +14,6 @@ import '../config/canoa_config.dart' show McpOrigin;
 import '../profile/aos_support.dart' show holdsPassword;
 import '../profile/profile.dart' show GitOverlay, OverlaySource, ProfileException, isEntryName, isEnvName;
 
-/// The official registry, which a person may use or leave: any registry that serves the same API can be added beside it.
-const officialRegistry = 'https://registry.modelcontextprotocol.io';
-
 /// Whether [address] names a git source (`<repository>@<ref>#<file>`) rather than a registry served over HTTP.
 bool isGitRegistry(String address) => address.contains('@') || address.contains('#');
 

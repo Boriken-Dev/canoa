@@ -158,9 +158,10 @@ void main() {
     expect(CanoaConfig.parse(base).clientLoadouts, isEmpty);
   });
 
-  test('a client default that names no kind of client or is not text is refused, naming it', () {
+  test('a client default that is not text is refused, naming it; a kind the app does not know is the host\'s to refuse', () {
+    final unknown = CanoaConfig.parse('[loadouts.a]\n[defaults.clients]\nfridge = "a"\n');
+    expect(unknown.clientLoadouts, {'fridge': 'a'}, reason: 'kept as written, and written back');
     for (final (text, word) in [
-      ('[loadouts.a]\n[defaults.clients]\nfridge = "a"\n', 'fridge'),
       ('[loadouts.a]\n[defaults.clients]\noutlook = 1\n', 'outlook'),
       ('[loadouts.a]\n[defaults]\nclients = "a"\n', 'clients'),
     ]) {

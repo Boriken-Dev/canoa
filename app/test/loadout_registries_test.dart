@@ -8,8 +8,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
+import 'package:canoa/config/catalog_specs.dart' show CatalogSpec;
 import 'package:canoa/loadout/loadout_controller.dart';
 import 'package:canoa/loadout/mcp_registry.dart';
+import 'package:canoa/store/catalog_types.dart' show CatalogRow, CatalogType, CatalogWords;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/catalog_standin.dart';
@@ -36,6 +38,27 @@ Future<String> _read(Uri uri) async {
 }
 
 void main() {
+  test('the official registry is the one the host says, and none until it has said', () async {
+    final controller = LoadoutController(
+      config: CanoaConfig.parse(''),
+      home: null,
+      save: (changed) async => changed,
+      catalogTypes: () async => [
+        CatalogType(
+          id: 'mcps',
+          title: 'MCP servers',
+          words: CatalogWords.generic,
+          rows: [CatalogRow(label: 'official', spec: CatalogSpec.read('https://registry.host-says.test'), fixed: true)],
+        ),
+      ],
+    );
+    addTearDown(controller.dispose);
+    expect(controller.registries, isEmpty, reason: 'the app holds no address of its own');
+    await controller.loadTypes();
+    expect(controller.registries, ['https://registry.host-says.test']);
+    expect(controller.selectedRegistry, 'https://registry.host-says.test');
+  });
+
   test('registries are the catalogs of the MCP servers type, in the order added, that the file keeps', () {
     final base = CanoaConfig.parse('');
     expect(base.storeRegistries, isEmpty);
@@ -81,8 +104,10 @@ void main() {
         return changed;
       },
       agents: const ['Claude'],
+      catalogTypes: standInCatalogTypes,
       readCatalog: standInCatalogRead(MemoryOverlays(), () => controller.config, registry: _read),
     );
+    await controller.loadTypes();
     try {
       final address = 'http://127.0.0.1:${server.port}';
       expect(controller.registries, [officialRegistry]);
@@ -126,6 +151,7 @@ void main() {
         return changed;
       },
       agents: const ['Claude'],
+      catalogTypes: standInCatalogTypes,
       // The official registry is not reachable here: nothing may read it.
       readCatalog: standInCatalogRead(overlays, () => controller.config,
           registry: (uri) async => throw StateError('no HTTP registry is read: $uri')),

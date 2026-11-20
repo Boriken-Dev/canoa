@@ -85,6 +85,7 @@ void main() {
         config: config,
         home: MemoryHome(overlays),
         index: standInIndex(overlays, () => saved.isEmpty ? config : saved.last),
+        catalogTypes: standInCatalogTypes,
         agents: agents,
         onSave: (changed) async {
           saved.add(changed);

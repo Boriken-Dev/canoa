@@ -106,7 +106,8 @@ void main() {
       expect(mode('&relation=conversation:h').kind, 'outlook');
       expect(mode('&relation=origin:https://a.test').kind, 'browser');
       expect(mode('&client=outlook&relation=origin:https://a.test').kind, 'outlook', reason: 'the address wins over the relation');
-      expect(mode('&client=fridge').kind, isNull, reason: 'a kind canoa.cfg has no name for is none');
+      expect(mode('&client=fridge').kind, 'fridge', reason: 'the host says which kinds have a loadout; any other is its label');
+      expect(mode('&client=').kind, isNull);
       expect(mode('').kind, isNull);
       expect(ClientMode.full.kind, isNull);
     });

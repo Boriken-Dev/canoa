@@ -1,6 +1,5 @@
 // How the page that hosts the app asks for it: the whole app, or the chat alone with the sessions of what the host page is
 // showing first. The extension's side panel and an Office task pane both ask for the second.
-import '../config/canoa_config.dart' show clientKinds;
 import 'relation.dart';
 
 /// Which app a page shows, from its address.
@@ -8,7 +7,7 @@ import 'relation.dart';
 /// `mode=chat` asks for the chat alone: the conversation and the sessions related to what is in front of the client, with no
 /// workspace, terminal, Store or Settings. `relation=<kind>:<key>` (with `scope=` and `label=`) names what is in front when the
 /// client knows it at load; a client that learns it later gives the app a [RelationSource] instead. `client=<kind>` says which
-/// kind of client it is (one of [clientKinds]), which canoa.cfg may give a default loadout of its own.
+/// kind of client it is, which canoa.cfg may give a default loadout of its own.
 final class ClientMode {
   const ClientMode({this.chatOnly = false, this.relation, this.client});
 
@@ -30,7 +29,8 @@ final class ClientMode {
   /// What was in front of the client when the page loaded, if its address said.
   final Relation? relation;
 
-  /// The kind of client the address names, one of [clientKinds]; null when it names none or one this app does not know.
+  /// The kind of client the address names, as written; null when it names none. The host knows which kinds have a loadout of
+  /// their own, and treats any other as a label.
   final String? client;
 
   /// The kind of client this is: the one the address names, else what the relation shows (a webpage's origin is a browser's, a mail
@@ -50,7 +50,7 @@ final class ClientMode {
     return ClientMode(
       chatOnly: true,
       relation: Relation.parse(query['relation'], scope: query['scope'], label: query['label']),
-      client: clientKinds.contains(query[clientParameter]) ? query[clientParameter] : null,
+      client: query[clientParameter]?.isEmpty ?? true ? null : query[clientParameter],
     );
   }
 

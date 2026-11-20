@@ -36,6 +36,7 @@ void main() {
             config: CanoaConfig.parse(text),
             home: MemoryHome(overlays),
             index: standInIndex(overlays, () => CanoaConfig.parse(text)),
+            catalogTypes: standInCatalogTypes,
             agents: const ['Claude', 'Codex'],
             onSave: (changed) async => changed,
             readCatalog: standInCatalogRead(overlays, () => CanoaConfig.parse(text), registry: (uri) async => registryAnswer),

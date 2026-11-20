@@ -96,6 +96,7 @@ void main() {
               ];
             },
         agents: const ['Claude'],
+        catalogTypes: standInCatalogTypes,
         onSave: (changed) async => changed,
         readCatalog: standInCatalogRead(overlays, () => config, registry: (uri) async => '{"servers": []}'),
       ),

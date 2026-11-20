@@ -1,9 +1,10 @@
-// The few facts the app keeps beside the host, since it runs with no host (a page nothing served, a desktop whose host is stopped):
-// each is the host's own, read here from the host's source, so a change in one without the other fails.
+// The few facts the app keeps beside the host, since it shows them with no host (a page nothing served, a desktop whose host is
+// stopped): each is the host's own, read here from the host's source, so a change in one without the other fails. What a host can
+// say is read from it instead: the official MCP registry and the default catalog come from `store/catalogs`, and which kinds of
+// client the host knows is the host's to refuse.
 import 'dart:io';
 
 import 'package:canoa/config/canoa_config.dart';
-import 'package:canoa/loadout/mcp_registry.dart' show officialRegistry;
 import 'package:flutter_test/flutter_test.dart';
 
 String _host(String file) => File('../crates/canoa-host/src/$file').readAsStringSync();
@@ -22,15 +23,8 @@ void main() {
     expect(defaultCatalogSpec, _constant(index, 'DEFAULT_CATALOG_SPEC'));
   });
 
-  test('the skills directory a search asks and the official MCP registry are the host\'s', () {
+  test('the skills directory a search asks is the host\'s', () {
     expect(CanoaConfig.defaultSkillsSearch, _constant(_host('control/skill_search.rs'), 'DEFAULT_BASE'));
-    expect(officialRegistry, _constant(_host('control/registry.rs'), 'OFFICIAL'));
-  });
-
-  test('the kinds of client a default loadout may name are the host\'s', () {
-    final found = RegExp(r'pub const CLIENT_KINDS: \[&str; \d+\] = \[([^\]]+)\];').firstMatch(_host('config.rs'));
-    expect(found, isNotNull);
-    expect(clientKinds, [for (final kind in RegExp(r'"(\w+)"').allMatches(found!.group(1)!)) kind.group(1)!]);
   });
 
   test('every key of [host.kb] the app edits is one the host reads', () {
