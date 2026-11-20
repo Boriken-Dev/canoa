@@ -103,7 +103,7 @@ class _HostProvidersGroupState extends State<HostProvidersGroup> {
               child: TextField(
                 key: const Key('speech-new-name'),
                 controller: _newName,
-                decoration: const InputDecoration(isDense: true, hintText: 'Name, such as whisper'),
+                decoration: const InputDecoration(isDense: true, hintText: 'Name, such as dictation'),
                 onChanged: (_) => setState(() {}),
               ),
             ),

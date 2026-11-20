@@ -64,7 +64,7 @@ final class HostSpeechProvider {
   /// The models its service has, when the host knows them; a recording may ask for one.
   final List<SpeechChoice> models;
 
-  /// The offer it was made from (`whisper`), when it was one of Canoa's.
+  /// The offer it was made from, when it was one of Canoa's.
   final String? offer;
 
   /// The account whose API key it uses, when it was made of one: the key is the account's and never leaves the host.

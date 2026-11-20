@@ -71,7 +71,7 @@ pub struct EndpointSettings {
     pub url: String,
     /// The model to ask for, when the endpoint takes one.
     #[schema(section = "endpoint", title = "Model")]
-    #[form(placeholder = "whisper-1")]
+    #[form(placeholder = "the service's model name")]
     pub model: Option<String>,
     /// A key sent as `Authorization: Bearer`, when the endpoint asks for one.
     #[schema(section = "endpoint", title = "Key")]
