@@ -15,7 +15,7 @@ use serde_json::{Map, Value, json};
 
 use super::{
     Outcome, Overlays, PoisonError, Trust, bad, git_source, is_local, refused, text_param,
-    valid_skill_name, write_beside,
+    valid_skill_name,
 };
 use crate::profile::full_commit_id;
 
@@ -408,9 +408,10 @@ impl Overlays {
         let mut text = serde_json::to_string_pretty(&Value::Object(record))
             .map_err(|error| refused(error.to_string()))?;
         text.push('\n');
-        write_beside(&base.join(format!("{key}.json")), text.as_bytes()).map_err(|error| {
-            refused(format!("the skill's record could not be written: {error}"))
-        })?;
+        crate::replace::write_file(&base.join(format!("{key}.json")), text.as_bytes(), 0o600)
+            .map_err(|error| {
+                refused(format!("the skill's record could not be written: {error}"))
+            })?;
         Ok(json!({"saved": true}))
     }
 

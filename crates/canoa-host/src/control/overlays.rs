@@ -643,11 +643,13 @@ impl Overlays {
         }
         let bytes =
             serde_json::to_vec_pretty(&record).map_err(|error| refused(error.to_string()))?;
-        write_beside(&root.join(format!("{name}.json")), &bytes).map_err(|error| {
-            refused(format!(
-                "the overlay's record could not be written: {error}"
-            ))
-        })?;
+        crate::replace::write_file(&root.join(format!("{name}.json")), &bytes, 0o600).map_err(
+            |error| {
+                refused(format!(
+                    "the overlay's record could not be written: {error}"
+                ))
+            },
+        )?;
         Ok(record)
     }
 
@@ -1753,18 +1755,6 @@ pub(in crate::control) fn find_git() -> Result<PathBuf, String> {
         }
     }
     Err("git is not in an absolute directory of PATH".to_owned())
-}
-
-fn write_beside(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let mut beside = path.as_os_str().to_owned();
-    beside.push(".new");
-    let beside = PathBuf::from(beside);
-    {
-        let mut file = fs::File::create(&beside)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-    }
-    fs::rename(&beside, path)
 }
 
 /// Now as an ISO 8601 time in UTC, to the second.

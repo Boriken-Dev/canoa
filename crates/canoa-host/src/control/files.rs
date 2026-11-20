@@ -664,17 +664,7 @@ impl Files {
             .and_then(|name| name.to_str())
             .unwrap_or("canoa.cfg");
         let formats = crate::format::formats();
-        let mut document = parse(path, &text)?;
-        let before = document.clone();
-        match toml_value(value) {
-            Some(toml::Value::Table(table)) => {
-                document.insert(section.to_owned(), toml::Value::Table(table));
-            }
-            _ => {
-                document.remove(section);
-            }
-        }
-        let document = toml::Value::Table(document);
+        let before = parse(path, &text)?;
         let format = if text.trim().is_empty() && !existed {
             "toml".to_owned()
         } else {
@@ -683,14 +673,41 @@ impl Files {
                 .map(|detected| detected.format.to_owned())
                 .map_err(|_| refused("canoa.cfg is in no format this host reads"))?
         };
-        let extension = path.extension().and_then(|ext| ext.to_str());
-        let bytes = if extension.is_some_and(|ext| ext.eq_ignore_ascii_case("cfg")) {
-            formats.to_auto_vec(&document, &format, "cfg")
+        let new_table = match toml_value(value) {
+            Some(toml::Value::Table(table)) => Some(table),
+            _ => None,
+        };
+        let written = if format == "toml" {
+            // In place: the person's comments, order and spelling of every other table stay.
+            let mut document = crate::cfg_edit::parse(&text)
+                .map_err(|error| refused(&format!("canoa.cfg is not TOML: {error}")))?;
+            match &new_table {
+                Some(table) => crate::cfg_edit::replace(&mut document, &[section], table),
+                None => crate::cfg_edit::remove(&mut document, &[section]).map(|_| ()),
+            }
+            .map_err(|error| refused(&error))?;
+            document.to_string()
         } else {
-            formats.to_vec(&document, &format)
-        }
-        .map_err(|_| refused("that section has no form in canoa.cfg's format"))?;
-        let written = String::from_utf8(bytes).map_err(|_| refused("canoa.cfg is not text"))?;
+            // YAML and JSON have no layout of their own to keep: the document is written whole.
+            let mut document = before.clone();
+            match new_table {
+                Some(table) => {
+                    document.insert(section.to_owned(), toml::Value::Table(table));
+                }
+                None => {
+                    document.remove(section);
+                }
+            }
+            let document = toml::Value::Table(document);
+            let extension = path.extension().and_then(|ext| ext.to_str());
+            let bytes = if extension.is_some_and(|ext| ext.eq_ignore_ascii_case("cfg")) {
+                formats.to_auto_vec(&document, &format, "cfg")
+            } else {
+                formats.to_vec(&document, &format)
+            }
+            .map_err(|_| refused("that section has no form in canoa.cfg's format"))?;
+            String::from_utf8(bytes).map_err(|_| refused("canoa.cfg is not text"))?
+        };
         // What the host itself reads must still be well formed, or the next start would refuse the file.
         crate::config::Config::from_str_named(
             &written,
@@ -712,8 +729,7 @@ impl Files {
             return Ok(json!({"section": section, "valid": true}));
         }
         // A canoa.cfg that is a link is written through to its target.
-        let target = fs::canonicalize(path).map_or_else(|_| path.to_path_buf(), plain);
-        write_beside(&target, written.as_bytes())
+        crate::replace::write_file(path, written.as_bytes(), 0o600)
             .map_err(|error| refused(&format!("canoa.cfg could not be written: {error}")))?;
         Ok(
             json!({"section": section, "restart": section == HOST || READ_AT_START.contains(&section)}),
@@ -1180,24 +1196,6 @@ fn toml_value(value: &Value) -> Option<toml::Value> {
                 .collect(),
         ),
     })
-}
-
-/// Writes `bytes` to `path` whole, beside it first so a stop in the middle leaves the old file, readable by this user alone.
-fn write_beside(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent)?;
-    }
-    let mut beside = path.as_os_str().to_owned();
-    beside.push(".new");
-    let beside = PathBuf::from(beside);
-    {
-        let mut file = private_new(&beside)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-    }
-    crate::replace::replace_file(&beside, path)
 }
 
 fn private_new(path: &Path) -> std::io::Result<fs::File> {

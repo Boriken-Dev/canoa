@@ -112,6 +112,8 @@ rpassword.workspace = true
 # The digest of a worktree's status listing, and of what the examples print; the version the dependency graph already holds.
 sha2.workspace = true
 toml.workspace = true
+# canoa.cfg edited in place by the accounts, pools and settings writers.
+toml_edit.workspace = true
 anycfg.workspace = true
 serde-saphyr = { workspace = true, optional = true }
 tracing.workspace = true
@@ -143,9 +145,10 @@ windows-native-keyring-store.workspace = true
 windows-registry.workspace = true
 # Whether this process runs elevated, through a safe call: the host forbids unsafe code. Small and old (winapi); one function.
 is_elevated.workspace = true
-# The process table, from a Toolhelp snapshot, and the pseudo-console a terminal runs on; the modules that are unsafe, and only for these
+# The process table, from a Toolhelp snapshot, the pseudo-console a terminal runs on, and the swap of a rewritten file for the one it
+# replaces; the modules that are unsafe, and only for these
 # calls. Already in the graph.
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_Console", "Win32_System_Pipes", "Win32_Security"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_Console", "Win32_System_Pipes", "Win32_Security", "Win32_Storage_FileSystem"] }
 
 # The stand-in Exchange of the mail tests completes a Negotiate exchange with the system's security package (test code only).
 [target.'cfg(windows)'.dev-dependencies]

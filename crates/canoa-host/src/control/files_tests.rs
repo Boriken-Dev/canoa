@@ -317,6 +317,83 @@ fn a_section_is_written_in_the_files_own_format_and_read_back() {
     }
 }
 
+/// A section the app saves is the one table that changes: the person's comments, order and spelling of every other table stay, and a
+/// table the app does not own is untouched.
+#[test]
+fn a_section_saved_leaves_the_text_of_every_other_table_as_the_person_wrote_it() {
+    let text = "\
+# my canoa.cfg
+[desktop]
+start_hidden = true   # on purpose
+
+# how many sessions to keep
+[sessions]
+keep = 3 # a few
+workspace = 'plain'
+
+[secrets]   # not the app's
+default = \"form\"
+
+[usage]
+warn_permille = 700
+";
+    let (path, control, who) = editing("canoa.cfg", text);
+    let set = ask(
+        &control,
+        &who,
+        "config/set",
+        json!({"section": "sessions", "value": {"keep": 12, "workspace": "plain"}}),
+    );
+    assert!(set["result"].is_object(), "{set}");
+    assert_eq!(
+        fs::read_to_string(&path).expect("written"),
+        text.replacen("keep = 3 # a few", "keep = 12 # a few", 1)
+    );
+    // A table the file lacks is added after the others, and one removed takes only itself.
+    ask(
+        &control,
+        &who,
+        "config/set",
+        json!({"section": "appearance", "value": {"brightness": "light"}}),
+    );
+    let added = fs::read_to_string(&path).expect("written");
+    assert!(
+        added.starts_with(&text.replacen("keep = 3 # a few", "keep = 12 # a few", 1)),
+        "{added}"
+    );
+    assert!(
+        added.ends_with("[appearance]\nbrightness = \"light\"\n"),
+        "{added}"
+    );
+    ask(
+        &control,
+        &who,
+        "config/set",
+        json!({"section": "appearance", "value": null}),
+    );
+    ask(
+        &control,
+        &who,
+        "config/set",
+        json!({"section": "sessions", "value": null}),
+    );
+    assert_eq!(
+        fs::read_to_string(&path).expect("written"),
+        "\
+# my canoa.cfg
+[desktop]
+start_hidden = true   # on purpose
+
+[secrets]   # not the app's
+default = \"form\"
+
+[usage]
+warn_permille = 700
+"
+    );
+    let _ = fs::remove_dir_all(path.parent().expect("dir"));
+}
+
 #[test]
 fn only_the_apps_own_sections_are_written() {
     let (path, control, who) = editing("canoa.cfg", "[desktop]\nstart_hidden = true\n");

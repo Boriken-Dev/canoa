@@ -13,6 +13,8 @@
 )]
 
 pub(crate) mod commands;
+#[cfg(test)]
+mod edit_tests;
 mod gate;
 pub(crate) mod login;
 pub(crate) mod matching;

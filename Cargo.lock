@@ -925,6 +925,7 @@ dependencies = [
  "tar",
  "time",
  "toml",
+ "toml_edit",
  "tracing",
  "tracing-subscriber",
  "tungstenite",
@@ -5574,6 +5575,7 @@ dependencies = [
  "indexmap 2.14.2",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 

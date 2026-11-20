@@ -5,6 +5,7 @@ extern crate alloc;
 
 mod accounts;
 mod bundled;
+mod cfg_edit;
 mod child;
 pub mod cli;
 mod client_tools;

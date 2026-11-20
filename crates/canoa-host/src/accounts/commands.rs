@@ -797,49 +797,6 @@ pub(crate) fn sign_in_relayed(
     .map_err(|error| Failed::run(error.to_string()))
 }
 
-/// A TOML basic string.
-pub(crate) fn quote(text: &str) -> String {
-    let mut out = String::from("\"");
-    for c in text.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", u32::from(c))),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
-/// A JSON value as inline TOML; `None` for one TOML cannot hold.
-pub(crate) fn toml_of(value: &serde_json::Value) -> Option<String> {
-    Some(match value {
-        serde_json::Value::Null => return None,
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => quote(s),
-        serde_json::Value::Array(items) => format!(
-            "[{}]",
-            items
-                .iter()
-                .filter_map(toml_of)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        serde_json::Value::Object(map) => format!(
-            "{{ {} }}",
-            map.iter()
-                .filter_map(|(key, value)| Some(format!("{} = {}", quote(key), toml_of(value)?)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    })
-}
-
 pub(crate) fn read_cfg(path: &Path) -> Result<String, Failed> {
     match fs::read_to_string(path) {
         Ok(text) => Ok(text),
@@ -859,37 +816,11 @@ pub(crate) fn check_cfg(path: &Path, text: &str) -> Result<(), Failed> {
     .map_err(|error| Failed::run(format!("the edited canoa.cfg would not be read: {error}")))
 }
 
-/// Writes `text` over `path`, beside it first, and only if it is a canoa.cfg this host reads.
+/// Writes `text` as the whole of the file at `path`, and only if it is a canoa.cfg this host reads.
 pub(crate) fn write_cfg(path: &Path, text: &str) -> Result<(), Failed> {
     check_cfg(path, text)?;
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)
-            .map_err(|error| Failed::run(format!("{}: {error}", dir.display())))?;
-    }
-    let beside = path.with_extension(format!("cfg.new{}", std::process::id()));
-    fs::write(&beside, text)
-        .and_then(|()| crate::replace::replace_file(&beside, path))
-        .map_err(|error| {
-            let _ = fs::remove_file(&beside);
-            Failed::run(format!("{}: {error}", path.display()))
-        })
-}
-
-/// The block `canoa accounts add` writes for an account.
-fn block_of(name: &str, account: &AccountConfig) -> String {
-    let mut block = format!(
-        "[host.accounts.{name}]\nharness = {}\nkind = {}\nid = {}\n",
-        quote(&account.harness),
-        quote(&account.kind),
-        quote(&account.id)
-    );
-    if let Some(settings) = &account.settings {
-        let table = serde_json::Value::Object(settings.as_map().clone());
-        if let Some(inline) = toml_of(&table) {
-            block.push_str(&format!("settings = {inline}\n"));
-        }
-    }
-    block
+    crate::replace::write_file(path, text.as_bytes(), 0o600)
+        .map_err(|error| Failed::run(format!("{}: {error}", path.display())))
 }
 
 pub(crate) fn file_name(path: &Path) -> &str {
@@ -968,47 +899,157 @@ fn append_account(path: &Path, name: &str, account: &AccountConfig) -> Result<()
     {
         block.insert("settings".into(), value);
     }
-    append_table(
-        path,
-        &["host", "accounts"],
-        name,
-        (&block_of(name, account), block),
-    )
+    append_table(path, &["host", "accounts"], name, &block)
 }
 
-/// The text of canoa.cfg with the table `[section.NAME]` added, in the file's own format: `block` is the table as TOML text,
-/// for a file in TOML, which keeps its comments and layout, and as a table, for one in another format.
+/// One change to canoa.cfg, made in whatever format the file is in.
+pub(crate) enum Change<'a> {
+    /// The table at the path holds exactly this one.
+    Replace(&'a [&'a str], &'a toml::Table),
+    /// These keys are set in the table at the path, which is made when there is none; its other keys stay.
+    Merge(&'a [&'a str], &'a toml::Table),
+    /// The table at the path is gone.
+    RemoveTable(&'a [&'a str]),
+    /// The key is gone from the table at the path.
+    RemoveKey(&'a [&'a str], &'a str),
+}
+
+/// `text` with `changes` made, in its own format, and whether every removal found what it removes. A file in TOML is edited in
+/// place: its comments, its order and the way its person spelled each name stay. A file in YAML or JSON, which has no layout of its
+/// own to keep, is read as a document and written whole.
+pub(crate) fn edit_cfg(
+    path: &Path,
+    text: &str,
+    changes: &[Change<'_>],
+) -> Result<(String, bool), Failed> {
+    let format = format_of(path, text)?;
+    let mut found = true;
+    if format != "toml" {
+        let edited = edit_document(path, text, &format, |table| {
+            for change in changes {
+                found &= change_tree(table, change)?;
+            }
+            Ok(())
+        })?;
+        return Ok((edited, found));
+    }
+    let refused = |error: String| Failed::run(format!("{}: {error}", path.display()));
+    let mut document = crate::cfg_edit::parse(text).map_err(refused)?;
+    for change in changes {
+        found &= match change {
+            Change::Replace(at, table) => {
+                crate::cfg_edit::replace(&mut document, at, table).map(|()| true)
+            }
+            Change::Merge(at, table) => {
+                crate::cfg_edit::merge(&mut document, at, table).map(|()| true)
+            }
+            Change::RemoveTable(at) => crate::cfg_edit::remove(&mut document, at),
+            Change::RemoveKey(at, key) => crate::cfg_edit::remove_key(&mut document, at, key),
+        }
+        .map_err(refused)?;
+    }
+    Ok((document.to_string(), found))
+}
+
+/// The table at `path` in a document, made when `make` is set.
+fn tree_at<'a>(
+    root: &'a mut toml::Table,
+    path: &[&str],
+    make: bool,
+) -> Result<Option<&'a mut toml::Table>, Failed> {
+    let mut at = root;
+    for key in path {
+        if !at.contains_key(*key) {
+            if !make {
+                return Ok(None);
+            }
+            at.insert((*key).to_owned(), toml::Value::Table(toml::Table::new()));
+        }
+        at = at
+            .get_mut(*key)
+            .and_then(toml::Value::as_table_mut)
+            .ok_or_else(|| Failed::run(format!("{key} is not a table")))?;
+    }
+    Ok(Some(at))
+}
+
+/// `change` made in a document; whether a removal found what it removes.
+fn change_tree(root: &mut toml::Table, change: &Change<'_>) -> Result<bool, Failed> {
+    Ok(match change {
+        Change::Replace(path, table) => {
+            let (last, parents) = path
+                .split_last()
+                .ok_or_else(|| Failed::run("no table is named".to_owned()))?;
+            if let Some(at) = tree_at(root, parents, true)? {
+                at.insert((*last).to_owned(), toml::Value::Table((*table).clone()));
+            }
+            true
+        }
+        Change::Merge(path, table) => {
+            if let Some(at) = tree_at(root, path, true)? {
+                for (key, value) in *table {
+                    at.insert(key.clone(), value.clone());
+                }
+            }
+            true
+        }
+        Change::RemoveTable(path) => {
+            let (last, parents) = path
+                .split_last()
+                .ok_or_else(|| Failed::run("no table is named".to_owned()))?;
+            tree_at(root, parents, false)?.is_some_and(|at| {
+                at.get(*last).is_some_and(toml::Value::is_table) && at.remove(*last).is_some()
+            })
+        }
+        Change::RemoveKey(path, key) => {
+            tree_at(root, path, false)?.is_some_and(|at| at.remove(*key).is_some())
+        }
+    })
+}
+
+/// Whether the file's text has a table at `path`, in whatever format it is written.
+fn has_table(path: &Path, text: &str, at: &[&str]) -> Result<bool, Failed> {
+    if text.trim().is_empty() {
+        return Ok(false);
+    }
+    let value = crate::format::formats()
+        .from_slice(
+            text.as_bytes(),
+            anycfg::Options::new().name(file_name(path)),
+        )
+        .map_err(|error| Failed::run(format!("{}: {error}", path.display())))?;
+    let mut here = &value;
+    for key in at {
+        match here.get(*key) {
+            Some(next) => here = next,
+            None => return Ok(false),
+        }
+    }
+    Ok(here.is_table())
+}
+
+/// The text of canoa.cfg with the table `[section.NAME]` added: made in place for a file in TOML, which keeps its comments and
+/// layout, and as a document for one in another format.
+///
+/// # Errors
+///
+/// The file already has a table of that name, or is not a file this host reads.
 pub(crate) fn with_table(
     path: &Path,
     text: &str,
     section: &[&str],
     name: &str,
-    (as_text, as_table): (&str, toml::Table),
+    table: &toml::Table,
 ) -> Result<String, Failed> {
-    let format = format_of(path, text)?;
-    if format != "toml" {
-        return edit_document(path, text, &format, |table| {
-            let mut at = &mut *table;
-            for key in section {
-                at = at
-                    .entry(*key)
-                    .or_insert_with(|| toml::Value::Table(toml::Table::new()))
-                    .as_table_mut()
-                    .ok_or_else(|| Failed::run(format!("{key} is not a table")))?;
-            }
-            at.insert(name.to_owned(), toml::Value::Table(as_table));
-            Ok(())
-        });
+    let mut at = section.to_vec();
+    at.push(name);
+    if has_table(path, text, &at)? {
+        return Err(Failed::usage(format!(
+            "canoa.cfg has a table [{}] already",
+            at.join(".")
+        )));
     }
-    let mut text = text.to_owned();
-    if !text.is_empty() && !text.ends_with('\n') {
-        text.push('\n');
-    }
-    if !text.is_empty() {
-        text.push('\n');
-    }
-    text.push_str(as_text);
-    Ok(text)
+    Ok(edit_cfg(path, text, &[Change::Replace(&at, table)])?.0)
 }
 
 /// Adds the table `[section.NAME]` to the file at `path`; see [`with_table`].
@@ -1016,11 +1057,11 @@ pub(crate) fn append_table(
     path: &Path,
     section: &[&str],
     name: &str,
-    block: (&str, toml::Table),
+    table: &toml::Table,
 ) -> Result<(), Failed> {
     let _one = config_writes();
     let text = read_cfg(path)?;
-    write_cfg(path, &with_table(path, &text, section, name, block)?)
+    write_cfg(path, &with_table(path, &text, section, name, table)?)
 }
 
 /// Held while canoa.cfg is read, changed and written back, so that an offer, an account added or removed and a setting saved never
@@ -1043,118 +1084,34 @@ pub(crate) fn set_offered(
     made: &[(&str, toml::Value)],
 ) -> Result<(), Failed> {
     let _one = config_writes();
-    let mut text = read_cfg(path)?;
-    let format = format_of(path, &text)?;
-    if format != "toml" {
-        let edited = edit_document(path, &text, &format, |table| {
-            let agents = table
-                .entry("host")
-                .or_insert_with(|| toml::Value::Table(toml::Table::new()))
-                .as_table_mut()
-                .ok_or_else(|| Failed::run("[host] is not a table".to_owned()))?
-                .entry("agents")
-                .or_insert_with(|| toml::Value::Table(toml::Table::new()))
-                .as_table_mut()
-                .ok_or_else(|| Failed::run("[host.agents] is not a table".to_owned()))?;
-            let fresh = !agents.contains_key(entry);
-            if fresh && accounts.is_empty() {
-                return Ok(());
-            }
-            let one = agents
-                .entry(entry.to_owned())
-                .or_insert_with(|| toml::Value::Table(toml::Table::new()))
-                .as_table_mut()
-                .ok_or_else(|| Failed::run(format!("[host.agents.{entry}] is not a table")))?;
-            if fresh {
-                one.insert("harness".into(), toml::Value::String(harness.to_owned()));
-                for (key, value) in made {
-                    one.insert((*key).to_owned(), value.clone());
-                }
-            }
-            if accounts.is_empty() {
-                one.remove("accounts");
-            } else {
-                one.insert(
-                    "accounts".into(),
-                    toml::Value::Array(
-                        accounts
-                            .iter()
-                            .map(|name| toml::Value::String(name.clone()))
-                            .collect(),
-                    ),
-                );
-            }
-            Ok(())
-        })?;
-        return write_cfg(path, &edited);
+    let text = read_cfg(path)?;
+    let at = ["host", "agents", entry];
+    let fresh = !has_table(path, &text, &at)?;
+    if fresh && accounts.is_empty() {
+        return Ok(());
     }
-    let line = format!(
-        "accounts = [{}]\n",
-        accounts
-            .iter()
-            .map(|name| quote(name))
-            .collect::<Vec<_>>()
-            .join(", ")
+    let mut table = toml::Table::new();
+    if fresh {
+        table.insert("harness".into(), toml::Value::String(harness.to_owned()));
+        for (key, value) in made {
+            table.insert((*key).to_owned(), value.clone());
+        }
+    }
+    table.insert(
+        "accounts".into(),
+        toml::Value::Array(
+            accounts
+                .iter()
+                .map(|name| toml::Value::String(name.clone()))
+                .collect(),
+        ),
     );
-    let header = format!("[host.agents.{entry}]");
-    let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let Some(start) = lines.iter().position(|each| each.trim() == header) else {
-        if accounts.is_empty() {
-            return Ok(());
-        }
-        if !text.is_empty() && !text.ends_with('\n') {
-            text.push('\n');
-        }
-        if !text.is_empty() {
-            text.push('\n');
-        }
-        let extra: String = made
-            .iter()
-            .map(|(key, value)| format!("{key} = {value}\n"))
-            .collect();
-        text.push_str(&format!(
-            "{header}\nharness = {}\n{extra}{line}",
-            quote(harness)
-        ));
-        return write_cfg(path, &text);
+    let change = if accounts.is_empty() {
+        Change::RemoveKey(&at, "accounts")
+    } else {
+        Change::Merge(&at, &table)
     };
-    let end = lines[start + 1..]
-        .iter()
-        .position(|each| each.trim_start().starts_with('['))
-        .map_or(lines.len(), |offset| start + 1 + offset);
-    let at = lines[start + 1..end].iter().position(|each| {
-        each.trim_start()
-            .strip_prefix("accounts")
-            .is_some_and(|rest| rest.trim_start().starts_with('='))
-    });
-    let mut kept: Vec<String> = lines.iter().map(|each| (*each).to_owned()).collect();
-    match at.map(|offset| start + 1 + offset) {
-        Some(index) => {
-            let value = kept[index].split_once('=').map_or("", |(_, value)| value);
-            if value.matches('[').count() != value.matches(']').count() {
-                return Err(Failed::usage(format!(
-                    "canoa.cfg spells {header}'s accounts over several lines: change it by hand"
-                )));
-            }
-            if accounts.is_empty() {
-                kept.remove(index);
-            } else {
-                kept[index] = line;
-            }
-        }
-        None if !accounts.is_empty() => {
-            let mut after = start + 1;
-            if !kept[start].ends_with('\n') {
-                kept[start].push('\n');
-            }
-            if after > kept.len() {
-                after = kept.len();
-            }
-            kept.insert(after, line);
-        }
-        None => {}
-    }
-    write_cfg(path, &kept.concat())
+    write_cfg(path, &edit_cfg(path, &text, &[change])?.0)
 }
 
 /// Writes the pool `name` as `[host.pools.NAME]` in the file at `path`, in the file's own format, replacing the one it has.
@@ -1165,7 +1122,6 @@ pub(crate) fn set_pool(
 ) -> Result<(), Failed> {
     let _one = config_writes();
     let text = read_cfg(path)?;
-    let format = format_of(path, &text)?;
     let mut table = toml::Table::new();
     table.insert(
         "standard".into(),
@@ -1180,42 +1136,11 @@ pub(crate) fn set_pool(
                 .collect(),
         ),
     );
-    let block = format!(
-        "[host.pools.{name}]\nstandard = {}\naccounts = [{}]\n",
-        quote(&pool.standard),
-        pool.accounts
-            .iter()
-            .map(|member| quote(member))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    let kept = if format == "toml" {
-        without_table(&text, &format!("[host.pools.{name}]"))
-    } else {
-        text.clone()
-    };
+    let at = ["host", "pools", name];
     write_cfg(
         path,
-        &with_table(path, &kept, &["host", "pools"], name, (&block, table))?,
+        &edit_cfg(path, &text, &[Change::Replace(&at, &table)])?.0,
     )
-}
-
-/// `text` with the table whose header line is `header` taken out, and the blank line before it; unchanged when it has none.
-fn without_table(text: &str, header: &str) -> String {
-    let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let Some(start) = lines.iter().position(|line| line.trim() == header) else {
-        return text.to_owned();
-    };
-    let end = lines[start + 1..]
-        .iter()
-        .position(|line| line.trim_start().starts_with('['))
-        .map_or(lines.len(), |offset| start + 1 + offset);
-    let mut kept: Vec<&str> = lines[..start].to_vec();
-    if kept.last().is_some_and(|line| line.trim().is_empty()) {
-        kept.pop();
-    }
-    kept.extend(&lines[end..]);
-    kept.concat()
 }
 
 /// Takes the block `add` wrote for `name` out of the file. An account written some other way is for its writer to remove.
@@ -1232,60 +1157,23 @@ pub(crate) fn remove_table(
 ) -> Result<(), Failed> {
     let _one = config_writes();
     let text = read_cfg(path)?;
-    let format = format_of(path, &text)?;
-    let header = format!("[{}.{name}]", section.join("."));
-    let by_hand = || {
-        Failed::usage(format!(
-            "canoa.cfg does not hold {header} as `{writer}` writes it: remove it from the file by hand"
-        ))
-    };
-    if format != "toml" {
-        let edited = edit_document(path, &text, &format, |table| {
-            let mut at = Some(&mut *table);
-            for key in section {
-                at = at
-                    .and_then(|table| table.get_mut(*key))
-                    .and_then(toml::Value::as_table_mut);
-            }
-            at.and_then(|accounts| accounts.remove(name))
-                .map(|_| ())
-                .ok_or_else(by_hand)
-        })?;
-        return write_cfg(path, &edited);
+    let mut at = section.to_vec();
+    at.push(name);
+    let (edited, found) = edit_cfg(path, &text, &[Change::RemoveTable(&at)])?;
+    if !found {
+        return Err(Failed::usage(format!(
+            "canoa.cfg does not hold [{}] as `{writer}` writes it: remove it from the file by hand",
+            at.join(".")
+        )));
     }
-    let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let Some(start) = lines.iter().position(|line| line.trim() == header) else {
-        return Err(by_hand());
-    };
-    let end = lines[start + 1..]
-        .iter()
-        .position(|line| line.trim_start().starts_with('['))
-        .map_or(lines.len(), |offset| start + 1 + offset);
-    let mut kept: Vec<&str> = lines[..start].to_vec();
-    // The blank line `add` put before the block goes with it.
-    if kept.last().is_some_and(|line| line.trim().is_empty()) {
-        kept.pop();
-    }
-    kept.extend(&lines[end..]);
-    write_cfg(path, &kept.concat())
+    write_cfg(path, &edited)
 }
 
 /// Whether the file at `path` has the agent entry `name`, in whatever format it is written.
 pub(crate) fn has_entry(path: &Path, name: &str) -> Result<bool, Failed> {
     let _one = config_writes();
     let text = read_cfg(path)?;
-    let value = crate::format::formats()
-        .from_slice(
-            text.as_bytes(),
-            anycfg::Options::new().name(file_name(path)),
-        )
-        .map_err(|error| Failed::run(format!("{}: {error}", path.display())))?;
-    Ok(value
-        .as_table()
-        .and_then(|table| table.get("host"))
-        .and_then(|host| host.get("agents"))
-        .and_then(|agents| agents.get(name))
-        .is_some_and(toml::Value::is_table))
+    has_table(path, &text, &["host", "agents", name])
 }
 
 /// Takes the agent entry `name` out of the file at `path`, whole. Refused when the file spells it with tables of their own
@@ -1293,46 +1181,23 @@ pub(crate) fn has_entry(path: &Path, name: &str) -> Result<bool, Failed> {
 pub(crate) fn remove_entry(path: &Path, name: &str) -> Result<(), Failed> {
     let _one = config_writes();
     let text = read_cfg(path)?;
-    let format = format_of(path, &text)?;
-    if format != "toml" {
-        let edited = edit_document(path, &text, &format, |table| {
-            table
-                .get_mut("host")
-                .and_then(toml::Value::as_table_mut)
-                .and_then(|host| host.get_mut("agents"))
-                .and_then(toml::Value::as_table_mut)
-                .and_then(|agents| agents.remove(name))
-                .map(|_| ())
-                .ok_or_else(|| Failed::usage(format!("canoa.cfg has no [host.agents.{name}]")))
-        })?;
-        return write_cfg(path, &edited);
+    let at = ["host", "agents", name];
+    if format_of(path, &text)? == "toml" {
+        let document = crate::cfg_edit::parse(&text)
+            .map_err(|error| Failed::run(format!("{}: {error}", path.display())))?;
+        if crate::cfg_edit::has_subtable(&document, &at) {
+            return Err(Failed::usage(format!(
+                "[host.agents.{name}] has tables of its own: change canoa.cfg by hand"
+            )));
+        }
     }
-    let header = format!("[host.agents.{name}]");
-    let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let Some(start) = lines.iter().position(|line| line.trim() == header) else {
+    let (edited, found) = edit_cfg(path, &text, &[Change::RemoveTable(&at)])?;
+    if !found {
         return Err(Failed::usage(format!(
-            "canoa.cfg does not spell {header} as a table of its own: change it by hand"
-        )));
-    };
-    let end = lines[start + 1..]
-        .iter()
-        .position(|line| line.trim_start().starts_with('['))
-        .map_or(lines.len(), |offset| start + 1 + offset);
-    let below = format!("[host.agents.{name}.");
-    if lines[end..]
-        .iter()
-        .any(|line| line.trim_start().starts_with(&below))
-    {
-        return Err(Failed::usage(format!(
-            "{header} has tables of its own: change canoa.cfg by hand"
+            "canoa.cfg has no [host.agents.{name}] as a table of its own: change it by hand"
         )));
     }
-    let mut kept: Vec<&str> = lines[..start].to_vec();
-    if kept.last().is_some_and(|line| line.trim().is_empty()) {
-        kept.pop();
-    }
-    kept.extend(&lines[end..]);
-    write_cfg(path, &kept.concat())
+    write_cfg(path, &edited)
 }
 
 #[cfg(all(feature = "yaml", feature = "json"))]

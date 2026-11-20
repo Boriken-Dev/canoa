@@ -65,14 +65,14 @@ pub(crate) const fn backend_name(backend: MailBackend) -> &'static str {
     }
 }
 
-/// The table of an account as TOML text and as a table, from one list of keys.
-fn block_of(name: &str, new: &NewAccount, id: Option<&str>) -> (String, toml::Table) {
-    let mut keys: Vec<(&str, toml::Value)> = Vec::new();
+/// The table of an account.
+fn block_of(new: &NewAccount, id: Option<&str>) -> toml::Table {
+    let mut table = toml::Table::new();
     let text = |value: &Option<String>| value.clone().map(toml::Value::String);
-    keys.push((
-        "backend",
+    table.insert(
+        "backend".to_owned(),
         toml::Value::String(new.backend.map_or("", backend_name).to_owned()),
-    ));
+    );
     for (key, value) in [
         ("email", text(&new.email)),
         ("server", text(&new.server)),
@@ -88,20 +88,10 @@ fn block_of(name: &str, new: &NewAccount, id: Option<&str>) -> (String, toml::Ta
         ),
     ] {
         if let Some(value) = value {
-            keys.push((key, value));
+            table.insert(key.to_owned(), value);
         }
     }
-    let mut block = format!("[{}.{name}]\n", SECTION.join("."));
-    let mut table = toml::Table::new();
-    for (key, value) in keys {
-        let spelled = match &value {
-            toml::Value::String(text) => crate::accounts::commands::quote(text),
-            other => other.to_string(),
-        };
-        block.push_str(&format!("{key} = {spelled}\n"));
-        table.insert(key.to_owned(), value);
-    }
-    (block, table)
+    table
 }
 
 /// `canoa mail add NAME`: asks for the password through `front` when the account signs in with one.
@@ -160,17 +150,11 @@ pub(crate) fn add_with(
     let id = new.password().then(new_id).transpose()?;
     // The file is read with the account in it before anything is asked or stored, so a name or an address it would refuse is
     // refused first.
-    let (as_text, as_table) = block_of(name, new, id.as_deref());
+    let block = block_of(new, id.as_deref());
     let before = read_cfg(cfg.config_path)?;
     check_cfg(
         cfg.config_path,
-        &with_table(
-            cfg.config_path,
-            &before,
-            SECTION,
-            name,
-            (&as_text, as_table.clone()),
-        )?,
+        &with_table(cfg.config_path, &before, SECTION, name, &block)?,
     )?;
     let mut stored = None;
     if let Some(id) = &id {
@@ -185,7 +169,7 @@ pub(crate) fn add_with(
         saved?;
         stored = Some(accounts);
     }
-    if let Err(failed) = append_table(cfg.config_path, SECTION, name, (&as_text, as_table)) {
+    if let Err(failed) = append_table(cfg.config_path, SECTION, name, &block) {
         if let (Some(accounts), Some(id)) = (&stored, &id) {
             let _ = accounts.forget_credentials(id);
         }
