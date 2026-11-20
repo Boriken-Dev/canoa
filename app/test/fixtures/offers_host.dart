@@ -107,6 +107,7 @@ final class OffersHost implements HostLink {
                 'partials': false,
                 'offer': entry.value['offer'],
                 'account': entry.value['account'],
+                'account_kind': entry.value['account'] == null ? null : 'API key',
               },
             if (enabled)
               {
@@ -135,7 +136,7 @@ final class OffersHost implements HostLink {
           enabled = true;
           result = {'name': 'whisper', 'provider': 'speech_command', 'model': 'base', 'saved': true};
         } else {
-          final name = (given['name'] as String?) ?? (offer['account'] != null ? 'openai-${offer['account']}' : '${offer['id']}');
+          final name = (given['name'] as String?) ?? (offer['account'] != null ? '${(offer['id'] as String).split(':').first}-${offer['account']}' : '${offer['id']}');
           made[name] = {'offer': offer['id'], 'account': offer['account'], 'model': given['model']};
           result = {'name': name, 'provider': 'speech_endpoint', 'model': given['model'], 'saved': true};
         }

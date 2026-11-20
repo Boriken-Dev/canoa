@@ -11,8 +11,8 @@ import 'speech_backend.dart';
 
 /// Settings > Voice, the speech providers Canoa offers out of the box, which the host of this page or app sets up: a local engine
 /// it installs through its Store (the audio is turned into text on the host and goes nowhere else), the model service a Store type runs on the
-/// host, the OpenAI API key of an account the person already has in Canoa (named, so they know which key pays) and the named
-/// services it can call with a key typed here. Nothing is installed or added until a button is pressed, and each offer says where
+/// host, the API key of an account the person already has in Canoa, for a service a library describes (named, so they know which
+/// key pays), and the named services it can call with a key typed here. Nothing is installed or added until a button is pressed, and each offer says where
 /// the audio goes before it is.
 class HostOffersGroup extends StatefulWidget {
   const HostOffersGroup({super.key, required this.catalog, required this.chosen, required this.onChosen});

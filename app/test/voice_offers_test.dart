@@ -214,16 +214,16 @@ void main() {
     final (_, _, harness) = await _page(tester, host: speech);
     expect(find.textContaining('account work'), findsWidgets, reason: 'the offer names the account whose key pays');
     expect(find.textContaining('API key of your account work'), findsWidgets);
-    expect(tester.widget<FilledButton>(find.byKey(const Key('offer-unavailable-openai_account:login'))).onPressed, isNull);
-    expect(tester.widget<Text>(find.byKey(const Key('offer-why-openai_account:login'))).data, contains('not an OpenAI API key'));
-    expect(find.byKey(const Key('offer-form-openai_account:work')), findsNothing, reason: 'the key is the account\'s: no form asks for one');
-    await tester.tap(find.byKey(const Key('offer-enable-openai_account:work')));
+    expect(tester.widget<FilledButton>(find.byKey(const Key('offer-unavailable-openai:login'))).onPressed, isNull);
+    expect(tester.widget<Text>(find.byKey(const Key('offer-why-openai:login'))).data, contains('not an OpenAI API key'));
+    expect(find.byKey(const Key('offer-form-openai:work')), findsNothing, reason: 'the key is the account\'s: no form asks for one');
+    await tester.tap(find.byKey(const Key('offer-enable-openai:work')));
     await _settle(tester);
-    expect(speech.params['speech/enable']!.single, {'offer': 'openai_account:work', 'model': 'gpt-transcribe'});
+    expect(speech.params['speech/enable']!.single, {'offer': 'openai:work', 'model': 'gpt-transcribe'});
     expect(speech.configured, isEmpty, reason: 'no key was typed or sent');
     expect(harness.last.voice.backend, 'host:openai-work');
     // The provider is listed as the account's, so the person can tell which key pays when they choose it.
-    expect(find.textContaining('openai-work (OpenAI, account work)'), findsWidgets);
+    expect(find.textContaining('openai-work (API key, account work)'), findsWidgets);
   });
 
   test('the model a person chose reaches the provider when the host lists it, and a model of another service does not', () async {
@@ -305,7 +305,7 @@ Map<String, Object?> _foundry({String? unavailable, List<String> models = const 
 };
 
 Map<String, Object?> _account(String name, {String? unavailable}) => {
-  'id': 'openai_account:$name',
+  'id': 'openai:$name',
   'title': 'OpenAI, account $name',
   'summary': 'Speech to text by OpenAI\'s service, under the API key of your account $name.',
   'local': false,

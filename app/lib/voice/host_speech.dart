@@ -54,6 +54,7 @@ final class HostSpeechProvider {
     this.models = const [],
     this.offer,
     this.account,
+    this.accountKind,
   });
 
   final String name, kind, title, description;
@@ -69,6 +70,9 @@ final class HostSpeechProvider {
 
   /// The account whose API key it uses, when it was made of one: the key is the account's and never leaves the host.
   final String? account;
+
+  /// What the account's kind is called, for the person to tell which key pays.
+  final String? accountKind;
 
   /// Why it cannot be used, in the host's words; null when it can.
   final String? problem;
@@ -88,6 +92,7 @@ final class HostSpeechProvider {
       models: _choices(json['models']),
       offer: json['offer'] is String ? json['offer']! as String : null,
       account: json['account'] is String ? json['account']! as String : null,
+      accountKind: json['account_kind'] is String ? json['account_kind']! as String : null,
     );
   }
 }
@@ -343,7 +348,7 @@ final class HostSpeech implements SpeechBackend {
   @override
   String get name {
     final account = provider.account;
-    if (account != null) return '${provider.name} (OpenAI, account $account)';
+    if (account != null) return '${provider.name} (${provider.accountKind ?? provider.title}, account $account)';
     return provider.title == provider.name ? provider.name : '${provider.name} (${provider.title})';
   }
 
