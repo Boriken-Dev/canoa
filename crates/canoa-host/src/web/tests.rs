@@ -1387,25 +1387,34 @@ fn office_js_and_the_files_it_loads_are_this_hosts_own_copy_of_the_pinned_files(
     let folder = Path::new(env!("CANOA_OFFICE_JS_BUILT"));
     for name in [
         "office.js",
-        "microsoftajax.js",
+        "o15apptofilemappingtable.js",
         "outlook-web-16.01.js",
         "word-win32-16.01.js",
         "excel-mac-16.00.js",
         "powerpoint-web-16.00.js",
         "en-us/office_strings.js",
         "ja-jp/outlook_strings.js",
+        "LICENSE.md",
     ] {
         let served = get(address, &format!("/office/js/{name}"));
         assert_eq!(served.status, 200, "{name}");
+        // The mirror's layout: the library's files are under dist/, its license beside it.
+        let source = if name == "LICENSE.md" {
+            folder.join(name)
+        } else {
+            folder.join("dist").join(name)
+        };
         assert_eq!(
             served.body,
-            std::fs::read(folder.join(name)).expect("a mirrored file"),
+            std::fs::read(source).expect("a mirrored file"),
             "{name}"
         );
-        assert_eq!(
-            served.headers["content-type"], "text/javascript; charset=utf-8",
-            "{name}"
-        );
+        let kind = if name == "LICENSE.md" {
+            "text/markdown; charset=utf-8"
+        } else {
+            "text/javascript; charset=utf-8"
+        };
+        assert_eq!(served.headers["content-type"], kind, "{name}");
         assert_eq!(served.headers["cache-control"], "max-age=3600", "{name}");
         // The usual policy, which names no origin but this one.
         let policy = &served.headers["content-security-policy"];
@@ -1425,41 +1434,36 @@ fn office_js_and_the_files_it_loads_are_this_hosts_own_copy_of_the_pinned_files(
 
 #[cfg(not(office_js_cdn))]
 #[test]
-fn every_file_the_list_pins_for_office_js_is_carried_and_nothing_else() {
+fn the_files_the_list_says_the_pane_loads_are_carried_and_nothing_else() {
     let list: serde_json::Value = serde_json::from_slice(
         &std::fs::read(
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("..")
                 .join("..")
                 .join("tools")
-                .join("cdn_files.json"),
+                .join("office_js.json"),
         )
         .expect("the list"),
     )
     .expect("JSON");
-    let mut pinned: Vec<String> = list["files"]
+    let mut named: Vec<String> = list["carried"]
         .as_array()
         .expect("a list")
         .iter()
-        .filter(|entry| entry["host"] == "officeapis.public.onecdn.static.microsoft")
-        .map(|entry| {
-            format!(
-                "js/{}",
-                entry["path"]
-                    .as_str()
-                    .expect("a path")
-                    .trim_start_matches("/1/")
-            )
+        .map(|path| {
+            let path = path.as_str().expect("a path");
+            format!("js/{}", path.strip_prefix("dist/").unwrap_or(path))
         })
         .collect();
     let mut carried: Vec<String> = office::LIBRARY
         .iter()
         .map(|page| page.name().to_owned())
         .collect();
-    pinned.sort();
+    named.sort();
     carried.sort();
-    assert!(pinned.len() > 100, "{}", pinned.len());
-    assert_eq!(carried, pinned);
+    assert!(named.len() > 100, "{}", named.len());
+    assert!(carried.contains(&"js/LICENSE.md".to_owned()));
+    assert_eq!(carried, named);
 }
 
 #[cfg(office_js_cdn)]

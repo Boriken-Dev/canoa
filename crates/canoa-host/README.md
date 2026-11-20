@@ -48,7 +48,11 @@ CANOA_WEB_DIST="$PWD/app/build/web" cargo build --release -p canoa-host --featur
 
 `CANOA_WEB_DIST` must be absolute; with `web` on and no site there, the build stops, `--all-features` included.
 
-`CANOA_OFFICE_JS` is `bundled` (the default) or `cdn`. Bundled, the host carries Office.js and the files it loads (`tools/cdn_files.json` pins each file's SHA-256; `build.rs` reads them from the deps branch's `cdn/officeapis.public.onecdn.static.microsoft/1/`, named by `CANOA_DEPS`, the checkout, or `CANOA_OFFICE_JS_DIR`, the folder itself, and stops on a missing or different file), the pages name `js/office.js` and the pages' policy allows no origin but the host's own. `cdn` carries nothing and the pages name Microsoft's address, whose one origin the policy of the task pane and the dialog then allows. `python app/tool/build.py desktop --office-js cdn` sets it.
+`CANOA_OFFICE_JS` is `bundled` (the default) or `cdn`. Bundled, the host carries Office.js and the files its pane loads, byte for byte as the OfficeDev/office-js repository publishes them, with that repository's `LICENSE.md` (`tools/office_js.json` pins the commit and each file's SHA-256; `build.rs` reads them from the deps branch's `cdn/office-js/`, named by `CANOA_DEPS`, the checkout, or `CANOA_OFFICE_JS_DIR`, the folder itself, and stops on a missing or different file), the pages name `js/office.js` and the pages' policy allows no origin but the host's own. `cdn` carries nothing and the pages name Microsoft's address, whose one origin the policy of the task pane and the dialog then allows. `python app/tool/build.py desktop --office-js cdn` sets it.
+
+## Third-party notices
+
+The host carries the Microsoft Office JavaScript (Office.js) API Library, unmodified, under Microsoft's license terms, which it serves at `/office/js/LICENSE.md`. Microsoft is not responsible for maintaining, updating or supporting Canoa. See `THIRD_PARTY_NOTICES.md` at the root of the repository.
 
 ## Quick start
 

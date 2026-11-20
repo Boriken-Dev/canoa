@@ -8,9 +8,6 @@ use core::fmt::Write as _;
 use sha2::{Digest as _, Sha256};
 use std::path::{Path, PathBuf};
 
-/// The host of Office.js's files in `tools/cdn_files.json` and in the deps mirror's `cdn/`.
-const OFFICE_HOST: &str = "officeapis.public.onecdn.static.microsoft";
-
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=CANOA_TEST_PYTHON");
@@ -30,9 +27,11 @@ fn main() {
 }
 
 /// Writes `office_js.rs` in `OUT_DIR`: one `Page` for each file Office.js loads, with its bytes. `CANOA_OFFICE_JS` is `bundled`
-/// (the default: the files come from the deps mirror, each checked against the digest `tools/cdn_files.json` pins) or `cdn`
-/// (nothing is carried and the pages name Microsoft's address, which sets the `office_js_cdn` cfg). The mirror is the folder
-/// `CANOA_OFFICE_JS_DIR` names, else `cdn/<host>/1/` of the deps checkout `CANOA_DEPS` names.
+/// (the default: the files come from the mirror of the office-js repository, byte for byte, each checked against the digest
+/// `tools/office_js.json` pins) or `cdn` (nothing is carried and the pages name Microsoft's address, which sets the
+/// `office_js_cdn` cfg). The mirror is the folder `CANOA_OFFICE_JS_DIR` names, else `cdn/office-js/` of the deps checkout
+/// `CANOA_DEPS` names. What is carried is the list's `carried` files: `dist/<name>` is served as `js/<name>`, and `LICENSE.md`
+/// as `js/LICENSE.md`.
 fn build_in_office_js() {
     println!("cargo:rerun-if-env-changed=CANOA_OFFICE_JS");
     println!("cargo:rerun-if-env-changed=CANOA_OFFICE_JS_DIR");
@@ -51,34 +50,36 @@ fn build_in_office_js() {
         _ => refuse("CANOA_OFFICE_JS is `bundled` (the default) or `cdn`"),
     }
     let manifest = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets it"));
-    let list_path = manifest.join("../../tools/cdn_files.json");
+    let list_path = manifest.join("../../tools/office_js.json");
     println!("cargo:rerun-if-changed={}", list_path.display());
     let list: serde_json::Value = std::fs::read(&list_path)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_else(|| refuse("tools/cdn_files.json cannot be read"));
-    let mut pinned: Vec<(String, String)> = list["files"]
+        .unwrap_or_else(|| refuse("tools/office_js.json cannot be read"));
+    let mut carried: Vec<(String, String)> = list["carried"]
         .as_array()
         .map_or(&[][..], Vec::as_slice)
         .iter()
-        .filter(|entry| entry["host"] == OFFICE_HOST)
-        .filter_map(|entry| {
-            let name = entry["path"].as_str()?.strip_prefix("/1/")?.to_owned();
-            Some((name, entry["sha256"].as_str()?.to_owned()))
+        .filter_map(|path| {
+            let path = path.as_str()?;
+            let sha256 = list["files"][path].as_str()?.to_owned();
+            Some((path.to_owned(), sha256))
         })
         .collect();
-    pinned.sort();
-    if !pinned.iter().any(|(name, _)| name == "office.js") {
-        refuse("tools/cdn_files.json pins no office.js");
+    carried.sort();
+    if !carried.iter().any(|(path, _)| path == "dist/office.js")
+        || !carried.iter().any(|(path, _)| path == "LICENSE.md")
+    {
+        refuse("tools/office_js.json carries no dist/office.js or no LICENSE.md");
     }
     let folder = office_js_folder();
     println!("cargo:rustc-env=CANOA_OFFICE_JS_BUILT={}", folder.display());
     let mut out = String::from("&[\n");
-    for (name, sha256) in &pinned {
+    for (name, sha256) in &carried {
         let file = folder.join(name);
         let bytes = std::fs::read(&file).unwrap_or_else(|_| {
             refuse(&format!(
-                "{name} is not in the Office.js mirror {}: refresh the deps branch (tools/cdn_files.py mirror), or build with CANOA_OFFICE_JS=cdn",
+                "{name} is not in the Office.js mirror {}: refresh the deps branch (tools/mirror_deps.py fills its cdn/office-js), or build with CANOA_OFFICE_JS=cdn",
                 folder.display()
             ))
         });
@@ -90,7 +91,7 @@ fn build_in_office_js() {
             });
         if &seen != sha256 {
             refuse(&format!(
-                "{} in the Office.js mirror is not the file tools/cdn_files.json pins (SHA-256 {seen}, pinned {sha256})",
+                "{} in the Office.js mirror is not the file tools/office_js.json pins (SHA-256 {seen}, pinned {sha256})",
                 file.display()
             ));
         }
@@ -100,7 +101,7 @@ fn build_in_office_js() {
         let _ = writeln!(
             out,
             "    Page {{ name: {:?}, body: include_bytes!({file:?}), kind: Kind::Library }},",
-            format!("js/{name}")
+            format!("js/{}", name.strip_prefix("dist/").unwrap_or(name))
         );
     }
     out.push_str("]\n");
@@ -108,15 +109,15 @@ fn build_in_office_js() {
     std::fs::write(target, out).expect("OUT_DIR is writable");
 }
 
-/// The folder holding the mirrored `office.js`.
+/// The mirror of the office-js repository.
 fn office_js_folder() -> PathBuf {
     let own = std::env::var_os("CANOA_OFFICE_JS_DIR").filter(|dir| !dir.is_empty());
     let deps = std::env::var_os("CANOA_DEPS").filter(|dir| !dir.is_empty());
     let folder = match (own, deps) {
         (Some(dir), _) => PathBuf::from(dir),
-        (None, Some(deps)) => PathBuf::from(deps).join("cdn").join(OFFICE_HOST).join("1"),
+        (None, Some(deps)) => PathBuf::from(deps).join("cdn").join("office-js"),
         (None, None) => refuse(
-            "the add-in carries Office.js from the deps mirror: set CANOA_DEPS to a checkout of the deps branch (or CANOA_OFFICE_JS_DIR to the folder holding office.js), \
+            "the add-in carries Office.js from the deps mirror: set CANOA_DEPS to a checkout of the deps branch, whose cdn/office-js holds it (or CANOA_OFFICE_JS_DIR to that folder), \
              or build with CANOA_OFFICE_JS=cdn to have its pages load Office.js from Microsoft's CDN instead",
         ),
     };

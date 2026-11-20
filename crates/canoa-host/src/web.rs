@@ -970,6 +970,7 @@ pub(crate) fn content_type(name: &str) -> &'static str {
         "js" | "mjs" => "text/javascript; charset=utf-8",
         "css" => "text/css; charset=utf-8",
         "txt" => "text/plain; charset=utf-8",
+        "md" => "text/markdown; charset=utf-8",
         "json" | "map" => "application/json",
         "webmanifest" => "application/manifest+json",
         "wasm" => "application/wasm",
