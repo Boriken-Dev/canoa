@@ -2,6 +2,7 @@
 
 import 'package:canoa/voice/speech_backend.dart';
 import 'package:canoa/voice/system_speech.dart';
+import 'package:flutter/services.dart' show MissingPluginException, PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 // ignore: depend_on_referenced_packages
@@ -12,13 +13,19 @@ final class _Platform extends SpeechToTextPlatform {
   bool ready = true;
   int listens = 0, stops = 0;
   bool endOnStop = true;
+  Object? initializeThrows, listenThrows;
 
   @override
   Future<bool> hasPermission() async => true;
   @override
-  Future<bool> initialize({debugLogging = false, List<SpeechConfigOption>? options}) async => ready;
+  Future<bool> initialize({debugLogging = false, List<SpeechConfigOption>? options}) async {
+    if (initializeThrows != null) throw initializeThrows!;
+    return ready;
+  }
+
   @override
   Future<bool> listen({String? localeId, partialResults = true, onDevice = false, int listenMode = 0, sampleRate = 0, SpeechListenOptions? options}) async {
+    if (listenThrows != null) throw listenThrows!;
     listens++;
     onStatus?.call('listening');
     return true;
@@ -80,5 +87,25 @@ void main() {
     expect(closed, isTrue, reason: 'a service that never says it is done must not hold the composer');
     expect(failures.single, isA<SpeechFailure>());
     expect((failures.single as SpeechFailure).message, contains('did not finish'));
+  });
+
+  Future<String> failureOf(SpeechBackend speech) async {
+    final failures = <Object>[];
+    speech.start().listen((_) {}, onError: failures.add);
+    await settle();
+    return (failures.single as SpeechFailure).message;
+  }
+
+  test('a platform with no plugin for the service says so in words, not by the name of the exception', () async {
+    platform.initializeThrows = MissingPluginException('No implementation found for method initialize');
+    final message = await failureOf(SystemSpeech('System', engine: SpeechToText.withMethodChannel()));
+    expect(message, 'The speech service could not start: the speech plugin of this system was not loaded when Canoa started.');
+    expect(message, isNot(contains('Exception')));
+  });
+
+  test('a platform error that stops the listen gives its own message', () async {
+    platform.listenThrows = PlatformException(code: 'listen', message: 'No microphone is connected');
+    final message = await failureOf(SystemSpeech('System', engine: SpeechToText.withMethodChannel()));
+    expect(message, 'The speech service could not start: No microphone is connected.');
   });
 }

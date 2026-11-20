@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/services.dart' show MissingPluginException, PlatformException;
 import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
@@ -123,8 +124,24 @@ final class SystemSpeech implements SpeechBackend {
         listenOptions: SpeechListenOptions(listenMode: ListenMode.dictation, partialResults: true, cancelOnError: true, localeId: language),
       );
     } on Object catch (error) {
-      if (identical(_capture, capture)) _fail('The speech service could not start: ${error.runtimeType}.');
+      if (identical(_capture, capture)) _fail('The speech service could not start: ${_why(error)}');
     }
+  }
+
+  /// What went wrong, in words: a call the platform has no plugin for, or the platform's own message.
+  static String _why(Object error) {
+    final said = switch (error) {
+      PlatformException(:final message) => message,
+      ListenFailedException(:final message) => message,
+      _ => null,
+    };
+    if (said != null && said.trim().isNotEmpty) return said.trim().endsWith('.') ? said.trim() : '${said.trim()}.';
+    return switch (error) {
+      MissingPluginException() => 'the speech plugin of this system was not loaded when Canoa started.',
+      PlatformException(:final code) => 'the system answered $code.',
+      SpeechToTextNotInitializedException() => 'the system speech service was not ready.',
+      _ => 'it stopped before it began listening.',
+    };
   }
 
   static String _said(String code) => switch (code) {
