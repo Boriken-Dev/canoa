@@ -23,6 +23,9 @@ final class _Host implements UsageSource, UsageReader {
   final rows = <String, Object?>{};
   final reads = <String>[];
 
+  /// The harness each read named, by the account's name: the host needs one for `local` and no other.
+  final harnesses = <String, String?>{};
+
   @override
   String get name => 'Laptop';
 
@@ -33,8 +36,9 @@ final class _Host implements UsageSource, UsageReader {
   Future<Object?> summary(Map<String, Object?> params) async => const {};
 
   @override
-  Future<Object?> read(String name) async {
+  Future<Object?> read(String name, {String? harness}) async {
     reads.add(name);
+    harnesses[name] = harness;
     final row = rows[name];
     if (row is Exception) throw row;
     return row;

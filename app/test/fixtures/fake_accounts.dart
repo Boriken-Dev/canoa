@@ -307,5 +307,10 @@ final class FakeAccountsHost implements AccountsHost {
   }
 }
 
-AccountInfo account(String name, {String kind = 'anthropic-api-key', String state = 'signed in', String harness = 'claude', String id = '', List<String> provides = const []}) =>
-    AccountInfo.parse({'name': name, 'harness': harness, 'kind': kind, 'id': id.isEmpty ? 'id-$name' : id, 'state': state, if (provides.isNotEmpty) 'provides': provides})!;
+AccountInfo account(String name, {String kind = 'anthropic-api-key', String state = 'signed in', String harness = 'claude', String id = '', List<String> provides = const [], bool automatic = false}) =>
+    AccountInfo.parse({'name': name, 'harness': harness, 'kind': kind, 'id': id.isEmpty ? 'id-$name' : id, 'state': state, if (provides.isNotEmpty) 'provides': provides, if (automatic) 'automatic': true})!;
+
+/// The automatic account of [harness] as the host lists it: `local`, of the kind a login the harness has where it runs is, under an id
+/// that names the harness.
+AccountInfo harnessLogin(String harness) =>
+    account('local', kind: 'harness-login', state: 'signed in where it runs', harness: harness, id: 'local:$harness', automatic: true);

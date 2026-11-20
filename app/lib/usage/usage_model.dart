@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../accounts/account_models.dart';
 import '../accounts/accounts_controller.dart';
+import '../chat/session_picker.dart' show machineLoginLabel;
 import '../desktop/control_client.dart' show ControlFailed;
 import '../desktop/host_control.dart';
 import 'spend_model.dart';
@@ -23,8 +24,9 @@ abstract interface class UsageSource {
 /// A host that can read an account's allowances from its provider now, with no session: what [UsageController] asks of each
 /// account it lists, so an account no session has run on shows what the provider can say.
 abstract interface class UsageReader {
-  /// The row `usage/limits` would list for the account called [name], or null when the host has none.
-  Future<Object?> read(String name);
+  /// The row `usage/limits` would list for the account called [name], or null when the host has none. [harness] says whose it is
+  /// when the name is not one account's but each harness's own (`local`, the login a harness has where it runs).
+  Future<Object?> read(String name, {String? harness});
 }
 
 /// The host this app's control link reaches.
@@ -49,8 +51,8 @@ final class ControlUsageSource implements UsageSource, UsageReader {
       (await _control.ready(wait: false)).call('usage/summary', params);
 
   @override
-  Future<Object?> read(String name) async {
-    final result = await (await _control.ready(wait: false)).call('usage/read', {'account': name});
+  Future<Object?> read(String name, {String? harness}) async {
+    final result = await (await _control.ready(wait: false)).call('usage/read', {'account': name, 'harness': ?harness});
     return result is Map ? result['account'] : null;
   }
 }
@@ -88,7 +90,11 @@ final class AccountLimits {
     required this.report,
     required this.readAt,
     this.note,
+    this.automatic = false,
   });
+
+  /// Whether it is the login a harness has where it runs, which the host makes itself.
+  final bool automatic;
 
   /// Why there are no figures, when a host was asked and gave none; null when figures show or no host was asked.
   final ReadNote? note;
@@ -207,14 +213,14 @@ class UsageController extends ChangeNotifier {
   /// provider can report. A provider that reports only during a turn answers nothing, and an answer that fails leaves the account
   /// as it was.
   Future<void> _readEach() async {
-    final listed = accounts?.accounts ?? const [];
+    final listed = accounts?.listed ?? const <AccountInfo>[];
     await Future.wait([
       for (final source in sources)
         if (source is UsageReader)
           for (final account in listed)
             () async {
               try {
-                final row = await (source as UsageReader).read(account.name);
+                final row = await (source as UsageReader).read(account.name, harness: account.automatic ? account.harness : null);
                 final heard = _Heard.parse(row is Map ? {'account': account.id, ...row.cast<String, Object?>()} : null);
                 if (heard == null) return;
                 (_read[source.name] ??= {})[account.id] = heard;
@@ -249,30 +255,31 @@ class UsageController extends ChangeNotifier {
       }
     }
     final merged = <AccountLimits>[];
-    for (final each in accounts?.accounts ?? const <AccountInfo>[]) {
+    for (final each in accounts?.listed ?? const <AccountInfo>[]) {
       if (byId.containsKey(each.id)) continue;
       ReadNote? note;
       for (final source in sources) {
         note ??= _notes[source.name]?[each.id];
       }
-      merged.add(AccountLimits(id: each.id, name: each.name, provider: each.harness, hosts: const [], report: UsageReport.parse({'supported': true})!, readAt: 0, note: note));
+      merged.add(AccountLimits(id: each.id, name: _label(each), provider: each.harness, hosts: const [], report: UsageReport.parse({'supported': true})!, readAt: 0, note: note, automatic: each.automatic));
     }
     for (final MapEntry(:key, :value) in byId.entries) {
       var newest = value.first.$2;
       for (final (_, heard) in value) {
         if (heard.readAt > newest.readAt) newest = heard;
       }
-      final info = accounts?.accounts
+      final info = accounts?.listed
           .where((each) => each.id == key)
           .firstOrNull;
       merged.add(
         AccountLimits(
           id: key,
-          name: info?.name ?? key,
+          name: info == null ? key : _label(info),
           provider: info?.harness ?? otherProvider,
           hosts: {for (final (host, _) in value) host}.toList(),
           report: newest.report,
           readAt: newest.readAt,
+          automatic: info?.automatic ?? false,
         ),
       );
     }
@@ -284,12 +291,16 @@ class UsageController extends ChangeNotifier {
           : b.provider == otherProvider
           ? -1
           : a.provider.compareTo(b.provider);
-      return provider != 0
-          ? provider
-          : a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      if (provider != 0) return provider;
+      // A harness's own login is the account a session runs on when none is chosen: first under its provider.
+      if (a.automatic != b.automatic) return a.automatic ? -1 : 1;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
     });
     return merged;
   }
+
+  /// What the account is called on the page: the harness's own login is `local` for each harness, which says nothing.
+  static String _label(AccountInfo account) => account.automatic ? machineLoginLabel : account.name;
 
   /// What the filters leave.
   List<AccountLimits> get visible => [
@@ -394,7 +405,7 @@ class UsageController extends ChangeNotifier {
   /// An account's name as the person knows it; Unknown when no host or account list names it.
   String accountName(String? key) {
     if (key == null || key.isEmpty) return 'Unknown';
-    final known = all.where((each) => each.id == key).firstOrNull?.name ?? accounts?.accounts.where((each) => each.id == key).firstOrNull?.name;
+    final known = all.where((each) => each.id == key).firstOrNull?.name;
     return known ?? 'Unknown';
   }
 

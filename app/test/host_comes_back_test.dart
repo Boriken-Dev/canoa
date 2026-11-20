@@ -94,7 +94,7 @@ final class _Source implements UsageSource, UsageReader {
   Future<Object?> summary(Map<String, Object?> params) async => const {};
 
   @override
-  Future<Object?> read(String name) async {
+  Future<Object?> read(String name, {String? harness}) async {
     readNames.add(name);
     if (failReads) throw StateError('the host cannot read');
     return reads[name];

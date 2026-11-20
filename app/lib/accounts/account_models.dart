@@ -399,7 +399,7 @@ final class AccountEntry {
   final bool open;
 }
 
-/// One account of canoa.cfg's `[host.accounts]`, with what the host says of its credential.
+/// One account the host lists, with what it says of its credential: canoa.cfg's `[host.accounts]`, and the [automatic] ones.
 final class AccountInfo {
   const AccountInfo({
     required this.name,
@@ -411,6 +411,7 @@ final class AccountInfo {
     this.revision = 0,
     this.expiresAt,
     this.provides = const [],
+    this.automatic = false,
   });
 
   /// One object of `accounts list --format json`, or null when it is not one.
@@ -435,10 +436,16 @@ final class AccountInfo {
       revision: map['revision'] is int ? map['revision'] as int : 0,
       expiresAt: map['expires_at'] as String?,
       provides: _texts(map['provides']),
+      automatic: map['automatic'] == true,
     );
   }
 
   final String name, harness, kind;
+
+  /// Whether the host makes the account itself: the login a harness has where it runs, called [localAccount] for each harness that
+  /// has one. No canoa.cfg names it, so it is neither removed, offered nor signed in again, and its name alone does not tell
+  /// one harness's from another's: its [id] does.
+  final bool automatic;
 
   /// The credential standards the account's kind provides (`claude-code`, `anthropic-api`), which say the agents it can run.
   final List<String> provides;

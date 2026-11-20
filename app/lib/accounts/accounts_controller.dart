@@ -50,6 +50,7 @@ class AccountsController extends ChangeNotifier {
   /// What the host last said it has loaded; null until it has, when what the app already knows of the host's agents stands in.
   List<AgentProvider>? _agents;
   List<AccountInfo> _accounts = const [];
+  List<AccountInfo> _logins = const [];
   List<AccountEntry> _entries = const [];
   List<PoolInfo> _pools = const [];
   final _catalogs = <String, AccountCatalog>{};
@@ -57,7 +58,15 @@ class AccountsController extends ChangeNotifier {
   bool _loading = false;
   bool _disposed = false;
 
+  /// The accounts canoa.cfg names, which are the ones to offer, sign in again to and remove.
   List<AccountInfo> get accounts => _accounts;
+
+  /// The automatic `local` account of each harness that has a login of its own: the host lists them with the rest, and they are kept
+  /// apart because nothing is offered, signed in again or removed for them. One per harness; its [AccountInfo.id] tells them apart.
+  List<AccountInfo> get logins => _logins;
+
+  /// Every account the host lists, the ones that are canoa.cfg's first: what has usage to show.
+  List<AccountInfo> get listed => [..._accounts, ..._logins];
 
   /// The pools of the host, the person's own first and then its own `any-<standard>` ones.
   List<PoolInfo> get pools => _pools;
@@ -184,7 +193,9 @@ class AccountsController extends ChangeNotifier {
     _loading = true;
     _notify();
     try {
-      _accounts = await host.list();
+      final listed = await host.list();
+      _accounts = [for (final each in listed) if (!each.automatic) each];
+      _logins = [for (final each in listed) if (each.automatic) each];
       try {
         final loaded = await host.providersLoaded();
         _agents = loaded;
