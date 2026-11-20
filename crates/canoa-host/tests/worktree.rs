@@ -14,17 +14,6 @@ use std::process::Command;
 use serde_json::{Value, json};
 use support::{Host, Scratch, example, quoted, with_link};
 
-fn has_git() -> bool {
-    let found = Command::new("git")
-        .arg("--version")
-        .output()
-        .is_ok_and(|output| output.status.success());
-    if !found {
-        eprintln!("skipped: no git on PATH");
-    }
-    found
-}
-
 /// `git -C dir args`, which must succeed; its output.
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -96,9 +85,6 @@ fn resolved(path: &Path) -> PathBuf {
 
 #[test]
 fn two_sessions_on_one_repository_each_work_in_a_worktree_of_their_own() {
-    if !has_git() {
-        return;
-    }
     let scratch = Scratch::new();
     let root = scratch.0.join("src");
     let repo = root.join("proj");
@@ -263,9 +249,6 @@ fn two_sessions_on_one_repository_each_work_in_a_worktree_of_their_own() {
 
 #[test]
 fn nothing_is_made_or_removed_outside_the_working_roots() {
-    if !has_git() {
-        return;
-    }
     let scratch = Scratch::new();
     let root = scratch.0.join("src");
     let repo = root.join("proj");
@@ -365,9 +348,6 @@ fn link_dir(target: &Path, link: &Path) {
 
 #[test]
 fn a_link_never_leads_a_worktree_out_of_the_roots() {
-    if !has_git() {
-        return;
-    }
     let scratch = Scratch::new();
     let root = scratch.0.join("src");
     let outside = scratch.0.join("elsewhere");
@@ -411,9 +391,6 @@ fn a_link_never_leads_a_worktree_out_of_the_roots() {
 
 #[test]
 fn hooks_in_the_repository_do_not_run() {
-    if !has_git() {
-        return;
-    }
     let scratch = Scratch::new();
     let root = scratch.0.join("src");
     let repo = root.join("proj");
@@ -466,9 +443,6 @@ fn host_with_worktree(root: &Path, repo: &Path, branch: &str) -> (Host, PathBuf)
 
 #[test]
 fn files_git_ignores_are_counted_and_never_removed_unasked() {
-    if !has_git() {
-        return;
-    }
     let scratch = Scratch::new();
     let root = scratch.0.join("src");
     let repo = root.join("proj");
@@ -509,9 +483,6 @@ fn files_git_ignores_are_counted_and_never_removed_unasked() {
 
 #[test]
 fn a_repository_whose_own_configuration_runs_programs_is_refused() {
-    if !has_git() {
-        return;
-    }
     let scratch = Scratch::new();
     let root = scratch.0.join("src");
     let repo = root.join("proj");
@@ -564,9 +535,6 @@ fn a_repository_whose_own_configuration_runs_programs_is_refused() {
 
 #[test]
 fn a_submodule_or_a_repository_with_alternates_gets_no_worktree() {
-    if !has_git() {
-        return;
-    }
     let scratch = Scratch::new();
     let root = scratch.0.join("src");
     let repo = root.join("proj");
@@ -617,9 +585,6 @@ fn a_submodule_or_a_repository_with_alternates_gets_no_worktree() {
 
 #[test]
 fn a_detached_head_with_commits_of_its_own_is_found_and_kept() {
-    if !has_git() {
-        return;
-    }
     let scratch = Scratch::new();
     let root = scratch.0.join("src");
     let repo = root.join("proj");
@@ -654,9 +619,6 @@ fn a_detached_head_with_commits_of_its_own_is_found_and_kept() {
 
 #[test]
 fn a_status_tells_one_set_of_changes_from_another_of_the_same_size() {
-    if !has_git() {
-        return;
-    }
     let scratch = Scratch::new();
     let root = scratch.0.join("src");
     let repo = root.join("proj");
@@ -686,9 +648,6 @@ fn a_status_tells_one_set_of_changes_from_another_of_the_same_size() {
 
 #[test]
 fn a_repository_has_at_most_so_many_worktrees_from_the_host() {
-    if !has_git() {
-        return;
-    }
     let scratch = Scratch::new();
     let root = scratch.0.join("src");
     let repo = root.join("proj");

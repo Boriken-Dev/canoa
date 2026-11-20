@@ -639,7 +639,7 @@ fn link_dir(target: &Path, link: &Path) -> bool {
     }
 }
 
-/// Makes `link` lead to the file `target`, where this user may: Windows asks for Developer Mode or an administrator.
+/// Makes `link` lead to the file `target`: Windows asks for Developer Mode or an administrator.
 fn link_file(target: &Path, link: &Path) -> bool {
     #[cfg(unix)]
     {
@@ -665,7 +665,6 @@ fn a_link_out_of_the_site_is_refused_and_one_inside_is_followed() {
         link_dir(&site.join("inside"), &site.join("in")),
         "a directory link can be made"
     );
-    let file_link = link_file(&outside.dir.join("secret.txt"), &site.join("secret.txt"));
     let address = running(&loopback(&site), &[]);
 
     let refused = get(address, "/out/inner.txt");
@@ -680,13 +679,24 @@ fn a_link_out_of_the_site_is_refused_and_one_inside_is_followed() {
     let followed = get(address, "/in/ok.txt");
     assert_eq!(followed.status, 200);
     assert_eq!(followed.body, b"INSIDE");
-    if file_link {
-        let refused = get(address, "/secret.txt");
-        assert_eq!(refused.status, 404);
-        assert!(!String::from_utf8_lossy(&refused.body).contains("SECRET"));
-    } else {
-        println!("skipped: a link to a file, which this user may not make here");
-    }
+}
+
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "needs permission to make a symbolic link to a file: Developer Mode or an administrator"
+)]
+fn a_link_to_a_file_outside_the_site_is_refused() {
+    let outside = Outside::new("file-link");
+    let site = outside.site();
+    assert!(
+        link_file(&outside.dir.join("secret.txt"), &site.join("secret.txt")),
+        "a link to a file can be made"
+    );
+    let address = running(&loopback(&site), &[]);
+    let refused = get(address, "/secret.txt");
+    assert_eq!(refused.status, 404);
+    assert!(!String::from_utf8_lossy(&refused.body).contains("SECRET"));
 }
 
 #[test]
@@ -913,24 +923,28 @@ fn a_dot_name_is_refused_however_it_is_reached() {
         "a directory link can be made"
     );
     let address = running(&loopback(&site), &[]);
-    let mut targets = vec!["/visible/config".to_owned()];
-    // NTFS gives a dot-name a short name such as GIT~1, which resolves to the dot-name itself.
-    for (long, short) in [(".git", "/GIT~1/config"), (".env.local", "/ENV~1.LOC")] {
-        let named = site.join(
-            short
-                .trim_start_matches('/')
-                .split('/')
-                .next()
-                .unwrap_or(""),
+    let reply = get(address, "/visible/config");
+    assert_eq!(reply.status, 404);
+    assert!(!String::from_utf8_lossy(&reply.body).contains("SECRET"));
+}
+
+/// NTFS gives a dot-name a short name such as GIT~1, which resolves to the dot-name itself.
+#[cfg(windows)]
+#[test]
+#[ignore = "needs 8.3 short names on the volume of the temporary folder (fsutil 8dot3name query)"]
+fn a_dot_name_is_refused_by_its_short_name() {
+    let outside = Outside::new("short-names");
+    let site = outside.site();
+    std::fs::create_dir_all(site.join(".git")).expect("a dot directory");
+    std::fs::write(site.join(".git").join("config"), "SECRET-GIT").expect("a file in it");
+    std::fs::write(site.join(".env.local"), "SECRET-ENV").expect("a dot file");
+    let address = running(&loopback(&site), &[]);
+    for (short_name, target) in [("GIT~1", "/GIT~1/config"), ("ENV~1.LOC", "/ENV~1.LOC")] {
+        assert!(
+            std::fs::metadata(site.join(short_name)).is_ok(),
+            "{short_name} is a short name here"
         );
-        if std::fs::metadata(&named).is_ok() {
-            targets.push(short.to_owned());
-        } else {
-            println!("skipped: {long} has no short name here");
-        }
-    }
-    for target in targets {
-        let reply = get(address, &target);
+        let reply = get(address, target);
         assert_eq!(reply.status, 404, "{target}");
         assert!(
             !String::from_utf8_lossy(&reply.body).contains("SECRET"),

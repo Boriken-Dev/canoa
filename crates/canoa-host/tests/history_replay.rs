@@ -3,7 +3,8 @@
 //!
 //!   CANOA_TEST_STDIO_PROVIDER=<libcoqui_acp_harness-stdio-provider> CANOA_TEST_FAKE_STDIO=<fake_stdio_cli> cargo test -p canoa-host --test history_replay
 //!
-//! (`cargo build -p coqui-acp-harness --features kind --examples` in coqui-acp builds both.) Without them it does nothing.
+//! (`cargo build -p coqui-acp-harness --features kind --examples` in coqui-acp builds both.) The test is ignored; run it with
+//! `-- --ignored` once both are set.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -44,16 +45,11 @@ fn call(
 }
 
 #[test]
+#[ignore = "needs CANOA_TEST_STDIO_PROVIDER and CANOA_TEST_FAKE_STDIO: the built stdio provider and its stand-in"]
 fn a_session_is_replayed_into_a_source_only_where_it_is_allowed() {
-    let (Some(library), Some(fake)) = (
-        variable("CANOA_TEST_STDIO_PROVIDER"),
-        variable("CANOA_TEST_FAKE_STDIO"),
-    ) else {
-        eprintln!(
-            "skipped: CANOA_TEST_STDIO_PROVIDER and CANOA_TEST_FAKE_STDIO name the built stdio provider and its stand-in"
-        );
-        return;
-    };
+    let library = variable("CANOA_TEST_STDIO_PROVIDER")
+        .expect("CANOA_TEST_STDIO_PROVIDER names the built stdio provider");
+    let fake = variable("CANOA_TEST_FAKE_STDIO").expect("CANOA_TEST_FAKE_STDIO names its stand-in");
     let entry = |name: &str, replay: u64| {
         format!(
             "[host.agents.{name}]\nharness = \"stdio\"\nlibrary = {}\nlisten = \"127.0.0.1:0\"\n\

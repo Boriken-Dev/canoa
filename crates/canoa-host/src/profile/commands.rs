@@ -276,7 +276,7 @@ mod tests {
         assert!(declared(&Map::new(), "linux").is_empty());
     }
 
-    /// The Python the tests run launchers with, or none.
+    /// The Python the tests run launchers with (`CANOA_TEST_PYTHON`), or none.
     fn python() -> Option<PathBuf> {
         let named = PathBuf::from(std::env::var_os("CANOA_TEST_PYTHON")?);
         if named.is_absolute() {
@@ -287,12 +287,10 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs CANOA_TEST_PYTHON: a Python 3"]
     fn a_launcher_made_for_a_script_runs_it_with_the_arguments_it_is_given_and_ends_with_its_status()
      {
-        let Some(python) = python() else {
-            eprintln!("NOT RUN: set CANOA_TEST_PYTHON to a Python 3");
-            return;
-        };
+        let python = python().expect("CANOA_TEST_PYTHON names a Python 3");
         let root = std::env::temp_dir().join(format!("canoa-commands-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("overlay/bin")).expect("a folder");

@@ -175,9 +175,7 @@ fn a_runtime_list_that_leaves_this_os_out_is_reported() {
 
 #[test]
 fn a_real_program_is_asked_its_version_and_a_missing_one_has_none() {
-    let Some(cargo) = std::env::var_os("CARGO") else {
-        return;
-    };
+    let cargo = std::env::var_os("CARGO").expect("cargo sets CARGO for the tests it runs");
     let version = version_of(Path::new(&cargo)).expect("cargo says its version");
     assert!(at_least(&version, "1.0"), "{version}");
     assert_eq!(

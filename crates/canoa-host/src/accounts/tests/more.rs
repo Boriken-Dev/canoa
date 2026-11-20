@@ -334,12 +334,9 @@ fn an_id_with_hash_signs_does_not_collide_with_another_accounts_chunks() {
 fn the_windows_credential_is_local_to_this_machine() {
     let real = super::RealStore::new();
     let store = real.store();
-    if store
+    store
         .put("account-one", b"x")
-        .is_err_and(|e| super::store_unavailable(&e.to_string()))
-    {
-        return;
-    }
+        .expect("the operating system's store holds a credential");
     let persistence = store.persistence_of("account-one");
     store.remove("account-one").expect("removes");
     assert_eq!(persistence.as_deref(), Some("Local"));

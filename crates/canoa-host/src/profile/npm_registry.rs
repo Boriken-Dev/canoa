@@ -19,8 +19,8 @@ use serde_json::json;
 
 use super::needs::Finder;
 
-/// The Node.js the tests install with (`CANOA_TEST_NODE`, a program or a name on the `PATH`), or none: a test without one says so
-/// and returns. Its folder must hold `npm` too.
+/// The Node.js the tests install with (`CANOA_TEST_NODE`, a program or a name on the `PATH`), or none. Its folder must hold `npm`
+/// too.
 pub(crate) fn node() -> Option<PathBuf> {
     let named = std::env::var_os("CANOA_TEST_NODE")?;
     let path = PathBuf::from(&named);

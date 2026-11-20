@@ -1025,6 +1025,10 @@ fn a_malformed_record_is_reported_and_never_stops_the_session_or_reads_outside_t
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "needs permission to make a symbolic link: Developer Mode or an administrator"
+)]
 fn a_skill_directory_that_is_a_link_is_never_read() {
     let temp = temp_with_skill();
     fetch_audit(&temp, "audit", &record_for(&["team"]));
@@ -1037,10 +1041,7 @@ fn a_skill_directory_that_is_a_link_is_never_read() {
     let linked = std::os::unix::fs::symlink(&moved, &real).is_ok();
     #[cfg(windows)]
     let linked = std::os::windows::fs::symlink_dir(&moved, &real).is_ok();
-    if !linked {
-        eprintln!("SKIPPED: this account cannot make a symbolic link");
-        return;
-    }
+    assert!(linked, "this account can make a symbolic link");
     let (_connection, parts) = audit_parts(&temp);
     assert_ne!(
         item(&parts.report, "skills.audit")["state"],
@@ -3102,12 +3103,10 @@ fn a_layer_that_sets_what_the_account_sets_is_told_the_account_wins() {
 }
 
 #[test]
+#[ignore = "needs CANOA_TEST_NODE: a Node.js with npm beside it"]
 fn what_a_real_npm_installed_is_on_a_sessions_node_path_after_the_overlays_lib_node() {
     use crate::profile::npm_registry::{Registry, finder_for, node, npm_env};
-    let Some(node) = node() else {
-        eprintln!("NOT RUN: set CANOA_TEST_NODE to a Node.js with npm beside it");
-        return;
-    };
+    let node = node().expect("CANOA_TEST_NODE names a Node.js with npm beside it");
     let temp = temp_with_skill();
     install_files(
         &temp,

@@ -434,15 +434,16 @@ mod tests {
 
     /// The operating system's real store, under a service of this run's own, emptied when the test ends however it ends.
     #[test]
-    fn the_operating_systems_store_reads_back_what_it_was_given_when_it_answers() {
+    #[cfg_attr(
+        target_os = "linux",
+        ignore = "needs the operating system's credential store: a Secret Service session on Linux"
+    )]
+    fn the_operating_systems_store_reads_back_what_it_was_given() {
         let real = crate::accounts::store::real_store::RealStore::new();
         let provider = SystemSecrets::over(Box::new(real.store()));
-        let put = provider.put(Keeping::new("probe", "a-made-up-value"), spawner());
-        let Ok(()) = put else {
-            // No credential store here (a container with no session bus): the memory store above is the test.
-            eprintln!("NOT RUN: the operating system's store does not answer here");
-            return;
-        };
+        provider
+            .put(Keeping::new("probe", "a-made-up-value"), spawner())
+            .expect("the operating system's store holds a value");
         let held = provider.get(Named::new("probe"), spawner()).unwrap();
         assert_eq!(held.value.unwrap().expose(), "a-made-up-value");
         assert_eq!(provider.names(spawner()).unwrap().names, ["probe"]);

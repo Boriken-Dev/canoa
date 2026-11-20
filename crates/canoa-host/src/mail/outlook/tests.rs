@@ -16,19 +16,6 @@ use crate::mail::related;
 
 const STANDIN: &str = include_str!("standin.ps1");
 
-fn windows_powershell() -> bool {
-    Command::new("powershell.exe")
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "exit 0",
-        ])
-        .output()
-        .is_ok_and(|output| output.status.success())
-}
-
 struct Dir(PathBuf);
 
 impl Dir {
@@ -77,29 +64,6 @@ fn outlook_over_standin(state: &Path) -> Outlook {
 
 fn subjects(items: &[Summary]) -> Vec<&str> {
     items.iter().map(|item| item.subject.as_str()).collect()
-}
-
-/// Skips the test where there is no Windows PowerShell.
-macro_rules! need_powershell {
-    () => {
-        if !windows_powershell() {
-            eprintln!("skipped: no Windows PowerShell here");
-            return;
-        }
-    };
-}
-
-/// Skips the test where Windows PowerShell does not see this process's files. The stand-in keeps what a call changed in a file
-/// that the next call reads, so it has to name the same file for both: through WSL's interop `powershell.exe` reads a Unix path
-/// as one of its own drive's.
-macro_rules! need_shared_files {
-    () => {
-        if !cfg!(windows) {
-            eprintln!("skipped: Windows PowerShell does not share this host's files");
-            return;
-        }
-        need_powershell!();
-    };
 }
 
 #[derive(Debug, Default)]
@@ -223,8 +187,11 @@ fn a_message_id_is_asked_for_by_name_and_an_empty_answer_is_no_message() {
 }
 
 #[test]
+#[cfg_attr(
+    not(windows),
+    ignore = "needs Windows PowerShell on the PATH as powershell.exe (WSL's interop has one)"
+)]
 fn the_helper_finds_a_message_by_its_internet_message_id_in_the_standins_mailbox() {
-    need_powershell!();
     let dir = Dir::new("message-id");
     let outlook = outlook_over_standin(&dir.state());
     let found = outlook
@@ -280,10 +247,14 @@ fn a_program_that_is_not_there_and_a_helper_that_hangs_are_said_so() {
     let error = missing.folders().expect_err("not started");
     assert!(matches!(error, MailError::Unreachable(_)), "{error:?}");
     assert!(error.to_string().contains("could not start"), "{error}");
+}
 
-    if !windows_powershell() {
-        return;
-    }
+#[test]
+#[cfg_attr(
+    not(windows),
+    ignore = "needs Windows PowerShell on the PATH as powershell.exe (WSL's interop has one)"
+)]
+fn a_helper_that_hangs_is_said_so() {
     let hangs = Outlook::new(
         Arc::new(PowerShell::new(
             Some(vec![
@@ -304,8 +275,11 @@ fn a_program_that_is_not_there_and_a_helper_that_hangs_are_said_so() {
 }
 
 #[test]
+#[cfg_attr(
+    not(windows),
+    ignore = "needs Windows PowerShell on the PATH as powershell.exe (WSL's interop has one)"
+)]
 fn the_helper_searches_the_standins_mailbox_with_filters() {
-    need_powershell!();
     let dir = Dir::new("search");
     let outlook = outlook_over_standin(&dir.state());
     let page = outlook
@@ -363,8 +337,11 @@ fn the_helper_searches_the_standins_mailbox_with_filters() {
 }
 
 #[test]
+#[cfg_attr(
+    not(windows),
+    ignore = "needs Windows PowerShell on the PATH as powershell.exe (WSL's interop has one)"
+)]
 fn the_helper_reads_a_message_lists_folders_and_relates_mail_by_conversation() {
-    need_powershell!();
     let dir = Dir::new("read");
     let outlook = outlook_over_standin(&dir.state());
     let message = outlook.read("M1").expect("reads");
@@ -405,8 +382,11 @@ fn the_helper_reads_a_message_lists_folders_and_relates_mail_by_conversation() {
 }
 
 #[test]
+#[cfg_attr(
+    not(windows),
+    ignore = "needs Windows PowerShell that reads this process's files: only on Windows"
+)]
 fn the_helper_saves_drafts_and_never_sends() {
-    need_shared_files!();
     let dir = Dir::new("draft");
     let outlook = outlook_over_standin(&dir.state());
     let saved = outlook
@@ -443,8 +423,11 @@ fn the_helper_saves_drafts_and_never_sends() {
 }
 
 #[test]
+#[cfg_attr(
+    not(windows),
+    ignore = "needs Windows PowerShell that reads this process's files: only on Windows"
+)]
 fn the_helper_moves_marks_flags_and_categorizes() {
-    need_shared_files!();
     let dir = Dir::new("change");
     let outlook = outlook_over_standin(&dir.state());
     let both = vec!["M1".to_owned(), "M3".to_owned()];

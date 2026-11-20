@@ -194,9 +194,10 @@ mod tests {
     }
 
     /// Hands the base folder to an owner nothing else vouches for (Everyone), which only a process holding the restore
-    /// privilege may do; without it the test says so and ends.
+    /// privilege may do.
     #[cfg(windows)]
     #[test]
+    #[ignore = "needs a process holding the restore privilege (an elevated one), to give a folder to another owner"]
     fn a_base_folder_cannot_vouch_for_its_own_owner() {
         use windows_permissions::constants::{SeObjectType, SecurityInformation};
         use windows_permissions::wrappers::{CreateWellKnownSid, SetNamedSecurityInfo};
@@ -216,11 +217,8 @@ mod tests {
             None,
             None,
         );
-        if let Err(e) = set {
-            eprintln!("skipped: this process may not give a folder to another owner ({e})");
-        } else {
-            assert!(matches!(ensure_base(&base), Err(Error::Refused(_))));
-        }
+        set.expect("this process may give a folder to another owner");
+        assert!(matches!(ensure_base(&base), Err(Error::Refused(_))));
         fs::remove_dir_all(&parent).unwrap();
     }
 

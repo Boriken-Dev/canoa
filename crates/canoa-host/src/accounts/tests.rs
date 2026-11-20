@@ -111,19 +111,19 @@ fn the_file_store_keeps_its_key_and_files_to_the_owner() {
 }
 
 /// The operating system's store, under a service of this run's own that is emptied afterwards, however the test ends. It
-/// needs a credential store, which a headless Linux has none of: there it is skipped, and the file store is the one tested.
+/// needs a credential store, which a headless Linux has none of: there it is ignored, and the file store is the one tested.
 #[test]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "needs the operating system's credential store: a Secret Service session on Linux"
+)]
 fn the_operating_systems_store_round_trips_a_record_over_the_blob_limit() {
     let real = RealStore::new();
     let store = real.store();
     let bytes = large();
-    match store.put("account-one", &bytes) {
-        Ok(()) => {}
-        Err(error) if store_unavailable(&error.to_string()) => {
-            return;
-        }
-        Err(error) => panic!("the store refused a record: {error}"),
-    }
+    store
+        .put("account-one", &bytes)
+        .unwrap_or_else(|error| panic!("the store refused a record: {error}"));
     let read = store.get("account-one");
     // Replacing leaves one generation, and removing leaves none.
     let replaced = store.put("account-one", &bytes[..5_000]);
@@ -437,35 +437,11 @@ fn windows_refuses_one_credential_over_2560_bytes() {
     let _ = entry.delete_credential();
     let over = entry.set_secret(&vec![b'x'; 2561]);
     let _ = entry.delete_credential();
-    if at_limit
-        .as_ref()
-        .is_err_and(|error| store_unavailable(&format!("{error:?}")))
-    {
-        return;
-    }
     at_limit.expect("2560 bytes are held");
     assert!(over.is_err(), "2561 bytes were held in one credential");
 }
 
 mod more;
-
-/// Whether the operating system's store cannot be used here: a Linux with no Secret Service, or a Windows that answers
-/// "not enough memory" (error 8) to a write while the machine is short of it. The test is then skipped, and says so on the
-/// process's own standard error, which the test harness does not capture, so that a gate's log shows it.
-pub(crate) fn store_unavailable(why: &str) -> bool {
-    let unavailable = cfg!(target_os = "linux")
-        || why.contains("Platform failure")
-        || why.contains("PlatformError(");
-    if unavailable {
-        use std::io::Write as _;
-        let name = std::thread::current().name().unwrap_or("a test").to_owned();
-        let _ = writeln!(
-            std::io::stderr(),
-            "SKIPPED {name}: the operating system's store cannot be used here: {why}"
-        );
-    }
-    unavailable
-}
 
 /// The clock behind a directory's name ticks more slowly than tests start, so the name alone is not unique: two tests that
 /// began together shared a directory, and one's cleanup removed the other's files.
@@ -659,6 +635,10 @@ fn an_explicit_file_choice_is_noted_and_an_entry_the_person_made_is_not() {
 /// An earlier host's record in the operating system's store, under the service of this home alone, is moved the same way. The entry is
 /// made for the test, under a service nothing else uses, and is gone when it ends.
 #[test]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "needs the operating system's credential store: a Secret Service session on Linux"
+)]
 fn an_account_the_operating_systems_store_held_under_the_homes_own_service_is_moved_too() {
     let dir = Dir::new();
     let earlier = KeyringStore::new(store::service_for(&dir.0));
@@ -666,14 +646,9 @@ fn an_account_the_operating_systems_store_held_under_the_homes_own_service_is_mo
     record
         .credentials
         .insert("TOKEN".to_owned(), "an-os-secret-zq9".to_owned());
-    if earlier
+    earlier
         .put("one", &serde_json::to_vec(&record).expect("a record"))
-        .is_err()
-    {
-        // No credential store here (a container with no session bus): the sealed files above are the test.
-        eprintln!("NOT RUN: the operating system's store does not answer here");
-        return;
-    }
+        .expect("the operating system's store holds a record");
     let accounts = Accounts::open_probing(
         &config_of("[secrets]\naccounts = \"file\"\n"),
         &dir.0,
@@ -696,6 +671,10 @@ fn an_account_the_operating_systems_store_held_under_the_homes_own_service_is_mo
 /// Two homes of one user, the same account id in both: each keeps its own value and lists only its own secrets, since the operating
 /// system's store is kept under a service of the home. The entries are made under services of these homes alone and removed.
 #[test]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "needs the operating system's credential store: a Secret Service session on Linux"
+)]
 fn two_homes_with_the_same_account_id_keep_separate_values_and_list_only_their_own() {
     use crate::secrets::catalog::Catalog;
     use crate::secrets::vault::Vault;
@@ -714,10 +693,8 @@ fn two_homes_with_the_same_account_id_keep_separate_values_and_list_only_their_o
             .insert("TOKEN".to_owned(), token.to_owned());
         record
     };
-    if a.save("alone-a", &record(1, "first-home-zq9")).is_err() {
-        eprintln!("NOT RUN: the operating system's store does not answer here");
-        return;
-    }
+    a.save("alone-a", &record(1, "first-home-zq9"))
+        .expect("the operating system's store holds a record");
     a.save("same", &record(1, "first-home-zq9")).expect("saved");
     b.save("alone-b", &record(2, "second-home-zq9"))
         .expect("saved");

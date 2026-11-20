@@ -191,6 +191,10 @@ fn no_entry_of_this_run_is_left_in_the_operating_systems_store() {
 /// The guard is what makes a failing test leave nothing: a test that panics after it stored something has its entries removed
 /// as the panic unwinds.
 #[test]
+#[cfg_attr(
+    target_os = "linux",
+    ignore = "needs the operating system's credential store: a Secret Service session on Linux"
+)]
 fn a_test_that_panics_after_storing_leaves_nothing_in_the_operating_systems_store() {
     use crate::accounts::store::SecretStore as _;
 
@@ -200,13 +204,9 @@ fn a_test_that_panics_after_storing_leaves_nothing_in_the_operating_systems_stor
         *made.lock().unwrap_or_else(PoisonError::into_inner) =
             Some((real.service().to_owned(), Arc::clone(&real.touched)));
         let store = real.store();
-        if let Err(error) = store.put("account", &[b'x'; 5_000]) {
-            assert!(
-                crate::accounts::tests::store_unavailable(&error.to_string()),
-                "the store refused a record: {error}"
-            );
-            return;
-        }
+        store
+            .put("account", &[b'x'; 5_000])
+            .unwrap_or_else(|error| panic!("the store refused a record: {error}"));
         panic!("a test that fails after it stored something");
     }));
     let made = made.into_inner().unwrap_or_else(PoisonError::into_inner);

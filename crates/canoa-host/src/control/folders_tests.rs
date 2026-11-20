@@ -267,11 +267,7 @@ fn in_a_git_repository_the_names_are_gits_not_ignored_ones() {
     let tmp = dir("git");
     let work = tmp.join("work");
     fs::create_dir_all(&work).expect("folder");
-    if !git(&work, &["init", "-q"]) {
-        eprintln!("git is not here: skipped");
-        let _ = fs::remove_dir_all(tmp);
-        return;
-    }
+    assert!(git(&work, &["init", "-q"]), "git initialises a repository");
     write(&work.join("notes.txt"), "x");
     write(&work.join("src").join("main.dart"), "x");
     write(&work.join(".gitignore"), "dist/\n*.log\n");

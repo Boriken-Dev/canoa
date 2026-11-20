@@ -166,9 +166,7 @@ fn a_device_or_a_share_outside_the_roots_is_never_looked_at() {
 #[cfg(windows)]
 #[test]
 fn a_repository_on_a_share_under_a_root_passes_the_hosts_checks() {
-    let Some(fixture) = Fixture::new("on-share") else {
-        return;
-    };
+    let fixture = Fixture::new("on-share");
     let on_share = |path: &Path| {
         let text = path.to_string_lossy();
         let (drive, rest) = text.split_at(2);
@@ -225,9 +223,6 @@ fn run_git(dir: &Path, args: &[&str]) -> String {
 
 #[test]
 fn a_commit_made_after_the_count_keeps_its_branch() {
-    if Command::new("git").arg("--version").output().is_err() {
-        return eprintln!("skipped: no git on PATH");
-    }
     let scratch = std::env::temp_dir().join(format!("canoa-worktree-race-{}", std::process::id()));
     let root = scratch.join("src");
     let repo = root.join("proj");
@@ -275,11 +270,7 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn new(name: &str) -> Option<Self> {
-        if Command::new("git").arg("--version").output().is_err() {
-            eprintln!("skipped: no git on PATH");
-            return None;
-        }
+    fn new(name: &str) -> Self {
         let scratch =
             std::env::temp_dir().join(format!("canoa-worktree-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&scratch);
@@ -291,11 +282,11 @@ impl Fixture {
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "-q", "-m", "first"]);
         let worktrees = Worktrees::new(vec![scratch.join("src")], true);
-        Some(Self {
+        Self {
             scratch,
             repo,
             worktrees,
-        })
+        }
     }
 
     fn make(&self, cwd: &Path, branch: &str) -> Result<PathBuf, Refusal> {
@@ -324,9 +315,7 @@ impl Drop for Fixture {
 
 #[test]
 fn how_many_worktrees_a_repository_may_hold_is_a_setting_and_has_no_ceiling() {
-    let Some(mut fixture) = Fixture::new("many") else {
-        return;
-    };
+    let mut fixture = Fixture::new("many");
     // The default is 32 beside the repository; the setting moves it either way.
     fixture.worktrees = Worktrees::new(vec![fixture.scratch.join("src")], true).with_limits(
         crate::config::WorktreeConfig {
@@ -357,9 +346,7 @@ fn how_many_worktrees_a_repository_may_hold_is_a_setting_and_has_no_ceiling() {
 
 #[test]
 fn two_sessions_on_one_repository_each_work_in_a_worktree_of_their_own() {
-    let Some(fixture) = Fixture::new("two") else {
-        return;
-    };
+    let fixture = Fixture::new("two");
     let first = fixture
         .make(&fixture.repo, "canoa/first-a1b2c3")
         .expect("first");
@@ -408,9 +395,7 @@ fn two_sessions_on_one_repository_each_work_in_a_worktree_of_their_own() {
 
 #[test]
 fn what_is_not_canoas_is_neither_made_over_nor_removed() {
-    let Some(fixture) = Fixture::new("notmine") else {
-        return;
-    };
+    let fixture = Fixture::new("notmine");
     assert!(fixture.make(&fixture.repo, "--orphan").is_err());
     assert!(
         fixture
@@ -453,9 +438,7 @@ fn what_is_not_canoas_is_neither_made_over_nor_removed() {
 
 #[test]
 fn a_worktrees_directory_that_is_a_link_is_not_used() {
-    let Some(fixture) = Fixture::new("linked") else {
-        return;
-    };
+    let fixture = Fixture::new("linked");
     let elsewhere = fixture.scratch.join("elsewhere");
     std::fs::create_dir_all(&elsewhere).expect("a directory");
     let link = fixture.scratch.join("src").join("proj.worktrees");
@@ -481,9 +464,7 @@ fn a_worktrees_directory_that_is_a_link_is_not_used() {
 
 #[test]
 fn files_git_ignores_are_counted_and_only_discard_removes_them() {
-    let Some(fixture) = Fixture::new("ignored") else {
-        return;
-    };
+    let fixture = Fixture::new("ignored");
     std::fs::write(fixture.repo.join(".gitignore"), ".env\nbuild/\n").expect("a file");
     run_git(&fixture.repo, &["add", ".gitignore"]);
     run_git(&fixture.repo, &["commit", "-q", "-m", "ignore"]);
@@ -502,9 +483,7 @@ fn files_git_ignores_are_counted_and_only_discard_removes_them() {
 
 #[test]
 fn a_repository_configured_with_a_filter_or_an_include_is_refused_and_no_filter_runs() {
-    let Some(fixture) = Fixture::new("filter") else {
-        return;
-    };
+    let fixture = Fixture::new("filter");
     std::fs::write(fixture.repo.join("a.txt"), "text\n").expect("a file");
     run_git(&fixture.repo, &["add", "a.txt"]);
     run_git(&fixture.repo, &["commit", "-q", "-m", "text"]);
@@ -536,9 +515,7 @@ fn a_repository_configured_with_a_filter_or_an_include_is_refused_and_no_filter_
 
 #[test]
 fn a_submodule_gets_no_worktree_inside_its_superprojects_git() {
-    let Some(fixture) = Fixture::new("submodule") else {
-        return;
-    };
+    let fixture = Fixture::new("submodule");
     let library = fixture.scratch.join("src").join("library");
     std::fs::create_dir_all(&library).expect("a directory");
     run_git(&library, &["init", "-q"]);
@@ -573,9 +550,7 @@ fn a_submodule_gets_no_worktree_inside_its_superprojects_git() {
 
 #[test]
 fn a_detached_head_with_commits_of_its_own_is_still_found_and_not_removed() {
-    let Some(fixture) = Fixture::new("detached") else {
-        return;
-    };
+    let fixture = Fixture::new("detached");
     let made = fixture
         .make(&fixture.repo, "canoa/detached-a1b2c3")
         .expect("made");
@@ -595,9 +570,7 @@ fn a_detached_head_with_commits_of_its_own_is_still_found_and_not_removed() {
 
 #[test]
 fn a_status_tells_one_set_of_changes_from_another_of_the_same_size() {
-    let Some(fixture) = Fixture::new("listing") else {
-        return;
-    };
+    let fixture = Fixture::new("listing");
     let made = fixture
         .make(&fixture.repo, "canoa/listing-a1b2c3")
         .expect("made");
@@ -612,9 +585,7 @@ fn a_status_tells_one_set_of_changes_from_another_of_the_same_size() {
 
 #[test]
 fn a_diff_lists_tracked_and_untracked_files_against_a_commit_and_writes_nothing() {
-    let Some(fixture) = Fixture::new("diff") else {
-        return;
-    };
+    let fixture = Fixture::new("diff");
     let repo = &fixture.repo;
     std::fs::write(repo.join("README"), "hello\nworld\n").expect("a file");
     std::fs::write(repo.join("fresh.txt"), "one\ntwo\n").expect("a file");
@@ -700,9 +671,7 @@ fn a_diff_lists_tracked_and_untracked_files_against_a_commit_and_writes_nothing(
 
 #[test]
 fn a_diff_changes_nothing_in_the_repository() {
-    let Some(fixture) = Fixture::new("diffreads") else {
-        return;
-    };
+    let fixture = Fixture::new("diffreads");
     std::fs::write(fixture.repo.join("README"), "changed\n").expect("a file");
     std::fs::write(fixture.repo.join("new.txt"), "x\n").expect("a file");
     let status = || {

@@ -1332,9 +1332,10 @@ fn with_no_session_open_an_agys_usage_is_read_by_an_agent_started_for_it_and_end
 #[test]
 #[ignore = "needs a signed-in agy; set CANOA_LIVE_AGY=1"]
 fn live_a_real_agys_quota_is_read_with_no_session_open() {
-    if std::env::var_os("CANOA_LIVE_AGY").is_none() {
-        return;
-    }
+    assert!(
+        std::env::var_os("CANOA_LIVE_AGY").is_some(),
+        "set CANOA_LIVE_AGY=1"
+    );
     let config =
         "[host.agents.agy]\nprogram = \"agy\"\nargs = [\"acp\"]\nusage = \"antigravity\"\n";
     let host = Host::start(config, 1);

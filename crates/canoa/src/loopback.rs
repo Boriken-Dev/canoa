@@ -791,16 +791,22 @@ Host: 127.0.0.1:{port}
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn a_client_of_this_user_is_answered_over_ipv4_and_over_a_dual_stack_socket() {
+    fn a_client_of_this_user_is_answered_over_ipv4() {
         let server = Listener::start(&Arc::new(Nobody)).expect("the server starts");
         let port = server.addr().port();
         let mut plain = TcpStream::connect(("127.0.0.1", port)).expect("connects");
         let said = ask(&mut plain, port, "", 0);
         assert!(said.starts_with("HTTP/1.1 401"), "over IPv4: {said}");
-        let Ok(mut mapped) = TcpStream::connect(format!("[::ffff:127.0.0.1]:{port}")) else {
-            eprintln!("skipped the dual-stack client: no IPv6 sockets here");
-            return;
-        };
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "needs IPv6 sockets on the machine (a dual-stack client, ::ffff:127.0.0.1)"]
+    fn a_client_of_this_user_is_answered_over_a_dual_stack_socket() {
+        let server = Listener::start(&Arc::new(Nobody)).expect("the server starts");
+        let port = server.addr().port();
+        let mut mapped = TcpStream::connect(format!("[::ffff:127.0.0.1]:{port}"))
+            .expect("a dual-stack client connects");
         let said = ask(&mut mapped, port, "", 0);
         assert!(
             said.starts_with("HTTP/1.1 401"),

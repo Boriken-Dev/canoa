@@ -737,6 +737,7 @@ fn answer_to_another_user(port: u16, request: &str) -> Option<String> {
 
 #[cfg(target_os = "linux")]
 #[test]
+#[ignore = "needs passwordless sudo and setpriv, to run a program as another user"]
 fn a_connection_from_another_user_is_dropped_even_with_the_right_bearer() {
     use std::io::{Read as _, Write as _};
 
@@ -759,10 +760,8 @@ fn a_connection_from_another_user_is_dropped_even_with_the_right_bearer() {
     stream.read_to_string(&mut mine).expect("reads");
     assert!(mine.starts_with("HTTP/1.1 503"), "the same user: {mine}");
 
-    let Some(theirs) = answer_to_another_user(port, &request) else {
-        eprintln!("skipped the other user: no passwordless sudo and setpriv here");
-        return;
-    };
+    let theirs = answer_to_another_user(port, &request)
+        .expect("this machine can run a program as another user: passwordless sudo and setpriv");
     assert!(theirs.is_empty(), "another user was answered: {theirs}");
 }
 

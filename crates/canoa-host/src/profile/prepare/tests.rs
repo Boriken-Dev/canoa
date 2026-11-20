@@ -5,7 +5,7 @@ use std::io::Write as _;
 
 use super::*;
 
-/// The Python the tests install with, or none: a test without one says so and returns.
+/// The Python the tests install with (`CANOA_TEST_PYTHON`), or none.
 fn python() -> Option<PathBuf> {
     let named = std::env::var_os("CANOA_TEST_PYTHON")?;
     let path = PathBuf::from(&named);
@@ -16,17 +16,9 @@ fn python() -> Option<PathBuf> {
     Finder::new(&lookup, &[]).find(&named.to_string_lossy())
 }
 
-macro_rules! python_or_return {
+macro_rules! the_python {
     () => {
-        match python() {
-            Some(python) => python,
-            None => {
-                eprintln!(
-                    "NOT RUN: set CANOA_TEST_PYTHON to a Python 3.9 or later with venv and pip"
-                );
-                return;
-            }
-        }
+        python().expect("CANOA_TEST_PYTHON names a Python 3.9 or later with venv and pip")
     };
 }
 
@@ -179,8 +171,9 @@ fn a_plan_lists_what_will_run_before_anything_does() {
 }
 
 #[test]
+#[ignore = "needs CANOA_TEST_PYTHON: a Python 3.9 or later with venv and pip"]
 fn dependencies_install_into_an_environment_of_the_overlays_own_and_setup_runs_in_its_phases() {
-    let python = python_or_return!();
+    let python = the_python!();
     let scratch = Scratch::new("deps");
     let index = scratch.0.join("index");
     wheel(&index, "canoa_test_pkg", "1.0", "from the first wheel");
@@ -252,8 +245,9 @@ fn dependencies_install_into_an_environment_of_the_overlays_own_and_setup_runs_i
 }
 
 #[test]
+#[ignore = "needs CANOA_TEST_PYTHON: a Python 3.9 or later with venv and pip"]
 fn a_failed_install_names_its_step_and_output_and_leaves_what_was_there() {
-    let python = python_or_return!();
+    let python = the_python!();
     let scratch = Scratch::new("fail");
     let index = scratch.0.join("index");
     wheel(&index, "canoa_test_pkg", "1.0", "kept");
@@ -333,8 +327,9 @@ fn a_failed_install_names_its_step_and_output_and_leaves_what_was_there() {
 }
 
 #[test]
+#[ignore = "needs CANOA_TEST_PYTHON: a Python 3.9 or later with venv and pip"]
 fn a_setup_that_fails_or_overruns_is_stopped_and_reported_with_what_it_printed() {
-    let python = python_or_return!();
+    let python = the_python!();
     let scratch = Scratch::new("setup");
     let home = Home::new(scratch.overlays());
     let finder = finder_for(&python);
@@ -420,15 +415,10 @@ fn an_overlay_with_nothing_to_prepare_runs_nothing_and_records_nothing() {
     assert!(!scratch.overlays().join(".state").exists());
 }
 
-macro_rules! node_or_return {
+macro_rules! the_node {
     () => {
-        match super::super::npm_registry::node() {
-            Some(node) => node,
-            None => {
-                eprintln!("NOT RUN: set CANOA_TEST_NODE to a Node.js with npm beside it");
-                return;
-            }
-        }
+        super::super::npm_registry::node()
+            .expect("CANOA_TEST_NODE names a Node.js with npm beside it")
     };
 }
 
@@ -448,9 +438,10 @@ fn node_prints(node: &Path, path: &Path, script: &str) -> String {
 }
 
 #[test]
+#[ignore = "needs CANOA_TEST_NODE: a Node.js with npm beside it"]
 fn node_dependencies_install_into_a_node_modules_of_the_overlays_own() {
     use super::super::npm_registry::{Registry, finder_for as node_finder, npm_env};
-    let node = node_or_return!();
+    let node = the_node!();
     let scratch = Scratch::new("npm");
     let registry = Registry::start(
         &node,
@@ -514,9 +505,10 @@ fn node_dependencies_install_into_a_node_modules_of_the_overlays_own() {
 }
 
 #[test]
+#[ignore = "needs CANOA_TEST_NODE: a Node.js with npm beside it"]
 fn a_node_package_the_registry_lacks_fails_the_step_with_npms_output_and_leaves_what_was_there() {
     use super::super::npm_registry::{Registry, finder_for as node_finder, npm_env};
-    let node = node_or_return!();
+    let node = the_node!();
     let scratch = Scratch::new("npm-absent");
     let registry = Registry::start(
         &node,
@@ -589,9 +581,10 @@ fn a_node_package_the_registry_lacks_fails_the_step_with_npms_output_and_leaves_
 }
 
 #[test]
+#[ignore = "needs CANOA_TEST_NODE: a Node.js with npm beside it"]
 fn a_package_lock_makes_the_install_npm_ci() {
     use super::super::npm_registry::{Registry, finder_for as node_finder, npm_env};
-    let node = node_or_return!();
+    let node = the_node!();
     let scratch = Scratch::new("npm-ci");
     let registry = Registry::start(
         &node,

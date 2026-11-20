@@ -1028,12 +1028,11 @@ impl Drop for Given<'_> {
 
 #[cfg(unix)]
 #[test]
+#[ignore = "needs passwordless sudo to change a folder's owner (sudo -n chown)"]
 fn discover_nearby_reports_a_descriptor_folder_another_user_owns_as_shared() {
     let nearby = Nearby::new();
-    let Some(_given) = Given::to(nearby.path(), "65534:65534") else {
-        eprintln!("skipped: cannot change a folder's owner without a password (sudo -n chown)");
-        return;
-    };
+    let _given = Given::to(nearby.path(), "65534:65534")
+        .expect("this process can change a folder's owner with sudo -n chown");
     let host = Host::start_with(
         &agent_entry(),
         1,
