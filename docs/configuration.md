@@ -366,9 +366,14 @@ value, and never empty; a value already set in the host's own environment is kep
 | `AGENTS_ROLE` | `delegate` when another agent started the session as a task |
 | `AGENTS_PROJECT_ROOT`, `AGENTS_SESSION_ID` | the session's folder and id, for the hooks that run for it |
 
-An agent entry with no profile (neither `profiles` nor `own_profile`) has no overlays and so no `<NAME>_OVERLAY_ROOT`, no
-profile and no loadout, but its agent is still given the identity variables above that do not depend on a profile
-(`AGENTS_HOST`, `AGENTS_HARNESS`, `AGENT`, `AGENTS_VENDOR`, the account's).
+An agent entry that names no profile (no `profiles`) starts with the default profile: canoa.cfg's top level (`[profile]`,
+`[overlays]`, `[profiles.default]`), so its overlays, skills, hooks, access and variables, `<NAME>_OVERLAY_ROOT` included, reach
+its sessions as they do for a named profile, whether the entry is a source of the host's own or written by hand under
+`[host.agents.NAME]`. An entry that names a profile gets that one instead, and one that should run bare names an empty
+profile (`profiles = ["bare"]` with an empty `[host.profiles.bare]`). `canoa check` prints the profile each entry starts with
+and why, and *Effective setup* lists it as `profile`. Without anything in canoa.cfg's top level there is no profile and no
+overlay, and the agent is still given the identity variables above that do not depend on one (`AGENTS_HOST`, `AGENTS_HARNESS`,
+`AGENT`, `AGENTS_VENDOR`, the account's).
 
 The names and the harness ids and vendors are dotagents'. One overlay then adapts to every harness:
 
