@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/canoa-antigravity", "crates/canoa-bitwarden", "crates/canoa-claude", "crates/canoa-codex", "crates/canoa-ffi", "crates/canoa-foundry", "crates/canoa-git-bash", "crates/canoa-grok", "crates/canoa-host", "crates/canoa-launch", "crates/canoa-litellm", "crates/canoa-microsoft-mail", "crates/canoa-node", "crates/canoa-openai", "crates/canoa-opencode", "crates/canoa-pi", "crates/canoa-piper", "crates/canoa-powershell", "crates/canoa-python", "crates/canoa-whisper"]
+members = ["crates/canoa", "crates/canoa-antigravity", "crates/canoa-bitwarden", "crates/canoa-claude", "crates/canoa-codex", "crates/canoa-ffi", "crates/canoa-foundry", "crates/canoa-git-bash", "crates/canoa-grok", "crates/canoa-host", "crates/canoa-launch", "crates/canoa-litellm", "crates/canoa-microsoft-mail", "crates/canoa-office", "crates/canoa-node", "crates/canoa-openai", "crates/canoa-opencode", "crates/canoa-pi", "crates/canoa-piper", "crates/canoa-powershell", "crates/canoa-python", "crates/canoa-whisper"]
 
 [workspace.package]
 version = "0.0.0-alpha.0"
@@ -146,6 +146,10 @@ rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"]
 rustls-native-certs = "0.8"
 windows-permissions = "0.2"
 win-msgbox = "0.2"
+# The COM add-in for classic desktop Office: the interfaces Office calls and the controls it hosts, in a DLL.
+windows = "0.62"
+# The macros of the `windows` crate name this crate in what they write.
+windows-core = "0.62"
 object = { version = "0.41", default-features = false, features = ["read_core", "pe", "std"] }
 # The member crates themselves.
 canoa = { path = "crates/canoa" }
@@ -160,6 +164,7 @@ canoa-grok = { path = "crates/canoa-grok" }
 canoa-litellm = { path = "crates/canoa-litellm" }
 canoa-node = { path = "crates/canoa-node" }
 canoa-microsoft-mail = { path = "crates/canoa-microsoft-mail" }
+canoa-office = { path = "crates/canoa-office" }
 canoa-openai = { path = "crates/canoa-openai" }
 canoa-opencode = { path = "crates/canoa-opencode" }
 canoa-pi = { path = "crates/canoa-pi" }

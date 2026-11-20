@@ -1029,6 +1029,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "canoa-office"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "windows",
+ "windows-core",
+ "windows-registry",
+]
+
+[[package]]
 name = "canoa-openai"
 version = "0.0.0-alpha.0"
 dependencies = [
