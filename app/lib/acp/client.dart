@@ -5,13 +5,14 @@ import 'package:coqui_acp/coqui_acp.dart';
 import 'package:coqui_acp/page.dart';
 import 'package:coqui_transport_web/coqui_transport_web.dart';
 
-import '../accounts/account_meta.dart' show accountMeta;
+import '../accounts/account_meta.dart' show accountMeta, maxMessageMeta;
 import '../chat/agent_events.dart';
 import '../chat/timing_log.dart';
 import 'delegate.dart';
 import 'delegate_targets.dart';
 import 'hub_wire.dart';
 import 'link_secret.dart';
+import 'message_limit.dart';
 import 'noise_secret.dart';
 import 'secret_wire.dart';
 import 'usage_wire.dart';
@@ -50,6 +51,9 @@ final class AgentIdentity {
   /// The account the host ran this connection on, and the pool it took it from when the client named a pool, as the answer's
   /// `_meta` says them; null when the host named none.
   String? ranOnAccount, ranOnPool;
+
+  /// The longest message the host takes, `[host] max_message_bytes`, as the answer's `_meta` says it; null when the host named none.
+  int? maxMessageBytes;
 
   /// The usage extension, when the agent advertised it.
   UsageSupport? usage;
@@ -91,6 +95,7 @@ final class AgentIdentity {
     if (meta is Map) {
       markers = [for (final MapEntry(:key, :value) in meta.entries) if (value == true && key is String) key];
       this.version ??= _text(meta['agentVersion']);
+      if (meta[maxMessageMeta] case final int bytes when bytes > 0) maxMessageBytes = bytes;
       if (meta[accountMeta] case final Map<Object?, Object?> account) {
         ranOnAccount = _text(account['name']);
         ranOnPool = _text(account['pool']);
@@ -206,6 +211,7 @@ final class VerifiedAgent {
     Map<String, Object?> initializeMeta = const {},
     ProfileApprover? approver,
     AgentSecrets? secrets,
+    HostLimit? limit,
   }) async {
     if (expectedPeerId.isEmpty) throw ArgumentError.value(expectedPeerId, 'expectedPeerId');
     try {
@@ -235,7 +241,11 @@ final class VerifiedAgent {
               .map(identity._inspect)
               .map(hub.incoming)
               .map(usage.incoming),
-          send: (message) => proven.send(_withOffer(secretWire, delegate.outgoing(usage.outgoing(hub.outgoing(message))))),
+          send: (message) {
+            final sent = _withOffer(secretWire, delegate.outgoing(usage.outgoing(hub.outgoing(message))));
+            final why = limit?.refuses(sent);
+            return why == null ? proven.send(sent) : Future.error(AcpFailure(why));
+          },
           closeSource: proven.close,
           decider: decider,
           elicitor: elicitor,

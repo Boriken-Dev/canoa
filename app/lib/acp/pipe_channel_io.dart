@@ -8,6 +8,8 @@ import 'dart:typed_data';
 
 import 'package:coqui_transport_web/coqui_transport_web.dart';
 
+import 'message_limit.dart';
+
 /// Opens the pipe or socket [url] names; see `openPipeChannel`.
 Future<ByteWebChannel> openPipeChannel(String url, Duration timeout, int maxMessage) async {
   final named = url.startsWith('pipe:');
@@ -32,26 +34,55 @@ String _runtimeSocket(String name) {
 }
 
 /// A byte stream as a channel of whole messages: a little-endian `u32` length, then the body.
-abstract base class _FramedChannel implements ByteWebChannel {
-  _FramedChannel(this._maxMessage) : _decoder = FrameDecoder(maxBytes: _maxMessage);
+abstract base class _FramedChannel implements ByteWebChannel, HostMessageLimit {
+  _FramedChannel(this._maxMessage);
 
-  final int _maxMessage;
-  final FrameDecoder _decoder;
+  /// The longest message either way. The host's limit replaces it once the host says it ([followHost]), and takes the next
+  /// message the peer sends, so what has arrived is read as it was framed.
+  int _maxMessage;
   final _incoming = StreamController<Uint8List>();
+  final _buffer = BytesBuilder(copy: false);
+  var _have = 0;
+  // What the next message needs to have arrived: its header, then the whole of it.
+  var _need = 4;
   bool _closed = false;
+
+  @override
+  void followHost(int bytes) => _maxMessage = bytes + pipeRecordOverhead;
 
   /// What arrived, in any chunks.
   void received(Uint8List chunk) {
     if (_closed) return;
-    try {
-      _decoder.push(chunk);
-      for (var message = _decoder.nextBytes(); message != null; message = _decoder.nextBytes()) {
-        _incoming.add(message);
+    _buffer.add(chunk);
+    _have += chunk.length;
+    if (_have < _need) return;
+    final bytes = _buffer.takeBytes();
+    var at = 0;
+    _need = 4;
+    while (bytes.length - at >= 4) {
+      // Multiplied rather than shifted: dart2js shifts are signed 32-bit.
+      final size = bytes[at] + (bytes[at + 1] << 8) + (bytes[at + 2] << 16) + bytes[at + 3] * 0x1000000;
+      if (size < 1 || size > _maxMessage) {
+        _have = 0;
+        _incoming.addError(
+          TransportProtocolFailure(
+            size < 1
+                ? 'The host sent an empty message'
+                : 'The host sent a message of $size bytes, over the limit of $_maxMessage this channel takes',
+          ),
+        );
+        unawaited(close());
+        return;
       }
-    } on TransportProtocolFailure catch (failure) {
-      _incoming.addError(failure);
-      unawaited(close());
+      if (bytes.length - at - 4 < size) {
+        _need = 4 + size;
+        break;
+      }
+      _incoming.add(Uint8List.sublistView(bytes, at + 4, at + 4 + size));
+      at += 4 + size;
     }
+    _have = bytes.length - at;
+    if (_have > 0) _buffer.add(Uint8List.sublistView(bytes, at));
   }
 
   /// The stream ended or failed: nothing more comes.
@@ -79,7 +110,19 @@ abstract base class _FramedChannel implements ByteWebChannel {
   @override
   Future<void> sendBytes(Uint8List message) {
     if (_closed) return Future.error(const TransportUnavailable('The pipe is closed'));
-    return write(encodeBytesFrame(message, maxBytes: _maxMessage));
+    if (message.isEmpty) return Future.error(const TransportProtocolFailure('A message cannot be empty'));
+    if (message.length > _maxMessage) {
+      return Future.error(
+        TransportProtocolFailure(
+          'A message of ${message.length} bytes is over the limit of $_maxMessage this channel takes, which the host sets: '
+          '[host] max_message_bytes in its configuration',
+        ),
+      );
+    }
+    final frame = Uint8List(4 + message.length);
+    ByteData.sublistView(frame, 0, 4).setUint32(0, message.length, Endian.little);
+    frame.setRange(4, frame.length, message);
+    return write(frame);
   }
 
   @override

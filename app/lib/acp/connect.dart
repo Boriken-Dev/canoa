@@ -1,6 +1,7 @@
 import 'package:coqui_transport_web/coqui_transport_web.dart';
 import '../net/system_dial.dart';
 import 'client.dart';
+import 'message_limit.dart';
 import 'pipe_channel.dart';
 
 /// The endpoints the chat dials for an agent it pins. Plain WebSocket is taken on loopback only, where `canoa` listens by
@@ -84,8 +85,10 @@ Future<VerifiedAgent> _verifiedAcp(
   Map<String, Object?> initializeMeta = const {},
 }) async {
   final connection = StagedChannel(source);
+  final limit = HostLimit();
   final client = await VerifiedAgent.open(
     connection,
+    limit: limit,
     expectedPeerId: expectedPeerId,
     verifyPeer: verifyPeer,
     verificationTimeout: timeout,
@@ -97,6 +100,10 @@ Future<VerifiedAgent> _verifiedAcp(
   try {
     connection.allowApplicationMessages();
     await client.initialize();
+    // A channel that frames its own messages takes the limit the host applies, so a message the host takes is not refused here.
+    final said = client.identity.maxMessageBytes;
+    limit.bytes = said;
+    if (said != null && source is HostMessageLimit) (source as HostMessageLimit).followHost(said);
     return client;
   } catch (_) {
     await client.close();

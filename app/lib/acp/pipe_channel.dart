@@ -1,12 +1,14 @@
 import 'pipe_channel_stub.dart' if (dart.library.io) 'pipe_channel_io.dart' as platform;
 import 'package:coqui_transport_web/coqui_transport_web.dart';
+import 'message_limit.dart';
 
 /// Whether [url] names a pipe or a Unix socket, as `canoa serve` prints an entry that listens on one: `pipe:NAME` (a Windows
 /// named pipe, or on Unix the socket `NAME.sock` in the runtime directory) or `unix:PATH`. A browser cannot dial either.
 bool isPipeUrl(String url) => url.startsWith('pipe:') || url.startsWith('unix:');
 
-/// The longest message either way: the host's own bound on an ACP line, and the overhead of the record around it.
-const int pipeMaxMessage = 16 * 1024 * 1024 + 64 * 1024;
+/// The longest message either way until the host says its own limit (`[host] max_message_bytes`, which this follows through
+/// `HostMessageLimit`): the host's default for an ACP line and the record around it.
+const int pipeMaxMessage = 16 * 1024 * 1024 + pipeRecordOverhead;
 
 /// Opens the pipe or Unix socket [url] names, as a channel of whole messages (a little-endian `u32` length, then the body, the
 /// stream format of WebTransport). It proves nobody: run the peer proof before any ACP message, as on any channel. The
