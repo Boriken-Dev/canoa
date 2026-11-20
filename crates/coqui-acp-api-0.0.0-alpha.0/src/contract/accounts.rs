@@ -211,12 +211,6 @@ pub(super) fn grant_of(
     Ok(grant)
 }
 
-pub(super) fn is_url(text: &str) -> bool {
-    (text.starts_with("https://") || text.starts_with("http://"))
-        && text.len() > 8
-        && !text.chars().any(|c| c.is_whitespace() || c.is_control())
-}
-
 /// What every kind an account provider or a harness lists is held to.
 pub(super) fn kind_rules(kinds: &[AccountKindInfo]) -> Outcome {
     let mut seen = Vec::new();
@@ -275,7 +269,7 @@ pub(super) fn kind_rules(kinds: &[AccountKindInfo]) -> Outcome {
             }
             if let Some(default) = &slot.default {
                 ensure!(
-                    is_url(default),
+                    crate::is_http_url(default),
                     "{}'s endpoint default is not a URL",
                     info.id
                 );
@@ -352,18 +346,6 @@ fn catalog(contract: &Contract, harness: &dyn AcpHarness) -> Outcome {
         );
         ensure!(!variables.contains(&name), "{name} is listed twice");
         variables.push(name);
-    }
-    let mut secrets: Vec<&String> = Vec::new();
-    for name in &catalog.secret_variables {
-        ensure!(
-            catalog.credential_variables.contains(name),
-            "secret_variables names {name}, which credential_variables does not list, so a start would not clear it"
-        );
-        ensure!(
-            !secrets.contains(&name),
-            "{name} is listed twice as a secret"
-        );
-        secrets.push(name);
     }
     let mut standards = Vec::new();
     for accepted in &catalog.accepts {

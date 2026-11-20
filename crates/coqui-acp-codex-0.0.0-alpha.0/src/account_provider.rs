@@ -24,7 +24,12 @@ use coqui_acp_harness::ThroughSpawner;
 use coqui_acp_harness::account::{Accounts, Files, Watching};
 
 use crate::account_usage::{ReadOptions, read_limits};
-use crate::{CodexLaunch, CodexSession, CodexSettings, ModelRead, accounts, signin};
+use crate::{
+    CodexLaunch, CodexSession, CodexSettings, ModelRead, SessionSettings, accounts, signin,
+};
+
+/// The id the account provider is registered under, which the harness's description names as its link.
+pub(crate) const ACCOUNT_PROVIDER: &str = "codex_accounts";
 
 /// How the Codex account provider is configured.
 #[derive(ToValue, FromValue, Schema, Debug, Clone)]
@@ -49,6 +54,10 @@ pub struct AccountSettings {
     /// The longest, in milliseconds, a plan limits read may take in all.
     #[map(default = 10_000)]
     pub usage_timeout_ms: u64,
+    /// How the sessions that list an account's models, read its allowances and refresh its login read the app server's
+    /// output, wait for it and end it.
+    #[map(flatten)]
+    pub session: SessionSettings,
 }
 
 impl Default for AccountSettings {
@@ -59,6 +68,7 @@ impl Default for AccountSettings {
             command_timeout_ms: 60_000,
             usage_endpoint: None,
             usage_timeout_ms: 10_000,
+            session: SessionSettings::default(),
         }
     }
 }
@@ -178,7 +188,13 @@ impl AccountProvider for CodexAccounts {
         request: RenewRequest,
         spawner: Object<dyn ProcessSpawner>,
     ) -> Result<RenewReport, ProviderError> {
-        signin::renew(&self.accounts, &self.executable(), &request, spawner)
+        signin::renew(
+            &self.accounts,
+            &self.executable(),
+            &request,
+            spawner,
+            self.settings.session.settings(),
+        )
     }
 
     fn watch(
@@ -238,7 +254,7 @@ impl AccountProvider for CodexAccounts {
             usage.account = Some(query.account.id.clone());
             // A login with no allowances answers with an error, and nothing is reported.
             if let Ok(mut buckets) =
-                CodexSession::read_account_usage(&launch, &spawn, CodexSettings::new())
+                CodexSession::read_account_usage(&launch, &spawn, self.settings.session.settings())
             {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -299,7 +315,11 @@ impl AccountProvider for CodexAccounts {
             )?
             .hold_keeping(&self.accounts, &files, Some(keeper))?
         };
-        let listing = listing(&launch, &ThroughSpawner::shared(spawner));
+        let listing = listing(
+            &launch,
+            &ThroughSpawner::shared(spawner),
+            self.settings.session.settings(),
+        );
         if let Some(hold) = hold {
             hold.finish();
         }
@@ -308,8 +328,8 @@ impl AccountProvider for CodexAccounts {
 }
 
 /// The models Codex lists once started on `launch`, with no thread.
-fn listing(launch: &CodexLaunch, spawn: &ThroughSpawner) -> ModelListing {
-    match CodexSession::read_models(launch, spawn, CodexSettings::new()) {
+fn listing(launch: &CodexLaunch, spawn: &ThroughSpawner, settings: CodexSettings) -> ModelListing {
+    match CodexSession::read_models(launch, spawn, settings) {
         Ok(ModelRead {
             models: Some(models),
             signed_out,

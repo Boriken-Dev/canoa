@@ -26,7 +26,10 @@ use coqui_acp_harness::stdio::accounts::Keeping;
 use crate::account_usage::read_limits;
 use crate::accounts::DEF;
 use crate::provider::apply_to;
-use crate::{PiLaunch, PiSession, PiSettings};
+use crate::{PiLaunch, PiSession, PiSettings, SessionSettings};
+
+/// The id the account provider is registered under, which the harness's description names as its link.
+pub(crate) const ACCOUNT_PROVIDER: &str = "pi_accounts";
 
 /// How the Pi account provider is configured.
 #[derive(ToValue, FromValue, Schema, Debug, Clone)]
@@ -45,6 +48,9 @@ pub struct AccountSettings {
     pub node: Option<String>,
     /// Pi's CLI script, an absolute path, which `node` runs.
     pub script: Option<String>,
+    /// How the session that lists an account's models reads Pi's output, waits for it and ends it.
+    #[map(flatten)]
+    pub session: SessionSettings,
 }
 
 impl Default for AccountSettings {
@@ -54,6 +60,7 @@ impl Default for AccountSettings {
             executable: "pi".into(),
             node: None,
             script: None,
+            session: SessionSettings::default(),
         }
     }
 }
@@ -196,7 +203,11 @@ impl AccountProvider for PiAccounts {
         } else {
             apply_to(grant, &mut launch, &spawner, (&self.accounts, Some(keeper)))?
         };
-        let listing = listing(&launch, &ThroughSpawner::shared(spawner));
+        let listing = listing(
+            &launch,
+            &ThroughSpawner::shared(spawner),
+            self.settings.session.settings(),
+        );
         if let Some(hold) = hold {
             hold.finish();
         }
@@ -205,8 +216,8 @@ impl AccountProvider for PiAccounts {
 }
 
 /// The models Pi lists once started on `launch`, with no turn.
-fn listing(launch: &PiLaunch, spawn: &ThroughSpawner) -> ModelListing {
-    match PiSession::read_models(launch, spawn, PiSettings::new()) {
+fn listing(launch: &PiLaunch, spawn: &ThroughSpawner, settings: PiSettings) -> ModelListing {
+    match PiSession::read_models(launch, spawn, settings) {
         Ok(models) if models.is_empty() => {
             ModelListing::unknown("Pi lists no model: none has a credential")
         }

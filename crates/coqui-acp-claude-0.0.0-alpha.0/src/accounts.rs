@@ -21,7 +21,9 @@ use coqui_acp_api::{
     LoginMethodInfo, MODEL_API, OPEN_URL, PASTE_CODE, PROXY,
 };
 use coqui_acp_harness::account::{Accounts, Files, Hold, Watched, rfc3339_ms, same_name};
-use coqui_acp_harness::provider::{credential, resolve, schema, to_json};
+use coqui_acp_harness::provider::{
+    credential, endpoint_setting, own_kind, resolve, schema, to_json,
+};
 use serde_json::{Value, json};
 
 /// The kind of a login made by `claude auth login --claudeai`, kept in `.credentials.json`.
@@ -52,7 +54,7 @@ pub const CREDENTIALS_FILE: &str = ".credentials.json";
 pub const FILE_KEY: &str = "credentials_file";
 
 /// The model endpoint Claude Code uses without `ANTHROPIC_BASE_URL`.
-const API: &str = "https://api.anthropic.com";
+const API: &str = crate::account_usage::DEFAULT_ENDPOINT;
 
 /// Every variable Claude Code reads for a credential, for where its requests go, or for which provider it signs in to,
 /// so a start on an account removes them all and sets only the kind's.
@@ -92,24 +94,6 @@ pub(crate) const VARIABLES: &[&str] = &[
     "ANTHROPIC_VERTEX_PROJECT_ID",
     "CLOUD_ML_REGION",
     "ANTHROPIC_FOUNDRY_RESOURCE",
-];
-
-/// The part of [`VARIABLES`] whose value is itself a secret: a key, a token, a password or a private key. Not an endpoint,
-/// a switch that picks a cloud provider, a project, a profile or the path of a file, which a person sets on purpose and
-/// which a start still clears.
-pub(crate) const SECRETS: &[&str] = &[
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "ANTHROPIC_AWS_API_KEY",
-    "AWS_BEARER_TOKEN_BEDROCK",
-    "ANTHROPIC_FOUNDRY_API_KEY",
-    "ANTHROPIC_FOUNDRY_AUTH_TOKEN",
-    "CLAUDE_CODE_CLIENT_KEY",
-    "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_SESSION_TOKEN",
 ];
 
 fn settings(secret: &str) -> Value {
@@ -283,7 +267,6 @@ fn full() -> AccountCatalog {
         .iter()
         .map(|v| (*v).to_string())
         .collect::<Vec<String>>();
-    catalog.secret_variables = SECRETS.iter().map(|v| (*v).to_string()).collect();
     catalog
 }
 
@@ -323,11 +306,7 @@ pub fn offer() -> AccountOffer {
 /// Why an account is not one the account provider keeps: `BAD_VALUE` for an id that is not one or a kind it does not
 /// list. Nothing of another standard is taken: a harness applies those, the provider makes its own.
 pub(crate) fn own(grant: &AccountGrant) -> Result<(), ProviderError> {
-    grant.check_id()?;
-    if offer().kind(&grant.kind).is_none() {
-        return Err(bad("this provider keeps no account of that kind"));
-    }
-    Ok(())
+    own_kind(grant, &offer())
 }
 
 /// The standards Claude Code starts on, and how each is applied: a Claude Code login (a configuration directory
@@ -355,34 +334,6 @@ fn accepts() -> Vec<Accepted> {
 
 fn bad(why: &str) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why)
-}
-
-/// The text setting `key` of `settings`: absent, or a plain `http(s)` address.
-pub(crate) fn base_url(
-    settings: &coqui_acp_api::guatiao::Value,
-) -> Result<Option<String>, ProviderError> {
-    let settings = guatiao_json(settings);
-    let Some(object) = settings.as_object() else {
-        return Err(bad("the account's settings are not an object"));
-    };
-    if object.keys().any(|key| key != "base_url") {
-        return Err(bad("the account's settings name something the kind lacks"));
-    }
-    match object.get("base_url") {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(url))
-            if (url.starts_with("https://") || url.starts_with("http://"))
-                && url.len() > 8
-                && !url.chars().any(|c| c.is_control() || c.is_whitespace()) =>
-        {
-            Ok(Some(url.clone()))
-        }
-        Some(_) => Err(bad("base_url is not an address")),
-    }
-}
-
-fn guatiao_json(value: &coqui_acp_api::guatiao::Value) -> Value {
-    to_json(value)
 }
 
 /// What applying a grant does.
@@ -445,7 +396,7 @@ pub(crate) fn check(account: &AccountRef) -> Result<(), ProviderError> {
         return Ok(());
     };
     if info.id == HARNESS_LOGIN {
-        if !guatiao_json(&account.settings)
+        if !to_json(&account.settings)
             .as_object()
             .is_some_and(serde_json::Map::is_empty)
         {
@@ -453,7 +404,7 @@ pub(crate) fn check(account: &AccountRef) -> Result<(), ProviderError> {
         }
         return Ok(());
     }
-    base_url(&account.settings)?;
+    endpoint_setting(&account.settings, "base_url")?;
     if info.state_dir && account.state_dir.as_deref().is_none_or(str::is_empty) {
         return Err(bad("that kind needs a directory to run in"));
     }
@@ -477,7 +428,7 @@ pub fn variables(grant: &AccountGrant) -> Vec<(String, String)> {
         set.push(("CLAUDE_CONFIG_DIR".to_string(), dir.to_string()));
     }
     if grant.kind != HARNESS_LOGIN
-        && let Ok(Some(url)) = base_url(&grant.settings)
+        && let Ok(Some(url)) = endpoint_setting(&grant.settings, "base_url")
     {
         set.push(("ANTHROPIC_BASE_URL".to_string(), url));
     }
@@ -510,7 +461,7 @@ fn plan_as(grant: &AccountGrant, in_place: bool) -> Result<Plan, ProviderError> 
             watched: Vec::new(),
         });
     }
-    let url = base_url(&grant.settings)?;
+    let url = endpoint_setting(&grant.settings, "base_url")?;
     let mut set = Vec::new();
     let mut applied = Plan {
         set: Vec::new(),
@@ -648,7 +599,7 @@ impl Applied {
 ///
 /// The endpoint variables are cleared and set only from the grant's `base_url`: a host that keeps a person's own
 /// choice of endpoint (`ANTHROPIC_BASE_URL`, a cloud switch) puts it back afterwards. They are among the catalog's
-/// `credential_variables` and not among its `secret_variables`.
+/// `credential_variables`.
 ///
 /// # Errors
 ///

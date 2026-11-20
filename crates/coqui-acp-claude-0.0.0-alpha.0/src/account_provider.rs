@@ -25,7 +25,10 @@ use coqui_acp_harness::ThroughSpawner;
 use coqui_acp_harness::account::{Accounts, Files, Watching};
 
 use crate::account_usage::{ReadOptions, read_limits};
-use crate::{ClaudeLaunch, ClaudeSession, ClaudeSettings, accounts, signin};
+use crate::{ClaudeLaunch, ClaudeSession, ClaudeSettings, SessionSettings, accounts, signin};
+
+/// The id the account provider is registered under, which the harness's description names as its link.
+pub(crate) const ACCOUNT_PROVIDER: &str = "claude_accounts";
 
 /// How the Claude Code account provider is configured.
 #[derive(ToValue, FromValue, Schema, Debug, Clone)]
@@ -50,6 +53,9 @@ pub struct AccountSettings {
     /// The longest, in milliseconds, a plan limits read may take in all.
     #[map(default = 10_000)]
     pub usage_timeout_ms: u64,
+    /// How the session that lists an account's models reads Claude Code's output, waits for it and ends it.
+    #[map(flatten)]
+    pub session: SessionSettings,
 }
 
 impl Default for AccountSettings {
@@ -60,6 +66,7 @@ impl Default for AccountSettings {
             command_timeout_ms: 60_000,
             usage_endpoint: None,
             usage_timeout_ms: 10_000,
+            session: SessionSettings::default(),
         }
     }
 }
@@ -336,7 +343,11 @@ impl AccountProvider for ClaudeAccounts {
             )?
         };
         drop(files);
-        let listing = listing(&launch, &ThroughSpawner::shared(spawner));
+        let listing = listing(
+            &launch,
+            &ThroughSpawner::shared(spawner),
+            self.settings.session.settings(),
+        );
         if let Some(hold) = hold {
             hold.finish();
         }
@@ -345,8 +356,12 @@ impl AccountProvider for ClaudeAccounts {
 }
 
 /// The models Claude Code lists once started on `launch`, with no turn.
-fn listing(launch: &ClaudeLaunch, spawn: &ThroughSpawner) -> ModelListing {
-    match ClaudeSession::start(launch, spawn, ClaudeSettings::new(), |_| true) {
+fn listing(
+    launch: &ClaudeLaunch,
+    spawn: &ThroughSpawner,
+    settings: ClaudeSettings,
+) -> ModelListing {
+    match ClaudeSession::start(launch, spawn, settings, |_| true) {
         Ok(session) => {
             let signed_out = session.signed_out();
             let listing = session.models().map_or_else(

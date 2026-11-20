@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-codex at ee8367d224ae0f38a48db5788f73c2190d9b184b, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-codex at fbb7b0059adfc6677248ba5cb735ccf67ef7110c, with what it inherits written out.
 example = [{ name = "codex_provider", crate-type = ["cdylib"] }]
 [package]
 name = "coqui-acp-codex"

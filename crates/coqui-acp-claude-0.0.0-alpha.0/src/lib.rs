@@ -20,6 +20,7 @@ mod provider;
 mod provider_history;
 mod replay;
 mod session;
+mod session_settings;
 mod signin;
 mod tools;
 
@@ -29,13 +30,14 @@ use core::time::Duration;
 use std::io;
 
 pub use account_provider::{AccountSettings, ClaudeAccounts};
-pub use agent::{ClaudeAgent, DEFAULT, EFFORTS, FreshSessions};
+pub use agent::{ClaudeAgent, DEFAULT, FreshSessions};
 pub use coqui_acp_harness::{self as harness, Launch, PlainSpawn, Spawn, Spawned};
 pub use launch::{ClaudeLaunch, SessionStart, mcp_config, valid_session_id};
 pub use parse::{ModeHook, ModePermit, Parser, ParserLimits};
 pub use provider::{ClaudeProvider, ProviderSettings, SettingSource};
 pub use replay::{config_dir, project_directory, replay, transcript};
 pub use session::{ClaudeSession, ClaudeSettings, Model, models_of, user_blocks, version_of};
+pub use session_settings::SessionSettings;
 
 /// The Claude Code versions this crate was tested with. Another one runs, with a warning.
 pub const TESTED_VERSIONS: &[&str] = &["2.1.318"];

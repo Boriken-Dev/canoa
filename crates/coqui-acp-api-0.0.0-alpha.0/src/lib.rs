@@ -6,6 +6,7 @@ extern crate alloc;
 
 mod account;
 mod account_provider;
+mod address;
 pub mod batch;
 #[cfg(feature = "contract")]
 #[cfg_attr(docsrs, doc(cfg(feature = "contract")))]
@@ -43,12 +44,13 @@ pub use account_provider::{
     AccountModelsQuery, AccountOffer, AccountProvider, AccountProviderInfo, AccountProviderVtable,
     AccountUsage, AccountUsageQuery, AccountWatch, AccountWatchVtable, WatchRequest,
 };
+pub use address::is_http_url;
 pub use environment::Environment;
 pub mod standard;
 pub use files::PrivateDir;
 pub use kind::{AcpHarness, AcpHarnessVtable};
 pub use models::{
-    CacheChoice, CacheLifetime, DEFAULT_PAGE_BYTES, ExportPage, HarnessInfo, HistoryLoss,
+    AccountsLink, CacheLifetime, DEFAULT_PAGE_BYTES, ExportPage, HarnessInfo, HistoryLoss,
     ImportReport, LINE_TOO_LARGE, ModelInfo, ModelListing, NonDefault, REPLAYED_AS_PROMPT,
     SeedPoint, SessionExport, SessionImport, SessionQuery, SessionRecordFile, StartRequest,
     StartRequestBuilder, Takes, UnknownKind, line_too_large,
