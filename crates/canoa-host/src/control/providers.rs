@@ -28,7 +28,8 @@ struct Row {
     title: Option<String>,
 }
 
-/// `{"providers": [...]}`: one row per agent, in the order the bundled agents are offered, then the loaded ones' as they were found.
+/// `{"providers": [...]}`: one row per agent, in the order the bundled agents are offered, then the loaded ones' as they were found,
+/// with the readers of an agent's quota, the gateways and the forms of an agent entry (`agent_entry`, `local_agent`).
 pub(crate) fn list(config: &Config) -> Value {
     let registries = loaded(config);
     let loaded: Vec<(&str, &Registry)> = registries
@@ -39,6 +40,8 @@ pub(crate) fn list(config: &Config) -> Value {
         "providers": rows_of(&loaded, bundled::ALL, &Makers::of(config)),
         "usage_readers": usage_readers_of(&loaded),
         "gateways": gateways_of(),
+        "agent_entry": super::agent_entries::agent_entry(),
+        "local_agent": super::agent_entries::local_agent(),
     })
 }
 

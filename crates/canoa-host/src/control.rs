@@ -1807,6 +1807,7 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
 }
 
 pub(crate) mod accounts;
+mod agent_entries;
 mod catalog_read;
 #[cfg(test)]
 mod catalog_read_tests;

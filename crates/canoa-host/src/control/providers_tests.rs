@@ -397,6 +397,8 @@ fn the_apps_fixture_is_what_this_build_lists() {
         "providers": rows(bundled::ALL),
         "usage_readers": usage_readers_of(&[("bundled", &registry)]),
         "gateways": gateways_of(),
+        "agent_entry": super::agent_entries::agent_entry(),
+        "local_agent": super::agent_entries::local_agent(),
     });
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../app/test/fixtures/providers_list.json");

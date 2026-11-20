@@ -447,5 +447,228 @@
       "provider": "foundry_accounts",
       "title": "Foundry Local"
     }
-  ]
+  ],
+  "agent_entry": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Name",
+          "description": "What the entry is called, which a client names it by.",
+          "x-section": "run"
+        },
+        "program": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Program",
+          "description": "A program that speaks ACP on its standard streams, a name found on the search path or a path. Name this or a harness.",
+          "x-section": "run"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Arguments",
+          "description": "The program's arguments, one per line.",
+          "x-section": "run",
+          "default": []
+        },
+        "harness": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Harness",
+          "description": "The harness a library provides, which the host runs in place of a program. Name this or a program.",
+          "x-section": "run"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Title",
+          "description": "What a client is shown for the entry in place of its name.",
+          "x-section": "run"
+        },
+        "usage": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Read its quota with",
+          "description": "How the quota of a program is read; the program's own command decides when none is chosen.",
+          "x-section": "run"
+        },
+        "working_roots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Only in these workspaces",
+          "description": "The folders a session of this entry may be given, each a whole path. Without one it works wherever the client asks.",
+          "x-section": "where",
+          "default": []
+        },
+        "worktrees": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "title": "Works in a worktree",
+          "description": "Whether a session works in a worktree of its folder.",
+          "x-section": "where"
+        },
+        "accounts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Accounts",
+          "description": "The accounts, by name, that a client may start a session on.",
+          "x-section": "accounts",
+          "default": []
+        },
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Profiles",
+          "description": "The profiles, by name, that a client may start a session with.",
+          "x-section": "accounts",
+          "default": []
+        },
+        "own_profile": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "title": "Has its own profile",
+          "description": "Whether the entry has a profile of its own beside the ones it offers.",
+          "x-section": "accounts",
+          "x-advanced": true
+        },
+        "library": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Library",
+          "description": "A harness's library file, which provides it.",
+          "x-section": "library",
+          "x-advanced": true
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Source",
+          "description": "A harness's source file, a script that provides it.",
+          "x-section": "library",
+          "x-advanced": true
+        },
+        "executable": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Executable",
+          "description": "The harness's own executable, when it is not the one it finds.",
+          "x-section": "library",
+          "x-advanced": true
+        },
+        "shared": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "title": "One session for every client",
+          "description": "Whether one session serves every client of the entry, which can then watch and answer in it together.",
+          "x-section": "where",
+          "x-advanced": true
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "form": {
+      "sections": [
+        {
+          "id": "run",
+          "title": "What it runs"
+        },
+        {
+          "id": "where",
+          "title": "Where it works"
+        },
+        {
+          "id": "accounts",
+          "title": "Accounts and profiles"
+        },
+        {
+          "id": "library",
+          "title": "Library"
+        }
+      ],
+      "fields": {
+        "program": {
+          "placeholder": "my-agent"
+        },
+        "harness": {
+          "widget": "harness"
+        },
+        "usage": {
+          "widget": "usage_reader"
+        }
+      }
+    }
+  },
+  "local_agent": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Name",
+          "description": "What the agent is called in the list of sources."
+        },
+        "program": {
+          "type": "string",
+          "title": "Program",
+          "description": "A program that speaks ACP on its standard streams, a name found on the search path or a path."
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Arguments",
+          "description": "The program's arguments, one per line.",
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "program"
+      ]
+    },
+    "form": {
+      "fields": {
+        "program": {
+          "placeholder": "my-agent"
+        }
+      }
+    }
+  }
 }
