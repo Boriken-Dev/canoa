@@ -98,6 +98,13 @@
           "location"
         ],
         "description": "How the person's speech-to-text calls the service that runs these models, when it can."
+      },
+      "voice": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The id of the library's `speech_output` provider that reads text aloud with the type's installed program, when it can: [`ServiceReport::voice`] says the settings that provider is built from."
       }
     },
     "additionalProperties": false,
@@ -904,6 +911,9 @@
           "model"
         ],
         "description": "How to run the copy of a `command` service, when there is a copy that can be."
+      },
+      "voice": {
+        "description": "The settings of the `speech_output` provider [`ModelStoreInfo::voice`] names, when the installed copy can read text aloud: an object that provider's schema accepts."
       }
     },
     "additionalProperties": false

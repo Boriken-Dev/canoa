@@ -82,6 +82,9 @@ pub struct ModelStoreInfo {
     pub settings: Option<ModelSettings>,
     /// How the person's speech-to-text calls the service that runs these models, when it can.
     pub speech: Option<SpeechService>,
+    /// The id of the library's `speech_output` provider that reads text aloud with the type's installed program, when it can:
+    /// [`ServiceReport::voice`] says the settings that provider is built from.
+    pub voice: Option<String>,
 }
 
 /// The per-model settings a store keeps: a guatiao schema of an object, and beside it an optional guatiao-intake form, drawn by
@@ -331,6 +334,9 @@ pub struct ServiceReport {
     pub unavailable: Option<String>,
     /// How to run the copy of a `command` service, when there is a copy that can be.
     pub command: Option<SpeechRun>,
+    /// The settings of the `speech_output` provider [`ModelStoreInfo::voice`] names, when the installed copy can read text aloud:
+    /// an object that provider's schema accepts.
+    pub voice: Option<Value>,
 }
 
 /// How a program turns one recording into text, which the host writes as the person's speech provider.
@@ -367,7 +373,7 @@ impl ModelSettings {
 }
 
 impl ModelStoreInfo {
-    /// A store of rows from `catalog`, with no settings and no speech.
+    /// A store of rows from `catalog`, with no settings, no speech and no voice.
     #[must_use]
     pub fn new(
         title: impl Into<String>,
@@ -382,6 +388,7 @@ impl ModelStoreInfo {
             missing: missing.into(),
             settings: None,
             speech: None,
+            voice: None,
         }
     }
 
@@ -417,6 +424,9 @@ impl ModelStoreInfo {
             {
                 return Some(why);
             }
+        }
+        if self.voice.as_deref().is_some_and(|id| id.trim().is_empty()) {
+            return Some("its voice provider has no id".into());
         }
         if let Some(speech) = &self.speech {
             if speech.title.trim().is_empty() {
@@ -757,6 +767,16 @@ mod tests {
         let mut info = ModelStoreInfo::new("t", "c", "p", "m");
         info.speech = Some(speech);
         info
+    }
+
+    #[test]
+    fn a_voice_provider_is_named_by_an_id() {
+        let mut named = ModelStoreInfo::new("t", "c", "p", "m");
+        assert_eq!(named.problem(), None, "a store needs no voice");
+        named.voice = Some("speech_say_x".to_owned());
+        assert_eq!(named.problem(), None);
+        named.voice = Some(" ".to_owned());
+        assert!(named.problem().is_some_and(|why| why.contains("voice")));
     }
 
     #[test]
