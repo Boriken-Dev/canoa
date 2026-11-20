@@ -256,5 +256,21 @@ void main() {
       expect(tester.takeException(), isNull);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/new_session_$label.png'));
     });
+
+    testWidgets('the centred box of a new session keeps +, the text and the microphone on one row, at $label width', (tester) async {
+      await _app(tester, size: size);
+      await newSession(tester);
+      await chooseSource(tester, 'Scripted');
+      final plus = tester.getRect(find.byKey(const Key('composer-plus')));
+      final field = tester.getRect(find.byType(TextField).last);
+      final mic = tester.getRect(find.byKey(const Key('dictate')));
+      final box = tester.getRect(find.byKey(const Key('composer')));
+      expect(box.height, greaterThanOrEqualTo(112), reason: 'the welcome box is the taller one');
+      expect((field.center.dy - plus.center.dy).abs(), lessThan(12), reason: '+ is beside the text, not on a row of its own');
+      expect((field.center.dy - mic.center.dy).abs(), lessThan(14), reason: 'the microphone is beside the text');
+      expect(plus.right, lessThanOrEqualTo(field.left + 1));
+      expect(mic.left, greaterThanOrEqualTo(field.right - 1));
+      expect(box.bottom - field.bottom, lessThan(16), reason: 'on the bottom line');
+    });
   }
 }
