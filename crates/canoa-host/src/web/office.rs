@@ -6,23 +6,43 @@
 //!
 //! | Route | Relaxed |
 //! | --- | --- |
-//! | `/office/taskpane.html` | Office.js may load; Office on the web may frame it (no `X-Frame-Options`); it may frame `/office/app/` |
-//! | `/office/dialog.html` | Office.js may load; no `Cross-Origin-Opener-Policy`, so the dialog keeps its link to the window that opened it |
+//! | `/office/taskpane.html` | Office on the web may frame it (no `X-Frame-Options`); it may frame `/office/app/` |
+//! | `/office/dialog.html` | no `Cross-Origin-Opener-Policy`, so the dialog keeps its link to the window that opened it |
 //! | `/office/app/` | the site's `index.html`, under today's policy, but its `frame-ancestors` names this page and Office on the web |
 //! | `/office/app/canoa.json` | the host's list of entries, as `/canoa.json` answers it, for the app page that asks for it beside itself |
 //! | `/office/icon-N.png` | `Cross-Origin-Resource-Policy: cross-origin`, since Office draws it from its own origin |
 //!
 //! `taskpane.js`, `relation.js`, `dialog.js`, `launch.js`, `launch-page.js` and the `tools*.js` files are scripts of this origin and
-//! are answered with the usual headers. `launch.html` is the page a server that only offers to start a host shows in place of
+//! are answered with the usual headers. So are Office.js and the files it loads (`/office/js/office.js`, the file of the Office
+//! application and platform, the strings of the person's language), which the build carries from the deps mirror: the pages'
+//! policy then names no origin but this one. Built with `CANOA_OFFICE_JS=cdn`, nothing under `/office/js/` is carried, the pages
+//! name Microsoft's address and the policy of the task pane and the dialog allows that one origin for scripts and connections.
+//! `launch.html` is the page a server that only offers to start a host shows in place of
 //! `taskpane.html`. Every other path under `/office/` is the site's, as before.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// Where Office.js is loaded from: the address in the `<script>` tag of Microsoft Learn's "Referencing the Office JavaScript API
-/// library" (`/office/dev/add-ins/develop/referencing-the-javascript-api-for-office-library-from-its-cdn`), whose page also says
-/// the add-in's network allow lists must hold `*.static.microsoft`. Only this one host is allowed here.
-pub(crate) const JS_ORIGIN: &str = "https://officeapis.public.onecdn.static.microsoft";
+/// Microsoft's CDN, the address in the `<script>` tag of Microsoft Learn's "Referencing the Office JavaScript API library"
+/// (`/office/dev/add-ins/develop/referencing-the-javascript-api-for-office-library-from-its-cdn`), whose page also says the
+/// add-in's network allow lists must hold `*.static.microsoft`. Only this one host is allowed, and only in a build made with
+/// `CANOA_OFFICE_JS=cdn`; the default build carries Office.js itself and allows no origin but its own.
+pub(crate) const JS_ORIGIN: Option<&str> = if cfg!(office_js_cdn) {
+    Some("https://officeapis.public.onecdn.static.microsoft")
+} else {
+    None
+};
+
+/// What the pages' `<script src>` is: Microsoft's file, or this host's own copy beside the pages (`/office/js/office.js`, whose
+/// folder Office.js loads the files it needs from).
+const JS_SOURCE: &str = if cfg!(office_js_cdn) {
+    "https://officeapis.public.onecdn.static.microsoft/1/office.js"
+} else {
+    "js/office.js"
+};
+
+/// The place in the pages' source that [`JS_SOURCE`] takes.
+const JS_PLACEHOLDER: &str = "@OFFICE_JS@";
 
 /// The origins of Office on the web that may frame an add-in's pages. Microsoft publishes no list of the origins that frame a
 /// task pane, so these are a starting list to check against each client's blocked-frame report, and `[host.web] office_frames`
@@ -49,7 +69,7 @@ pub(crate) const APP_INDEX: &str = "/office/app/canoa.json";
 /// The pages of the add-in this host carries, by name under `/office/`.
 pub(crate) struct Page {
     name: &'static str,
-    body: &'static str,
+    body: &'static [u8],
     kind: Kind,
 }
 
@@ -62,70 +82,79 @@ pub(crate) enum Kind {
     Dialog,
     /// A script of this origin.
     Script,
+    /// A file of Office.js's library, carried from the deps mirror.
+    #[cfg_attr(
+        office_js_cdn,
+        allow(dead_code, reason = "a build that names the CDN carries none")
+    )]
+    Library,
 }
 
 const PAGES: &[Page] = &[
     Page {
         name: "taskpane.html",
-        body: include_str!("../../../../clients/office/taskpane/taskpane.html"),
+        body: include_bytes!("../../../../clients/office/taskpane/taskpane.html"),
         kind: Kind::Pane,
     },
     Page {
         name: "taskpane.js",
-        body: include_str!("../../../../clients/office/taskpane/taskpane.js"),
+        body: include_bytes!("../../../../clients/office/taskpane/taskpane.js"),
         kind: Kind::Script,
     },
     Page {
         name: "relation.js",
-        body: include_str!("../../../../clients/office/taskpane/relation.js"),
+        body: include_bytes!("../../../../clients/office/taskpane/relation.js"),
         kind: Kind::Script,
     },
     Page {
         name: "dialog.html",
-        body: include_str!("../../../../clients/office/taskpane/dialog.html"),
+        body: include_bytes!("../../../../clients/office/taskpane/dialog.html"),
         kind: Kind::Dialog,
     },
     Page {
         name: "dialog.js",
-        body: include_str!("../../../../clients/office/taskpane/dialog.js"),
+        body: include_bytes!("../../../../clients/office/taskpane/dialog.js"),
         kind: Kind::Script,
     },
     Page {
         name: "launch.html",
-        body: include_str!("../../../../clients/office/taskpane/launch.html"),
+        body: include_bytes!("../../../../clients/office/taskpane/launch.html"),
         kind: Kind::Pane,
     },
     Page {
         name: "launch.js",
-        body: include_str!("../../../../clients/office/taskpane/launch.js"),
+        body: include_bytes!("../../../../clients/office/taskpane/launch.js"),
         kind: Kind::Script,
     },
     Page {
         name: "launch-page.js",
-        body: include_str!("../../../../clients/office/taskpane/launch-page.js"),
+        body: include_bytes!("../../../../clients/office/taskpane/launch-page.js"),
         kind: Kind::Script,
     },
     Page {
         name: "tools.js",
-        body: include_str!("../../../../clients/office/taskpane/tools.js"),
+        body: include_bytes!("../../../../clients/office/taskpane/tools.js"),
         kind: Kind::Script,
     },
     Page {
         name: "tools-outlook.js",
-        body: include_str!("../../../../clients/office/taskpane/tools-outlook.js"),
+        body: include_bytes!("../../../../clients/office/taskpane/tools-outlook.js"),
         kind: Kind::Script,
     },
     Page {
         name: "tools-word.js",
-        body: include_str!("../../../../clients/office/taskpane/tools-word.js"),
+        body: include_bytes!("../../../../clients/office/taskpane/tools-word.js"),
         kind: Kind::Script,
     },
     Page {
         name: "tools-excel.js",
-        body: include_str!("../../../../clients/office/taskpane/tools-excel.js"),
+        body: include_bytes!("../../../../clients/office/taskpane/tools-excel.js"),
         kind: Kind::Script,
     },
 ];
+
+/// Office.js and the files it loads, by `js/` and their path under it: empty when the build names Microsoft's CDN.
+pub(crate) const LIBRARY: &[Page] = include!(concat!(env!("OUT_DIR"), "/office_js.rs"));
 
 /// The sizes the manifests ask icons in; each is the site's one icon, which the browser scales.
 const ICONS: &[&str] = &["icon-16.png", "icon-32.png", "icon-64.png", "icon-80.png"];
@@ -182,16 +211,20 @@ impl Office {
             .chain(extra.iter().map(String::as_str))
             .collect::<Vec<_>>()
             .join(" ");
+        // Office.js is this origin's own file unless the build names Microsoft's CDN, whose one origin is then allowed.
+        let js = JS_ORIGIN
+            .map(|origin| format!(" {origin}"))
+            .unwrap_or_default();
         Self {
-            // Office.js needs to load, and the pane to frame the app: nothing else is added to a policy with no default.
+            // The pane frames the app: nothing else is added to a policy with no default.
             pane: format!(
-                "default-src 'none'; script-src 'self' {JS_ORIGIN}; style-src 'self' 'unsafe-inline'; \
-                 img-src 'self' data:; font-src 'self' data:; connect-src 'self' {JS_ORIGIN}; frame-src 'self'; \
+                "default-src 'none'; script-src 'self'{js}; style-src 'self' 'unsafe-inline'; \
+                 img-src 'self' data:; font-src 'self' data:; connect-src 'self'{js}; frame-src 'self'; \
                  object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors {framers}"
             ),
             dialog: format!(
-                "default-src 'none'; script-src 'self' {JS_ORIGIN}; style-src 'self' 'unsafe-inline'; \
-                 img-src 'self' data:; connect-src 'self' {JS_ORIGIN}; object-src 'none'; base-uri 'self'; \
+                "default-src 'none'; script-src 'self'{js}; style-src 'self' 'unsafe-inline'; \
+                 img-src 'self' data:; connect-src 'self'{js}; object-src 'none'; base-uri 'self'; \
                  form-action 'none'; frame-ancestors 'none'"
             ),
             app: super::policy_framed(connect, &format!("'self' {framers}")),
@@ -200,6 +233,17 @@ impl Office {
 
     /// The route a request for `segments` is, or `None` for a path that is the site's as ever.
     pub(crate) fn route(segments: &[String]) -> Option<Route> {
+        if let [first, js, rest @ ..] = segments
+            && first == "office"
+            && js == "js"
+            && !rest.is_empty()
+        {
+            let name = segments[1..].join("/");
+            return LIBRARY
+                .iter()
+                .find(|page| page.name == name)
+                .map(Route::Page);
+        }
         let [first, second] = segments else {
             return None;
         };
@@ -243,16 +287,30 @@ impl Office {
                     ("Content-Security-Policy", self.dialog.clone()),
                     ("Cross-Origin-Opener-Policy", String::new()),
                 ],
-                Kind::Script => Vec::new(),
+                Kind::Script | Kind::Library => Vec::new(),
             },
         }
     }
 }
 
 impl Page {
-    /// The page as a body, with its type.
+    /// The page as a body, with its type. A page of HTML names Office.js where its source has the placeholder.
     pub(crate) fn body(&self) -> Vec<u8> {
-        self.body.as_bytes().to_vec()
+        if self.name.ends_with(".html") {
+            return String::from_utf8_lossy(self.body)
+                .replace(JS_PLACEHOLDER, JS_SOURCE)
+                .into_bytes();
+        }
+        self.body.to_vec()
+    }
+
+    /// How long a copy may be reused: Office.js's files are the build's own and change only with it, so an hour is enough; the
+    /// pages are asked again each time.
+    pub(crate) const fn cache(&self) -> &'static str {
+        match self.kind {
+            Kind::Library => "max-age=3600",
+            _ => "no-cache",
+        }
     }
 
     /// Its file name, for the media type.

@@ -22,8 +22,16 @@ jobs:
             bundle: app/build/macos/Build/Products/Release/Canoa.app/Contents/MacOS
             host: canoa
     runs-on: ${{ matrix.os }}
+    env:
+      CANOA_DEPS: ${{ github.workspace }}/deps-cache
     steps:
       - uses: actions/checkout@v4
+      # Office.js, which the add-in carries, comes from the deps branch's mirror: only that folder is fetched.
+      - uses: actions/checkout@v4
+        with:
+          ref: deps
+          path: deps-cache
+          sparse-checkout: cdn/officeapis.public.onecdn.static.microsoft
       - uses: subosito/flutter-action@v2
         with:
           channel: stable

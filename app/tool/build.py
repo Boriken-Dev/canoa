@@ -225,7 +225,19 @@ def restore_env(key: str, value: str | None) -> None:
         os.environ[key] = value
 
 
-def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False, mode: str = "online") -> None:
+def office_js_environment(source: str) -> dict[str, str]:
+    """What the host's build reads to carry Office.js: Microsoft's address for `cdn`, else the deps mirror's copy.
+
+    The default (`bundled`) needs the deps checkout, which crates/canoa-host/build.rs names in its error when there is none.
+    """
+    if source == "cdn":
+        return {"CANOA_OFFICE_JS": "cdn"}
+    deps = None if os.environ.get("CANOA_DEPS") else offline_pub.find_deps(ROOT, SETTINGS)
+    return {"CANOA_OFFICE_JS": "bundled", **({"CANOA_DEPS": str(deps)} if deps else {})}
+
+
+def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False, mode: str = "online",
+                  office_js: str = "bundled") -> None:
     require_tools()
     if portable and platform == "macos":
         raise RuntimeError("Canoa.app is already one bundle: ship build/macos/Build/Products/Release/Canoa.app")
@@ -234,6 +246,9 @@ def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False,
     before = lock.read_bytes() if lock.is_file() else None
     flag = "--debug" if debug else "--release"
     saved = {key: os.environ.get(key) for key in OFFLINE_ENV}
+    office = office_js_environment(office_js)
+    office_saved = {key: os.environ.get(key) for key in office}
+    os.environ.update(office)
     try:
         offline = choose_pub(mode)
         cache = offline.cache if offline else None
@@ -260,6 +275,8 @@ def build_desktop(platform: str, debug: bool, run: bool, portable: bool = False,
         subprocess.run([flutter_program(), "build", platform, flag, *no_pub], check=True, cwd=APP, env=env)
     finally:
         for key, value in saved.items():
+            restore_env(key, value)
+        for key, value in office_saved.items():
             restore_env(key, value)
         if restore_lock(before):
             print("Restored app/pubspec.lock")
@@ -335,14 +352,18 @@ def main() -> None:
     pub.add_argument("--offline", action="store_true",
         help="desktop: resolve from the deps branch, and fail instead of going online (the default is offline, "
              "falling back to online with the reason when a dependency is missing)")
+    parser.add_argument("--office-js", choices=("bundled", "cdn"), default="bundled",
+        help="desktop: where the Office add-in's pages load Office.js from: the host's own copy, taken from the deps "
+             "mirror (the default, nothing is fetched from Microsoft), or Microsoft's CDN")
     parser.add_argument("--platform", choices=tuple(RUNNER_MARKERS),
         help="desktop: the platform (default: this machine's; Flutter cannot cross-build)")
     opts = parser.parse_args()
     configure_environment()
     if opts.debug and opts.kind not in ("chromium", "desktop"):
         parser.error("--debug is only valid for chromium and desktop")
-    if (opts.run or opts.platform or opts.portable or opts.online or opts.offline) and opts.kind != "desktop":
-        parser.error("--run, --platform, --portable, --online and --offline are only valid for desktop")
+    desktop_only = opts.run or opts.platform or opts.portable or opts.online or opts.offline or opts.office_js != "bundled"
+    if desktop_only and opts.kind != "desktop":
+        parser.error("--run, --platform, --portable, --online, --offline and --office-js are only valid for desktop")
     if opts.portable and (opts.debug or opts.run):
         parser.error("--portable packages a release build: not with --debug or --run")
     if opts.kind == "desktop":
@@ -351,7 +372,7 @@ def main() -> None:
             parser.error(f"a {platform} build needs a {platform} machine")
         try:
             build_desktop(platform, opts.debug, opts.run, opts.portable,
-                          "online" if opts.online else "offline" if opts.offline else "auto")
+                          "online" if opts.online else "offline" if opts.offline else "auto", opts.office_js)
         except (RuntimeError, subprocess.CalledProcessError) as error:
             sys.exit(f"build.py: {error}")
         return

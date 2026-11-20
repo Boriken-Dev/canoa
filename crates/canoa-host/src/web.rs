@@ -511,8 +511,10 @@ impl WebServer {
         }
         if web.office {
             tracing::info!(
-                "non-default: host.web.office serves the Office add-in under /office/: Office on the web may frame its pages and Office.js ({}) runs in them",
-                office::JS_ORIGIN
+                "non-default: host.web.office serves the Office add-in under /office/: Office on the web may frame its pages{}",
+                office::JS_ORIGIN.map_or_else(String::new, |origin| format!(
+                    " and Office.js loads from {origin}"
+                ))
             );
             for source in &web.office_frames {
                 tracing::info!(
@@ -1497,7 +1499,7 @@ fn answer(
     if let Some((office, route @ Route::Page(page))) = &office {
         let mut headers = vec![
             ("Content-Type", content_type(page.name()).to_owned()),
-            ("Cache-Control", "no-cache".to_owned()),
+            ("Cache-Control", page.cache().to_owned()),
         ];
         headers.extend(office.headers(route));
         let body = Body::Owned(page.body());

@@ -9,6 +9,12 @@ from build import flutter_args, package_ui, package_debug_extension
 
 
 class DesktopTests(unittest.TestCase):
+    def setUp(self):
+        # A deps checkout the environment names is not looked for, which would run git.
+        patcher = patch.dict("build.os.environ", {"CANOA_DEPS": "/deps"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_runner_detection_follows_the_platform_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             app = Path(tmp)
@@ -135,17 +141,21 @@ class DesktopTests(unittest.TestCase):
         host = build.host_platform()
         with patch("sys.argv", ["build.py", "desktop", "--debug", "--run"]):
             build.main()
-        desktop.assert_called_once_with(host, True, True, False, "auto")
+        desktop.assert_called_once_with(host, True, True, False, "auto", "bundled")
         with patch("sys.argv", ["build.py", "desktop", "--portable"]):
             build.main()
-        desktop.assert_called_with(host, False, False, True, "auto")
+        desktop.assert_called_with(host, False, False, True, "auto", "bundled")
         with patch("sys.argv", ["build.py", "desktop", "--online"]):
             build.main()
-        desktop.assert_called_with(host, False, False, False, "online")
+        desktop.assert_called_with(host, False, False, False, "online", "bundled")
         with patch("sys.argv", ["build.py", "desktop", "--offline"]):
             build.main()
-        desktop.assert_called_with(host, False, False, False, "offline")
-        for bad in (["desktop", "--online", "--offline"], ["pwa", "--offline"]):
+        desktop.assert_called_with(host, False, False, False, "offline", "bundled")
+        with patch("sys.argv", ["build.py", "desktop", "--office-js", "cdn"]):
+            build.main()
+        desktop.assert_called_with(host, False, False, False, "auto", "cdn")
+        for bad in (["desktop", "--online", "--offline"], ["pwa", "--offline"], ["pwa", "--office-js", "cdn"],
+                    ["desktop", "--office-js", "elsewhere"]):
             with patch("sys.argv", ["build.py", *bad]), self.assertRaises(SystemExit):
                 build.main()
         for bad in (["desktop", "--portable", "--debug"], ["desktop", "--portable", "--run"], ["pwa", "--portable"]):
@@ -199,7 +209,7 @@ class DesktopTests(unittest.TestCase):
 @patch("build.subprocess.run")
 class PubModeTests(unittest.TestCase):
     def setUp(self):
-        patcher = patch.dict("build.os.environ", {"PUB_CACHE": "/user/cache"})
+        patcher = patch.dict("build.os.environ", {"PUB_CACHE": "/user/cache", "CANOA_DEPS": "/deps"})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -347,6 +357,24 @@ class FinishWebTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "not all in the deps mirror"):
                     build.finish_web(dist)
             self.assertFalse((dist / "flutter_service_worker.js").exists())
+
+
+class OfficeJsTests(unittest.TestCase):
+    def test_the_cdn_choice_names_no_deps_checkout(self):
+        self.assertEqual(build.office_js_environment("cdn"), {"CANOA_OFFICE_JS": "cdn"})
+
+    def test_the_default_carries_office_js_from_the_deps_checkout_found(self):
+        with patch.dict("os.environ", {}, clear=False) as env, patch("build.offline_pub.find_deps", return_value=Path("/deps")):
+            env.pop("CANOA_DEPS", None)
+            self.assertEqual(
+                build.office_js_environment("bundled"),
+                {"CANOA_OFFICE_JS": "bundled", "CANOA_DEPS": str(Path("/deps"))},
+            )
+
+    def test_a_deps_checkout_the_environment_names_is_left_as_it_is(self):
+        with patch.dict("os.environ", {"CANOA_DEPS": "/mine"}), patch("build.offline_pub.find_deps") as find:
+            self.assertEqual(build.office_js_environment("bundled"), {"CANOA_OFFICE_JS": "bundled"})
+            find.assert_not_called()
 
 
 if __name__ == "__main__":

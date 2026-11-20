@@ -50,7 +50,7 @@ pub fn answer(inner: &Inner, request: &Request, conn: &Conn, path: &str) -> Opti
         web::Route::Page(page) => {
             let mut all = vec![
                 ("Content-Type", web::content_type(page.name()).to_owned()),
-                ("Cache-Control", "no-cache".to_owned()),
+                ("Cache-Control", page.cache().to_owned()),
             ];
             all.extend(headers);
             Response {

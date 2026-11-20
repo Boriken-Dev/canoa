@@ -27,10 +27,18 @@ jobs:
     env:
       # The site canoa's web feature builds in, which --all-features turns on.
       CANOA_WEB_DIST: ${{ github.workspace }}/crates/canoa-host/tests/site
+      # The deps checkout whose cdn/ holds the Office.js files the host carries.
+      CANOA_DEPS: ${{ github.workspace }}/deps-cache
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
+      # Office.js, which the add-in carries, comes from the deps branch's mirror: only that folder is fetched.
+      - uses: actions/checkout@v4
+        with:
+          ref: deps
+          path: deps-cache
+          sparse-checkout: cdn/officeapis.public.onecdn.static.microsoft
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}

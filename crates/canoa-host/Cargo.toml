@@ -33,6 +33,11 @@ foundry = ["canoa-foundry/sdk"]
 # it links the system's libpam.
 portal = ["dep:coqui-access", "dep:coqui-access-system", "dep:coqui-access-signin", "dep:coqui-access-kit", "dep:coqui-peer-tls", "dep:qrcode", "dep:tungstenite"]
 
+# build.rs checks the Office.js files it carries against the digests tools/cdn_files.json pins.
+[build-dependencies]
+serde_json.workspace = true
+sha2.workspace = true
+
 [dependencies]
 coqui-access = { workspace = true, optional = true }
 coqui-access-system = { workspace = true, optional = true }

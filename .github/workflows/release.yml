@@ -23,6 +23,12 @@ jobs:
       pages: write
     steps:
       - uses: actions/checkout@v4
+      # Office.js, which the add-in carries, comes from the deps branch's mirror: only that folder is fetched.
+      - uses: actions/checkout@v4
+        with:
+          ref: deps
+          path: deps-cache
+          sparse-checkout: cdn/officeapis.public.onecdn.static.microsoft
       - uses: actions/configure-pages@v5
         with:
           enablement: true
@@ -37,6 +43,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings
           # The site canoa's web feature builds in.
           CANOA_WEB_DIST: ${{ github.workspace }}/crates/canoa-host/tests/site
+          CANOA_DEPS: ${{ github.workspace }}/deps-cache
       - run: mkdocs build --strict
 
   # The docs workflow owns every Pages deploy; the release does not wait for it.

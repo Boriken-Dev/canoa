@@ -26,6 +26,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      # Office.js, which the add-in carries, comes from the deps branch's mirror: only that folder is fetched.
+      - uses: actions/checkout@v4
+        with:
+          ref: deps
+          path: deps-cache
+          sparse-checkout: cdn/officeapis.public.onecdn.static.microsoft
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
@@ -38,6 +44,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings
           # The site canoa's web feature builds in.
           CANOA_WEB_DIST: ${{ github.workspace }}/crates/canoa-host/tests/site
+          CANOA_DEPS: ${{ github.workspace }}/deps-cache
       - name: Build documentation
         run: mkdocs build --strict
       - name: Add Rust API reference

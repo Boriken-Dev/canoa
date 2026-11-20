@@ -156,9 +156,10 @@ fn a_pane_opened_with_no_host_finds_the_offer_and_asking_starts_a_host_and_lets_
         ask(launcher.address, "GET", "/office/taskpane.html", &[]).expect("an answer");
     assert_eq!(status, 200);
     assert!(head.contains("content-type: text/html"), "{head}");
-    assert!(
+    assert_eq!(
         head.contains("officeapis.public.onecdn.static.microsoft"),
-        "Office.js may load: {head}"
+        cfg!(office_js_cdn),
+        "Office.js is this origin's own unless the build names Microsoft's CDN: {head}"
     );
     assert!(body.contains("launch-page.js"), "{body}");
     assert_eq!(

@@ -1230,7 +1230,26 @@ fn directives(policy: &str) -> BTreeMap<&str, &str> {
         .collect()
 }
 
-/// The add-in's own file `name` under `clients/office/taskpane`, as the repository holds it.
+/// What a page's `script-src` and `connect-src` hold: this origin, and Microsoft's CDN only in a build that names it.
+fn office_js_sources() -> &'static str {
+    if cfg!(office_js_cdn) {
+        "'self' https://officeapis.public.onecdn.static.microsoft"
+    } else {
+        "'self'"
+    }
+}
+
+/// Where a page of HTML in that build names Office.js.
+fn office_js_address() -> &'static str {
+    if cfg!(office_js_cdn) {
+        "https://officeapis.public.onecdn.static.microsoft/1/office.js"
+    } else {
+        "js/office.js"
+    }
+}
+
+/// The add-in's own file `name` under `clients/office/taskpane`, as the repository holds it, with the place of Office.js in a page
+/// of HTML filled in as this build does.
 fn taskpane_file(name: &str) -> Vec<u8> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -1239,7 +1258,14 @@ fn taskpane_file(name: &str) -> Vec<u8> {
         .join("office")
         .join("taskpane")
         .join(name);
-    std::fs::read(path).expect("a file of the add-in")
+    let bytes = std::fs::read(path).expect("a file of the add-in");
+    if name.ends_with(".html") {
+        return String::from_utf8(bytes)
+            .expect("UTF-8")
+            .replace("@OFFICE_JS@", office_js_address())
+            .into_bytes();
+    }
+    bytes
 }
 
 /// A site with an index and the icon the add-in's icons are, and a server on it with the add-in's routes `on`.
@@ -1282,10 +1308,8 @@ fn the_task_pane_may_load_office_js_and_be_framed_by_office_and_nothing_else_may
     assert_eq!(pane.body, taskpane_file("taskpane.html"));
     assert_eq!(pane.headers["content-type"], "text/html; charset=utf-8");
     let policy = directives(&pane.headers["content-security-policy"]);
-    assert_eq!(
-        policy["script-src"],
-        "'self' https://officeapis.public.onecdn.static.microsoft"
-    );
+    assert_eq!(policy["script-src"], office_js_sources());
+    assert_eq!(policy["connect-src"], office_js_sources());
     assert_eq!(policy["default-src"], "'none'");
     assert_eq!(policy["frame-src"], "'self'");
     assert_eq!(policy["object-src"], "'none'");
@@ -1308,10 +1332,15 @@ fn the_task_pane_may_load_office_js_and_be_framed_by_office_and_nothing_else_may
     );
     assert_eq!(pane.headers["x-content-type-options"], "nosniff");
     assert_eq!(pane.headers["cross-origin-opener-policy"], "same-origin");
-    // The page names Office.js at the address the policy allows, and no other address.
+    // The page names Office.js at the address the policy allows, and no other address: this host's own copy unless the build names
+    // Microsoft's.
     let html = String::from_utf8(pane.body).expect("UTF-8");
-    assert!(html.contains("src=\"https://officeapis.public.onecdn.static.microsoft/1/office.js\""));
-    assert_eq!(html.matches("https://").count(), 1, "{html}");
+    assert!(html.contains(&format!("src=\"{}\"", office_js_address())));
+    assert_eq!(
+        html.matches("https://").count(),
+        usize::from(cfg!(office_js_cdn)),
+        "{html}"
+    );
 }
 
 #[test]
@@ -1321,10 +1350,8 @@ fn the_dialog_loads_office_js_and_keeps_its_link_to_its_opener_but_is_never_fram
     assert_eq!(dialog.status, 200);
     assert_eq!(dialog.body, taskpane_file("dialog.html"));
     let policy = directives(&dialog.headers["content-security-policy"]);
-    assert_eq!(
-        policy["script-src"],
-        "'self' https://officeapis.public.onecdn.static.microsoft"
-    );
+    assert_eq!(policy["script-src"], office_js_sources());
+    assert_eq!(policy["connect-src"], office_js_sources());
     assert_eq!(policy["frame-ancestors"], "'none'");
     assert!(!policy.contains_key("frame-src"));
     assert_eq!(dialog.headers["x-frame-options"], "DENY");
@@ -1351,6 +1378,96 @@ fn the_add_ins_scripts_are_this_origins_and_carry_the_usual_headers() {
         assert_eq!(policy["frame-ancestors"], "'none'", "{name}");
         assert_eq!(script.headers["x-frame-options"], "DENY", "{name}");
     }
+}
+
+#[cfg(not(office_js_cdn))]
+#[test]
+fn office_js_and_the_files_it_loads_are_this_hosts_own_copy_of_the_pinned_files() {
+    let (_site, address) = office_site("office-library", true, &[]);
+    let folder = Path::new(env!("CANOA_OFFICE_JS_BUILT"));
+    for name in [
+        "office.js",
+        "microsoftajax.js",
+        "outlook-web-16.01.js",
+        "word-win32-16.01.js",
+        "excel-mac-16.00.js",
+        "powerpoint-web-16.00.js",
+        "en-us/office_strings.js",
+        "ja-jp/outlook_strings.js",
+    ] {
+        let served = get(address, &format!("/office/js/{name}"));
+        assert_eq!(served.status, 200, "{name}");
+        assert_eq!(
+            served.body,
+            std::fs::read(folder.join(name)).expect("a mirrored file"),
+            "{name}"
+        );
+        assert_eq!(
+            served.headers["content-type"], "text/javascript; charset=utf-8",
+            "{name}"
+        );
+        assert_eq!(served.headers["cache-control"], "max-age=3600", "{name}");
+        // The usual policy, which names no origin but this one.
+        let policy = &served.headers["content-security-policy"];
+        assert!(!policy.contains("static.microsoft"), "{name}: {policy}");
+    }
+    // What the build does not carry (Microsoft's telemetry, sign-in calls) and what is not a file are not there.
+    for path in [
+        "/office/js/telemetry/oteljs_agave.js",
+        "/office/js/ariatelemetry/aria-web-telemetry.js",
+        "/office/js/webauth/webauth.browserauth.js",
+        "/office/js/nothing.js",
+        "/office/js/../taskpane.js",
+    ] {
+        assert_eq!(get(address, path).status, 404, "{path}");
+    }
+}
+
+#[cfg(not(office_js_cdn))]
+#[test]
+fn every_file_the_list_pins_for_office_js_is_carried_and_nothing_else() {
+    let list: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+                .join("tools")
+                .join("cdn_files.json"),
+        )
+        .expect("the list"),
+    )
+    .expect("JSON");
+    let mut pinned: Vec<String> = list["files"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter(|entry| entry["host"] == "officeapis.public.onecdn.static.microsoft")
+        .map(|entry| {
+            format!(
+                "js/{}",
+                entry["path"]
+                    .as_str()
+                    .expect("a path")
+                    .trim_start_matches("/1/")
+            )
+        })
+        .collect();
+    let mut carried: Vec<String> = office::LIBRARY
+        .iter()
+        .map(|page| page.name().to_owned())
+        .collect();
+    pinned.sort();
+    carried.sort();
+    assert!(pinned.len() > 100, "{}", pinned.len());
+    assert_eq!(carried, pinned);
+}
+
+#[cfg(office_js_cdn)]
+#[test]
+fn a_build_that_names_the_cdn_carries_no_office_js() {
+    let (_site, address) = office_site("office-no-library", true, &[]);
+    assert!(office::LIBRARY.is_empty());
+    assert_eq!(get(address, "/office/js/office.js").status, 404);
 }
 
 #[test]
@@ -1706,7 +1823,10 @@ fn the_task_pane_is_served_over_tls_with_the_certificate_the_person_names() {
         String::from_utf8_lossy(body).contains("office.js"),
         "the task pane's page"
     );
-    assert!(reply.headers["content-security-policy"].contains("static.microsoft"));
+    assert_eq!(
+        reply.headers["content-security-policy"].contains("static.microsoft"),
+        cfg!(office_js_cdn)
+    );
 }
 
 #[test]

@@ -7,6 +7,10 @@
 //
 // The browser is told to ignore this run's certificate for its own throwaway profile; nothing is put in any trust store. The
 // certificate is made with `openssl`, which has to be on PATH.
+//
+// The browser resolves no name but localhost, so a request to any other host fails: the task pane has to load Office.js, and
+// everything it loads, from the host itself (a build made with CANOA_OFFICE_JS=cdn is the one that goes to Microsoft's address,
+// and this run then fails on it).
 import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -83,7 +87,8 @@ try {
   const profile = path.join(work, 'profile');
   chrome = spawn(browser, [
     '--headless=new', `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check',
-    '--ignore-certificate-errors', '--window-size=1000,800', 'about:blank',
+    '--ignore-certificate-errors', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1',
+    '--window-size=1000,800', 'about:blank',
   ], { stdio: 'ignore' });
   const debug = await waitFor('the browser', () => {
     try {
@@ -105,12 +110,17 @@ try {
   const peers = () => execFileSync(hostProgram, ['peers', '--format', 'json'], { env, encoding: 'utf8' })
     .split('\n').filter(Boolean).map((line) => JSON.parse(line));
 
-  await check('the task pane page is served over HTTPS and loads Office.js under its policy', async () => {
+  await check('the task pane page is served over HTTPS and loads Office.js, from the host alone, under its policy', async () => {
     const pane = await open(`${origin}/office/taskpane.html`);
     await waitFor('the pane', () => pane.run('document.readyState === "complete"').catch(() => false), 30_000);
     await sleep(2000);
     const refused = await pane.run('window.__refused');
     if (refused.length) throw new Error(`refused: ${refused.join('; ')}`);
+    if ((await pane.run('typeof Office')) !== 'object') throw new Error('Office.js is not defined in the pane');
+    const loaded = await pane.run('performance.getEntriesByType("resource").map((entry) => entry.name)');
+    const elsewhere = loaded.filter((name) => !name.startsWith(`${origin}/`));
+    if (elsewhere.length) throw new Error(`the pane asked for ${elsewhere.join(', ')}`);
+    if (!loaded.includes(`${origin}/office/js/office.js`)) throw new Error(`Office.js was not loaded from the host: ${loaded.join(', ')}`);
     pane.close();
   });
 

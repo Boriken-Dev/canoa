@@ -157,7 +157,11 @@ fn the_pages_are_given_to_a_browser_that_has_not_signed_in_each_with_the_policy_
     assert_eq!(pane.status, 200);
     assert!(pane.body.contains("office.js"));
     let policy = pane.header("content-security-policy").unwrap();
-    assert!(policy.contains("https://officeapis.public.onecdn.static.microsoft"));
+    assert_eq!(
+        policy.contains("https://officeapis.public.onecdn.static.microsoft"),
+        cfg!(office_js_cdn),
+        "Office.js is this origin's own unless the build names Microsoft's CDN: {policy}"
+    );
     assert!(policy.contains("frame-src 'self'"));
     assert!(policy.contains("frame-ancestors https://outlook.office.com"));
     assert!(!policy.contains("frame-ancestors 'none'"));
@@ -168,7 +172,11 @@ fn the_pages_are_given_to_a_browser_that_has_not_signed_in_each_with_the_policy_
     let dialog = call(rig.addr, "GET", "/office/dialog.html", &[], "");
     assert_eq!(dialog.status, 200);
     let policy = dialog.header("content-security-policy").unwrap();
-    assert!(policy.contains("https://officeapis.public.onecdn.static.microsoft"));
+    assert_eq!(
+        policy.contains("https://officeapis.public.onecdn.static.microsoft"),
+        cfg!(office_js_cdn),
+        "Office.js is this origin's own unless the build names Microsoft's CDN: {policy}"
+    );
     assert!(policy.contains("frame-ancestors 'none'"));
     assert_eq!(dialog.header("x-frame-options"), Some("DENY"));
     assert_eq!(
