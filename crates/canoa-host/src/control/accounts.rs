@@ -85,8 +85,9 @@ fn entries_of(config: &Config, portal: bool) -> Vec<Value> {
 }
 
 /// The pools an entry of `harness` offers, as `accounts/entries` says them: each with its standard, whether the host made it,
-/// whether the entry names it, and its accounts, each saying whether the entry offers it by itself. An entry that names a pool its
-/// harness cannot take has none listed here and does not start.
+/// whether the entry names it, and its accounts, each saying whether the entry offers it by itself. The host's `any-<standard>`
+/// is left out while fewer than two accounts hold it, though a session that names it still resolves it. An entry that names a pool
+/// its harness cannot take has none listed here and does not start.
 fn pools_of(
     config: &Config,
     catalogs: &Catalogs<'_>,
@@ -96,6 +97,7 @@ fn pools_of(
     crate::pools::for_entry(config, catalogs, harness, names)
         .unwrap_or_default()
         .iter()
+        .filter(|pool| crate::pools::worth_listing(pool.automatic, pool.members.len()))
         .map(|pool| {
             json!({
                 "name": pool.name,

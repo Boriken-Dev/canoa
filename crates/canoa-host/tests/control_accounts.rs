@@ -652,6 +652,91 @@ fn an_entry_is_offered_the_accounts_the_person_picks_and_the_host_says_it_must_s
 }
 
 #[test]
+fn the_hosts_pool_of_a_standard_is_listed_once_two_accounts_hold_it() {
+    let host = host();
+    let link = host.local.open("@control").expect("a link");
+    let mut app = app_of(&host);
+    let automatic = |listed: &Value| -> Vec<(String, Vec<String>)> {
+        listed["pools"]
+            .as_array()
+            .expect("pools")
+            .iter()
+            .map(|pool| {
+                (
+                    pool["name"].as_str().expect("a name").to_owned(),
+                    pool["accounts"]
+                        .as_array()
+                        .expect("accounts")
+                        .iter()
+                        .map(|name| name.as_str().expect("a name").to_owned())
+                        .collect(),
+                )
+            })
+            .collect()
+    };
+    let entry_pools = |id: u64| -> Vec<String> {
+        let entries = plain_call(&link, id, "accounts/entries", json!({})).expect("entries");
+        entries["entries"][0]["pools"]
+            .as_array()
+            .map(|pools| {
+                pools
+                    .iter()
+                    .map(|pool| pool["name"].as_str().expect("a name").to_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    // Each harness's own login is a pool of one, which cannot rotate: none is listed.
+    let none = plain_call(&link, 1, "pools/list", json!({})).expect("listed");
+    assert!(automatic(&none).is_empty(), "{none}");
+    assert!(entry_pools(2).is_empty(), "{:?}", entry_pools(2));
+    let (_, added) = app.drive(
+        &link,
+        3,
+        "accounts/add",
+        &json!({"name": "one", "harness": "claude", "method": "api-key"}),
+        &Typed::Fills(&[("api_key", KEY)]),
+    );
+    added.expect("a key account");
+    plain_call(
+        &link,
+        9,
+        "accounts/offer",
+        json!({"entry": "Claude", "accounts": ["one"]}),
+    )
+    .expect("offered");
+    let one = plain_call(&link, 4, "pools/list", json!({})).expect("listed");
+    assert!(automatic(&one).is_empty(), "a pool of one account: {one}");
+    assert!(entry_pools(5).is_empty(), "{:?}", entry_pools(5));
+    let (_, added) = app.drive(
+        &link,
+        6,
+        "accounts/add",
+        &json!({"name": "two", "harness": "claude", "method": "api-key"}),
+        &Typed::Fills(&[("api_key", KEY)]),
+    );
+    added.expect("a second key account");
+    plain_call(
+        &link,
+        10,
+        "accounts/offer",
+        json!({"entry": "Claude", "accounts": ["one", "two"]}),
+    )
+    .expect("offered");
+    let both = plain_call(&link, 7, "pools/list", json!({})).expect("listed");
+    assert_eq!(
+        automatic(&both),
+        [(
+            "any-anthropic-api".to_owned(),
+            vec!["one".to_owned(), "two".to_owned()]
+        )],
+        "{both}"
+    );
+    assert_eq!(entry_pools(8), ["any-anthropic-api"]);
+    host.stop();
+}
+
+#[test]
 fn a_pool_is_made_edited_and_removed_over_the_link_and_an_entry_offers_it() {
     let host = host();
     let link = host.local.open("@control").expect("a link");

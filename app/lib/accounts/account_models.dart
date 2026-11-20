@@ -226,6 +226,10 @@ final class PoolInfo {
 
   /// The members, in the order the pool takes them.
   final List<String> accounts;
+
+  /// Whether a list shows it: the host's own pool of fewer than two accounts cannot rotate, so only the person's own and one of two or
+  /// more are shown. A session that names the pool still runs on it.
+  bool get listable => !automatic || accounts.length >= 2;
 }
 
 /// An account of a pool as one entry offers it.
@@ -264,6 +268,9 @@ final class EntryPool {
   /// Whether the entry names it in its `accounts`.
   final bool listed;
   final List<PoolMember> members;
+
+  /// Whether a picker shows it: as [PoolInfo.listable], by the accounts the entry can run on.
+  bool get listable => !automatic || members.length >= 2;
 }
 
 /// A limit the client heard of for an account, which the host holds the account back for: until [resetsAt] (Unix seconds) when the

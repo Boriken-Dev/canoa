@@ -69,7 +69,7 @@ class AccountsController extends ChangeNotifier {
   List<AccountInfo> get listed => [..._accounts, ..._logins];
 
   /// The pools of the host, the person's own first and then its own `any-<standard>` ones.
-  List<PoolInfo> get pools => _pools;
+  List<PoolInfo> get pools => [for (final each in _pools) if (each.listable) each];
 
   /// The agent entries the host lists, which a built-in source is one of before canoa.cfg names it.
   List<AccountEntry> get hostEntries => _entries;
@@ -98,7 +98,7 @@ class AccountsController extends ChangeNotifier {
   ];
 
   /// The pools the agent entry [entry] offers a session: those it names and the host's own its harness accepts.
-  List<EntryPool> poolsOf(String entry) => hostEntry(entry)?.pools ?? const [];
+  List<EntryPool> poolsOf(String entry) => [for (final each in hostEntry(entry)?.pools ?? const <EntryPool>[]) if (each.listable) each];
 
   /// The pool of [entry] called [name]; null when [name] is no pool the entry offers (an account's name, say).
   EntryPool? poolOf(String entry, String? name) => name == null ? null : poolsOf(entry).where((each) => each.name == name).firstOrNull;

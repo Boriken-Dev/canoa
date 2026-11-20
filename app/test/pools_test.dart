@@ -98,7 +98,7 @@ void main() {
     var restarts = 0;
     final controller = _controller(host, restart: () async => restarts++);
     await controller.refresh();
-    expect(controller.pools.map((each) => each.name), ['keys', 'any-anthropic-api', 'any-claude-code', 'any-openai-api']);
+    expect(controller.pools.map((each) => each.name), ['keys', 'any-anthropic-api', 'any-claude-code']);
     // A new pool may be of any standard an account provides, and holds exactly those accounts, `local` among them when the host's
     // pool of the standard holds it.
     expect(controller.standards, containsAll(['anthropic-api', 'claude-code', 'openai-api']));
@@ -128,7 +128,8 @@ void main() {
         accepts: ['claude-code', 'anthropic-api'],
         pools: [
           EntryPool(name: 'keys', standard: 'anthropic-api', listed: true, members: [PoolMember(name: 'two', listed: true)]),
-          EntryPool(name: 'any-claude-code', standard: 'claude-code', automatic: true, members: [PoolMember(name: 'local', listed: true)]),
+          EntryPool(name: 'any-claude-code', standard: 'claude-code', automatic: true, members: [PoolMember(name: 'local', listed: true), PoolMember(name: 'login', listed: true)]),
+          EntryPool(name: 'any-anthropic-api', standard: 'anthropic-api', automatic: true, members: [PoolMember(name: 'one', listed: true)]),
         ],
       ));
     const config = CanoaConfig(host: {
@@ -138,7 +139,8 @@ void main() {
     });
     final controller = _controller(host, config: config);
     await controller.refresh();
-    expect(controller.poolsOf('Claude').map((each) => each.name), ['keys', 'any-claude-code']);
+    expect(controller.poolsOf('Claude').map((each) => each.name), ['keys', 'any-claude-code'], reason: 'a pool of one account cannot rotate, so no picker shows it');
+    expect(controller.poolOf('Claude', 'any-anthropic-api'), isNull);
     expect(controller.poolOf('Claude', 'keys')?.listed, isTrue);
     expect(controller.poolOf('Claude', 'login'), isNull, reason: 'an account is no pool');
     expect(controller.defaultOf('Claude'), 'keys', reason: 'the entry lists a pool first');
@@ -169,6 +171,9 @@ void main() {
     expect(find.byKey(const Key('pool-automatic any-claude-code')), findsOneWidget);
     expect(find.byKey(const Key('pool-edit any-claude-code')), findsNothing, reason: 'the host\'s own pool is not edited');
     expect(find.byKey(const Key('pool-remove any-claude-code')), findsNothing);
+    // The host's pool of one account (the OpenAI key) cannot rotate, so Settings does not list it; the person's own pool of one would be.
+    expect(find.byKey(const Key('pool any-openai-api')), findsNothing);
+    expect(controller.pools.map((each) => each.name), ['keys', 'any-anthropic-api', 'any-claude-code']);
   });
 
   testWidgets('a pool is made of the accounts that provide the standard chosen, in the order given, and saved through the host', (tester) async {

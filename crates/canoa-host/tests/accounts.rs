@@ -333,6 +333,24 @@ fn initialize_on(
 }
 
 #[test]
+fn a_session_that_names_the_hosts_pool_of_one_account_still_starts() {
+    // Nothing lists a pool of one account, but a session that names it runs on its account.
+    let fixture = offering("api-key", "sk-test-key-0000\n", "");
+    let (host, _log, _record, _cfg) = fixture.serve();
+    let client = support::key();
+    host.pair(&client);
+    let answer = with_link(host.url("Claude"), &client, host.peer, |rpc| {
+        initialize_on(rpc, "any-anthropic-api", None).expect("a pool of one starts")
+    })
+    .expect("served");
+    assert_eq!(
+        answer["_meta"][ACCOUNT_META]["pool"], "any-anthropic-api",
+        "{answer}"
+    );
+    assert_eq!(answer["_meta"][ACCOUNT_META]["name"], "one", "{answer}");
+}
+
+#[test]
 fn a_session_on_a_pool_runs_on_the_first_of_its_accounts_that_is_free_and_says_which() {
     let fixture = with_a_pool("\"both\"");
     let (host, _log, _record, _cfg) = fixture.serve();

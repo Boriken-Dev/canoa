@@ -28,11 +28,11 @@ pub(super) fn pool_json(pool: &Pool) -> Value {
     })
 }
 
-/// `pools/list` `{}`: every pool, the person's own in the file's order and then the host's `any-<standard>`, each with its
-/// standard and its accounts by name.
+/// `pools/list` `{}`: every pool, the person's own in the file's order and then the host's `any-<standard>` that hold two or more
+/// accounts, each with its standard and its accounts by name.
 pub(super) fn list(config: &Config) -> Value {
     let catalogs = Catalogs::new(config);
-    let rows: Vec<Value> = pools::listing(config, &catalogs)
+    let rows: Vec<Value> = pools::listed(config, &catalogs)
         .iter()
         .map(pool_json)
         .collect();

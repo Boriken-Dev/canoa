@@ -4,7 +4,9 @@
 //! standards it accepts and the standard of its own login (the first it accepts, which the account `local` provides), and a pool
 //! is the accounts that provide the standard it names. Besides the pools a person writes (`[host.pools.NAME]`), the host offers
 //! `any-<standard>` for every standard at least one account provides, holding all of them, so nothing is written for it and it
-//! follows the accounts as they come and go.
+//! follows the accounts as they come and go. A listing (`pools/list`, what an entry offers to choose from) shows one only while two
+//! or more accounts hold it, since a pool of one account cannot rotate; a session or canoa.cfg that names it still resolves it,
+//! whatever it holds.
 //!
 //! A pool is a set of accounts and is never an account of its own: each member keeps its own credential, usage and holder, so an
 //! account that is in the pools of two standards is still one account.
@@ -172,6 +174,19 @@ pub(crate) fn listing(config: &Config, catalogs: &Catalogs<'_>) -> Vec<Pool> {
             accounts,
         });
     }
+    pools
+}
+
+/// Whether a pool is shown in a listing: the person's own always, the host's `any-<standard>` only with two or more accounts,
+/// since one cannot rotate. Resolving a pool by name does not ask this.
+pub(crate) const fn worth_listing(automatic: bool, accounts: usize) -> bool {
+    !automatic || accounts >= 2
+}
+
+/// [`listing`] as a person is shown it: without the host's pools that hold fewer than two accounts.
+pub(crate) fn listed(config: &Config, catalogs: &Catalogs<'_>) -> Vec<Pool> {
+    let mut pools = listing(config, catalogs);
+    pools.retain(|pool| worth_listing(pool.automatic, pool.accounts.len()));
     pools
 }
 

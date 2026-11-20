@@ -106,6 +106,104 @@ fn the_host_makes_an_any_pool_of_each_standard_and_it_follows_the_accounts() {
     );
 }
 
+/// The pools by name that a person is shown.
+fn shown(config: &Config, catalogs: &Catalogs<'_>) -> Vec<String> {
+    listed(config, catalogs)
+        .into_iter()
+        .map(|pool| pool.name)
+        .collect()
+}
+
+#[test]
+fn the_host_lists_its_any_pool_only_when_two_accounts_hold_it_and_still_resolves_one_that_holds_one()
+ {
+    // No account but each harness's own login: every pool the host makes holds one account, so none is listed.
+    let none = config("");
+    let catalogs = Catalogs::new(&none);
+    assert!(
+        listing(&none, &catalogs)
+            .iter()
+            .any(|pool| pool.name == "any-pi" && names(pool) == ["local"]),
+        "Pi's own login makes a pool of one"
+    );
+    assert!(
+        shown(&none, &catalogs).is_empty(),
+        "{:?}",
+        shown(&none, &catalogs)
+    );
+    // A session or canoa.cfg that names it still gets it, and the entry still offers it for a session to choose.
+    let any_pi = ["any-pi".to_owned()];
+    assert_eq!(
+        expand(&none, &catalogs, "pi", &any_pi).expect("resolves"),
+        ["local"]
+    );
+    let offered = for_entry(&none, &catalogs, "pi", &any_pi).expect("pools");
+    assert!(
+        offered
+            .iter()
+            .any(|pool| pool.name == "any-pi" && pool.members.len() == 1),
+        "{offered:?}"
+    );
+    // A Pi sign-in account makes it a pool of two, and it is listed with both.
+    let two =
+        config("[host.accounts.pi-one]\nharness = \"pi\"\nkind = \"pi-oauth\"\nid = \"id-pi\"\n");
+    let catalogs = Catalogs::new(&two);
+    assert_eq!(shown(&two, &catalogs), ["any-pi"]);
+    assert_eq!(
+        names(pool_named(&listed(&two, &catalogs), "any-pi")),
+        ["local", "pi-one"]
+    );
+    // The person's own pool is listed however many accounts it holds.
+    let own = config(
+        "[host.accounts.api-one]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-one\"\n\
+         [host.pools.mine]\nstandard = \"anthropic-api\"\naccounts = [\"api-one\"]\n",
+    );
+    assert_eq!(shown(&own, &Catalogs::new(&own)), ["mine"]);
+}
+
+#[test]
+fn a_pi_provider_key_is_in_the_pool_of_the_api_its_variable_names_beside_an_api_key_account() {
+    let both = config(
+        "[host.accounts.api-one]\nharness = \"claude\"\nkind = \"anthropic-api-key\"\nid = \"id-one\"\n\
+         [host.accounts.pi-key]\nharness = \"pi\"\nkind = \"pi-api-key\"\nid = \"id-key\"\nsettings = { variable = \"ANTHROPIC_API_KEY\" }\n\
+         [host.accounts.pi-other]\nharness = \"pi\"\nkind = \"pi-api-key\"\nid = \"id-other\"\nsettings = { variable = \"MISTRAL_API_KEY\" }\n\
+         [host.pools.mixed]\nstandard = \"anthropic-api\"\naccounts = [\"api-one\", \"pi-key\"]\n",
+    );
+    // Pi lists the kind as its harness applies it; the kind, not Canoa, says the variable picks the standard.
+    let pi = canoa_pi::acp::accounts::catalog();
+    let catalogs = Catalogs::with(&both, "pi", (&pi, &pi), true);
+    check(&both, &catalogs).expect("the key of the Anthropic variable provides the Anthropic API");
+    let pools = listed(&both, &catalogs);
+    assert_eq!(
+        names(pool_named(&pools, "any-anthropic-api")),
+        ["api-one", "pi-key"]
+    );
+    assert!(
+        pools
+            .iter()
+            .all(|pool| !pool.accounts.contains(&"pi-other".to_owned())),
+        "a key of a variable no API is named for provides none: {pools:?}"
+    );
+    // Claude Code runs it as an Anthropic key and so is offered both.
+    assert_eq!(
+        expand(
+            &both,
+            &catalogs,
+            "claude",
+            &["any-anthropic-api".to_owned()]
+        )
+        .expect("resolves"),
+        ["api-one", "pi-key"]
+    );
+    let other = config(
+        "[host.accounts.pi-other]\nharness = \"pi\"\nkind = \"pi-api-key\"\nid = \"id-other\"\nsettings = { variable = \"MISTRAL_API_KEY\" }\n\
+         [host.pools.mixed]\nstandard = \"anthropic-api\"\naccounts = [\"pi-other\"]\n",
+    );
+    let why =
+        check(&other, &Catalogs::with(&other, "pi", (&pi, &pi), true)).expect_err("provides none");
+    assert!(why.contains("pi-other") && why.contains("none"), "{why}");
+}
+
 #[test]
 fn an_account_in_the_pools_of_two_standards_is_one_account() {
     // Foundry Local's kind provides both wire formats, so the one account is in both of the host's pools.
