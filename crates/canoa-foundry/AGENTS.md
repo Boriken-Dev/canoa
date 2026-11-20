@@ -77,7 +77,7 @@ pub fn sse(event: Option<&str>, data: &Value) -> String;
 pub const KEEP_ALIVE: &str = ": keep-alive\n\n";
 
 pub mod daemon {      // feature `daemon`
-    #[non_exhaustive] pub struct DaemonConfig { pub model: String, pub endpoint: Option<String>, pub tools: bool, pub images: bool, pub context: Option<u64> }
+    #[non_exhaustive] pub struct DaemonConfig { pub model: String, pub endpoint: Option<String>, pub tools: bool, pub images: bool, pub context: Option<u64>, pub answer: Duration }   // answer: how long one answer may take, `daemon::DEFAULT_ANSWER` (30 minutes) from `DaemonConfig::new`; the account's `answer_seconds` sets it
     impl DaemonConfig { pub fn new(model) -> Self; }                     // the running service, tools and images offered
     pub struct DaemonEngine;
     impl DaemonEngine { pub fn open(config: &DaemonConfig, home: &Path) -> Result<Self, EngineError>; }   // finds the service, checks it lists the model; loads nothing

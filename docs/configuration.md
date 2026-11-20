@@ -1189,6 +1189,26 @@ menu's and the bar's Paste have to read the clipboard, which a browser lets a pa
 localhost, and when it refuses, the terminal says so and names the keyboard paste. A copy writes from your key or click, with the browser's
 copy command where the clipboard API is not there.
 
+## Limits and warnings
+
+Canoa does not refuse a choice because it is weak or unusual, and a limit is a setting with a default and no ceiling of its own. Where
+something is told instead of refused, it is in the log as `non-default:`, in `canoa check`, and where the app shows the account.
+
+- **Plain http.** Any `http` or `https` address is accepted for an account's address (the API-gateway and LiteLLM kinds, and any
+  kind's endpoint setting), a mail account's `server` and `autodiscover`, `[store] skills_search`, an MCP registry, `[host.kb]`'s
+  `embeddings` and `llm_endpoint`, and the address of an MCP server a paired client hands a session. One that goes over plain `http`
+  to somewhere other than this computer is told of: `canoa check` and `canoa accounts list` print it, the host logs it when it
+  starts, and the account's row in Settings shows it. An address that holds a login is still refused.
+- **Worktrees.** `[host.worktrees]` `max_per_repository` (32) and `git_seconds` (120).
+- **Delegation.** `[host.delegate]` `wait_seconds` (300, the longest one `task_status` waits) and `dial_seconds` (20, reaching an agent
+  on another machine).
+- **History and mail.** `[host.history]` `max_session_bytes` and a mail account's `timeout_secs` have no ceiling.
+- **Foundry Local.** An account's `answer_seconds` (1800) is how long one answer may take.
+- **Files.** The host answers `fs/list` and `fs/read` a page at a time and says where the next one starts, so a long folder or a large
+  file is reachable whole.
+- **Secrets.** A secret provider lists every name it holds; a name or a value has no length limit of Canoa's.
+- **The Store.** A program is offered for any platform its publisher has a build for.
+
 ## Windows, macOS and Linux tray behavior
 
 Canoa uses a desktop tray controller and the shared Flutter app under root app/. The app can start without a visible main window, remain alive when its window closes, and expose Open Canoa, Hosting, Settings, Hide and Exit commands via the notification area. Closing the window leaves the app, its conversations, its own agents and `canoa` running; Exit, or **Quit Canoa** in Settings, ends them.

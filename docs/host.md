@@ -291,7 +291,7 @@ worktrees = true                   # the default
   main worktree, and the directory beside it that worktrees go in. A `.worktrees` directory that is a link, a branch
   other than `canoa/` and lower-case words joined by single hyphens, and a share or device path are refused before git
   runs, and so is a `.git` file or `commondir` naming a share. A worktree is made on a new branch from the directory's
-  current commit, then checked again where it landed. A repository holds at most 32 worktrees beside it from the host.
+  current commit, then checked again where it landed. A repository holds at most 32 worktrees beside it from the host unless `[host.worktrees] max_per_repository` says another number, and a git command may run 120 seconds unless `git_seconds` says otherwise.
 - **A repository that is itself a working root has nowhere beside it** inside the roots: name the directory holding it.
 - **Refused before git reads more than its settings**: a repository whose own settings (`.git/config`, a worktree's
   `config.worktree`) name a filter, an include or an attributes file, which would run a program or read files the host
@@ -437,6 +437,8 @@ canoa accounts add local --harness claude --method foundry-local --input model=q
   `config.toml` in its folder that turns off its web search and its multi-agent and goal tools), and an `OPENAI_API_KEY` with a
   `models.json` in its folder for Pi (`pi-api-key`). The bearer ends with the session, the gateway with its last session, and
   a request is answered only when it shows the bearer, names this socket in `Host` and carries no `Origin` (and, on Linux, comes from a process of this user).
+- **`answer_seconds`** is how long one answer may take (1800, 30 minutes, with the `service` engine); a large prompt on a slow model may need
+  longer, and there is no ceiling.
 - **The three APIs.** The gateway answers `/v1/messages` (Anthropic: Claude Code), `/v1/responses` (OpenAI Responses: Codex and
   Pi) and `/v1/chat/completions`, each translated to one chat completion, with `/v1/models` and `/v1/messages/count_tokens`.
   Any model name a client sends is served by the account's model. The model is called once, whole, and a stream is replayed from

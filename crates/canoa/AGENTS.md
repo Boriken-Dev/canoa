@@ -119,7 +119,6 @@ The `secret_provider` kind: somewhere a secret comes from and, for some, goes to
 
 ```rust
 pub const KIND: &str = "secret_provider";
-pub const MAX_NAME: usize = 256;  pub const MAX_VALUE: usize = 65536;  pub const MAX_NAMES: usize = 1000;
 #[non_exhaustive] pub struct ProviderInfo { pub title: String, pub description: Option<String>, pub can_store: bool, pub can_list: bool, pub needs_person: bool }   // ToValue, FromValue, Schema, Clone, Debug, Eq; unknown keys refused
 ProviderInfo::new(title); .problem() -> Option<String>
 #[non_exhaustive] pub struct Named { pub name: String }                              // Named::new(name)
@@ -133,14 +132,14 @@ ProviderInfo::new(title); .problem() -> Option<String>
     fn put(&self, request: Keeping, spawner: Object<dyn ProcessSpawner>) -> Result<(), ProviderError>;     // UNSUPPORTED unless can_store
     fn forget(&self, request: Named, spawner: Object<dyn ProcessSpawner>) -> Result<(), ProviderError>;    // UNSUPPORTED unless can_store; not having it is no error
 }
-pub fn name_problem(name: &str) -> Option<String>;   // 1 to MAX_NAME bytes, no control character
+pub fn name_problem(name: &str) -> Option<String>;   // text of any length that is not empty, with no control character
 pub fn unsupported(why) / unavailable(why) / bad_value(why) / internal(why) -> ProviderError   // UNSUPPORTED, GONE, BAD_VALUE, INTERNAL
 ```
 
 - **One configuration, one instance.** A provider declares its settings as a guatiao schema (`config = ..., form = ...` on the provider, a secret setting a `Secret<String>`), and the host makes an instance for each entry of `[secrets.providers]`. Every setting has a default, so the host can make an instance with none to describe the provider.
 - **A program runs through the `spawner`.** Every call but `describe` is handed the host's `ProcessSpawner` (`coqui-acp-api`), which owns the provider's processes from `spawn` on; the provider destroys it, even when it refuses. A script has no other way to start a program (QuickJS gives it none). The feature needs `coqui-acp-api`.
 - **A setting may be another secret.** A field the schema marks `x-from-secret: true` (beside `writeOnly` and `x-sensitive`; guatiao carries the annotation and never reads it, and a form draws it as a choice of the secret's source) is not typed into the entry: the host reads the secret another provider holds and gives its text as the setting.
-- **No call lists values.** `names` answers names only, so a host never asks for a whole store. A value is text.
+- **No call lists values.** `names` answers names only, so a host never asks for a whole store; it answers every name the provider holds, with no count or length cut (a name or a value of any length is the provider's to keep or refuse). A value is text.
 - **`needs_person`** says answering needs someone at the screen (a form to fill, a vault to unlock): the host asks such a provider of no session whose person is not there. `can_store` and `can_list` say what `put`, `forget` and `names` do.
 - **A value may carry its own end.** `Held::expires_in` is seconds from now; the host keeps the value no longer than that, whatever the person chose, and asks again after.
 - **`GONE` is "cannot answer now"** (locked, signed out, not installed). The reason holds no value; the host then asks the person for the secret itself.
@@ -564,7 +563,7 @@ answers `GONE` (`install cancelled` or `install timed out`) after killing the pr
 Helpers, free functions of the same module:
 
 ```rust
-pub fn measured_platforms() -> Vec<Platform>;                     // windows and linux, x86_64 and aarch64
+pub fn measured_platforms() -> Vec<Platform>;                     // windows and linux, x86_64 and aarch64: what the stores are measured on, not a gate (`ProgramInfo::platforms` is informational; the recipe's `release` refuses a platform its publisher has no build for)
 pub fn serves_when(provider: &str, key: &str, value: &str) -> Serves;   // takes the program when the provider's settings say key = value
 pub fn executable_settings(path: &str) -> Value;                  // {"executable": path}, which hands a copy to a harness provider
 pub fn get_json(tools: &Object<dyn InstallTools>, url: &str) -> Result<serde_json::Value, ProviderError>;  // fetch_text capped at 4 MiB; INTERNAL when not JSON
