@@ -3702,7 +3702,8 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     return _add(session, Attachment.file(name, path, size, mimeType: mimeType));
   }
 
-  /// Takes the file or folder at [path], which [label] names after an `@` in the message, to go as a link. Nothing happens, and
+  /// Takes the file or folder at [path], which [label] names after an `@` in the message, to go as a link (a small text file as its
+  /// contents where the agent takes files). Nothing happens, and
   /// there is nothing to tell, when it is already there.
   String? addMention(
     ChatSession session,
@@ -3710,11 +3711,31 @@ class SessionStore extends ChangeNotifier implements AgentSecrets {
     String path,
     int size, {
     bool folder = false,
+    bool onAgentHost = false,
   }) {
     if (session.attachments.any((item) => item.mention && item.name == label)) {
       return null;
     }
-    return _add(session, Attachment.mention(label, path, size, folder: folder));
+    return _add(session, Attachment.mention(label, path, size, folder: folder, onAgentHost: onAgentHost));
+  }
+
+  /// Takes the conversation [other], which [label] names after an `@` in the message, as text for the agent: its messages in order,
+  /// and only the latest ones when they are more than an attachment can hold. Nothing happens when it is already there.
+  String? addConversation(ChatSession session, ChatSession other, String label) {
+    if (session.attachments.any((item) => item.mention && item.name == label)) return null;
+    final parts = [
+      for (final message in other.messages)
+        if (message.text.trim().isNotEmpty) '${message.role == MessageRole.user ? 'User' : 'Assistant'}: ${message.text.trim()}',
+    ];
+    if (parts.isEmpty) return 'That conversation has no messages yet.';
+    var kept = parts;
+    var text = '# ${other.title}\n\n${kept.join('\n\n')}';
+    // The latest messages are the ones that matter when it is more than a file can be here.
+    while (utf8.encode(text).length > maxAttachedText && kept.length > 1) {
+      kept = kept.sublist(1);
+      text = '# ${other.title}\n\n(earlier messages left out)\n\n${kept.join('\n\n')}';
+    }
+    return _add(session, Attachment.conversation(label, text));
   }
 
   /// Takes the folder at [path] on this computer, which the agent is given a link to.

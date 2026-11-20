@@ -27,7 +27,7 @@ String? imageTypeOf(String name, String? mimeType) {
 /// One thing that goes with a message, as Canoa keeps it until it is sent: how it reaches the agent is decided then, by
 /// what the agent takes.
 final class Attachment {
-  Attachment._(this.kind, this.name, {this.mimeType, this.bytes, this.text, this.path, required this.size, this.mention = false});
+  Attachment._(this.kind, this.name, {this.mimeType, this.bytes, this.text, this.path, required this.size, this.mention = false, this.onAgentHost = false});
 
   /// An image, sent whole where the agent takes images; with a [path], linked where it does not.
   factory Attachment.image(String name, String mimeType, List<int> bytes, {String? path}) =>
@@ -41,19 +41,30 @@ final class Attachment {
   factory Attachment.file(String name, String path, int size, {String? mimeType}) =>
       Attachment._(AttachmentKind.file, name, mimeType: mimeType, path: path, size: size);
 
+  /// Another conversation of this app named by an `@` in the message: its messages as text, sent as the agent's embedded context.
+  factory Attachment.conversation(String name, String text) =>
+      Attachment._(AttachmentKind.text, name, mimeType: 'text/markdown', text: text, size: utf8.encode(text).length, mention: true);
+
   /// A folder on this computer, linked by its path for the agent to read itself.
   factory Attachment.folder(String name, String path) => Attachment._(AttachmentKind.folder, name, path: path, size: 0);
 
-  /// A file or folder of the session's folder named by an `@` in the message, always sent as a link to its path. [name] is the
-  /// path as the message writes it after the `@`.
-  factory Attachment.mention(String name, String path, int size, {bool folder = false}) =>
-      Attachment._(folder ? AttachmentKind.folder : AttachmentKind.file, name, path: path, size: folder ? 0 : size, mention: true);
+  /// A file or folder of the session's folder named by an `@` in the message: a folder goes as a link to its path, and so does a
+  /// file, unless the agent takes files and it is small enough text, when it goes embedded. [name] is the path as the message writes
+  /// it after the `@`.
+  ///
+  /// [onAgentHost] says the path is on the host the agent runs on, which is not this computer: it goes as a link, which that agent
+  /// can follow, and is never read here.
+  factory Attachment.mention(String name, String path, int size, {bool folder = false, bool onAgentHost = false}) =>
+      Attachment._(folder ? AttachmentKind.folder : AttachmentKind.file, name, path: path, size: folder ? 0 : size, mention: true, onAgentHost: onAgentHost);
 
   final AttachmentKind kind;
   final String name;
 
   /// Whether it was named by an `@` in the message, which it goes with only while the message still says it.
   final bool mention;
+
+  /// Whether the path is on the host the agent runs on, when that host is not this computer.
+  final bool onAgentHost;
   final String? mimeType;
   final List<int>? bytes;
   final String? text;
@@ -78,6 +89,7 @@ final class Attachment {
     'text': ?text,
     'blob': ?blob,
     if (mention) 'mention': true,
+    if (onAgentHost) 'onAgentHost': true,
   };
 
   /// Null for anything that is not a whole record; [blob] answers the bytes a record's `blob` names.
@@ -91,13 +103,14 @@ final class Attachment {
         final bytes = json['blob'] is String ? blob?.call(json['blob'] as String) : null;
         return bytes == null || mimeType == null ? null : Attachment.image(name, mimeType, bytes, path: path);
       case 'text':
-        return json['text'] is String ? Attachment.text(name, json['text'] as String, mimeType: mimeType) : null;
+        if (json['text'] is! String) return null;
+        return json['mention'] == true ? Attachment.conversation(name, json['text'] as String) : Attachment.text(name, json['text'] as String, mimeType: mimeType);
       case 'file':
         if (path == null) return null;
-        return json['mention'] == true ? Attachment.mention(name, path, size) : Attachment.file(name, path, size, mimeType: mimeType);
+        return json['mention'] == true ? Attachment.mention(name, path, size, onAgentHost: json['onAgentHost'] == true) : Attachment.file(name, path, size, mimeType: mimeType);
       case 'folder':
         if (path == null) return null;
-        return json['mention'] == true ? Attachment.mention(name, path, 0, folder: true) : Attachment.folder(name, path);
+        return json['mention'] == true ? Attachment.mention(name, path, 0, folder: true, onAgentHost: json['onAgentHost'] == true) : Attachment.folder(name, path);
     }
     return null;
   }
@@ -118,7 +131,8 @@ final class PromptTakes {
 /// ever left out without saying so.
 (AttachmentRoute, String?) routeOf(Attachment attachment, PromptTakes takes, {required int embedLimit, String agent = 'The agent'}) =>
     switch (attachment.kind) {
-      AttachmentKind.file when attachment.mention => takes.links
+      _ when attachment.mention && attachment.onAgentHost => (AttachmentRoute.link, null),
+      AttachmentKind.file when attachment.mention && !(takes.files && attachment.size <= embedLimit) => takes.links
           ? (AttachmentRoute.link, null)
           : (AttachmentRoute.refused, '$agent runs elsewhere, and cannot read this computer\'s files by a link'),
       AttachmentKind.image when takes.images => (AttachmentRoute.image, null),

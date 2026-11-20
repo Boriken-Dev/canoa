@@ -24,6 +24,26 @@ void main() {
         [AttachmentRoute.image, AttachmentRoute.embedded, AttachmentRoute.link, AttachmentRoute.embedded, AttachmentRoute.link]);
   });
 
+  test('a file named by an @ goes embedded when the agent takes files and it is small, else as a link; a folder is always a link', () {
+    final mentioned = Attachment.mention('notes.txt', '/w/notes.txt', 10);
+    final mentionedLarge = Attachment.mention('big.log', '/w/big.log', 1000);
+    final mentionedFolder = Attachment.mention('src/', '/w/src', 0, folder: true);
+    expect([for (final each in [mentioned, mentionedLarge, mentionedFolder]) _route(each, _all)], [AttachmentRoute.embedded, AttachmentRoute.link, AttachmentRoute.link]);
+    expect([for (final each in [mentioned, mentionedLarge, mentionedFolder]) _route(each, const PromptTakes(images: true, files: false))], everyElement(AttachmentRoute.link));
+    expect(_route(mentioned, _elsewhere), AttachmentRoute.embedded, reason: 'its contents need no link to this computer');
+    expect(_route(mentionedLarge, _elsewhere), AttachmentRoute.refused);
+  });
+  test('a mention of another conversation or of a path on the agent\'s host survives being saved, and a conversation goes embedded or not at all', () {
+    final chat = Attachment.conversation('Fix login', '# Fix login\n\nUser: hi');
+    final far = Attachment.mention('src/a.dart', '/srv/app/src/a.dart', 5, onAgentHost: true);
+    final back = [for (final each in [chat, far]) Attachment.fromJson(each.toJson())!];
+    expect([for (final each in back) each.mention], [true, true]);
+    expect(back[0].text, '# Fix login\n\nUser: hi');
+    expect(back[1].onAgentHost, isTrue);
+    expect(_route(back[0], _all), AttachmentRoute.embedded);
+    expect(_route(back[0], _none), AttachmentRoute.refused, reason: 'it has no file to link to');
+    expect(_route(back[1], _elsewhere), AttachmentRoute.link, reason: 'the agent runs where the file is');
+  });
   test('an agent that takes nothing is given links where there is a file, and nothing else', () {
     expect([for (final each in [image, pasted, small, text, folder]) _route(each, _none)],
         [AttachmentRoute.link, AttachmentRoute.refused, AttachmentRoute.link, AttachmentRoute.refused, AttachmentRoute.link]);

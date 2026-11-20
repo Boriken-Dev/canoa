@@ -1,4 +1,5 @@
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart';
+import 'package:flutter/material.dart' show Icons;
 
 import '../acp/local_agent.dart' show InsideFile;
 import '../session_store.dart';
@@ -7,13 +8,14 @@ import '../session_store.dart';
 const Duration _keepListing = Duration(seconds: 5);
 final Map<String, (DateTime, Future<List<String>>)> _listings = {};
 
-Future<List<String>> _listingOf(String folder, Future<List<String>> Function(String folder) list) {
-  final kept = _listings[folder];
+Future<List<String>> _listingOf(String scope, String folder, Future<List<String>> Function(String folder) list) {
+  final key = '$scope|$folder';
+  final kept = _listings[key];
   final now = DateTime.now();
   if (kept != null && now.difference(kept.$1) < _keepListing) return kept.$2;
   if (_listings.length > 16) _listings.clear();
   final read = list(folder);
-  _listings[folder] = (now, read);
+  _listings[key] = (now, read);
   return read;
 }
 
@@ -61,10 +63,16 @@ bool _inOrder(String path, String letters) {
   return true;
 }
 
+/// The two things an `@` asks of the computer a session's folder is on: the names under a folder, and what one name is.
+typedef FolderServices = ({Future<List<String>> Function(String folder) list, Future<InsideFile?> Function(String folder, String relative) resolve});
+
 /// What an `@` names in [session]: files and folders under its folder on this computer. Nothing outside the folder is offered or
-/// taken, and a pick is a link to the path, never the file's text. [list] and [resolve] are the platform's file services.
+/// taken, and a pick goes to the agent as a link to the path, or as the file's text where the agent takes files and it is small. [list] and [resolve] are the platform's file services.
 final class SessionMentions implements ComposerMentions {
-  SessionMentions({required this.store, required this.session, required this.list, required this.resolve});
+  SessionMentions({required this.store, required this.session, required this.list, required this.resolve, this.scope = ''});
+
+  /// Whose folders [list] reads, so that two hosts' folders of one path are not taken for each other in the kept listings.
+  final String scope;
 
   final SessionStore store;
   final ChatSession session;
@@ -82,7 +90,7 @@ final class SessionMentions implements ComposerMentions {
   Future<List<MentionCandidate>> search(String query) async {
     final folder = session.cwd;
     if (folder == null || folder.isEmpty) return const [];
-    final entries = await _listingOf(folder, list);
+    final entries = await _listingOf(scope, folder, list);
     final ranked = rankMentions(entries, query);
     final found = await Future.wait([for (final entry in ranked) resolve(folder, entry)]);
     return [
@@ -99,6 +107,56 @@ final class SessionMentions implements ComposerMentions {
     final key = candidate.key;
     final (String relative, InsideFile found) = key is (String, InsideFile) ? key : (candidate.label, (path: '', folder: false, size: -1));
     if (found.size < 0) return '$relative is not in this session\'s workspace, so it is not attached.';
-    return store.addMention(session, relative, found.path, found.size, folder: found.folder);
+    return store.addMention(session, relative, found.path, found.size, folder: found.folder, onAgentHost: scope.isNotEmpty);
+  }
+}
+
+/// What an `@` names in [session]: the files and folders [files] offers (when the session has a folder), then the other
+/// conversations this app holds, whose messages go to the agent as text.
+final class SessionAtMentions implements ComposerMentions {
+  SessionAtMentions({required this.store, required this.session, this.files});
+
+  final SessionStore store;
+  final ChatSession session;
+  final ComposerMentions? files;
+
+  /// How many of each group the list holds, so that neither crowds out the other.
+  static const int filesShown = 6, conversationsShown = 3;
+
+  /// The conversations other than [session] that have something said, the latest first, whose title holds [query] (any, with none).
+  List<ChatSession> conversationsFor(String query) {
+    final wanted = query.toLowerCase();
+    final found = [
+      for (final other in store.listed)
+        if (other.id != session.id && other.messages.isNotEmpty && (wanted.isEmpty || other.title.toLowerCase().contains(wanted))) other,
+    ]..sort((a, b) => b.lastActivity.compareTo(a.lastActivity));
+    return found.take(conversationsShown).toList();
+  }
+
+  @override
+  Future<List<MentionCandidate>> search(String query) async {
+    final named = files == null ? const <MentionCandidate>[] : (await files!.search(query)).take(filesShown).toList();
+    return [
+      ...named,
+      for (final other in conversationsFor(query))
+        MentionCandidate(
+          label: other.title,
+          detail: other.agent,
+          group: 'Conversations',
+          icon: Icons.forum_outlined,
+          key: other.id,
+        ),
+    ];
+  }
+
+  @override
+  String? pick(MentionCandidate candidate) {
+    final id = candidate.key;
+    if (candidate.group == 'Conversations' && id is String) {
+      final other = store.sessions.where((each) => each.id == id).firstOrNull;
+      return other == null ? 'That conversation is gone.' : store.addConversation(session, other, candidate.label);
+    }
+    final source = files;
+    return source == null ? 'This session has no workspace.' : source.pick(candidate);
   }
 }

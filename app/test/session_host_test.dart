@@ -68,6 +68,11 @@ final class _Far implements HostLink {
               {'path': path, 'exists': path.startsWith('/srv'), 'folder': path.startsWith('/srv'), 'repository': false},
           ],
         };
+      case 'fs/mentions':
+        result = {'entries': ['notes.txt', 'src/']};
+      case 'fs/resolve':
+        final name = params['name'] as String;
+        result = {'path': '${params['path']}/$name', 'folder': name.endsWith('/'), 'size': 11};
       case 'fs/scratch':
         result = {'path': '/srv/scratch/${params['session']}', 'made': true};
       case 'fs/scratch_remove':
@@ -216,6 +221,37 @@ void main() {
     await finish(tester);
   });
 
+  testWidgets('an @ in a session on another host lists that host\'s folder, and a pick goes as a link to a path on that host', (tester) async {
+    final (store, agent, _, far, _) = await _page(tester);
+    await newSession(tester);
+    await chooseWorkspace(tester);
+    await _aimAtFar(tester);
+    await openFolder(tester);
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('host-folder /srv')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('host-folder /srv/app')));
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('host-folder-choose')));
+    await settle(tester);
+    await send(tester, 'Say hello');
+    await settle(tester, 150);
+    expect(store.selected!.place, SessionPlace.peer);
+    final field = find.byType(TextField).last;
+    await tester.enterText(field, 'read @no');
+    await settle(tester);
+    expect(far.asked, contains('fs/mentions /srv/app'), reason: 'the host lists its own folder');
+    await tester.tap(find.byKey(const ValueKey('mention notes.txt')));
+    await settle(tester);
+    expect(store.selected!.attachments.single.onAgentHost, isTrue);
+    final before = agent.methods.where((method) => method == 'session/prompt').length;
+    await tester.tap(find.byTooltip('Send'));
+    await until(tester, () => agent.methods.where((method) => method == 'session/prompt').length > before, 'the agent to have it');
+    final prompt = agent.last('session/prompt')['params']['prompt'] as List<dynamic>;
+    expect(prompt.map((block) => block['type']), ['text', 'resource_link'], reason: 'the file is on the agent\'s host: it is not read here');
+    expect(prompt[1]['uri'], endsWith('/srv/app/notes.txt'));
+    await finish(tester);
+  });
   testWidgets('an unreadable path is refused before anything starts, and a Windows path is not taken for a Linux host', (tester) async {
     final (store, _, reached, _, _) = await _page(tester);
     await newSession(tester);

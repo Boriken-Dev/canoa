@@ -58,6 +58,7 @@ import 'desktop/host_grants.dart';
 import 'mail/mail_accounts.dart';
 import 'chat/agent_events.dart' show Choice;
 import 'chat/cache_lifetime.dart';
+import 'chat/mentions.dart' show FolderServices;
 import 'chat/modes.dart' show modeEntries, modeOptionIn;
 import 'chat/session_options.dart' show OptionRole, optionIn;
 import 'chat/delegate_dialog.dart';
@@ -3251,6 +3252,30 @@ class _CanoaAppState extends State<CanoaApp> {
     }
   }
 
+  /// The folder services of the saved Canoa host [session] runs on, dialled when first asked, for the names an `@` offers there; null
+  /// for a session on this app's own host or on a direct agent, which has no folder listing.
+  FolderServices? _remoteFoldersOf(ChatSession session) {
+    final name = session.host;
+    final connection = _connection(name);
+    if (name == null || connection == null || connection.kind == ConnectionKind.acp) return null;
+    return (
+      list: (folder) async {
+        try {
+          return await (await _remoteOf(name)).folders.mentions(folder);
+        } on Object {
+          return const [];
+        }
+      },
+      resolve: (folder, relative) async {
+        try {
+          return await (await _remoteOf(name)).folders.resolve(folder, relative);
+        } on Object {
+          return null;
+        }
+      },
+    );
+  }
+
   /// What the host makes [session]'s scratch folder from, null for a session made no id here.
   ScratchRequest? _scratchRequest(ChatSession session) {
     final id = session.workspaceId;
@@ -3288,6 +3313,7 @@ class _CanoaAppState extends State<CanoaApp> {
     foldersChanged: _remoteReady.isEmpty ? _hostFolders : Listenable.merge([?_hostFolders, for (final remote in _remoteReady.values) remote.folders]),
     foldersReadable: (session) =>
         session.host == null && (widget.listFolder != null ? session.place == SessionPlace.local : _viaHost && _filesOf(session) != null),
+    remoteFolders: _remoteFoldersOf,
     pickFolder: widget.pickFolder ?? (widget.served != null ? _pickHostFolder : canRunLocalAgents ? () => getDirectoryPath() : null),
     // A served page has no file system: the host makes a chat's folder when the session opens.
     hosts: _hostChoices,

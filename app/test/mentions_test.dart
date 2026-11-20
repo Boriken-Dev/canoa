@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:canoa/acp/local_agent.dart' show InsideFile;
 import 'package:canoa/chat/agent_events.dart' show AgentCommandInfo;
 import 'package:canoa/chat/mentions.dart' show rankMentions;
+import 'package:canoa/profile/report.dart' show ItemState, ProfileItem, ProfileReport;
 import 'package:canoa/session_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -54,10 +55,10 @@ Future<InsideFile?> _resolve(String folder, String relative) async {
   return await file.exists() ? (path: path, folder: false, size: await file.length()) : null;
 }
 
-Future<(SessionStore, OptionsAgent, _Tree)> _started(WidgetTester tester, {Size size = const Size(1280, 800)}) async {
+Future<(SessionStore, OptionsAgent, _Tree)> _started(WidgetTester tester, {Size size = const Size(1280, 800), bool files = true}) async {
   final tree = _Tree();
   addTearDown(() => tree.root.deleteSync(recursive: true));
-  final agent = OptionsAgent();
+  final agent = OptionsAgent(files: files);
   final store = SessionStore();
   await pumpApp(tester, store, linked: agent.openLink, size: size, pickFolder: () async => tree.folder.path, listFolder: _list, resolveInside: _resolve, openIn: false);
   await newSession(tester);
@@ -118,13 +119,14 @@ void main() {
     expect(tester.getSize(find.text(draft)).height, lessThan(30));
     await tester.tap(find.byKey(const Key('composer-plus')));
     await frames(tester);
-    expect(find.byKey(const Key('plus-mention')), findsNothing, reason: 'no folder is chosen yet, so no @');
+    expect(find.text('Mention a file'), findsNothing, reason: 'no folder is chosen yet, so no file to mention');
+    expect(find.text('Mention a conversation'), findsOneWidget, reason: 'the conversation before it can be');
     expect(find.byKey(const Key('plus-slash')), findsOneWidget);
     await finish(tester);
   });
 
-  testWidgets('an @ lists the folder\'s files, a pick writes the mention and goes as a link with no contents', (tester) async {
-    final (store, agent, tree) = await _started(tester);
+  testWidgets('an @ lists the folder\'s files, a pick writes the mention and, to an agent that takes no files, goes as a link with no contents', (tester) async {
+    final (store, agent, tree) = await _started(tester, files: false);
     await _type(tester, 'read @ma');
     await until(tester, () => _mention('src/main.dart').evaluate().isNotEmpty, 'the list');
     expect(_mention('src/util.dart'), findsNothing);
@@ -146,6 +148,47 @@ void main() {
     await finish(tester);
   });
 
+  testWidgets('to an agent that takes files, a picked text file goes as its contents and a picked folder as a link', (tester) async {
+    final (_, agent, tree) = await _started(tester);
+    await _type(tester, 'read @ma');
+    await until(tester, () => _mention('src/main.dart').evaluate().isNotEmpty, 'the list');
+    await tester.tap(_mention('src/main.dart'));
+    await settle(tester);
+    await _type(tester, 'read @src/main.dart and @sr');
+    await until(tester, () => _mention('src/').evaluate().isNotEmpty, 'the list');
+    await tester.tap(_mention('src/'));
+    await settle(tester);
+    final before = agent.methods.where((method) => method == 'session/prompt').length;
+    await tester.tap(find.byTooltip('Send'));
+    await until(tester, () => agent.methods.where((method) => method == 'session/prompt').length > before, 'the agent to have it');
+    final prompt = _lastPrompt(agent);
+    expect(prompt.map((block) => block['type']), ['text', 'resource', 'resource_link']);
+    expect(prompt[1]['resource']['text'], 'void main() {}');
+    expect(prompt[2]['uri'], Uri.directory('${tree.folder.path}${Platform.pathSeparator}src').toString());
+    await finish(tester);
+  });
+  testWidgets('an @ also lists the other conversations under their own heading, and a pick goes as that conversation\'s messages as text', (tester) async {
+    final (store, agent, _) = await _started(tester);
+    await newSession(tester);
+    await chooseSource(tester, 'Scripted');
+    await openFolder(tester);
+    await send(tester, 'Second one');
+    await _type(tester, 'continue from @Say');
+    await until(tester, () => find.byKey(const Key('mention-group Conversations')).evaluate().isNotEmpty, 'the list');
+    expect(find.byKey(const ValueKey('mention Conversations Say hello')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mention Conversations Second one')), findsNothing, reason: 'not the conversation it is typed in');
+    await tester.tap(find.byKey(const ValueKey('mention Conversations Say hello')));
+    await settle(tester);
+    expect(tester.widget<TextField>(_field).controller!.text, 'continue from @Say hello ');
+    final before = agent.methods.where((method) => method == 'session/prompt').length;
+    await tester.tap(find.byTooltip('Send'));
+    await until(tester, () => agent.methods.where((method) => method == 'session/prompt').length > before, 'the agent to have it');
+    final prompt = _lastPrompt(agent);
+    expect(prompt.map((block) => block['type']), ['text', 'resource']);
+    expect(prompt[1]['resource']['text'], allOf(startsWith('# Say hello'), contains('User: Say hello')));
+    expect(store.selected!.title, isNot('Say hello'));
+    await finish(tester);
+  });
   testWidgets('a mention whose text was deleted does not go', (tester) async {
     final (_, agent, _) = await _started(tester);
     await _type(tester, '@notes');
@@ -188,6 +231,46 @@ void main() {
     await finish(tester);
   });
 
+  testWidgets('/ lists every command the agent reports, not a first few', (tester) async {
+    final (store, _, _) = await _started(tester);
+    store.selected!.offerCommands([for (var i = 0; i < 30; i++) AgentCommandInfo('skill$i', 'Skill number $i')]);
+    store.markViewed(store.selected!, 'x', null);
+    await tester.pump();
+    await _type(tester, '/');
+    expect(find.byKey(const ValueKey('command skill29')), findsOneWidget);
+    expect(find.byKey(const ValueKey('command skill0')), findsOneWidget);
+    await finish(tester);
+  });
+
+  testWidgets('/ lists the skills and MCP servers Canoa gave the session under their own headings, once each, and a pick writes a request', (tester) async {
+    final (store, agent, _) = await _started(tester);
+    store.selected!
+      ..offerCommands(const [AgentCommandInfo('review', 'The agent lists this skill itself')])
+      ..profile = const ProfileReport('claude-code', [
+        ProfileItem('skills.review', 'overlay:team', ItemState.applied, 'a skill folder'),
+        ProfileItem('skills.deploy', 'overlay:team', ItemState.applied, 'a skill folder'),
+        ProfileItem('skills.refused', 'overlay:team', ItemState.refused, 'not allowed'),
+        ProfileItem('mcp.github', 'overlay:team', ItemState.applied, 'mcpServers'),
+        ProfileItem('model', 'yours', ItemState.applied, 'set'),
+      ]);
+    store.markViewed(store.selected!, 'x', null);
+    await tester.pump();
+    final before = agent.methods.where((method) => method == 'session/prompt').length;
+    await _type(tester, '/');
+    expect(find.text('Skills given to this session'), findsOneWidget);
+    expect(find.text('MCP servers given to this session'), findsOneWidget);
+    expect(find.byKey(const ValueKey('action Skills given to this session deploy')), findsOneWidget);
+    expect(find.byKey(const ValueKey('action Skills given to this session review')), findsNothing, reason: 'the agent lists it as a command');
+    expect(find.byKey(const ValueKey('action Skills given to this session refused')), findsNothing, reason: 'a skill the agent was not given');
+    expect(find.byKey(const ValueKey('command review')), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey('action MCP servers given to this session github')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('action MCP servers given to this session github')));
+    await settle(tester);
+    expect(tester.widget<TextField>(_field).controller!.text, 'Use the github MCP server to ');
+    expect(agent.methods.where((method) => method == 'session/prompt').length, before, reason: 'nothing is sent until the person sends it');
+    await finish(tester);
+  });
   testWidgets('+ has Slash commands, which opens the list', (tester) async {
     final (store, _, _) = await _started(tester);
     store.selected!.offerCommands(const [AgentCommandInfo('compact', 'Make room')]);
@@ -213,6 +296,35 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('the / list with the skills and servers Canoa gave draws at $label width', (tester) async {
+      final (store, _, _) = await _started(tester, size: size);
+      store.selected!
+        ..offerCommands(const [AgentCommandInfo('compact', 'Make room')])
+        ..profile = const ProfileReport('claude-code', [
+          ProfileItem('skills.deploy', 'overlay:team', ItemState.applied, 'a skill folder'),
+          ProfileItem('skills.release-notes', 'overlay:team', ItemState.applied, 'a skill folder'),
+          ProfileItem('mcp.github', 'overlay:team', ItemState.applied, 'mcpServers'),
+        ]);
+      store.markViewed(store.selected!, 'x', null);
+      await tester.pump();
+      await _type(tester, '/');
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/slash_given_$label.png'));
+      await finish(tester);
+    });
+
+    testWidgets('the @ list with files and conversations draws at $label width', (tester) async {
+      await _started(tester, size: size);
+      await newSession(tester);
+      await chooseSource(tester, 'Scripted');
+      await openFolder(tester);
+      await send(tester, 'Second one');
+      await _type(tester, 'see @');
+      await until(tester, () => find.byKey(const Key('mention-group Conversations')).evaluate().isNotEmpty, 'the list');
+      expect(tester.takeException(), isNull);
+      await expectLater(find.byType(MaterialApp), matchesGoldenFile('goldens/mention_conversations_$label.png'));
+      await finish(tester);
+    });
     testWidgets('the / list in two groups draws at $label width', (tester) async {
       final (store, _, _) = await _started(tester, size: size);
       store.selected!.offerCommands(const [AgentCommandInfo('compact', 'Make room'), AgentCommandInfo('review', 'Review the changes')]);

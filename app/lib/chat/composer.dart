@@ -50,6 +50,7 @@ final class ComposerKit {
     this.listFolder,
     this.resolveInside,
     this.foldersReadable,
+    this.remoteFolders,
     this.foldersChanged,
     this.clipboard = const TextClipboard(),
     this.overlays = const [],
@@ -201,6 +202,10 @@ final class ComposerKit {
   /// Whether [session]'s folder is on a computer this app reads folders of (for `@` names); null means this one, for a session
   /// started here.
   final bool Function(ChatSession session)? foldersReadable;
+
+  /// The folder services of the host [session] runs on when that is another Canoa host, for its @ names: that host lists its own
+  /// folders, and this computer's are not read. Null for a session on no other host.
+  final FolderServices? Function(ChatSession session)? remoteFolders;
 
   /// Told when a folder's answer arrives that a widget built with a guess.
   final Listenable? foldersChanged;
@@ -430,9 +435,17 @@ class SessionComposer extends StatelessWidget {
     final draft = session.status == SessionStatus.draft;
     final options = store.optionsOf(session);
     final seen = store.optionsSeen(session);
-    final mentions = kit.listFolder != null && kit.resolveInside != null && store.canAttach(session) && SessionMentions.offeredFor(session, readable: kit.foldersReadable)
-        ? SessionMentions(store: store, session: session, list: kit.listFolder!, resolve: kit.resolveInside!)
+    final remote = kit.remoteFolders?.call(session);
+    final inFolder = session.cwd?.isNotEmpty ?? false
+        ? remote != null
+              ? SessionMentions(store: store, session: session, list: remote.list, resolve: remote.resolve, scope: session.host ?? '')
+              : kit.listFolder != null && kit.resolveInside != null && SessionMentions.offeredFor(session, readable: kit.foldersReadable)
+              ? SessionMentions(store: store, session: session, list: kit.listFolder!, resolve: kit.resolveInside!)
+              : null
         : null;
+    // An `@` also names the other conversations, which need no folder; only a session that can take attachments has any.
+    final atMentions = store.canAttach(session) ? SessionAtMentions(store: store, session: session, files: inFolder) : null;
+    final mentions = atMentions != null && (inFolder != null || atMentions.conversationsFor('').isNotEmpty) ? atMentions : null;
     final actions = _actions(session);
     final dictation = kit.dictation;
     return Composer(
@@ -448,6 +461,8 @@ class SessionComposer extends StatelessWidget {
       commands: commands,
       actions: actions,
       actionsTitle: '$appName actions',
+      // / lists everything the session has, scrolling past what fits.
+      suggestionLimit: 200,
       mentions: mentions,
       centred: centred,
       hint: _hint(narrow: narrow),
@@ -475,7 +490,7 @@ class SessionComposer extends StatelessWidget {
               controller.value = TextEditingValue(text: '$text$at', selection: TextSelection.collapsed(offset: text.length + at.length));
               focusNode?.requestFocus();
             },
-            child: const Text('Mention a file'),
+            child: Text(inFolder != null ? 'Mention a file' : 'Mention a conversation'),
           ),
         MenuItemButton(
           key: const Key('plus-slash'),
@@ -542,6 +557,7 @@ class SessionComposer extends StatelessWidget {
 
   /// Canoa's own entries in the `/` list: what the person could do from the controls, by name.
   List<ComposerAction> _actions(ChatSession session) => [
+    ..._givenActions(session),
     if (session.status != SessionStatus.preview)
       ComposerAction(name: 'mode', description: 'Switch to the next mode', run: () => unawaited(store.cycleMode(session))),
     if (kit.onSettings != null) ComposerAction(name: 'settings', description: 'Open Settings', run: kit.onSettings!),
@@ -552,6 +568,35 @@ class SessionComposer extends StatelessWidget {
     if (kit.onProfile != null && session.profile != null)
       ComposerAction(name: 'profile', description: 'Show what this session was given', run: () => kit.onProfile!(session)),
   ];
+
+  /// The skills and MCP servers Canoa gave the session, which the agent may not list as commands: a pick writes a request for the
+  /// agent to use it, to finish and send. A skill the agent lists under its own commands is not listed twice.
+  List<ComposerAction> _givenActions(ChatSession session) {
+    final given = session.profile?.applied;
+    if (given == null) return const [];
+    final listed = {
+      for (final command in commands) ...[command.name, command.name.substring(command.name.lastIndexOf(':') + 1)],
+    };
+    ComposerAction offer(String name, String group, String description, String request) => ComposerAction(
+      name: name,
+      description: description,
+      group: group,
+      run: () {
+        controller.value = TextEditingValue(text: request, selection: TextSelection.collapsed(offset: request.length));
+        focusNode?.requestFocus();
+      },
+    );
+    return [
+      for (final item in given)
+        if (item.key.startsWith('skills.') && !listed.contains(item.key.substring('skills.'.length)))
+          offer(item.key.substring('skills.'.length), 'Skills given to this session', 'Ask the agent to use this skill',
+              'Use the ${item.key.substring('skills.'.length)} skill to '),
+      for (final item in given)
+        if (item.key.startsWith('mcp.') && !item.key.substring('mcp.'.length).contains('.'))
+          offer(item.key.substring('mcp.'.length), 'MCP servers given to this session', 'Ask the agent to use this server\'s tools',
+              'Use the ${item.key.substring('mcp.'.length)} MCP server to '),
+    ];
+  }
 
   /// The last message the person sent here, which Up in an empty message brings back.
   String? _lastSent() {
