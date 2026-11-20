@@ -173,7 +173,7 @@ fn an_empty_password_and_a_refused_address_leave_nothing_behind() {
             "--backend",
             "ews",
             "--server",
-            "http://mail.example.com/EWS/Exchange.asmx",
+            "ftp://mail.example.com/EWS/Exchange.asmx",
             "--user",
             "u",
         ],
@@ -181,7 +181,7 @@ fn an_empty_password_and_a_refused_address_leave_nothing_behind() {
     );
     assert_eq!(clear.status.code(), Some(1));
     assert!(
-        text(&clear.stderr).contains("in the clear"),
+        text(&clear.stderr).contains("http or https address"),
         "{}",
         text(&clear.stderr)
     );

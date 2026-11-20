@@ -206,7 +206,7 @@ fn one_account_of_two_standards_is_made_by_signing_in_and_its_key_is_not_in_cano
         json!(["openai-api", "anthropic-api"]),
         "{row}"
     );
-    // A key is refused in canoa.cfg, naming the setting.
+    // What is no http or https address is refused, naming the address's setting.
     let refused = text(
         &fixture
             .canoa(
@@ -219,7 +219,7 @@ fn one_account_of_two_standards_is_made_by_signing_in_and_its_key_is_not_in_cano
                     "--method",
                     "api-gateway",
                     "--input",
-                    "base_url=http://llm.example.com",
+                    "base_url=ftp://llm.example.com",
                     "--input",
                     "standards=openai-api",
                 ],
@@ -227,7 +227,40 @@ fn one_account_of_two_standards_is_made_by_signing_in_and_its_key_is_not_in_cano
             )
             .stderr,
     );
-    assert!(refused.contains("https"), "{refused}");
+    assert!(refused.contains("https://"), "{refused}");
+    // Plain http beyond this computer is the person's choice: the account is made, and the listing tells what it costs.
+    let far = fixture.canoa(
+        &[
+            "accounts",
+            "add",
+            "far",
+            "--harness",
+            "codex",
+            "--method",
+            "api-gateway",
+            "--input",
+            "base_url=http://llm.example.com",
+            "--input",
+            "standards=openai-api",
+        ],
+        Some("k\n"),
+    );
+    assert!(far.status.success(), "{}", text(&far.stderr));
+    let listed = fixture.canoa(&["accounts", "list", "--format", "json"], None);
+    let rows: Vec<Value> = text(&listed.stdout)
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("JSON"))
+        .collect();
+    let row = rows
+        .iter()
+        .find(|row| row["name"] == "far")
+        .expect("the account");
+    assert!(
+        row["warnings"][0]
+            .as_str()
+            .is_some_and(|note| note.contains("plain http to llm.example.com")),
+        "{row}"
+    );
 }
 
 #[test]

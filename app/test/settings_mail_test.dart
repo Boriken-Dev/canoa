@@ -124,11 +124,11 @@ void main() {
     expect(find.text('Type the password'), findsOneWidget);
     expect(host.added, isEmpty);
 
-    host.refuseAdd = 'the edited canoa.cfg would not be read: server is an https address';
+    host.refuseAdd = 'the edited canoa.cfg would not be read: server is an http or https address';
     await _fill(tester, 'mail-password', 'x');
     await tester.tap(find.byKey(const Key('add-mail-submit')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('server is an https address'), findsOneWidget);
+    expect(find.textContaining('server is an http or https address'), findsOneWidget);
     expect(find.byKey(const Key('add-mail-dialog')), findsOneWidget, reason: 'the dialog stays so the address can be fixed');
   });
 

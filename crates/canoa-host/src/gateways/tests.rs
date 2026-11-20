@@ -296,11 +296,22 @@ fn the_kinds_settings_are_checked_like_any_others() {
     let catalog = catalog_of("claude");
     let kind = catalog.kind(KIND).expect("the kind");
     assert!(crate::accounts::check_settings(kind, Some(&settings("m"))).is_ok());
-    let mut open = serde_json::Map::new();
-    open.insert("model".to_owned(), json!("m"));
-    open.insert("endpoint".to_owned(), json!("http://example.org:1"));
-    let refused = crate::accounts::check_settings(kind, Some(&Settings::new(open)))
-        .expect_err("a far address");
+    // Plain http to another computer is the person's choice: accepted, and told of.
+    let mut far = serde_json::Map::new();
+    far.insert("model".to_owned(), json!("m"));
+    far.insert("endpoint".to_owned(), json!("http://example.org:1"));
+    let far = Settings::new(far);
+    assert!(crate::accounts::check_settings(kind, Some(&far)).is_ok());
+    let notes = crate::accounts::address_notes("local", kind, Some(&far));
+    assert!(
+        notes.len() == 1 && notes[0].contains("plain http to example.org"),
+        "{notes:?}"
+    );
+    let mut foreign = serde_json::Map::new();
+    foreign.insert("model".to_owned(), json!("m"));
+    foreign.insert("endpoint".to_owned(), json!("ftp://example.org:1"));
+    let refused = crate::accounts::check_settings(kind, Some(&Settings::new(foreign)))
+        .expect_err("not an http address");
     assert!(refused.contains("endpoint"), "{refused}");
     let mut stray = serde_json::Map::new();
     stray.insert("model".to_owned(), json!("m"));
