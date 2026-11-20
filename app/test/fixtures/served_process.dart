@@ -17,6 +17,7 @@ final class ServedProcess {
     required this.dir,
     required this.config,
     required this.method,
+    this.environment = const {},
   });
 
   /// The built `canoa`.
@@ -24,6 +25,9 @@ final class ServedProcess {
   final Directory dir;
   final File config;
   final String method;
+
+  /// More variables for the host's environment, over the ones it is given for its home.
+  final Map<String, String> environment;
 
   /// The status `canoa serve` ends with when a key granted `host.restart` asked it to start again.
   static const restartStatus = 75;
@@ -43,6 +47,7 @@ final class ServedProcess {
     'HOME': home,
     'USERPROFILE': home,
     'COQUI_AGENTIC_PEER_HOME': state,
+    ...environment,
   };
 
   Future<void> start() async {

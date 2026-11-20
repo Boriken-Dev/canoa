@@ -11,7 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/fake_tab_bridge.dart';
-import 'fixtures/sample_render.dart' show samplesDir;
+import 'fixtures/sample_render.dart' show samplesSkip;
 
 final _peer = 'sha256:${'ab' * 32}';
 
@@ -69,9 +69,8 @@ Future<void> _openPlus(WidgetTester tester) async {
   await tester.pump();
 }
 
-/// With CANOA_SAMPLES_DIR set, a picture of the composer as the narrow panel draws it; otherwise nothing.
+/// A picture of the composer as the narrow panel draws it, written to CANOA_SAMPLES_DIR by the tests that are run with it set.
 Future<void> _sample(WidgetTester tester, String name) async {
-  if (samplesDir == null) return;
   await tester.binding.setSurfaceSize(const Size(380, 560));
   await tester.pump();
   await expectLater(find.byType(MaterialApp), matchesGoldenFile(name));
@@ -119,8 +118,7 @@ void main() {
     expect(rig.bridge.shares[key], {2});
   });
 
-  testWidgets('samples of the panel: sharing, the + menu and @, and the notices', (tester) async {
-    if (samplesDir == null) return;
+  testWidgets('samples of the panel: sharing, the + menu and @, and the notices (CANOA_SAMPLES_DIR)', (tester) async {
     final rig = await _pump(tester);
     await rig.shares.toggle(rig.session, rig.bridge.tabs[1]!);
     await rig.shares.toggle(rig.session, rig.bridge.tabs[2]!);
@@ -139,7 +137,7 @@ void main() {
     await rig.shares.refresh();
     await tester.pump();
     await _sample(tester, 'extension_panel_notices.png');
-  });
+  }, skip: samplesSkip);
 
   testWidgets('the person can share more than ten tabs: there is no cap', (tester) async {
     final bridge = FakeTabBridge(front: 1);

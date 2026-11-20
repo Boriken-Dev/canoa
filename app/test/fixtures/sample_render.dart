@@ -13,6 +13,10 @@ String? get samplesDir {
   return dir == null || dir.isEmpty ? null : dir;
 }
 
+/// Whether a test that only draws the pictures of the samples is skipped: CANOA_SAMPLES_DIR is not set. `testWidgets` takes no
+/// reason, so such a test names the variable in its description.
+bool get samplesSkip => samplesDir == null;
+
 /// Writes each golden scene a test draws as a PNG under [dir], named after the golden, instead of comparing it.
 /// Pair it with [loadSampleFonts]: the goldens' own comparison stays untouched when [dir] is not set.
 final class SampleWriter extends GoldenFileComparator {

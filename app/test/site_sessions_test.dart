@@ -22,7 +22,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fixtures/app_fixture.dart' show settle, until;
 import 'fixtures/fake_tab_bridge.dart';
-import 'fixtures/sample_render.dart' show samplesDir;
+import 'fixtures/sample_render.dart' show samplesSkip;
 
 final _peer = 'sha256:${'ab' * 32}';
 // What the agent's host puts the folders under; the panel does not know it.
@@ -338,8 +338,7 @@ void main() {
     expect(ledger.entries, isEmpty);
   });
 
-  testWidgets('sample: the side panel for a site lists its earlier sessions', (tester) async {
-    if (samplesDir == null) return;
+  testWidgets('sample: the side panel for a site lists its earlier sessions (CANOA_SAMPLES_DIR)', (tester) async {
     final ledger = SessionLedger(MemoryLedgerBackend(), clock: _Clock().now);
     final provider = _Provider();
     final opened = await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/docs'), provider: provider);
@@ -353,7 +352,7 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await _panel(tester, ledger: ledger, bridge: _bridge('https://example.com/docs'), provider: _Provider());
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('ext_panel_site_sessions.png'));
-  });
+  }, skip: samplesSkip);
 }
 
 const _chatOnly = ClientMode(chatOnly: true);
@@ -731,8 +730,7 @@ void chatOnlyTests() {
       expect(store.sessions.single.loadout, isNull);
     });
 
-    testWidgets('sample: the side panel chooses the loadout and profile beside New session', (tester) async {
-      if (samplesDir == null) return;
+    testWidgets('sample: the side panel chooses the loadout and profile beside New session (CANOA_SAMPLES_DIR)', (tester) async {
       await _panel(
         tester, ledger: SessionLedger(MemoryLedgerBackend()), bridge: _bridge('https://example.com/docs', title: 'Docs'), provider: _Provider(),
         mode: _chatOnly, config: _withLoadouts,
@@ -740,10 +738,9 @@ void chatOnlyTests() {
       await tester.tap(find.byKey(const Key('start-loadout')));
       await settle(tester);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('ext_panel_start_loadout.png'));
-    });
+    }, skip: samplesSkip);
 
-    testWidgets('sample: the chat-only drawer lists the page\'s sessions first', (tester) async {
-      if (samplesDir == null) return;
+    testWidgets('sample: the chat-only drawer lists the page\'s sessions first (CANOA_SAMPLES_DIR)', (tester) async {
       final ledger = SessionLedger(MemoryLedgerBackend(), clock: _Clock().now);
       final bridge = _bridge('https://example.com/docs', title: 'Docs');
       final store = await _panel(tester, ledger: ledger, bridge: bridge, provider: _Provider(), mode: _chatOnly);
@@ -764,7 +761,7 @@ void chatOnlyTests() {
       store.select(store.sessions.firstWhere((session) => session.title == 'Fix the broken link').id);
       await settle(tester);
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('ext_chat_only_conversation.png'));
-    });
+    }, skip: samplesSkip);
   });
 }
 
