@@ -57,9 +57,6 @@ pub(crate) struct AgentEntry {
     #[map(default)]
     #[schema(section = "accounts", title = "Profiles")]
     pub profiles: Vec<String>,
-    /// Whether the entry has a profile of its own beside the ones it offers.
-    #[schema(advanced, section = "accounts", title = "Has its own profile")]
-    pub own_profile: Option<bool>,
     /// A harness's library file, which provides it.
     #[schema(advanced, section = "library", title = "Library")]
     pub library: Option<String>,

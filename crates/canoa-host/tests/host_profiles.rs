@@ -343,13 +343,21 @@ fn a_client_that_does_not_say_it_answers_is_never_asked() {
 }
 
 #[test]
-fn an_entry_with_own_profile_gets_the_persons_own_layer_and_another_entry_does_not() {
+fn an_entry_that_names_no_profile_gets_the_persons_own_layer_and_one_that_names_a_profile_does_not()
+{
     let agent = quoted(&example("profile_agent", false).to_string_lossy());
     let client = support::key();
     let config = format!(
-        "[profile]\ncontext = {{ text = \"The person's own context.\" }}\n\
-         [host.agents.mine]\nprogram = {agent}\nown_profile = true\npeers = [\"{peer}\"]\n\
-         [host.agents.theirs]\nprogram = {agent}\n",
+        "[profile]
+context = {{ text = \"The person's own context.\" }}
+         [host.agents.mine]
+program = {agent}
+peers = [\"{peer}\"]
+         [host.agents.theirs]
+program = {agent}
+profiles = [\"p\"]
+[host.profiles.p]
+",
         peer = client.peer_id()
     );
     let host = Host::start(&config, 2);
@@ -368,31 +376,6 @@ fn an_entry_with_own_profile_gets_the_persons_own_layer_and_another_entry_does_n
         "The person's own context."
     );
     assert_eq!(prompt_of("theirs")["systemPrompt"], "");
-}
-
-#[test]
-fn own_profile_cannot_go_with_profiles() {
-    let config = "[host.agents.a]\nprogram = \"x\"\nown_profile = true\npeers = [\"sha256:aa\"]\nprofiles = [\"p\"]\n[host.profiles.p]\n";
-    let parsed = canoa_host::Config::from_str_in(config, Path::new("."));
-    assert!(parsed.is_err(), "{parsed:?}");
-    let alone = canoa_host::Config::from_str_in(
-        &format!(
-            "[host.agents.a]\nprogram = \"x\"\nown_profile = true\npeers = [\"sha256:{}\"]\n",
-            "a".repeat(64)
-        ),
-        Path::new("."),
-    )
-    .expect("parses");
-    assert!(alone.entries[0].own_profile);
-}
-
-#[test]
-fn own_profile_needs_peers() {
-    let parsed = canoa_host::Config::from_str_in(
-        "[host.agents.a]\nprogram = \"x\"\nown_profile = true\n",
-        Path::new("."),
-    );
-    assert!(parsed.is_err(), "{parsed:?}");
 }
 
 /// An entry named as a preset is, with `profile`'s access, started as the preset's program with the access in its own words.

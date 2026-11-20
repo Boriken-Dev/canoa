@@ -823,7 +823,8 @@ impl Shared {
 
 /// How an agent started only to read its usage is started: recorded with the others, so that stopping the host ends it and
 /// none starts while it stops. The second part of what it hands back forgets the agent once it has ended.
-/// What re-reads an entry's profile at each connection: only an entry of the host's own or one with `own_profile`, when the options hold canoa.cfg's files.
+/// What re-reads an entry's profile at each connection: an entry of the host's own or one that names no profile, so that canoa.cfg's
+/// top level is what it starts with, when the options hold canoa.cfg's files.
 fn refresh_of(
     entry: &Entry,
     names: &[String],
@@ -834,7 +835,7 @@ fn refresh_of(
     let layers = options
         .layers
         .clone()
-        .filter(|_| entry.local || entry.own_profile)?;
+        .filter(|_| entry.local || names.is_empty())?;
     let launcher = options.provider_program.as_os_str().to_owned();
     let before = options.program_args.clone();
     let local = config
@@ -860,6 +861,32 @@ fn refresh_of(
         before,
         items: items.clone(),
     })
+}
+
+/// Which profile an entry's sessions start with and why, in words: what `canoa check` prints for the entry.
+pub(crate) fn applied_profile(config: &Config, entry: &Entry) -> String {
+    let named = entry_profiles(entry);
+    if !named.is_empty() {
+        return format!("{} (named by the entry)", named.join(", "));
+    }
+    match &entry.kind {
+        EntryKind::Agent { .. } | EntryKind::Harness { .. } => {
+            if config.local_profiles.for_agent(&entry.name).is_some() {
+                "default (canoa.cfg's top level; the entry names none)".to_owned()
+            } else {
+                "none (the entry names none and canoa.cfg has no profile)".to_owned()
+            }
+        }
+        _ => "none (the entry's kind takes no profile)".to_owned(),
+    }
+}
+
+/// The `[host.profiles]` an entry names; none for an entry of a kind that has no profile to name.
+fn entry_profiles(entry: &Entry) -> &[String] {
+    match &entry.kind {
+        EntryKind::Agent { profiles, .. } | EntryKind::Harness { profiles, .. } => profiles,
+        _ => &[],
+    }
 }
 
 fn private_starter(agents: &Arc<Mutex<Agents>>, max_line: usize) -> Starter {
@@ -1427,7 +1454,6 @@ impl Serving {
         if let Some(sockets) = portal_of(options) {
             for source in &mut sources {
                 source.entry.local = false;
-                source.entry.own_profile = true;
                 source.entry.listen = Listen::Pipe(sockets.entry(&source.entry.name)?);
             }
         }
@@ -1554,9 +1580,9 @@ impl Serving {
                 )?;
                 (Some(bound), url)
             };
-            // The host's own sources are launched with what canoa.cfg's top level says, and so is an entry that sets `own_profile`;
-            // any other entry on an address, with its `[host.profiles]`.
-            let local_profile = (entry.local || entry.own_profile)
+            // The host's own sources are launched with what canoa.cfg's top level says, and so is every entry that names no profile of
+            // `[host.profiles]`: the default applies to anything that names none. An entry that names a profile is launched with it.
+            let local_profile = (entry.local || entry_profiles(entry).is_empty())
                 .then(|| config.local_profiles.for_agent(&entry.name))
                 .flatten()
                 .map(|mut each| {

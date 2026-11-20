@@ -1799,14 +1799,16 @@ fn check(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
             crate::EntryKind::Provider { .. } => "provider",
             crate::EntryKind::Tool { .. } => "tool",
         };
+        let profile = crate::serve::applied_profile(&config, entry);
         let line = match args.format {
             Format::Json => serde_json::json!({
                 "name": entry.name,
                 "kind": kind,
                 "listen": entry.listen.to_string(),
+                "profile": profile,
             })
             .to_string(),
-            Format::Text => format!("{} {kind} {}", entry.name, entry.listen),
+            Format::Text => format!("{} {kind} {} profile: {profile}", entry.name, entry.listen),
         };
         print(front, &line)?;
     }

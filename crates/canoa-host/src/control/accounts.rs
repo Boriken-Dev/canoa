@@ -112,18 +112,12 @@ fn pools_of(
         .collect()
 }
 
-/// The keys an entry made by an offer starts with. A built-in source keeps what it was (its title, the profile it is
-/// launched with) and reaches no paired key unless the host is a portal's; any other entry made here is titled by its name and no
-/// paired key reaches it.
+/// The keys an entry made by an offer starts with. A built-in source keeps what it was (its title) and reaches no paired key
+/// unless the host is a portal's; any other entry made here is titled by its name and no paired key reaches it.
 fn made_keys(entry: &str, built_in: bool, portal: bool) -> Vec<(&'static str, toml::Value)> {
     let mut keys = vec![("title", toml::Value::String(entry.to_owned()))];
     if !(built_in && portal) {
         keys.push(("peers", toml::Value::Array(Vec::new())));
-        // The profile is the person's own for a built-in source; a portal host gives it to its harness entries whatever the file
-        // says, and a file may ask for it only of an entry that names its keys.
-        if built_in {
-            keys.push(("own_profile", toml::Value::Boolean(true)));
-        }
     }
     keys
 }
@@ -179,7 +173,6 @@ fn app_made_accounts_entry(entry: &crate::config::Entry, harness: &str) -> Optio
         && entry.name == format!("{harness}-accounts")
         && entry.title.as_deref() == Some(title.as_str())
         && entry.peers.as_ref().is_some_and(Vec::is_empty)
-        && !entry.own_profile
         && !entry.local
         && origin.is_none()
         && executable.is_none()
@@ -797,7 +790,7 @@ mod offer_tests {
         answer.expect("offered");
         let codex = entry(&after, "Codex");
         assert_eq!(codex.peers.as_ref().map(Vec::len), Some(0), "{written}");
-        assert!(codex.own_profile, "{written}");
+        assert!(!written.contains("own_profile"), "{written}");
         assert!(!written.contains("bypass"), "{written}");
         assert!(written.contains("title = \"Codex\""), "{written}");
         let (answer, written, after) = offered(true, &params);

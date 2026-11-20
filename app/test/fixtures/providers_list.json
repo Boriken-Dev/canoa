@@ -544,16 +544,6 @@
           "x-section": "accounts",
           "default": []
         },
-        "own_profile": {
-          "type": [
-            "boolean",
-            "null"
-          ],
-          "title": "Has its own profile",
-          "description": "Whether the entry has a profile of its own beside the ones it offers.",
-          "x-section": "accounts",
-          "x-advanced": true
-        },
         "library": {
           "type": [
             "string",

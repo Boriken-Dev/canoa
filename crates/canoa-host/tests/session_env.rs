@@ -49,11 +49,11 @@ fn install_overlay(scratch: &Scratch) {
 /// How the entry under test gets a profile.
 #[derive(Clone, Copy, Debug)]
 enum Profile {
-    /// None: the entry is a bare one.
+    /// None: nothing in canoa.cfg but the entry.
     None,
     /// `profiles = ["main"]`, with nothing in it.
     Host,
-    /// The person's own: canoa.cfg's top level with overlay `team`, and the loadout `review` chosen.
+    /// The default: canoa.cfg's top level with overlay `team`, and the loadout `review` chosen.
     Own,
 }
 
@@ -66,7 +66,7 @@ impl Profile {
                 "[host.agents.Agent]\n{command}\nprofiles = [\"main\"]\n[host.profiles.main]\n"
             ),
             Self::Own => format!(
-                "[host.agents.Agent]\n{command}\nown_profile = true\npeers = [\"{peer}\"]\n\
+                "[host.agents.Agent]\n{command}\npeers = [\"{peer}\"]\n\
                  [overlays]\nteam = \"fixture\"\n[loadouts.review]\noverlays = [\"team\"]\n"
             ),
         }

@@ -297,7 +297,7 @@ fn check_prints_entries_and_a_bad_configuration_exits_2() {
     assert!(checked.status.success());
     assert_eq!(
         String::from_utf8_lossy(&checked.stdout).trim(),
-        "fixture agent 127.0.0.1:7999"
+        "fixture agent 127.0.0.1:7999 profile: none (the entry names none and canoa.cfg has no profile)"
     );
 
     std::fs::write(&path, agent_entry("fixture", "listen = \"0.0.0.0:7999\"")).expect("written");
@@ -305,7 +305,7 @@ fn check_prints_entries_and_a_bad_configuration_exits_2() {
     assert!(beyond.status.success(), "{beyond:?}");
     assert_eq!(
         String::from_utf8_lossy(&beyond.stdout).trim(),
-        "fixture agent 0.0.0.0:7999"
+        "fixture agent 0.0.0.0:7999 profile: none (the entry names none and canoa.cfg has no profile)"
     );
     std::fs::write(&path, agent_entry("fixture", "listen = \"not an address\"")).expect("written");
     assert_eq!(

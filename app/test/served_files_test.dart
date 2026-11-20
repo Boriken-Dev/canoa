@@ -168,7 +168,6 @@ args = ["--scripted"]
 listen = "127.0.0.1:${await freeLoopbackPort()}"
 working_roots = [${jsonEncode(home)}]
 peers = [${jsonEncode(browserId)}]
-own_profile = true
 ''');
     host = _Host(dir, config, home, method.id);
     await host.start();

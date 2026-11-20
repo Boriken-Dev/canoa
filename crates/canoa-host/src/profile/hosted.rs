@@ -184,6 +184,8 @@ impl Item {
 #[derive(Debug)]
 pub(crate) struct Offer {
     pub(crate) profiles: Vec<(String, HostProfile)>,
+    /// Whether the profile is the default one, given because the entry names none, rather than one the entry names.
+    pub(crate) by_default: bool,
     pub(crate) launcher: OsString,
     /// What goes between the launcher and a subcommand of the host's own: the forwarder is run as `launcher [before]
     /// hook-forward`.
@@ -581,6 +583,16 @@ impl Connection {
         } = choices;
         let (name, listed) = &offer.profiles[index];
         let mut notes = Vec::new();
+        if offer.by_default {
+            notes.push(Item::new(
+                "profile",
+                LayerId::new(LayerKind::User, ""),
+                State::Applied,
+                format!(
+                    "the default profile ({name}): canoa.cfg's top level, which applies to an entry that names no profile"
+                ),
+            ));
+        }
         let mut narrowed = listed.clone();
         // A session that names none starts with the default profile, when the file has one.
         let preset = match preset {
@@ -3327,6 +3339,7 @@ pub(crate) fn offer(
     if let Some(local) = local {
         return Some(Arc::new(Offer {
             profiles: vec![(LOCAL_PROFILE.to_owned(), local.clone())],
+            by_default: true,
             launcher,
             before,
         }));
@@ -3339,6 +3352,7 @@ pub(crate) fn offer(
             .iter()
             .filter_map(|name| Some((name.clone(), profiles.get(name)?.clone())))
             .collect(),
+        by_default: false,
         launcher,
         before,
     }))

@@ -139,7 +139,7 @@ try {
     "[host.control]", 'listen = "127.0.0.1:0"',
     `grants = { ${JSON.stringify(own)} = ["ledger.read", "ledger.write", "folders", "config.read", "config.write", "config.write.sessions", "upload", "overlay.read", "overlay.write"] }`,
     "[host.agents.scripted]", `program = ${JSON.stringify(forward(agent))}`, 'args = ["--scripted"]', 'listen = "127.0.0.1:0"',
-    `working_roots = [${JSON.stringify(forward(home))}]`, `peers = [${JSON.stringify(own)}]`, "own_profile = true",
+    `working_roots = [${JSON.stringify(forward(home))}]`, `peers = [${JSON.stringify(own)}]`,
     "[host.web]", `dir = ${JSON.stringify(forward(site))}`, `listen = "127.0.0.1:${webPort}"`, "",
   ].join("\n"));
   const env = { ...process.env, HOME: home, USERPROFILE: home, COQUI_AGENTIC_PEER_HOME: path.join(work, "peers"), CANOA_LOG: "info" };

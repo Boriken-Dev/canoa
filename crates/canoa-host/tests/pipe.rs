@@ -206,7 +206,9 @@ fn check_prints_a_pipe_entry_and_refuses_a_pipe_it_cannot_use() {
     );
     assert_eq!(
         String::from_utf8_lossy(&checked.stdout).trim(),
-        format!("fixture agent {listen}")
+        format!(
+            "fixture agent {listen} profile: none (the entry names none and canoa.cfg has no profile)"
+        )
     );
     let json = run(&["check", "--config", &config_arg, "--format", "json"]);
     let line: Value =
