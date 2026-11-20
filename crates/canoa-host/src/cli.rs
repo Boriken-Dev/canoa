@@ -1234,6 +1234,7 @@ fn serve(args: &ServeArgs, front: &dyn Front) -> Result<(), Failed> {
             .map_err(Failed::usage)?;
     }
     let (config, layers) = load_for_serving(args, front)?;
+    crate::addresses::log(&config);
     let home = home_of(front)?;
     let web = web_config(&config, args, &home, front)?;
     // Before anything of the home is touched or any address bound.
@@ -1802,6 +1803,14 @@ fn check(args: &ConfigArgs, front: &dyn Front) -> Result<(), Failed> {
             })
             .to_string(),
             Format::Text => format!("{} {kind} {}", entry.name, entry.listen),
+        };
+        print(front, &line)?;
+    }
+    // An address is never refused for being plain http; the person is told what it costs.
+    for note in crate::addresses::warnings(&config) {
+        let line = match args.format {
+            Format::Json => serde_json::json!({"warning": note}).to_string(),
+            Format::Text => format!("non-default: {note}"),
         };
         print(front, &line)?;
     }

@@ -171,9 +171,21 @@ class _AccountsSectionState extends State<AccountsSection> {
         leading: SourceMark.provider(accountMarkId(account.harness, account.kind), size: 24, key: Key('account-mark ${account.name}')),
         description: detail,
         // The standards it supports say which agents can run on it; the usage opens under them.
-        below: account.provides.isEmpty && !open
+        below: account.provides.isEmpty && !open && account.warnings.isEmpty
             ? null
             : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                for (var i = 0; i < account.warnings.length; i++)
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Icon(Icons.warning_amber_rounded, size: 16, color: scheme.error),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        account.warnings[i],
+                        key: Key('account-warning ${account.name} $i'),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.error),
+                      ),
+                    ),
+                  ]),
                 if (account.provides.isNotEmpty)
                   Text(
                     'Supports ${standardsText(account.provides)}',

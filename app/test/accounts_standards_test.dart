@@ -71,6 +71,17 @@ void main() {
     expect(find.descendant(of: find.byKey(const Key('account gateway')), matching: find.text('Supports Anthropic API, OpenAI API')), findsOneWidget);
   });
 
+  testWidgets('Settings shows the warning the host gives for an account address, and nothing for one with none', (tester) async {
+    const note = 'account lan: base_url is plain http to 192.0.2.11: what is sent there, a key or a password included, crosses the network unprotected';
+    final host = FakeAccountsHost(accounts: [
+      account('lan', kind: 'litellm', provides: ['openai-api'], warnings: [note]),
+      account('metered', provides: ['anthropic-api']),
+    ]);
+    await _show(tester, AccountsSection(controller: _controller(host)));
+    expect(find.descendant(of: find.byKey(const Key('account lan')), matching: find.text(note)), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('account metered')), matching: find.byIcon(Icons.warning_amber_rounded)), findsNothing);
+  });
+
   testWidgets('Add account says what each way to sign in makes, by its standard', (tester) async {
     await _show(tester, AccountsSection(controller: _controller(FakeAccountsHost())));
     await tester.tap(find.byKey(const Key('add-account-claude')));

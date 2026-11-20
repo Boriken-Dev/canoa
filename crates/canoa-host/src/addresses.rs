@@ -1,0 +1,93 @@
+//! What the person is told of the addresses canoa.cfg names: each one that is plain http beyond this computer. Nothing here refuses
+//! an address; it is the person's network, and the cost is said where they look (`canoa check`, `canoa accounts list`, the log
+//! when the host starts, and the application's account rows).
+
+use crate::accounts::{self, matching::Catalogs};
+use crate::config::Config;
+
+/// The notes for every address `config` names, each in words that start with what names it (`account work: base_url`).
+pub(crate) fn warnings(config: &Config) -> Vec<String> {
+    let catalogs = Catalogs::new(config);
+    let mut notes = Vec::new();
+    for (name, account) in &config.accounts {
+        if let Some(info) = catalogs.kind(account) {
+            notes.extend(accounts::address_notes(
+                name,
+                &info,
+                account.settings.as_ref(),
+            ));
+        }
+    }
+    notes.extend(mail_and_kb_warnings(config));
+    notes
+}
+
+/// The notes for the addresses of the mailboxes and the knowledge index, which need no account catalog.
+pub(crate) fn mail_and_kb_warnings(config: &Config) -> Vec<String> {
+    let mut notes = Vec::new();
+    for (name, mailbox) in &config.mail.accounts {
+        for (key, address) in [
+            ("server", &mailbox.server),
+            ("autodiscover", &mailbox.autodiscover),
+        ] {
+            if let Some(address) = address {
+                notes.extend(canoa::address::plain_http_note(
+                    &format!("[host.mail.accounts.{name}] {key}"),
+                    address,
+                ));
+            }
+        }
+    }
+    for (key, address) in [
+        ("embeddings", &config.kb.embeddings),
+        ("llm_endpoint", &config.kb.llm_endpoint),
+    ] {
+        if let Some(address) = address {
+            notes.extend(canoa::address::plain_http_note(
+                &format!("[host.kb] {key}"),
+                address,
+            ));
+        }
+    }
+    notes
+}
+
+/// Logs each note at `info` as a non-default setting.
+pub(crate) fn log(config: &Config) {
+    for note in warnings(config) {
+        tracing::info!("non-default: {note}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_of(text: &str) -> Config {
+        Config::from_str_in(text, &std::env::temp_dir()).expect("canoa.cfg parses")
+    }
+
+    #[test]
+    fn plain_http_beyond_this_computer_is_noted_in_mail_and_the_index_and_nowhere_else() {
+        let quiet = config_of(
+            "[host.mail.accounts.a]\nbackend = \"ews\"\nserver = \"https://mail.example/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n\
+             [host.mail.accounts.b]\nbackend = \"graph\"\nclient_id = \"c\"\nserver = \"http://127.0.0.1:9/v1.0\"\n\
+             [host.kb]\nembeddings = \"http://localhost:60570\"\nmodel = \"m\"\n",
+        );
+        assert!(warnings(&quiet).is_empty(), "{:?}", warnings(&quiet));
+        let loud = config_of(
+            "[host.mail.accounts.a]\nbackend = \"ews\"\nserver = \"http://192.0.2.9/EWS/Exchange.asmx\"\nuser = \"u\"\npassword_env = \"P\"\n\
+             [host.kb]\nembeddings = \"http://192.0.2.9:60570\"\nmodel = \"m\"\n",
+        );
+        let notes = warnings(&loud);
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert!(
+            notes[0].starts_with("[host.mail.accounts.a] server is plain http to 192.0.2.9"),
+            "{notes:?}"
+        );
+        assert!(
+            notes[1].starts_with("[host.kb] embeddings is plain http to 192.0.2.9"),
+            "{notes:?}"
+        );
+    }
+}

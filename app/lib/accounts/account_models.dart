@@ -419,6 +419,7 @@ final class AccountInfo {
     this.expiresAt,
     this.provides = const [],
     this.automatic = false,
+    this.warnings = const [],
   });
 
   /// One object of `accounts list --format json`, or null when it is not one.
@@ -444,10 +445,14 @@ final class AccountInfo {
       expiresAt: map['expires_at'] as String?,
       provides: _texts(map['provides']),
       automatic: map['automatic'] == true,
+      warnings: _texts(map['warnings']),
     );
   }
 
   final String name, harness, kind;
+
+  /// What the host tells the person of its settings, such as an address that is plain http beyond this computer. Never a refusal.
+  final List<String> warnings;
 
   /// Whether the host makes the account itself: the login a harness has where it runs, called [localAccount] for each harness that
   /// has one. No canoa.cfg names it, so it is neither removed, offered nor signed in again, and its name alone does not tell

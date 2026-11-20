@@ -396,6 +396,8 @@ pub(crate) struct Row {
     /// Whether the host makes the account itself (the `local` of a harness that has a login of its own) and no canoa.cfg names
     /// it, so it can be neither removed nor signed in again.
     pub(crate) automatic: bool,
+    /// What the person is told of the account's settings, such as an address that is plain http beyond this computer.
+    pub(crate) warnings: Vec<String>,
 }
 
 impl Row {
@@ -403,7 +405,7 @@ impl Row {
         serde_json::json!({
             "name": self.name, "harness": self.harness, "kind": self.kind, "id": self.id,
             "state": self.state, "revision": self.revision, "expires_at": self.expires_at,
-            "provides": self.provides, "automatic": self.automatic,
+            "provides": self.provides, "automatic": self.automatic, "warnings": self.warnings,
         })
     }
 }
@@ -422,6 +424,7 @@ fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
         .iter()
         .map(|(name, account)| {
             let (state, revision, expires_at) = state_of(accounts, account);
+            let kind = catalogs.kind(account);
             Row {
                 name: name.clone(),
                 harness: account.harness.clone(),
@@ -430,9 +433,13 @@ fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
                 state,
                 revision,
                 expires_at,
-                provides: catalogs
-                    .kind(account)
-                    .map(|info| info.provides)
+                provides: kind
+                    .as_ref()
+                    .map(|info| info.provides.clone())
+                    .unwrap_or_default(),
+                warnings: kind
+                    .as_ref()
+                    .map(|info| super::address_notes(name, info, account.settings.as_ref()))
                     .unwrap_or_default(),
                 automatic: false,
             }
@@ -451,6 +458,7 @@ fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
             revision,
             expires_at,
             automatic: true,
+            warnings: Vec::new(),
         });
     }
     rows
@@ -465,6 +473,13 @@ pub(crate) fn list(env: &Env<'_>, format: Format) -> Result<(), Failed> {
             Format::Text => format!("{} {} {} {}", row.name, row.harness, row.kind, row.state),
         };
         env.front.print(&line).map_err(Failed::run)?;
+        if format == Format::Text {
+            for warning in &row.warnings {
+                env.front
+                    .print(&format!("non-default: {warning}"))
+                    .map_err(Failed::run)?;
+            }
+        }
     }
     if format == Format::Text
         && let Some(note) = accounts.note()
