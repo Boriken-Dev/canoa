@@ -30,6 +30,7 @@ class ModelStore:         # canoa_sdk.store: lists, moves and sets up the models
 class SpeechProvider:     # canoa_sdk.speech: audio in, text out; abstract slot open(request, spawner) -> SpeechSession
     title: str; encodings: Sequence[str]; description = max_seconds = None; partials = False; hints = ()
 class SpeechOutput:       # canoa_sdk.speech: text in, audio out; abstract slots voices, say; info() -> dict (the OutputInfo)
+class AccountSpeech:      # canoa_sdk.speech: the speech-to-text services the accounts of some kinds can call; services: Sequence[AccountSpeechService] (id, title, standard, address, url, credential, summary, location, models: [AccountSpeechModel(id, label)])
 class SecretProvider:     # canoa_sdk.secret: somewhere a secret comes from; abstract slot get(request, spawner); names, put, forget refuse UNSUPPORTED
     title: str; description = None; can_store = can_list = needs_person = False
 class UsageReader:        # canoa_sdk.usage: how an agent's own quota is read; reader: str, bucket_prefix: str, settle_ms = 10000, retries_ms = (), cache_ms = 15000, private_limit_ms = 40000, private_retries_ms = (); abstract slot open(members) -> UsageReading

@@ -1,4 +1,5 @@
-// The speech kinds: `speech_provider` (audio in, text out) and `speech_output` (text in, audio out). A provider's own settings are its
+// The speech kinds: `speech_provider` (audio in, text out), `speech_output` (text in, audio out) and `account_speech` (the speech-to-text
+// services the accounts of some kinds can call). A provider's own settings are its
 // `static config` (an `s` schema from `guatiao/provide`), with a form from `static meta = formMeta(...)` (see `forms.js`); a provider that
 // starts a program or opens a connection does it through the `spawner` the host hands `open` or `say`, never by itself.
 //
@@ -11,6 +12,29 @@ import { dataOf } from './model.js';
 import { yieldCalls } from './wait.js';
 
 /** @typedef {import('./model.js').Spawner} Spawner the host's, which the provider destroys */
+
+/**
+ * Subclass it with `services`, or override `info()`: the host offers each of the person's accounts whose kind a service names and lends
+ * its key for a recording, so the host itself names no service. A service is `{id, title, standard, address, url, credential, summary,
+ * location, models}`: `id` is lower-case letters and digits (an offer made of an account is `ID:ACCOUNT`), `standard` the credential
+ * standard an account's kind provides for it, `address` the address that kind's model API starts from, `url` where a recording is
+ * posted, `credential` the credential that holds the key, and `models` are `{id, label}` with the recommended one first.
+ */
+export class AccountSpeech extends Provider {
+  static kinds = [kinds.AccountSpeech];
+
+  /** @type {{id: string, title: string, standard: string, address: string, url: string, credential: string, summary?: string, location?: string, models?: {id: string, label: string}[]}[]} */
+  static services = [];
+
+  info() {
+    const c = /** @type {typeof AccountSpeech} */ (this.constructor);
+    return { services: c.services.map((service) => ({ summary: '', location: '', models: [], ...service })) };
+  }
+
+  describe() {
+    return dataOf(this.info());
+  }
+}
 
 /**
  * Subclass it with `title` and `encodings` (and the optional fields of the description) and implement `open(request, spawner)`,

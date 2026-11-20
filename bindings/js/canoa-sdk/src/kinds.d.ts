@@ -5,6 +5,29 @@ import type * as g from 'guatiao';
 import type * as k from 'guatiao/kinds';
 
 /**
+ * Describes the speech-to-text services the accounts of some kinds can call. The same answer on every call, with nothing run and no
+ * connection opened.
+ *
+ * The `account_speech` kind: what a provider of it implements.
+ */
+export interface AccountSpeech {
+  /** The services. */
+  describe(): unknown;
+}
+
+/** A caller's handle on a `account_speech` table: a method per slot. */
+export interface AccountSpeechRemote extends k.RemoteBase<typeof AccountSpeech> {
+  /** The services. */
+  describe(): g.Value;
+}
+
+/**
+ * Describes the speech-to-text services the accounts of some kinds can call. The same answer on every call, with nothing run and no
+ * connection opened.
+ */
+export declare const AccountSpeech: k.DescribedKind<AccountSpeech, AccountSpeechRemote, false>;
+
+/**
  * Where a catalog comes from.
  *
  * `read` answers with the catalog in the type's own format, or fails with the reason, which the Store shows beside the last good

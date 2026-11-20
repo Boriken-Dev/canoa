@@ -15,6 +15,7 @@ A script is shared between hosts as the files it is.
 | `settings_section` | a page, or a group on a page, of Settings | `SettingsSection` |
 | `panel_tab` | a kind of tab of the bottom panel | `PanelTab`, `TerminalPanelTab`, `LogPanelTab` |
 | `speech_provider`, `speech_output` | dictation and a voice | `SpeechProvider`, `SpeechOutput` |
+| `account_speech` | the speech-to-text services the accounts of some kinds can call | `AccountSpeech` |
 
 The classes after the first of each row mirror what Canoa carries: subclass one to change a few words, or read it as the example.
 The SDK is in `bindings/js/canoa-sdk` (plain ES modules with `.d.ts` files, so TypeScript works too) and `bindings/python/canoa-sdk`; each

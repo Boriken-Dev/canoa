@@ -11,6 +11,18 @@ from guatiao import Ref
 from guatiao.kinds import I64, U32, U64, KindProtocol, Taken, ValueAnswer, fallible, required
 
 
+class AccountSpeech(KindProtocol, Protocol, kind="account_speech", floor_hash=2239884849):
+    """Describes the speech-to-text services the accounts of some kinds can call. The same answer on every call, with nothing run and no
+    connection opened.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """The services."""
+        ...
+
+
 class SpawnedProcess(KindProtocol, Protocol, kind="spawned_process", floor_hash=3306532587, is_object=True):
     """One program a spawner started, and everything it starts in turn.
 
@@ -755,4 +767,4 @@ class AgentVendor(KindProtocol, Protocol, kind="agent_vendor", floor_hash=192835
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "CatalogSource", "ModelStore", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]
+__all__ = ["AccountSpeech", "SpawnedProcess", "ProcessSpawner", "CatalogSource", "ModelStore", "PanelTab", "ProfileItem", "SecretProvider", "SettingsSection", "SpeechSession", "SpeechProvider", "SpeechUtterance", "SpeechOutput", "InstallTools", "InstallPrompter", "ProgramStore", "StoreExtension", "ProcessMembers", "UsageReading", "UsageReader", "AgentVendor"]

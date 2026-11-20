@@ -30,7 +30,7 @@ export {
   wordsOf,
 } from './profile.js';
 export { MAX_VALUES, SettingsSection } from './section.js';
-export { SpeechOutput, SpeechProvider } from './speech.js';
+export { AccountSpeech, SpeechOutput, SpeechProvider } from './speech.js';
 export {
   CatalogSource,
   CommandCatalogSource,

@@ -64,6 +64,38 @@ def test_an_extension_lists_its_types_and_leaves_an_absent_icon_out() -> None:
     }
 
 
+def test_an_account_speech_provider_lists_its_services_with_their_models() -> None:
+    class Acme(sdk.AccountSpeech):
+        services = [
+            sdk.AccountSpeechService(
+                "acme",
+                "Acme",
+                "acme-api",
+                "https://api.acme.test/v1",
+                "https://api.acme.test/v1/audio/transcriptions",
+                "api_key",
+                models=[sdk.AccountSpeechModel("m", "M")],
+            )
+        ]
+
+    assert Acme().describe() == {
+        "services": [
+            {
+                "id": "acme",
+                "title": "Acme",
+                "standard": "acme-api",
+                "address": "https://api.acme.test/v1",
+                "url": "https://api.acme.test/v1/audio/transcriptions",
+                "credential": "api_key",
+                "summary": "",
+                "location": "",
+                "models": [{"id": "m", "label": "M"}],
+            }
+        ]
+    }
+    assert provide.library("acme", "1", providers=[Acme]).kinds == ("account_speech",)
+
+
 @dataclass
 class Settings:
     command: Annotated[List[str], sdk.ui(section="run", placeholder="whisper-cli")]

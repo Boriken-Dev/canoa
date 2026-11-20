@@ -1,4 +1,5 @@
-"""The speech kinds: `speech_provider` (audio in, text out) and `speech_output` (text in, audio out).
+"""The speech kinds: `speech_provider` (audio in, text out), `speech_output` (text in, audio out) and `account_speech` (the
+speech-to-text services the accounts of some kinds can call).
 
 A provider's own settings are its `__init__` dataclass, with a form from `form=` (see `canoa_sdk.forms`); a provider that starts a
 program or opens a connection does it through the `spawner` the host hands `open` or `say`, never by itself.
@@ -17,7 +18,16 @@ from . import kinds
 from ._model import Model
 from ._provider import WithForm, abstract
 
-__all__ = ["SpeechInfo", "SpeechOutput", "SpeechProvider", "SpeechSession", "SpeechUtterance"]
+__all__ = [
+    "AccountSpeech",
+    "AccountSpeechModel",
+    "AccountSpeechService",
+    "SpeechInfo",
+    "SpeechOutput",
+    "SpeechProvider",
+    "SpeechSession",
+    "SpeechUtterance",
+]
 
 #: The object a recording runs on: `push(audio)`, `finish()` and `cancel()`; subclass it and answer from `SpeechProvider.open`.
 SpeechSession = kinds.SpeechSession
@@ -36,6 +46,46 @@ class SpeechInfo(Model):
     partials: bool = False
     max_seconds: Optional[int] = None
     hints: List[str] = field(default_factory=list)
+
+
+@dataclass
+class AccountSpeechModel(Model):
+    """One model a service transcribes with: the name a recording asks for, and what the offer calls it."""
+
+    id: str
+    label: str
+
+
+@dataclass
+class AccountSpeechService(Model):
+    """A speech-to-text service the accounts of some kind can call: its `id` (lower-case letters and digits; an offer made of an
+    account is `ID:ACCOUNT`), its `title`, the credential `standard` an account's kind provides for it, the `address` that kind's
+    model API starts from, the `url` a recording is posted to, the `credential` that holds the key, what it is (`summary`), where the
+    audio goes (`location`) and its `models`, the recommended one first."""
+
+    id: str
+    title: str
+    standard: str
+    address: str
+    url: str
+    credential: str
+    summary: str = ""
+    location: str = ""
+    models: List[AccountSpeechModel] = field(default_factory=list)
+
+
+class AccountSpeech(WithForm, provide.Provider, kinds.AccountSpeech):
+    """Subclass it with `services`, or override `info()`: the host offers each of the person's accounts whose kind a service names and
+    lends its key for a recording, so the host itself names no service."""
+
+    services: ClassVar[Sequence[AccountSpeechService]] = ()
+
+    def info(self) -> Dict[str, Any]:
+        """The `AccountSpeechInfo` as a map, from the class attribute."""
+        return {"services": [service.to_data() for service in self.services]}
+
+    def describe(self) -> ValueAnswer:
+        return self.info()
 
 
 class SpeechProvider(WithForm, provide.Provider, kinds.SpeechProvider, abstract=True):

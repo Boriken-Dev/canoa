@@ -33,7 +33,16 @@ from .secret import (
 )
 from .settings import SettingsSection
 from .source import CatalogSource, CommandCatalogSource, ReadCatalogSource, fields_of
-from .speech import SpeechInfo, SpeechOutput, SpeechProvider, SpeechSession, SpeechUtterance
+from .speech import (
+    AccountSpeech,
+    AccountSpeechModel,
+    AccountSpeechService,
+    SpeechInfo,
+    SpeechOutput,
+    SpeechProvider,
+    SpeechSession,
+    SpeechUtterance,
+)
 from .store import ExtensionInfo, ExtensionType, ModelStore, ProgramStore, StoreExtension
 from .usage import ReaderInfo, Retry, UsageReader, UsageReading, bucket, failed, reading
 from .vendor import AgentVendor, ModeTitle, StandardTitle, VendorInfo

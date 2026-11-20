@@ -26,6 +26,7 @@ class SpeechProvider extends Provider {       // speech.js: static title, encodi
 class CommandSpeech extends SpeechProvider    // a program the person names: audio on its input (a WAV stream or the samples), text on its output; id `speech_command`; `finish` and the catalog source's read let the host's other calls through while they wait (`yieldCalls` of wait.js, 0 under Node), so a `cancel` during `finish` ends the recording
 wavHeader(format); fill(arg, values); languageCode(tag); MAX_OUTPUT; PCM_S16LE
 class SpeechOutput extends Provider {         // speech.js: info() (the OutputInfo), voices, say
+class AccountSpeech extends Provider {        // speech.js: static services: [{id, title, standard, address, url, credential, summary?, location?, models?: [{id, label}]}], the speech-to-text services the accounts of some kinds can call
 }
 class SecretProvider extends Provider {       // secret.js: static title, description, can_store, can_list, needs_person; get(request, spawner); names, put, forget refuse with Unsupported
 }

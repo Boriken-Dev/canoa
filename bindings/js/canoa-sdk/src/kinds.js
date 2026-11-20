@@ -7,6 +7,22 @@ const described = kindsOf({
   "format": 1,
   "kinds": [
     {
+      "name": "account_speech",
+      "floor_hash": 2239884849,
+      "object": false,
+      "slots": [
+        {
+          "name": "describe",
+          "required": true,
+          "fallible": true,
+          "args": [],
+          "answer": {
+            "type": "value"
+          }
+        }
+      ]
+    },
+    {
       "name": "catalog_source",
       "floor_hash": 2158006965,
       "object": false,
@@ -1282,6 +1298,12 @@ const described = kindsOf({
     }
   ]
 });
+
+/**
+ * Describes the speech-to-text services the accounts of some kinds can call. The same answer on every call, with nothing run and no
+ * connection opened.
+ */
+export const AccountSpeech = described["account_speech"];
 
 /**
  * Where a catalog comes from.
