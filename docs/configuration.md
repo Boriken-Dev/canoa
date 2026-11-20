@@ -1173,6 +1173,22 @@ own, or one it names), a log whose latest lines the provider answers, or a page 
 Opening Logs and an extension's logs needs the key to hold `hosting`. A page's tab names its address and has a button that opens it in
 your browser; Canoa embeds no web view, and a page on a host that runs on another computer is not offered, since its loopback is not yours.
 
+### Copy and paste in a terminal
+
+Every terminal screen (the Terminal section, the panel's shell tabs, a host's shell) copies and pastes as the terminals you know do, in the
+desktop app, the web app and the browser extension's page. Copy takes the selected text: Ctrl+Shift+C or Ctrl+Insert (⌘C on a Mac), and on
+Windows Ctrl+C while text is selected, which also drops the selection, so the next Ctrl+C is the interrupt; with nothing selected Ctrl+C goes
+to the shell as it always did, and on Linux and macOS it always does. Paste sends the clipboard to the shell: Ctrl+Shift+V, Ctrl+V or
+Shift+Insert (⌘V on a Mac). Ctrl+Shift+A (⌘A) selects everything the screen holds; Ctrl+A is the shell's. A right click opens Copy, Paste and
+Select all, and the Terminal section's bar has Copy and Paste buttons. Selecting does not copy. A paste is one write to the shell, with each
+line end sent as Enter, and wrapped in the bracketed-paste markers when the shell asked for them (a pasted end marker is dropped, so the text
+cannot end its own paste); nothing limits its size or asks about several lines.
+
+A browser hands a page a keyboard paste as its `paste` event, which asks for no permission, so the keys above paste through it; only the
+menu's and the bar's Paste have to read the clipboard, which a browser lets a page do only after you allow it and only over HTTPS or on
+localhost, and when it refuses, the terminal says so and names the keyboard paste. A copy writes from your key or click, with the browser's
+copy command where the clipboard API is not there.
+
 ## Windows, macOS and Linux tray behavior
 
 Canoa uses a desktop tray controller and the shared Flutter app under root app/. The app can start without a visible main window, remain alive when its window closes, and expose Open Canoa, Hosting, Settings, Hide and Exit commands via the notification area. Closing the window leaves the app, its conversations, its own agents and `canoa` running; Exit, or **Quit Canoa** in Settings, ends them.
