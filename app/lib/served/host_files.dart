@@ -28,7 +28,7 @@ final class HostFolderListing {
   final String? parent;
   final List<HostFolderEntry> entries;
 
-  /// Whether the host stopped listing at its limit.
+  /// Whether the host has entries it did not list: never, from [HostFiles], which asks for every page.
   final bool more;
 }
 
@@ -46,10 +46,10 @@ final class HostFileRead {
   final String kind;
   final String? mime;
 
-  /// Whether [bytes] stops short of the file. A cut image carries no bytes.
+  /// Whether [bytes] stops short of the file: a text preview is the page asked for, and an image is read to its end.
   final bool truncated;
 
-  /// What was read; null for a binary file and for an image the limit cut.
+  /// What was read; null for a binary file.
   final Uint8List? bytes;
 }
 
@@ -105,32 +105,54 @@ final class HostFiles implements WorkspaceFiles, HostOpening {
 
   @override
   Future<HostFileRead> readFile(String path, {int? maxBytes}) async {
-    final answer = await _call('fs/read', {'path': path, 'max_bytes': ?maxBytes});
-    final data = answer['data'];
+    final first = await _call('fs/read', {'path': path, 'max_bytes': ?maxBytes});
+    final data = first['data'];
+    final parts = <Uint8List>[if (data is String) base64Decode(data)];
+    var last = first;
+    // A cut image shows nothing, so an image is read to its end, a page after another; a text preview is the page asked for.
+    while (first['kind'] == 'image' && last['next'] is num && parts.isNotEmpty) {
+      last = await _call('fs/read', {'path': path, 'offset': (last['next'] as num).toInt()});
+      final more = last['data'];
+      if (more is! String) break;
+      parts.add(base64Decode(more));
+    }
+    final Uint8List? bytes;
+    if (parts.length > 1) {
+      final joined = BytesBuilder(copy: false);
+      parts.forEach(joined.add);
+      bytes = joined.takeBytes();
+    } else {
+      bytes = parts.firstOrNull;
+    }
     return HostFileRead(
-      path: answer['path'] as String? ?? path,
-      name: answer['name'] as String? ?? path.split(RegExp(r'[\\/]')).last,
-      size: (answer['size'] as num?)?.toInt() ?? 0,
-      kind: answer['kind'] as String? ?? 'binary',
-      mime: answer['mime'] as String?,
-      truncated: answer['truncated'] == true,
-      bytes: data is String ? base64Decode(data) : null,
+      path: first['path'] as String? ?? path,
+      name: first['name'] as String? ?? path.split(RegExp(r'[\\/]')).last,
+      size: (first['size'] as num?)?.toInt() ?? 0,
+      kind: first['kind'] as String? ?? 'binary',
+      mime: first['mime'] as String?,
+      truncated: last['truncated'] == true,
+      bytes: bytes,
     );
   }
 
   @override
   Future<HostFolderListing> listFolders({String? path, bool hidden = false, bool files = false}) async {
-    final answer = await _call('fs/list', {'path': ?path, if (hidden) 'hidden': true, if (files) 'files': true});
-    return HostFolderListing(
-      path: answer['path'] as String?,
-      parent: answer['parent'] as String?,
-      entries: [
-        for (final each in (answer['entries'] as List<Object?>? ?? const []))
-          if (each is Map<Object?, Object?> && each['name'] is String && each['path'] is String)
-            HostFolderEntry(name: each['name']! as String, path: each['path']! as String, isFolder: each['dir'] == true),
-      ],
-      more: answer['more'] == true,
-    );
+    final entries = <HostFolderEntry>[];
+    Map<Object?, Object?> answer;
+    var offset = 0;
+    // The host answers a page at a time, cut from the sorted whole; every page is asked for, so no entry is missing.
+    while (true) {
+      answer = await _call('fs/list', {'path': ?path, if (hidden) 'hidden': true, if (files) 'files': true, if (offset > 0) 'offset': offset});
+      for (final each in (answer['entries'] as List<Object?>? ?? const [])) {
+        if (each is Map<Object?, Object?> && each['name'] is String && each['path'] is String) {
+          entries.add(HostFolderEntry(name: each['name']! as String, path: each['path']! as String, isFolder: each['dir'] == true));
+        }
+      }
+      final next = answer['next'];
+      if (next is! num || next.toInt() <= offset) break;
+      offset = next.toInt();
+    }
+    return HostFolderListing(path: answer['path'] as String?, parent: answer['parent'] as String?, entries: entries, more: false);
   }
 
   /// The most raw bytes one upload message carries: the host takes 512 KiB, and a page's transport no message over a mebibyte.

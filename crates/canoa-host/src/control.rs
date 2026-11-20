@@ -20,8 +20,8 @@ use crate::terminal::{self, Terminals};
 use crate::worktree::Worktrees;
 pub(crate) use extension_install::ExtensionInstall;
 pub use files::{
-    DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_TOTAL, DEFAULT_MAX_UPLOADS, MAX_CHUNK, MAX_LIST,
-    MAX_SECTION_BYTES, SECTIONS,
+    DEFAULT_LIST, DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_TOTAL, DEFAULT_MAX_UPLOADS,
+    MAX_CHUNK, MAX_SECTION_BYTES, SECTIONS,
 };
 pub(crate) use files::{Files, UploadLimits, table_in};
 pub(crate) use import::{Homes, IMPORT_KEY};
@@ -1823,6 +1823,8 @@ mod looks;
 #[cfg(test)]
 mod looks_tests;
 pub(crate) mod mail_setup;
+mod files_read_tests;
+#[cfg(test)]
 #[cfg(test)]
 mod mail_setup_tests;
 pub(crate) mod panel_tabs;

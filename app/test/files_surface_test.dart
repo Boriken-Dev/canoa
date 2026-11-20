@@ -462,6 +462,44 @@ void main() {
       expect(asked.last.containsKey('max_bytes'), isFalse);
     });
 
+    test('an image the page cuts is read to its end, a page after another, and a folder past a page is listed whole', () async {
+      final asked = <Map<String, Object?>>[];
+      final whole = Uint8List.fromList(List.generate(10, (i) => i));
+      final link = _Link((method, params) {
+        asked.add({'method': method, ...params});
+        if (method == 'fs/list') {
+          final from = (params['offset'] as int?) ?? 0;
+          final all = [for (var i = 0; i < 5; i++) {'name': 'f$i', 'path': '/w/f$i', 'dir': false}];
+          final page = all.skip(from).take(2).toList();
+          final end = from + page.length;
+          return {'path': '/w', 'parent': null, 'entries': page, 'more': end < all.length, 'next': end < all.length ? end : null};
+        }
+        final from = (params['offset'] as int?) ?? 0;
+        final end = from + 4 < whole.length ? from + 4 : whole.length;
+        return {
+          'path': '/w/p.png',
+          'name': 'p.png',
+          'size': whole.length,
+          'kind': 'image',
+          'mime': 'image/png',
+          'truncated': end < whole.length,
+          'offset': from,
+          'next': end < whole.length ? end : null,
+          'data': base64Encode(whole.sublist(from, end)),
+        };
+      });
+      final files = HostFiles(HostControl.dialing(() async => link));
+      final read = await files.readFile('/w/p.png');
+      expect(read.bytes, whole);
+      expect(read.truncated, isFalse);
+      expect(asked.map((a) => a['offset']), [null, 4, 8]);
+      asked.clear();
+      final listing = await files.listFolders(path: '/w', files: true);
+      expect([for (final entry in listing.entries) entry.name], ['f0', 'f1', 'f2', 'f3', 'f4']);
+      expect(listing.more, isFalse);
+      expect(asked.map((a) => a['offset']), [null, 2, 4]);
+    });
+
     test('a file the host sends no bytes for has none, and its refusal is the host\'s', () async {
       final link = _Link(
         (method, params) => params['path'] == '/w/no'

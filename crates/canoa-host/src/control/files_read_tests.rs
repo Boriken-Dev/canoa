@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::files::{Files, MAX_READ_BYTES, UploadLimits};
+use super::files::{DEFAULT_LIST, Files, READ_PAGE_BYTES, UploadLimits};
 use super::*;
 
 fn dir(name: &str) -> PathBuf {
@@ -201,8 +201,8 @@ fn a_read_stops_at_the_limit_and_says_so() {
     let whole = read(&control, &reader(), &place.work.join("big.txt"));
     assert_eq!(whole["result"]["truncated"], false, "{whole}");
     assert_eq!(bytes_of(&whole).len(), 2000);
-    // A request cannot ask for more than the host answers with, or for nothing.
-    let huge = vec![b'b'; usize::try_from(MAX_READ_BYTES).expect("fits") + 10];
+    // One answer carries a page the transport takes, whatever the request asks; the rest is read with `offset`.
+    let huge = vec![b'b'; usize::try_from(READ_PAGE_BYTES).expect("fits") + 10];
     fs::write(place.work.join("huge.txt"), &huge).expect("file");
     let capped = ask(
         &control,
@@ -211,7 +211,21 @@ fn a_read_stops_at_the_limit_and_says_so() {
         json!({"path": text(&place.work.join("huge.txt")), "max_bytes": u64::MAX}),
     );
     assert_eq!(capped["result"]["truncated"], true, "{capped}");
-    assert_eq!(bytes_of(&capped).len() as u64, MAX_READ_BYTES);
+    assert_eq!(bytes_of(&capped).len() as u64, READ_PAGE_BYTES);
+    assert_eq!(capped["result"]["next"], READ_PAGE_BYTES, "{capped}");
+    let rest = ask(
+        &control,
+        &reader(),
+        "fs/read",
+        json!({"path": text(&place.work.join("huge.txt")), "offset": READ_PAGE_BYTES}),
+    );
+    assert_eq!(bytes_of(&rest), vec![b'b'; 10], "{rest}");
+    assert_eq!(rest["result"]["truncated"], false, "{rest}");
+    assert!(rest["result"]["next"].is_null(), "{rest}");
+    assert_eq!(
+        rest["result"]["kind"], "text",
+        "a page far in is told by the file's start"
+    );
     for bad in [json!(0), json!(-1), json!("9"), json!(1.5)] {
         let answer = ask(
             &control,
@@ -222,11 +236,18 @@ fn a_read_stops_at_the_limit_and_says_so() {
         assert_eq!(answer["error"]["code"], BAD_PARAMS, "{bad}: {answer}");
         assert!(why(&answer).contains("max_bytes"), "{answer}");
     }
+    let answer = ask(
+        &control,
+        &reader(),
+        "fs/read",
+        json!({"path": big_path, "offset": -1}),
+    );
+    assert!(why(&answer).contains("offset"), "{answer}");
     let _ = fs::remove_dir_all(&place.tmp);
 }
 
 #[test]
-fn a_cut_character_is_still_text_and_an_image_is_whole_or_not_sent() {
+fn a_cut_character_is_still_text_and_an_image_is_sent_in_pages_to_put_together() {
     let place = place("kinds");
     fs::write(place.work.join("e.txt"), "\u{e9}\u{e9}\u{e9}").expect("file");
     let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
@@ -251,10 +272,22 @@ fn a_cut_character_is_still_text_and_an_image_is_whole_or_not_sent() {
     assert_eq!(image["result"]["kind"], "image", "{image}");
     assert_eq!(image["result"]["mime"], "image/png");
     assert_eq!(bytes_of(&image), png);
-    let cut_image = ask_of("p.png", 20);
-    assert_eq!(cut_image["result"]["kind"], "image");
-    assert_eq!(cut_image["result"]["truncated"], true);
-    assert!(cut_image["result"]["data"].is_null(), "{cut_image}");
+    // An image the page cuts is not withheld: its pages are read by offset and put together.
+    let first = ask_of("p.png", 20);
+    assert_eq!(first["result"]["kind"], "image");
+    assert_eq!(first["result"]["truncated"], true);
+    assert_eq!(first["result"]["next"], 20, "{first}");
+    assert_eq!(bytes_of(&first), png[..20]);
+    let second = ask(
+        &control,
+        &reader(),
+        "fs/read",
+        json!({"path": text(&place.work.join("p.png")), "offset": 20, "max_bytes": 1000}),
+    );
+    assert_eq!(second["result"]["kind"], "image", "{second}");
+    assert_eq!(second["result"]["mime"], "image/png", "{second}");
+    assert_eq!(bytes_of(&second), png[20..], "{second}");
+    assert!(second["result"]["next"].is_null());
     for name in ["b.bin", "bad.txt"] {
         let answer = ask_of(name, 1000);
         assert_eq!(answer["result"]["kind"], "binary", "{answer}");
@@ -379,6 +412,56 @@ fn a_key_with_the_grant_lists_anywhere_and_starts_from_the_home() {
         json!({"path": text(&place.elsewhere.join("a.txt"))}),
     );
     assert!(why(&a_file).contains("file"), "{a_file}");
+    let _ = fs::remove_dir_all(&place.tmp);
+}
+
+/// A folder of more than a page of entries loses none: the page is cut from the sorted whole and the rest is asked for by offset.
+#[test]
+fn a_folder_longer_than_a_page_is_listed_in_pages_with_none_lost() {
+    let place = place("pages");
+    let total = DEFAULT_LIST + 150;
+    for number in 0..total {
+        fs::write(place.work.join(format!("f{number:05}.txt")), "").expect("file");
+    }
+    let control = control_over(&place.home, &place.work);
+    let lister = key(&[Grant::Files, Grant::Folders]);
+    let ask_page = |params: Value| {
+        let mut asked = json!({"path": text(&place.work), "files": true});
+        asked
+            .as_object_mut()
+            .expect("an object")
+            .extend(params.as_object().cloned().expect("an object"));
+        ask(&control, &lister, "fs/list", asked)
+    };
+    let first = ask_page(json!({}));
+    assert_eq!(names(&first).len(), DEFAULT_LIST, "{first}");
+    assert_eq!(first["result"]["more"], true);
+    assert_eq!(first["result"]["next"], DEFAULT_LIST);
+    assert_eq!(
+        names(&first)[0],
+        "f00000.txt",
+        "the page is of the sorted whole"
+    );
+    let rest = ask_page(json!({"offset": DEFAULT_LIST}));
+    assert_eq!(names(&rest).len(), 150, "{rest}");
+    assert_eq!(rest["result"]["more"], false);
+    assert!(rest["result"]["next"].is_null());
+    assert_eq!(names(&rest).last().map(String::as_str), Some("f01149.txt"));
+    // A request may ask for a page of its own size: one answer, no ceiling of the host's.
+    let all = ask_page(json!({"limit": total}));
+    assert_eq!(names(&all).len(), total, "{all}");
+    assert_eq!(all["result"]["more"], false);
+    let small = ask_page(json!({"limit": 5, "offset": 5}));
+    assert_eq!(names(&small)[0], "f00005.txt", "{small}");
+    assert_eq!(small["result"]["next"], 10);
+    for bad in [
+        json!({"limit": 0}),
+        json!({"offset": -1}),
+        json!({"limit": "x"}),
+    ] {
+        let answer = ask_page(bad.clone());
+        assert_eq!(answer["error"]["code"], BAD_PARAMS, "{bad}: {answer}");
+    }
     let _ = fs::remove_dir_all(&place.tmp);
 }
 

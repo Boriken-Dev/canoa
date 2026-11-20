@@ -18,13 +18,16 @@ use super::{Caller, EntryRoots, REFUSED, bad, private_dir, text_param, whole_mac
 
 type Outcome = Result<Value, (i32, String)>;
 
-/// The most entries one `fs/list` answers.
-pub const MAX_LIST: usize = 1000;
+/// The entries one `fs/list` answers unless the request names a `limit`; the rest are asked for with `offset`.
+pub const DEFAULT_LIST: usize = 1000;
 /// The bytes `fs/read` answers with when the request names no limit. A page's transport takes no message over a mebibyte, and the
 /// bytes go in base64.
 pub const DEFAULT_READ_BYTES: u64 = 256 * 1024;
-/// The most bytes `fs/read` answers with, whatever the request asks.
-pub const MAX_READ_BYTES: u64 = 512 * 1024;
+/// The most bytes one `fs/read` answer carries, whatever the request asks: the transport's message, not a limit on the file. The
+/// rest is read with `offset`, `next` saying where.
+pub const READ_PAGE_BYTES: u64 = 512 * 1024;
+/// How much of a file's start tells what it is, when a page far into it is read.
+const HEAD_BYTES: u64 = 4096;
 /// The largest upload, in bytes, unless `[host.control] max_upload_bytes` says otherwise. A request carries it in base64.
 pub const DEFAULT_MAX_UPLOAD_BYTES: u64 = 8 * 1024 * 1024;
 /// What one owner (a key, or the app) may keep uploaded, in bytes, unless `max_upload_total_bytes` says otherwise.
@@ -294,8 +297,20 @@ impl Files {
         }
         let reader = fs::read_dir(&path)
             .map_err(|error| refused(&format!("this account cannot list that folder: {error}")))?;
+        let offset = match params.get("offset") {
+            None | Some(Value::Null) => 0,
+            Some(value) => value
+                .as_u64()
+                .ok_or_else(|| bad("offset is a whole number of entries"))?,
+        };
+        let limit = match params.get("limit") {
+            None | Some(Value::Null) => DEFAULT_LIST as u64,
+            Some(value) => value
+                .as_u64()
+                .filter(|limit| *limit > 0)
+                .ok_or_else(|| bad("limit is a whole number of entries above zero"))?,
+        };
         let mut entries: Vec<(String, bool, PathBuf)> = Vec::new();
-        let mut more = false;
         for entry in reader.flatten() {
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
@@ -315,10 +330,6 @@ impl Files {
                 continue;
             };
             if kind.is_dir() || (files && kind.is_file()) {
-                if entries.len() >= MAX_LIST {
-                    more = true;
-                    break;
-                }
                 entries.push((name, kind.is_dir(), resolved));
             }
         }
@@ -327,6 +338,16 @@ impl Files {
                 .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
                 .then_with(|| a.0.cmp(&b.0))
         });
+        // The page is cut from the sorted whole, so every entry is reachable by offset and none is lost to a cut made before sorting.
+        let total = entries.len() as u64;
+        let page: Vec<(String, bool, PathBuf)> = entries
+            .into_iter()
+            .skip(usize::try_from(offset).unwrap_or(usize::MAX))
+            .take(usize::try_from(limit).unwrap_or(usize::MAX))
+            .collect();
+        let end = offset.saturating_add(page.len() as u64);
+        let next = (end < total).then_some(end);
+        let entries = page;
         let parent = path
             .parent()
             .map(Path::to_path_buf)
@@ -340,11 +361,13 @@ impl Files {
                 .iter()
                 .map(|(name, dir, resolved)| json!({"name": visible_name(name), "path": text_of(resolved), "dir": dir}))
                 .collect::<Vec<_>>(),
-            "more": more,
+            "more": next.is_some(),
+            "next": next,
         }))
     }
 
-    /// `fs/read`: the start of one file, for a preview. See [`DEFAULT_READ_BYTES`] for the size.
+    /// `fs/read`: one page of a file, from `offset` (the start unless the request says), for a preview or to read it all. See
+    /// [`DEFAULT_READ_BYTES`] and [`READ_PAGE_BYTES`] for the size of a page; `next` is where the following one starts.
     ///
     /// A key holding `files` reads what this computer's account can read, anywhere: the grant is the only gate. What is refused is
     /// what would hurt the person who asked, and the answer says why: a path or a link into a network share (Windows would send
@@ -358,7 +381,13 @@ impl Files {
                 .as_u64()
                 .filter(|bytes| *bytes > 0)
                 .ok_or_else(|| bad("max_bytes is a whole number of bytes above zero"))?
-                .min(MAX_READ_BYTES),
+                .min(READ_PAGE_BYTES),
+        };
+        let offset = match params.get("offset") {
+            None | Some(Value::Null) => 0,
+            Some(value) => value
+                .as_u64()
+                .ok_or_else(|| bad("offset is a whole number of bytes"))?,
         };
         let path = Path::new(asked);
         if !path.is_absolute() {
@@ -402,17 +431,30 @@ impl Files {
                 "that is not a regular file any more, so it is not read",
             ));
         }
+        let size = opened.len();
+        // What a file is is told by its start, whichever page is read.
+        let mut head = Vec::new();
+        if offset > 0 {
+            std::io::Read::take(&mut file, HEAD_BYTES)
+                .read_to_end(&mut head)
+                .map_err(|error| refused(&format!("that file could not be read: {error}")))?;
+            std::io::Seek::seek(&mut file, std::io::SeekFrom::Start(offset))
+                .map_err(|error| refused(&format!("that file could not be read: {error}")))?;
+        }
         let mut bytes = Vec::new();
         std::io::Read::take(&mut file, limit)
             .read_to_end(&mut bytes)
             .map_err(|error| refused(&format!("that file could not be read: {error}")))?;
-        let size = opened.len();
-        let truncated = size > bytes.len() as u64;
-        let (kind, mime) = classify(&bytes, truncated);
-        // A cut image shows nothing, so none of it is sent.
+        let end = offset.saturating_add(bytes.len() as u64);
+        let next = (end < size).then_some(end);
+        let truncated = next.is_some();
+        let (kind, mime) = if offset == 0 {
+            classify(&bytes, truncated)
+        } else {
+            classify(&head, size > head.len() as u64)
+        };
         let data = match kind {
-            "text" => Some(bytes.as_slice()),
-            "image" if !truncated => Some(bytes.as_slice()),
+            "text" | "image" => Some(bytes.as_slice()),
             _ => None,
         };
         Ok(json!({
@@ -422,6 +464,8 @@ impl Files {
             "kind": kind,
             "mime": mime,
             "truncated": truncated,
+            "offset": offset,
+            "next": next,
             "data": data.map(|data| data_encoding::BASE64.encode(data)),
         }))
     }
