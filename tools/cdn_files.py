@@ -5,13 +5,9 @@ Each entry is a host, a path on it and the digest of the file served there. Two 
 
   mirror   (tools/mirror_deps.py, or this script) downloads every file into the deps branch's cdn/<host><path> and
            refuses one whose digest differs. The only step that uses the network.
-  build    (app/tool/build.py for the fonts, crates/canoa-host/build.rs for Office.js) reads the mirror, checks the
-           digests again and never fetches.
+  build    (app/tool/build.py) reads the mirror, checks the digests again and never fetches.
 
-Office.js is a loader: it asks, from the folder it was loaded from, for one file of the Office application and platform
-it runs in, for the strings of the person's language and for a few helpers. `pin-office` reads the loader the CDN serves
-at `/1/office.js`, which names exactly those files, downloads them and rewrites the Office.js entries of the list; the
-diff of the list is then the review. `/1/` is an alias Microsoft moves, so the digests, not the path, say which copy this is.
+Office.js is not here: it is mirrored whole from its repository, see office_js.py.
 """
 from __future__ import annotations
 
@@ -20,18 +16,27 @@ import hashlib
 import json
 import re
 import sys
-import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 LIST = Path(__file__).with_name("cdn_files.json")
-OFFICE_HOST = "officeapis.public.onecdn.static.microsoft"
-OFFICE_BASE = f"https://{OFFICE_HOST}/1/"
-# The Office applications Canoa's add-in is made for; Outlook also has its own strings file.
-OFFICE_APPLICATIONS = ("outlook", "word", "excel", "powerpoint")
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$")
 _PATH = re.compile(r"^/[A-Za-z0-9._/-]+$")
+
+README = """# CDN files
+
+Files the builds would otherwise take from a CDN or a repository, mirrored here so no build or run needs the network for them.
+`manifest.json` records what is here; `tools/mirror_deps.py` fills this folder, refuses a file whose digest differs from the one
+pinned on the source branch, and is the only thing that writes it. No build fetches from a CDN.
+
+| Folder | What | Read by |
+| --- | --- | --- |
+| `fonts.gstatic.com/s/` | The fonts Flutter's web engine falls back to for a glyph Roboto lacks (symbols, emoji, CJK, every script), pinned by `tools/cdn_files.json` and `tools/fallback_fonts.sha256` | `app/tool/build.py`, which copies them into the web build |
+| `office-js/` | The whole tree of one commit of github.com/OfficeDev/office-js (its commit and every file's SHA-256 are in `manifest.json`), unmodified, with its `LICENSE.md`. Nothing is renamed, filtered or rewritten, and nothing is trimmed to what compiles: the owner asked for the library as published, which Microsoft's license terms require of a copy | `crates/canoa-host/build.rs`, which carries the files the add-in's pane loads, and `LICENSE.md`, in the host |
+
+Flutter's CanvasKit is not here: the web build bundles it (`--no-web-resources-cdn`).
+"""
 
 
 class CdnError(RuntimeError):
@@ -55,11 +60,6 @@ def read_list(path: Path = LIST) -> dict:
     for entry in data["files"]:
         check_entry(entry)
     return data
-
-
-def write_list(data: dict, path: Path = LIST) -> None:
-    text = json.dumps(data, indent=1, ensure_ascii=False)
-    path.write_text(text + "\n", encoding="utf-8", newline="\n")
 
 
 def fetch(url: str) -> bytes:
@@ -96,95 +96,13 @@ def mirror(deps: Path, entries: list[dict], workers: int = 12) -> list[dict]:
         return list(pool.map(one, entries))
 
 
-README = """# CDN files
-
-Files the builds would otherwise take from a CDN, mirrored here so no build or run needs the network for them. Each is pinned by
-SHA-256 in `tools/cdn_files.json` on the source branch, and `manifest.json` records what is here. `tools/mirror_deps.py` fills this
-folder and refuses a file whose digest differs; nothing else writes it, and no build fetches from the CDN.
-
-| Folder | What | Read by |
-| --- | --- | --- |
-| `fonts.gstatic.com/s/` | The fonts Flutter's web engine falls back to for a glyph Roboto lacks (symbols, emoji, CJK, every script) | `app/tool/build.py`, which copies them into the web build |
-| `officeapis.public.onecdn.static.microsoft/1/` | Office.js and the files it loads: the file of each Office application and platform, the strings of each language, helpers | `crates/canoa-host/build.rs`, which carries them in the host; Microsoft's license terms for Office.js apply to them |
-
-Flutter's CanvasKit is not here: the web build bundles it (`--no-web-resources-cdn`).
-"""
-
-
-def office_names(loader: str) -> tuple[list[str], list[str]]:
-    """The files Office.js's loader asks for: those every run needs, and the per-platform ones that may not exist."""
-    versions = re.search(r"OSF\.HostSpecificFileVersionMap=(\{.*?\});OSF", loader)
-    locales = re.search(r"OSF\.SupportedLocales=(\{.*?\});", loader)
-    if versions is None or locales is None:
-        raise CdnError("office.js no longer names its host files and locales where this tool reads them")
-    by_application = json.loads(re.sub(r"([{,])([a-z0-9]+):", r'\1"\2":', versions.group(1)))
-    languages = sorted(json.loads(locales.group(1)))
-    always = ["office.js", "microsoftajax.js", "o15apptofilemappingtable.js"]
-    always += [f"{language}/office_strings.js" for language in languages]
-    always += [f"{language}/outlook_strings.js" for language in languages]
-    platform = [
-        f"{application}-{system}-{version}.js"
-        for application in OFFICE_APPLICATIONS
-        for system, version in sorted(by_application[application].items())
-    ]
-    return always, platform
-
-
-def pin_office(data: dict, workers: int = 12) -> tuple[dict, dict[str, bytes], list[str]]:
-    """The list with its Office.js entries replaced by what the CDN serves now, the files, and the names that are absent."""
-    loader = fetch(OFFICE_BASE + "office.js")
-    version = re.search(rb'FileVersion:"([0-9.]+)"', loader)
-    always, platform = office_names(loader.decode("utf-8"))
-    files: dict[str, bytes] = {"office.js": loader}
-
-    def one(name: str) -> tuple[str, bytes | None]:
-        try:
-            return name, fetch(OFFICE_BASE + name)
-        except urllib.error.HTTPError as error:
-            if error.code == 404 and name in platform:
-                return name, None
-            raise
-
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        got = dict(pool.map(one, [name for name in always + platform if name != "office.js"]))
-    absent = sorted(name for name, body in got.items() if body is None)
-    files.update({name: body for name, body in got.items() if body is not None})
-    kept = [entry for entry in data["files"] if entry["host"] != OFFICE_HOST]
-    pinned = [
-        dict(host=OFFICE_HOST, path="/1/" + name, sha256=digest(body), bytes=len(body), licence="Microsoft Office.js")
-        for name, body in sorted(files.items())
-    ]
-    out = dict(data)
-    out["files"] = kept + pinned
-    out["office_js"] = dict(
-        file_version=version.group(1).decode() if version else None,
-        not_served=absent,
-        not_carried=[
-            "telemetry/oteljs_agave.js", "ariatelemetry/aria-web-telemetry.js",
-            "webauth/webauth.browserauth*.js (Office's sign-in token calls, which Canoa's add-in does not make)",
-            "officeconfig.json", "*.debug.js"],
-    )
-    return out, files, absent
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=("mirror", "pin-office"))
-    parser.add_argument("deps", type=Path, help="mirror: the deps checkout to fill; pin-office: where to put the files")
+    parser.add_argument("deps", type=Path, help="the deps checkout to fill")
     args = parser.parse_args()
     try:
-        data = read_list()
-        if args.command == "mirror":
-            done = mirror(args.deps, data["files"])
-            print(f"mirrored {len(done)} files, {sum(item['bytes'] for item in done)} bytes")
-        else:
-            data, files, absent = pin_office(data)
-            for name, body in files.items():
-                destination = args.deps / "cdn" / OFFICE_HOST / "1" / name
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(body)
-            write_list(data)
-            print(f"pinned {len(files)} Office.js files ({', '.join(absent) or 'none'} not served)")
+        done = mirror(args.deps, read_list()["files"])
+        print(f"mirrored {len(done)} files, {sum(item['bytes'] for item in done)} bytes")
     except (CdnError, OSError) as error:
         sys.exit(f"cdn_files.py: {error}")
 

@@ -8,6 +8,7 @@ high-entropy data) is deleted. Git dependencies are not mirrored (their bare clo
 pack files); manifest.json records each one's URL and pinned revision from
 pubspec.lock, and resolving them needs the network. Hosted packages resolve offline
 from the result with PUB_CACHE pointed at the branch's pub directory.
+The one exception is cdn/office-js/, which holds a whole repository tree unmodified, by the owner's word.
 """
 import argparse
 import collections
@@ -21,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import cdn_files
 import fallback_fonts
+import office_js
 
 # leanflutter's desktop packages: the tray and the window. A desktop build needs all of these, whichever of them pub resolves.
 DESKTOP_PACKAGES = ("tray_manager","window_manager","screen_retriever","screen_retriever_linux","screen_retriever_macos",
@@ -144,9 +146,21 @@ def main():
     if missing: raise SystemExit("Desktop packages missing from the mirror: "+", ".join(missing))
     files=[]
     if not args.skip_cdn:
-        # The CDN files the builds read (the fonts, Office.js), pinned by tools/cdn_files.json.
+        # The CDN files the builds read (the fonts), pinned by tools/cdn_files.json.
         files=cdn_files.mirror(target,cdn_files.read_list()["files"])
+        # Office.js: the whole tree of one commit of its repository, written as published. This is the one exception to keeping
+        # only what compiles (the owner's word): nothing in cdn/office-js is trimmed, renamed or rewritten, and git must not
+        # convert its line endings either.
+        office_pin=office_js.read_list()
+        office=office_js.mirror(target,office_pin)
+        attributes=target/".gitattributes"
+        text=attributes.read_text(encoding="utf-8") if attributes.is_file() else ""
+        if "cdn/office-js/**" not in text:
+            attributes.write_text(text+("" if not text or text.endswith("\n") else "\n")+"cdn/office-js/** -text\n",encoding="utf-8",newline="\n")
         (target/"cdn"/"README.md").write_text(cdn_files.README,encoding="utf-8",newline="\n")
+    else:
+        office=[]
+        office_pin=None
     fallback=0
     if not args.skip_cdn:
         # The fonts the web engine falls back to, pinned by fallback_fonts.sha256: the app's build copies them from here.
@@ -158,6 +172,8 @@ def main():
                 gitDependenciesNote="not mirrored; pub fetches them from their URL, so they need the network",
                 dropped=dict(directories=list(DROP_DIRECTORIES),counts=dropped,deletedFlaggedFiles=deleted),
                 cdnFiles=files,
+                officeJs=None if office_pin is None else dict(repository=office_pin["repository"],commit=office_pin["commit"],
+                    fileVersion=office_pin["file_version"],carriedByTheHost=office_pin["carried"],files=office),
                 fallbackFonts=dict(count=0 if args.skip_cdn else len(pinned),bytes=fallback),
                 desktopPackages=list(DESKTOP_PACKAGES),desktopLinuxSystemPackages=list(DESKTOP_LINUX_SYSTEM))
     (target/"manifest.json").write_text(json.dumps(report,indent=2)+"\n")
