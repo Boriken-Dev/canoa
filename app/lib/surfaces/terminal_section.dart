@@ -587,6 +587,7 @@ class TerminalMain extends StatelessWidget {
             child: TerminalPanel(
               key: ObjectKey(group),
               workspace: group.workspace,
+              focusOnMount: true,
             ),
           ),
         ],

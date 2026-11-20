@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show FocusNode;
 import 'package:xterm/xterm.dart';
 
 import '../desktop/control_client.dart';
@@ -218,6 +219,9 @@ class TerminalPane extends ChangeNotifier {
 
   /// The emulator's own view state: the selection.
   late final TerminalController view;
+
+  /// The keyboard's place on the screen. It is the pane's, so it stays with the shell while the screen is hidden and shown again.
+  final focusNode = FocusNode(debugLabel: 'terminal');
   RemoteTerminal? _remote;
   StreamSubscription<String>? _printing;
   PaneState state = PaneState.starting;
@@ -341,6 +345,7 @@ class TerminalPane extends ChangeNotifier {
   @override
   void dispose() {
     unawaited(close());
+    focusNode.dispose();
     super.dispose();
   }
 }
@@ -373,6 +378,7 @@ class TerminalWorkspace extends ChangeNotifier {
   TerminalTab? _active;
   int _made = 0;
   bool _released = false;
+  bool _focusWished = false;
 
   /// The most shells open at once in one conversation; the host holds 8 to a link.
   static const limit = 8;
@@ -384,6 +390,14 @@ class TerminalWorkspace extends ChangeNotifier {
 
   /// The shell the keyboard is in.
   TerminalPane? get focused => active?.focused;
+
+  /// Whether the person chose a shell since the last call (a new one, a split, another tab), which then takes the keyboard. The
+  /// screen asks once it is built, since the tab chosen may not be drawn yet.
+  bool takeFocusWish() {
+    final wished = _focusWished;
+    _focusWished = false;
+    return wished;
+  }
 
   TerminalPane _pane([String? own]) {
     final pane = TerminalPane(host: host, cwd: cwd, shell: own ?? shell);
@@ -398,6 +412,7 @@ class TerminalWorkspace extends ChangeNotifier {
     final tab = TerminalTab(++_made, 'Shell $_made', _pane(shell));
     tabs.add(tab);
     _active = tab;
+    _focusWished = true;
     notifyListeners();
     return tab;
   }
@@ -405,6 +420,7 @@ class TerminalWorkspace extends ChangeNotifier {
   void activate(TerminalTab tab) {
     if (!tabs.contains(tab)) return;
     _active = tab;
+    _focusWished = true;
     notifyListeners();
   }
 
@@ -427,6 +443,7 @@ class TerminalWorkspace extends ChangeNotifier {
     final pane = _pane();
     tab.panes.add(pane);
     tab.focused = pane;
+    _focusWished = true;
     notifyListeners();
     return true;
   }
@@ -442,6 +459,7 @@ class TerminalWorkspace extends ChangeNotifier {
     } else if (identical(tab.focused, pane)) {
       tab.focused = tab.panes.first;
     }
+    _focusWished = tabs.isNotEmpty;
     notifyListeners();
   }
 

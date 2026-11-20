@@ -7,6 +7,7 @@ import '../session_store.dart';
 import '../theme/look.dart';
 import 'bottom_panel.dart';
 import 'layout_state.dart';
+import 'shown.dart';
 import 'split.dart';
 import 'surface.dart';
 
@@ -220,9 +221,9 @@ class WorkPanel extends StatelessWidget {
     if (here.isEmpty) return _launcher(context);
     return Stack(fit: StackFit.expand, children: [
       for (final each in here)
-        Offstage(
+        Shown(
           key: ValueKey('surface ${each.surface.id}'),
-          offstage: !identical(each, active),
+          shown: identical(each, active),
           child: KeyedSubtree(key: each.key, child: _built(context, each)),
         ),
     ]);
@@ -360,21 +361,21 @@ class PanelFrame extends StatelessWidget {
       final rightAlone = showRight && (focus == PanelFocus.right || narrow);
 
       final main = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Flexible(flex: bottomAlone ? 0 : 1, child: Offstage(offstage: bottomAlone, child: child)),
+        Flexible(flex: bottomAlone ? 0 : 1, child: Shown(shown: !bottomAlone, child: child)),
         if (bottomAlone)
           Expanded(child: panel(SurfaceSlot.bottom, bottomOffered))
         else if (bottomBuilt)
-          Offstage(
-            offstage: !showBottom,
+          Shown(
+            shown: showBottom,
             child: BottomPanel(layout: layout, height: bottomHeight, maxHeight: maxBottom, child: panel(SurfaceSlot.bottom, bottomOffered)),
           ),
       ]);
 
       final panels = Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Expanded(child: Offstage(offstage: rightAlone, child: main)),
+        Expanded(child: Shown(shown: !rightAlone, child: main)),
         if (rightBuilt)
-          Offstage(
-            offstage: !showRight,
+          Shown(
+            shown: showRight,
             child: rightAlone
                 ? SizedBox(width: constraints.maxWidth, child: panel(SurfaceSlot.right, rightOffered))
                 : Row(children: [

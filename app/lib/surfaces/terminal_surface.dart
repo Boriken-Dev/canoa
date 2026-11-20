@@ -8,6 +8,7 @@ import '../session_store.dart';
 import '../shell/surface.dart';
 import '../theme/look.dart';
 import '../shell/panel_tabs.dart' show PanelShows, PanelTabKind;
+import '../shell/shown.dart';
 import 'files_surface.dart' show FilesSurface;
 import 'terminal_controller.dart';
 
@@ -189,9 +190,10 @@ const terminalTextStyle = TerminalStyle(
   ],
 );
 
-/// The terminal's tabs and screens.
-class TerminalPanel extends StatelessWidget {
-  const TerminalPanel({super.key, required this.workspace, this.onAttachText, this.showToolbar = true});
+/// The terminal's tabs and screens. The shell the person chose (a new one, a split, another tab), and the panel when it is brought
+/// in front, take the keyboard.
+class TerminalPanel extends StatefulWidget {
+  const TerminalPanel({super.key, required this.workspace, this.onAttachText, this.showToolbar = true, this.focusOnMount = false});
 
   final TerminalWorkspace workspace;
   final void Function(String name, String text)? onAttachText;
@@ -199,6 +201,38 @@ class TerminalPanel extends StatelessWidget {
   /// Whether the panel draws its own bar of shells. A conversation's panel has one tab bar, which holds the shells, so it asks for
   /// none; the Terminal section has no other, so it keeps this one.
   final bool showToolbar;
+
+  /// Whether the shell takes the keyboard when the panel is first drawn: true where drawing it is the person's choice (the Terminal
+  /// section), false where it is also drawn when they move to another conversation.
+  final bool focusOnMount;
+
+  @override
+  State<TerminalPanel> createState() => _TerminalPanelState();
+}
+
+class _TerminalPanelState extends State<TerminalPanel> {
+  bool? _wasShown;
+
+  TerminalWorkspace get workspace => widget.workspace;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.focusOnMount) _takeKeyboard();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final shown = Shown.of(context);
+    if (shown && _wasShown == false) _takeKeyboard();
+    _wasShown = shown;
+  }
+
+  /// Gives the keyboard to the focused shell once the frame is built, which is when a screen just chosen is drawn and can have it.
+  void _takeKeyboard() => WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (mounted) workspace.focused?.focusNode.requestFocus();
+  });
 
   Future<void> _rename(BuildContext context, TerminalTab tab) => renameTerminalTab(context, workspace, tab);
 
@@ -277,7 +311,7 @@ class TerminalPanel extends StatelessWidget {
               onSelected: (_) => unawaited(_rename(context, active)),
               itemBuilder: (_) => const [PopupMenuItem(key: ValueKey('terminal rename'), value: 'rename', child: Text('Rename the tab'))],
             ),
-          if (onAttachText != null && pane != null) ...[
+          if (widget.onAttachText != null && pane != null) ...[
             ListenableBuilder(
               listenable: pane.view,
               builder: (context, _) => IconButton(
@@ -286,7 +320,7 @@ class TerminalPanel extends StatelessWidget {
                 visualDensity: VisualDensity.compact,
                 iconSize: 18,
                 icon: const Icon(Icons.content_cut),
-                onPressed: pane.selectedText == null ? null : () => onAttachText!('terminal selection.txt', pane.selectedText!),
+                onPressed: pane.selectedText == null ? null : () => widget.onAttachText!('terminal selection.txt', pane.selectedText!),
               ),
             ),
             IconButton(
@@ -297,7 +331,7 @@ class TerminalPanel extends StatelessWidget {
               icon: const Icon(Icons.attach_file),
               onPressed: () {
                 final text = pane.lastOutput();
-                if (text != null) onAttachText!('terminal output.txt', text);
+                if (text != null) widget.onAttachText!('terminal output.txt', text);
               },
             ),
           ],
@@ -312,17 +346,18 @@ class TerminalPanel extends StatelessWidget {
     listenable: workspace,
     builder: (context, _) {
       final active = workspace.active;
+      if (workspace.takeFocusWish()) _takeKeyboard();
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        if (showToolbar) ...[_toolbar(context), const Divider(height: 1)],
+        if (widget.showToolbar) ...[_toolbar(context), const Divider(height: 1)],
         Expanded(
           child: active == null
               ? Center(child: FilledButton.icon(key: const ValueKey('terminal start'), onPressed: workspace.newTab, icon: const Icon(Icons.add), label: const Text('New shell')))
               : Stack(fit: StackFit.expand, children: [
                   // Every tab stays built, so its screen and scroll position are where they were left.
                   for (final tab in workspace.tabs)
-                    Offstage(
+                    Shown(
                       key: ValueKey('terminal screen ${tab.id}'),
-                      offstage: !identical(tab, active),
+                      shown: identical(tab, active),
                       child: Row(children: [
                         for (final (index, pane) in tab.panes.indexed) ...[
                           if (index > 0) VerticalDivider(width: 1, color: Theme.of(context).dividerColor),
@@ -373,7 +408,7 @@ class _Screen extends StatelessWidget {
                 pane.terminal,
                 key: ValueKey('terminal view ${pane.hashCode}'),
                 controller: pane.view,
-                autofocus: true,
+                focusNode: pane.focusNode,
                 padding: const EdgeInsets.all(6),
                 theme: _theme,
                 textStyle: terminalTextStyle,

@@ -9,6 +9,7 @@ import 'layout_controls.dart';
 import 'layout_state.dart';
 import 'section_rail.dart';
 import 'sections.dart';
+import 'shown.dart';
 import 'split.dart';
 
 /// A shortcut as the person reads it on this platform: "Ctrl+B", or "⌘B" on a Mac.
@@ -107,9 +108,9 @@ class _AppShellState extends State<AppShell> {
     return Stack(fit: StackFit.expand, children: [
       for (final section in widget.sections)
         if (_shown.contains(section.id))
-          Offstage(
+          Shown(
             key: ValueKey('main ${section.id}'),
-            offstage: section.id != current.id,
+            shown: section.id == current.id,
             child: TickerMode(enabled: section.id == current.id, child: section.main),
           ),
     ]);
