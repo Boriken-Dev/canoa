@@ -1,0 +1,176 @@
+{
+  "AccountSpeechModel": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "The name a recording's request names."
+      },
+      "label": {
+        "type": "string",
+        "description": "What the offer calls it."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "label"
+    ]
+  },
+  "AccountSpeechService": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "A word of lower-case letters and digits, 1 to 32: the offer made of an account is `ID:ACCOUNT`."
+      },
+      "title": {
+        "type": "string",
+        "description": "What the service is called: an offer reads `TITLE, account NAME`."
+      },
+      "summary": {
+        "type": "string",
+        "description": "What it is, in a sentence."
+      },
+      "location": {
+        "type": "string",
+        "description": "Where the audio goes, in a sentence or two, as the offer says it before the person sets it up."
+      },
+      "standard": {
+        "type": "string",
+        "description": "The credential standard an account's kind provides for the account to be this service's: an id of the accounts' standards."
+      },
+      "address": {
+        "type": "string",
+        "description": "The address the kind's model API is called at when nothing moves it. An account is offered only when its kind provides the standard with this default, and one whose settings move the address elsewhere is listed as not offered."
+      },
+      "url": {
+        "type": "string",
+        "description": "The address a recording is posted to."
+      },
+      "credential": {
+        "type": "string",
+        "description": "The credential of the account that holds the key, sent as the bearer."
+      },
+      "models": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The name a recording's request names."
+            },
+            "label": {
+              "type": "string",
+              "description": "What the offer calls it."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "label"
+          ]
+        },
+        "description": "The models the service transcribes with, the recommended one first.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "title",
+      "summary",
+      "location",
+      "standard",
+      "address",
+      "url",
+      "credential"
+    ]
+  },
+  "AccountSpeechInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "services": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "A word of lower-case letters and digits, 1 to 32: the offer made of an account is `ID:ACCOUNT`."
+            },
+            "title": {
+              "type": "string",
+              "description": "What the service is called: an offer reads `TITLE, account NAME`."
+            },
+            "summary": {
+              "type": "string",
+              "description": "What it is, in a sentence."
+            },
+            "location": {
+              "type": "string",
+              "description": "Where the audio goes, in a sentence or two, as the offer says it before the person sets it up."
+            },
+            "standard": {
+              "type": "string",
+              "description": "The credential standard an account's kind provides for the account to be this service's: an id of the accounts' standards."
+            },
+            "address": {
+              "type": "string",
+              "description": "The address the kind's model API is called at when nothing moves it. An account is offered only when its kind provides the standard with this default, and one whose settings move the address elsewhere is listed as not offered."
+            },
+            "url": {
+              "type": "string",
+              "description": "The address a recording is posted to."
+            },
+            "credential": {
+              "type": "string",
+              "description": "The credential of the account that holds the key, sent as the bearer."
+            },
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "The name a recording's request names."
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "What the offer calls it."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "label"
+                ]
+              },
+              "description": "The models the service transcribes with, the recommended one first.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title",
+            "summary",
+            "location",
+            "standard",
+            "address",
+            "url",
+            "credential"
+          ]
+        },
+        "description": "The services, each with a different id.",
+        "default": []
+      }
+    },
+    "additionalProperties": false
+  }
+}

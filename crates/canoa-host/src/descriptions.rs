@@ -17,6 +17,7 @@ use canoa::panel_tab::PanelTabVtable;
 use canoa::profile_item::ProfileItemVtable;
 use canoa::secret_provider::SecretProviderVtable;
 use canoa::settings_section::SettingsSectionVtable;
+use canoa::speech::account::AccountSpeechVtable;
 use canoa::speech::output::{SpeechOutputVtable, SpeechUtteranceVtable};
 use canoa::speech::{SpeechProviderVtable, SpeechSessionVtable};
 use canoa::store::extension::StoreExtensionVtable;
@@ -50,6 +51,7 @@ pub(crate) fn document() -> String {
         ProgramStoreVtable::description(),
         InstallPrompterVtable::description(),
         InstallToolsVtable::description(),
+        AccountSpeechVtable::description(),
         SpeechProviderVtable::description(),
         SpeechSessionVtable::description(),
         SpeechOutputVtable::description(),

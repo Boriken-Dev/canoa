@@ -4,7 +4,7 @@ Header-file-style reference for the `canoa` crate: every public item with its si
 
 Eleven Cargo features (`api-gateway` is the generic account kind of an address and a key, below; `usage` is the `usage_reader` kind, `vendor` is the `agent_vendor` kind, `profile-item` the `profile_item` kind, `secret` the `secret_provider` kind, `settings-section` the `settings_section` kind and `panel-tab` the `panel_tab` kind, below): `network` (the system's proxy, proxy login, certificate verifier and client certificates, below), `store` (the `program_store` kind and the recipe contract, which need `coqui-acp-api` and `serde_json`; `serde_json::Value` is public through `recipe::get_json`), `speech` (the `speech_provider` kind, which needs `guatiao` and `coqui-acp-api`) and `speech-builtin` (the providers that ship with it); a default build has no dependencies. MSRV Rust 1.89. Not published yet.
 
-The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`) and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
+The registry types are imported from the crate root, `SourcePreset` from `canoa::preset`, and the `program_store` kind and its recipe contract from `canoa::store` and `canoa::store::recipe` (feature `store`); the `speech_provider` kind from `canoa::speech` (feature `speech`), the `account_speech` kind from `canoa::speech::account` and its built-in providers from `canoa::speech::builtin` (feature `speech-builtin`).
 
 No `unsafe` code (`#![forbid(unsafe_code)]`).
 
@@ -759,3 +759,22 @@ ended and the read says so; a non-zero exit is an error carrying the end of its 
   For `api.openai.com` the lists are the documented ones until the settings give others (models `gpt-4o-mini-tts`, `tts-1`, `tts-1-hd`; thirteen voices, of which `ballad`, `verse`, `marin` and `cedar` work with
   `gpt-4o-mini-tts` only, which a request is refused for; four styles); for any other address they are `models`, `voices` and `styles` (`name=instruction`) as written. `leaves` is `Yes` and `words` names the host and
   whether a key goes with it. The text is at most `max_chars` (default 4096).
+
+## `account_speech` (`canoa::speech::account`, feature `speech`)
+
+The speech-to-text services the accounts of some kinds can call, described by a library, so a host holds no service's address, models or credential: it offers each of the person's accounts whose kind a service names, lends the key when a recording opens and never writes it down. A Guatiao kind, not ACP, of one slot with the same answer on every call and nothing run. The files an outside library is built against: `include/canoa.account_speech.kinds.json` and `include/canoa.account_speech.schemas.json`, checked current by `tests/account_speech.rs` (regenerate with `CANOA_SPEECH_WRITE_KINDS=1`).
+
+```rust
+#[guatiao::kind(name = "account_speech")]
+pub trait AccountSpeech: Send + Sync {
+    fn describe(&self) -> Result<AccountSpeechInfo, ProviderError>;
+}
+pub const KIND: &str = "account_speech";   pub const KIND_VERSIONS: [&str; 1] = ["1"];
+pub struct AccountSpeechInfo { pub services: Vec<AccountSpeechService> }   // new(services); problem(): a service that cannot be offered, or an id used twice
+pub struct AccountSpeechService { pub id, pub title, pub summary, pub location, pub standard, pub address, pub url, pub credential: String, pub models: Vec<AccountSpeechModel> }
+    // new(id, title, standard, address, url, credential); problem()
+pub struct AccountSpeechModel { pub id: String, pub label: String }   // new(id, label)
+```
+
+- A service's `id` is 1 to 32 lower-case letters and digits; the offer made of an account is `ID:ACCOUNT`. `standard` is the credential standard an account's kind provides (such as `openai-api`) and `address` the address that kind's model API is called at when nothing moves it: an account is offered when its provider has a kind that provides the standard from that address, and is listed as not offered, with the reason, when its own kind is not one or its settings move the address elsewhere. `url` is where a recording is posted (an http or https address, the key sent as `Authorization: Bearer`), `credential` the field of the account's stored credentials that holds the key, `summary` and `location` the words of the offer (what it is, and where the audio goes) and `models` the ones that transcribe, the recommended first.
+- Every model is `#[non_exhaustive]` with `new` and public fields.
