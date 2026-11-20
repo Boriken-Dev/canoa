@@ -69,12 +69,20 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 CANOA_TEST_PYTHON=python3 cargo test -p canoa-host --test python_source   # a Python with its shared library; ignored without
-CANOA_TEST_PYTHON=python3 CANOA_TEST_NODE=node cargo test -p canoa-host --lib profile   # real pip and npm against a folder of wheels and a loopback registry; each is skipped (and says so) without its variable
+CANOA_TEST_PYTHON=python3 CANOA_TEST_NODE=node cargo test -p canoa-host --lib profile -- --ignored   # real pip and npm against a folder of wheels and a loopback registry; ignored, with the variable they need as the reason, without them
+CANOA_TEST_STDIO_PROVIDER=<libcoqui_acp_harness-stdio-provider> CANOA_TEST_FAKE_STDIO=<fake_stdio_cli> cargo test -p canoa-host --test history_replay -- --ignored   # coqui-acp builds both with `--features kind --examples`
+# A test that needs what a machine may not have is `#[ignore = "<what it needs>"]`, never a pass that did not run; `cargo test` reports the count. Run the ones this machine can:
+cargo test -p canoa-host --lib -- --ignored a_skill_directory_that_is_a_link a_link_to_a_file_outside a_dot_name_is_refused_by_its_short_name   # Windows: symbolic links (Developer Mode or elevated) and 8.3 short names
+cargo test -p canoa-launch --lib -- --ignored a_base_folder_cannot_vouch   # Windows: elevated, for the restore privilege
+cargo test -p canoa-host --all-features -- --ignored discover_nearby_reports a_connection_from_another_user   # Linux: passwordless sudo and setpriv
+cargo test -p canoa-host --lib -- --ignored operating_systems_store two_homes_with_the_same_account_id   # Linux: a Secret Service session; the other platforms run these without --ignored
 (cd app && flutter analyze && flutter test)
 (cd app && flutter test integration_test/desktop_test.dart -d windows)   # or -d linux; needs CANOA_TEST_HOST
 # the chat's connection code against the real host
 cargo build -p canoa-host --bin canoa --examples
 (cd app && CANOA_TEST_HOST=../target/debug/canoa flutter test test/host_test.dart)
+# the app's reading of `settings/sections`, `accounts/catalog` and `store/models` against a real `canoa serve` whose vendor homes, data folder and PATH are the test's own (needs the examples built)
+(cd app && CANOA_TEST_HOST=../target/debug/canoa flutter test test/control_wire_host_test.dart)
 # the app's Store code against the real control channel and a stand-in program (needs the examples built)
 (cd app && CANOA_TEST_HOST=../target/debug/canoa flutter test test/program_store_host_test.dart)
 # the host as a library in a test process, and a standalone canoa on the same home
