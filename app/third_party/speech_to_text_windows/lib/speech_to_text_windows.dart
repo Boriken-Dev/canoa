@@ -18,9 +18,9 @@ class SpeechToTextWindows extends SpeechToTextPlatform {
     SpeechToTextPlatform.instance = SpeechToTextWindows();
   }
 
-  SpeechToTextWindows() {
-    _channel.setMethodCallHandler(_handleMethodCall);
-  }
+  /// Touches no channel: the generated registrant calls [registerWith] before the app's `main` has created Flutter's bindings, and
+  /// a channel's handler cannot be set until they exist. [initialize] sets it.
+  SpeechToTextWindows();
 
   /// A failure of a call to the native side reaches the listener as an error of the session, not as a silent `false`.
   void _fail(String code) {
