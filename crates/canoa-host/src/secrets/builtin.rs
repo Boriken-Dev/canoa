@@ -168,9 +168,6 @@ impl SecretProvider for SystemSecrets {
     fn put(&self, request: Keeping, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
         check(&request.name)?;
         let value = request.value.expose();
-        if value.len() > canoa::secret_provider::MAX_VALUE {
-            return Err(bad_value("the value is longer than a secret may be"));
-        }
         let _one = self.index.lock().unwrap_or_else(PoisonError::into_inner);
         let mut names = self.names_held()?;
         // The value goes first: an index that names a secret the store lacks would be worse than the reverse.
@@ -269,9 +266,6 @@ impl SecretProvider for FileSecrets {
     fn put(&self, request: Keeping, _: Object<dyn ProcessSpawner>) -> Result<(), ProviderError> {
         check(&request.name)?;
         let value = request.value.expose();
-        if value.len() > canoa::secret_provider::MAX_VALUE {
-            return Err(bad_value("the value is longer than a secret may be"));
-        }
         self.store()?
             .put(&request.name, value.as_bytes())
             .map_err(|why| failed(&why))
@@ -381,6 +375,31 @@ mod tests {
         assert!(provider.put(Keeping::new("", "v"), spawner()).is_err());
         assert!(provider.get(Named::new("a\nb"), spawner()).is_err());
         assert!(provider.names(spawner()).unwrap().names.is_empty());
+    }
+
+    #[test]
+    fn every_name_is_listed_and_no_value_or_name_is_cut_by_a_length_of_the_hosts_own() {
+        let provider = system();
+        for number in 0..1200 {
+            provider
+                .put(Keeping::new(format!("n{number:04}"), "v"), spawner())
+                .unwrap();
+        }
+        let long_name = "k".repeat(1000);
+        let long_value = "v".repeat(200 * 1024);
+        provider
+            .put(
+                Keeping::new(long_name.clone(), long_value.clone()),
+                spawner(),
+            )
+            .unwrap();
+        let names = provider.names(spawner()).unwrap().names;
+        assert_eq!(names.len(), 1201, "the listing is not cut");
+        let held = provider.get(Named::new(long_name), spawner()).unwrap();
+        assert_eq!(
+            held.value.as_ref().map(|v| v.expose().len()),
+            Some(long_value.len())
+        );
     }
 
     #[test]

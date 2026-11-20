@@ -41,22 +41,12 @@ from ._provider import WithForm, abstract
 __all__ = [
     "FormSecretProvider",
     "Held",
-    "MAX_NAME",
-    "MAX_NAMES",
-    "MAX_VALUE",
     "ProviderInfo",
     "SecretProvider",
     "SystemStoreSecretProvider",
     "keeping_of",
     "name_of",
 ]
-
-#: The longest name of a secret, in bytes.
-MAX_NAME = 256
-#: The longest value, in bytes.
-MAX_VALUE = 64 * 1024
-#: The most names one `names` answer may hold.
-MAX_NAMES = 1000
 
 
 @dataclass
@@ -87,15 +77,15 @@ def _plain(value: Any) -> Any:
 
 
 def _checked(name: Any) -> str:
-    if not isinstance(name, str) or not name or len(name.encode("utf-8")) > MAX_NAME:
-        raise BadValue(f"a secret's name is 1 to {MAX_NAME} bytes of text")
+    if not isinstance(name, str) or not name:
+        raise BadValue("a secret's name is text that is not empty")
     if any(ord(char) < 32 or ord(char) == 127 for char in name):
         raise BadValue("a secret's name has a control character")
     return name
 
 
 def name_of(request: Ref) -> str:
-    """The name a `get` or `forget` request asks for, checked as the kind says a name is: 1 to `MAX_NAME` bytes with no control
+    """The name a `get` or `forget` request asks for, checked as the kind says a name is: text that is not empty, with no control
     character. A request that holds anything else is refused, so a field a newer host adds is never dropped silently."""
     body = _plain(request)
     if not isinstance(body, dict) or set(body) != {"name"}:
@@ -104,15 +94,13 @@ def name_of(request: Ref) -> str:
 
 
 def keeping_of(request: Ref) -> Tuple[str, str]:
-    """The name and the value a `put` request carries, checked the same way; the value is text of at most `MAX_VALUE` bytes."""
+    """The name and the value a `put` request carries, checked the same way; the value is text."""
     body = _plain(request)
     if not isinstance(body, dict) or set(body) != {"name", "value"}:
         raise BadValue("a request keeps one value under one name and nothing else")
     value = body["value"]
     if not isinstance(value, str):
         raise BadValue("a secret is text")
-    if len(value.encode("utf-8")) > MAX_VALUE:
-        raise BadValue("the value is longer than a secret may be")
     return _checked(body["name"]), value
 
 
@@ -136,7 +124,7 @@ class SecretProvider(WithForm, provide.Provider, kinds.SecretProvider, abstract=
         return self.info().to_data()
 
     def names(self, spawner: Taken[kinds.ProcessSpawner]) -> ValueAnswer:
-        """The names it holds and nothing else: `{"names": [...]}`, at most `MAX_NAMES`."""
+        """The names it holds and nothing else: `{"names": [...]}`, every one it holds."""
         raise Unsupported("this provider cannot list what it holds")
 
     @abstract
@@ -217,7 +205,7 @@ class SystemStoreSecretProvider(SecretProvider, abstract=True):
         self.write(self.INDEX, json.dumps(sorted(set(names))))
 
     def names(self, spawner: Taken[kinds.ProcessSpawner]) -> ValueAnswer:
-        return {"names": sorted(self._held())[:MAX_NAMES]}
+        return {"names": sorted(self._held())}
 
     def get(self, request: Ref, spawner: Taken[kinds.ProcessSpawner]) -> ValueAnswer:
         text = self.read(f"s:{name_of(request)}")

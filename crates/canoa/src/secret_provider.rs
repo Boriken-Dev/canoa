@@ -23,15 +23,6 @@ use guatiao::{FromValue, Schema, Secret, Status, ToValue};
 /// The name of the `secret_provider` kind.
 pub const KIND: &str = "secret_provider";
 
-/// The longest name of a secret, in bytes.
-pub const MAX_NAME: usize = 256;
-
-/// The longest value, in bytes.
-pub const MAX_VALUE: usize = 64 * 1024;
-
-/// The most names one [`SecretProvider::names`] answer may hold, so a provider cannot make a listing large.
-pub const MAX_NAMES: usize = 1000;
-
 /// What a provider is and can do, from [`SecretProvider::describe`]. Cheap, and the same on every call.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(deny_unknown_fields)]
@@ -100,7 +91,7 @@ impl Named {
 pub struct Keeping {
     /// The name to keep it under; see [`name_problem`].
     pub name: String,
-    /// The value, at most [`MAX_VALUE`] bytes of text.
+    /// The value.
     pub value: Secret<String>,
 }
 
@@ -159,7 +150,7 @@ impl Held {
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Names {
-    /// At most [`MAX_NAMES`], each one [`name_problem`] accepts.
+    /// Every name the provider holds, each one [`name_problem`] accepts.
     pub names: Vec<String>,
 }
 
@@ -211,14 +202,11 @@ pub trait SecretProvider: Send + Sync {
     ) -> Result<(), ProviderError>;
 }
 
-/// Why `name` cannot be a secret's name, or `None` when it can: 1 to [`MAX_NAME`] bytes, no control character.
+/// Why `name` cannot be a secret's name, or `None` when it can: text of any length with no control character.
 #[must_use]
 pub fn name_problem(name: &str) -> Option<String> {
-    if name.is_empty() || name.len() > MAX_NAME {
-        return Some(alloc::format!(
-            "a secret's name is 1 to {MAX_NAME} bytes, and this one is {}",
-            name.len()
-        ));
+    if name.is_empty() {
+        return Some(String::from("a secret's name is not empty"));
     }
     name.chars()
         .any(char::is_control)
@@ -257,12 +245,12 @@ mod tests {
     fn a_name_of_text_with_no_control_character_is_usable() {
         assert_eq!(name_problem("github_token"), None);
         assert_eq!(name_problem("Work: staging key"), None);
-        assert_eq!(name_problem(&"a".repeat(MAX_NAME)), None);
+        assert_eq!(name_problem(&"a".repeat(100_000)), None);
     }
 
     #[test]
-    fn an_empty_long_or_control_name_is_refused() {
-        for name in ["", "a\nb", "a\u{0}b", &"a".repeat(MAX_NAME + 1)] {
+    fn an_empty_or_control_name_is_refused() {
+        for name in ["", "a\nb", "a\u{0}b"] {
             assert!(name_problem(name).is_some(), "{name:?}");
         }
     }

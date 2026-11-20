@@ -446,7 +446,7 @@ fn the_session_key_goes_in_the_environment_and_never_on_a_command_line() {
 fn a_request_for_a_name_that_is_no_name_is_refused_before_bw_is_run() {
     let home = Home::new("names_refused");
     let provider = provider(&home, &good());
-    for name in ["", "a\nb", &"x".repeat(300)] {
+    for name in ["", "a\nb"] {
         let (standin, calls) = StandIn::new();
         let error = provider
             .get(Named::new(name), standin.into_object())
@@ -457,6 +457,12 @@ fn a_request_for_a_name_that_is_no_name_is_refused_before_bw_is_run() {
         );
         assert!(calls.lock().unwrap().is_empty(), "{name:?}");
     }
+    // A long name is no refusal of the host's: it is asked of `bw` like any other.
+    let (standin, calls) = StandIn::new();
+    provider
+        .get(Named::new("x".repeat(300)), standin.into_object())
+        .expect("a long name is asked");
+    assert!(!calls.lock().unwrap().is_empty());
 }
 
 #[test]

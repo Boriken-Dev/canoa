@@ -13,9 +13,9 @@
 // A vault that is locked, signed out or given a wrong key answers `GONE`, so the host asks the person instead. An item that is not
 // there is no value, not an error. Bitwarden items have no end of their own, so no answer carries one.
 
-import { BadValue, Gone, Internal, NotFound, Unsupported } from 'guatiao';
+import { Gone, Internal, NotFound, Unsupported } from 'guatiao';
 
-import { MAX_NAMES, MAX_VALUE, SecretProvider, nameOf, release } from './sdk/secret.js';
+import { SecretProvider, nameOf, release } from './sdk/secret.js';
 
 /** The most of `bw`'s output read: a listing of a large vault with every item's fields is the biggest. */
 const MAX_OUTPUT = 64 * 1024 * 1024;
@@ -198,7 +198,7 @@ export class Bitwarden extends SecretProvider {
         items.filter((item) => item && typeof item === 'object' && typeof item.name === 'string' && item.name).map((item) => item.name),
       ),
     ].sort();
-    return { names: names.slice(0, MAX_NAMES) };
+    return { names };
   }
 
   get(request, spawner) {
@@ -218,7 +218,6 @@ export class Bitwarden extends SecretProvider {
     }
     // `bw` may end its answer with one line break of its own; a value's own are inside it.
     const value = text.endsWith('\r\n') ? text.slice(0, -2) : text.endsWith('\n') ? text.slice(0, -1) : text;
-    if (new TextEncoder().encode(value).length > MAX_VALUE) throw new BadValue('the value is longer than a secret may be');
     return value ? { value } : {};
   }
 

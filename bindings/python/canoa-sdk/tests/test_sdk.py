@@ -232,12 +232,12 @@ def test_a_request_names_one_secret_checked_as_the_kind_says() -> None:
     from guatiao.errors import BadValue
 
     assert sdk.name_of({"name": "github_token"}) == "github_token"
-    for bad in ({}, {"name": ""}, {"name": "a\nb"}, {"name": "x" * 257}, {"name": "n", "extra": 1}, {"name": 1}):
+    for bad in ({}, {"name": ""}, {"name": "a\nb"}, {"name": "n", "extra": 1}, {"name": 1}):
         with pytest.raises(BadValue):
             sdk.name_of(bad)
     assert sdk.keeping_of({"name": "n", "value": "v"}) == ("n", "v")
-    with pytest.raises(BadValue):
-        sdk.keeping_of({"name": "n", "value": "v" * (64 * 1024 + 1)})
+    big = "v" * (64 * 1024 + 1)
+    assert sdk.keeping_of({"name": "n" * 300, "value": big}) == ("n" * 300, big)
 
 
 def test_a_store_provider_keeps_secrets_with_an_index_of_their_names() -> None:

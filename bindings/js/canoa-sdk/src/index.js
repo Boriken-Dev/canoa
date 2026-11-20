@@ -8,9 +8,6 @@ export { FORM_KEY, formMeta, section, ui, when } from './forms.js';
 export * as kinds from './kinds.js';
 export {
   FormSecretProvider,
-  MAX_NAME,
-  MAX_NAMES,
-  MAX_VALUE,
   SecretProvider,
   SystemStoreSecretProvider,
   keepingOf,

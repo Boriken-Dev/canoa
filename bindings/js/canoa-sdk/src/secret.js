@@ -29,15 +29,6 @@ import { dataOf } from './model.js';
 
 /** @typedef {import('./model.js').Spawner} Spawner the host's, which the provider destroys */
 
-/** The longest name of a secret, in bytes. */
-export const MAX_NAME = 256;
-/** The longest value, in bytes. */
-export const MAX_VALUE = 64 * 1024;
-/** The most names one `names` answer may hold. */
-export const MAX_NAMES = 1000;
-
-const encoder = new TextEncoder();
-
 /**
  * Lets go of the host's spawner a call was handed: every call does, whether it runs a program or refuses.
  * @param {Spawner | undefined} spawner
@@ -48,17 +39,15 @@ export function release(spawner) {
 
 /** @param {unknown} name */
 function checked(name) {
-  if (typeof name !== 'string' || name.length === 0 || encoder.encode(name).length > MAX_NAME) {
-    throw new BadValue(`a secret's name is 1 to ${MAX_NAME} bytes of text`);
-  }
+  if (typeof name !== 'string' || name.length === 0) throw new BadValue("a secret's name is text that is not empty");
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(name)) throw new BadValue("a secret's name has a control character");
   return name;
 }
 
 /**
- * The name a `get` or `forget` request asks for, checked as the kind says a name is: 1 to `MAX_NAME` bytes with no control
- * character. A request that holds anything else is refused, so a field a newer host adds is never dropped silently.
+ * The name a `get` or `forget` request asks for, checked as the kind says a name is: text that is not empty, with no
+ * control character. A request that holds anything else is refused, so a field a newer host adds is never dropped silently.
  * @param {unknown} request
  * @returns {string}
  */
@@ -69,7 +58,7 @@ export function nameOf(request) {
 }
 
 /**
- * The name and the value a `put` request carries, checked the same way; the value is text of at most `MAX_VALUE` bytes.
+ * The name and the value a `put` request carries, checked the same way; the value is text.
  * @param {unknown} request
  * @returns {{name: string, value: string}}
  */
@@ -80,7 +69,6 @@ export function keepingOf(request) {
   }
   const { name, value } = /** @type {{name: unknown, value: unknown}} */ (request);
   if (typeof value !== 'string') throw new BadValue('a secret is text');
-  if (encoder.encode(value).length > MAX_VALUE) throw new BadValue('the value is longer than a secret may be');
   return { name: checked(name), value };
 }
 
@@ -116,7 +104,7 @@ export class SecretProvider extends Provider {
   }
 
   /**
-   * The names it holds and nothing else: `{ names: [...] }`, at most `MAX_NAMES`.
+   * The names it holds and nothing else: `{ names: [...] }`, every one it holds.
    * @param {Spawner} spawner
    * @returns {{names: string[]}}
    */
@@ -245,7 +233,7 @@ export class SystemStoreSecretProvider extends SecretProvider {
   /** @param {Spawner} spawner */
   names(spawner) {
     release(spawner);
-    return { names: [...this.#held()].sort().slice(0, MAX_NAMES) };
+    return { names: [...this.#held()].sort() };
   }
 
   /** @param {unknown} request @param {Spawner} spawner */
