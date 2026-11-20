@@ -106,3 +106,7 @@ required-features = ["speech-builtin"]
 [[example]]
 name = "say_standin"
 required-features = ["speech-builtin"]
+
+[[test]]
+name = "form_vectors"
+required-features = ["settings-section"]

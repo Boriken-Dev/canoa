@@ -1,0 +1,158 @@
+{
+  "about": "Cases for how a guatiao-intake form lays out and shows a guatiao schema. crates/canoa/tests/form_vectors.rs checks them against guatiao-intake itself and app/test/schema_layout_test.dart against the app's renderer, so the two cannot disagree. layout lists each group as its section id ('' is the default section) and the member names in the order they are shown; shown lists, for each set of values, the members that are shown.",
+  "cases": [
+    {
+      "name": "the default section comes first when the form does not place it",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "host": {"type": "string", "x-section": "net"},
+          "name": {"type": "string"},
+          "port": {"type": "integer", "x-section": "net"}
+        }
+      },
+      "form": {"sections": [{"id": "net", "title": "Network"}]},
+      "layout": [
+        {"section": "", "fields": ["name"]},
+        {"section": "net", "title": "Network", "fields": ["host", "port"]}
+      ],
+      "shown": [{"values": {}, "members": ["host", "name", "port"]}]
+    },
+    {
+      "name": "the form may place the default section after another",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "host": {"type": "string", "x-section": "net"}
+        }
+      },
+      "form": {"sections": [{"id": "net", "title": "Network"}, {"id": "", "title": "General"}]},
+      "layout": [
+        {"section": "net", "title": "Network", "fields": ["host"]},
+        {"section": "", "title": "General", "fields": ["name"]}
+      ],
+      "shown": [{"values": {}, "members": ["name", "host"]}]
+    },
+    {
+      "name": "a section the form does not declare is the default section, and an empty section is left out",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {"type": "string", "x-section": "gone"},
+          "b": {"type": "string"}
+        }
+      },
+      "form": {"sections": [{"id": "empty", "title": "Nothing here"}]},
+      "layout": [{"section": "", "fields": ["a", "b"]}],
+      "shown": [{"values": {}, "members": ["a", "b"]}]
+    },
+    {
+      "name": "an explicit order comes first, lowest first, and the rest keep the schema's order",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "p": {"type": "string", "x-order": 2},
+          "q": {"type": "string"},
+          "r": {"type": "string", "x-order": 1},
+          "s": {"type": "string", "x-order": 1},
+          "t": {"type": "string"},
+          "u": {"type": "string", "x-order": -3}
+        }
+      },
+      "form": {},
+      "layout": [{"section": "", "fields": ["u", "r", "s", "p", "q", "t"]}],
+      "shown": [{"values": {}, "members": ["p", "q", "r", "s", "t", "u"]}]
+    },
+    {
+      "name": "a condition reads the value, else the default, and a field with neither does not meet it",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "mode": {"type": "string", "enum": ["fast", "slow"], "default": "fast"},
+          "limit": {"type": "integer"},
+          "slow_note": {"type": "string"},
+          "limit_note": {"type": "string"}
+        }
+      },
+      "form": {
+        "fields": {
+          "slow_note": {"visibleWhen": {"field": "mode", "equals": "slow"}},
+          "limit_note": {"visibleWhen": {"field": "limit", "equals": 5}}
+        }
+      },
+      "layout": [{"section": "", "fields": ["mode", "limit", "slow_note", "limit_note"]}],
+      "shown": [
+        {"values": {}, "members": ["mode", "limit"]},
+        {"values": {"mode": "slow"}, "members": ["mode", "limit", "slow_note"]},
+        {"values": {"mode": "slow", "limit": 5}, "members": ["mode", "limit", "slow_note", "limit_note"]},
+        {"values": {"limit": 6}, "members": ["mode", "limit"]}
+      ]
+    },
+    {
+      "name": "a condition on a field that is hidden is not met, whatever the hidden field holds",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "kind": {"type": "string", "enum": ["a", "b"]},
+          "verify": {"type": "boolean"},
+          "ca": {"type": "string"}
+        }
+      },
+      "form": {
+        "fields": {
+          "verify": {"visibleWhen": {"field": "kind", "equals": "a"}},
+          "ca": {"visibleWhen": {"field": "verify", "equals": true}}
+        }
+      },
+      "layout": [{"section": "", "fields": ["kind", "verify", "ca"]}],
+      "shown": [
+        {"values": {"verify": true}, "members": ["kind"]},
+        {"values": {"kind": "b", "verify": true}, "members": ["kind"]},
+        {"values": {"kind": "a", "verify": true}, "members": ["kind", "verify", "ca"]},
+        {"values": {"kind": "a", "verify": false}, "members": ["kind", "verify"]}
+      ]
+    },
+    {
+      "name": "a field shown for any of a list of values",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "scheme": {"type": "string", "enum": ["http", "https", "socks"]},
+          "tls": {"type": "string"}
+        }
+      },
+      "form": {"fields": {"tls": {"visibleWhen": {"field": "scheme", "in": ["https", "socks"]}}}},
+      "layout": [{"section": "", "fields": ["scheme", "tls"]}],
+      "shown": [
+        {"values": {}, "members": ["scheme"]},
+        {"values": {"scheme": "http"}, "members": ["scheme"]},
+        {"values": {"scheme": "https"}, "members": ["scheme", "tls"]},
+        {"values": {"scheme": "socks"}, "members": ["scheme", "tls"]}
+      ]
+    },
+    {
+      "name": "a condition compares whole numbers and real numbers by value",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "level": {"type": "integer"},
+          "ratio": {"type": "number"},
+          "extra": {"type": "string"},
+          "more": {"type": "string"}
+        }
+      },
+      "form": {
+        "fields": {
+          "extra": {"visibleWhen": {"field": "level", "equals": 2}},
+          "more": {"visibleWhen": {"field": "ratio", "equals": 0.5}}
+        }
+      },
+      "layout": [{"section": "", "fields": ["level", "ratio", "extra", "more"]}],
+      "shown": [
+        {"values": {"level": 2, "ratio": 0.5}, "members": ["level", "ratio", "extra", "more"]},
+        {"values": {"level": 3, "ratio": 0.25}, "members": ["level", "ratio"]}
+      ]
+    }
+  ]
+}
