@@ -8,6 +8,7 @@
 use alloc::sync::Arc;
 use std::sync::{Mutex, OnceLock, PoisonError};
 
+use canoa::store::ProgramStore;
 use canoa::vendor::{AgentVendor, VendorInfo};
 use coqui_acp_api::guatiao::library::Registry;
 
@@ -77,6 +78,7 @@ fn keep_all(registry: &Registry) {
         else {
             continue;
         };
+        crate::network::note_endpoints(info.endpoints.iter().cloned());
         if kept.iter().all(|each| each.agent != info.agent) {
             let record = Vendor::of(&info);
             providers.push((record.agent, Arc::clone(&vendor)));
@@ -84,6 +86,14 @@ fn keep_all(registry: &Registry) {
         }
     }
     crate::gateways::note(registry);
+    for offer in registry.offers::<dyn ProgramStore>() {
+        if let Some(info) = offer
+            .default_instance()
+            .and_then(|store| store.describe().ok())
+        {
+            crate::network::note_endpoints(info.endpoints.into_iter().chain(info.services));
+        }
+    }
 }
 
 /// The bundled agents' descriptions are kept first, whatever is noted.
@@ -93,13 +103,22 @@ fn bundled() {
             Ok(registry) => keep_all(&registry),
             Err(why) => tracing::warn!("the bundled agents' descriptions are not kept: {why}"),
         }
+        match crate::store::registry::built_in() {
+            Ok(registry) => keep_all(&registry),
+            Err(why) => tracing::warn!("the built-in stores' endpoints are not kept: {why}"),
+        }
     });
 }
 
-/// Keeps the descriptions `registry` offers that are not kept yet.
+/// Keeps the descriptions `registry` offers that are not kept yet, and the addresses its agents and stores say their programs reach.
 pub(crate) fn note(registry: &Registry) {
     bundled();
     keep_all(registry);
+}
+
+/// Keeps the bundled agents' and built-in stores' descriptions, which a caller that reads what they reach needs first.
+pub(crate) fn load_bundled() {
+    bundled();
 }
 
 /// Every description kept: the bundled agents', then the others' in the order they were opened.

@@ -434,3 +434,68 @@ fn a_proxy_that_names_a_pac_script_is_asked_about_the_endpoints_a_program_reache
     assert_eq!(value("HTTPS_PROXY"), Some("http://gateway.example:3128"));
     assert!(value("NO_PROXY").is_some_and(|list| list.contains("direct.example")));
 }
+
+/// An agent no crate of Canoa's names, whose library says where its program goes.
+mod standin_vendor {
+    use canoa::vendor::{AgentVendor, VendorInfo};
+    use coqui_acp_api::guatiao::Provider;
+    use coqui_acp_api::guatiao::library::ProviderError;
+
+    pub(super) const ADDRESS: &str = "https://api.zed-agent.test/";
+
+    #[derive(Default, Debug, Provider)]
+    #[provider(AgentVendor, id = "zed_endpoints_vendor", crate = ::coqui_acp_api::guatiao)]
+    pub(super) struct ZedVendor;
+
+    impl AgentVendor for ZedVendor {
+        fn describe(&self) -> Result<VendorInfo, ProviderError> {
+            let mut info = VendorInfo::new("zedendpoints", "Zed");
+            info.endpoints = vec![ADDRESS.to_owned()];
+            Ok(info)
+        }
+    }
+
+    coqui_acp_api::guatiao::local_providers!(
+        id = "zed-endpoints",
+        version = "0.0.0",
+        providers = [ZedVendor]
+    );
+}
+
+#[test]
+fn the_addresses_programs_reach_are_what_the_libraries_loaded_say() {
+    use coqui_acp_api::guatiao::library::Registry;
+
+    let before = super::program_endpoints();
+    // What the bundled libraries and built-in stores say is there, each from its own description.
+    for named in [
+        "https://api.anthropic.com/",
+        "https://api.openai.com/",
+        "https://api.x.ai/",
+        "https://registry.npmjs.org/",
+        "https://pypi.org/",
+        "https://nodejs.org/dist/",
+    ] {
+        assert!(before.iter().any(|url| url == named), "{named}: {before:?}");
+    }
+    // An agent a library adds says its own, and only once it is loaded.
+    assert!(!before.iter().any(|url| url == standin_vendor::ADDRESS));
+    let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    let loading = registry
+        .register_local("zed-endpoints", standin_vendor::library)
+        .expect("the library registers");
+    assert!(loading.loaded().is_some());
+    crate::vendors::note(&registry);
+    let after = super::program_endpoints();
+    assert!(after.iter().any(|url| url == standin_vendor::ADDRESS));
+    crate::vendors::note(&registry);
+    let again = super::program_endpoints();
+    assert_eq!(
+        again
+            .iter()
+            .filter(|url| *url == standin_vendor::ADDRESS)
+            .count(),
+        1,
+        "an address already there is not added again"
+    );
+}

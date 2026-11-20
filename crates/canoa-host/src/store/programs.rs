@@ -402,6 +402,7 @@ impl fmt::Debug for Programs {
 impl Programs {
     /// The programs under `shelf`, through the stores `registry` offers, fetching over HTTPS.
     pub fn new(shelf: Shelf, registry: Arc<Registry>) -> Self {
+        crate::vendors::note(&registry);
         Self {
             shelf,
             registry,
@@ -415,6 +416,7 @@ impl Programs {
     /// Also offers the stores of `registry`, which an extension's library was loaded into; a store the first registry offers
     /// is never replaced by one of these.
     pub fn add_registry(&self, registry: Arc<Registry>) {
+        crate::vendors::note(&registry);
         self.extras
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

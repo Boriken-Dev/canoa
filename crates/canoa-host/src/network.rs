@@ -7,7 +7,7 @@
 
 use core::sync::atomic::{AtomicU64, Ordering};
 use core::time::Duration;
-use std::sync::{PoisonError, RwLock};
+use std::sync::{Mutex, PoisonError, RwLock};
 
 use canoa::network::{Network, NetworkSettings};
 
@@ -20,24 +20,31 @@ pub(crate) mod tests;
 
 use crate::config::{ConfigError, NetworkConfig};
 
-/// What the programs the host starts reach: the runtimes' registries and release hosts, and the agents' own services. A PAC script
-/// cannot be written as environment variables, so it is asked about these to choose the proxy a program is given. `[host.network]
-/// endpoints` adds to them.
-pub(crate) const PROGRAM_ENDPOINTS: &[&str] = &[
-    "https://registry.npmjs.org/",
-    "https://pypi.org/",
-    "https://files.pythonhosted.org/",
-    "https://github.com/",
-    "https://api.github.com/",
-    "https://objects.githubusercontent.com/",
-    "https://raw.githubusercontent.com/",
-    "https://nodejs.org/",
-    "https://api.anthropic.com/",
-    "https://api.openai.com/",
-    "https://chatgpt.com/",
-    "https://generativelanguage.googleapis.com/",
-    "https://api.x.ai/",
-];
+/// What the programs the host starts reach: the addresses the loaded libraries say, which the Store's programs (their endpoints and
+/// the services they reach) and each agent vendor (the API and login hosts of its program) name. A PAC script cannot be written as
+/// environment variables, so it is asked about these to choose the proxy a program is given. `[host.network] endpoints` adds to them.
+static PROGRAM_ENDPOINTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Adds the addresses `urls` to what the programs the host starts reach; one already there is not added again.
+pub(crate) fn note_endpoints(urls: impl IntoIterator<Item = String>) {
+    let mut kept = PROGRAM_ENDPOINTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    for url in urls {
+        if !url.is_empty() && !kept.contains(&url) {
+            kept.push(url);
+        }
+    }
+}
+
+/// What the programs the host starts reach, from every library loaded so far (the bundled ones first).
+pub(crate) fn program_endpoints() -> Vec<String> {
+    crate::vendors::load_bundled();
+    PROGRAM_ENDPOINTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+}
 
 /// Makes `config` the process's network.
 ///
@@ -80,11 +87,7 @@ pub(crate) fn installed_settings() -> NetworkSettings {
 
 /// The proxy variables of a program that reaches what programs usually reach.
 pub(crate) fn program_variables(network: &Network) -> Vec<(String, String)> {
-    let endpoints: Vec<String> = PROGRAM_ENDPOINTS
-        .iter()
-        .map(|url| (*url).to_owned())
-        .collect();
-    network.child_variables(&endpoints)
+    network.child_variables(&program_endpoints())
 }
 
 /// The proxy variables of a program that reaches `urls`.
