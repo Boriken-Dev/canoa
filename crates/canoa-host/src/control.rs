@@ -1839,6 +1839,7 @@ mod secrets;
 mod secrets_tests;
 pub(crate) mod settings_sections;
 mod speech;
+mod speech_accounts;
 #[cfg(test)]
 mod speech_lend_tests;
 mod speech_offers;

@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 
 use super::files::{Files, UploadLimits};
 use super::speech::Speech;
+use super::speech_accounts::Services;
 use super::speech_offers::{self, Lend};
 use super::{Caller, NOT_FOUND, REFUSED, Stores};
 use crate::config::Layers;
@@ -109,6 +110,23 @@ struct Home {
     layers: Layers,
 }
 
+/// Puts the credential `credential` of the account `account` in the account store of the home `root`.
+fn keep_credential(root: &PathBuf, account: &str, credential: &str, key: &str) {
+    let files = crate::config::Config::from_str_in(
+        "[secrets]
+accounts = \"file\"
+",
+        root,
+    )
+    .expect("a config");
+    let store = crate::accounts::Accounts::open(&files, root).expect("a store");
+    let mut credentials = Credentials::new();
+    credentials.insert(credential.to_owned(), key.to_owned());
+    store
+        .store_login(&format!("id-{account}"), &credentials, None)
+        .expect("stored");
+}
+
 fn home(name: &str, accounts: &[(&str, &str, &str, &str)], key: Option<&str>, extra: &str) -> Home {
     let root = dir(name);
     let cfg = root.join("canoa.cfg");
@@ -121,19 +139,7 @@ fn home(name: &str, accounts: &[(&str, &str, &str, &str)], key: Option<&str>, ex
     text.push_str(extra);
     fs::write(&cfg, text).expect("canoa.cfg");
     if let (Some(key), Some((account, ..))) = (key, accounts.first()) {
-        let files = crate::config::Config::from_str_in(
-            "[secrets]
-accounts = \"file\"
-",
-            &root,
-        )
-        .expect("a config");
-        let store = crate::accounts::Accounts::open(&files, &root).expect("a store");
-        let mut credentials = Credentials::new();
-        credentials.insert("api_key".to_owned(), key.to_owned());
-        store
-            .store_login(&format!("id-{account}"), &credentials, None)
-            .expect("stored");
+        keep_credential(&root, account, "api_key", key);
     }
     let layers = Layers::only(&cfg);
     Home { root, cfg, layers }
@@ -232,7 +238,7 @@ fn each_openai_account_is_an_offer_with_its_name_and_an_account_that_is_not_an_a
     let lend = Lend::from(&home.layers, &home.root, None);
     let rows = offers(&files, &lend);
 
-    let work = by_id(&rows, "openai_account:work");
+    let work = by_id(&rows, "openai:work");
     assert_eq!(work["account"], "work");
     assert_eq!(work["local"], false);
     assert!(work["unavailable"].is_null(), "{work}");
@@ -250,22 +256,22 @@ fn each_openai_account_is_an_offer_with_its_name_and_an_account_that_is_not_an_a
     );
     assert_eq!(work["default_model"], "gpt-transcribe");
 
-    let proxied = by_id(&rows, "openai_account:proxied");
+    let proxied = by_id(&rows, "openai:proxied");
     assert!(
         proxied["unavailable"]
             .as_str()
             .is_some_and(|why| why.contains("gateway.example")),
         "{proxied}"
     );
-    let login = by_id(&rows, "openai_account:login");
+    let login = by_id(&rows, "openai:login");
     assert!(
         login["unavailable"]
             .as_str()
-            .is_some_and(|why| why.contains("not an OpenAI API key")),
+            .is_some_and(|why| why.contains("not an API key for OpenAI")),
         "{login}"
     );
     assert!(
-        rows.iter().all(|row| row["id"] != "openai_account:claude"),
+        rows.iter().all(|row| row["id"] != "openai:claude"),
         "an account of another provider is no OpenAI key"
     );
     let _ = fs::remove_dir_all(&home.root);
@@ -281,7 +287,7 @@ fn enabling_an_account_writes_its_name_and_never_its_key_and_the_key_reaches_the
     let made = enable(
         &files,
         &lend,
-        &json!({"offer": "openai_account:work", "model": "whisper-1"}),
+        &json!({"offer": "openai:work", "model": "whisper-1"}),
     )
     .expect("enabled");
     assert_eq!(made["name"], "openai-work");
@@ -298,10 +304,7 @@ fn enabling_an_account_writes_its_name_and_never_its_key_and_the_key_reaches_the
         "the key stays in the account's store: {written}"
     );
     let rows = offers(&files, &lend);
-    assert_eq!(
-        by_id(&rows, "openai_account:work")["provider"],
-        "openai-work"
-    );
+    assert_eq!(by_id(&rows, "openai:work")["provider"], "openai-work");
 
     // The provider is listed with its account and no key, and the listing reads no credential.
     let listed = speak(
@@ -320,7 +323,7 @@ fn enabling_an_account_writes_its_name_and_never_its_key_and_the_key_reaches_the
         .expect("listed");
     assert_eq!(row["account"], "work");
     assert!(row.get("problem").is_none(), "{row}");
-    assert_eq!(row["offer"], "openai_account:work");
+    assert_eq!(row["offer"], "openai:work");
     assert_eq!(row["models"][0]["id"], "gpt-transcribe", "{row}");
     assert!(row["settings"].get("account").is_none(), "{row}");
 
@@ -355,16 +358,14 @@ fn an_account_that_is_not_an_api_key_or_holds_none_is_refused_with_the_reason() 
     let files = files(&home);
     let lend = Lend::from(&home.layers, &home.root, None);
     // work holds no credential in this store.
-    let err = enable(&files, &lend, &json!({"offer": "openai_account:work"})).expect_err("no key");
+    let err = enable(&files, &lend, &json!({"offer": "openai:work"})).expect_err("no key");
     assert_eq!(err.0, REFUSED);
     assert!(err.1.contains("holds no key"), "{}", err.1);
-    let err =
-        enable(&files, &lend, &json!({"offer": "openai_account:login"})).expect_err("a login");
-    assert!(err.1.contains("not an OpenAI API key"), "{}", err.1);
-    let err =
-        enable(&files, &lend, &json!({"offer": "openai_account:proxied"})).expect_err("moved");
+    let err = enable(&files, &lend, &json!({"offer": "openai:login"})).expect_err("a login");
+    assert!(err.1.contains("not an API key for OpenAI"), "{}", err.1);
+    let err = enable(&files, &lend, &json!({"offer": "openai:proxied"})).expect_err("moved");
     assert!(err.1.contains("gateway.example"), "{}", err.1);
-    let err = enable(&files, &lend, &json!({"offer": "openai_account:nobody"})).expect_err("gone");
+    let err = enable(&files, &lend, &json!({"offer": "openai:nobody"})).expect_err("gone");
     assert!(err.1.contains("is gone"), "{}", err.1);
     assert!(
         !fs::read_to_string(&home.cfg)
@@ -412,7 +413,7 @@ fn a_host_that_keeps_no_accounts_offers_none_and_refuses_one() {
     let lend = Lend::new(None, None);
     let rows = offers(&files, &lend);
     assert!(rows.iter().all(|row| row["account"].is_null()));
-    let err = enable(&files, &lend, &json!({"offer": "openai_account:work"})).expect_err("none");
+    let err = enable(&files, &lend, &json!({"offer": "openai:work"})).expect_err("none");
     assert!(err.1.contains("keeps no accounts"), "{}", err.1);
     let _ = fs::remove_dir_all(&home.root);
 }
@@ -622,7 +623,7 @@ fn saving_a_providers_settings_keeps_its_account_and_service() {
         "keeps",
         &ACCOUNTS,
         Some("sk"),
-        "\n[speech.openai-work]\nprovider = \"speech_endpoint\"\nurl = \"https://api.openai.com/v1/audio/transcriptions\"\nmodel = \"gpt-transcribe\"\naccount = \"work\"\noffer = \"openai_account:work\"\n\n[speech.foundry]\nprovider = \"speech_endpoint\"\nmodel = \"m\"\nservice = \"foundry\"\noffer = \"foundry\"\n",
+        "\n[speech.openai-work]\nprovider = \"speech_endpoint\"\nurl = \"https://api.openai.com/v1/audio/transcriptions\"\nmodel = \"gpt-transcribe\"\naccount = \"work\"\noffer = \"openai:work\"\n\n[speech.foundry]\nprovider = \"speech_endpoint\"\nmodel = \"m\"\nservice = \"foundry\"\noffer = \"foundry\"\n",
     );
     let files = files(&home);
     let held = stores(None);
@@ -945,4 +946,196 @@ fn an_installed_program_is_enabled_as_the_command_its_library_describes_and_is_t
     for path in [&home.root, &root] {
         let _ = fs::remove_dir_all(path);
     }
+}
+
+/// The accounts of a harness whose keys a stand-in description names: a key at its own address, one moved to a gateway, and a login.
+const STAND_IN_ACCOUNTS: [(&str, &str, &str, &str); 4] = [
+    ("plain", "claude", "anthropic-api-key", ""),
+    (
+        "moved",
+        "claude",
+        "anthropic-api-key",
+        "settings = { base_url = \"https://gw.example/v1\" }\n",
+    ),
+    ("login", "claude", "claude-oauth-token", ""),
+    ("other", "codex", "codex-api-key", ""),
+];
+
+/// A service no library of this build describes, for the accounts whose kind provides the standard `claude`'s keys do at its address.
+fn stand_in_services(url: &str) -> Services {
+    use canoa::speech::account::{AccountSpeechModel, AccountSpeechService};
+
+    let mut service = AccountSpeechService::new(
+        "standin",
+        "Stand-in",
+        coqui_acp_api::standard::ANTHROPIC_API,
+        "https://api.anthropic.com",
+        url,
+        "token",
+    );
+    service.summary = "Speech to text by the stand-in.".to_owned();
+    service.location = "The audio goes to the stand-in.".to_owned();
+    service.models = vec![
+        AccountSpeechModel::new("m1", "Model one"),
+        AccountSpeechModel::new("m2", "Model two"),
+    ];
+    Services::from_services(vec![service])
+}
+
+#[test]
+fn an_account_whose_kind_a_description_names_is_offered_and_one_whose_kind_it_does_not_is_not() {
+    let home = home("described", &STAND_IN_ACCOUNTS, None, "");
+    let files = files(&home);
+    let lend = Lend::from(&home.layers, &home.root, None).with_services(stand_in_services(
+        "http://127.0.0.1:9/v1/audio/transcriptions",
+    ));
+    let rows = offers(&files, &lend);
+
+    let plain = by_id(&rows, "standin:plain");
+    assert_eq!(plain["account"], "plain");
+    assert_eq!(plain["local"], false);
+    assert!(plain["unavailable"].is_null(), "{plain}");
+    assert_eq!(plain["title"], "Stand-in, account plain");
+    assert_eq!(plain["default_model"], "m1");
+    assert_eq!(
+        plain["models"],
+        json!([{"id": "m1", "label": "Model one"}, {"id": "m2", "label": "Model two"}])
+    );
+    assert!(
+        plain["where"]
+            .as_str()
+            .is_some_and(|words| words.contains("The audio goes to the stand-in.")
+                && words.contains("plain")),
+        "{plain}"
+    );
+    assert!(
+        by_id(&rows, "standin:moved")["unavailable"]
+            .as_str()
+            .is_some_and(|why| why.contains("gw.example")),
+        "a key moved to another address is listed with the reason"
+    );
+    assert!(
+        by_id(&rows, "standin:login")["unavailable"]
+            .as_str()
+            .is_some_and(|why| why.contains("not an API key for Stand-in")),
+        "a login is listed with the reason"
+    );
+    assert!(
+        rows.iter()
+            .all(|row| !row["id"].as_str().is_some_and(|id| id.ends_with(":other"))),
+        "an account whose provider has no kind a description names is not offered: {rows:?}"
+    );
+    assert!(
+        rows.iter().all(|row| !row["id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("openai"))),
+        "a service no description names is not offered, whatever the accounts"
+    );
+    let _ = fs::remove_dir_all(&home.root);
+}
+
+#[test]
+fn a_described_account_is_used_for_a_recording_with_the_credential_its_description_names() {
+    let (base, received) = standin("200 OK", r#"{"text":" said by the stand-in "}"#, |_| {});
+    let home = home("described-use", &STAND_IN_ACCOUNTS, None, "");
+    let files = files(&home);
+    let lend = Lend::from(&home.layers, &home.root, None).with_services(stand_in_services(
+        &format!("{base}/v1/audio/transcriptions"),
+    ));
+
+    // The account holds a key under another name, which the description does not ask for.
+    keep_credential(&home.root, "plain", "api_key", "sk-wrong-field");
+    let err = enable(&files, &lend, &json!({"offer": "standin:plain"})).expect_err("no token");
+    assert_eq!(err.0, REFUSED);
+    assert!(err.1.contains("holds no key"), "{}", err.1);
+
+    keep_credential(&home.root, "plain", "token", "tok-from-the-store");
+    let made = enable(
+        &files,
+        &lend,
+        &json!({"offer": "standin:plain", "model": "m2"}),
+    )
+    .expect("enabled");
+    assert_eq!(made["name"], "standin-plain");
+    assert_eq!(made["model"], "m2");
+    let written = fs::read_to_string(&home.cfg).expect("canoa.cfg");
+    assert!(
+        written.contains("[speech.standin-plain]")
+            && written.contains("offer = \"standin:plain\"")
+            && written.contains("account = \"plain\"")
+            && written.contains("/v1/audio/transcriptions"),
+        "{written}"
+    );
+    assert!(
+        !written.contains("tok-from-the-store") && !written.contains("api_key"),
+        "the key stays in the account's store: {written}"
+    );
+
+    // Listed, the provider names its account and the account's kind, and reads no credential.
+    let listed = speak(
+        &Speech::default(),
+        &files,
+        &lend,
+        "speech/providers",
+        &json!({}),
+    )
+    .expect("listed");
+    let row = listed["providers"]
+        .as_array()
+        .expect("providers")
+        .iter()
+        .find(|row| row["name"] == "standin-plain")
+        .expect("listed");
+    assert_eq!(row["account"], "plain");
+    assert!(
+        row["account_kind"]
+            .as_str()
+            .is_some_and(|kind| !kind.is_empty()),
+        "the account's kind is named for the person: {row}"
+    );
+    assert_eq!(
+        row["models"][0]["id"], "m1",
+        "the models are the description's, found by the address it posts to"
+    );
+    assert!(row.get("problem").is_none(), "{row}");
+
+    let answer = dictate(&files, &lend, "standin-plain").expect("dictated");
+    assert_eq!(answer["text"], "said by the stand-in");
+    let request = received
+        .recv_timeout(Duration::from_secs(5))
+        .expect("a request");
+    assert!(
+        request.head.contains("Bearer tok-from-the-store"),
+        "{}",
+        request.head
+    );
+    assert!(
+        String::from_utf8_lossy(&request.body).contains("m2"),
+        "the model is in the upload"
+    );
+    let _ = fs::remove_dir_all(&home.root);
+}
+
+#[test]
+fn an_offer_no_description_names_is_not_found_and_an_account_of_another_kind_is_refused_with_the_reason()
+ {
+    let home = home("described-refused", &STAND_IN_ACCOUNTS, Some("k"), "");
+    let files = files(&home);
+    let lend = Lend::from(&home.layers, &home.root, None)
+        .with_services(stand_in_services("http://127.0.0.1:9/x"));
+    let err =
+        enable(&files, &lend, &json!({"offer": "nothing:plain"})).expect_err("no such service");
+    assert_eq!(err.0, NOT_FOUND);
+    let err = enable(&files, &lend, &json!({"offer": "standin:moved"})).expect_err("moved");
+    assert_eq!(err.0, REFUSED);
+    assert!(err.1.contains("gw.example"), "{}", err.1);
+    let err = enable(&files, &lend, &json!({"offer": "standin:other"})).expect_err("no kind");
+    assert!(err.1.contains("no library describes"), "{}", err.1);
+    assert!(
+        !fs::read_to_string(&home.cfg)
+            .expect("canoa.cfg")
+            .contains("[speech."),
+        "nothing was written"
+    );
+    let _ = fs::remove_dir_all(&home.root);
 }

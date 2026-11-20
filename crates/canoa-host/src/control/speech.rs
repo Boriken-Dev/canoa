@@ -537,7 +537,7 @@ fn providers(files: &Files, lend: &Lend<'_>) -> Outcome {
                 }
             }
         }
-        entry["models"] = json!(speech_offers::models_of(&Value::Object(settings.clone())));
+        entry["models"] = json!(lend.models_at(&settings));
         entry["offer"] = table
             .get(speech_offers::OFFER_KEY)
             .cloned()
@@ -546,6 +546,11 @@ fn providers(files: &Files, lend: &Lend<'_>) -> Outcome {
             .get(speech_offers::ACCOUNT_KEY)
             .cloned()
             .unwrap_or(Value::Null);
+        entry["account_kind"] = table
+            .get(speech_offers::ACCOUNT_KEY)
+            .and_then(Value::as_str)
+            .and_then(|account| lend.account_kind(account))
+            .map_or(Value::Null, Value::String);
         entry["settings"] = Value::Object(settings);
         entry["secrets_set"] = json!(set);
         let made = found.and_then(|(resolved, origin)| {

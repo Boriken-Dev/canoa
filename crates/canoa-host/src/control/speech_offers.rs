@@ -3,13 +3,13 @@
 //! the type's library says how to run the copy; a named service is added through `speech/configure` with the settings the offer
 //! carries, and a key of the person's.
 //!
-//! The same file says which models a provider's service has, for a provider whose address names a service Canoa knows, and
-//! applies the model a recording asks for in place of the one the provider's table names.
+//! The same file applies the model a recording asks for in place of the one the provider's table names.
 //!
-//! Two offers make tables that are not complete in canoa.cfg, and [`Lend`] completes them each time a provider is built:
-//! an OpenAI API key of an account the person has in Canoa (`account`, the key is read from the account's store when a
-//! recording opens and is never written to canoa.cfg) and the service a Store type's models run in on this computer (`service`,
-//! the type's id; its address changes with each start and its library says where it is, through the type's `model_store`).
+//! Two kinds of offer make tables that are not complete in canoa.cfg, and [`Lend`] completes them each time a provider is built:
+//! a service a library describes for the accounts the person has in Canoa (`account`: the key is read from the account's store when a
+//! recording opens and is never written to canoa.cfg; what the service is and how it is called is the library's, through
+//! `account_speech`) and the service a Store type's models run in on this computer (`service`, the type's id; its address changes with
+//! each start and its library says where it is, through the type's `model_store`).
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -17,40 +17,28 @@
 )]
 
 use std::path::Path;
+use std::sync::OnceLock;
 
+use canoa::speech::account::AccountSpeechService;
 use canoa::store::models::{ServiceReport, SpeechRun, SpeechService};
-use coqui_acp_api::{AccountKindInfo, EndpointSlot, MODEL_API, standard};
 use serde_json::{Map, Value, json};
 
 use super::accounts::Accounts as HostAccounts;
 use super::files::Files;
+use super::speech_accounts::Services;
 use super::{Caller, Grant, NOT_FOUND, REFUSED, Stores, allow, bad, text_param};
 use crate::accounts::matching::Catalogs;
-use crate::config::{AccountConfig, Config, Layers};
+use crate::config::{Config, Layers};
 
 type Outcome = Result<Value, (i32, String)>;
 
 /// The table of canoa.cfg the providers are in.
 const SECTION: &str = "speech";
 
-/// The address OpenAI's speech-to-text is called at.
-const OPENAI_URL: &str = "https://api.openai.com/v1/audio/transcriptions";
-
-/// The models OpenAI's transcriptions take, the recommended one first. The older three are announced to end on 2027-02-26.
-const OPENAI_MODELS: [(&str, &str); 4] = [
-    ("gpt-transcribe", "GPT Transcribe (recommended)"),
-    (
-        "gpt-4o-mini-transcribe",
-        "GPT-4o mini Transcribe (ends 2027-02-26)",
-    ),
-    ("gpt-4o-transcribe", "GPT-4o Transcribe (ends 2027-02-26)"),
-    ("whisper-1", "Whisper (ends 2027-02-26)"),
-];
-
 /// The key a provider's table keeps the offer it was made from under.
 pub(super) const OFFER_KEY: &str = "offer";
 
-/// The key of a table that names the account whose OpenAI API key the provider uses.
+/// The key of a table that names the account whose API key the provider uses.
 pub(super) const ACCOUNT_KEY: &str = "account";
 
 /// The key of a table that names the Store type whose service on this computer the provider calls, and the one that overrides its
@@ -69,18 +57,6 @@ pub(super) const HOST_KEYS: [&str; 8] = [
     "source_settings",
     "import_search",
 ];
-
-/// The offers that are the host's own, whose ids no Store type's service may take.
-const OWN_OFFERS: [&str; 1] = ["openai"];
-
-/// The offer made of one of the person's accounts is `openai_account:NAME`.
-const ACCOUNT_OFFER: &str = "openai_account";
-
-/// The credential that holds the key of an account of the `openai-api` standard, which that standard fixes.
-const OPENAI_KEY_FIELD: &str = "api_key";
-
-/// What an OpenAI key's service is called at, without the path.
-const OPENAI_BASE: &str = "https://api.openai.com/v1";
 
 /// The most a model's name may be.
 const MAX_MODEL: usize = 100;
@@ -102,21 +78,6 @@ pub(super) fn call(
     }
 }
 
-fn model_rows(models: &[(&str, &str)]) -> Vec<Value> {
-    models
-        .iter()
-        .map(|(id, label)| json!({"id": id, "label": label}))
-        .collect()
-}
-
-/// The models a provider's service has, from the address in its settings; none for an address Canoa knows nothing of.
-pub(super) fn models_of(settings: &Value) -> Vec<Value> {
-    match settings.get("url").and_then(Value::as_str) {
-        Some(url) if url.starts_with("https://api.openai.com/") => model_rows(&OPENAI_MODELS),
-        _ => Vec::new(),
-    }
-}
-
 /// `table` with the model a recording asks for, when it asks for one and the provider takes a model setting.
 pub(super) fn with_model(table: &Value, params: &Value) -> Result<Value, (i32, String)> {
     let Some(model) = text_param(params, "model")?.filter(|model| !model.is_empty()) else {
@@ -134,12 +95,15 @@ pub(super) fn with_model(table: &Value, params: &Value) -> Result<Value, (i32, S
     Ok(changed)
 }
 
-/// What a provider's table is completed from: the accounts the host keeps, and the Store types whose services it calls.
+/// What a provider's table is completed from: the accounts the host keeps, the services the libraries describe for them, and the Store
+/// types whose services it calls.
 pub(super) struct Lend<'a> {
     /// The canoa.cfg files accounts are listed in, and the home their credentials rest in.
     accounts: Option<(&'a Layers, &'a Path)>,
     /// The stores, which say where a type's service is and what it serves.
     stores: Option<&'a Stores>,
+    /// The speech services the libraries describe for accounts, read when first needed.
+    services: OnceLock<Services>,
 }
 
 impl<'a> Lend<'a> {
@@ -148,6 +112,7 @@ impl<'a> Lend<'a> {
         Self {
             accounts: accounts.map(|each| (each.layers(), each.home_dir())),
             stores,
+            services: OnceLock::new(),
         }
     }
 
@@ -157,7 +122,15 @@ impl<'a> Lend<'a> {
         Lend {
             accounts: Some((layers, home)),
             stores,
+            services: OnceLock::new(),
         }
+    }
+
+    /// The same, with the services a test names in place of the libraries this build carries.
+    #[cfg(test)]
+    pub(super) fn with_services(self, services: Services) -> Self {
+        let _ = self.services.set(services);
+        self
     }
 
     /// The accounts canoa.cfg lists now.
@@ -166,24 +139,72 @@ impl<'a> Lend<'a> {
         Config::load_layers(layers).map_err(|error| error.to_string())
     }
 
-    /// The account `name`, when it is one whose key may call OpenAI's transcriptions: the reason when it is not.
-    fn usable(&self, config: &Config, name: &str) -> Result<(), String> {
+    /// The services the libraries describe: those this build carries and, when the host has a canoa.cfg, the ones its entries and
+    /// extensions load.
+    fn services(&self) -> &Services {
+        self.services
+            .get_or_init(|| Services::of(self.config().ok().as_ref()))
+    }
+
+    /// The models of the service a recording is posted to at the address in `settings`: none for an address no library describes.
+    pub(super) fn models_at(&self, settings: &Map<String, Value>) -> Vec<Value> {
+        settings
+            .get("url")
+            .and_then(Value::as_str)
+            .map(|url| self.services().models_at(url))
+            .unwrap_or_default()
+    }
+
+    /// What the kind of the account `name` is called, for the provider made of it: none when the account is gone.
+    pub(super) fn account_kind(&self, name: &str) -> Option<String> {
+        let config = self.config().ok()?;
+        let account = config.accounts.get(name)?;
+        let kinds = Catalogs::new(&config);
+        Some(
+            kinds
+                .listing(&account.harness)
+                .and_then(|listing| listing.kind(&account.kind).map(|kind| kind.title.clone()))
+                .unwrap_or_else(|| account.kind.clone()),
+        )
+    }
+
+    /// The service the account `name` can call, as a library describes it: the one `wanted` names, else the first its kind is a key for.
+    /// The reason when it is none.
+    fn service_for(
+        &self,
+        config: &Config,
+        name: &str,
+        wanted: Option<&str>,
+    ) -> Result<AccountSpeechService, String> {
         let account = config
             .accounts
             .get(name)
             .ok_or_else(|| format!("the account {name} is gone: add the provider again"))?;
-        openai_key(&Catalogs::new(config), account).unwrap_or_else(|| {
-            Err(format!(
-                "an account of kind {} is not an OpenAI API key",
+        let mut reason = None;
+        for (service, verdict) in self
+            .services()
+            .offered(&Catalogs::new(config), account)
+            .into_iter()
+            .filter(|(service, _)| wanted.is_none_or(|id| id == service.id))
+        {
+            match verdict {
+                Ok(()) => return Ok(service.clone()),
+                Err(why) => reason = reason.or(Some(why)),
+            }
+        }
+        Err(reason.unwrap_or_else(|| {
+            format!(
+                "no library describes a speech-to-text service for an account of kind {}",
                 account.kind
-            ))
-        })
+            )
+        }))
     }
 
-    /// The API key of the account `name`, from the store its credentials rest in.
-    fn key_of(&self, name: &str) -> Result<String, String> {
+    /// The API key of the account `name`, from the store its credentials rest in, for the service `wanted` names or else the one its
+    /// kind is a key for.
+    fn key_of(&self, name: &str, wanted: Option<&str>) -> Result<String, String> {
         let config = self.config()?;
-        self.usable(&config, name)?;
+        let service = self.service_for(&config, name, wanted)?;
         let (_, home) = self.accounts.ok_or("this host keeps no accounts")?;
         let account = &config.accounts[name];
         let store = crate::accounts::Accounts::open(&config, home).map_err(|error| {
@@ -199,7 +220,7 @@ impl<'a> Lend<'a> {
             .ok_or_else(|| format!("the account {name} holds no key: sign in to it again"))?;
         record
             .credentials
-            .get(OPENAI_KEY_FIELD)
+            .get(&service.credential)
             .filter(|key| !key.is_empty())
             .cloned()
             .ok_or_else(|| format!("the account {name} holds no key: sign in to it again"))
@@ -245,10 +266,18 @@ impl<'a> Lend<'a> {
             map.remove(key);
         }
         if let Some(account) = table.get(ACCOUNT_KEY).and_then(Value::as_str) {
+            let wanted = table
+                .get(OFFER_KEY)
+                .and_then(Value::as_str)
+                .and_then(|offer| offer.split_once(':'))
+                .map(|(service, _)| service);
             if with_key {
-                map.insert("api_key".to_owned(), Value::String(self.key_of(account)?));
+                map.insert(
+                    "api_key".to_owned(),
+                    Value::String(self.key_of(account, wanted)?),
+                );
             } else {
-                self.usable(&self.config()?, account)?;
+                self.service_for(&self.config()?, account, wanted)?;
             }
         }
         if let Some(service) = table.get(SERVICE_KEY).and_then(Value::as_str) {
@@ -280,49 +309,8 @@ impl<'a> Lend<'a> {
     }
 }
 
-/// What an account's kind says of an OpenAI API key, for an account of a provider that signs in to OpenAI: `None` for an account of
-/// a provider none of whose kinds is a key for the OpenAI API at OpenAI's own address, `Ok` for a key that may call OpenAI's
-/// transcriptions and the reason for an account that is not one. The kind says it: the standard it provides (`openai-api`), the
-/// address its model API is called at when nothing moves it, and the setting that moves it.
-fn openai_key(kinds: &Catalogs<'_>, account: &AccountConfig) -> Option<Result<(), String>> {
-    let listing = kinds.listing(&account.harness)?;
-    let own = |kind: &AccountKindInfo| {
-        kind.provides
-            .iter()
-            .any(|each| each == standard::OPENAI_API)
-            && openai_slot(kind).is_some_and(|slot| {
-                slot.default
-                    .as_deref()
-                    .is_some_and(|url| url.trim_end_matches('/') == OPENAI_BASE)
-            })
-    };
-    listing.kinds.iter().find(|kind| own(kind))?;
-    let Some(kind) = listing.kind(&account.kind).filter(|kind| own(kind)) else {
-        return Some(Err(format!(
-            "an account of kind {} is not an OpenAI API key, and Canoa has no measured way to send audio to OpenAI with it, so it is not offered: add an API key as an account to use OpenAI's speech-to-text",
-            account.kind
-        )));
-    };
-    let moved = openai_slot(kind)
-        .and_then(|slot| slot.key.as_deref())
-        .and_then(|key| account.settings.as_ref()?.as_map().get(key))
-        .and_then(Value::as_str)
-        .map(|address| address.trim().trim_end_matches('/'))
-        .filter(|address| !address.is_empty() && *address != OPENAI_BASE);
-    Some(match moved {
-        Some(address) => Err(format!(
-            "its key is for {address}, not for api.openai.com, and Canoa has not measured that address's speech-to-text, so it is not offered"
-        )),
-        None => Ok(()),
-    })
-}
-
-/// The slot of `kind` that says where its model API is called.
-fn openai_slot(kind: &AccountKindInfo) -> Option<&EndpointSlot> {
-    kind.endpoints.iter().find(|slot| slot.purpose == MODEL_API)
-}
-
-/// The offers made of the person's accounts, one for each account of a provider that signs in to OpenAI.
+/// The offers made of the person's accounts: one for each service a library describes that an account of a provider that signs in to
+/// it can call.
 fn account_offers(files: &Files, lend: &Lend<'_>) -> Result<Vec<Value>, (i32, String)> {
     let Ok(config) = lend.config() else {
         return Ok(Vec::new());
@@ -330,23 +318,26 @@ fn account_offers(files: &Files, lend: &Lend<'_>) -> Result<Vec<Value>, (i32, St
     let kinds = Catalogs::new(&config);
     let mut rows = Vec::new();
     for (name, account) in &config.accounts {
-        let Some(usable) = openai_key(&kinds, account) else {
-            continue;
-        };
-        let id = format!("{ACCOUNT_OFFER}:{name}");
-        let unavailable = usable.err();
-        rows.push(json!({
-            "id": id,
-            "title": format!("OpenAI, account {name}"),
-            "summary": format!("Speech to text by OpenAI's service, under the API key of your account {name}."),
-            "local": false,
-            "where": format!("The audio goes over the internet to api.openai.com, under the API key of your account {name} in Canoa, and OpenAI's terms say what it does with it. Canoa reads the key when you dictate and never shows or copies it."),
-            "account": name,
-            "models": model_rows(&OPENAI_MODELS),
-            "default_model": OPENAI_MODELS[0].0,
-            "unavailable": unavailable,
-            "provider": enabled(files, &id)?,
-        }));
+        for (service, verdict) in lend.services().offered(&kinds, account) {
+            let id = format!("{}:{name}", service.id);
+            let models: Vec<Value> = service
+                .models
+                .iter()
+                .map(|model| json!({"id": model.id, "label": model.label}))
+                .collect();
+            rows.push(json!({
+                "id": id,
+                "title": format!("{}, account {name}", service.title),
+                "summary": format!("{} Under the API key of your account {name}.", service.summary).trim(),
+                "local": false,
+                "where": format!("{} It is sent under the API key of your account {name} in Canoa, which Canoa reads when you dictate and never shows or copies.", service.location).trim(),
+                "account": name,
+                "default_model": models.first().map(|model| model["id"].clone()),
+                "models": models,
+                "unavailable": verdict.err(),
+                "provider": enabled(files, &id)?,
+            }));
+        }
     }
     Ok(rows)
 }
@@ -362,7 +353,6 @@ fn store_offers(files: &Files, lend: &Lend<'_>) -> Result<Vec<Value>, (i32, Stri
     let (programs, services): (Vec<_>, Vec<_>) = stores
         .speech_services()
         .into_iter()
-        .filter(|(id, _)| !OWN_OFFERS.contains(&id.as_str()))
         .partition(|(_, how)| how.command);
     for (id, how) in programs {
         rows.push(program_offer(files, stores, &id, &how)?);
@@ -462,19 +452,7 @@ fn enabled(files: &Files, id: &str) -> Result<Option<String>, (i32, String)> {
 }
 
 fn offers(files: &Files, lend: &Lend<'_>) -> Outcome {
-    let mut offers = vec![json!({
-        "id": "openai",
-        "title": "OpenAI",
-        "summary": "Speech to text by OpenAI's service, under your own API key.",
-        "local": false,
-        "where": "The audio goes over the internet to api.openai.com, under the key you enter here, and OpenAI's terms say what it does with it.",
-        "kind": "speech_endpoint",
-        "settings": {"url": OPENAI_URL, "model": OPENAI_MODELS[0].0},
-        "models": model_rows(&OPENAI_MODELS),
-        "default_model": OPENAI_MODELS[0].0,
-        "provider": enabled(files, "openai")?,
-    })];
-    offers.extend(store_offers(files, lend)?);
+    let mut offers = store_offers(files, lend)?;
     offers.extend(account_offers(files, lend)?);
     Ok(json!({"offers": offers}))
 }
@@ -524,11 +502,10 @@ fn name_of<'a>(params: &'a Value, fallback: &'a str) -> Result<&'a str, (i32, St
 /// `speech/enable` `{offer, name?, model?}`: makes (or remakes) the provider of an offer that needs no form. The id of a Store type
 /// whose library runs a program is made from the copy the Store has installed, whose model is the one the copy holds (another is
 /// installed through the Store, and this is called again). The id of a type whose models run in a service takes the model `model`
-/// of that service, which the person loads, and `openai_account:NAME` the API key of the account `NAME`.
+/// of that service, which the person loads, and `SERVICE:NAME` the API key of the account `NAME` for the service a library describes.
 fn enable(files: &Files, lend: &Lend<'_>, params: &Value) -> Outcome {
     let offer = text_param(params, "offer")?.ok_or_else(|| bad("offer is needed"))?;
     if let Some(stores) = lend.stores
-        && !OWN_OFFERS.contains(&offer)
         && let Some((_, how)) = stores
             .speech_services()
             .into_iter()
@@ -540,11 +517,10 @@ fn enable(files: &Files, lend: &Lend<'_>, params: &Value) -> Outcome {
             enable_service(files, offer, params)
         };
     }
-    if let Some(account) = offer
-        .strip_prefix(ACCOUNT_OFFER)
-        .and_then(|rest| rest.strip_prefix(':'))
+    if let Some((service, account)) = offer.split_once(':')
+        && let Some(service) = lend.services().find(service)
     {
-        return enable_account(files, lend, offer, account, params);
+        return enable_account(files, lend, service, account, params);
     }
     Err((
         NOT_FOUND,
@@ -584,29 +560,38 @@ fn enable_service(files: &Files, service: &str, params: &Value) -> Outcome {
     Ok(json!({"name": name, "provider": "speech_endpoint", "model": model, "saved": true}))
 }
 
-/// The provider that sends audio to OpenAI under the API key of the account `account`. The key is not copied: the table names the
+/// The provider that sends audio to `service` under the API key of the account `account`. The key is not copied: the table names the
 /// account, and the key is read from its store whenever a recording opens.
 fn enable_account(
     files: &Files,
     lend: &Lend<'_>,
-    offer: &str,
+    service: &AccountSpeechService,
     account: &str,
     params: &Value,
 ) -> Outcome {
-    let fallback: String = format!("openai-{account}").chars().take(40).collect();
+    let fallback: String = format!("{}-{account}", service.id)
+        .chars()
+        .take(40)
+        .collect();
     let name = name_of(params, &fallback)?;
-    let model = model_of(params, Some(OPENAI_MODELS[0].0))?;
+    let model = model_of(
+        params,
+        service.models.first().map(|model| model.id.as_str()),
+    )?;
     // The key is read once so a missing one is said now and not at the first dictation, and dropped at once.
     drop(
-        lend.key_of(account)
+        lend.key_of(account, Some(&service.id))
             .map_err(|why| (REFUSED, format!("{account}: {why}")))?,
     );
     let mut table = Map::new();
     table.insert("provider".to_owned(), json!("speech_endpoint"));
-    table.insert("url".to_owned(), json!(OPENAI_URL));
+    table.insert("url".to_owned(), json!(service.url));
     table.insert("model".to_owned(), json!(model));
     table.insert(ACCOUNT_KEY.to_owned(), json!(account));
-    table.insert(OFFER_KEY.to_owned(), json!(offer));
+    table.insert(
+        OFFER_KEY.to_owned(),
+        json!(format!("{}:{account}", service.id)),
+    );
     write_table(files, name, table)?;
     Ok(
         json!({"name": name, "provider": "speech_endpoint", "model": model, "account": account, "saved": true}),
@@ -639,30 +624,18 @@ mod tests {
 
     #[test]
     fn a_model_is_applied_to_an_endpoint_and_to_nothing_else() {
-        let endpoint = json!({"provider": "speech_endpoint", "url": "https://api.openai.com/v1/audio/transcriptions", "model": "whisper-1"});
-        let asked = json!({"model": "gpt-transcribe"});
+        let endpoint = json!({"provider": "speech_endpoint", "url": "https://stt.example/v1/audio/transcriptions", "model": "model-a"});
+        let asked = json!({"model": "model-b"});
         assert_eq!(
             with_model(&endpoint, &asked).expect("applied")["model"],
-            "gpt-transcribe"
+            "model-b"
         );
         assert_eq!(
             with_model(&endpoint, &json!({})).expect("kept")["model"],
-            "whisper-1"
+            "model-a"
         );
         let command = json!({"provider": "speech_command", "program": "x"});
         assert_eq!(with_model(&command, &asked).expect("kept"), command);
         assert!(with_model(&endpoint, &json!({"model": "bad\nname"})).is_err());
-    }
-
-    #[test]
-    fn only_an_address_canoa_knows_lists_models() {
-        let known = json!({"url": "https://api.openai.com/v1/audio/transcriptions"});
-        let rows = models_of(&known);
-        assert_eq!(rows[0]["id"], "gpt-transcribe");
-        assert!(rows.iter().any(|row| row["id"] == "whisper-1"));
-        assert!(
-            models_of(&json!({"url": "https://example.test/v1/audio/transcriptions"})).is_empty()
-        );
-        assert!(models_of(&json!({"program": "x"})).is_empty());
     }
 }

@@ -322,15 +322,9 @@ fn a_local_engine_and_a_named_service_are_offered_and_the_engine_is_not_enabled_
         "{whisper}"
     );
     assert!(whisper["provider"].is_null(), "{whisper}");
-    let openai = by_id("openai");
-    assert_eq!(openai["local"], false);
-    assert_eq!(openai["kind"], "speech_endpoint");
-    assert_eq!(openai["settings"]["model"], "gpt-transcribe");
     assert!(
-        openai["where"]
-            .as_str()
-            .is_some_and(|words| words.contains("api.openai.com")),
-        "a service says where the audio goes: {openai}"
+        offers.iter().all(|offer| offer["id"] != "openai"),
+        "no service is offered that no library or account describes: {offers:?}"
     );
     // Nothing is installed, so there is nothing to make a provider of.
     let answer = ask(
@@ -344,7 +338,7 @@ fn a_local_engine_and_a_named_service_are_offered_and_the_engine_is_not_enabled_
         &control,
         &owner,
         "speech/enable",
-        json!({"offer": "openai"}),
+        json!({"offer": "elsewhere"}),
     );
     assert_eq!(answer["error"]["code"], NOT_FOUND, "{answer}");
     let _ = fs::remove_dir_all(&tmp);
