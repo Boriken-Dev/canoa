@@ -2347,9 +2347,11 @@ impl Config {
             profile.protected.clone_from(&protected_paths);
             profiles.insert(name, profile);
         }
-        if host.shell.as_deref().is_some_and(|shell| {
-            shell.is_empty() || shell.contains(' ') || shell.chars().any(char::is_control)
-        }) {
+        if host
+            .shell
+            .as_deref()
+            .is_some_and(|shell| shell.is_empty() || shell.chars().any(char::is_control))
+        {
             return Err(ConfigError::Invalid {
                 entry: None,
                 what: "shell is the name or path of a program".to_owned(),

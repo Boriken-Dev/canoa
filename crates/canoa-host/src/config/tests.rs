@@ -2180,7 +2180,11 @@ fn host_shell_is_a_program_name_and_defaults_to_the_persons_own() {
         spaced.shell.as_deref(),
         Some("C:\\Program Files\\PowerShell\\7\\pwsh.exe")
     );
-    for text in ["[host]\nshell = \"\"\n", "[host]\nshell = \"a\\u0001b\"\n"] {
+    for text in [
+        "[host]\nshell = \"\"\n",
+        "[host]\nshell = \"a\\u0001b\"\n",
+        "[host]\nshell = \"a\\u0000b\"\n",
+    ] {
         let error = Config::from_str_in(text, &base()).expect_err("refused");
         assert!(error.to_string().contains("shell"), "{error}");
     }
