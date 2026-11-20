@@ -115,6 +115,14 @@
         "description": "The modes the agent is known to offer before it has run.",
         "default": []
       },
+      "endpoints": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The `https` addresses the agent's program reaches while it runs (`https://api.anthropic.com/`): its model API and login hosts. The host asks the system's proxy about each, to choose the proxy the program is started with.",
+        "default": []
+      },
       "mark": {
         "type": [
           "string",

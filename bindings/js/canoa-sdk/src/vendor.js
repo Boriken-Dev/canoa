@@ -32,6 +32,7 @@ export class AgentVendor extends Provider {
   /** @type {string[]} */ static names = [];
   /** @type {string[]} */ static markers = [];
   /** @type {{id: string, title: string}[]} */ static modes = [];
+  /** @type {string[]} */ static endpoints = [];
   /** @type {string | undefined} */ static mark;
   /** @type {string | undefined} */ static look;
 
@@ -51,6 +52,7 @@ export class AgentVendor extends Provider {
       names: c.names,
       markers: c.markers,
       modes: c.modes,
+      endpoints: c.endpoints,
       mark: c.mark,
       look: c.look,
     };

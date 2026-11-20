@@ -73,6 +73,7 @@ impl AgentVendor for AgyVendor {
             ModeTitle::new("accept-edits", "Accept edits"),
             ModeTitle::new("plan", "Plan"),
         ];
+        info.endpoints = vec!["https://generativelanguage.googleapis.com/".to_owned()];
         info.mark = Some(MARK.to_owned());
         info.look = None;
         Ok(info)
@@ -118,6 +119,7 @@ impl AgentVendor for GeminiVendor {
         info.model_variable = Some("GEMINI_MODEL".to_owned());
         info.skills_folder = Some(".gemini/skills".to_owned());
         info.names = vec!["gemini-cli".to_owned()];
+        info.endpoints = vec!["https://generativelanguage.googleapis.com/".to_owned()];
         Ok(info)
     }
 

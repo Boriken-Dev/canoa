@@ -1593,6 +1593,14 @@
         },
         "type": "array"
       },
+      "services": {
+        "default": [],
+        "description": "The `https` places the program itself reaches while it runs, beyond where it is fetched from (a package registry): the host asks the system's proxy about each, to choose the proxy a program is started with. They are not endpoints: a download is never let reach them.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
       "summary": {
         "description": "What it is, in a sentence, for the page that opens it.",
         "type": [

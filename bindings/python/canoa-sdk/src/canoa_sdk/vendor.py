@@ -57,6 +57,7 @@ class VendorInfo(Model):
     names: List[str] = field(default_factory=list)
     markers: List[str] = field(default_factory=list)
     modes: List[ModeTitle] = field(default_factory=list)
+    endpoints: List[str] = field(default_factory=list)
     mark: Optional[str] = None
     look: Optional[str] = None
 
@@ -82,6 +83,7 @@ class AgentVendor(WithForm, provide.Provider, kinds.AgentVendor):
     names: ClassVar[Sequence[str]] = ()
     markers: ClassVar[Sequence[str]] = ()
     modes: ClassVar[Sequence[ModeTitle]] = ()
+    endpoints: ClassVar[Sequence[str]] = ()
     mark: ClassVar[Optional[str]] = None
     look: ClassVar[Optional[str]] = None
 
@@ -100,6 +102,7 @@ class AgentVendor(WithForm, provide.Provider, kinds.AgentVendor):
             names=list(self.names),
             markers=list(self.markers),
             modes=list(self.modes),
+            endpoints=list(self.endpoints),
             mark=self.mark,
             look=self.look,
         )

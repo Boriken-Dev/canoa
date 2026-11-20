@@ -19,7 +19,7 @@ for other classes: it may leave `@abstract` slots in place; a class that does no
 class AgentVendor:        # canoa_sdk.vendor: who an agent is and how Canoa shows it
     agent: str; title: str                                   # required; agent = its acp_harness id, else its source's name
     program = vendor = aos = model_variable = tool_name = skills_folder = mark = look = None
-    standards: Sequence[StandardTitle] = (); names = markers = (); modes: Sequence[ModeTitle] = ()
+    standards: Sequence[StandardTitle] = (); names = markers = endpoints = (); modes: Sequence[ModeTitle] = ()
     def info(self) -> VendorInfo                             # override to compute the description
 class StoreExtension:     # canoa_sdk.store: adds types to the Store
     title: str; publisher: str; types: Sequence[ExtensionType] = ()

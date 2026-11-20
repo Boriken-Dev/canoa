@@ -34,7 +34,7 @@ pub const KIND: &str = "agent_vendor";
 pub const MAX_DOCUMENT_TEXT: usize = 65536;                                    // the most characters a mark or a look may take
 #[non_exhaustive] pub struct VendorInfo { pub agent: String, pub title: String, pub program: Option<String>, pub vendor: Option<String>,
     pub aos: Option<String>, pub model_variable: Option<String>, pub tool_name: Option<String>, pub skills_folder: Option<String>, pub standards: Vec<StandardTitle>, pub names: Vec<String>,
-    pub markers: Vec<String>, pub modes: Vec<ModeTitle>, pub mark: Option<String>, pub look: Option<String> }   // ToValue, FromValue, Schema, Clone, Debug, Eq
+    pub markers: Vec<String>, pub modes: Vec<ModeTitle>, pub endpoints: Vec<String>, pub mark: Option<String>, pub look: Option<String> }   // ToValue, FromValue, Schema, Clone, Debug, Eq
 VendorInfo::new(agent, title); .problem() -> Option<String>                      // why the description cannot be used
 #[non_exhaustive] pub struct StandardTitle { pub id: String, pub title: String }  // StandardTitle::new(id, title)
 #[non_exhaustive] pub struct ModeTitle { pub id: String, pub title: String }      // ModeTitle::new(id, title)
@@ -71,7 +71,7 @@ VendorInfo::new(agent, title); .problem() -> Option<String>                     
 
 - `agent`: 1 to 64 lower-case letters, digits, `-` and `_`: the id of the agent's `acp_harness` provider when it has one (`claude`), else its source's name in lower case. Every other provider and source of the agent names it this way.
 - `title` is the name for people (`Claude`), `program` the program's (`Claude Code`; absent: the title). `vendor` stamps a session (`AGENTS_VENDOR`, `anthropic`); `aos` is the id in the standard registry of harnesses (`claude-code`); `model_variable` is where the running model is read from (`ANTHROPIC_MODEL`); `tool_name` is where the agent puts a tool's own name in a tool call's `_meta`, a JSON pointer below it (`/claudeCode/toolName`); `skills_folder` is the folder below a project where the agent reads skills from (`.claude/skills`), which a scan of a skill source looks in beside `skills/` and `.agents/skills`. Each may be absent.
-- `standards` are the credential standards that are the vendor's own, each with its name. `names` are the `agentInfo.name` values the agent reports; `markers` are the `initialize` `_meta` keys that are `true` for an agent that reports no name. `modes` are the modes it is known to offer before it has run.
+- `standards` are the credential standards that are the vendor's own, each with its name. `names` are the `agentInfo.name` values the agent reports; `markers` are the `initialize` `_meta` keys that are `true` for an agent that reports no name. `modes` are the modes it is known to offer before it has run. `endpoints` are the `https` addresses its program reaches while it runs (its API and login hosts), which the host asks the system's proxy about for the program.
 - `mark` is SVG text: a square `viewBox` and `path` elements with a `d` and an optional `#RRGGBB` `fill` (on the path or the root); a path with none, or `currentColor`, takes the text's colour. `look` is a JSON document with an `id`, a `label`, the agent's `vendor` (its `agent` id) and, for `light` and `dark`, colour tokens, as `looks/list` serves it. Both are at most `MAX_DOCUMENT_TEXT` characters.
 
 ## The form a provider asks for
@@ -514,7 +514,9 @@ Every method is required and synchronous. Every object a method is handed is the
 `UNSUPPORTED` always carries its reason.
 
 - `describe`: cheap, the same on every call. `StoreInfo.program` is the folder name (`[a-z0-9-]{1,64}`, `is_program_name`); `endpoints`
-  are the `https` origins the host lets a download or a redirect reach; `serves` names the `acp_harness` provider ids and the
+  are the `https` origins the host lets a download or a redirect reach; `services` are the `https` places the program itself reaches
+  while it runs (a package registry), which the host asks the system's proxy about for the programs it starts and no download may
+  reach; `serves` names the `acp_harness` provider ids and the
   settings (`when`) that select the program. `summary` is a sentence for the page that opens it; `icon` names one of the glyphs the
   application draws, `STORE_GLYPHS` (`nodes`, `indent`, `crucible`, `brackets`, `chip`, `branch`, `prompt`, `speaker`: plain pictures that suggest what a runtime is
   for, none a project's logo), and an unknown name or none draws the generic icon; `commands` are the names the host's copy puts on the

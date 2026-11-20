@@ -82,6 +82,7 @@ impl Recipe for NodeRecipe {
             .collect();
         info.channels = vec!["lts".to_owned(), "current".to_owned()];
         info.endpoints = vec![NODE_ORIGIN.to_owned()];
+        info.services = vec!["https://registry.npmjs.org/".to_owned()];
         info
     }
 

@@ -161,6 +161,11 @@ pub struct StoreInfo {
     /// (`https://host`), or a prefix with a path (`https://host/bucket/`) that a URL has to start with.
     #[map(default)]
     pub endpoints: Vec<String>,
+    /// The `https` places the program itself reaches while it runs, beyond where it is fetched from (a package registry): the
+    /// host asks the system's proxy about each, to choose the proxy a program is started with. They are not endpoints: a
+    /// download is never let reach them.
+    #[map(default)]
+    pub services: Vec<String>,
 }
 
 /// Whether `name` is a program folder name: 1 to 64 of `a-z`, `0-9` and `-`.
@@ -735,6 +740,7 @@ impl StoreInfo {
             platforms: Vec::new(),
             channels: Vec::new(),
             endpoints: Vec::new(),
+            services: Vec::new(),
         }
     }
 }

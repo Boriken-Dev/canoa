@@ -142,6 +142,9 @@ impl Recipe for PythonRecipe {
         info.endpoints = core::iter::once(PYTHON_RELEASES.to_owned())
             .chain(GITHUB_ASSET_HOSTS.iter().map(|host| (*host).to_owned()))
             .collect();
+        info.services = ["https://pypi.org/", "https://files.pythonhosted.org/"]
+            .map(str::to_owned)
+            .into();
         info
     }
 

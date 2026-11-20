@@ -79,6 +79,10 @@ impl AgentVendor for CodexVendor {
             ModeTitle::new("plan", "Plan"),
             ModeTitle::new("bypass", "Bypass"),
         ];
+        info.endpoints = vec![
+            "https://api.openai.com/".to_owned(),
+            "https://chatgpt.com/".to_owned(),
+        ];
         info.mark = Some(MARK.to_owned());
         info.look = Some(LOOK.to_owned());
         Ok(info)

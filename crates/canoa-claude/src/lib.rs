@@ -79,6 +79,7 @@ impl AgentVendor for ClaudeVendor {
             ModeTitle::new("plan", "Plan"),
             ModeTitle::new("bypass", "Bypass"),
         ];
+        info.endpoints = vec!["https://api.anthropic.com/".to_owned()];
         info.mark = Some(MARK.to_owned());
         info.look = Some(LOOK.to_owned());
         Ok(info)

@@ -101,6 +101,10 @@ pub struct VendorInfo {
     /// The modes the agent is known to offer before it has run.
     #[map(default)]
     pub modes: Vec<ModeTitle>,
+    /// The `https` addresses the agent's program reaches while it runs (`https://api.anthropic.com/`): its model API and login
+    /// hosts. The host asks the system's proxy about each, to choose the proxy the program is started with.
+    #[map(default)]
+    pub endpoints: Vec<String>,
     /// Its mark as SVG text: `path` elements with a `d` and an optional `fill`, in the `viewBox`'s square. A path with no `fill`,
     /// or `currentColor`, is drawn in the text's colour. At most [`MAX_DOCUMENT_TEXT`] characters.
     pub mark: Option<String>,
@@ -125,6 +129,7 @@ impl VendorInfo {
             names: Vec::new(),
             markers: Vec::new(),
             modes: Vec::new(),
+            endpoints: Vec::new(),
             mark: None,
             look: None,
         }

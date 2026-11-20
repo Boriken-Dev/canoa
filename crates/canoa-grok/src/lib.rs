@@ -55,6 +55,7 @@ impl AgentVendor for GrokVendor {
         ];
         info.markers = vec!["grokShell".to_owned()];
         info.modes = vec![];
+        info.endpoints = vec!["https://api.x.ai/".to_owned()];
         info.mark = Some(MARK.to_owned());
         info.look = None;
         Ok(info)
