@@ -61,6 +61,27 @@ Object? _asked(OptionsAgent agent) {
 }
 
 void main() {
+  test("the lifetimes a provider honours are named in the app's own words, whatever the host labelled them", () {
+    final choices = SourceChoices.parse(
+      jsonEncode({
+        ...claudeAnswer,
+        'cache_lifetime': _claudeSays,
+        'cache_choices': [
+          {'id': 'off', 'label': 'X'},
+          {'id': 'long', 'label': 'Y'},
+          {'id': 'forever', 'label': 'Z'},
+          {'label': 'no id'},
+        ],
+      }),
+    )!;
+    expect(choices.cacheChoices, [CacheLifetime.off, CacheLifetime.long]);
+    expect(choices.cacheLabel(CacheLifetime.off), 'Off');
+    expect(choices.cacheLabel(CacheLifetime.long), '1 hour');
+    expect(choices.cacheLabel(CacheLifetime.short), '5 minutes');
+    expect(choices.offersCache(CacheLifetime.long), isTrue);
+    expect(choices.offersCache(CacheLifetime.short), isFalse);
+  });
+
   testWidgets('a chat session asks long, and the view shows the provider\'s sentence', (tester) async {
     await pumpApp(tester, _store(), askChoices: (source) async => _answer(source.label));
     await _draft(tester, 'Claude');

@@ -739,7 +739,7 @@ class _SessionPickerState extends State<SessionPicker> {
             ),
           for (final entry in entries)
             Tooltip(
-              message: entry.description ?? entry.label,
+              message: modeDescription(option, entry) ?? entry.label,
               child: ChoiceChip(
                 key: Key('picker-mode ${entry.value}'),
                 label: Text(entry.label),

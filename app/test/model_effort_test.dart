@@ -224,6 +224,30 @@ void main() {
     });
   });
 
+  group('the mode menu, an agent that describes its own modes', () {
+    testWidgets("shows its description of a mode, and Canoa's words only where it gives none", (tester) async {
+      final agent = OptionsAgent(
+        modes: OptionsAgent.claudeModes,
+        modeDescriptions: const {'plan': 'Drafts a plan in a scratch file first', 'bypass': "Runs everything, in this agent's own words"},
+      );
+      await pumpApp(tester, _store(), linked: agent.openLink, size: const Size(1280, 800));
+      await newSession(tester);
+      await chooseSource(tester, 'Claude');
+      await openFolder(tester);
+      await send(tester, 'Say hello');
+      await tester.tap(find.byKey(const Key('option-mode')));
+      await frames(tester);
+      expect(find.text('Drafts a plan in a scratch file first'), findsOneWidget);
+      expect(find.text("Runs everything, in this agent's own words"), findsOneWidget);
+      expect(find.text('Reads and plans; makes no changes'), findsNothing, reason: 'the agent worded Plan itself');
+      expect(find.text('Asks for nothing'), findsNothing, reason: 'the agent worded Bypass itself');
+      expect(find.text('Asks before each change or command'), findsOneWidget, reason: 'Manual has none of its own');
+      await tester.tapAt(const Offset(2, 2));
+      await frames(tester);
+      await finish(tester);
+    });
+  });
+
   group('Bypass', () {
     for (final (label, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 800))]) {
       testWidgets('shows in the header and the mode control, and takes no height of the conversation, at $label width', (tester) async {

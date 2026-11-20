@@ -21,15 +21,20 @@ enum CacheLifetime {
   /// What it comes to, for a menu.
   final String about;
 
+  /// What the menu of the lifetimes an agent honours calls it, the same whichever agent honours it.
+  String get choiceLabel => switch (this) {
+    harness => label,
+    off => 'Off',
+    short => '5 minutes',
+    long => '1 hour',
+  };
+
   /// A chat session asks this unless the person chooses or the agent's entry in canoa.cfg says otherwise.
   static const chat = CacheLifetime.long;
 
   /// The lifetime named [id], or null for anything else.
   static CacheLifetime? named(Object? id) => values.where((each) => each.id == id).firstOrNull;
 }
-
-/// A lifetime a provider honours beyond [CacheLifetime.harness], under the name the provider gives it.
-typedef CacheChoice = ({CacheLifetime lifetime, String label});
 
 /// The `_meta` key of `initialize` through which the chat tells a host how long a session's prompt cache should live.
 const cacheLifetimeMeta = 'dev.boriken.canoa/cache_lifetime';

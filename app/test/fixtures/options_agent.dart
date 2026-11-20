@@ -12,7 +12,7 @@ import 'package:canoa/desktop/host_tool.dart';
 import 'package:canoa/chat/agent_events.dart' show ConfigOption, chatLimits, parseConfigOptions;
 
 final class OptionsAgent {
-  OptionsAgent({this.images = true, this.files = true, this.failStart, this.modes = const [('ask', 'Ask first'), ('edits', 'Accept edits')]})
+  OptionsAgent({this.images = true, this.files = true, this.failStart, this.modes = const [('ask', 'Ask first'), ('edits', 'Accept edits')], this.modeDescriptions = const {}})
       : mode = modes.isEmpty ? '' : modes.first.$1;
 
   /// What it says it takes with a prompt.
@@ -41,6 +41,9 @@ final class OptionsAgent {
 
   /// The modes it offers, each with its label: Claude's translator offers five, Codex's four with no Bypass.
   final List<(String, String)> modes;
+
+  /// What it says each mode (by id) does, for a mode that has a description.
+  final Map<String, String> modeDescriptions;
 
   /// Modes as `coqui-acp-claude` offers them, and as `coqui-acp-codex` does, with no Bypass.
   static const claudeModes = [('manual', 'Manual'), ('accept_edits', 'Accept edits'), ('auto', 'Auto'), ('plan', 'Plan'), ('bypass', 'Bypass')];
@@ -130,7 +133,7 @@ final class OptionsAgent {
 
   List<Map<String, Object?>> get options => [
     if (modes.isNotEmpty) {'id': 'mode', 'name': 'Mode', 'category': 'mode', 'type': 'select', 'currentValue': mode, 'options': [
-      for (final (value, name) in modes) {'value': value, 'name': name},
+      for (final (value, name) in modes) {'value': value, 'name': name, 'description': ?modeDescriptions[value]},
     ]},
     {'id': 'model', 'name': 'Model', 'category': 'model', 'type': 'select', 'currentValue': model, 'options': [
       {'value': 'default', 'name': 'Default model'},

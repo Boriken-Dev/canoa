@@ -237,14 +237,14 @@ class ModeChooser extends StatelessWidget {
             value: entry,
             enabled: entry.selectable,
             checked: entry.value == current,
-            child: entry.description == null
+            child: modeDescription(option, entry) == null
                 ? Text(entry.label)
                 : Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(entry.label),
-                      Text(entry.description!, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor)),
+                      Text(modeDescription(option, entry)!, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor)),
                     ],
                   ),
           ),
@@ -324,10 +324,10 @@ class CacheChooser extends StatelessWidget {
         ),
         for (final each in choices.cacheChoices)
           CheckedPopupMenuItem<CacheLifetime?>(
-            key: Key('cache-${each.lifetime.id}'),
-            value: each.lifetime,
-            checked: asked.chosen && each.lifetime == asked.lifetime,
-            child: Text(each.label),
+            key: Key('cache-${each.id}'),
+            value: each,
+            checked: asked.chosen && each == asked.lifetime,
+            child: Text(choices.cacheLabel(each)),
           ),
         if (unavailable != null)
           PopupMenuItem<CacheLifetime?>(

@@ -60,12 +60,15 @@ String choiceLabel(OptionRole role, Choice choice) {
 bool _isRaw(String label, String value) =>
     label == value || label.toLowerCase() == value.toLowerCase() || (label.toUpperCase() == label && label.contains(RegExp('[A-Z]')));
 
-/// One line on what [entry]'s mode does, where its name is one Canoa knows; null for a mode an agent worded itself.
-extension ModeEntryText on ModeEntry {
-  String? get description => modeDescriptions[bypass ? 'Bypass' : label];
+/// One line on what [entry] does: what the agent says of the value in [option] when it says something, else Canoa's words for a mode
+/// it knows by name. Null for a mode neither words.
+String? modeDescription(ConfigOption? option, ModeEntry entry) {
+  final own = entry.own ? null : option?.choices.where((choice) => choice.value == entry.value).firstOrNull?.description?.trim();
+  if (own != null && own.isNotEmpty) return own;
+  return modeDescriptions[entry.bypass ? 'Bypass' : entry.label];
 }
 
-/// What each mode does, by the name it is shown under.
+/// What each mode does, by the name it is shown under: the fallback for an agent that words none.
 const Map<String, String> modeDescriptions = {
   'Manual': 'Asks before each change or command',
   'Accept edits': 'Changes files without asking; commands still ask',
