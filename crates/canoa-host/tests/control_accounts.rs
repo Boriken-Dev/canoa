@@ -119,6 +119,16 @@ fn written(host: &Hosted, app: &App) -> Vec<(String, Vec<u8>)> {
     places
 }
 
+/// How many of the listed accounts are canoa.cfg's: the host also lists the `local` account of each harness that has a login.
+fn configured(listed: &Value) -> usize {
+    listed["accounts"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter(|row| row["automatic"] == false)
+        .count()
+}
+
 fn config_text(host: &Hosted) -> String {
     std::fs::read_to_string(host.scratch.0.join("canoa.cfg")).expect("canoa.cfg")
 }
@@ -356,11 +366,7 @@ fn a_sign_in_the_person_walks_away_from_makes_no_account_and_leaves_no_directory
     }
     let second = host.local.open("@control").expect("another link");
     let listed = plain_call(&second, 1, "accounts/list", json!({})).expect("listed");
-    assert_eq!(
-        listed["accounts"].as_array().map(Vec::len),
-        Some(0),
-        "{listed}"
-    );
+    assert_eq!(configured(&listed), 0, "{listed}");
     assert!(
         !config_text(&host).contains("[host.accounts"),
         "no block was written"
@@ -388,7 +394,7 @@ fn a_declined_form_and_an_answer_bound_to_another_secret_make_no_account() {
     assert_eq!(forged["code"], -32002, "{forged}");
     assert!(!forged.to_string().contains(KEY));
     let listed = plain_call(&link, 3, "accounts/list", json!({})).expect("listed");
-    assert_eq!(listed["accounts"].as_array().map(Vec::len), Some(0));
+    assert_eq!(configured(&listed), 0, "{listed}");
     assert!(!config_text(&host).contains("[host.accounts"));
     let hits = found_in(KEY, &written(&host, &app));
     // The forged answer sealed the key to the host's key; nothing but ciphertext crossed.
@@ -424,7 +430,7 @@ fn an_account_signs_in_again_and_is_removed() {
         plain_call(&link, 3, "accounts/remove", json!({"name": "work"})).expect("removed");
     assert_eq!(removed, json!({"removed": true}));
     let listed = plain_call(&link, 4, "accounts/list", json!({})).expect("listed");
-    assert_eq!(listed["accounts"].as_array().map(Vec::len), Some(0));
+    assert_eq!(configured(&listed), 0, "{listed}");
     assert!(!config_text(&host).contains("[host.accounts"));
     let missing =
         plain_call(&link, 5, "accounts/remove", json!({"name": "work"})).expect_err("gone");
@@ -433,11 +439,85 @@ fn an_account_signs_in_again_and_is_removed() {
 }
 
 #[test]
+fn the_login_each_harness_has_is_listed_as_its_local_account_and_cannot_be_removed() {
+    let host = host();
+    let link = host.local.open("@control").expect("a link");
+    let (_, added) = app_of(&host).drive(
+        &link,
+        1,
+        "accounts/add",
+        &json!({"name": "work", "harness": "claude", "method": "api-key"}),
+        &Typed::Fills(&[("api_key", KEY)]),
+    );
+    added.expect("the account is added");
+    let listed = plain_call(&link, 2, "accounts/list", json!({})).expect("listed");
+    let rows = listed["accounts"].as_array().expect("a list");
+    // canoa.cfg's accounts come first, then each harness's own login.
+    assert_eq!(rows[0]["name"], "work", "{listed}");
+    assert_eq!(rows[0]["automatic"], false, "{listed}");
+    let locals: Vec<&Value> = rows.iter().filter(|row| row["automatic"] == true).collect();
+    for harness in ["claude", "codex", "pi"] {
+        let one = locals
+            .iter()
+            .find(|row| row["harness"] == harness)
+            .unwrap_or_else(|| panic!("{harness} lists its login: {listed}"));
+        assert_eq!(one["name"], "local", "{one}");
+        assert_eq!(one["kind"], "harness-login", "{one}");
+        assert_eq!(one["state"], "signed in where it runs", "{one}");
+        // The id is what usage is recorded and reported under, which tells one harness's `local` from another's.
+        assert_eq!(one["id"], format!("local:{harness}"), "{one}");
+    }
+    let ids: std::collections::BTreeSet<String> =
+        locals.iter().map(|row| row["id"].to_string()).collect();
+    assert_eq!(ids.len(), locals.len(), "one id for each: {listed}");
+    assert!(
+        rows.iter()
+            .filter(|row| row["name"] == "local")
+            .all(|row| row["automatic"] == true),
+        "{listed}"
+    );
+    let refused = plain_call(&link, 3, "accounts/remove", json!({"name": "local"}))
+        .expect_err("nothing to remove");
+    assert!(refused.contains("automatic account"), "{refused}");
+    assert!(config_text(&host).contains("[host.accounts.work]"));
+    host.stop();
+}
+
+#[test]
+fn the_local_account_of_a_harness_is_read_through_its_account_provider_for_the_harness_asked() {
+    let host = host();
+    let link = host.local.open("@control").expect("a link");
+    let read = |id: u64, params: Value| plain_call(&link, id, "usage/read", params);
+    // Pi's provider reads no file and starts nothing for its login, which keeps this off the person's own logins that Claude's and
+    // Codex's providers read where they are.
+    let row = read(1, json!({"account": "local", "harness": "pi"})).expect("read");
+    assert_eq!(row["account"]["account"], "local:pi", "{row}");
+    assert_eq!(row["account"]["supported"], false, "{row}");
+    assert!(
+        row["account"]["unsupported_because"]
+            .as_str()
+            .is_some_and(|why| why.contains("Pi")),
+        "the provider's own reason: {row}"
+    );
+    let unnamed = read(2, json!({"account": "local"})).expect_err("which harness's");
+    assert!(
+        unnamed.contains("-32602") && unnamed.contains("harness"),
+        "{unnamed}"
+    );
+    let none =
+        read(3, json!({"account": "local", "harness": "no-such-harness"})).expect_err("no login");
+    assert!(none.contains("-32003"), "{none}");
+    let missing = read(4, json!({"account": "nobody"})).expect_err("no account");
+    assert!(missing.contains("-32003"), "{missing}");
+    host.stop();
+}
+
+#[test]
 fn the_list_reads_canoa_cfg_again_so_an_account_the_command_line_added_shows() {
     let host = host();
     let link = host.local.open("@control").expect("a link");
     let listed = plain_call(&link, 1, "accounts/list", json!({})).expect("listed");
-    assert_eq!(listed["accounts"].as_array().map(Vec::len), Some(0));
+    assert_eq!(configured(&listed), 0, "{listed}");
     let mut child = Command::new(host_binary())
         .args([
             "accounts",

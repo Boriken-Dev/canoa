@@ -393,6 +393,9 @@ pub(crate) struct Row {
     pub(crate) expires_at: Option<String>,
     /// The standards the account's kind provides, which say the harnesses that can run a session on it.
     pub(crate) provides: Vec<String>,
+    /// Whether the host makes the account itself (the `local` of a harness that has a login of its own) and no canoa.cfg names
+    /// it, so it can be neither removed nor signed in again.
+    pub(crate) automatic: bool,
 }
 
 impl Row {
@@ -400,19 +403,21 @@ impl Row {
         serde_json::json!({
             "name": self.name, "harness": self.harness, "kind": self.kind, "id": self.id,
             "state": self.state, "revision": self.revision, "expires_at": self.expires_at,
-            "provides": self.provides,
+            "provides": self.provides, "automatic": self.automatic,
         })
     }
 }
 
-/// Every account canoa.cfg names, with its state.
+/// Every account canoa.cfg names, with its state, then the automatic `local` account of each harness that has a login of its own.
+/// A `local`'s `id` is the one usage is recorded and reported under, which tells the harnesses' apart.
 pub(crate) fn rows(cfg: Cfg<'_>) -> Result<Vec<Row>, Failed> {
     Ok(rows_of(cfg, &accounts_of(cfg)?))
 }
 
 fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
     let catalogs = super::matching::Catalogs::new(cfg.config);
-    cfg.config
+    let mut rows: Vec<Row> = cfg
+        .config
         .accounts
         .iter()
         .map(|(name, account)| {
@@ -429,9 +434,26 @@ fn rows_of(cfg: Cfg<'_>, accounts: &Arc<Accounts>) -> Vec<Row> {
                     .kind(account)
                     .map(|info| info.provides)
                     .unwrap_or_default(),
+                automatic: false,
             }
         })
-        .collect()
+        .collect();
+    for (harness, kind) in catalogs.locals() {
+        let account = AccountConfig::local(&harness);
+        let (state, revision, expires_at) = state_of(accounts, &account);
+        rows.push(Row {
+            name: coqui_acp_api::LOCAL_ACCOUNT.to_owned(),
+            id: account.usage_id(),
+            kind: kind.id,
+            provides: catalogs.login_standard(&harness).into_iter().collect(),
+            harness,
+            state,
+            revision,
+            expires_at,
+            automatic: true,
+        });
+    }
+    rows
 }
 
 /// `canoa accounts list`.
@@ -701,6 +723,11 @@ pub(crate) fn remove(env: &Env<'_>, name: &str) -> Result<(), Failed> {
 
 /// Removes the account `name`, which no entry may offer and no connection may hold.
 pub(crate) fn remove_with(cfg: Cfg<'_>, name: &str) -> Result<(), Failed> {
+    if name == coqui_acp_api::LOCAL_ACCOUNT {
+        return Err(Failed::usage(format!(
+            "{name} is the automatic account of a harness that has a login of its own: there is nothing of it to remove"
+        )));
+    }
     let account = cfg
         .config
         .accounts

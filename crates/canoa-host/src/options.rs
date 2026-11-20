@@ -673,23 +673,13 @@ fn version_of(program: &str) -> Option<String> {
     Some(line[..end].to_string())
 }
 
-/// What the provider of the account `name` reports of its allowances with no session, as one row of `usage/limits`
-/// (`account`, `observed_at`, `buckets`, `limit`); `supported: false` with a reason when the provider learns them only in a turn.
-/// Asked through an entry of the account's provider that offers it, else any that runs the provider, else the provider's own
-/// defaults.
+/// What the provider of the account `name` of canoa.cfg reports of its allowances, with the account-side readers sent to
+/// `endpoints` where it names one; see [`usage_for`].
 ///
 /// # Errors
 ///
 /// Why the account could not be asked: it is not in canoa.cfg, its provider could not be built, or its credential is held.
-pub(crate) fn usage_of(
-    config: &Config,
-    name: &str,
-    store: &Arc<crate::accounts::Accounts>,
-) -> Result<Value, String> {
-    usage_at(config, name, store, &limits::Endpoints::default())
-}
-
-/// [`usage_of`], with the account-side readers sent to `endpoints` where it names one.
+#[cfg(test)]
 pub(crate) fn usage_at(
     config: &Config,
     name: &str,
@@ -703,8 +693,14 @@ pub(crate) fn usage_at(
     usage_for(config, (name, account), store, endpoints)
 }
 
-/// What the account provider reports of the allowances of `account`, which is `name` in canoa.cfg or the automatic `local` account
-/// of a harness (`AccountConfig::local`, which no file holds); see [`usage_at`].
+/// What the provider of the account `name` reports of its allowances with no session, as one row of `usage/limits` (`account`,
+/// `observed_at`, `buckets`, `limit`); `supported: false` with a reason when the provider learns them only in a turn. The account
+/// is `name` in canoa.cfg or the automatic `local` account of a harness (`AccountConfig::local`, which no file holds). Asked
+/// through an entry of the account's provider that offers it, else any that runs the provider, else the provider's own defaults.
+///
+/// # Errors
+///
+/// Why the account could not be asked: its provider could not be built, or its credential is held.
 pub(crate) fn usage_for(
     config: &Config,
     (name, account): (&str, &crate::config::AccountConfig),

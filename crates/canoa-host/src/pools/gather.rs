@@ -73,7 +73,7 @@ fn reported(
 ) -> Option<UsageReport> {
     let store = built.accounts_host()?;
     // One account has one allowance, whichever harness or pool asks: it is read once and counts everywhere the account is.
-    let key = format!("{}\0{}", account.id, account.kind);
+    let key = format!("{}\0{}", account.usage_id(), account.kind);
     let stand_in = !endpoints.is_default();
     if !stand_in && let Some(held) = kept(&REPORTED, &key, REPORTED_FOR) {
         return held;

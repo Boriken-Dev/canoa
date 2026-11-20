@@ -384,7 +384,7 @@ A session runs on one account, with a model that account lists, or on a pool: a 
 
 ```sh
 canoa accounts add work --harness claude --method subscription   # signs in; asks for the code the page shows, with no echo
-canoa accounts list                                              # name, harness, kind, state; never a credential
+canoa accounts list                                              # name, harness, kind, state; never a credential. canoa.cfg's accounts, then `local` of each harness that has a login of its own
 canoa accounts login work                                        # sign in again when a login was lost
 canoa accounts remove work                                       # forgets the stored credential and the account's directory
 ```

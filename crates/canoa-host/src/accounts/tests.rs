@@ -795,6 +795,37 @@ fn a_preview_names_the_directory_the_settings_and_the_standards_with_no_credenti
     );
 }
 
+/// Every harness has an account called `local`, so usage is recorded under an id that names the harness too; any other account is
+/// recorded under its own id.
+#[test]
+fn the_local_account_of_each_harness_is_recorded_under_an_id_of_its_own() {
+    let dir = Dir::new();
+    let accounts = accounts(&dir);
+    let login = AccountKindInfo::new(coqui_acp_api::HARNESS_LOGIN, "The login it has");
+    let held = |harness: &str| {
+        let local = AccountConfig::local(harness);
+        let held = accounts
+            .begin("local", &local, &login, Runs::plain(harness), "a test")
+            .expect("held");
+        assert_eq!(held.usage_id(), local.usage_id());
+        held.usage_id()
+    };
+    let (claude, codex) = (held("claude"), held("codex"));
+    assert_eq!(claude, "local:claude");
+    assert_eq!(codex, "local:codex");
+
+    accounts
+        .store_login("id-p", &credentials("1"), None)
+        .expect("stored");
+    let own = config("id-p");
+    let key = AccountKindInfo::new("claude-login", "Claude");
+    let held = accounts
+        .begin("work", &own, &key, Runs::plain(&own.harness), "a test")
+        .expect("held");
+    assert_eq!(held.usage_id(), "id-p");
+    assert_eq!(own.usage_id(), "id-p");
+}
+
 /// An account that names an address and the form of its key for each standard is given each harness the address and the key of the
 /// standard that harness applies it as, and the account's maker is given what the account holds.
 #[test]

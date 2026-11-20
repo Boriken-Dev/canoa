@@ -139,8 +139,15 @@ impl Fixture {
         child.wait_with_output().expect("canoa ends")
     }
 
-    /// The accounts, as `accounts list --format json` prints them.
+    /// The accounts canoa.cfg names, as `accounts list --format json` prints them: the automatic `local` of each harness that has a
+    /// login of its own follows them, and `local_accounts` has those.
     fn listed(&self) -> Vec<Value> {
+        let mut rows = self.rows();
+        rows.retain(|row| row["automatic"] == false);
+        rows
+    }
+
+    fn rows(&self) -> Vec<Value> {
         let listed = self.canoa(&["accounts", "list", "--format", "json"], None);
         assert!(listed.status.success(), "{}", text(&listed.stderr));
         text(&listed.stdout)
@@ -518,6 +525,36 @@ fn signing_in_makes_an_account_whose_credential_is_in_the_store_and_not_in_canoa
     );
     assert!(!again.status.success());
     assert_eq!(fixture.listed().len(), 1);
+}
+
+#[test]
+fn the_login_each_harness_has_is_listed_after_the_accounts_of_canoa_cfg() {
+    let fixture = Fixture::signed_in();
+    let rows = fixture.rows();
+    assert_eq!(rows[0]["name"], "work", "{rows:?}");
+    assert_eq!(rows[0]["automatic"], false);
+    let locals: Vec<&Value> = rows.iter().filter(|row| row["automatic"] == true).collect();
+    assert!(
+        ["claude", "codex", "pi"].iter().all(|harness| locals
+            .iter()
+            .any(|row| row["harness"] == *harness
+                && row["name"] == "local"
+                && row["id"] == format!("local:{harness}"))),
+        "{rows:?}"
+    );
+    let listing = fixture.canoa(&["accounts", "list"], None);
+    assert!(
+        text(&listing.stdout).contains("local claude harness-login signed in where it runs"),
+        "{}",
+        text(&listing.stdout)
+    );
+    let removed = fixture.canoa(&["accounts", "remove", "local"], None);
+    assert!(!removed.status.success());
+    assert!(
+        text(&removed.stderr).contains("automatic account"),
+        "{}",
+        text(&removed.stderr)
+    );
 }
 
 #[test]

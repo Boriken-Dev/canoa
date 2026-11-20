@@ -3710,7 +3710,7 @@ fn give_harness<C: Channel>(
     let accounted;
     let scope = match &account {
         Some(held) => {
-            accounted = scope.clone().account(held.id().to_owned());
+            accounted = scope.clone().account(held.usage_id());
             &accounted
         }
         None => scope,

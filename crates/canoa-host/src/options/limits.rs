@@ -71,7 +71,7 @@ fn read_account(
     account: &AccountConfig,
 ) -> Result<UsageReport, String> {
     let stamp = |mut report: UsageReport| {
-        report.account.get_or_insert_with(|| account.id.clone());
+        report.account.get_or_insert_with(|| account.usage_id());
         if report.observed_at == 0 {
             report.observed_at = crate::usage_splice::unix_now();
         }
@@ -85,8 +85,12 @@ fn read_account(
     if account.kind == coqui_acp_api::HARNESS_LOGIN {
         // The login a program has where it runs holds nothing here: the provider asks the program as it stands.
         let grant = AccountGrant::new(account.id.clone(), coqui_acp_api::HARNESS_LOGIN);
+        // Every harness has an account called `local`, which the provider names as it was given: the host names it by its harness.
         return ask(provider, &grant)
-            .map(stamp)
+            .map(|mut report| {
+                report.account = Some(account.usage_id());
+                stamp(report)
+            })
             .map_err(|error| why(&error));
     }
     let grant = built

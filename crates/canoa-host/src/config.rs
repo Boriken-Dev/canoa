@@ -919,6 +919,21 @@ impl AccountConfig {
             settings: None,
         }
     }
+
+    /// The id the usage log and the usage reports name this account by; see [`usage_id`].
+    pub(crate) fn usage_id(&self) -> String {
+        usage_id(&self.harness, &self.id, &self.kind)
+    }
+}
+
+/// The id usage is recorded and reported under for the account `id` of `kind` that `harness` runs. It is the account's own id,
+/// except for the automatic `local` account: every harness has one, so it is told apart by its harness.
+pub(crate) fn usage_id(harness: &str, id: &str, kind: &str) -> String {
+    if kind == coqui_acp_api::HARNESS_LOGIN && id == coqui_acp_api::LOCAL_ACCOUNT {
+        format!("{id}:{harness}")
+    } else {
+        id.to_owned()
+    }
 }
 
 /// One `[host.pools.NAME]`: accounts that provide one standard, as one choice for a session. Which kinds provide the standard is

@@ -120,6 +120,26 @@ impl<'a> Catalogs<'a> {
         found
     }
 
+    /// The kind of the automatic `local` account of `harness`; `None` when its provider does not offer its own login.
+    pub(crate) fn local_kind(&self, harness: &str) -> Option<AccountKindInfo> {
+        let known = self.known(harness)?;
+        if !known.local {
+            return None;
+        }
+        known.listing.kind(coqui_acp_api::HARNESS_LOGIN).cloned()
+    }
+
+    /// The automatic `local` account of every harness whose provider offers its own login: the harness and the kind that login is.
+    pub(crate) fn locals(&self) -> Vec<(String, AccountKindInfo)> {
+        self.harnesses()
+            .into_iter()
+            .filter_map(|harness| {
+                let kind = self.local_kind(&harness)?;
+                Some((harness, kind))
+            })
+            .collect()
+    }
+
     /// The standard the login `harness` has where it runs provides, when its provider offers that login as the account `local`.
     /// A harness lists first what it was made for, but a harness also takes the APIs others do, so the login is the first standard
     /// it accepts that no other harness accepts: one only its own login makes. `None` when it has no such login.
