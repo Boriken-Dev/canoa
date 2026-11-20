@@ -27,19 +27,7 @@ impl Services {
     /// The services of the libraries this build carries and, when the host has a canoa.cfg, of the ones its entries and extensions
     /// load.
     pub(crate) fn of(config: Option<&Config>) -> Self {
-        let mut carried = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
-        if let Err(why) = crate::bundled::register_included(&mut carried) {
-            tracing::warn!("the libraries this build carries are not read for speech: {why}");
-        }
-        let mut registries = vec![carried];
-        if let Some(config) = config {
-            registries.extend(
-                super::providers::loaded(config)
-                    .into_iter()
-                    .map(|(_, registry)| registry),
-            );
-        }
-        Self::from_registries(&registries)
+        Self::from_registries(&registries(config))
     }
 
     /// The services `registries` offer, in the order they are given. A service that cannot be offered, or whose id an earlier one took,
@@ -172,9 +160,41 @@ fn verdict(
     })
 }
 
+/// The registries the services are read from, each library once: with a canoa.cfg, those `providers/list` opens (the carried
+/// libraries among them); without one, the carried libraries alone.
+fn registries(config: Option<&Config>) -> Vec<Registry> {
+    if let Some(config) = config {
+        return super::providers::loaded(config)
+            .into_iter()
+            .map(|(_, registry)| registry)
+            .collect();
+    }
+    let mut carried = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+    if let Err(why) = crate::bundled::register_included(&mut carried) {
+        tracing::warn!("the libraries this build carries are not read for speech: {why}");
+    }
+    vec![carried]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// How many speech providers `registries` offer, counting a library each time it appears.
+    fn offered(registries: &[Registry]) -> usize {
+        registries
+            .iter()
+            .map(|registry| registry.offers::<dyn AccountSpeech>().count())
+            .sum()
+    }
+
+    #[test]
+    fn a_host_with_a_canoa_cfg_reads_each_carried_library_once() {
+        let config = Config::from_str_in("", &std::env::temp_dir()).expect("an empty canoa.cfg");
+        let alone = offered(&registries(None));
+        assert!(alone > 0, "the build carries a speech provider");
+        assert_eq!(offered(&registries(Some(&config))), alone);
+    }
 
     fn services() -> Services {
         let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
