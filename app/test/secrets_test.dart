@@ -135,6 +135,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(const Key('secret-provider-from-name-session'))).controller!.text, 'vault_session');
     await tester.enterText(find.byKey(const Key('secret-provider-from-name-session')), 'bw_session');
+    await tester.ensureVisible(find.byKey(const Key('secret-provider-save')));
     await tester.tap(find.byKey(const Key('secret-provider-save')));
     await tester.pumpAndSettle();
     expect(host.configured, hasLength(1));

@@ -31,6 +31,29 @@ bool _secret(Map<String, Object?> field) => field['writeOnly'] == true || field[
 /// Whether the member is another secret, taken from a provider's entry rather than typed or written down.
 bool _fromSecret(Map<String, Object?> field) => field['x-from-secret'] == true;
 
+bool _isNumeric(String type) => type == 'integer' || type == 'number';
+
+/// What [text] says as a number of [type] (`integer` or `number`), or null when it is not one: JSON Schema's integers include 3.0.
+num? _parseNumber(String type, String text) {
+  final number = num.tryParse(text.trim());
+  if (number == null || !number.isFinite) return null;
+  if (type == 'integer') return number == number.truncate() ? number.truncate() : null;
+  return number;
+}
+
+/// Why [value] is not a number the member [field] of [type] accepts, in the words that follow its title, or null.
+String? _numberProblem(Map<String, Object?> field, String type, Object? value) {
+  final number = value is num && value.isFinite ? (type == 'integer' ? (value == value.truncate() ? value.truncate() : null) : value) : null;
+  if (number == null) return type == 'integer' ? 'is a whole number' : 'is a number';
+  final minimum = field['minimum'], maximum = field['maximum'];
+  final above = field['exclusiveMinimum'], below = field['exclusiveMaximum'];
+  if (minimum is num && number < minimum) return 'is at least $minimum';
+  if (maximum is num && number > maximum) return 'is at most $maximum';
+  if (above is num && number <= above) return 'is more than $above';
+  if (below is num && number >= below) return 'is less than $below';
+  return null;
+}
+
 String _titleOf(Map<String, Object?> schema, String key) {
   final title = _map(schemaProperties(schema)[key])['title'];
   return title is String && title.isNotEmpty ? title : key;
@@ -101,14 +124,101 @@ final class SecretSourceChoice {
   final String entry, label;
 }
 
-/// Whether the member [key] is shown for [values]: its form hint's `visibleWhen` names another member and what it must hold.
+/// The member a condition or a hint names by [path]: a member by its name, or by the store's spelling of a one-segment path
+/// (`[a.b]`, `["a.b"]`).
+String _memberKey(Map<String, Object?> schema, String path) {
+  final properties = schemaProperties(schema);
+  if (properties.containsKey(path)) return path;
+  final spelled = RegExp(r'^\[(?:"(.*)"|(.*))\]$').firstMatch(path);
+  final inner = spelled == null ? null : (spelled.group(1) ?? spelled.group(2));
+  return inner != null && properties.containsKey(inner) ? inner : path;
+}
+
+/// Whether the member [key] is shown for [values], by guatiao-intake's rule. With no condition it is. Otherwise it is when the member
+/// its `visibleWhen` reads is itself shown and holds `equals` (or one of `in`); a member holding nothing reads as its schema's default,
+/// and one with neither does not meet the condition, so hiding a member hides everything that waits on it. A chain of conditions that
+/// leads back to itself, or to a member the schema does not have, is not shown.
 bool schemaVisible(Map<String, Object?> schema, Map<String, Object?> form, Map<String, Object?> values, String key) {
-  final when = _map(_map(form['fields'])[key])['visibleWhen'];
-  if (when is! Map) return true;
-  final other = values[when['field']] ?? _map(schemaProperties(schema)['${when['field']}'])['default'];
-  if (when.containsKey('equals')) return other == when['equals'];
-  final within = when['in'];
-  return within is List ? within.contains(other) : true;
+  final properties = schemaProperties(schema);
+  final hints = _map(form['fields']);
+  final conditions = <Map>[];
+  final seen = <String>{};
+  var at = _memberKey(schema, key);
+  while (true) {
+    if (!properties.containsKey(at) || !seen.add(at)) return false;
+    final when = _map(hints[at])['visibleWhen'];
+    if (when is! Map) break;
+    conditions.add(when);
+    at = _memberKey(schema, '${when['field']}');
+  }
+  return conditions.every((when) {
+    final read = _memberKey(schema, '${when['field']}');
+    final held = values[read] ?? _map(properties[read])['default'];
+    if (held == null) return false;
+    if (when.containsKey('equals')) return held == when['equals'];
+    final within = when['in'];
+    return within is List && within.contains(held);
+  });
+}
+
+/// Members a person sees together: a section of the form, or the default section, and the members in the order they are shown.
+class SchemaGroup {
+  const SchemaGroup({required this.section, required this.title, required this.help, required this.keys});
+
+  /// The section's id; `''` is the default section.
+  final String section;
+
+  /// What the form calls the section, empty when it says nothing.
+  final String title, help;
+
+  /// The members, whether or not they are shown now.
+  final List<String> keys;
+}
+
+/// The members of [schema] grouped into the sections [form] declares and put in order, by guatiao-intake's rule: the sections in the
+/// form's order with the default section (`''`) first unless the form places it; a member whose `x-section` the form does not declare
+/// joins the default section; within a section the members with an `x-order` come first, lowest first, then the rest as the schema
+/// declares them; a section with no members is left out. Which members are shown now is [schemaVisible]'s.
+List<SchemaGroup> schemaLayout(Map<String, Object?> schema, Map<String, Object?> form) {
+  final declared = <String, Map<String, Object?>>{};
+  final listed = form['sections'];
+  if (listed is List) {
+    for (final section in listed) {
+      if (section is Map && section['id'] is String) declared.putIfAbsent(section['id']! as String, () => section.cast<String, Object?>());
+    }
+  }
+  final ids = [if (!declared.containsKey('')) '', ...declared.keys];
+  final into = {for (final id in ids) id: <String>[]};
+  for (final MapEntry(:key, :value) in schemaProperties(schema).entries) {
+    final named = _map(value)['x-section'];
+    into[named is String && into.containsKey(named) ? named : '']!.add(key);
+  }
+  int? order(String key) {
+    final at = _map(schemaProperties(schema)[key])['x-order'];
+    return at is num ? at.toInt() : null;
+  }
+
+  final groups = <SchemaGroup>[];
+  for (final id in ids) {
+    final keys = into[id]!;
+    if (keys.isEmpty) continue;
+    final position = {for (var i = 0; i < keys.length; i++) keys[i]: i};
+    final sorted = [...keys]
+      ..sort((a, b) {
+        final first = order(a), second = order(b);
+        if (first != null && second != null && first != second) return first.compareTo(second);
+        if ((first == null) != (second == null)) return first == null ? 1 : -1;
+        return position[a]!.compareTo(position[b]!);
+      });
+    final section = declared[id];
+    groups.add(SchemaGroup(
+      section: id,
+      title: section?['title'] is String ? section!['title']! as String : '',
+      help: section?['description'] is String ? section!['description']! as String : '',
+      keys: sorted,
+    ));
+  }
+  return groups;
 }
 
 /// What a form holds of [values] that is to be kept: the shown members that have a value (a secret kept as typed, the rest only when
@@ -135,8 +245,8 @@ Map<String, Object?> collectSchemaValues(Map<String, Object?> schema, Map<String
   return out;
 }
 
-/// Why [values] cannot be kept, in the words of the form: a shown member the schema requires has no value, or a whole number is not
-/// one. None when they can.
+/// Why [values] cannot be kept, in the words of the form: a shown member the schema requires has no value, or a number is not one the
+/// schema accepts (a whole number for an `integer`, within its `minimum` and `maximum`). None when they can.
 String? schemaProblem(Map<String, Object?> schema, Map<String, Object?> form, Map<String, Object?> values) {
   final properties = schemaProperties(schema);
   final required = schemaRequired(schema);
@@ -158,7 +268,10 @@ String? schemaProblem(Map<String, Object?> schema, Map<String, Object?> form, Ma
       continue;
     }
     final type = _typeOf(field);
-    if ((type == 'integer'|| type == 'number') && (value is! int || value < 0)) return '${_titleOf(schema, key)} is a whole number';
+    if (_isNumeric(type)) {
+      final why = _numberProblem(field, type, value);
+      if (why != null) return '${_titleOf(schema, key)} $why';
+    }
   }
   return null;
 }
@@ -333,21 +446,21 @@ class _SchemaFieldsState extends State<SchemaFields> {
       );
     }
     if (field['enum'] is List) {
-      final choices = (field['enum']! as List).whereType<String>().toList();
+      final choices = [for (final each in field['enum']! as List) ?each];
       final unsettable = widget.unsetEntry && !schemaRequired(widget.schema).contains(key);
-      final dflt = field['default'] as String?;
-      return DropdownButton<String?>(
+      final dflt = field['default'];
+      return DropdownButton<Object?>(
         key: Key(id),
-        value: choices.contains(_values[key]) ? _values[key]! as String : (unsettable ? null : dflt),
+        value: choices.contains(_values[key]) ? _values[key] : (unsettable ? null : (choices.contains(dflt) ? dflt : null)),
         items: [
-          if (unsettable) DropdownMenuItem<String?>(value: null, child: Text(dflt == null ? 'Not set' : 'Default ($dflt)')),
-          for (final choice in choices) DropdownMenuItem<String?>(value: choice, child: Text(choice)),
+          if (unsettable) DropdownMenuItem<Object?>(value: null, child: Text(dflt == null ? 'Not set' : 'Default ($dflt)')),
+          for (final choice in choices) DropdownMenuItem<Object?>(value: choice, child: Text('$choice')),
         ],
         onChanged: (choice) => _set(key, choice),
       );
     }
     final isList = type == 'array';
-    final isNumber = type == 'integer' || type == 'number';
+    final isNumber = _isNumeric(type);
     final current = _values[key];
     final initial = isList
         ? (current is List ? current.join('\n') : '')
@@ -361,7 +474,7 @@ class _SchemaFieldsState extends State<SchemaFields> {
         obscureText: secret || hints['widget'] == 'password',
         minLines: hints['widget'] == 'textarea' ? 3 : 1,
         maxLines: isList ? 4 : (hints['widget'] == 'textarea' ? 6 : 1),
-        keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+        keyboardType: isNumber ? TextInputType.numberWithOptions(signed: true, decimal: type == 'number') : TextInputType.text,
         decoration: InputDecoration(
           isDense: true,
           hintText: set ? 'Set. Type to replace' : (placeholder ?? (field['default'] != null && !isNumber ? '${field['default']}' : null)),
@@ -383,7 +496,7 @@ class _SchemaFieldsState extends State<SchemaFields> {
           } else if (isList) {
             _values[key] = [for (final line in text.split('\n')) if (line.trim().isNotEmpty) line.trim()];
           } else if (isNumber) {
-            final number = int.tryParse(text.trim());
+            final number = _parseNumber(type, text);
             _values[key] = number ?? (text.trim().isEmpty ? null : text.trim());
           } else {
             _values[key] = text.isEmpty ? null : text;
@@ -431,26 +544,26 @@ class _SchemaFieldsState extends State<SchemaFields> {
     );
   }
 
-  List<String> _keys({required bool advanced}) {
-    final sections = <String>[];
-    final listed = widget.form['sections'];
-    if (listed is List) {
-      for (final section in listed) {
-        if (section is Map && section['id'] is String) sections.add(section['id']! as String);
-      }
+  /// The members shown now, in the layout's order, [advanced] ones or the rest, by section.
+  List<SchemaGroup> _shown({required bool advanced}) {
+    final groups = <SchemaGroup>[];
+    for (final group in schemaLayout(widget.schema, widget.form)) {
+      final keys = [for (final key in group.keys) if ((_field(key)['x-advanced'] == true) == advanced && _visible(key)) key];
+      if (keys.isNotEmpty) groups.add(SchemaGroup(section: group.section, title: group.title, help: group.help, keys: keys));
     }
-    int rank(String key) {
-      final section = _field(key)['x-section'] is String ? _field(key)['x-section']! as String : '';
-      final at = sections.indexOf(section);
-      return at < 0 ? sections.length : at;
-    }
+    return groups;
+  }
 
-    final keys = [
-      for (final key in _properties.keys)
-        if ((_field(key)['x-advanced'] == true) == advanced && _visible(key)) key,
-    ];
-    keys.sort((a, b) => rank(a).compareTo(rank(b)));
-    return keys;
+  Widget _heading(SchemaGroup group) {
+    final text = Theme.of(context).textTheme;
+    return Padding(
+      key: Key('${widget.idPrefix}-section-${group.section}'),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Semantics(header: true, child: Text(group.title, style: text.titleSmall)),
+        if (group.help.isNotEmpty) Text(group.help, style: text.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      ]),
+    );
   }
 
   Widget _row(String key) {
@@ -489,10 +602,14 @@ class _SchemaFieldsState extends State<SchemaFields> {
 
   @override
   Widget build(BuildContext context) {
-    final advanced = _keys(advanced: true);
-    if (widget.compact) return Wrap(crossAxisAlignment: WrapCrossAlignment.end, children: [for (final key in _keys(advanced: false)) _row(key)]);
+    final basic = _shown(advanced: false);
+    final advanced = [for (final group in _shown(advanced: true)) ...group.keys];
+    if (widget.compact) return Wrap(crossAxisAlignment: WrapCrossAlignment.end, children: [for (final group in basic) for (final key in group.keys) _row(key)]);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      for (final key in _keys(advanced: false)) _row(key),
+      for (final group in basic) ...[
+        if (group.title.isNotEmpty) _heading(group),
+        for (final key in group.keys) _row(key),
+      ],
       if (advanced.isNotEmpty)
         ExpansionTile(
           key: Key('${widget.idPrefix}-advanced'),
@@ -554,6 +671,11 @@ class _SchemaSettingsFormState extends State<SchemaSettingsForm> {
   bool _saving = false;
 
   Future<void> _save() async {
+    final invalid = schemaProblem(widget.schema, widget.form, _values);
+    if (invalid != null) {
+      setState(() => _problem = invalid);
+      return;
+    }
     final settings = collectSchemaValues(widget.schema, widget.form, _values);
     final properties = schemaProperties(widget.schema);
     final from = <String, SecretSource>{
