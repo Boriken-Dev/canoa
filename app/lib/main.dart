@@ -507,7 +507,14 @@ class _CanoaAppState extends State<CanoaApp> {
   });
 
   String? get _configPath => widget.configPath ?? desktopConfigPath();
-  Future<void> _write(CanoaConfig changed) => (widget.writeConfig ?? _writeConfig)(changed);
+  Future<void> _write(CanoaConfig changed) async {
+    // The defaults a canoa.cfg that could not be read was replaced by never go over it.
+    if (config.unreadable ?? changed.unreadable case final reason?) {
+      _messenger.currentState?.showSnackBar(SnackBar(duration: const Duration(seconds: 15), content: Text(ConfigUnreadable(reason).message)));
+      return;
+    }
+    await (widget.writeConfig ?? _writeConfig)(changed);
+  }
 
   /// The store canoa.cfg is written through while a host answers: the host that served this page, or this app's own. Null for an
   /// app whose host does not run, which then writes the file itself, as a host that cannot start for what the file holds needs.
@@ -3105,7 +3112,8 @@ class _CanoaAppState extends State<CanoaApp> {
     store.addListener(_keepSelection);
     // The welcome page, which a window with no session shows, lists each source with what it needs.
     scheduleMicrotask(_noteLast);
-    if (widget.served?.problem ?? widget.served?.configProblem case final problem?) {
+    if (widget.served?.problem ?? widget.served?.configProblem ?? (config.unreadable == null ? null : ConfigUnreadable(config.unreadable!).message)
+        case final problem?) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _messenger.currentState?.showSnackBar(SnackBar(duration: const Duration(seconds: 30), content: Text(problem)));
       });
