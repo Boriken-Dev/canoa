@@ -11,20 +11,17 @@ from the result with PUB_CACHE pointed at the branch's pub directory.
 """
 import argparse
 import collections
-import hashlib
 import json
 import math
 import re
 import shutil
 import sys
-import urllib.request
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
+import cdn_files
 import fallback_fonts
 
-INDEX = "https://raw.githubusercontent.com/jose-pr/ai6/main/clients/outer-office/tool/cdn_files.json"
 # leanflutter's desktop packages: the tray and the window. A desktop build needs all of these, whichever of them pub resolves.
 DESKTOP_PACKAGES = ("tray_manager","window_manager","screen_retriever","screen_retriever_linux","screen_retriever_macos",
                     "screen_retriever_platform_interface","screen_retriever_windows","menu_base")
@@ -79,13 +76,6 @@ def flagged_kind(body, name):
     except UnicodeDecodeError:
         pass
     return "opaque high-entropy data" if entropy(body[:65536]) > 7.5 else None
-
-
-def fetch(url):
-    request=urllib.request.Request(url, headers={"User-Agent":"Canoa-Offline-Mirror"})
-    with urllib.request.urlopen(request,timeout=90) as response:
-        return response.read()
-def digest(data): return hashlib.sha256(data).hexdigest()
 
 
 def git_dependencies(lock):
@@ -154,23 +144,9 @@ def main():
     if missing: raise SystemExit("Desktop packages missing from the mirror: "+", ".join(missing))
     files=[]
     if not args.skip_cdn:
-        inventory=json.loads(fetch(INDEX))
-        fonts=[e for e in inventory["files"] if e["host"]=="fonts.gstatic.com"]
-        def copy(e):
-            name=e["path"]
-            if not name.startswith("/") or ".." in Path(name).parts:
-                raise ValueError("Invalid CDN path")
-            destination=target/"cdn"/e["host"]/name.lstrip("/")
-            if destination.exists() and digest(destination.read_bytes())==e["sha256"]:
-                data=destination.read_bytes()
-            else:
-                data=fetch("https://"+e["host"]+name)
-                if digest(data)!=e["sha256"]: raise ValueError("CDN checksum mismatch "+name)
-                destination.parent.mkdir(parents=True,exist_ok=True)
-                destination.write_bytes(data)
-            return dict(host=e["host"],path=name,sha256=digest(data),bytes=len(data))
-        with ThreadPoolExecutor(max_workers=12) as workers:
-            files=list(workers.map(copy,fonts))
+        # The CDN files the builds read (the fonts, Office.js), pinned by tools/cdn_files.json.
+        files=cdn_files.mirror(target,cdn_files.read_list()["files"])
+        (target/"cdn"/"README.md").write_text(cdn_files.README,encoding="utf-8",newline="\n")
     fallback=0
     if not args.skip_cdn:
         # The fonts the web engine falls back to, pinned by fallback_fonts.sha256: the app's build copies them from here.
@@ -185,6 +161,6 @@ def main():
                 fallbackFonts=dict(count=0 if args.skip_cdn else len(pinned),bytes=fallback),
                 desktopPackages=list(DESKTOP_PACKAGES),desktopLinuxSystemPackages=list(DESKTOP_LINUX_SYSTEM))
     (target/"manifest.json").write_text(json.dumps(report,indent=2)+"\n")
-    print("Mirrored",len(packages),"pub packages,",len(gits),"git dependencies recorded and",len(files),"font assets;",
+    print("Mirrored",len(packages),"pub packages,",len(gits),"git dependencies recorded and",len(files),"CDN files;",
           "dropped",sum(dropped.values()),"files")
 if __name__=="__main__": main()
