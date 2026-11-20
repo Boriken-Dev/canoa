@@ -62,7 +62,7 @@ fn refusal(failed: &Failed) -> Refusal {
 /// the pool's. The host reads its pools when it starts, so the answer says it has to start again.
 pub(super) fn set(own: &Path, config: &Config, params: &Value) -> Result<Value, Refusal> {
     let name = text(params, "name")?;
-    crate::config::check_name(name).map_err(|error| (BAD_PARAMS, error.to_string()))?;
+    crate::config::check_label(name).map_err(|error| (BAD_PARAMS, error.to_string()))?;
     let standard = text(params, "standard")?;
     if !coqui_acp_api::standard::is_standard(standard) {
         return Err((

@@ -3984,7 +3984,7 @@ fn check_title(name: &str, title: &str) -> Result<(), ConfigError> {
 
 /// One `[host.accounts.NAME]`. Errors name a key, never a value: a credential written here is refused, and not quoted.
 fn account_of(name: &str, raw: RawAccount) -> Result<AccountConfig, ConfigError> {
-    check_name(name)?;
+    check_label(name)?;
     let refused = |what: String| ConfigError::Invalid {
         entry: None,
         what: format!("account {name}: {what}"),
@@ -4024,7 +4024,7 @@ fn pool_of(
     raw: RawPool,
     accounts: &IndexMap<String, AccountConfig>,
 ) -> Result<PoolConfig, ConfigError> {
-    check_name(name)?;
+    check_label(name)?;
     let refused = |what: String| ConfigError::Invalid {
         entry: None,
         what: format!("pool {name}: {what}"),
@@ -4064,7 +4064,19 @@ fn pool_of(
     })
 }
 
-/// Checked before anything quotes the name, since a key in the file may hold any character.
+/// A name the person gives an account or a pool: any text they can read, 1 to [`MAX_NAME`] characters and no control character. It
+/// is a key of canoa.cfg, quoted where it has to be, and is never part of an address.
+pub(crate) fn check_label(name: &str) -> Result<(), ConfigError> {
+    if name.is_empty() || name.chars().count() > MAX_NAME || name.chars().any(char::is_control) {
+        return Err(ConfigError::Invalid {
+            entry: None,
+            what: format!("a name has 1 to {MAX_NAME} characters, none of them control characters"),
+        });
+    }
+    Ok(())
+}
+
+/// Checked before anything puts the name in an address, which only letters, digits, hyphens and underscores are safe in.
 pub(crate) fn check_name(name: &str) -> Result<(), ConfigError> {
     if name.is_empty()
         || name.len() > MAX_NAME

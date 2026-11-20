@@ -21,7 +21,7 @@ use coqui_acp_api::{AccountKindInfo, LoginAnswer, LoginForm, LoginMethodInfo, Op
 use super::login::{self, Interaction};
 use super::{Accounts, Refusal, check_settings};
 use crate::cli::{Failed, Format, Front};
-use crate::config::{AccountConfig, Config, EntryKind, Settings, check_name, is_built_in_harness};
+use crate::config::{AccountConfig, Config, EntryKind, Settings, check_label, is_built_in_harness};
 use crate::home::Home;
 use crate::{kind, serve};
 
@@ -559,7 +559,7 @@ pub(crate) fn add_with(
     inputs: &serde_json::Map<String, serde_json::Value>,
     signer: &mut Signer<'_>,
 ) -> Result<Added, Failed> {
-    check_name(name).map_err(Failed::usage)?;
+    check_label(name).map_err(Failed::usage)?;
     if name == coqui_acp_api::LOCAL_ACCOUNT {
         return Err(Failed::usage(format!(
             "{name} is taken: it is the automatic account of a harness that has a login of its own"

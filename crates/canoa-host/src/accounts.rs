@@ -18,6 +18,8 @@ mod edit_tests;
 mod gate;
 pub(crate) mod login;
 pub(crate) mod matching;
+#[cfg(test)]
+mod names_tests;
 mod private;
 mod spawner;
 pub(crate) mod standards;
