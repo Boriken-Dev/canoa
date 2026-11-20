@@ -1472,7 +1472,7 @@ class _CanoaAppState extends State<CanoaApp> {
       return HostWorktrees((name, params) => hostWorktreeRequestOverPipe(
         uri.toString(), expectedPeerId: peerId, method: name, params: params,
         verifyPeer: (channel, expected) => verifyBrowserPeer(channel, expected, proof),
-        timeout: Duration(seconds: config.connectTimeout),
+        timeout: config.connectTimeoutDuration,
       ));
     }
     final overWebTransport = uri.scheme == 'https';
@@ -1484,7 +1484,7 @@ class _CanoaAppState extends State<CanoaApp> {
     return HostWorktrees((name, params) => hostWorktreeRequest(
       endpoints, expectedPeerId: peerId, method: name, params: params,
       verifyPeer: (channel, expected) => verifyBrowserPeer(channel, expected, proof),
-      timeout: Duration(seconds: config.connectTimeout),
+      timeout: config.connectTimeoutDuration,
     ));
   }
 
@@ -2365,7 +2365,7 @@ class _CanoaAppState extends State<CanoaApp> {
         ),
         pinnedPeerId: pinned,
         method: method,
-        timeout: Duration(seconds: config.connectTimeout),
+        timeout: config.connectTimeoutDuration,
         decider: store.askPermission,
         elicitor: store.askQuestion,
         secrets: store,
@@ -2591,14 +2591,14 @@ class _CanoaAppState extends State<CanoaApp> {
       client = isPipeUrl(listening.url)
           ? await connectBrowserAcpOverPipe(
               listening.url, pinnedPeerId: listening.peer, method: method,
-              timeout: Duration(seconds: config.connectTimeout),
+              timeout: config.connectTimeoutDuration,
               decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
               initializeMeta: _startMeta(draft),
             )
           : await (widget.connectEndpoint ?? connectBrowserAcp)(
               chatEndpoints(webSocket: listening.url, webTransport: '', preferWebTransport: config.preferWebTransport),
               pinnedPeerId: listening.peer, method: method,
-              timeout: Duration(seconds: config.connectTimeout),
+              timeout: config.connectTimeoutDuration,
               decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
               initializeMeta: _startMeta(draft),
             );
@@ -2866,7 +2866,7 @@ class _CanoaAppState extends State<CanoaApp> {
         client = isPipeUrl(endpoint.toString())
             ? await connectBrowserAcpOverPipe(
                 endpoint.toString(), pinnedPeerId: peerId!, method: method,
-                timeout: Duration(seconds: config.connectTimeout),
+                timeout: config.connectTimeoutDuration,
                 decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
                 initializeMeta: {...cacheMeta, ..._accountMeta(account)},
               )
@@ -2877,7 +2877,7 @@ class _CanoaAppState extends State<CanoaApp> {
                   preferWebTransport: config.preferWebTransport,
                 ),
                 pinnedPeerId: peerId!, method: method,
-                timeout: Duration(seconds: config.connectTimeout),
+                timeout: config.connectTimeoutDuration,
                 decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
                 initializeMeta: {...cacheMeta, ..._accountMeta(account)},
               );
@@ -3011,7 +3011,7 @@ class _CanoaAppState extends State<CanoaApp> {
     try {
       client = await connectBrowserAcp(
         endpoints, pinnedPeerId: pinnedPeerId, method: target.method,
-        timeout: Duration(seconds: config.connectTimeout),
+        timeout: config.connectTimeoutDuration,
         decider: store.askPermission, elicitor: store.askQuestion, secrets: store,
       );
     } catch (_) {

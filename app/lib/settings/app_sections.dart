@@ -114,14 +114,15 @@ class _GeneralSectionState extends State<GeneralSection> {
             value: config.preferWebTransport,
             onChanged: (v) => c.change((x) => x.copyWith(preferWebTransport: v)),
           ),
-          ChoiceRow<int>(
+          NumberRow(
             title: 'Network timeout',
             configKey: const ['network', 'connect_timeout'],
             description: 'How long a connection may take before Canoa gives up',
             child: true,
-            fieldKey: const Key('settings-timeout'),
+            fieldKey: const ValueKey('settings-timeout'),
+            unit: 's',
             value: config.connectTimeout,
-            choices: [for (final n in {5, 10, 15, 30, 60, config.connectTimeout}.toList()..sort()) (n, '$n s')],
+            presets: const [5, 10, 15, 30, 60],
             onChanged: (v) => c.change((x) => x.copyWith(connectTimeout: v)),
           ),
         ]),

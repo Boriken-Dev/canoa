@@ -40,6 +40,18 @@ connect_timeout = 15
 [assets]
 cdn = "local"
 
+[secrets]
+default = "form"
+
+[secrets.providers.work]
+kind = "env"
+
+[settings.claude]
+effort = "high"
+
+[say.reader]
+program = "piper"
+
 [appearance]
 look = "terminal"
 brightness = "system"
@@ -146,7 +158,7 @@ final every = CanoaConfig.parse(everything);
 void main() {
   test('the canoa.cfg used here holds every table, and writes back whole', () {
     final names = tomlOf(every).keys.toSet();
-    expect(names, containsAll(['desktop', 'network', 'assets', 'appearance', 'sessions', 'harnesses', 'notifications', 'attachments',
+    expect(names, containsAll(['desktop', 'network', 'assets', 'secrets', 'settings', 'say', 'appearance', 'sessions', 'harnesses', 'notifications', 'attachments',
       'usage', 'voice', 'permissions', 'sources', 'agents', 'host', 'overlays', 'profile', 'store', 'skill_pins', 'loadouts', 'defaults', 'profiles']));
     expect(changedTables(every, CanoaConfig.parse(every.encode())), isEmpty);
   });
@@ -271,8 +283,22 @@ void main() {
       expect(changedTables(every, h.last), {'desktop', 'sessions'});
       expect(h.last.sessions.harnesses, every.sessions.harnesses);
 
-      await choose(tester, 'settings-timeout', '30 s');
+      // Any number above 0 is taken, typed; the presets are only suggestions.
+      await tester.enterText(find.byKey(const Key('settings-timeout')), '300');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(h.last.connectTimeout, 300);
+      await tester.tap(find.byKey(const ValueKey('settings-timeout-presets')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('30 s').last);
+      await tester.pumpAndSettle();
       expect(h.last.connectTimeout, 30);
+      expect(tester.widget<TextField>(find.byKey(const Key('settings-timeout'))).controller!.text, '30');
+      await tester.enterText(find.byKey(const Key('settings-timeout')), '0');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(h.last.connectTimeout, 30, reason: 'a number that is not above 0 changes nothing');
+      expect(find.text('Above 0'), findsOneWidget);
       expect(changedTables(every, h.last), {'desktop', 'sessions', 'network'});
     });
 

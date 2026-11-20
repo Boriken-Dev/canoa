@@ -243,6 +243,127 @@ class ChoiceRow<T> extends StatelessWidget {
   );
 }
 
+/// A row whose control is a number typed in, for a setting that has no range of its own: any number above 0 is taken, and
+/// [presets] are offered as suggestions beside the field. A value is applied when the field is submitted or loses the focus.
+class NumberRow extends StatefulWidget {
+  const NumberRow({
+    super.key,
+    required this.title,
+    this.description,
+    required this.value,
+    required this.presets,
+    required this.onChanged,
+    this.unit,
+    this.child = false,
+    this.enabled = true,
+    this.machine = false,
+    this.fieldKey,
+    this.configKey,
+  });
+
+  final String title;
+  final String? description;
+  final List<String>? configKey;
+  final num value;
+
+  /// The numbers the menu offers.
+  final List<num> presets;
+
+  /// What the number counts, shown after it (`s`).
+  final String? unit;
+  final ValueChanged<num> onChanged;
+  final bool child, enabled, machine;
+
+  /// The key of the text field; its menu is [fieldKey] with `-presets` after it.
+  final ValueKey<String>? fieldKey;
+
+  static String format(num value) => value == value.roundToDouble() && value.abs() < 1e15 ? '${value.toInt()}' : '$value';
+
+  @override
+  State<NumberRow> createState() => _NumberRowState();
+}
+
+class _NumberRowState extends State<NumberRow> {
+  late final TextEditingController _text = TextEditingController(text: NumberRow.format(widget.value));
+  late final FocusNode _focus = FocusNode()..addListener(_leave);
+  bool _bad = false;
+
+  @override
+  void didUpdateWidget(NumberRow old) {
+    super.didUpdateWidget(old);
+    // Another change of the value (Reset, a reread file) replaces what is typed; a value the person is typing is left alone.
+    if (widget.value != old.value && _parsed != widget.value && !_focus.hasFocus) {
+      _text.text = NumberRow.format(widget.value);
+      _bad = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    _text.dispose();
+    super.dispose();
+  }
+
+  num? get _parsed {
+    final number = num.tryParse(_text.text.trim());
+    return number != null && number.isFinite && number > 0 ? number : null;
+  }
+
+  void _leave() {
+    if (!_focus.hasFocus) _apply();
+  }
+
+  void _apply() {
+    final number = _parsed;
+    setState(() => _bad = number == null);
+    if (number != null && number != widget.value) widget.onChanged(number);
+  }
+
+  void _pick(num number) {
+    _text.text = NumberRow.format(number);
+    _apply();
+  }
+
+  @override
+  Widget build(BuildContext context) => SettingsRow(
+    title: widget.title,
+    description: widget.description,
+    child: widget.child,
+    enabled: widget.enabled,
+    machine: widget.machine,
+    configKey: widget.configKey,
+    control: Row(mainAxisSize: MainAxisSize.min, children: [
+      SizedBox(
+        width: 96,
+        child: TextField(
+          key: widget.fieldKey,
+          controller: _text,
+          focusNode: _focus,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          textAlign: TextAlign.end,
+          decoration: InputDecoration(
+            isDense: true,
+            suffixText: widget.unit,
+            errorText: _bad ? 'Above 0' : null,
+          ),
+          onSubmitted: (_) => _apply(),
+        ),
+      ),
+      PopupMenuButton<num>(
+        key: widget.fieldKey == null ? null : ValueKey('${widget.fieldKey!.value}-presets'),
+        tooltip: 'Suggestions',
+        icon: const Icon(Icons.arrow_drop_down),
+        enabled: widget.enabled,
+        onSelected: _pick,
+        itemBuilder: (_) => [
+          for (final preset in widget.presets) PopupMenuItem<num>(value: preset, child: Text('${NumberRow.format(preset)}${widget.unit == null ? '' : ' ${widget.unit}'}')),
+        ],
+      ),
+    ]),
+  );
+}
+
 /// "Applying settings for [scope]": the choice, on a section whose values can be set per agent, of the one this page edits.
 class ScopeBar extends StatelessWidget {
   const ScopeBar({super.key, this.fieldKey, required this.label, required this.value, required this.choices, required this.onChanged});

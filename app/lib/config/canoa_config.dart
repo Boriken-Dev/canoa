@@ -155,7 +155,11 @@ const defaultCatalogSpec = 'https://github.com/Boriken-Dev/agent-overlays.git@ma
 /// installed copy and the system's file, lowest first), and the person's file as it was read. A save writes the person's
 /// file only, in its own format.
 final class ConfigSource {
-  const ConfigSource({this.format = ConfigFormat.toml, this.marked = false, this.layers = const [], this.own = const {}});
+  const ConfigSource({this.format = ConfigFormat.toml, this.marked = false, this.layers = const [], this.own = const {}, this.unreadable});
+
+  /// Why canoa.cfg could not be read, for a configuration that is the defaults the app runs on instead: nothing is written over the
+  /// file while it is set. Null for one that was read.
+  final String? unreadable;
 
   final ConfigFormat format;
 
@@ -177,7 +181,7 @@ final class ConfigSource {
     } else {
       next[key] = value;
     }
-    return ConfigSource(format: format, marked: marked, layers: layers, own: next);
+    return ConfigSource(format: format, marked: marked, layers: layers, own: next, unreadable: unreadable);
   }
 
   /// The layers below the person's file, merged.
@@ -200,7 +204,6 @@ final class CanoaConfig {
     this.localHost = true,
     this.preferWebTransport = true,
     this.connectTimeout = 10,
-    this.cdn = 'none',
     this.look = LookId.canoa,
     this.followProvider = false,
     this.brightness = 'dark',
@@ -225,8 +228,14 @@ final class CanoaConfig {
     this.source = const ConfigSource(),
   });
 
+  /// The defaults, for a canoa.cfg that could not be read for [reason]: [unreadable] says so, and saving is refused.
+  factory CanoaConfig.unreadable(String reason) => CanoaConfig(source: ConfigSource(unreadable: reason));
+
   /// Where this configuration was read from, which a save writes back to.
   final ConfigSource source;
+
+  /// Why canoa.cfg could not be read, when this is the defaults the app runs on instead; null for a configuration that was read.
+  String? get unreadable => source.unreadable;
 
   /// `[usage] warn_permille`: from this many thousandths used, the usage control shows a status (800 is 80%).
   final int warnPermille;
@@ -247,8 +256,11 @@ final class CanoaConfig {
 
   /// `[desktop] local_host`: whether the desktop app runs its own host.
   final bool localHost;
-  final int connectTimeout;
-  final String cdn;
+  /// `[network] connect_timeout`: seconds a connection may take before the app gives up; any number above 0.
+  final num connectTimeout;
+
+  /// [connectTimeout] as a duration.
+  Duration get connectTimeoutDuration => Duration(milliseconds: (connectTimeout * 1000).round());
   final LookId look;
 
   /// Whether the shown conversation's agent picks the family (Claude and Codex have one); [look] is the one for any other.
@@ -308,7 +320,7 @@ final class CanoaConfig {
   };
 
   CanoaConfig copyWith({bool? startHidden, bool? closeToTray,
-      bool? minimizeToTray, bool? preferWebTransport, int? connectTimeout,
+      bool? minimizeToTray, bool? preferWebTransport, num? connectTimeout,
       LookId? look, bool? followProvider, String? brightness, ChatDensity? density, LedgerSettings? sessions, String? defaultMode, bool clearDefaultMode = false, bool? allowOnceOnly,
       List<String>? protectedPaths, bool clearProtectedPaths = false,
       NotificationSettings? notifications, VoiceSettings? voice, List<AgentCommand>? agents, Set<String>? hiddenSources, int? warnPermille}) =>
@@ -319,7 +331,6 @@ final class CanoaConfig {
         localHost: localHost,
         preferWebTransport: preferWebTransport ?? this.preferWebTransport,
         connectTimeout: connectTimeout ?? this.connectTimeout,
-        cdn: cdn,
         look: look ?? this.look,
         followProvider: followProvider ?? this.followProvider,
         brightness: brightness ?? this.brightness,
@@ -352,7 +363,6 @@ final class CanoaConfig {
     localHost: localHost,
     preferWebTransport: preferWebTransport,
     connectTimeout: connectTimeout,
-    cdn: cdn,
     look: look,
     followProvider: followProvider,
     brightness: brightness,
@@ -1367,7 +1377,6 @@ final class CanoaConfig {
     localHost: localHost,
     preferWebTransport: preferWebTransport,
     connectTimeout: connectTimeout,
-    cdn: cdn,
     look: look,
     followProvider: followProvider,
     brightness: brightness,
@@ -1406,6 +1415,13 @@ final class CanoaConfig {
   factory CanoaConfig.parse(String text, {String? name, List<ConfigLayer> below = const []}) =>
       CanoaConfig.fromLayers(decodeConfig(text, name: name), below);
 
+  /// The tables of canoa.cfg this app reads; any other is kept as it was found.
+  static const _ownTables = {
+    'desktop', 'network', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile', 'permissions',
+    'notifications', 'store', 'skill_pins', 'loadouts', 'defaults', 'profiles', 'sources', 'attachments', 'usage', 'voice',
+    'speech', 'connections',
+  };
+
   /// The person's own file [own] merged over [below]: what the app shows and edits.
   factory CanoaConfig.fromLayers(ConfigText own, List<ConfigLayer> below) {
     var lower = <String, dynamic>{};
@@ -1414,13 +1430,12 @@ final class CanoaConfig {
     }
     final data = mergeConfig(lower, own.data);
     final readFrom = ConfigSource(format: own.format, marked: own.marked, layers: below, own: own.data);
-    for (final name in data.keys) {
-      if (!{'desktop', 'network', 'assets', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile',
-            'permissions', 'notifications', 'store', 'skill_pins', 'loadouts', 'defaults', 'profiles', 'sources', 'attachments', 'usage', 'voice', 'speech', 'connections'}
-          .contains(name)) {
-        throw FormatException('canoa.cfg: unknown table $name');
-      }
-    }
+    // Every other table is the host's or an extension's (`[secrets]`, `[settings.ID]`, `[say.NAME]`, ...): kept as read and written
+    // back as found.
+    final foreign = {
+      for (final MapEntry(:key, :value) in data.entries)
+        if (!_ownTables.contains(key)) key: value,
+    };
     Map<String, dynamic> table(String name, Set<String> allowed) {
       final raw = data[name];
       if (raw == null) return {};
@@ -1433,7 +1448,6 @@ final class CanoaConfig {
     }
     final desktop = table('desktop', {'start_hidden','close_to_tray','minimize_to_tray','local_host'});
     final network = table('network', {'prefer_webtransport','connect_timeout'});
-    final assets = table('assets', {'cdn'});
     final appearance = table('appearance', {'look', 'follow_provider', 'brightness', 'density'});
     final sessions = table('sessions', {'keep', 'keep_text', 'text_messages', 'workspace', 'while_working', 'queue_delivery'});
     final permissions = table('permissions', {'default_mode', 'full_access', 'allow_once_only', 'protected'});
@@ -1446,8 +1460,8 @@ final class CanoaConfig {
       'output', 'output_voice', 'output_model', 'output_style', 'output_speed', 'read_replies',
     });
     final outputSpeed = voiceTable['output_speed'];
-    if (outputSpeed != null && (outputSpeed is! num || !(outputSpeed > 0) || outputSpeed > 10)) {
-      throw const FormatException('canoa.cfg: voice.output_speed must be a number above 0 and at most 10');
+    if (outputSpeed != null && (outputSpeed is! num || !outputSpeed.isFinite || !(outputSpeed > 0))) {
+      throw const FormatException('canoa.cfg: voice.output_speed must be a number above 0');
     }
     String? voiceText(String key) {
       final raw = voiceTable[key];
@@ -1499,12 +1513,8 @@ final class CanoaConfig {
       return raw;
     }
     final timeout = network['connect_timeout'] ?? 10;
-    if (timeout is! int || timeout < 1 || timeout > 120) {
-      throw const FormatException('canoa.cfg: connect_timeout must be 1..120');
-    }
-    final cdn = assets['cdn'] ?? 'none';
-    if (cdn is! String || !{'none', 'local'}.contains(cdn)) {
-      throw const FormatException('canoa.cfg: assets.cdn must be none or local');
+    if (timeout is! num || !timeout.isFinite || timeout <= 0) {
+      throw const FormatException('canoa.cfg: network.connect_timeout must be a number of seconds above 0');
     }
     final lookName = appearance['look'] ?? LookId.canoa.name;
     final look = lookName is String ? LookId.named(lookName) : null;
@@ -1655,6 +1665,7 @@ final class CanoaConfig {
         'defaults': ?data['defaults'],
         'profiles': ?data['profiles'],
         'store': ?rawStore,
+        ...foreign,
       },
       agents: agents,
       host: host == null ? null : Map<String, dynamic>.from(host as Map),
@@ -1664,7 +1675,7 @@ final class CanoaConfig {
       minimizeToTray: flag(desktop, 'minimize_to_tray', false),
       localHost: flag(desktop, 'local_host', true),
       preferWebTransport: flag(network, 'prefer_webtransport', true),
-      connectTimeout: timeout, cdn: cdn,
+      connectTimeout: timeout,
       defaultMode: defaultMode as String?,
       allowOnceOnly: flag(permissions, 'allow_once_only', false),
       protectedPaths: protectedPaths,
@@ -1729,9 +1740,14 @@ final class CanoaConfig {
     return lines.isEmpty ? '' : '\n[voice]\n${lines.join('\n')}\n';
   }
 
+  /// The top-level values of [tables] that are not tables, which belong before the first table's header.
+  Map<String, Object?> get _loose => {for (final MapEntry(:key, :value) in tables.entries) if (value is! Map) key: value};
+
+  Map<String, Object?> get _tabled => {for (final MapEntry(:key, :value) in tables.entries) if (value is Map) key: value};
+
   String _encodeToml() => '''
 # Canoa deployment settings — Boriken Dev
-[desktop]
+${_loose.isEmpty ? '' : '${TomlDocument.fromMap(_loose)}\n'}[desktop]
 start_hidden = $startHidden
 close_to_tray = $closeToTray
 minimize_to_tray = $minimizeToTray
@@ -1740,9 +1756,6 @@ local_host = $localHost
 [network]
 prefer_webtransport = $preferWebTransport
 connect_timeout = $connectTimeout
-
-[assets]
-cdn = "$cdn"
 
 [appearance]
 look = "${look.name}"
@@ -1767,7 +1780,7 @@ ${_voiceToml()}${warnPermille == defaultWarnPermille && limitPhrases == null ? '
 [agents.${jsonEncode(agent.label)}]
 program = ${jsonEncode(agent.program)}
 args = ${jsonEncode(agent.args)}
-''').join()}${tables.isEmpty ? '' : '\n${TomlDocument.fromMap(tables)}'}${host == null ? '' : '\n${TomlDocument.fromMap({'host': host})}'}''';
+''').join()}${_tabled.isEmpty ? '' : '\n${TomlDocument.fromMap(_tabled)}'}${host == null ? '' : '\n${TomlDocument.fromMap({'host': host})}'}''';
 
   /// canoa.cfg as the person's own file is written: in the format and with the first line it was read with, holding the
   /// keys the person changed or already had there and none that a lower layer gives the same.
@@ -1813,10 +1826,21 @@ args = ${jsonEncode(agent.args)}
 
   /// This configuration with the key at [path] taken out of the person's file, so that the lower layers' value (or the
   /// default) shows again.
-  CanoaConfig resetKey(List<String> path) => CanoaConfig.fromLayers(
-    (format: source.format, marked: source.marked, data: withoutKey(_ownDocument(), path)),
-    source.layers,
-  );
+  CanoaConfig resetKey(List<String> path) {
+    final reset = CanoaConfig.fromLayers(
+      (format: source.format, marked: source.marked, data: withoutKey(_ownDocument(), path)),
+      source.layers,
+    );
+    final why = unreadable;
+    if (why == null) return reset;
+    return reset.withHost(reset.host, source: ConfigSource(
+      format: reset.source.format,
+      marked: reset.source.marked,
+      layers: reset.source.layers,
+      own: reset.source.own,
+      unreadable: why,
+    ));
+  }
 
   /// A profile table of canoa.cfg, its refusal named by [where] and never quoting a value.
   static Profile _profile(String where, Map<dynamic, dynamic> table, LayerKind kind) {

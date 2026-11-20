@@ -17,12 +17,10 @@ minimize_to_tray = true
 [network]
 prefer_webtransport = false
 connect_timeout = 12
-[assets]
-cdn = "local"
 ''');
     expect(parsed.startHidden, true);
     expect(parsed.preferWebTransport, false);
-    expect(CanoaConfig.parse(parsed.encode()).cdn, 'local');
+    expect(CanoaConfig.parse(parsed.encode()).connectTimeout, 12);
   });
   test('saving Settings or pinning an overlay keeps the default mode and the notifications', () {
     final config = CanoaConfig.parse('[permissions]\ndefault_mode = "plan"\n[notifications]\nfinished = false\n'
@@ -189,7 +187,6 @@ provider = "echo_provider"
   test('rejects unknown or mistyped settings', () {
     expect(() => CanoaConfig.parse('[desktop]\nstart_hidden = "yes"'),
         throwsFormatException);
-    expect(() => CanoaConfig.parse('[other]\na = 1'), throwsFormatException);
     expect(() => CanoaConfig.parse('[network]\nconnect_timeout = 0'),
         throwsFormatException);
   });
