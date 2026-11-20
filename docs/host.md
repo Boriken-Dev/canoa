@@ -371,7 +371,6 @@ harness = "claude"
 accounts = ["work", "personal"] # a session runs on the first unless its client names another
 
 [host.accounts.work]            # written by `canoa accounts add`; holds no credential
-harness = "claude"
 kind = "claude-login"
 id = "0b7d3c1e-5a52-4f0e-9d0f-6c1f5d5b8e21"
 
@@ -383,8 +382,9 @@ accounts = ["local", "work"]
 A session runs on one account, with a model that account lists, or on a pool: a named set of accounts that provide the same standard (the kind of credential: a Claude Code login, an Anthropic API key, an OpenAI API key, whatever the providers name). The Accounts section makes, edits and removes pools: pick the standard and it offers every account that provides it. Canoa also makes an `any-<standard>` pool for each standard an account provides, holding all of them, which follows the accounts as they are added and removed and is written nowhere. It is listed (Settings, the pickers) only while two or more accounts hold it, since a pool of one cannot rotate; a session or canoa.cfg that names it still gets it. An entry offers a pool by naming it among its `accounts`. A pool takes each new session on the next of its accounts that lists the model and has usage left, in turn; a session keeps its account while its prompt cache is warm, moves to the next account when the cache has lapsed or when its account has run out (the conversation goes with it, and the chat says which account and why), and a turn that no account of the pool can take is refused with the time the soonest allowance refills. A session on one account is never moved: when that account runs out, the chat offers the move.
 
 ```sh
-canoa accounts add work --harness claude --method subscription   # signs in; asks for the code the page shows, with no echo
-canoa accounts list                                              # name, harness, kind, state; never a credential. canoa.cfg's accounts, then `local` of each harness that has a login of its own
+canoa accounts providers                                         # the account providers: each agent's own and each maker (a proxy, a gateway, a model service), with its own ways to sign in
+canoa accounts add work --provider claude_accounts --method subscription   # signs in; asks for the code the page shows, with no echo
+canoa accounts list                                              # name, provider, kind, state; never a credential. canoa.cfg's accounts, then `local` of each harness that has a login of its own
 canoa accounts login work                                        # sign in again when a login was lost
 canoa accounts remove work                                       # forgets the stored credential and the account's directory
 ```
@@ -425,7 +425,7 @@ Codex or Pi the entry runs. It holds no credential: the model's id (`model`, as 
 the service's address (`endpoint`; the running service's own is read from `~/.foundry/daemon.json`), are the account.
 
 ```sh
-canoa accounts add local --harness claude --method foundry-local --input model=qwen3-14b-generic-gpu:2
+canoa accounts add local --provider foundry_accounts --method foundry-local --input model=qwen3-14b-generic-gpu:2
 ```
 
 - **Loading a model is the person's.** Load it first, from the Store's Foundry models page (Foundry Local itself is in the
