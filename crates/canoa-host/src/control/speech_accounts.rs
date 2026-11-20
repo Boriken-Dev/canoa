@@ -129,7 +129,7 @@ fn model_api(kind: &AccountKindInfo) -> Option<&EndpointSlot> {
 
 /// Whether `kind` is a key for `service`: it provides the service's standard and its model API starts from the service's address.
 fn is_key_for(service: &AccountSpeechService, kind: &AccountKindInfo) -> bool {
-    kind.provides.iter().any(|each| *each == service.standard)
+    kind.provides.contains(&service.standard)
         && model_api(kind)
             .and_then(|slot| slot.default.as_deref())
             .is_some_and(|address| same(address, &service.address))

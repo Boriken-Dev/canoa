@@ -111,7 +111,7 @@ struct Home {
 }
 
 /// Puts the credential `credential` of the account `account` in the account store of the home `root`.
-fn keep_credential(root: &PathBuf, account: &str, credential: &str, key: &str) {
+fn keep_credential(root: &std::path::Path, account: &str, credential: &str, key: &str) {
     let files = crate::config::Config::from_str_in(
         "[secrets]
 accounts = \"file\"
@@ -795,19 +795,19 @@ fn talk_stores(name: &str) -> (Stores, Arc<Programs>, PathBuf) {
         standin: echo_standin(),
         archive: false,
     };
-    let mut options = Options::default();
-    options.home = Some(home.clone());
-    options.watch_registry = false;
-    options.allow_elevated = true;
-    options.settle = Duration::from_millis(100);
-    options.environment = {
-        let mut env = coqui_acp_api::Environment::new();
-        for name in ["PATH", "Path", "SystemRoot"] {
-            if let Ok(value) = std::env::var(name) {
-                env.insert(name, value);
-            }
+    let mut environment = coqui_acp_api::Environment::new();
+    for name in ["PATH", "Path", "SystemRoot"] {
+        if let Ok(value) = std::env::var(name) {
+            environment.insert(name, value);
         }
-        env
+    }
+    let options = Options {
+        home: Some(home.clone()),
+        watch_registry: false,
+        allow_elevated: true,
+        settle: Duration::from_millis(100),
+        environment,
+        ..Options::default()
     };
     let programs = Arc::new(
         Programs::new(
