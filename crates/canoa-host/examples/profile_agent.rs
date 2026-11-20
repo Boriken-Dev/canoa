@@ -1,7 +1,8 @@
 //! A scripted ACP agent on its standard streams for the host's profile tests. It says it takes a system prompt and more
 //! directories; `session/new` starts each stdio MCP server it is given, calls that server's `probe` tool, and answers with
 //! the system prompt's text, each tool's answer, the SHA-256 of `TOKEN` in its own environment, the directories and
-//! whether `_meta` came, its own arguments and `GROK_SANDBOX`. It never answers another variable's value.
+//! whether `_meta` came, its own arguments, `GROK_SANDBOX` and the variables that say who the session is
+//! (`session_env`). It never answers the value of another variable.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
@@ -82,6 +83,24 @@ fn probe(server: &Value) -> String {
     said
 }
 
+/// The variables that say who the session is and which overlays it has (`AGENT`, `AGENTS_*`, `AOS_*`, `*_OVERLAY_ROOT`,
+/// `*_OVERLAY_STATE`) and the ones `PROFILE_AGENT_ENV` names, comma-separated, with their values.
+fn session_env() -> BTreeMap<String, String> {
+    let asked = std::env::var("PROFILE_AGENT_ENV").unwrap_or_default();
+    std::env::vars()
+        .filter(|(name, _)| {
+            let upper = name.to_ascii_uppercase();
+            upper == "AGENT"
+                || upper.starts_with("AGENTS_")
+                || upper.starts_with("AOS_")
+                || upper.ends_with("_OVERLAY_ROOT")
+                || upper.ends_with("_OVERLAY_STATE")
+                || asked.split(',').any(|each| each.eq_ignore_ascii_case(name))
+        })
+        .map(|(name, value)| (name.to_ascii_uppercase(), value))
+        .collect()
+}
+
 fn main() {
     let mut stdout = std::io::stdout().lock();
     let mut send = |message: Value| {
@@ -136,6 +155,7 @@ fn main() {
                     "meta_value": params.get("_meta").cloned().unwrap_or(Value::Null),
                     "argv": std::env::args().skip(1).collect::<Vec<_>>(),
                     "grok_sandbox": std::env::var("GROK_SANDBOX").ok(),
+                    "session_env": session_env(),
                 })
             }
             "session/prompt" => {

@@ -590,6 +590,18 @@ impl Harness {
         account: Option<&Held>,
         lifetime: CacheLifetime,
     ) -> Connection {
+        self.connection_as(profile, &[], account, lifetime)
+    }
+
+    /// [`Self::connection`] for a session. One with no profile is given `identity`, the variables that say who the session is,
+    /// for its program's own tools to read, as a profile's connection's environment carries them.
+    pub(crate) fn connection_as(
+        &self,
+        profile: Option<(Environment, &Path)>,
+        identity: &[(String, String)],
+        account: Option<&Held>,
+        lifetime: CacheLifetime,
+    ) -> Connection {
         let mut request = StartRequest::builder();
         for root in &self.roots {
             request = request.working_root(root.clone());
@@ -612,8 +624,14 @@ impl Harness {
                 Arc::clone(self.profiled.as_ref().unwrap_or(&self.plain))
             }
             None => {
-                if !self.shell_env.is_empty() {
-                    request = request.environment(Environment::from_iter(self.shell_env.clone()));
+                let mut environment = Environment::from_iter(self.shell_env.clone());
+                for (name, value) in identity {
+                    if environment.get(name).is_none() {
+                        environment.insert(name.clone(), value.clone());
+                    }
+                }
+                if !environment.is_empty() {
+                    request = request.environment(environment);
                 }
                 Arc::clone(&self.plain)
             }

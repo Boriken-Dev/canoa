@@ -29,6 +29,15 @@ pub(crate) fn launch_line(env: &[(String, Secret)], args: &[String]) -> Vec<u8> 
     serde_json::to_vec(&line).unwrap_or_default()
 }
 
+/// [`launch_line`] for variables that name no secret, with no arguments: what an agent with no profile is given.
+pub(crate) fn plain_launch_line(env: &[(String, String)]) -> Vec<u8> {
+    let pairs: Vec<Value> = env
+        .iter()
+        .map(|(name, value)| json!([name, value]))
+        .collect();
+    serde_json::to_vec(&json!({ LAUNCH_KEY: 1, "env": pairs })).unwrap_or_default()
+}
+
 /// `program` as this process finds it, when the environment the program is about to be given sets `PATH`: a bare name is
 /// looked for on `own_path` (this process's own, with `pathext` on Windows), not on the `PATH` it is given. An overlay's
 /// `bin/` goes first on the agent's `PATH`, and never decides which program the agent is. A name with a directory, or one

@@ -232,6 +232,18 @@ impl Host {
             std::fs::write(&path, config).expect("canoa.cfg is written");
             command.arg("--config").arg(&path);
         }
+        // The variables that say who a session is come from the host, never from the shell that runs the tests.
+        for name in std::env::vars_os().filter_map(|(name, _)| name.into_string().ok()) {
+            let upper = name.to_ascii_uppercase();
+            if upper == "AGENT"
+                || upper.starts_with("AGENTS_")
+                || upper.starts_with("AOS_")
+                || upper.ends_with("_OVERLAY_ROOT")
+                || upper.ends_with("_OVERLAY_STATE")
+            {
+                command.env_remove(&name);
+            }
+        }
         let mut child = command
             .args(args)
             .args(["--method", method().name()])

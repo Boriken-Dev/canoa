@@ -1547,6 +1547,7 @@ pub(crate) use hosted::forward_hook;
 pub use hosted::{APPROVE_META, APPROVE_METHOD, OVERLAYS_META, PRESET_META, PROFILE_META};
 pub use items::ItemSet;
 pub use launch::launch;
+pub(crate) use launch::plain_launch_line;
 #[cfg(unix)]
 pub(crate) use launch::{found_on_own_path, sets_path};
 pub(crate) use needs::{Finder, Line as NeedLine, of_installed};

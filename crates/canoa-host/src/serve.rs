@@ -50,7 +50,7 @@ use crate::kind;
 use crate::local::{self, Link};
 use crate::pipe;
 use crate::profile::hosted::{self, Connection, Hosted, Offer, Starting};
-use crate::profile::{Who, account_words};
+use crate::profile::{Session, Who, account_words, plain_launch_line};
 use crate::provider::HostLine;
 use crate::scope::{Scope, Scoped};
 use crate::secrets::{self, Layer, Raw};
@@ -570,6 +570,8 @@ struct Shared {
     /// Set by [`Stopper::stop`]: every listener and link ends.
     stopped: Arc<AtomicBool>,
     program_args: Vec<OsString>,
+    /// The program `canoa launch` is run through, which gives an agent its environment on its first line of input.
+    launcher: OsString,
     /// A host run for a portal: the only user a connection on a socket may be from.
     portal_uid: Option<u32>,
     /// The ledger and the rest of what belongs to no entry.
@@ -2028,6 +2030,7 @@ impl Serving {
                 ending: Mutex::new(()),
                 stopped: Arc::clone(&stopped),
                 program_args: options.program_args.clone(),
+                launcher: options.provider_program.as_os_str().to_owned(),
                 portal_uid: options.portal.as_ref().map(|sockets| sockets.uid),
                 control: Arc::new({
                     let kept = control::Control::open(
@@ -2998,6 +3001,16 @@ fn give_agent_flow<C: Channel>(
             account_words(kind, provides, harness_id, &makers)
         });
     let version = hosted::harness_version(provider);
+    let who = Who {
+        harness: harness_id,
+        version: version.as_deref(),
+        account: account.as_ref().map(|(label, ..)| label.as_str()),
+        account_kind,
+        account_provider,
+        // A task another agent started runs as its delegate.
+        role: context.is_some().then_some("delegate"),
+        ..Who::default()
+    };
     let connection = match offer {
         Some(offer) => match prepare(
             served,
@@ -3008,16 +3021,7 @@ fn give_agent_flow<C: Channel>(
             // Only this process's own link is asked to approve: a key reaches the configuration's behaviour.
             *peer == shared.method.peer_id(),
             Starting {
-                who: Who {
-                    harness: harness_id,
-                    version: version.as_deref(),
-                    account: account.as_ref().map(|(label, ..)| label.as_str()),
-                    account_kind,
-                    account_provider,
-                    // A task another agent started runs as its delegate.
-                    role: context.is_some().then_some("delegate"),
-                    ..Who::default()
-                },
+                who,
                 host: hosted::host_variables(provider),
                 account: match &agent {
                     Agent::Harness(harness) => harness.account_environment(first, any_account),
@@ -3029,6 +3033,14 @@ fn give_agent_flow<C: Channel>(
             None => return,
         },
         None => None,
+    };
+    // An entry with no profile still tells its agent who the session is, which is all its environment holds.
+    let identity: Vec<(String, String)> = if offer.is_none() {
+        Session::new(who, Vec::new(), &|name| std::env::var(name).ok())
+            .identity()
+            .to_vec()
+    } else {
+        Vec::new()
     };
     // A session that was given the store tools is told when to use them, by a skill that goes with it.
     let connection = connection.map(|connection| {
@@ -3092,20 +3104,31 @@ fn give_agent_flow<C: Channel>(
                     store.as_ref(),
                     kb.as_ref(),
                     tools.as_ref(),
+                    &identity,
                 ),
             );
         }
     };
     let (Some(offer), Some(connection)) = (offer, connection) else {
+        // The agent's environment reaches it on `launch`'s first line, as a profile's does.
+        let mut launched = shared.program_args.clone();
+        launched.extend([
+            OsString::from("launch"),
+            OsString::from("--"),
+            program.clone(),
+        ]);
+        launched.extend(args.iter().cloned());
         // Nothing is logged once the host is stopping: its standard error may be a pipe nobody reads.
-        let (key, agent) = match shared.start(program, args) {
+        let (key, agent) = match shared.start(&shared.launcher, &launched) {
             Ok(Some(started)) => started,
             Ok(None) => return,
             Err(error) => {
                 return tracing::warn!(entry = served.name, "the agent could not start: {error}");
             }
         };
-        let scoped = Scoped::new(channel, scope).agent(agent.pid());
+        let scoped = Scoped::new(channel, scope)
+            .agent(agent.pid())
+            .launching(plain_launch_line(&identity));
         let end = relay(
             &ToolsLayer::new(
                 &KbLayer::new(
@@ -3635,6 +3658,7 @@ type Joined<'a> = (
     Option<&'a Arc<store_mcp::Link>>,
     Option<&'a Arc<kb_mcp::Link>>,
     Option<&'a Arc<client_tools::Link>>,
+    &'a [(String, String)],
 );
 
 /// Answers the `initialize` in `first` with `-32602` and `why`, and says in the log that the connection was turned away.
@@ -3661,7 +3685,7 @@ fn give_harness<C: Channel>(
     (peer, first, any_account, pool): (&PeerId, &[u8], bool, Option<&str>),
     harness: &kind::Harness,
     scope: &Scope,
-    (connection, conn, link, store, kb, tools): Joined<'_>,
+    (connection, conn, link, store, kb, tools, identity): Joined<'_>,
 ) {
     let turn_away = |why: String| turn_away(channel, first, (&served.name, peer), why);
     let lifetime = match harness.lifetime_of(first) {
@@ -3682,7 +3706,7 @@ fn give_harness<C: Channel>(
         Ok(Some((key, ()))) => key,
         Ok(None) | Err(_) => return,
     };
-    let started = harness.connection(
+    let started = harness.connection_as(
         connection.map(|connection| {
             let environment = connection
                 .env()
@@ -3691,6 +3715,7 @@ fn give_harness<C: Channel>(
                 .collect();
             (environment, connection.skills())
         }),
+        identity,
         account.as_ref(),
         lifetime,
     );

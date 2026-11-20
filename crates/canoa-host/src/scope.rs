@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::Instant;
 
@@ -383,9 +384,18 @@ pub(crate) struct Scoped<'a, C: Channel + ?Sized> {
     sites: Sites,
     /// An unreadable line has been logged.
     noted: AtomicBool,
+    /// The line `canoa launch` reads before the client's first message, when the agent is started through it.
+    launch: Mutex<Option<Vec<u8>>>,
 }
 
 impl<'a, C: Channel + ?Sized> Scoped<'a, C> {
+    /// The agent is started through `canoa launch`, which reads `line` first: the environment it is given.
+    #[must_use]
+    pub(crate) fn launching(self, line: Vec<u8>) -> Self {
+        *self.launch.lock().unwrap_or_else(PoisonError::into_inner) = Some(line);
+        self
+    }
+
     /// This channel serves the agent running as process `pid`.
     #[must_use]
     pub(crate) fn agent(mut self, pid: u32) -> Self {
@@ -400,6 +410,7 @@ impl<'a, C: Channel + ?Sized> Scoped<'a, C> {
             splice: scope.splice(),
             sites: scope.sites(),
             noted: AtomicBool::new(false),
+            launch: Mutex::new(None),
         }
     }
 
@@ -715,6 +726,14 @@ impl<C: Channel + ?Sized> Channel for Scoped<'_, C> {
     /// A refused message reads as a timeout, after which the channel is still usable, so a caller polling for its own
     /// reasons is never held by a peer that only sends what is refused.
     fn receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, Failure> {
+        let line = self
+            .launch
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if line.is_some() {
+            return Ok(line);
+        }
         self.splice
             .tick(|sent| self.inner.send(&self.scope.stamp(sent)));
         let Some(message) = self.inner.receive(timeout)? else {
