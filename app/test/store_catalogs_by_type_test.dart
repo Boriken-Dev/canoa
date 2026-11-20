@@ -386,6 +386,36 @@ named = { provider = "read", source = "https://example.invalid/b.git@main#c.toml
       expect(stored.catalogSpecs('skills').keys, ['mine']);
     });
 
+    testWidgets('with no catalog the first-run form offers the sources the host lists, and a program makes the first catalog', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 1800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      stored = CanoaConfig.parse('[store.overlays.catalogs]\nboriken = false\n');
+      controller = LoadoutController(
+        config: stored,
+        home: null,
+        save: (changed) async => stored = changed,
+        catalogTypes: () async => catalogTypesFromAnswer(_answer(stored)),
+      );
+      addTearDown(controller.dispose);
+      await controller.loadTypes();
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child: NoCatalogs(controller: controller)))));
+      await tester.pumpAndSettle();
+      expect(stored.catalogSpecs('overlays'), isEmpty);
+      expect(find.byKey(const Key('store-source-provider')), findsOneWidget, reason: 'the host lists more than the read form');
+
+      await tester.tap(find.byKey(const Key('store-source-provider')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Run a program').last);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('store-catalog-source')), findsNothing, reason: 'the read form is gone');
+      await tester.enterText(find.byKey(const Key('store-command-field-command')), 'python gen.py');
+      await tester.tap(find.byKey(const Key('store-add-catalog')));
+      await tester.pumpAndSettle();
+      final made = stored.catalogSpecs('overlays')['command']!;
+      expect(made.provider, 'command');
+      expect(made.fields['command'], ['python gen.py']);
+    });
+
     testWidgets('removing one takes it from its type only, and a default is written as false', (tester) async {
       await open(tester, 'mcps');
       await tester.tap(find.byKey(const Key('store-remove-catalog-corp')));

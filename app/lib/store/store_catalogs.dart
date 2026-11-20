@@ -369,53 +369,6 @@ class CatalogTile extends StatelessWidget {
   }
 }
 
-/// The label and source fields and the button that adds a catalog.
-class CatalogAddForm extends StatefulWidget {
-  const CatalogAddForm({super.key, required this.controller});
-
-  final LoadoutController controller;
-
-  @override
-  State<CatalogAddForm> createState() => _CatalogAddFormState();
-}
-
-class _CatalogAddFormState extends State<CatalogAddForm> {
-  final label = TextEditingController();
-  final spec = TextEditingController();
-
-  @override
-  void dispose() {
-    label.dispose();
-    spec.dispose();
-    super.dispose();
-  }
-
-  Future<void> _add() async {
-    await widget.controller.addCatalog(label.text, spec.text);
-    label.clear();
-    spec.clear();
-  }
-
-  @override
-  Widget build(BuildContext context) => Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.end, children: [
-    SizedBox(
-      width: 160,
-      child: TextField(key: const Key('store-catalog-label'), controller: label,
-          decoration: const InputDecoration(labelText: 'Label, optional')),
-    ),
-    SizedBox(
-      width: 420,
-      child: TextField(key: const Key('store-catalog-source'), controller: spec,
-          decoration: const InputDecoration(labelText: 'Source', hintText: 'https://github.com/ana/overlays.git@main#catalog.toml')),
-    ),
-    FilledButton(
-      key: const Key('store-add-catalog'),
-      onPressed: widget.controller.busy != null ? null : () => unawaited(_add()),
-      child: const Text('Add catalog'),
-    ),
-  ]);
-}
-
 /// What a person with no catalog sees: where to find some, and how to add one, never a bare repository field.
 class NoCatalogs extends StatelessWidget {
   const NoCatalogs({super.key, required this.controller});
@@ -452,7 +405,7 @@ class NoCatalogs extends StatelessWidget {
       const SizedBox(height: 4),
       const Text('A git repository, a branch or tag, and the catalog file in it: https://github.com/ana/overlays.git@main#catalog.toml'),
       const SizedBox(height: 8),
-      CatalogAddForm(controller: c),
+      AddCatalogForm(controller: c, type: 'overlays', words: c.typeOf('overlays')?.words ?? CatalogWords.generic),
     ]);
   }
 }
