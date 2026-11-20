@@ -3,6 +3,7 @@
 //! `SaveOnly`; no request here sends), and moved, flagged, marked and categorized with `MoveItem` and `UpdateItem`. The server is
 //! named by the account or found by Autodiscover from the account's address.
 
+mod hosts;
 mod parse;
 mod request;
 mod transport;
@@ -12,6 +13,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use canoa::network::Network;
 
+use self::hosts::Hosts;
 use self::request::{FolderRef, well_known};
 pub(crate) use self::transport::Auth;
 use self::transport::Transport;
@@ -89,6 +91,7 @@ impl Ews {
             }
         };
         let body = request::autodiscover(email);
+        let trusted = Hosts::of(email, self.settings.autodiscover.as_deref());
         let mut last = None;
         for candidate in candidates {
             let mut url = candidate;
@@ -108,10 +111,21 @@ impl Ews {
                     }
                 };
                 match parse::ews_url(&reply.body) {
-                    Ok(Some(found)) => match found.strip_prefix("redirect:") {
-                        Some(next) => url = next.to_owned(),
-                        None => return Ok(found),
-                    },
+                    Ok(Some(found)) => {
+                        let (next, redirect) = match found.strip_prefix("redirect:") {
+                            Some(next) => (next.to_owned(), true),
+                            None => (found, false),
+                        };
+                        // The reply is the server's word: the sign-in goes only where the account's own names say.
+                        if let Err(error) = trusted.admit(&next) {
+                            last = Some(error);
+                            break;
+                        }
+                        if !redirect {
+                            return Ok(next);
+                        }
+                        url = next;
+                    }
                     Ok(None) => {
                         last = Some(MailError::Backend(format!("{url} names no EWS address")));
                         break;

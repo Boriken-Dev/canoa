@@ -736,3 +736,71 @@ fn an_unreachable_server_is_unreachable_not_a_panic() {
         .expect_err("down");
     assert!(matches!(error, MailError::Unreachable(_)), "{error:?}");
 }
+
+/// The user name `basic` signs in as.
+const USER: &str = "EXAMPLE\\me";
+
+/// An Autodiscover answer that names `url` as the EWS address.
+fn names_ews_address(url: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\"?><Autodiscover xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006\">\
+         <Response xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a\"><Account>\
+         <AccountType>email</AccountType><Action>settings</Action>\
+         <Protocol><Type>EXPR</Type><EwsUrl>{url}</EwsUrl></Protocol></Account></Response></Autodiscover>"
+    )
+}
+
+/// An Autodiscover answer that sends the asker to `url`.
+fn redirects_to(url: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\"?><Autodiscover xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006\">\
+         <Response xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a\"><Account>\
+         <Action>redirectUrl</Action><RedirectUrl>{url}</RedirectUrl></Account></Response></Autodiscover>"
+    )
+}
+
+#[test]
+fn autodiscover_sends_the_credential_only_to_servers_the_account_names() {
+    let asked = Standin::start(Mailbox::sample(), Some((USER, "fake-password")));
+    // Another server on this computer, which the account names nowhere: reached as `localhost`, not as the address the account gave.
+    let other = Standin::start(Mailbox::sample(), Some((USER, "fake-password")));
+    let other_server = other.server().replace("127.0.0.1", "localhost");
+    let other_autodiscover = other.autodiscover().replace("127.0.0.1", "localhost");
+
+    for answer in [
+        names_ews_address(&other_server),
+        redirects_to(&other_autodiscover),
+    ] {
+        asked.queue_autodiscover(answer);
+        let mut named = settings(None, basic("fake-password"));
+        named.autodiscover = Some(asked.autodiscover());
+        let error = Ews::new(named, direct())
+            .folders()
+            .expect_err("a server the account does not name");
+        assert!(
+            error.to_string().contains("localhost") && error.to_string().contains("`server`"),
+            "{error}"
+        );
+        assert!(
+            other.log().is_empty(),
+            "the credential reached a server the account does not name: {:?}",
+            other.log()
+        );
+    }
+}
+
+#[test]
+fn autodiscover_follows_a_redirect_to_a_server_the_account_names() {
+    let standin = Standin::start(Mailbox::sample(), Some((USER, "fake-password")));
+    standin.queue_autodiscover(redirects_to(&format!("{}?again", standin.autodiscover())));
+    let mut named = settings(None, basic("fake-password"));
+    named.autodiscover = Some(standin.autodiscover());
+    let ews = Ews::new(named, direct());
+    assert_eq!(ews.folders().expect("found").len(), 7);
+    let operations = standin.operations();
+    assert_eq!(
+        operations.iter().filter(|op| *op == "Autodiscover").count(),
+        2,
+        "the redirect was followed: {operations:?}"
+    );
+}

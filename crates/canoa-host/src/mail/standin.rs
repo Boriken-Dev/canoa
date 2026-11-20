@@ -250,6 +250,8 @@ struct Shared {
     mailbox: Mutex<Mailbox>,
     log: Mutex<Vec<Logged>>,
     sent: Mutex<Vec<String>>,
+    /// Autodiscover answers given, one each, before the stand-in's own.
+    autodiscover_replies: Mutex<Vec<String>>,
     demand: Demand,
     /// The accounts a security-package exchange authenticated.
     #[cfg_attr(
@@ -330,6 +332,7 @@ impl Standin {
             mailbox: Mutex::new(mailbox),
             log: Mutex::new(Vec::new()),
             sent: Mutex::new(Vec::new()),
+            autodiscover_replies: Mutex::new(Vec::new()),
             demand,
             users: Mutex::new(Vec::new()),
             connections: AtomicUsize::new(0),
@@ -363,6 +366,11 @@ impl Standin {
 
     pub(crate) fn autodiscover(&self) -> String {
         format!("http://{}/autodiscover/autodiscover.xml", self.shared.addr)
+    }
+
+    /// Answers the next Autodiscover request with `reply` instead of the stand-in's own answer.
+    pub(crate) fn queue_autodiscover(&self, reply: String) {
+        lock(&self.shared.autodiscover_replies).push(reply);
     }
 
     pub(crate) fn mailbox(&self) -> Mailbox {
@@ -672,6 +680,12 @@ fn serve_operation(
 }
 
 fn autodiscover_answer(shared: &Shared, tree: &Element) -> String {
+    {
+        let mut queued = lock(&shared.autodiscover_replies);
+        if !queued.is_empty() {
+            return queued.remove(0);
+        }
+    }
     let email = tree
         .descendants("EMailAddress")
         .first()
