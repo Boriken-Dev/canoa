@@ -10,7 +10,9 @@ import '../theme/look.dart';
 import '../shell/panel_tabs.dart' show PanelShows, PanelTabKind;
 import '../shell/shown.dart';
 import 'files_surface.dart' show FilesSurface;
+import 'terminal_clipboard.dart';
 import 'terminal_controller.dart';
+import 'terminal_keys.dart';
 
 /// What a conversation's host offers of a shell.
 sealed class TerminalAccess {
@@ -35,12 +37,15 @@ final class TerminalRefused extends TerminalAccess {
 /// them. Hiding it or moving it to the other panel leaves the shells running; closing the surface ends them. Nothing a shell prints
 /// reaches the agent: the person attaches a selection or the last output to their own message.
 class TerminalSurface extends WorkSurface {
-  const TerminalSurface(this.accessFor, {this.kinds});
+  const TerminalSurface(this.accessFor, {this.kinds, this.clipboard = const SystemTerminalClipboard()});
 
   static const surfaceId = 'terminal';
 
   /// The kinds of terminal tab the host lists (an extension's names a shell of its own); the host's own is the surface itself.
   final List<PanelTabKind> Function()? kinds;
+
+  /// The clipboard the shells copy to and paste from.
+  final TerminalClipboard clipboard;
 
   /// What the host [session] runs on offers; null when it offers nothing to this app and the surface is not listed.
   final TerminalAccess? Function(ChatSession session) accessFor;
@@ -64,7 +69,7 @@ class TerminalSurface extends WorkSurface {
   TerminalWorkspace? workspaceFor(SurfaceController controller, ChatSession session, {String? firstShell}) {
     if (controller.data[_key] case final TerminalWorkspace made) return made;
     if (accessFor(session) case TerminalOnHost(:final host)) {
-      final made = TerminalWorkspace(host: host, cwd: FilesSurface.workspaceOf(session))..newTab(shell: firstShell);
+      final made = TerminalWorkspace(host: host, cwd: FilesSurface.workspaceOf(session), clipboard: clipboard)..newTab(shell: firstShell);
       controller.data[_key] = made;
       controller.onRelease(made.release);
       return made;
@@ -102,6 +107,10 @@ class TerminalSurface extends WorkSurface {
     return [
       SurfaceAction(id: 'split', label: 'Split: a second shell beside this one', enabled: tab.panes.length < 2 && !workspace.full, run: (_) => workspace.split(tab)),
       SurfaceAction(id: 'rename', label: 'Rename the tab', run: (context) => unawaited(renameTerminalTab(context, workspace, tab))),
+      if (pane != null) ...[
+        SurfaceAction(id: 'copy', label: 'Copy the selected text', enabled: pane.selection != null, run: (context) => unawaited(copyFromTerminal(context, pane))),
+        SurfaceAction(id: 'paste', label: 'Paste into the shell', run: (context) => unawaited(pasteIntoTerminal(context, pane))),
+      ],
       if (attach != null && pane != null) ...[
         SurfaceAction(
           id: 'attach selection',
@@ -311,6 +320,27 @@ class _TerminalPanelState extends State<TerminalPanel> {
               onSelected: (_) => unawaited(_rename(context, active)),
               itemBuilder: (_) => const [PopupMenuItem(key: ValueKey('terminal rename'), value: 'rename', child: Text('Rename the tab'))],
             ),
+          if (pane != null) ...[
+            ListenableBuilder(
+              listenable: pane.view,
+              builder: (context, _) => IconButton(
+                key: const ValueKey('terminal copy'),
+                tooltip: 'Copy the selected text',
+                visualDensity: VisualDensity.compact,
+                iconSize: 18,
+                icon: const Icon(Icons.content_copy_outlined),
+                onPressed: pane.selection == null ? null : () => unawaited(copyFromTerminal(context, pane)),
+              ),
+            ),
+            IconButton(
+              key: const ValueKey('terminal paste'),
+              tooltip: 'Paste into the shell',
+              visualDensity: VisualDensity.compact,
+              iconSize: 18,
+              icon: const Icon(Icons.content_paste_outlined),
+              onPressed: () => unawaited(pasteIntoTerminal(context, pane)),
+            ),
+          ],
           if (widget.onAttachText != null && pane != null) ...[
             ListenableBuilder(
               listenable: pane.view,
@@ -378,14 +408,80 @@ Future<void> renameTerminalTab(BuildContext context, TerminalWorkspace workspace
   if (name != null) workspace.rename(tab, name);
 }
 
-class _Screen extends StatelessWidget {
+/// Says [text] where the person looks, when there is somewhere to say it.
+void _tell(BuildContext context, String text) => ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(text)));
+
+/// Copies what is selected in [pane]; says why when the platform refused.
+Future<void> copyFromTerminal(BuildContext context, TerminalPane pane) async {
+  try {
+    await pane.copy();
+  } on ClipboardRefused catch (refused) {
+    if (context.mounted) _tell(context, refused.message);
+  }
+}
+
+/// Pastes the clipboard into [pane] as the menu's Paste does; says why when the platform refused or the clipboard holds no text.
+Future<void> pasteIntoTerminal(BuildContext context, TerminalPane pane) async {
+  final problem = await pane.pasteClipboard();
+  if (problem != null && context.mounted) _tell(context, problem);
+}
+
+class _Screen extends StatefulWidget {
   const _Screen({super.key, required this.pane, required this.onFocus, required this.onClose});
 
   final TerminalPane pane;
   final VoidCallback onFocus;
   final VoidCallback onClose;
 
+  @override
+  State<_Screen> createState() => _ScreenState();
+}
+
+class _ScreenState extends State<_Screen> {
   static const _theme = TerminalThemes.defaultTheme;
+
+  TerminalPane get pane => widget.pane;
+  late final VoidCallback _stopListening;
+
+  @override
+  void initState() {
+    super.initState();
+    // A paste the platform delivers itself (a browser's paste event) goes to the shell that has the keyboard, and only to it.
+    _stopListening = pane.clipboard.onPaste((text) {
+      if (!pane.focusNode.hasPrimaryFocus) return false;
+      pane.paste(text);
+      pane.view.clearSelection();
+      return true;
+    });
+  }
+
+  @override
+  void dispose() {
+    _stopListening();
+    super.dispose();
+  }
+
+  Future<void> _menu(BuildContext context, Offset at) async {
+    final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(at & Size.zero, Offset.zero & overlay.size),
+      items: [
+        PopupMenuItem(key: const ValueKey('terminal context copy'), value: 'copy', enabled: pane.selection != null, child: const Text('Copy')),
+        const PopupMenuItem(key: ValueKey('terminal context paste'), value: 'paste', child: Text('Paste')),
+        const PopupMenuItem(key: ValueKey('terminal context select all'), value: 'all', child: Text('Select all')),
+      ],
+    );
+    if (!context.mounted) return;
+    switch (choice) {
+      case 'copy':
+        await copyFromTerminal(context, pane);
+      case 'paste':
+        await pasteIntoTerminal(context, pane);
+      case 'all':
+        pane.selectAll();
+    }
+  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -403,7 +499,7 @@ class _Screen extends StatelessWidget {
         child: Column(children: [
           Expanded(
             child: Listener(
-              onPointerDown: (_) => onFocus(),
+              onPointerDown: (_) => widget.onFocus(),
               child: TerminalView(
                 pane.terminal,
                 key: ValueKey('terminal view ${pane.hashCode}'),
@@ -412,6 +508,13 @@ class _Screen extends StatelessWidget {
                 padding: const EdgeInsets.all(6),
                 theme: _theme,
                 textStyle: terminalTextStyle,
+                // The clipboard keys are `terminalClipboardKey`'s; the terminal's own shortcuts, which use the system clipboard
+                // directly and take Ctrl+A from the shell, are left out.
+                shortcuts: const {},
+                onKeyEvent: (_, event) => terminalClipboardKey(event, pane, say: (problem) {
+                  if (mounted) _tell(this.context, problem);
+                }),
+                onSecondaryTapDown: (details, _) => unawaited(_menu(context, details.globalPosition)),
               ),
             ),
           ),
@@ -424,7 +527,7 @@ class _Screen extends StatelessWidget {
                 Expanded(child: Text(note, style: TextStyle(fontSize: 12, color: pane.state == PaneState.failed ? look.danger : const Color(0xFFCCCCCC)))),
                 if (pane.state == PaneState.exited || pane.state == PaneState.failed) ...[
                   TextButton(key: const ValueKey('terminal restart'), onPressed: pane.start, child: const Text('Start again')),
-                  TextButton(key: const ValueKey('terminal close shell'), onPressed: onClose, child: const Text('Close')),
+                  TextButton(key: const ValueKey('terminal close shell'), onPressed: widget.onClose, child: const Text('Close')),
                 ],
               ]),
             ),

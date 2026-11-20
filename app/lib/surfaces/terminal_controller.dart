@@ -8,6 +8,7 @@ import 'package:xterm/xterm.dart';
 import '../desktop/control_client.dart';
 import '../desktop/host_control.dart';
 import '../settings/shell_settings.dart' show HostShell;
+import 'terminal_clipboard.dart';
 
 /// A shell on a host, as the Terminal surface drives it. What it prints arrives on [output] as bytes; what the person types goes
 /// through [write].
@@ -193,7 +194,7 @@ enum PaneState { starting, running, exited, failed }
 /// One shell and the screen that shows it: the emulator, the selection, and the shell on the host. Lives in a tab for as long as
 /// the tab does, whatever panel it is drawn in.
 class TerminalPane extends ChangeNotifier {
-  TerminalPane({required this.host, required this.cwd, this.shell, this.maxLines = 10000}) {
+  TerminalPane({required this.host, required this.cwd, this.shell, this.maxLines = 10000, this.clipboard = const SystemTerminalClipboard()}) {
     terminal = Terminal(maxLines: maxLines);
     view = TerminalController();
     terminal.onOutput = _typed;
@@ -205,6 +206,9 @@ class TerminalPane extends ChangeNotifier {
   }
 
   final TerminalHost host;
+
+  /// The clipboard copy and paste use.
+  final TerminalClipboard clipboard;
 
   /// The folder the shell starts in on its host; null for the host's default.
   final String? cwd;
@@ -321,6 +325,63 @@ class TerminalPane extends ChangeNotifier {
     return text.trim().isEmpty ? null : text;
   }
 
+  /// The text selected on the screen exactly as it is, blanks included; null when nothing is selected.
+  String? get selection {
+    final range = view.selection;
+    if (range == null) return null;
+    final text = terminal.buffer.getText(range);
+    return text.isEmpty ? null : text;
+  }
+
+  /// Puts the selected text on the clipboard; false when nothing is selected. [clear] drops the selection after, as Windows
+  /// Terminal does when Ctrl+C copies, so that the next Ctrl+C interrupts. Throws [ClipboardRefused].
+  Future<bool> copy({bool clear = false}) async {
+    final text = selection;
+    if (text == null) return false;
+    if (clear) view.clearSelection();
+    await clipboard.write(text);
+    return true;
+  }
+
+  /// Selects everything the screen holds.
+  void selectAll() {
+    final buffer = terminal.buffer;
+    view.setSelection(
+      buffer.createAnchor(0, 0),
+      buffer.createAnchor(terminal.viewWidth, buffer.height - 1),
+      mode: SelectionMode.line,
+    );
+  }
+
+  /// Sends [text] to the shell as one paste: line ends become the Enter key's `\r`, and when the shell asked for bracketed paste the
+  /// whole is wrapped in its markers, so it can tell a paste from typing. Before the shell is up it waits, as typing does.
+  void paste(String text) {
+    if (text.isEmpty || (state != PaneState.running && state != PaneState.starting)) return;
+    final bracketed = terminal.bracketedPasteMode && state == PaneState.running;
+    // The end marker inside the text would end the paste early and leave the rest to run as typed.
+    final lines = text.replaceAll(RegExp(r'\r\n|\n'), '\r');
+    final clean = bracketed ? lines.replaceAll(_pasteEnd, '') : lines;
+    if (state == PaneState.starting) {
+      _pending.write(clean);
+    } else {
+      terminal.paste(clean);
+    }
+  }
+
+  static const _pasteEnd = '\x1b[201~';
+
+  /// Pastes the clipboard's text; the problem in words when it could not, or null.
+  Future<String?> pasteClipboard() async {
+    try {
+      final text = await clipboard.read();
+      if (text == null) return 'The clipboard holds no text.';
+      paste(text);
+      return null;
+    } on ClipboardRefused catch (refused) {
+      return refused.message;
+    }
+  }
+
   /// The last [lines] lines the screen holds, with the blank ones at the end dropped; null when it holds nothing.
   String? lastOutput({int lines = 200}) {
     final all = terminal.buffer.getText().split('\n');
@@ -367,10 +428,13 @@ class TerminalTab {
 /// The shells open for one conversation, in tabs. Held by the surface's controller, so hiding the panel or moving the surface to
 /// the other one leaves every shell running with the screen it has.
 class TerminalWorkspace extends ChangeNotifier {
-  TerminalWorkspace({required this.host, required this.cwd, this.shell});
+  TerminalWorkspace({required this.host, required this.cwd, this.shell, this.clipboard = const SystemTerminalClipboard()});
 
   final TerminalHost host;
   final String? cwd;
+
+  /// The clipboard every shell here copies to and pastes from.
+  final TerminalClipboard clipboard;
 
   /// The id of the shell each new tab starts, one the host listed; null for the host's own choice.
   final String? shell;
@@ -400,7 +464,7 @@ class TerminalWorkspace extends ChangeNotifier {
   }
 
   TerminalPane _pane([String? own]) {
-    final pane = TerminalPane(host: host, cwd: cwd, shell: own ?? shell);
+    final pane = TerminalPane(host: host, cwd: cwd, shell: own ?? shell, clipboard: clipboard);
     unawaited(pane.start());
     return pane;
   }
