@@ -1,24 +1,22 @@
 //! What a LiteLLM key has used, read from the proxy's `/key/info`: its spend against its budget, and its request and token limits.
 //!
-//! One bucket covers every model: the budget (`spend` against `max_budget`, in millionths of a dollar, refilling at
-//! `budget_reset_at`), and a bucket each for `rpm_limit` and `tpm_limit` when the key has them. The proxy reports a limit and not what
-//! is left of it, so those two say their limit and their refill and no more. Every field is optional and a missing one is left out,
-//! never guessed.
+//! The proxy's document is made into buckets by `coqui_acp_api::key_usage`: one covers every model (the budget, `spend` against
+//! `max_budget`, with its reset), and a bucket each for `rpm_limit` and `tpm_limit` when the key has them. The request is made
+//! here, through the host's HTTP client, so the proxy is reached the way every other address is.
 #![allow(
     clippy::std_instead_of_core,
     clippy::std_instead_of_alloc,
     reason = "a clock is std's"
 )]
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use canoa::api_gateway::http;
 use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::ProviderError;
-use coqui_acp_api::{AccountUsage, Bucket, Coverage, Refill, Source, Status as BucketStatus, Unit};
+use coqui_acp_api::key_usage::{SOURCE_GATEWAY, gateway_buckets};
+use coqui_acp_api::{AccountUsage, Bucket, Source};
 use serde_json::Value;
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
 /// The id of the budget bucket.
 pub const BUDGET: &str = "budget";
@@ -36,125 +34,10 @@ fn now() -> i64 {
         })
 }
 
-/// A dollar amount in millionths, rounded; a negative or non-finite amount is none.
-fn micro(dollars: f64) -> Option<u64> {
-    (dollars.is_finite() && dollars >= 0.0).then(|| {
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "checked finite and non-negative; a budget beyond u64 millionths is not one"
-        )]
-        let millionths = (dollars * 1_000_000.0).round() as u64;
-        millionths
-    })
-}
-
-/// The seconds a duration like `30d`, `12h`, `90m`, `45s` or `1mo` (LiteLLM's `budget_duration`) names.
-fn duration_of(text: &str) -> Option<Duration> {
-    let text = text.trim();
-    let split = text.find(|c: char| !c.is_ascii_digit())?;
-    let (count, unit) = text.split_at(split);
-    let count: u64 = count.parse().ok()?;
-    let each = match unit {
-        "s" => 1,
-        "m" => 60,
-        "h" => 3_600,
-        "d" => 86_400,
-        "w" => 604_800,
-        "mo" => 30 * 86_400,
-        _ => return None,
-    };
-    Some(Duration::from_secs(count.checked_mul(each)?))
-}
-
-fn whole(info: &Value, key: &str) -> Option<u64> {
-    let found = info.get(key)?;
-    found
-        .as_u64()
-        .or_else(|| {
-            found
-                .as_f64()
-                .filter(|n| n.is_finite() && *n >= 0.0)
-                .map(|n| {
-                    #[allow(
-                        clippy::cast_possible_truncation,
-                        clippy::cast_sign_loss,
-                        reason = "checked finite and non-negative"
-                    )]
-                    let whole = n as u64;
-                    whole
-                })
-        })
-        .filter(|limit| *limit > 0)
-}
-
-fn dollars(info: &Value, key: &str) -> Option<f64> {
-    info.get(key).and_then(Value::as_f64)
-}
-
-fn when(info: &Value, key: &str) -> Option<i64> {
-    let text = info.get(key)?.as_str()?;
-    OffsetDateTime::parse(text, &Rfc3339)
-        .ok()
-        .map(OffsetDateTime::unix_timestamp)
-}
-
 /// The buckets a key's `info` object says, as of `observed` (Unix seconds).
 #[must_use]
 pub fn buckets_of(info: &Value, observed: i64) -> Vec<Bucket> {
-    let mut buckets = Vec::new();
-    let mut budget = Bucket::new(BUDGET);
-    budget.label = Some("Budget".to_owned());
-    budget.models = Coverage::All;
-    budget.unit = Unit::MicroUsd;
-    budget.observed_at = observed;
-    budget.source = Source::Reported;
-    let used = dollars(info, "spend").and_then(micro);
-    let limit = dollars(info, "max_budget").and_then(micro);
-    if used.is_some() || limit.is_some() {
-        budget.used = used;
-        budget.limit = limit;
-        budget.remaining = used
-            .zip(limit)
-            .map(|(used, limit)| limit.saturating_sub(used));
-        let length = info
-            .get("budget_duration")
-            .and_then(Value::as_str)
-            .and_then(duration_of);
-        let resets_at = when(info, "budget_reset_at");
-        budget.refill = if resets_at.is_some() || length.is_some() {
-            Refill::FixedWindow { length, resets_at }
-        } else {
-            Refill::Never
-        };
-        budget.status = match (used, limit) {
-            (Some(used), Some(limit)) if used >= limit => BucketStatus::Exhausted,
-            (_, Some(_)) | (Some(_), None) => BucketStatus::Ok,
-            (None, None) => BucketStatus::Unknown,
-        };
-        buckets.push(budget);
-    }
-    for (id, label, unit, key) in [
-        (RPM, "Requests per minute", Unit::Requests, "rpm_limit"),
-        (TPM, "Tokens per minute", Unit::Tokens, "tpm_limit"),
-    ] {
-        let Some(limit) = whole(info, key) else {
-            continue;
-        };
-        let mut bucket = Bucket::new(id);
-        bucket.label = Some(label.to_owned());
-        bucket.models = Coverage::All;
-        bucket.unit = unit;
-        bucket.limit = Some(limit);
-        bucket.refill = Refill::TokenBucket {
-            amount: limit,
-            per: Duration::from_secs(60),
-            max: limit,
-        };
-        bucket.observed_at = observed;
-        buckets.push(bucket);
-    }
-    buckets
+    gateway_buckets(info, observed)
 }
 
 /// What the key `key` has used at the proxy `base`: its `/key/info`.
@@ -182,7 +65,7 @@ pub fn read(base: &str, key: &str, account: &str) -> Result<AccountUsage, Provid
             }
             let observed = now();
             let mut usage = AccountUsage::new();
-            usage.sources = vec![Source::Reported];
+            usage.sources = vec![Source::Other(SOURCE_GATEWAY.to_owned())];
             usage.observed_at = observed;
             usage.buckets = buckets_of(info, observed);
             usage
@@ -210,6 +93,9 @@ pub fn read(base: &str, key: &str, account: &str) -> Result<AccountUsage, Provid
 
 #[cfg(test)]
 mod tests {
+    use core::time::Duration;
+
+    use coqui_acp_api::{Coverage, Refill, Status as BucketStatus, Unit};
     use serde_json::json;
 
     use super::*;
@@ -222,7 +108,7 @@ mod tests {
             "spend": 12.5, "max_budget": 50.0, "budget_duration": "30d",
             "budget_reset_at": "2027-02-01T00:00:00Z",
         });
-        let buckets = buckets_of(&info, AT);
+        let buckets = buckets_of(&json!({ "info": info }), AT);
         assert_eq!(buckets.len(), 1);
         let budget = &buckets[0];
         assert_eq!(budget.id, BUDGET);
@@ -248,15 +134,6 @@ mod tests {
     }
 
     #[test]
-    fn a_key_with_no_budget_reports_its_spend_and_no_limit() {
-        let buckets = buckets_of(&json!({"spend": 0.0001065, "max_budget": null}), AT);
-        assert_eq!(buckets.len(), 1);
-        assert_eq!((buckets[0].used, buckets[0].limit), (Some(107), None));
-        assert_eq!(buckets[0].status, BucketStatus::Ok);
-        assert!(buckets_of(&json!({"models": ["m"]}), AT).is_empty());
-    }
-
-    #[test]
     fn request_and_token_limits_are_buckets_of_their_own_when_set() {
         let buckets = buckets_of(
             &json!({"spend": 1.0, "rpm_limit": 60, "tpm_limit": null}),
@@ -277,25 +154,13 @@ mod tests {
         let tpm = buckets_of(&json!({"tpm_limit": 100_000}), AT);
         assert_eq!(tpm[0].id, TPM);
         assert_eq!(tpm[0].unit, Unit::Tokens);
-        assert!(buckets_of(&json!({"rpm_limit": 0}), AT).is_empty());
+        assert!(buckets_of(&json!({"models": ["m"]}), AT).is_empty());
     }
 
     #[test]
-    fn a_budget_duration_is_the_proxys_own_words() {
-        for (text, seconds) in [
-            ("30s", 30),
-            ("90m", 5400),
-            ("12h", 43_200),
-            ("1d", 86_400),
-            ("1mo", 2_592_000),
-        ] {
-            assert_eq!(
-                duration_of(text),
-                Some(Duration::from_secs(seconds)),
-                "{text}"
-            );
-        }
-        assert_eq!(duration_of("soon"), None);
-        assert_eq!(duration_of(""), None);
+    fn a_key_with_no_budget_reports_its_spend_and_no_limit() {
+        let buckets = buckets_of(&json!({"spend": 0.0001065, "max_budget": null}), AT);
+        assert_eq!(buckets.len(), 1);
+        assert_eq!((buckets[0].used, buckets[0].limit), (Some(107), None));
     }
 }

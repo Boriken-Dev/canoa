@@ -34,7 +34,7 @@ pub mod sso {
 }
 pub mod usage {
     pub const BUDGET: &str = "budget"; pub const RPM: &str = "rpm"; pub const TPM: &str = "tpm";
-    pub fn buckets_of(info: &Value, observed: i64) -> Vec<Bucket>;       // from a key's `info` object
+    pub fn buckets_of(info: &Value, observed: i64) -> Vec<Bucket>;       // from a key's `info` object: `coqui_acp_api::key_usage::gateway_buckets`
     pub fn read(base: &str, key: &str, account: &str) -> Result<AccountUsage, ProviderError>;   // GET /key/info
 }
 ```
@@ -51,7 +51,7 @@ Two ways in (`LiteLlmAccounts::login`; the address is the method's input, the ke
 ## What it reports
 
 - `models`: `GET <base_url>/v1/models` with the key; the proxy's list for either API (a query carries no standard to tell them apart by). The proxy not answering or refusing the key is an unknown with the reason, never a guess.
-- `usage`: `GET <base_url>/key/info` with the key. A bucket `budget` (`spend` against `max_budget`, millionths of a dollar, every model, `FixedWindow` at `budget_reset_at` for `budget_duration` when the proxy says them, else `Never`; exhausted once spend reaches the budget; with no `max_budget` the spend alone), and a bucket `rpm` and one `tpm` (`Requests`, `Tokens`, the limit, a one-minute `TokenBucket`, status unknown: the proxy reports the limit and not what is left) when `rpm_limit` and `tpm_limit` are set. A 401 is `GONE` (the key expired or was revoked), so the host renews it; a 403, 404 or 405 is "not offered".
+- `usage`: `GET <base_url>/key/info` with the key. The buckets are `coqui_acp_api::key_usage::gateway_buckets`'s, source `gateway`: a bucket `budget` (`spend` against `max_budget`, millionths of a dollar, every model, `FixedWindow` at `budget_reset_at` for `budget_duration` when the proxy says them, else `Never`; exhausted once spend reaches the budget; with no `max_budget` the spend alone, status unknown), and a bucket `rpm` and one `tpm` (`Requests`, `Tokens`, the limit, a one-minute `FixedWindow`, status unknown: the proxy reports the limit and not what is left) when `rpm_limit` and `tpm_limit` are set. The request itself goes through the host's HTTP client. A 401 is `GONE` (the key expired or was revoked), so the host renews it; a 403, 404 or 405 is "not offered".
 - `renew`: for a signed-in key, the refresh grant at `/token`, which the proxy rotates, so the answer holds the next refresh token and when the new key ends; a refused token is `GONE` saying to sign in again. A key someone gave has nothing to renew it with and the report says so.
 - `watch`: not offered, a key at a proxy is in no file a program renews.
 

@@ -361,12 +361,12 @@ fn usage_is_the_keys_budget_as_buckets_and_one_report_of_it_stops_the_account_wh
     proxy.spend(VIRTUAL_KEY, 10.0);
     let spent = usage(grant(&proxy.address, &held)).expect("usage");
     assert_eq!(spent.buckets[0].status, BucketStatus::Exhausted);
-    // A key with no budget reports its spend and no limit.
+    // A key with no budget reports its spend and no limit, and cannot say what is left.
     proxy.budget(None);
     let free = usage(grant(&proxy.address, &held)).expect("usage");
     assert_eq!(
         (free.buckets[0].limit, free.buckets[0].status.clone()),
-        (None, BucketStatus::Ok)
+        (None, BucketStatus::Unknown)
     );
 }
 
