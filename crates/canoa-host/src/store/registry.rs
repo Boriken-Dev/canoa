@@ -6,21 +6,14 @@
     reason = "the registry is the host's"
 )]
 
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use canoa::store::ProgramStore;
 use coqui_acp_api::guatiao::library::Registry;
 
-use super::piper::PiperStore;
 use crate::bundled::{self, Bundle};
-
-coqui_acp_api::guatiao::local_providers!(
-    id = "canoa-built-in-stores",
-    version = env!("CARGO_PKG_VERSION"),
-    providers = [PiperStore]
-);
 
 /// A registry holding the built-in stores and those of the bundled libraries.
 ///
@@ -31,12 +24,6 @@ pub fn built_in() -> Result<Arc<Registry>, String> {
     let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
     bundled::register(&mut registry, bundled::ALL)?;
     bundled::register_included(&mut registry)?;
-    let loading = registry
-        .register_local("canoa-stores", library)
-        .map_err(|error| error.to_string())?;
-    if loading.loaded().is_none() {
-        return Err("the built-in stores were not accepted".to_owned());
-    }
     Ok(Arc::new(registry))
 }
 

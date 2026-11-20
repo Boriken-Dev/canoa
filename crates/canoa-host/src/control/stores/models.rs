@@ -285,6 +285,32 @@ impl Stores {
             .collect()
     }
 
+    /// The types whose installed program reads text aloud, each with the id of the `speech_output` provider of the same library that
+    /// speaks with it.
+    pub(crate) fn voice_services(&self) -> Vec<(String, String)> {
+        self.models
+            .all()
+            .filter_map(|held| Some((held.type_id.clone(), held.info.voice.clone()?)))
+            .collect()
+    }
+
+    /// The settings the type `type_id`'s voice provider is built from, for the copy of its program the host installed or found: none
+    /// when there is no copy, or the provider could not say.
+    pub(crate) fn voice_settings(&self, type_id: &str) -> Option<Value> {
+        let held = self
+            .models
+            .of(type_id)
+            .filter(|held| held.info.voice.is_some())?;
+        let mut query = ServiceQuery::default();
+        query.home = self.home_text();
+        query.program = self.type_program(type_id);
+        query.program.as_ref()?;
+        let report = held
+            .ask(|store, spawner| store.service(query, spawner))
+            .ok()?;
+        crate::forms::json_of(&report.voice?).ok()
+    }
+
     /// The store a type's program is installed as when its speech service is that program: the type's first.
     pub(crate) fn speech_store(&self, type_id: &str) -> Option<String> {
         self.types

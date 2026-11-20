@@ -23,8 +23,7 @@ use std::time::{Duration, Instant};
 use canoa::speech::AudioFormat;
 use canoa::speech::builtin::say_command::{SayInput, SayOutput};
 use canoa::speech::builtin::{
-    CommandSay, CommandSaySettings, EndpointSay, EndpointSaySettings, PiperSettings, PiperSpeech,
-    SystemSettings, SystemSpeech,
+    CommandSay, CommandSaySettings, EndpointSay, EndpointSaySettings, SystemSettings, SystemSpeech,
 };
 use canoa::speech::output::{
     Choice, Leaves, OutputInfo, READ_TIMED_OUT, SayRequest, SpeechOutput, SpeechOutputVtable,
@@ -95,7 +94,6 @@ fn the_committed_schemas_are_what_this_build_describes() {
         ("SayRequest", schema_of::<SayRequest>()),
         ("CommandSaySettings", schema_of::<CommandSaySettings>()),
         ("EndpointSaySettings", schema_of::<EndpointSaySettings>()),
-        ("PiperSettings", schema_of::<PiperSettings>()),
         ("SystemSettings", schema_of::<SystemSettings>()),
     ];
     let document: serde_json::Map<String, Json> = schemas
@@ -373,144 +371,6 @@ fn a_program_that_is_not_listened_to_stops_running_ahead() {
     utterance.stop().expect("stopped");
 }
 
-fn voices_folder(names: &[(&str, &str)]) -> PathBuf {
-    let mut dir = std::env::temp_dir();
-    dir.push(
-        format!(
-            "canoa-piper-{}-{:?}",
-            std::process::id(),
-            thread::current().id()
-        )
-        .replace(['(', ')'], ""),
-    );
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("a folder");
-    for (stem, json) in names {
-        std::fs::write(dir.join(format!("{stem}.onnx")), b"model").expect("model");
-        if !json.is_empty() {
-            std::fs::write(dir.join(format!("{stem}.onnx.json")), json).expect("json");
-        }
-    }
-    dir
-}
-
-const ENGLISH: &str =
-    r#"{"audio":{"sample_rate":16000},"language":{"code":"en_US"},"num_speakers":1}"#;
-const SPANISH: &str =
-    r#"{"audio":{"sample_rate":22050},"language":{"code":"es_MX"},"num_speakers":1}"#;
-const CHOIR: &str = r#"{"audio":{"sample_rate":22050},"language":{"code":"en_GB"},"num_speakers":3,"speaker_id_map":{"ann":0,"bo":1,"cy":2}}"#;
-
-fn piper(dir: &std::path::Path) -> PiperSpeech {
-    PiperSpeech::from(PiperSettings::new(standin(), dir.to_string_lossy()))
-}
-
-#[test]
-fn piper_lists_the_voices_in_its_folder_with_their_language_and_speakers() {
-    let dir = voices_folder(&[
-        ("en_US-ljspeech-medium", ENGLISH),
-        ("es_MX-claude-high", SPANISH),
-        ("en_GB-choir-low", CHOIR),
-        ("no_json-x_low", ""),
-    ]);
-    let provider = piper(&dir);
-    let all = provider
-        .voices(VoiceQuery::default(), spawner())
-        .ok()
-        .expect("listed");
-    let ids: Vec<&str> = all.voices.iter().map(|v| v.id.as_str()).collect();
-    assert_eq!(
-        ids,
-        [
-            "en_GB-choir-low",
-            "en_GB-choir-low#0",
-            "en_GB-choir-low#1",
-            "en_GB-choir-low#2",
-            "en_US-ljspeech-medium",
-            "es_MX-claude-high",
-            "no_json-x_low"
-        ]
-    );
-    let english = &all.voices[4];
-    assert_eq!(english.language.as_deref(), Some("en-US"));
-    assert_eq!(english.description.as_deref(), Some("medium quality"));
-    assert!(all.voices[2].name.contains("bo"));
-    let spanish = provider
-        .voices(VoiceQuery::in_language("es"), spawner())
-        .ok()
-        .expect("listed");
-    assert_eq!(
-        spanish
-            .voices
-            .iter()
-            .map(|v| v.id.as_str())
-            .collect::<Vec<_>>(),
-        ["es_MX-claude-high", "no_json-x_low"]
-    );
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-#[test]
-fn piper_speaks_with_the_voice_speed_and_speaker_asked_at_the_rate_of_its_model() {
-    let dir = voices_folder(&[
-        ("en_US-ljspeech-medium", ENGLISH),
-        ("en_GB-choir-low", CHOIR),
-    ]);
-    let provider = piper(&dir);
-    let mut request = SayRequest::new("Good morning. Good night.");
-    request.voice = Some("en_US-ljspeech-medium".to_owned());
-    request.speed = Some(2.0);
-    let utterance = say(&provider, request);
-    assert_eq!(
-        utterance.format().expect("format"),
-        AudioFormat::pcm(16_000)
-    );
-    assert_eq!(
-        text_of(drain(&utterance)),
-        "[Good morning.|model=en_US-ljspeech-medium|scale=0.500|speaker=0][Good night.|model=en_US-ljspeech-medium|scale=0.500|speaker=0]"
-    );
-    let mut request = SayRequest::new("Hi.");
-    request.voice = Some("en_GB-choir-low#2".to_owned());
-    assert_eq!(
-        text_of(drain(&say(&provider, request))),
-        "[Hi.|model=en_GB-choir-low|scale=1|speaker=2]"
-    );
-    // A voice left out is the first one in the request's language, else the first.
-    let mut request = SayRequest::new("Hi.");
-    request.language = Some("en-GB".to_owned());
-    assert!(text_of(drain(&say(&provider, request))).contains("model=en_GB-choir-low"));
-    assert!(
-        text_of(drain(&say(&provider, SayRequest::new("Hi.")))).contains("model=en_GB-choir-low")
-    );
-
-    let mut request = SayRequest::new("Hi.");
-    request.voice = Some("en_GB-choir-low#9".to_owned());
-    assert!(refused(&provider, request).contains("3 speakers"));
-    let mut request = SayRequest::new("Hi.");
-    request.voice = Some("../escape".to_owned());
-    assert!(refused(&provider, request).contains("no voice"));
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-#[test]
-fn piper_without_its_program_or_voices_says_what_to_do() {
-    let dir = voices_folder(&[]);
-    let provider = piper(&dir);
-    assert!(refused(&provider, SayRequest::new("Hi.")).contains("no voice"));
-    let provider = PiperSpeech::from(PiperSettings::new("", dir.to_string_lossy()));
-    assert!(provider.describe().is_ok());
-    let missing = PiperSpeech::from(PiperSettings::new(standin(), " "));
-    assert!(
-        missing
-            .voices(VoiceQuery::default(), spawner())
-            .err()
-            .expect("refused")
-            .message
-            .to_string()
-            .contains("not set")
-    );
-    let _ = std::fs::remove_dir_all(dir);
-}
-
 /// One request an endpoint stand-in received.
 struct Received {
     head: String,
@@ -663,61 +523,25 @@ fn an_endpoint_that_refuses_says_what_it_answered_and_an_unlisted_choice_is_not_
 }
 
 #[test]
-fn openais_address_lists_its_documented_models_voices_and_styles_and_says_where_the_text_goes() {
-    let mut settings = EndpointSaySettings::new("https://api.openai.com/v1/audio/speech");
-    settings.api_key = Some(Secret::new("sk-test".to_owned()));
-    let provider = EndpointSay::from(settings);
-    let info = provider.describe().expect("described");
-    assert_eq!(
-        info.models
-            .iter()
-            .map(|m| m.id.as_str())
-            .collect::<Vec<_>>(),
-        ["gpt-4o-mini-tts", "tts-1", "tts-1-hd"]
-    );
-    assert_eq!(info.default_model.as_deref(), Some("gpt-4o-mini-tts"));
-    assert_eq!(info.styles.len(), 4);
-    assert_eq!(info.speed, Some(SpeedRange::new(0.25, 4.0)));
-    assert_eq!(info.leaves, Leaves::Yes);
-    assert_eq!(
-        info.endpoint.as_deref(),
-        Some("https://api.openai.com/v1/audio/speech")
-    );
-    let words = info.words.expect("words");
-    assert!(
-        words.contains("api.openai.com") && words.contains("your key"),
-        "{words}"
-    );
-    let voices = provider
-        .voices(VoiceQuery::default(), spawner())
-        .ok()
-        .expect("listed")
-        .voices;
-    assert_eq!(voices.len(), 13);
-    let marin = voices.iter().find(|v| v.id == "marin").expect("marin");
-    assert_eq!(marin.models, ["gpt-4o-mini-tts"]);
-    assert!(
-        voices
-            .iter()
-            .find(|v| v.id == "alloy")
-            .expect("alloy")
-            .models
-            .is_empty()
-    );
-
-    // Another address has no list of its own until the settings give one.
-    let other = EndpointSay::from(EndpointSaySettings::new(
+fn an_address_has_the_lists_the_settings_give_and_none_of_its_own() {
+    for url in [
+        "https://api.openai.com/v1/audio/speech",
         "https://tts.example.org/v1/audio/speech",
-    ));
-    assert!(other.describe().expect("described").models.is_empty());
-    assert!(
-        other
-            .voices(VoiceQuery::default(), spawner())
-            .ok()
-            .expect("listed")
-            .voices
-            .is_empty()
-    );
+    ] {
+        let other = EndpointSay::from(EndpointSaySettings::new(url));
+        let info = other.describe().expect("described");
+        assert!(info.models.is_empty() && info.styles.is_empty(), "{url}");
+        assert_eq!(info.default_model, None);
+        assert!(
+            other
+                .voices(VoiceQuery::default(), spawner())
+                .ok()
+                .expect("listed")
+                .voices
+                .is_empty(),
+            "{url}"
+        );
+    }
 }
 
 /// Windows PowerShell and a desktop voice are what this needs, which a build machine may not have.

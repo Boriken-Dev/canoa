@@ -1,9 +1,17 @@
-//! OpenAI for Canoa: the speech-to-text service the accounts that hold an OpenAI API key can call.
+//! OpenAI for Canoa: the speech services the accounts that hold an OpenAI API key can call: speech-to-text, and its text-to-speech
+//! voices ([`OpenAiVoices`]).
 //!
 //! [`library`] is what a Canoa host loads: an `account_speech` provider that says which accounts those are (a kind that provides the
 //! OpenAI API at OpenAI's own address), where a recording is posted, which credential holds the key and which models transcribe.
 //! The host names none of it. The models and their end dates are OpenAI's, which it changes on its own schedule.
 #![forbid(unsafe_code)]
+
+mod voices;
+
+pub use voices::{
+    OpenAiVoiceSettings, OpenAiVoices, SPEECH, SPEECH_MODELS, SPEECH_PROVIDER, STYLED_MODEL,
+    STYLES, VOICES,
+};
 
 use canoa::speech::account::{
     AccountSpeech, AccountSpeechInfo, AccountSpeechModel, AccountSpeechService,
@@ -67,7 +75,7 @@ impl AccountSpeech for OpenAiSpeech {
 coqui_acp_api::guatiao::local_providers!(
     id = "canoa-openai",
     version = env!("CARGO_PKG_VERSION"),
-    providers = [OpenAiSpeech]
+    providers = [OpenAiSpeech, OpenAiVoices]
 );
 
 #[cfg(test)]
@@ -102,6 +110,11 @@ mod tests {
         assert!(
             registry
                 .offer::<dyn AccountSpeech>("openai_speech")
+                .is_some()
+        );
+        assert!(
+            registry
+                .offer::<dyn canoa::speech::output::SpeechOutput>(SPEECH_PROVIDER)
                 .is_some()
         );
     }

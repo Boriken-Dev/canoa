@@ -1,13 +1,12 @@
 //! The endpoint provider for speech output: an HTTP text-to-speech endpoint, in the shape of the `audio/speech` call that
-//! OpenAI and the servers that copy it answer.
+//! servers copying OpenAI's answer.
 //!
 //! It makes the call: a `POST` of JSON with the `model`, the `input` text, the `voice`, `response_format` `pcm`, and the `speed`
-//! and `instructions` (the style) the request chose; the answer is the audio as raw 16-bit mono samples at the setting's `rate`
-//! (24 kHz for OpenAI), read as it arrives so playing starts before the server has finished.
+//! and `instructions` (the style) the request chose; the answer is the audio as raw 16-bit mono samples at the setting's `rate`,
+//! read as it arrives so playing starts before the server has finished.
 //!
-//! For OpenAI's own address the lists of models, voices and styles are the ones the service documents, until the settings name
-//! others; for any other address they are what the settings say. The text, and the key when one is set, go to the address and
-//! nowhere else.
+//! The lists of models, voices and styles are what the settings say: a library that knows a service's own lists builds this
+//! provider over them. The text, and the key when one is set, go to the address and nowhere else.
 
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -36,33 +35,6 @@ const SPEED: SpeedRange = SpeedRange::new(0.25, 4.0);
 /// The longest a whole answer may take to arrive, in seconds.
 const BODY_SECONDS: u64 = 900;
 
-/// The models OpenAI documents for the call, newest first.
-const OPENAI_MODELS: [(&str, &str); 3] = [
-    ("gpt-4o-mini-tts", "GPT-4o mini TTS"),
-    ("tts-1", "TTS-1"),
-    ("tts-1-hd", "TTS-1 HD"),
-];
-
-/// The voices OpenAI documents. The last four work with `gpt-4o-mini-tts` alone.
-const OPENAI_VOICES: [&str; 13] = [
-    "alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "ballad", "verse",
-    "marin", "cedar",
-];
-
-/// The voices only `gpt-4o-mini-tts` has.
-const NEWER_VOICES: [&str; 4] = ["ballad", "verse", "marin", "cedar"];
-
-/// The model that takes `instructions`.
-const STYLED_MODEL: &str = "gpt-4o-mini-tts";
-
-/// Styles offered for OpenAI's address, as `name=instruction`.
-const OPENAI_STYLES: [&str; 4] = [
-    "calm=Speak calmly and slowly, in a soothing tone.",
-    "cheerful=Speak in a bright, cheerful tone.",
-    "serious=Speak in a serious, measured tone.",
-    "whisper=Whisper softly.",
-];
-
 const fn default_rate() -> u32 {
     24_000
 }
@@ -80,9 +52,9 @@ const fn default_max_chars() -> u32 {
 #[form(section(id = "endpoint", label = "Endpoint"))]
 #[non_exhaustive]
 pub struct EndpointSaySettings {
-    /// The address the text is posted to, such as `https://api.openai.com/v1/audio/speech`.
+    /// The address the text is posted to, such as `https://speech.example.test/v1/audio/speech`.
     #[schema(section = "endpoint", title = "Address")]
-    #[form(placeholder = "https://api.openai.com/v1/audio/speech")]
+    #[form(placeholder = "https://speech.example.test/v1/audio/speech")]
     pub url: String,
     /// A key sent as `Authorization: Bearer`, when the endpoint asks for one.
     #[schema(section = "endpoint", title = "Key")]
@@ -90,17 +62,15 @@ pub struct EndpointSaySettings {
     pub api_key: Option<Secret<String>>,
     /// The model used when a request names none.
     #[schema(section = "endpoint", title = "Model")]
-    #[form(placeholder = "gpt-4o-mini-tts")]
     pub model: Option<String>,
     /// The voice used when a request names none.
     #[schema(section = "endpoint", title = "Voice")]
-    #[form(placeholder = "marin")]
     pub voice: Option<String>,
-    /// The models to offer, when not OpenAI's own.
+    /// The models to offer.
     #[map(default)]
     #[schema(section = "endpoint", title = "Models offered")]
     pub models: Vec<String>,
-    /// The voices to offer, when not OpenAI's own.
+    /// The voices to offer.
     #[map(default)]
     #[schema(section = "endpoint", title = "Voices offered")]
     pub voices: Vec<String>,
@@ -142,62 +112,28 @@ impl EndpointSaySettings {
         }
     }
 
-    fn is_openai(&self) -> bool {
-        host_of(&self.url).is_some_and(|host| host.eq_ignore_ascii_case("api.openai.com"))
-    }
-
-    /// The models offered: the settings', else OpenAI's own for its address.
+    /// The models offered.
     fn model_list(&self) -> Vec<Choice> {
-        if !self.models.is_empty() {
-            return self
-                .models
-                .iter()
-                .filter(|name| !name.trim().is_empty())
-                .map(|name| Choice::new(name.trim(), name.trim()))
-                .collect();
-        }
-        if self.is_openai() {
-            return OPENAI_MODELS
-                .iter()
-                .map(|(id, label)| Choice::new(*id, *label))
-                .collect();
-        }
-        Vec::new()
+        self.models
+            .iter()
+            .filter(|name| !name.trim().is_empty())
+            .map(|name| Choice::new(name.trim(), name.trim()))
+            .collect()
     }
 
     fn voice_list(&self) -> Vec<Voice> {
-        if !self.voices.is_empty() {
-            return self
-                .voices
-                .iter()
-                .filter(|name| !name.trim().is_empty())
-                .map(|name| Voice::new(name.trim(), name.trim()))
-                .collect();
-        }
-        if self.is_openai() {
-            return OPENAI_VOICES
-                .iter()
-                .map(|name| {
-                    let mut voice = Voice::new(*name, *name);
-                    if NEWER_VOICES.contains(name) {
-                        voice.models = vec![STYLED_MODEL.to_owned()];
-                    }
-                    voice
-                })
-                .collect();
-        }
-        Vec::new()
+        self.voices
+            .iter()
+            .filter(|name| !name.trim().is_empty())
+            .map(|name| Voice::new(name.trim(), name.trim()))
+            .collect()
     }
 
     /// The styles as (name, instruction).
     fn style_list(&self) -> Vec<(String, String)> {
-        let entries: Vec<&str> = if self.styles.is_empty() && self.is_openai() {
-            OPENAI_STYLES.to_vec()
-        } else {
-            self.styles.iter().map(String::as_str).collect()
-        };
-        entries
-            .into_iter()
+        self.styles
+            .iter()
+            .map(String::as_str)
             .filter(|entry| !entry.trim().is_empty())
             .map(|entry| match entry.split_once('=') {
                 Some((name, text)) => (name.trim().to_owned(), text.trim().to_owned()),
@@ -313,24 +249,11 @@ impl SpeechOutput for EndpointSay {
             .clone()
             .filter(|voice| !voice.is_empty())
             .or_else(|| settings.voice.clone().filter(|voice| !voice.is_empty()));
-        if let Some(voice) = &voice {
-            match voices.iter().find(|each| &each.id == voice) {
-                None if !voice_ids.is_empty() => {
-                    return Err(unknown_choice("voice", voice, &voice_ids));
-                }
-                Some(found)
-                    if !found.models.is_empty()
-                        && model
-                            .as_ref()
-                            .is_some_and(|model| !found.models.contains(model)) =>
-                {
-                    return Err(bad_value(alloc::format!(
-                        "the voice {voice} works with {} only",
-                        found.models.join(", ")
-                    )));
-                }
-                _ => {}
-            }
+        if let Some(voice) = &voice
+            && !voice_ids.is_empty()
+            && !voice_ids.contains(voice)
+        {
+            return Err(unknown_choice("voice", voice, &voice_ids));
         }
         let styles = settings.style_list();
         let instructions = match request.style.as_deref().filter(|style| !style.is_empty()) {

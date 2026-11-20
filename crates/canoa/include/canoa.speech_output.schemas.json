@@ -512,7 +512,7 @@
       "url": {
         "type": "string",
         "title": "Address",
-        "description": "The address the text is posted to, such as `https://api.openai.com/v1/audio/speech`.",
+        "description": "The address the text is posted to, such as `https://speech.example.test/v1/audio/speech`.",
         "x-section": "endpoint"
       },
       "api_key": {
@@ -550,7 +550,7 @@
           "type": "string"
         },
         "title": "Models offered",
-        "description": "The models to offer, when not OpenAI's own.",
+        "description": "The models to offer.",
         "x-section": "endpoint",
         "default": []
       },
@@ -560,7 +560,7 @@
           "type": "string"
         },
         "title": "Voices offered",
-        "description": "The voices to offer, when not OpenAI's own.",
+        "description": "The voices to offer.",
         "x-section": "endpoint",
         "default": []
       },
@@ -608,48 +608,6 @@
     "additionalProperties": false,
     "required": [
       "url"
-    ]
-  },
-  "PiperSettings": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "properties": {
-      "program": {
-        "type": "string",
-        "title": "Program",
-        "description": "The Piper program: a path, or a name found on the search path.",
-        "x-section": "piper"
-      },
-      "voices_dir": {
-        "type": "string",
-        "title": "Voices folder",
-        "description": "The folder of voices: each `NAME.onnx` with its `NAME.onnx.json`.",
-        "x-section": "piper"
-      },
-      "default_voice": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "title": "Default voice",
-        "description": "The voice used when a request names none; absent is the first voice, in the request's language when it has one.",
-        "x-section": "piper"
-      },
-      "timeout_seconds": {
-        "type": "integer",
-        "minimum": 0,
-        "maximum": 4294967295,
-        "title": "Time to start",
-        "description": "How long the program may go without a sound before it is stopped, in seconds.",
-        "x-section": "piper",
-        "x-advanced": true,
-        "default": 60
-      }
-    },
-    "additionalProperties": false,
-    "required": [
-      "program",
-      "voices_dir"
     ]
   },
   "SystemSettings": {

@@ -18,8 +18,8 @@ use canoa::store::{
     STORE_GLYPHS, StoreSettings,
 };
 use canoa_host::store::contract::{World, WorldTransport, standin_bytes};
-use canoa_host::store::piper::{Catalog, Engine as Archive, PiperRecipe, VERSION, VoiceFile};
 use canoa_host::store::tools::LocalTools;
+use canoa_piper::store::{Catalog, Engine as Archive, PiperRecipe, VERSION, VoiceFile};
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::{LoginAnswer, LoginForm, ProcessSpawner};
 use coqui_acp_harness::LocalSpawner;
@@ -378,8 +378,8 @@ fn the_real_release_installs_and_speaks() {
     assert!(copy.join("voices/es_MX-claude-high.onnx.json").is_file());
 
     // The provider speaks with what was installed: both voices, the audio a sentence at a time.
-    use canoa::speech::builtin::{PiperSettings, PiperSpeech};
     use canoa::speech::output::{READ_TIMED_OUT, SayRequest, SpeechOutput, VoiceQuery};
+    use canoa_piper::{PiperSettings, PiperSpeech};
     let provider = PiperSpeech::from(PiperSettings::new(
         launch.to_string_lossy(),
         copy.join("voices").to_string_lossy(),

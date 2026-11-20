@@ -62,6 +62,7 @@ canoa-node.workspace = true
 canoa-openai.workspace = true
 canoa-opencode.workspace = true
 canoa-pi.workspace = true
+canoa-piper.workspace = true
 canoa-powershell.workspace = true
 canoa-python.workspace = true
 canoa-whisper.workspace = true

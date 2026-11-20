@@ -12,7 +12,6 @@ pub mod footprint;
 pub(crate) mod index;
 pub(crate) mod listings;
 pub(crate) mod mcp;
-pub mod piper;
 pub mod programs;
 pub mod registry;
 pub mod runtimes;

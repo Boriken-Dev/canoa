@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/canoa-antigravity", "crates/canoa-bitwarden", "crates/canoa-claude", "crates/canoa-codex", "crates/canoa-ffi", "crates/canoa-foundry", "crates/canoa-git-bash", "crates/canoa-grok", "crates/canoa-host", "crates/canoa-launch", "crates/canoa-litellm", "crates/canoa-microsoft-mail", "crates/canoa-node", "crates/canoa-openai", "crates/canoa-opencode", "crates/canoa-pi", "crates/canoa-powershell", "crates/canoa-python", "crates/canoa-whisper"]
+members = ["crates/canoa", "crates/canoa-antigravity", "crates/canoa-bitwarden", "crates/canoa-claude", "crates/canoa-codex", "crates/canoa-ffi", "crates/canoa-foundry", "crates/canoa-git-bash", "crates/canoa-grok", "crates/canoa-host", "crates/canoa-launch", "crates/canoa-litellm", "crates/canoa-microsoft-mail", "crates/canoa-node", "crates/canoa-openai", "crates/canoa-opencode", "crates/canoa-pi", "crates/canoa-piper", "crates/canoa-powershell", "crates/canoa-python", "crates/canoa-whisper"]
 
 [workspace.package]
 version = "0.0.0-alpha.0"
@@ -166,6 +166,7 @@ canoa-pi = { path = "crates/canoa-pi" }
 canoa-powershell = { path = "crates/canoa-powershell" }
 canoa-python = { path = "crates/canoa-python" }
 canoa-whisper = { path = "crates/canoa-whisper" }
+canoa-piper = { path = "crates/canoa-piper" }
 
 # The bridge library (coqui-acp-bridge) takes coqui-peer-tls from crates.io, which names the released coqui-peer: one PeerId type across the graph
 # needs the one source coqui-acp patches it to.

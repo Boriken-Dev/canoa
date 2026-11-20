@@ -3,7 +3,7 @@
 //! `speech_provider`: it declares its settings and the form that shows them, so a host offers it the way it offers one a person
 //! wrote in another language. The program-running provider is a script of the Canoa SDK, which `canoa-host` carries.
 //!
-//! The speech-output providers, which turn text into audio, are [`say_command`], [`say_endpoint`], [`say_piper`] and
+//! The speech-output providers, which turn text into audio, are [`say_command`], [`say_endpoint`] and
 //! [`say_system`]; [`spoken`] is what the ones that run a program share.
 //!
 //! None limits which program or address the person may name: they run as the person, and what they name is theirs.
@@ -16,14 +16,12 @@
 pub mod endpoint;
 pub mod say_command;
 pub mod say_endpoint;
-pub mod say_piper;
 pub mod say_system;
 pub mod spoken;
 
 pub use endpoint::{EndpointRequest, EndpointSettings, EndpointSpeech};
 pub use say_command::{CommandSay, CommandSaySettings, SayInput, SayOutput};
 pub use say_endpoint::{EndpointSay, EndpointSaySettings};
-pub use say_piper::{PiperSettings, PiperSpeech};
 pub use say_system::{SystemSettings, SystemSpeech};
 
 use alloc::string::String;

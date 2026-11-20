@@ -1012,6 +1012,53 @@ mod runtimes_tests {
     }
 
     #[test]
+    fn the_voice_program_is_a_type_its_library_adds_and_offers_a_voice_provider() {
+        let (stores, root) = stores();
+        let types = stores
+            .read("store/extensions", &json!({}), None)
+            .expect("the types");
+        let added = types["types"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .find(|each| each["id"] == canoa_piper::STORE_TYPE)
+            .expect("the type the library adds is listed");
+        assert_eq!(added["stores"], json!(["piper_store"]));
+        assert_eq!(added["models"]["provider"], "piper_voices");
+        let listed = stores
+            .read(
+                "store/list",
+                &json!({"kind": "extension", "type": canoa_piper::STORE_TYPE}),
+                None,
+            )
+            .expect("the type's stores");
+        assert_eq!(
+            programs_of(&listed),
+            [("piper_store".to_owned(), "piper".to_owned())]
+        );
+        let runtimes = stores
+            .read("store/list", &json!({"kind": "runtimes"}), None)
+            .expect("the runtimes");
+        assert!(
+            programs_of(&runtimes)
+                .iter()
+                .all(|(id, _)| id != "piper_store"),
+            "a library's program is its type's alone"
+        );
+        assert!(
+            stores
+                .voice_services()
+                .contains(&("piper".to_owned(), "speech_say_piper".to_owned())),
+            "the type names the provider that speaks with its program"
+        );
+        assert!(
+            stores.voice_settings("piper").is_none(),
+            "nothing is installed, so no settings"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn secret_providers_are_a_store_type_that_lists_bitwardens_command_apart_from_agents_and_runtimes()
      {
         let (stores, root) = stores();

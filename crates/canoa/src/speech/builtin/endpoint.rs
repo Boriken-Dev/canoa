@@ -66,7 +66,7 @@ const fn default_request() -> EndpointRequest {
 #[form(section(id = "endpoint", label = "Endpoint"))]
 #[non_exhaustive]
 pub struct EndpointSettings {
-    /// The address the audio is posted to, such as `https://api.openai.com/v1/audio/transcriptions`.
+    /// The address the audio is posted to, such as `https://speech.example.test/v1/audio/transcriptions`.
     #[schema(section = "endpoint", title = "Address")]
     #[form(placeholder = "https://host/v1/audio/transcriptions")]
     pub url: String,

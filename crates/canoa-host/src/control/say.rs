@@ -1,8 +1,9 @@
 //! `speech/voices`, `speech/say`, `speech/audio`, `speech/stop` and `speech/say_configure`: text to speech, the other direction of
 //! `speech/*`. A provider is a `[say.NAME]` table of canoa.cfg naming one of the kinds this host has (`provider = "speech_say_command"`,
-//! `"speech_say_endpoint"`, `"speech_say_piper"` or `"speech_say_system"`) and its settings, checked against that kind's schema; the
-//! host also offers `system` (the operating system's voices) with no table, and `piper` when the Store installed Piper, until a table
-//! of that name says otherwise.
+//! `"speech_say_endpoint"` or `"speech_say_system"`, or a provider a library this build carries offers) and its settings, checked
+//! against that kind's schema; the host also offers `system` (the operating system's voices) with no table, and each Store type
+//! whose installed program reads text aloud (the type's library names the provider and says its settings), until a table of that name
+//! says otherwise.
 //!
 //! An utterance is `speech/say`, then `speech/audio` as often as the client wants the next piece of audio (it answers as soon as
 //! there is some, or empty after `wait_ms`), then it is over (`done`) or `speech/stop` ends it. The client pulls, so a client that
@@ -16,14 +17,12 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use canoa::speech::builtin::{
-    CommandSay, CommandSaySettings, EndpointSay, EndpointSaySettings, PiperSettings, PiperSpeech,
-    SystemSettings, SystemSpeech,
+    CommandSay, CommandSaySettings, EndpointSay, EndpointSaySettings, SystemSettings, SystemSpeech,
 };
 use canoa::speech::output::{
     READ_TIMED_OUT, SayRequest, SpeechOutput, SpeechUtterance, VoiceQuery,
@@ -35,7 +34,7 @@ use serde_json::{Map, Value, json};
 
 use super::files::Files;
 use super::speech::{form_of, members_of, schema_of, secrets_of, text_list, valid_name};
-use super::{Caller, Grant, NOT_FOUND, REFUSED, allow, bad, text_param};
+use super::{Caller, Grant, NOT_FOUND, REFUSED, Stores, allow, bad, text_param};
 use crate::speech_scripts::{self, ORIGIN_KEYS};
 
 type Outcome = Result<Value, (i32, String)>;
@@ -64,11 +63,6 @@ pub const MAX_TEXT: usize = 256 * 1024;
 
 /// The name of the provider the operating system's voices are offered as.
 pub const SYSTEM: &str = "system";
-/// The name of the provider the Store's Piper is offered as.
-pub const PIPER: &str = "piper";
-/// The program the Store installs Piper as.
-const PIPER_PROGRAM: &str = "piper";
-
 type Provider = Arc<dyn SpeechOutput>;
 
 /// An utterance's id and the object it runs on.
@@ -95,7 +89,7 @@ where
     Ok(Arc::new(P::from(settings)))
 }
 
-const KINDS: [Kind; 4] = [
+const KINDS: [Kind; 3] = [
     Kind {
         id: "speech_say_system",
         title: "System voices",
@@ -103,14 +97,6 @@ const KINDS: [Kind; 4] = [
         build: kind_of::<SystemSettings, SystemSpeech>,
         schema: schema_of::<SystemSettings>,
         form: form_of::<SystemSettings>,
-    },
-    Kind {
-        id: "speech_say_piper",
-        title: "Piper",
-        description: "A local neural voice engine over the voices you keep in a folder",
-        build: kind_of::<PiperSettings, PiperSpeech>,
-        schema: schema_of::<PiperSettings>,
-        form: form_of::<PiperSettings>,
     },
     Kind {
         id: "speech_say_endpoint",
@@ -132,6 +118,28 @@ const KINDS: [Kind; 4] = [
 
 fn kind(id: &str) -> Option<&'static Kind> {
     KINDS.iter().find(|kind| kind.id == id)
+}
+
+static CARRIED: Mutex<Option<Arc<Registry>>> = Mutex::new(None);
+
+/// The libraries this build carries, as one registry: the providers of the speech-output kind they offer are kinds a table may name.
+fn carried() -> Option<Arc<Registry>> {
+    let mut held = CARRIED.lock().unwrap_or_else(PoisonError::into_inner);
+    if held.is_none() {
+        let mut registry = Registry::new("canoa", env!("CARGO_PKG_VERSION"));
+        match crate::bundled::register_included(&mut registry) {
+            Ok(()) => *held = Some(Arc::new(registry)),
+            Err(why) => {
+                tracing::warn!("the libraries this build carries are not read for voices: {why}");
+            }
+        }
+    }
+    held.clone()
+}
+
+/// The kinds of provider the carried libraries offer.
+fn carried_kinds() -> Vec<Resolved> {
+    carried().map_or_else(Vec::new, |registry| Resolved::scripted(&registry))
 }
 
 /// One kind of provider a table may name, wherever its code is: the host's own, or a registry the table's `library` or `source`
@@ -230,9 +238,13 @@ fn resolve(id: &str, origin: Option<&Arc<Registry>>) -> Result<Resolved, String>
             .find(|each| each.id == id)
             .ok_or_else(|| format!("the library or source it names has no provider {id}"));
     }
-    kind(id)
+    if let Some(kind) = kind(id) {
+        return Resolved::native(kind);
+    }
+    carried_kinds()
+        .into_iter()
+        .find(|each| each.id == id)
         .ok_or_else(|| format!("this host has no provider {id}"))
-        .and_then(Resolved::native)
 }
 
 /// The kind of provider a table names, its origin loaded.
@@ -271,15 +283,33 @@ struct Kept {
     answer: Value,
 }
 
-/// Where the Store's Piper is, when it installed one: the program's launch path.
-type Managed = Box<dyn Fn() -> Option<PathBuf> + Send + Sync>;
+/// The tables the host offers for the Store types whose installed program reads text aloud: each named for its type, with the provider
+/// and the settings its library says.
+type Offered = Box<dyn Fn(Option<&Stores>) -> Vec<(String, Value)> + Send + Sync>;
+
+fn from_stores(stores: Option<&Stores>) -> Vec<(String, Value)> {
+    let Some(stores) = stores else {
+        return Vec::new();
+    };
+    stores
+        .voice_services()
+        .into_iter()
+        .filter_map(|(name, provider)| {
+            let mut table = stores.voice_settings(&name)?;
+            table
+                .as_object_mut()?
+                .insert("provider".to_owned(), json!(provider));
+            Some((name, table))
+        })
+        .collect()
+}
 
 /// The utterances the host has open for clients, and the voices it has listed lately.
 pub(crate) struct Say {
     open: Mutex<BTreeMap<String, Open>>,
     next: AtomicU64,
     kept: Mutex<BTreeMap<String, Kept>>,
-    managed: Managed,
+    offered: Offered,
 }
 
 impl Default for Say {
@@ -288,9 +318,7 @@ impl Default for Say {
             open: Mutex::default(),
             next: AtomicU64::new(0),
             kept: Mutex::default(),
-            managed: Box::new(|| {
-                crate::sources::managed_program(PIPER_PROGRAM).map(|(path, _)| path)
-            }),
+            offered: Box::new(from_stores),
         }
     }
 }
@@ -310,10 +338,10 @@ fn tables(files: &Files) -> Result<Map<String, Value>, (i32, String)> {
 }
 
 impl Say {
-    /// Where the Store's Piper is, as a test says.
+    /// The tables offered for Store types, as a test says them.
     #[cfg(test)]
-    pub(crate) fn managed_at(mut self, path: Option<PathBuf>) -> Self {
-        self.managed = Box::new(move || path.clone());
+    pub(crate) fn offering(mut self, tables: Vec<(String, Value)>) -> Self {
+        self.offered = Box::new(move |_| tables.clone());
         self
     }
 
@@ -321,18 +349,19 @@ impl Say {
         &self,
         caller: &Caller,
         files: &Files,
+        stores: Option<&Stores>,
         method: &str,
         params: &Value,
     ) -> Outcome {
         match method {
             "speech/voices" => {
-                allow(caller, Grant::Voice).and_then(|()| self.voices(files, params))
+                allow(caller, Grant::Voice).and_then(|()| self.voices(files, stores, params))
             }
             "speech/say_configure" => {
                 allow(caller, Grant::VoiceSetup).and_then(|()| self.configure(files, params))
             }
             "speech/say" => {
-                allow(caller, Grant::Voice).and_then(|()| self.say(caller, files, params))
+                allow(caller, Grant::Voice).and_then(|()| self.say(caller, files, stores, params))
             }
             "speech/audio" => allow(caller, Grant::Voice).and_then(|()| self.audio(caller, params)),
             "speech/stop" => allow(caller, Grant::Voice).and_then(|()| self.stop(caller, params)),
@@ -353,54 +382,29 @@ impl Say {
     }
 
     /// The providers this call may use: the file's tables, and the ones the host offers by itself that the file does not name.
-    fn all_tables(&self, files: &Files) -> Result<Map<String, Value>, (i32, String)> {
+    fn all_tables(
+        &self,
+        files: &Files,
+        stores: Option<&Stores>,
+    ) -> Result<Map<String, Value>, (i32, String)> {
         let mut all = tables(files)?;
         if !all.contains_key(SYSTEM) && cfg!(any(windows, unix)) {
             all.insert(SYSTEM.to_owned(), json!({"provider": "speech_say_system"}));
         }
-        if !all.contains_key(PIPER) && (self.managed)().is_some() {
-            all.insert(PIPER.to_owned(), json!({"provider": "speech_say_piper"}));
+        for (name, table) in (self.offered)(stores) {
+            all.entry(name).or_insert(table);
         }
         Ok(all)
     }
 
-    /// What one table says, built: its kind and the provider, or why it cannot be. A Piper table that names no program or no folder
-    /// of voices has the Store's copy and the folder of voices it installed.
+    /// What one table says, built: its kind and the provider, or why it cannot be.
     fn built(&self, files: &Files, table: &Value) -> Result<(Resolved, Built), String> {
         let (resolved, origin) = resolve_table(files, table)?;
-        let id = resolved.id.as_str();
         let mut settings = table.clone();
         if let Some(map) = settings.as_object_mut() {
             map.remove("provider");
             for key in ORIGIN_KEYS {
                 map.remove(key);
-            }
-            if id == "speech_say_piper" {
-                let empty = |map: &Map<String, Value>, key: &str| {
-                    map.get(key)
-                        .and_then(Value::as_str)
-                        .is_none_or(|text| text.trim().is_empty())
-                };
-                let (no_program, no_folder) = (empty(map, "program"), empty(map, "voices_dir"));
-                if no_program || no_folder {
-                    let managed = (self.managed)();
-                    if no_program {
-                        let program = managed
-                            .as_ref()
-                            .map(|path| path.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        map.insert("program".to_owned(), json!(program));
-                    }
-                    if no_folder {
-                        // The Store puts the program at `<copy>/piper/piper` and the voices at `<copy>/voices`.
-                        let folder = managed
-                            .as_deref()
-                            .and_then(|path| path.parent()?.parent())
-                            .map(|copy| copy.join("voices").to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        map.insert("voices_dir".to_owned(), json!(folder));
-                    }
-                }
             }
         }
         let (provider, code) = resolved.build(&settings)?;
@@ -419,10 +423,10 @@ impl Say {
     /// `speech/voices`: the kinds this host has, each with the schema and the form its settings are drawn with, and the providers it
     /// offers, each with what it says of itself, where the text goes and the voices it has. A setting that is a secret is never
     /// answered, only that it is set. `provider` asks for one provider, `language` for the voices that speak it.
-    fn voices(&self, files: &Files, params: &Value) -> Outcome {
+    fn voices(&self, files: &Files, stores: Option<&Stores>, params: &Value) -> Outcome {
         let only = text_param(params, "provider")?;
         let language = text_param(params, "language")?;
-        let all = self.all_tables(files)?;
+        let all = self.all_tables(files, stores)?;
         if let Some(only) = only
             && !all.contains_key(only)
         {
@@ -432,6 +436,7 @@ impl Say {
         for kind in &KINDS {
             kinds.push(Resolved::native(kind).map_err(|why| (REFUSED, why))?);
         }
+        kinds.extend(carried_kinds());
         let in_file = tables(files)?;
         let mut listed = Vec::new();
         for (name, table) in &all {
@@ -572,7 +577,13 @@ impl Say {
         Ok(answer)
     }
 
-    fn say(&self, caller: &Caller, files: &Files, params: &Value) -> Outcome {
+    fn say(
+        &self,
+        caller: &Caller,
+        files: &Files,
+        stores: Option<&Stores>,
+        params: &Value,
+    ) -> Outcome {
         let name = text_param(params, "provider")?.ok_or_else(|| bad("provider is needed"))?;
         let text = text_param(params, "text")?.ok_or_else(|| bad("text is needed"))?;
         if text.len() > MAX_TEXT {
@@ -581,7 +592,7 @@ impl Say {
                 format!("a text is at most {MAX_TEXT} bytes; send it in parts"),
             ));
         }
-        let all = self.all_tables(files)?;
+        let all = self.all_tables(files, stores)?;
         let table = all
             .get(name)
             .ok_or_else(|| (NOT_FOUND, format!("this host has no voice provider {name}")))?;

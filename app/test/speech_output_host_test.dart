@@ -62,8 +62,11 @@ void main() {
     test('lists the providers canoa.cfg defines with their voices and models, and the kinds with their forms', () async {
       await catalog.refresh();
       expect(catalog.problem, isNull);
-      expect([for (final kind in catalog.types) kind.id], ['speech_say_system', 'speech_say_piper', 'speech_say_endpoint', 'speech_say_command']);
-      expect(catalog.types.last.form['sections'], isA<List<Object?>>());
+      final kinds = [for (final kind in catalog.types) kind.id];
+      // The host's own kinds first, then the ones the libraries it carries offer.
+      expect(kinds.take(3), ['speech_say_system', 'speech_say_endpoint', 'speech_say_command']);
+      expect(kinds, containsAll(['speech_say_piper', 'speech_say_openai']));
+      expect(catalog.types.firstWhere((kind) => kind.id == 'speech_say_command').form['sections'], isA<List<Object?>>());
       final output = says();
       expect(await output.voices(), hasLength(2));
       expect((await output.voices()).map((v) => v.id), ['ana', 'luis']);
@@ -103,8 +106,7 @@ void main() {
 
     test('a provider written from the form is in canoa.cfg, listed without its key, and keeps the key when saved again', () async {
       await catalog.refresh();
-      await catalog.save('cloud', 'speech_say_endpoint', {
-        'url': 'https://api.openai.com/v1/audio/speech',
+      await catalog.save('cloud', 'speech_say_openai', {
         'model': 'tts-1',
         'api_key': 'sk-test-0123456789',
       });
@@ -115,7 +117,7 @@ void main() {
       expect(cloud.settings['model'], 'tts-1');
       expect(cloud.settings.containsKey('api_key'), isFalse);
       expect(cloud.secretsSet, {'api_key'});
-      // OpenAI's documented models, voices and styles are listed, and the text is said to go to its host with the key.
+      // OpenAI's library lists its documented models, voices and styles, and the text is said to go to its host with the key.
       expect(cloud.models.map((m) => m.id), ['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd']);
       expect(cloud.voices, hasLength(13));
       expect(cloud.voices.firstWhere((v) => v.id == 'marin').models, ['gpt-4o-mini-tts']);
@@ -124,7 +126,7 @@ void main() {
       expect(cloud.where.words, contains('your key'));
 
       // The form never shows the key, so it sends none, and the host keeps the one it has.
-      await catalog.save('cloud', 'speech_say_endpoint', {'url': 'https://api.openai.com/v1/audio/speech', 'model': 'gpt-4o-mini-tts'});
+      await catalog.save('cloud', 'speech_say_openai', {'model': 'gpt-4o-mini-tts'});
       text = await File('${dir.path}/canoa.cfg').readAsString();
       expect(text, contains('gpt-4o-mini-tts'));
       expect(text, contains('sk-test-0123456789'));

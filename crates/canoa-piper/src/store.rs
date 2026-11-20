@@ -1,4 +1,4 @@
-//! The Piper store (of the Runtimes type): a local neural text-to-speech engine, with a voice for English and one for Spanish, so
+//! The Piper store: a local neural text-to-speech engine, with a voice for English and one for Spanish, so
 //! the host can read replies aloud with nothing leaving the computer.
 //!
 //! Piper's last binary release is `2023.11.14-2` (the program prints `1.2.0`): the project was archived in 2025 and its successor
@@ -6,8 +6,8 @@
 //! SHA-256 of the published files, measured once and pinned, and each voice is a file of one commit of the voices repository, so
 //! what is downloaded is what was measured. Every voice has the licence of its own data, which the plan names.
 //!
-//! The folder is `piper/` (the program and its libraries) and `voices/` (each `NAME.onnx` with its `NAME.onnx.json`): the host's
-//! `speech_say_piper` provider is given that folder when its table names none. A Linux archive carries its libraries' short names
+//! The folder is `piper/` (the program and its libraries) and `voices/` (each `NAME.onnx` with its `NAME.onnx.json`); the
+//! type's `speech_say_piper` provider is given both through `PiperModels::service`. A Linux archive carries its libraries' short names
 //! as links, which the unpack leaves out, so the install writes them as copies.
 #![allow(
     clippy::std_instead_of_core,
@@ -29,7 +29,11 @@ use canoa::store::{
 };
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 
-use canoa::store_provider;
+/// The folder of a version's copy that holds the program and its libraries.
+pub const PROGRAM_DIR: &str = "piper";
+
+/// The folder of a version's copy that holds the voices.
+pub const VOICES_DIR: &str = "voices";
 
 /// The version Piper prints, and the one this store offers.
 pub const VERSION: &str = "1.2.0";
@@ -174,11 +178,6 @@ impl Default for Catalog {
     }
 }
 
-store_provider!(
-    /// The Piper store.
-    PiperStore, PiperRecipe, "piper_store"
-);
-
 /// Piper.
 #[derive(Debug, Default, Clone)]
 pub struct PiperRecipe {
@@ -288,7 +287,12 @@ impl Recipe for PiperRecipe {
         );
         let format = if windows { "zip" } else { "tar.gz" };
         let mut parts = vec![
-            Part::new(archive, "piper-archive").unpacked(UnpackStep::new(format, "piper", 1, true)),
+            Part::new(archive, "piper-archive").unpacked(UnpackStep::new(
+                format,
+                PROGRAM_DIR,
+                1,
+                true,
+            )),
         ];
         let mut notices = vec![format!(
             "Piper {} is its last binary release: the project is archived, and its MIT-licensed files publish no checksums, so Canoa checks them against SHA-256 digests it measured from the published files.",
@@ -314,7 +318,7 @@ impl Recipe for PiperRecipe {
                         value: voice.onnx.0.to_owned(),
                     },
                 ),
-                format!("voices/{}.onnx", voice.name),
+                format!("{VOICES_DIR}/{}.onnx", voice.name),
             ));
             parts.push(Part::new(
                 Download::new(
@@ -324,7 +328,7 @@ impl Recipe for PiperRecipe {
                         value: voice.json.0.to_owned(),
                     },
                 ),
-                format!("voices/{}.onnx.json", voice.name),
+                format!("{VOICES_DIR}/{}.onnx.json", voice.name),
             ));
             notices.push(format!(
                 "The voice {} is licensed as {}; a voice carries the licence of the recordings it learned from.",

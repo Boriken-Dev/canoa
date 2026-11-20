@@ -336,10 +336,10 @@ impl Control {
         self.say.age(by);
     }
 
-    /// Where the Store's Piper is, as a test says.
+    /// The voices the Store's programs are offered as, as a test says them.
     #[cfg(test)]
-    pub(crate) fn with_managed_piper(mut self, path: Option<PathBuf>) -> Self {
-        self.say = core::mem::take(&mut self.say).managed_at(path);
+    pub(crate) fn with_offered_voices(mut self, tables: Vec<(String, Value)>) -> Self {
+        self.say = core::mem::take(&mut self.say).offering(tables);
         self
     }
 

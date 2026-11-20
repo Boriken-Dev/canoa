@@ -5,6 +5,12 @@
 //! as `NAME#N`. The text is handed to the program a sentence at a time and its raw samples are the audio, so a client hears the
 //! first sentence while the rest is being made. The text never leaves the computer.
 
+#![allow(
+    clippy::std_instead_of_core,
+    clippy::std_instead_of_alloc,
+    reason = "a provider that runs a program names what it uses from std"
+)]
+
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -16,13 +22,17 @@ use guatiao::library::{Object, ProviderError};
 use guatiao::{FromValue, Schema, ToValue};
 use guatiao_intake::Form;
 
-use super::spoken::{Head, Spoken};
-use crate::speech::output::{
+use canoa::speech::AudioFormat;
+use canoa::speech::PCM_S16LE;
+use canoa::speech::builtin::spoken::{Head, Spoken};
+use canoa::speech::output::{
     Leaves, OutputInfo, SayRequest, SpeechOutput, SpeechUtterance, SpeedRange, Voice, VoiceList,
     VoiceQuery, checked_text, sentences, unknown_choice,
 };
-use crate::speech::{AudioFormat, PCM_S16LE};
-use crate::status::{bad_value, internal};
+use canoa::status::{bad_value, internal};
+
+/// The id of the provider, which a table names and the Store type's voice offer builds.
+pub const PROVIDER: &str = "speech_say_piper";
 
 /// The sample rate of a model whose json does not say.
 const DEFAULT_RATE: u32 = 22_050;
@@ -74,7 +84,7 @@ impl PiperSettings {
 
 /// The Piper provider.
 #[derive(guatiao::Provider)]
-#[provider(SpeechOutput, id = "speech_say_piper", config = PiperSettings, form = PiperSettings)]
+#[provider(SpeechOutput, id = "speech_say_piper", name = "Piper", config = PiperSettings, form = PiperSettings)]
 pub struct PiperSpeech {
     settings: PiperSettings,
 }

@@ -892,6 +892,7 @@ dependencies = [
  "canoa-openai",
  "canoa-opencode",
  "canoa-pi",
+ "canoa-piper",
  "canoa-powershell",
  "canoa-python",
  "canoa-whisper",
@@ -1032,6 +1033,9 @@ version = "0.0.0-alpha.0"
 dependencies = [
  "canoa",
  "coqui-acp-api",
+ "coqui-acp-harness",
+ "guatiao",
+ "guatiao-intake",
 ]
 
 [[package]]
@@ -1053,6 +1057,18 @@ dependencies = [
  "coqui-acp-api",
  "coqui-acp-harness",
  "coqui-acp-pi",
+ "serde_json",
+]
+
+[[package]]
+name = "canoa-piper"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
+ "coqui-acp-harness",
+ "guatiao",
+ "guatiao-intake",
  "serde_json",
 ]
 

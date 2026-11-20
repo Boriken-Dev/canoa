@@ -70,7 +70,7 @@ fn control(tmp: &Path) -> Control {
         Some(tmp.join("uploads")),
         UploadLimits::default(),
     ))
-    .with_managed_piper(None)
+    .with_offered_voices(Vec::new())
 }
 
 fn say(control: &Control, caller: &Caller, params: Value) -> Value {
@@ -191,18 +191,21 @@ fn voices_are_listed_per_provider_with_their_models_styles_speeds_and_where_the_
         .iter()
         .filter_map(|kind| kind["id"].as_str())
         .collect();
+    // The host's own kinds, then the ones the libraries it carries offer.
     assert_eq!(
-        kinds,
+        kinds[..3],
         [
             "speech_say_system",
-            "speech_say_piper",
             "speech_say_endpoint",
             "speech_say_command"
         ]
     );
-    assert!(listed["result"]["types"][3]["form"]["sections"].is_array());
+    for carried in ["speech_say_piper", "speech_say_openai"] {
+        assert!(kinds[3..].contains(&carried), "{carried} in {kinds:?}");
+    }
+    assert!(listed["result"]["types"][2]["form"]["sections"].is_array());
     assert_eq!(
-        listed["result"]["types"][3]["schema"]["properties"]["program"]["x-section"],
+        listed["result"]["types"][2]["schema"]["properties"]["program"]["x-section"],
         "command"
     );
     let answer = ask(
@@ -450,8 +453,11 @@ fn a_provider_written_through_the_host_is_listed_without_its_key_and_keeps_it() 
             .contains("with your key"),
         "{cloud}"
     );
-    assert_eq!(cloud["models"].as_array().expect("models").len(), 3);
-    assert_eq!(cloud["voices"].as_array().expect("voices").len(), 13);
+    assert!(
+        cloud["models"].as_array().expect("models").is_empty(),
+        "an address has no list of its own: {cloud}"
+    );
+    assert!(cloud["voices"].as_array().expect("voices").is_empty());
     let cfg = tmp.join("canoa.cfg");
     let written = fs::read_to_string(&cfg).expect("canoa.cfg");
     assert!(
@@ -547,6 +553,51 @@ fn a_provider_that_cannot_be_built_is_listed_with_its_reason_and_refuses_to_spea
     let _ = fs::remove_dir_all(&tmp);
 }
 
+#[test]
+fn a_library_a_build_carries_offers_its_voices_with_no_word_of_them_in_the_host() {
+    let tmp = dir("openai");
+    let control = control(&tmp);
+    let owner = Caller::Owner;
+    let saved = ask(
+        &control,
+        &owner,
+        "speech/say_configure",
+        json!({"name": "cloud", "provider": "speech_say_openai", "settings": {
+            "model": "tts-1", "api_key": "sk-test-0123456789"}}),
+    );
+    assert_eq!(saved["result"]["saved"], true, "{saved}");
+    let listed = ask(
+        &control,
+        &owner,
+        "speech/voices",
+        json!({"provider": "cloud"}),
+    );
+    assert!(!listed.to_string().contains("sk-test"), "{listed}");
+    let cloud = provider(&listed, "cloud");
+    assert_eq!(cloud["secrets_set"], json!(["api_key"]), "{cloud}");
+    assert_eq!(cloud["leaves"], "yes");
+    assert_eq!(cloud["models"].as_array().expect("models").len(), 3);
+    let voices = cloud["voices"].as_array().expect("voices");
+    assert_eq!(voices.len(), 13);
+    let marin = voices.iter().find(|v| v["id"] == "marin").expect("marin");
+    assert_eq!(marin["models"], json!(["gpt-4o-mini-tts"]));
+    // The same request the library refuses before anything is sent.
+    let refused = say(
+        &control,
+        &owner,
+        json!({"provider": "cloud", "text": "Hi.", "voice": "marin", "model": "tts-1"}),
+    );
+    assert_eq!(refused["error"]["code"], REFUSED, "{refused}");
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .expect("message")
+            .contains("gpt-4o-mini-tts"),
+        "{refused}"
+    );
+    let _ = fs::remove_dir_all(&tmp);
+}
+
 /// Where the Store puts Piper: `<copy>/piper/piper` over `<copy>/voices`.
 fn piper_copy(tmp: &Path) -> PathBuf {
     let copy = tmp.join("shelf").join("piper").join("versions").join("1");
@@ -581,7 +632,19 @@ fn piper_copy(tmp: &Path) -> PathBuf {
 fn the_piper_the_store_installed_is_offered_with_its_voices_and_speaks_them() {
     let tmp = dir("piper");
     let program = piper_copy(&tmp);
-    let control = control(&tmp).with_managed_piper(Some(program));
+    let voices = program
+        .parent()
+        .and_then(Path::parent)
+        .expect("the copy")
+        .join("voices");
+    let control = control(&tmp).with_offered_voices(vec![(
+        "piper".to_owned(),
+        json!({
+            "provider": "speech_say_piper",
+            "program": program.to_string_lossy(),
+            "voices_dir": voices.to_string_lossy(),
+        }),
+    )]);
     let owner = Caller::Owner;
     let listed = ask(
         &control,
@@ -614,7 +677,7 @@ fn the_piper_the_store_installed_is_offered_with_its_voices_and_speaks_them() {
         "[Hello.|model=en_US-ljspeech-medium|scale=0.500|speaker=0][Goodbye.|model=en_US-ljspeech-medium|scale=0.500|speaker=0]"
     );
     assert_eq!(error, None);
-    // No copy installed: it is not offered at all.
+    // No copy installed: no table is offered for the type.
     let none = control_without_piper(&tmp);
     let listed = ask(&none, &owner, "speech/voices", json!({}));
     assert!(
@@ -628,5 +691,5 @@ fn the_piper_the_store_installed_is_offered_with_its_voices_and_speaks_them() {
 }
 
 fn control_without_piper(tmp: &Path) -> Control {
-    control(tmp).with_managed_piper(None)
+    control(tmp).with_offered_voices(Vec::new())
 }

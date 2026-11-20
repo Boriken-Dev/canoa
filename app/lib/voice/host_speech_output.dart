@@ -63,7 +63,7 @@ final class HostVoiceProvider {
 
   final String name, kind, title, description;
 
-  /// Whether the host offers it with no table in canoa.cfg (the operating system's voices, the Store's Piper).
+  /// Whether the host offers it with no table in canoa.cfg (the operating system's voices, the voices of a Store program that is installed).
   final bool builtin;
   final Map<String, Object?> settings;
   final Set<String> secretsSet;
