@@ -4,13 +4,18 @@ The [deps branch](https://github.com/Boriken-Dev/canoa/tree/deps) keeps a pub/ a
 
 The fonts the web engine falls back to for a glyph Roboto lacks (symbols, arrows, emoji, CJK and every script: 724 files, 20.7 MiB) are mirrored the same way, under `cdn/fonts.gstatic.com/s/`, from `tools/fallback_fonts.sha256`, which pins each file's SHA-256. `tools/mirror_deps.py` (or `python tools/fallback_fonts.py mirror DEPS_DIR`) downloads them and refuses a file that changed; after a Flutter upgrade `python tools/fallback_fonts.py pin DIR` rewrites the list from the SDK's engine, and its diff is the review. `build.py` for the web copies them from the deps checkout into `build/web/assets/fonts/fallback/` and stops, naming the file, when one is missing or differs; it never fetches them.
 
-`tools/cdn_files.json` pins every other CDN file by host, path and SHA-256: the fonts above and Office.js with the files it loads
-(124 files under `cdn/officeapis.public.onecdn.static.microsoft/1/`). `python tools/cdn_files.py mirror DEPS_DIR` (or `mirror_deps.py`)
-downloads them and refuses a file that changed; `python tools/cdn_files.py pin-office DIR` reads Office.js's loader, which names the files it
-asks for, downloads them and rewrites the Office.js entries, and the diff of the list is the review. `/1/` is an alias Microsoft moves, so the
-digests say which copy it is. `crates/canoa-host/build.rs` carries the files from the deps checkout (`CANOA_DEPS`) into the host and checks
-each against the list; it never fetches, and without the mirror it stops, naming `CANOA_OFFICE_JS=cdn` as the way to have the add-in load
-Office.js from Microsoft's CDN instead. Nothing under `cdn/` is fetched by any build.
+`tools/cdn_files.json` pins the fonts above by host, path and SHA-256 (`python tools/cdn_files.py DEPS_DIR`, or `mirror_deps.py`, downloads
+them and refuses a file that changed).
+
+Office.js is mirrored whole, from its repository: `cdn/office-js/` holds the tree of one commit of github.com/OfficeDev/office-js, with its
+`LICENSE.md`, exactly as published (772 files, 83.6 MiB at commit `498e88261bc5`). Nothing in it is renamed, filtered or rewritten, and it is
+not trimmed to what compiles: the owner asked for the library as published, and Microsoft's license terms let it be distributed only
+unmodified. `tools/office_js.json` pins the commit and each file's SHA-256; `python tools/office_js.py mirror DEPS_DIR` (or `mirror_deps.py`) fetches that
+commit's source archive over HTTPS (no clone) and refuses a tree that differs, and `python tools/office_js.py pin [--commit SHA]` moves the pin
+to the head of the `release` branch, the diff of the list being the review. `manifest.json` records the commit and every file's hash.
+`crates/canoa-host/build.rs` carries the files the add-in's pane loads, and `LICENSE.md`, from the deps checkout (`CANOA_DEPS`) into the host and
+checks each against the list; it never fetches, and without the mirror it stops, naming `CANOA_OFFICE_JS=cdn` as the way to have the add-in
+load Office.js from Microsoft's CDN instead. Nothing under `cdn/` is fetched by any build.
 
 A cache is ready when manifest.json reports status complete. The Flutter SDK, engine, native toolchains and deployment rewrites for font fallbacks are separate requirements.
 

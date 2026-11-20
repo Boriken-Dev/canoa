@@ -88,4 +88,4 @@ The [documentation](https://boriken-dev.github.io/canoa/) contains the [architec
 
 ## License
 
-MPL-2.0; see [LICENSE](https://github.com/Boriken-Dev/canoa/blob/main/LICENSE).
+MPL-2.0; see [LICENSE](https://github.com/Boriken-Dev/canoa/blob/main/LICENSE). Third-party notices, including the Office.js library the Office add-in carries, are in [THIRD_PARTY_NOTICES.md](https://github.com/Boriken-Dev/canoa/blob/main/THIRD_PARTY_NOTICES.md).

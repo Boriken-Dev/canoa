@@ -57,9 +57,17 @@ Office.js comes from the host too. The task pane and the dialog load `/office/js
 Office.js loads from there (the file of the Office application and platform, the strings of the person's language, a helper), so a pane
 asks Microsoft for nothing and the pages' policy names no origin but the host's. That is how a build is made unless it is told otherwise;
 `CANOA_OFFICE_JS=cdn` at build time (`build.py desktop --office-js cdn`) has the pages name Microsoft's CDN and the policy allow that one
-origin instead, and carries none of the files. Not carried either way: Office's own telemetry scripts (Office.js's code treats one it cannot
-load as telemetry off; no client has run this) and its sign-in token calls (`Office.auth`), which the add-in does not use. Microsoft's license terms
-for Office.js apply to the copy: it may be used and distributed as part of an app that works with Microsoft 365, unmodified.
+origin instead, and carries none of the files. Not carried either way: the repository's telemetry scripts (Office.js's code treats one it cannot
+load as telemetry off; no client has run this) and its sign-in token calls (`Office.auth`), which the add-in does not use. The files are the
+OfficeDev/office-js repository's, at the commit `tools/office_js.json` pins, as published; its copy is older than the one Microsoft's CDN
+serves now (see `docs/offline-deps.md`), and it holds no `microsoftajax.js`, which the CDN's newer loader asks the folder for.
+
+### Notice
+
+Canoa carries the Microsoft Office JavaScript (Office.js) API Library, unmodified, from github.com/OfficeDev/office-js, and uses it under
+Microsoft's license terms for that library, whose text is `licenses/OFFICE_JS_LICENSE.md` in the repository and `/office/js/LICENSE.md` on a host.
+Microsoft is not responsible for maintaining, updating or supporting Canoa. The license terms allow the library to be used only in apps
+that work with Microsoft 365.
 
 Render the manifests for your address once (Node 20 or later, no packages to install):
 
@@ -382,8 +390,9 @@ the code does not guess them:
 1. Which origins frame a task pane in each client. The list in the host is a start (Outlook on the web's own addresses and
    two wildcards); check the browser console's blocked-frame report in each client and add with `office_frames`.
 2. Whether Office.js, served by the host, needs anything beyond it in each client (`script-src` and `connect-src` name the host alone);
-   a violation or a failed request shows in the console of the pane. The set the host carries was read from Office.js's loader and
-   checked in a real Chromium with every other name refused; no Office client has loaded it.
+   a violation or a failed request shows in the console of the pane. The set the host carries was read from the loader of the pinned
+   office-js commit and checked in a real Chromium with every other name refused; no Office client has loaded it. Whether a client needs
+   `MicrosoftAjax.js`, which the pinned copy has no file for and whose address (`ajax.aspnetcdn.com`) the policy refuses, is open too.
 3. Whether one `TaskPaneApp` manifest may name Word, Excel and PowerPoint together; if Office refuses it, render one host
    at a time with `--hosts`.
 4. Whether Office accepts the one icon (192 pixels, scaled) where the manifest asks for 16, 32, 64 and 80.
