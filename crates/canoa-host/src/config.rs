@@ -36,7 +36,7 @@ pub const MAX_TITLE: usize = 64;
 
 /// What the host serves: every entry of `[host.agents]`, `[host.providers]` and `[host.tools]`, in the file's order, agents
 /// first, then providers.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Config {
     /// Browser origins that may connect; empty lets any connect, and the proof still decides.
@@ -104,6 +104,41 @@ pub struct Config {
     pub extensions: Vec<Extension>,
     /// The account makers the libraries this config names offer, found when first asked for.
     pub(crate) makers: crate::makers::Cell,
+}
+
+/// Serves nothing, with every setting at its default.
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            origins: Default::default(),
+            entries: Default::default(),
+            profiles: Default::default(),
+            web: Default::default(),
+            limit_phrases: Default::default(),
+            protected_paths: Default::default(),
+            accounts: Default::default(),
+            pools: Default::default(),
+            secrets: Default::default(),
+            shell: Default::default(),
+            max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
+            store: Default::default(),
+            network: Default::default(),
+            kb: Default::default(),
+            mail: Default::default(),
+            delegate: Default::default(),
+            control: Default::default(),
+            native: Default::default(),
+            history: Default::default(),
+            worktrees: Default::default(),
+            usage: Default::default(),
+            local_agents: Default::default(),
+            remote_agents: Default::default(),
+            local_profiles: Default::default(),
+            skill_pins: Default::default(),
+            extensions: Default::default(),
+            makers: Default::default(),
+        }
+    }
 }
 
 /// One `[host.extensions.NAME]`: a `store_extension` provider the host loads, whose store types the Store lists.

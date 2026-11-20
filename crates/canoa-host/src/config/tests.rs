@@ -2707,3 +2707,11 @@ fn the_longest_message_is_a_setting_with_no_ceiling_of_its_own() {
     );
     assert!(parse(&format!("[host]\nmax_message_bytes = 0\n{program}")).is_err());
 }
+
+#[test]
+fn a_config_made_by_default_takes_messages_of_the_default_size() {
+    assert_eq!(
+        Config::default().max_message_bytes,
+        DEFAULT_MAX_MESSAGE_BYTES
+    );
+}
