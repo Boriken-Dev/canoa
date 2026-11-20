@@ -64,6 +64,7 @@ Canoa uses a Rust workspace with focused crates, public contracts, cross-platfor
 
 ```sh
 export CANOA_WEB_DIST="$PWD/crates/canoa-host/tests/site"   # --all-features builds canoa's web feature, which needs a site
+export CANOA_DEPS=<a checkout of the deps branch>           # the host carries Office.js from its cdn/; CANOA_OFFICE_JS=cdn instead names Microsoft's address and needs none
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features

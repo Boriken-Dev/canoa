@@ -48,6 +48,8 @@ CANOA_WEB_DIST="$PWD/app/build/web" cargo build --release -p canoa-host --featur
 
 `CANOA_WEB_DIST` must be absolute; with `web` on and no site there, the build stops, `--all-features` included.
 
+`CANOA_OFFICE_JS` is `bundled` (the default) or `cdn`. Bundled, the host carries Office.js and the files it loads (`tools/cdn_files.json` pins each file's SHA-256; `build.rs` reads them from the deps branch's `cdn/officeapis.public.onecdn.static.microsoft/1/`, named by `CANOA_DEPS`, the checkout, or `CANOA_OFFICE_JS_DIR`, the folder itself, and stops on a missing or different file), the pages name `js/office.js` and the pages' policy allows no origin but the host's own. `cdn` carries nothing and the pages name Microsoft's address, whose one origin the policy of the task pane and the dialog then allows. `python app/tool/build.py desktop --office-js cdn` sets it.
+
 ## Quick start
 
 ```toml
@@ -141,6 +143,7 @@ Exit status: 0 success, 1 the operation failed, 2 the invocation or canoa.cfg wa
 
 ```sh
 export CANOA_WEB_DIST="$PWD/crates/canoa-host/tests/site"   # the site --all-features builds in
+export CANOA_DEPS=<a checkout of the deps branch>           # Office.js, which the add-in carries (CANOA_OFFICE_JS=cdn needs none)
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features

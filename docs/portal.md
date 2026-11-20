@@ -697,7 +697,7 @@ manifests and the steps to sideload them. Off, `/office/...` is an ordinary path
 
 | Request | Answer |
 | --- | --- |
-| `GET /office/taskpane.html`, `/office/dialog.html`, `/office/taskpane.js`, `/office/relation.js`, `/office/dialog.js`, `/office/icon-N.png` | given to anyone (they hold nothing of anyone's), each with the policy it needs: Office.js may load in the two pages, Office on the web may frame the task pane, the dialog keeps its link to Office (no `Cross-Origin-Opener-Policy`), the icon is `Cross-Origin-Resource-Policy: cross-origin` |
+| `GET /office/taskpane.html`, `/office/dialog.html`, `/office/taskpane.js`, `/office/relation.js`, `/office/dialog.js`, `/office/icon-N.png` | given to anyone (they hold nothing of anyone's), each with the policy it needs (Office.js is the host's own file under `/office/js/`, so the two pages allow no other origin; a build made with `CANOA_OFFICE_JS=cdn` allows Microsoft's one): Office on the web may frame the task pane, the dialog keeps its link to Office (no `Cross-Origin-Opener-Policy`), the icon is `Cross-Origin-Resource-Policy: cross-origin` |
 | `GET /office/app/` | the web app's page, the one the task pane frames, to a browser that holds a session (else `401`); `frame-ancestors` names the same origins as the task pane |
 | `GET /office/session` | JSON, `200 {"signed_in": true, "user"}` for a browser that holds a session, else `401 {"signed_in": false}` |
 | `GET /office/signin` | the Office dialog's first request: marks the browser as signing in for the dialog and sends it to `/portal/login`; only from this site's own page (`Sec-Fetch-Site` absent or `same-origin`, else `403`) |

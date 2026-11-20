@@ -16,7 +16,7 @@ Nothing here is published to a marketplace. You render a manifest for your own h
 | `render.mjs` | Fills a manifest in for your origin: `node render.mjs outlook --origin https://canoa.example --out outlook.xml` (`documents` takes `--hosts Document,Workbook,Presentation`, all three by default; `--secret-file <home>/office/secret` puts the home's secret in the pane's address) |
 | `taskpane/` | The pages the host serves: `taskpane.html` and `taskpane.js` (read the open item through Office.js, frame the chat, carry the sign-in), `relation.js` (the relation of an item and the messages the pane and the app exchange, with no Office.js in it), `dialog.html` and `dialog.js` (the Office dialog that carries a sign-in result back as a string), `launch.js`, `launch.html` and `launch-page.js` (starting a host that is not running, and the secret), `tools.js` with `tools-outlook.js`, `tools-word.js` and `tools-excel.js` (the tools the pane offers) |
 | `sideload.ps1` | Registers or removes a rendered manifest for Word, Excel and PowerPoint on Windows (`add`, `remove`, `status`; `-Key` names another registry key, which is how its test runs) |
-| `e2e/local.mjs` | A real Chromium against a host with `office_local` over HTTPS: the pages load under the policy and the page's key is accepted with no pairing |
+| `e2e/local.mjs` | A real Chromium against a host with `office_local` over HTTPS, resolving no name but localhost: the pages load Office.js from the host alone, under the policy, and the page's key is accepted with no pairing |
 | `test/` | `npm test` runs `node --test` over `relation.js`, `launch.js`, `tools.js` and the tool modules (against stand-ins for Office.js), `render.mjs` and `sideload.ps1` (the last on a scratch registry key, skipped without PowerShell on Windows) |
 
 The pages are compiled into `canoa-host` and answered under `/office/` only when the configuration says so; the manifests are not
@@ -52,6 +52,14 @@ office = true
 `crates/canoa-host/AGENTS.md` for exactly what is relaxed where. A proxy in front of either must not add `X-Frame-Options` or
 its own `Content-Security-Policy` to `/office/` paths. The web app's page connects to the host's entries, which listen on
 loopback, so a browser on another machine needs a proxy that carries them as well (the portal relays them itself).
+
+Office.js comes from the host too. The task pane and the dialog load `/office/js/office.js`, which the `canoa` you run carries with the files
+Office.js loads from there (the file of the Office application and platform, the strings of the person's language, a helper), so a pane
+asks Microsoft for nothing and the pages' policy names no origin but the host's. That is how a build is made unless it is told otherwise;
+`CANOA_OFFICE_JS=cdn` at build time (`build.py desktop --office-js cdn`) has the pages name Microsoft's CDN and the policy allow that one
+origin instead, and carries none of the files. Not carried either way: Office's own telemetry scripts (Office.js's code treats one it cannot
+load as telemetry off; no client has run this) and its sign-in token calls (`Office.auth`), which the add-in does not use. Microsoft's license terms
+for Office.js apply to the copy: it may be used and distributed as part of an app that works with Microsoft 365, unmodified.
 
 Render the manifests for your address once (Node 20 or later, no packages to install):
 
@@ -373,8 +381,9 @@ the code does not guess them:
 
 1. Which origins frame a task pane in each client. The list in the host is a start (Outlook on the web's own addresses and
    two wildcards); check the browser console's blocked-frame report in each client and add with `office_frames`.
-2. Whether Office.js needs anything beyond its one origin under this policy (`script-src` and `connect-src` name it alone);
-   a violation shows in the console of the pane.
+2. Whether Office.js, served by the host, needs anything beyond it in each client (`script-src` and `connect-src` name the host alone);
+   a violation or a failed request shows in the console of the pane. The set the host carries was read from Office.js's loader and
+   checked in a real Chromium with every other name refused; no Office client has loaded it.
 3. Whether one `TaskPaneApp` manifest may name Word, Excel and PowerPoint together; if Office refuses it, render one host
    at a time with `--hosts`.
 4. Whether Office accepts the one icon (192 pixels, scaled) where the manifest asks for 16, 32, 64 and 80.
