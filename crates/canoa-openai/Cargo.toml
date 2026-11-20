@@ -1,0 +1,27 @@
+[package]
+name = "canoa-openai"
+description = "OpenAI for Canoa: the speech-to-text service the accounts that hold an OpenAI API key can call"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["canoa", "openai", "speech-to-text"]
+categories = ["development-tools"]
+exclude = [".*", "*.local.*"]
+# Canoa itself is not published yet.
+publish = false
+
+[dependencies]
+canoa = { workspace = true, features = ["speech"] }
+coqui-acp-api.workspace = true
+
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+alloc_instead_of_core = "warn"

@@ -861,6 +861,7 @@ dependencies = [
  "canoa-foundry",
  "canoa-grok",
  "canoa-litellm",
+ "canoa-openai",
  "canoa-opencode",
  "canoa-pi",
  "canoa-whisper",
@@ -963,6 +964,14 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "time",
+]
+
+[[package]]
+name = "canoa-openai"
+version = "0.0.0-alpha.0"
+dependencies = [
+ "canoa",
+ "coqui-acp-api",
 ]
 
 [[package]]

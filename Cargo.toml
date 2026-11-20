@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/canoa", "crates/canoa-antigravity", "crates/canoa-claude", "crates/canoa-codex", "crates/canoa-ffi", "crates/canoa-foundry", "crates/canoa-grok", "crates/canoa-host", "crates/canoa-launch", "crates/canoa-litellm", "crates/canoa-opencode", "crates/canoa-pi", "crates/canoa-whisper"]
+members = ["crates/canoa", "crates/canoa-antigravity", "crates/canoa-claude", "crates/canoa-codex", "crates/canoa-ffi", "crates/canoa-foundry", "crates/canoa-grok", "crates/canoa-host", "crates/canoa-launch", "crates/canoa-litellm", "crates/canoa-openai", "crates/canoa-opencode", "crates/canoa-pi", "crates/canoa-whisper"]
 
 [workspace.package]
 version = "0.0.0-alpha.0"
@@ -144,6 +144,7 @@ canoa-foundry = { path = "crates/canoa-foundry" }
 canoa-codex = { path = "crates/canoa-codex" }
 canoa-grok = { path = "crates/canoa-grok" }
 canoa-litellm = { path = "crates/canoa-litellm" }
+canoa-openai = { path = "crates/canoa-openai" }
 canoa-opencode = { path = "crates/canoa-opencode" }
 canoa-pi = { path = "crates/canoa-pi" }
 canoa-whisper = { path = "crates/canoa-whisper" }

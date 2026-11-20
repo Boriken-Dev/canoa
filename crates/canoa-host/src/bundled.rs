@@ -129,6 +129,11 @@ pub(crate) const INCLUDED: &[Included] = &[
         helper: None,
     },
     Included {
+        name: canoa_openai::LIBRARY,
+        library: canoa_openai::library,
+        helper: None,
+    },
+    Included {
         name: canoa_whisper::LIBRARY,
         library: canoa_whisper::library,
         helper: None,

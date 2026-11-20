@@ -50,6 +50,7 @@ canoa-codex.workspace = true
 canoa-foundry.workspace = true
 canoa-litellm.workspace = true
 canoa-grok.workspace = true
+canoa-openai.workspace = true
 canoa-opencode.workspace = true
 canoa-pi.workspace = true
 canoa-whisper.workspace = true
