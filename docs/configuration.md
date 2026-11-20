@@ -1199,6 +1199,10 @@ something is told instead of refused, it is in the log as `non-default:`, in `ca
   `embeddings` and `llm_endpoint`, and the address of an MCP server a paired client hands a session. One that goes over plain `http`
   to somewhere other than this computer is told of: `canoa check` and `canoa accounts list` print it, the host logs it when it
   starts, and the account's row in Settings shows it. An address that holds a login is still refused.
+- **Messages.** `[host] max_message_bytes` (16 MiB) is the longest ACP message, as one line, either way on a connection: a prompt
+  carrying an attachment is one message, and base64 makes a file a third larger. There is no ceiling of Canoa's own, so raise it to
+  send a larger file. A message over it is refused with the setting named (the link's error, the host's log), and the connection
+  carries on.
 - **Worktrees.** `[host.worktrees]` `max_per_repository` (32) and `git_seconds` (120).
 - **Delegation.** `[host.delegate]` `wait_seconds` (300, the longest one `task_status` waits) and `dial_seconds` (20, reaching an agent
   on another machine).

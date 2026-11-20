@@ -130,6 +130,9 @@ worktrees = true                      # agents and tools: a git worktree per ses
 peers = ["sha256:…"]                  # paired keys that may use it; default every paired key
 max_peers = 4                         # connections at once
 
+[host]
+max_message_bytes = 16777216          # the longest ACP message, one line, either way on a connection (a prompt with an attachment is one); no ceiling here, 0 is refused; `Config::max_message_bytes`, default `DEFAULT_MAX_MESSAGE_BYTES`. A message over it is refused naming the setting (`LinkError::TooLong` says it; a network client sees its connection end and the host's log says it). The host's link to another machine's agent uses it too; `canoa agent` takes `--max-message-bytes`, and `canoa launch`, `mcp-bridge` and a tool's own lines keep the default
+
 [host.web]                            # optional: the web app on a listener of its own; see "The web app" below
 dir = "site"                          # the site, relative to the file's directory; without it the site built in (feature web)
 listen = "127.0.0.1:7800"             # the default; beyond loopback only with cert and key
@@ -270,7 +273,7 @@ pub fn Local::link_secret(&self) -> Option<Zeroizing<[u8; 32]>>   // the secret 
 pub fn Link::send(&self, message: &[u8]) -> Result<(), LinkError>    // waits up to 30 s while 256 are unread
 pub fn Link::receive(&self, timeout: Option<Duration>) -> Result<Option<Vec<u8>>, LinkError>   // None: the other end closed and all was read
 pub fn Link::close(&self)                      // ends both ends and the agent; dropping a Link does it
-#[non_exhaustive] pub enum LinkError { TooLong, Timeout, Ended }
+#[non_exhaustive] pub enum LinkError { TooLong { limit: usize }, Timeout, Ended }   // TooLong: over `[host] max_message_bytes`; ends nothing
 pub fn Serving::run(self)                      // takes connections until Stopper::stop or the process ends; returns with every listener closed and every agent ended
 pub fn Stopper::stop(&self)                    // ends every listener, link and agent
 pub fn Stopper::stop_agents(&self)             // ends every agent process running, and each later one before it serves; the listeners stay; returns once all have ended, whichever thread ends them
@@ -1480,7 +1483,7 @@ canoa provider (--library FILE | --source FILE [--import-search library|path]) -
 canoa tool --name NAME --spec JSON
 canoa agent ID [--executable FILE] [--setting KEY=VALUE]... COMMON...        # ID: a harness provider the bundled agents offer (claude, codex, ...)
       COMMON: [--model M] [--effort E] [--max-acp-version 1|2] [--max-sessions N] [--working-root DIR]...
-              [--no-client-mcp-servers] [--allow-network-paths] [--cache-lifetime default|off|short|long]
+              [--no-client-mcp-servers] [--allow-network-paths] [--cache-lifetime default|off|short|long] [--max-message-bytes N]
 canoa launch PROGRAM [ARGS]...
 canoa options (claude | codex [--executable FILE] | NAME --entry [--config FILE]) [--format text|json]
 canoa accounts list [--config FILE] [--format text|json]
