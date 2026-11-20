@@ -48,7 +48,9 @@ request with the agent's `reject_once` option (any other refusal, else a plain o
 the turn is still open, when it ends. A refusal chosen on the card itself stops the turn with `session/cancel`; a subagent's request
 is refused alone.
 
-**Modes.** The mode a session is in shows at the composer's bottom left, as Claude Code's and Codex's own do, and is changed
+**The composer** is one box: `+` at the left (files and images, a folder reference, paste, slash commands, a mention, dictation, voice mode), the text, the attachments as picture or file cards above it, and at the right the microphone while the message is empty and Send once it holds text or an attachment (Queue, Steer and Stop while a turn runs). Under the box a quiet line holds the choices: model and effort, mode, account, then for a new session its source, Local or Worktree, profile, cache and overlays, the usage and, while a turn runs, a spinner. The placeholder names the agent and the keys that send.
+
+**Modes.** The mode a session is in shows in the line under the composer's box, and is changed
 from its menu or with Shift+Tab in the message, which goes on to the next mode and round. Nothing is asked: choosing a mode is
 the whole act. The control offers the agent's own modes (the `mode` option, or an agent's `modes`), read from the agent and
 never assumed; `canoa agent claude` and `canoa agent codex` offer Canoa's five where their tool has them: Manual, Accept edits,
@@ -210,7 +212,7 @@ the source also names the model's default effort) rather than Default twice; a s
 "Claude Code isn't installed on this host" with **Install** (the Store's programs, where the host allows installing),
 "Claude needs a sign-in" with **Sign in** (the Accounts flow; an account the entry offers carries its own login, so the
 machine's is not asked for), or "Couldn't start Claude" with **Try again**. Sending to a source of the first two asks the host
-once more, then opens that action and keeps the message. The mode control is at the composer's bottom left (see Modes above), with Bypass beside the agent's own
+once more, then opens that action and keeps the message. The mode control is in the line under the composer's box (see Modes above), with Bypass beside the agent's own
 modes; its menu is headed "Permissions · this session" and gives each mode Canoa knows a line on what it does.
 
 ## Usage
