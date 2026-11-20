@@ -2674,3 +2674,27 @@ item = true
         assert!(parse(bad).is_err(), "{bad}");
     }
 }
+
+/// A canoa.cfg with the tables and keys a person's application writes, and a Claude and a Codex entry, loads as before: the
+/// harness names are the providers' ids, which the providers' own change leaves alone.
+#[test]
+fn a_config_with_the_claude_and_codex_harness_entries_reads_as_it_did() {
+    let config =
+        parse(include_str!("../../tests/fixtures/owner_cfg/canoa.cfg")).expect("the file parses");
+    let harness_of = |name: &str| match &config.entry(name).expect("the entry is there").kind {
+        EntryKind::Harness {
+            harness,
+            executable,
+            accounts,
+            profiles,
+            ..
+        } => {
+            assert!(executable.is_none() && accounts.is_empty() && profiles.is_empty());
+            harness.clone()
+        }
+        other => panic!("{name} is {other:?}"),
+    };
+    assert_eq!(harness_of("Claude"), "claude");
+    assert_eq!(harness_of("Codex"), "codex");
+    assert_eq!(config.entries.len(), 2);
+}
