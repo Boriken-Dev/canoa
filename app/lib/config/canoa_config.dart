@@ -1408,6 +1408,49 @@ final class CanoaConfig {
   factory CanoaConfig.parse(String text, {String? name, List<ConfigLayer> below = const []}) =>
       CanoaConfig.fromLayers(decodeConfig(text, name: name), below);
 
+  /// The keys of each table the app edits through its own fields. Any other key of one of them is the host's or a later version's:
+  /// kept as found, never refused here (the host says what it refuses, through `config/check`).
+  static const _editedKeys = <String, Set<String>>{
+    'desktop': {'start_hidden', 'close_to_tray', 'minimize_to_tray', 'local_host'},
+    'network': {'prefer_webtransport', 'connect_timeout'},
+    'appearance': {'look', 'follow_provider', 'brightness', 'density'},
+    'sessions': {'keep', 'keep_text', 'text_messages', 'workspace', 'while_working', 'queue_delivery'},
+    'permissions': {'default_mode', 'full_access', 'allow_once_only', 'protected'},
+    'notifications': {'permission', 'question', 'finished'},
+    'sources': {'hidden'},
+    'attachments': {'paste_as_file', 'embed_limit'},
+    'usage': {'warn_permille', 'limit_phrases'},
+    'voice': {
+      'backend', 'model', 'language', 'device', 'mode', 'accent', 'voice', 'vocabulary', 'acknowledged',
+      'output', 'output_voice', 'output_model', 'output_style', 'output_speed', 'read_replies',
+    },
+  };
+
+  /// The keys the layers and the person's file hold in the tables of [_editedKeys] that the app has no field for, by table.
+  Map<String, Map<String, dynamic>> get _unknownKeys {
+    var merged = <String, dynamic>{};
+    for (final layer in source.layers) {
+      merged = mergeConfig(merged, layer.data);
+    }
+    merged = mergeConfig(merged, source.own);
+    return {
+      for (final MapEntry(key: name, value: known) in _editedKeys.entries)
+        if (merged[name] case final Map<dynamic, dynamic> table)
+          if (table.keys.any((key) => !known.contains(key)))
+            name: {for (final MapEntry(:key, :value) in table.entries) if (!known.contains(key)) '$key': value},
+    };
+  }
+
+  /// What this configuration writes, as a document: its own fields and, in their tables, the keys it did not read.
+  Map<String, dynamic> _modelDocument() {
+    final model = TomlDocument.parse(_encodeToml()).toMap();
+    for (final MapEntry(:key, :value) in _unknownKeys.entries) {
+      final held = model[key];
+      model[key] = {...(held is Map ? held.cast<String, dynamic>() : const <String, dynamic>{}), ...value};
+    }
+    return model;
+  }
+
   /// The tables of canoa.cfg this app reads; any other is kept as it was found.
   static const _ownTables = {
     'desktop', 'network', 'appearance', 'agents', 'host', 'sessions', 'harnesses', 'overlays', 'profile', 'permissions',
@@ -1429,29 +1472,23 @@ final class CanoaConfig {
       for (final MapEntry(:key, :value) in data.entries)
         if (!_ownTables.contains(key)) key: value,
     };
-    Map<String, dynamic> table(String name, Set<String> allowed) {
+    // A key of these tables the app does not name is not read and not refused: [_unknownKeys] gives it back when the file is written.
+    Map<String, dynamic> table(String name) {
       final raw = data[name];
       if (raw == null) return {};
       if (raw is! Map) throw FormatException('canoa.cfg: expected a table');
-      final entries = Map<String, dynamic>.from(raw);
-      for (final key in entries.keys) {
-        if (!allowed.contains(key)) throw FormatException('canoa.cfg: invalid key $key');
-      }
-      return entries;
+      return Map<String, dynamic>.from(raw);
     }
-    final desktop = table('desktop', {'start_hidden','close_to_tray','minimize_to_tray','local_host'});
-    final network = table('network', {'prefer_webtransport','connect_timeout'});
-    final appearance = table('appearance', {'look', 'follow_provider', 'brightness', 'density'});
-    final sessions = table('sessions', {'keep', 'keep_text', 'text_messages', 'workspace', 'while_working', 'queue_delivery'});
-    final permissions = table('permissions', {'default_mode', 'full_access', 'allow_once_only', 'protected'});
-    final notifications = table('notifications', {'permission', 'question', 'finished'});
-    final sources = table('sources', {'hidden'});
-    final attachments = table('attachments', {'paste_as_file', 'embed_limit'});
-    final usage = table('usage', {'warn_permille', 'limit_phrases'});
-    final voiceTable = table('voice', {
-      'backend', 'model', 'language', 'device', 'mode', 'accent', 'voice', 'vocabulary', 'acknowledged',
-      'output', 'output_voice', 'output_model', 'output_style', 'output_speed', 'read_replies',
-    });
+    final desktop = table('desktop');
+    final network = table('network');
+    final appearance = table('appearance');
+    final sessions = table('sessions');
+    final permissions = table('permissions');
+    final notifications = table('notifications');
+    final sources = table('sources');
+    final attachments = table('attachments');
+    final usage = table('usage');
+    final voiceTable = table('voice');
     final outputSpeed = voiceTable['output_speed'];
     if (outputSpeed != null && (outputSpeed is! num || !outputSpeed.isFinite || !(outputSpeed > 0))) {
       throw const FormatException('canoa.cfg: voice.output_speed must be a number above 0');
@@ -1779,14 +1816,17 @@ args = ${jsonEncode(agent.args)}
   /// keys the person changed or already had there and none that a lower layer gives the same.
   String encode() {
     final toml = _encodeToml();
-    if (source.layers.isEmpty && source.format == ConfigFormat.toml) return source.marked ? '#!toml\n$toml' : toml;
+    if (source.layers.isEmpty && source.format == ConfigFormat.toml) {
+      final text = _unknownKeys.isEmpty ? toml : '${toml.split('\n').first}\n${TomlDocument.fromMap(_modelDocument())}';
+      return source.marked ? '#!toml\n$text' : text;
+    }
     return encodeConfig(_ownDocument(), source.format, marked: source.marked);
   }
 
   static final _ownDocuments = Expando<Map<String, dynamic>>('own document');
 
   Map<String, dynamic> _ownDocument() => _ownDocuments[this] ??=
-      ownDocument(TomlDocument.parse(_encodeToml()).toMap(), _lowerModel, source.own, _defaults);
+      ownDocument(_modelDocument(), _lowerModel, source.own, _defaults);
 
   static final _lowerModels = Expando<Map<String, dynamic>>('lower layers as the model writes them');
 
@@ -1795,9 +1835,8 @@ args = ${jsonEncode(agent.args)}
   /// person's file.
   Map<String, dynamic> get _lowerModel => source.layers.isEmpty
       ? const {}
-      : _lowerModels[source] ??= TomlDocument.parse(
-          CanoaConfig.fromLayers((format: ConfigFormat.toml, marked: false, data: const <String, dynamic>{}), source.layers)._encodeToml(),
-        ).toMap();
+      : _lowerModels[source] ??=
+            CanoaConfig.fromLayers((format: ConfigFormat.toml, marked: false, data: const <String, dynamic>{}), source.layers)._modelDocument();
 
   static final Map<String, dynamic> _defaults = TomlDocument.parse(const CanoaConfig()._encodeToml()).toMap();
 
