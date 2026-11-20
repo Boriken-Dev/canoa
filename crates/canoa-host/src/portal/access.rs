@@ -141,23 +141,13 @@ fn read_lines(path: &Path) -> Result<Vec<String>, String> {
 
 /// Writes `lines` to `path`, privately and in one step.
 fn write_lines(path: &Path, lines: &[String]) -> Result<(), String> {
-    use std::io::Write as _;
-    use std::os::unix::fs::OpenOptionsExt as _;
-    let mut temporary = path.to_path_buf().into_os_string();
-    temporary.push(".new");
-    let temporary = PathBuf::from(temporary);
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&temporary)
-        .map_err(|error| error.to_string())?;
+    let mut text = String::new();
     for line in lines {
-        writeln!(file, "{line}").map_err(|error| error.to_string())?;
+        text.push_str(line);
+        text.push('\n');
     }
-    file.sync_all().map_err(|error| error.to_string())?;
-    std::fs::rename(&temporary, path).map_err(|error| error.to_string())
+    crate::replace::write_file(path, text.as_bytes(), crate::replace::PRIVATE)
+        .map_err(|error| error.to_string())
 }
 
 /// Runs `body` holding an exclusive lock on the file `<path>.lock`, which every process that changes `path` takes.
@@ -2569,5 +2559,24 @@ mod tests {
         codes.provider = "second_factor".to_owned();
         let error = check_code_files_owned(&settings(vec![password, codes])).unwrap_err();
         assert!(error.contains("belongs to user id 0"), "{error}");
+    }
+}
+
+#[cfg(test)]
+mod write_tests {
+    use crate::replace::proof;
+
+    #[test]
+    fn a_list_of_lines_is_whole_private_and_keeps_the_mode_it_had() {
+        let dir = proof::folder("access-lines");
+        let file = dir.join("deeper").join("resets");
+        super::write_lines(&file, &["one".to_owned(), "two".to_owned()]).expect("written");
+        assert_eq!(std::fs::read_to_string(&file).expect("read"), "one\ntwo\n");
+        assert_eq!(proof::mode(&file), 0o600);
+        proof::set_mode(&file, 0o640);
+        super::write_lines(&file, &["three".to_owned()]).expect("written");
+        assert_eq!(proof::mode(&file), 0o640);
+        assert_eq!(proof::names(&dir.join("deeper")), ["resets"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

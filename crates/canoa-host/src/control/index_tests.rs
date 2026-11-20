@@ -338,7 +338,7 @@ fn an_index_is_kept_under_its_own_home_and_read_back_after_a_restart() {
         std::fs::read_dir(rig.cache.join("s1-catalog-team").join(&commit))
             .expect("folder")
             .flatten()
-            .all(|found| found.file_name() != "index.json.new"),
+            .all(|found| !found.file_name().to_string_lossy().contains(".new")),
         "written through a temporary file that was renamed over"
     );
 

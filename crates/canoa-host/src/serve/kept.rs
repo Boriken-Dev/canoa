@@ -219,19 +219,7 @@ impl Keeper {
             text.push_str(&message.to_string());
             text.push('\n');
         }
-        let partial = self.path.with_extension("tmp");
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&partial)?;
-        file.write_all(text.as_bytes())?;
-        file.sync_data()?;
-        drop(file);
-        fs::rename(&partial, &self.path)?;
+        crate::replace::write_file(&self.path, text.as_bytes(), crate::replace::PRIVATE)?;
         self.file = Some(fs::OpenOptions::new().append(true).open(&self.path)?);
         self.written = snapshot.head;
         self.lines = snapshot.entries.len();

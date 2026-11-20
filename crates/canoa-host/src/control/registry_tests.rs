@@ -1,3 +1,4 @@
+use std::io::Write as _;
 use std::net::TcpListener;
 use std::sync::Mutex;
 

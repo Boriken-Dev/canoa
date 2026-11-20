@@ -232,10 +232,10 @@ impl UsageLog {
         names
     }
 
-    /// Writes `bytes` over `name` through a file beside it, so a stop never leaves half of it.
+    /// Writes `bytes` over `name`, whole or not at all.
     fn replace(&self, name: &str, bytes: &[u8]) {
-        let tmp = self.dir.join(format!("{name}.tmp"));
-        let written = fs::write(&tmp, bytes).and_then(|()| fs::rename(&tmp, self.dir.join(name)));
+        let written =
+            crate::replace::write_file(&self.dir.join(name), bytes, crate::replace::SHARED);
         if let Err(error) = written {
             tracing::warn!("the usage file {name} could not be written: {error}");
         }

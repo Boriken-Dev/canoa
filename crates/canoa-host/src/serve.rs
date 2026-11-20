@@ -710,13 +710,8 @@ impl Admission {
 
 /// Keeps `keys` in `file`, replacing what it held.
 fn write_admitted(file: &std::path::Path, secret: bool, keys: &[String]) -> std::io::Result<()> {
-    if let Some(dir) = file.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
     let text = serde_json::json!({ "secret": secret, "keys": keys }).to_string();
-    let part = file.with_extension("json.part");
-    std::fs::write(&part, text)?;
-    std::fs::rename(&part, file)
+    crate::replace::write_file(file, text.as_bytes(), crate::replace::SHARED)
 }
 
 /// The keys `file` holds that the add-in's page may still hold: those the trust store still accepts (a key taken away with `revoke`
@@ -4228,5 +4223,29 @@ settings = { replay_max_bytes = 4096 }
             &[offered("pi", &["pi"], false)],
             "claude"
         ));
+    }
+}
+
+#[cfg(test)]
+mod write_tests {
+    use crate::replace::proof;
+
+    #[test]
+    fn the_admitted_keys_are_whole_with_nothing_beside_them_and_keep_their_mode() {
+        let dir = proof::folder("admitted");
+        let file = dir.join("deeper").join("admitted.json");
+        super::write_admitted(&file, false, &["a".to_owned()]).expect("kept");
+        super::write_admitted(&file, true, &["a".to_owned(), "b".to_owned()]).expect("kept");
+        let held: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).expect("read")).expect("JSON");
+        assert_eq!(held["keys"].as_array().map(Vec::len), Some(2));
+        assert_eq!(proof::names(&dir.join("deeper")), ["admitted.json"]);
+        #[cfg(unix)]
+        {
+            proof::set_mode(&file, 0o640);
+            super::write_admitted(&file, true, &["c".to_owned()]).expect("kept");
+            assert_eq!(proof::mode(&file), 0o640);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

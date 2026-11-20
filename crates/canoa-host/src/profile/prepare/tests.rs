@@ -674,3 +674,26 @@ fn a_setup_sh_runs_under_sh_with_its_phase_and_the_overlays_variables() {
         "install install shell"
     );
 }
+
+#[test]
+fn a_setup_record_is_whole_with_nothing_beside_it_and_keeps_its_mode() {
+    use crate::replace::proof;
+    let dir = proof::folder("prepared");
+    let home = Home::new(dir.join("overlays"));
+    let record = SetupRecord::new("abc", Phase::Install);
+    home.write_record("one", &record).expect("written");
+    home.write_record("one", &record).expect("written");
+    assert_eq!(
+        home.record("one").map(|read| read.digest),
+        Some("abc".to_owned())
+    );
+    let prepared = dir.join("overlays").join(".prepared");
+    assert_eq!(proof::names(&prepared), ["one.json"]);
+    #[cfg(unix)]
+    {
+        proof::set_mode(&prepared.join("one.json"), 0o640);
+        home.write_record("one", &record).expect("written");
+        assert_eq!(proof::mode(&prepared.join("one.json")), 0o640);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

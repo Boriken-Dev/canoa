@@ -97,18 +97,9 @@ pub(crate) fn file() -> Result<PathBuf, String> {
         }
         std::fs::create_dir_all(&directory)
             .map_err(|error| format!("{}: {error}", directory.display()))?;
-        // Written under a name of its own and moved into place, so a source starting at the same time never reads half of it.
-        let partial = directory.join(format!(
-            "kinds-{}-{}.part",
-            std::process::id(),
-            fingerprint(path.as_os_str().as_encoded_bytes())
-        ));
-        std::fs::write(&partial, &text)
-            .map_err(|error| format!("{}: {error}", partial.display()))?;
-        std::fs::rename(&partial, &path).map_err(|error| {
-            let _ = std::fs::remove_file(&partial);
-            format!("{}: {error}", path.display())
-        })?;
+        // Whole or not at all, so a source starting at the same time never reads half of it.
+        crate::replace::write_file(&path, text.as_bytes(), crate::replace::SHARED)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
         Ok(path)
     })
     .clone()

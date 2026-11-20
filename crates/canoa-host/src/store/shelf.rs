@@ -22,7 +22,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 use std::fs::{self, File, TryLockError};
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 
 use canoa::store::{Launch, is_program_name};
@@ -570,12 +570,11 @@ impl Locked<'_> {
 
     fn write(&self, current: &Current) -> Result<(), ShelfError> {
         let bytes = serde_json::to_vec_pretty(current).map_err(io::Error::other)?;
-        let temporary = self.program.dir.join("current.json.tmp");
-        let mut file = File::create(&temporary)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&temporary, self.program.dir.join("current.json"))?;
+        crate::replace::write_file(
+            &self.program.dir.join("current.json"),
+            &bytes,
+            crate::replace::SHARED,
+        )?;
         // The digest of what was written is kept beside the programs, not in the program's own folder.
         let digest = self.program.digest_path();
         if let Some(parent) = digest.parent() {

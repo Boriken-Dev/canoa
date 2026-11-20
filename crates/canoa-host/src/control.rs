@@ -814,7 +814,7 @@ impl Control {
         self.ledger.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Writes the ledger whole, beside itself first, so a stop in the middle leaves the old one.
+    /// Writes the ledger whole, so a stop in the middle leaves the old one.
     fn save(&self, ledger: &BTreeMap<String, Stored>) -> Result<(), String> {
         let Some(path) = &self.path else {
             return Ok(());
@@ -824,15 +824,8 @@ impl Control {
         }
         let bytes =
             serde_json::to_vec(&json!({"records": ledger})).map_err(|error| error.to_string())?;
-        let beside = path.with_extension("json.new");
-        {
-            use std::io::Write as _;
-            let mut file = private_file(&beside).map_err(|error| error.to_string())?;
-            file.write_all(&bytes).map_err(|error| error.to_string())?;
-            // The bytes are on disk before the name points at them, so a stop in between leaves the old ledger.
-            file.sync_all().map_err(|error| error.to_string())?;
-        }
-        fs::rename(&beside, path).map_err(|error| error.to_string())
+        crate::replace::write_file(path, &bytes, crate::replace::PRIVATE)
+            .map_err(|error| error.to_string())
     }
 
     fn fs_read(&self, caller: &Caller, params: &Value) -> Result<Value, (i32, String)> {

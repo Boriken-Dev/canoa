@@ -381,3 +381,21 @@ fn recorded_buckets_count_a_keys_tokens_today_in_thirty_days_and_by_model() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_usage_file_is_replaced_whole_with_nothing_beside_it_and_keeps_its_mode() {
+    use crate::replace::proof;
+    let dir = proof::folder("usage-replace");
+    let log = UsageLog::open(dir.clone(), 30, NOW);
+    log.replace("totals.json", b"one");
+    log.replace("totals.json", b"two");
+    assert_eq!(fs::read(dir.join("totals.json")).expect("read"), b"two");
+    assert_eq!(proof::names(&dir), ["totals.json"]);
+    #[cfg(unix)]
+    {
+        proof::set_mode(&dir.join("totals.json"), 0o640);
+        log.replace("totals.json", b"three");
+        assert_eq!(proof::mode(&dir.join("totals.json")), 0o640);
+    }
+    let _ = fs::remove_dir_all(&dir);
+}

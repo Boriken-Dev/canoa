@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::time::Duration;
 use std::fs::{self, File, TryLockError};
-use std::io::{self, Read as _, Write as _};
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 
 use coqui_agentic_peer::home::{self, METHOD_FILE, identity_file};
@@ -330,21 +330,7 @@ fn write_holder(file: &Path, name: &str) -> io::Result<()> {
         .take(MAX_NAME)
         .collect();
     let text = json!({ "pid": std::process::id(), "name": name }).to_string();
-    // A name nobody could have put a link at in advance, made only where nothing is.
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |since| since.as_nanos());
-    let beside = file.with_extension(format!("holder.{}.{stamp}", std::process::id()));
-    let written = File::options()
-        .write(true)
-        .create_new(true)
-        .open(&beside)
-        .and_then(|mut out| out.write_all(text.as_bytes()))
-        .and_then(|()| fs::rename(&beside, file));
-    if written.is_err() {
-        let _ = fs::remove_file(&beside);
-    }
-    written
+    crate::replace::write_file(file, text.as_bytes(), crate::replace::SHARED)
 }
 
 fn read_holder(file: &Path) -> Option<Holder> {
@@ -546,5 +532,31 @@ mod tests {
         fs::remove_file(dir.join(METHOD_FILE)).expect("removed");
         assert!(home.identity(None).is_err(), "both, and none named");
         fs::remove_dir_all(&dir).expect("removed");
+    }
+}
+
+#[cfg(test)]
+mod write_tests {
+    use super::*;
+    use crate::replace::proof;
+
+    #[test]
+    fn who_holds_the_home_is_whole_with_nothing_beside_it_and_keeps_its_mode() {
+        let dir = proof::folder("holder");
+        let file = dir.join("holder.json");
+        write_holder(&file, "first").expect("written");
+        write_holder(&file, "CanoaUI").expect("written");
+        assert_eq!(
+            read_holder(&file).map(|holder| holder.name),
+            Some("CanoaUI".to_owned())
+        );
+        assert_eq!(proof::names(&dir), ["holder.json"]);
+        #[cfg(unix)]
+        {
+            proof::set_mode(&file, 0o640);
+            write_holder(&file, "again").expect("written");
+            assert_eq!(proof::mode(&file), 0o640);
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 }

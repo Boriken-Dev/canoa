@@ -135,6 +135,8 @@ impl State {
         }
         file.sync_all().map_err(refuse)?;
         drop(file);
+        // The pieces arrive over several requests, so the file beside is kept between them and is moved whole at the last: it
+        // cannot be one `replace::write_file`.
         fs::rename(&part, &path).map_err(refuse)?;
         Ok(json!({}))
     }

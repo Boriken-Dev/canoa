@@ -764,17 +764,10 @@ impl SecretStore for FileStore {
         sealed.extend_from_slice(&nonce);
         sealed.extend_from_slice(&text);
         let path = self.path_of(id);
-        // Beside its place and then over it, so nobody reads half of it.
-        let beside = self
-            .dir
-            .join(format!("{}.tmp.{}", tag(id), unique_suffix()));
-        let written = super::private::create_file(&beside)
-            .and_then(|mut file| file.write_all(&sealed).and_then(|()| file.sync_all()))
-            .and_then(|()| fs::rename(&beside, &path));
-        if let Err(error) = written {
-            let _ = fs::remove_file(&beside);
-            return Err(failed("the account could not be written", error));
-        }
+        // The accounts folder is private to its owner and what is made in it takes that, so the file is swapped in by one rename:
+        // `get` reads it while it is rewritten.
+        crate::replace::write_file_in_folder(&path, &sealed, crate::replace::PRIVATE)
+            .map_err(|error| failed("the account could not be written", error))?;
         sync_dir(&self.dir);
         Ok(())
     }
@@ -792,3 +785,34 @@ pub(crate) mod outside;
 
 #[cfg(test)]
 pub(crate) mod real_store;
+
+#[cfg(test)]
+mod write_tests {
+    use super::*;
+    use crate::replace::proof;
+
+    #[test]
+    fn a_sealed_account_is_whole_private_and_keeps_the_mode_it_had() {
+        let dir = proof::folder("sealed");
+        let store = FileStore::new(dir.join("accounts"));
+        store.put("a", b"first").expect("kept");
+        store.put("a", b"second").expect("kept");
+        assert_eq!(store.get("a").expect("read"), Some(b"second".to_vec()));
+        let names = proof::names(&dir.join("accounts"));
+        assert!(
+            names
+                .iter()
+                .all(|name| !name.contains(".new") && !name.contains(".tmp")),
+            "{names:?}"
+        );
+        #[cfg(unix)]
+        {
+            let file = store.path_of("a");
+            assert_eq!(proof::mode(&file), 0o600);
+            proof::set_mode(&file, 0o640);
+            store.put("a", b"third").expect("kept");
+            assert_eq!(proof::mode(&file), 0o640);
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

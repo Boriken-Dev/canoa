@@ -9,7 +9,7 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::io::{Read as _, Write as _};
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -191,17 +191,8 @@ impl Registry {
                 format!("the cache holds {MAX_DOCUMENTS} documents already"),
             ));
         }
-        let beside = folder.join(format!("{name}.new"));
-        let written = fs::File::create(&beside)
-            .and_then(|mut next| {
-                next.write_all(document.as_bytes())?;
-                next.sync_all()
-            })
-            .and_then(|()| fs::rename(&beside, &file));
-        written.map_err(|error| {
-            let _ = fs::remove_file(&beside);
-            (REFUSED, format!("the cache cannot be written: {error}"))
-        })?;
+        crate::replace::write_file(&file, document.as_bytes(), crate::replace::SHARED)
+            .map_err(|error| (REFUSED, format!("the cache cannot be written: {error}")))?;
         Ok(json!({}))
     }
 }

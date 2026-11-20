@@ -78,14 +78,12 @@ impl Home {
     }
 
     pub(crate) fn write_record(&self, identity: &str, record: &SetupRecord) -> std::io::Result<()> {
-        let file = self.record_file(identity);
-        if let Some(parent) = file.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let text = json!({"digest": record.digest, "phase": record.phase.name()}).to_string();
-        let beside = file.with_extension("json.new");
-        std::fs::write(&beside, text)?;
-        std::fs::rename(beside, file)
+        crate::replace::write_file(
+            &self.record_file(identity),
+            text.as_bytes(),
+            crate::replace::SHARED,
+        )
     }
 
     /// Each runtime's packages folder of `identity`, for the runtimes whose environment is built: what goes on `PYTHONPATH` and

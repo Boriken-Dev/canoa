@@ -198,12 +198,8 @@ impl Files {
         let path = self.trust_path()?;
         let text = serde_json::to_vec_pretty(&json!({"version": 1, "projects": projects}))
             .map_err(|error| refused(&error.to_string()))?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|error| refused(&error.to_string()))?;
-        }
-        let beside = path.with_extension("json.new");
-        fs::write(&beside, text).map_err(|error| refused(&format!("trust.json: {error}")))?;
-        fs::rename(&beside, &path).map_err(|error| refused(&format!("trust.json: {error}")))
+        crate::replace::write_file(&path, &text, crate::replace::SHARED)
+            .map_err(|error| refused(&format!("trust.json: {error}")))
     }
 
     /// `trust/set` `{"directory", "sha256"}` -> the list: trusts the folder's project profile as the person was shown it. The

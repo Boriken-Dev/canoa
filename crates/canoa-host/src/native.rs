@@ -229,13 +229,8 @@ pub fn record_origin(home: &Path, peer: &str, origin: &str) -> io::Result<()> {
     let mut map = origins(home)?;
     map.insert(peer.to_owned(), origin.into());
     let file = origins_file(home);
-    fs::create_dir_all(file.parent().unwrap_or(home))?;
-    let temporary = file.with_extension("json.tmp");
-    fs::write(
-        &temporary,
-        serde_json::to_string_pretty(&Value::Object(map)).map_err(io::Error::other)?,
-    )?;
-    fs::rename(temporary, file)
+    let text = serde_json::to_string_pretty(&Value::Object(map)).map_err(io::Error::other)?;
+    crate::replace::write_file(&file, text.as_bytes(), crate::replace::SHARED)
 }
 
 /// Whether `peer` was paired through the door by the extension at `origin`. A key paired another way is bound to none.
@@ -864,5 +859,29 @@ mod tests {
     fn a_piece_and_its_message_fit_what_a_browser_takes() {
         let piece = json!({ "d": BASE64.encode(&vec![0xff_u8; MAX_PIECE]) }).to_string();
         assert!(piece.len() <= companion::MAX_REPLY, "{}", piece.len());
+    }
+}
+
+#[cfg(test)]
+mod write_tests {
+    use super::*;
+    use crate::replace::proof;
+
+    #[test]
+    fn the_record_of_origins_is_whole_with_nothing_beside_it_and_keeps_its_mode() {
+        let home = proof::folder("origins");
+        record_origin(&home, "peer-a", "chrome-extension://a/").expect("recorded");
+        record_origin(&home, "peer-b", "chrome-extension://b/").expect("recorded");
+        assert!(bound_to(&home, "peer-a", "chrome-extension://a/"));
+        assert!(bound_to(&home, "peer-b", "chrome-extension://b/"));
+        assert_eq!(proof::names(&home.join("native")), ["origins.json"]);
+        #[cfg(unix)]
+        {
+            let file = origins_file(&home);
+            proof::set_mode(&file, 0o640);
+            record_origin(&home, "peer-c", "chrome-extension://c/").expect("recorded");
+            assert_eq!(proof::mode(&file), 0o640);
+        }
+        let _ = fs::remove_dir_all(&home);
     }
 }

@@ -862,6 +862,8 @@ impl Files {
         drop(file);
         let path = dir.join(&stored);
         if done {
+            // An upload arrives in pieces over several requests: its file is kept apart until the last, then moved whole, so it
+            // cannot be one `replace::write_file`.
             fs::rename(&part, &path).map_err(|error| {
                 let _ = fs::remove_file(&part);
                 refused(&format!("the upload could not be kept: {error}"))
