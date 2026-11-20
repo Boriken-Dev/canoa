@@ -163,6 +163,24 @@ void main() {
       expect(link.asked.where((method) => method == 'config/set'), hasLength(1));
     });
 
+    test('Voice is read from the host and a change of it is saved there, so it is still set after a reload', () async {
+      final sent = <String, Object?>{};
+      final link = _Link((method, params) {
+        if (method == 'config/get') {
+          return {'section': params['section'], 'value': params['section'] == 'voice' ? {'mode': 'hold', 'language': 'es'} : null};
+        }
+        sent[params['section'] as String] = params['value'];
+        return {'section': params['section'], 'restart': false};
+      });
+      final store = HostConfigStore(HostFiles(HostControl.dialing(() async => link)));
+      final config = await store.load();
+      expect(config.voice.mode, DictationMode.hold);
+      expect(config.voice.language, 'es');
+      expect(await store.save(config.copyWith(voice: config.voice.copyWith(speak: config.voice.speak.copyWith(readReplies: true)))), isFalse);
+      expect(sent.keys, ['voice']);
+      expect(sent['voice'], {'mode': 'hold', 'language': 'es', 'read_replies': true});
+    });
+
     test('a connection saved on the page is sent as its own table, and as the one table', () async {
       final sent = <String, Object?>{};
       final link = _Link((method, params) {

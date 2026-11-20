@@ -44,7 +44,6 @@ pub const MAX_SECTION_BYTES: usize = 256 * 1024;
 /// `skill_pins` name programs to run or what may run, so they stay the person's to edit in the file.
 pub const SECTIONS: &[&str] = &[
     "appearance",
-    "assets",
     "attachments",
     "connections",
     "defaults",

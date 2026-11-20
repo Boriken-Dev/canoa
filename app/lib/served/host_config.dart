@@ -10,7 +10,6 @@ import 'host_files.dart';
 /// person's to edit in the file; a change to one of them in a configuration saved here is left unsaved.
 const hostConfigSections = [
   'appearance',
-  'assets',
   'attachments',
   'connections',
   'defaults',
@@ -23,11 +22,12 @@ const hostConfigSections = [
   'sessions',
   'store',
   'usage',
+  'voice',
 ];
 
 /// The tables only the app the host runs in reads and writes: the commands, the window and the profile it holds, and what pins a
 /// skill. No paired key edits them.
-const ownerSections = ['agents', 'desktop', 'profile', 'skill_pins', 'voice'];
+const ownerSections = ['agents', 'desktop', 'profile', 'skill_pins'];
 
 /// The host's own table, which only a key that holds `hosting` reads or writes: the agents it serves, who may connect and the
 /// knowledge settings.
