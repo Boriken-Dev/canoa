@@ -491,7 +491,7 @@ fn the_settings_default_to_the_documented_values_and_refuse_what_they_do_not_kno
     let none = Config::from_str_in("", std::path::Path::new(".")).expect("parses");
     assert_eq!(none.delegate, DelegateConfig::default());
     let text = "[host.delegate]\nenabled = false\nsources = [\"a\", \"b\"]\nmax_children = 2\nmax_running = 3\nmax_depth = 0\n\
-                task_bytes = 10\nresult_bytes = 20\nhistory_bytes = 30\ncontext_bytes = 40\n";
+                task_bytes = 10\nresult_bytes = 20\nhistory_bytes = 30\ncontext_bytes = 40\nwait_seconds = 900\ndial_seconds = 45\n";
     let set = Config::from_str_in(text, std::path::Path::new("."))
         .expect("parses")
         .delegate;
@@ -508,6 +508,8 @@ fn the_settings_default_to_the_documented_values_and_refuse_what_they_do_not_kno
             result_bytes: 20,
             history_bytes: 30,
             context_bytes: 40,
+            wait_seconds: 900,
+            dial_seconds: 45,
         }
     );
     let defaults = DelegateConfig::default();

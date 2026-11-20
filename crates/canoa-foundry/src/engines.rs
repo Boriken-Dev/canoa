@@ -44,6 +44,9 @@ fn service_engine(settings: &Settings) -> Result<Arc<dyn Engine>, String> {
     use crate::daemon::{DaemonConfig, DaemonEngine};
     let mut config = DaemonConfig::new(settings.model.clone());
     config.endpoint.clone_from(&settings.endpoint);
+    if let Some(seconds) = settings.answer_seconds {
+        config.answer = std::time::Duration::from_secs(seconds);
+    }
     let home = std::env::home_dir().unwrap_or_default();
     DaemonEngine::open(&config, &home)
         .map(|engine| Arc::new(engine) as Arc<dyn Engine>)

@@ -32,8 +32,6 @@ pub const DEFAULT_MAX_SESSION_BYTES: u64 = 16 * 1024 * 1024;
 pub const DEFAULT_MAX_SESSIONS: usize = 1000;
 /// What every history together may take unless `[host.history] max_total_bytes` says otherwise.
 pub const DEFAULT_MAX_TOTAL_BYTES: u64 = 1024 * 1024 * 1024;
-/// The largest `max_session_bytes`: a history is read whole to be exported or moved.
-pub const MAX_SESSION_BYTES_CEILING: u64 = 64 * 1024 * 1024;
 
 /// Sessions of one connection recorded at once; a connection opening more records the first of them.
 const MAX_LIVE: usize = 16;

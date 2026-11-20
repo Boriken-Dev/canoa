@@ -35,6 +35,8 @@ pub struct DaemonConfig {
     pub images: bool,
     /// How many tokens the model holds at once, when the person knows.
     pub context: Option<u64>,
+    /// How long one answer may take: a local model on a large prompt is slow, and the person stops one by ending the session.
+    pub answer: Duration,
 }
 
 impl DaemonConfig {
@@ -47,12 +49,13 @@ impl DaemonConfig {
             tools: true,
             images: true,
             context: None,
+            answer: DEFAULT_ANSWER,
         }
     }
 }
 
-/// How long one answer may take: a local model on a large prompt is slow, and the person stops one by ending the session.
-const ANSWER_LIMIT: Duration = Duration::from_secs(30 * 60);
+/// How long one answer may take unless [`DaemonConfig::answer`] says otherwise.
+pub const DEFAULT_ANSWER: Duration = Duration::from_secs(30 * 60);
 
 /// An agent for one conversation with the service, and whether it opens its own sockets.
 ///
@@ -60,11 +63,11 @@ const ANSWER_LIMIT: Duration = Duration::from_secs(30 * 60);
 /// [`ureq::Agent::shutdown`] ends every connection of the agent it is called on, and it reaches only the sockets ureq opened. The
 /// service is on this computer, so the connection goes straight to it unless the host's network says otherwise; one that goes
 /// through a proxy is the network's agent, whose connections only it can close.
-fn new_agent(base: &str) -> Result<(ureq::Agent, bool), EngineError> {
+fn new_agent(base: &str, answer: Duration) -> Result<(ureq::Agent, bool), EngineError> {
     let settings = ureq::Agent::config_builder()
         .max_redirects(0)
         .http_status_as_error(false)
-        .timeout_global(Some(ANSWER_LIMIT))
+        .timeout_global(Some(answer))
         .build();
     let network = Network::current();
     if network.goes_direct(base) {
@@ -81,6 +84,8 @@ fn new_agent(base: &str) -> Result<(ureq::Agent, bool), EngineError> {
 pub struct DaemonEngine {
     base: String,
     info: ModelInfo,
+    /// How long one answer may take.
+    answer: Duration,
     /// One request at a time: the service answers one, and a second on a model is not what it was measured with.
     one_at_a_time: Mutex<()>,
 }
@@ -103,7 +108,7 @@ impl DaemonEngine {
             })?
             .trim_end_matches('/')
             .to_owned();
-        let (agent, _) = new_agent(&base)?;
+        let (agent, _) = new_agent(&base, config.answer)?;
         let listed = agent
             .get(format!("{base}/v1/models"))
             .config()
@@ -148,6 +153,7 @@ impl DaemonEngine {
         Ok(Self {
             base,
             info,
+            answer: config.answer,
             one_at_a_time: Mutex::new(()),
         })
     }
@@ -270,7 +276,7 @@ impl Engine for DaemonEngine {
         let _one = crate::engine::lock_unless_cancelled(&self.one_at_a_time, cancel)?;
         // Cancelling closes the connection to the service, which is what tells it the answer is not wanted: its model is then free
         // for the next request. The agent is this request's own, so no other request is touched.
-        let (agent, own) = new_agent(&self.base)?;
+        let (agent, own) = new_agent(&self.base, self.answer)?;
         if own {
             let victim = agent.clone();
             cancel.on_cancel(move || victim.shutdown());

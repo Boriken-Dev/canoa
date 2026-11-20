@@ -27,8 +27,6 @@ use serde_json::{Value, json};
 use super::child::{Child, Outcome};
 use super::{Engine, Remote, Session, lock};
 
-/// How long the dial and the proof may take.
-const DIAL_LIMIT: Duration = Duration::from_secs(20);
 /// The largest message of the link once the other host has proved itself.
 const MAX_MESSAGE: usize = 16 * 1024 * 1024;
 /// How often a link that says nothing is probed, and how many probes may go unanswered before it is lost.
@@ -82,7 +80,8 @@ pub(super) fn drive(
         Ok(proof) => proof,
         Err(why) => return Outcome::Failed(format!("{name} cannot be reached: {why}")),
     };
-    let channel = match dial(&target.url, &proof) {
+    let dial_limit = Duration::from_secs(engine.config.dial_seconds);
+    let channel = match dial(&target.url, &proof, dial_limit) {
         Ok(channel) => Arc::new(channel),
         Err(why) => return Outcome::Failed(format!("{name} cannot be reached: {why}")),
     };
@@ -93,12 +92,13 @@ pub(super) fn drive(
         session,
         (child, text, workspace),
         (&proof, &channel, &target),
+        dial_limit,
     );
     channel.close();
     outcome
 }
 
-fn dial(url: &str, proof: &Proof) -> Result<websocket::Channel, String> {
+fn dial(url: &str, proof: &Proof, limit: Duration) -> Result<websocket::Channel, String> {
     let url = url::Url::parse(url).map_err(|error| error.to_string())?;
     let mut limits = coqui_transport_web::Limits::default();
     limits.max_message = proof.method().record_length(MAX_MESSAGE);
@@ -107,7 +107,7 @@ fn dial(url: &str, proof: &Proof) -> Result<websocket::Channel, String> {
         .limits(limits)
         .build()
         .map_err(|error| error.to_string())?
-        .dial(Kind::WebSocket, &url, DIAL_LIMIT)
+        .dial(Kind::WebSocket, &url, limit)
         .map_err(|failure| failure.to_string())
 }
 
@@ -116,13 +116,14 @@ fn linked(
     session: &Arc<Session>,
     sent: (&Arc<Child>, &str, Option<&str>),
     (proof, channel, target): (&Proof, &Arc<websocket::Channel>, &Remote),
+    dial_limit: Duration,
 ) -> Outcome {
     let (child, text, workspace) = sent;
     let name = &child.source;
     let established = match auth::prove_out(
         proof,
         &**channel,
-        DIAL_LIMIT,
+        dial_limit,
         proof.method().record_length(MAX_MESSAGE),
     ) {
         Ok(established) => established,

@@ -1457,6 +1457,16 @@ impl Delegation {
                 );
             }
         }
+        for (setting, value, default) in [
+            ("wait_seconds", config.wait_seconds, defaults.wait_seconds),
+            ("dial_seconds", config.dial_seconds, defaults.dial_seconds),
+        ] {
+            if value != default {
+                tracing::info!(
+                    "non-default: host.delegate.{setting} is {value}, default {default}"
+                );
+            }
+        }
         if let Some(sources) = &config.sources {
             tracing::info!(
                 "non-default: host.delegate.sources is {}, default every source a connection may use",
@@ -1566,9 +1576,6 @@ impl PeerStore for Grants {
         ))
     }
 }
-
-/// How long a call may wait for a task to leave a state it is in, at most.
-pub(crate) const MAX_WAIT: Duration = Duration::from_secs(300);
 
 #[cfg(test)]
 mod tests;

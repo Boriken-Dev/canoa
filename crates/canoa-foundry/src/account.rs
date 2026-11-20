@@ -30,6 +30,8 @@ pub struct Settings {
     /// The window, in tokens, the person set for this model: not a key of the account's table, which has no such key, but what the
     /// host finds for [`Settings::model`] in its own configuration before it opens an engine. Only the SDK engine uses it.
     pub window: Option<u64>,
+    /// How long one answer may take, in seconds, when the person set it: the service engine's default (30 minutes) otherwise.
+    pub answer_seconds: Option<u64>,
 }
 
 /// What runs the model of an account.
@@ -56,12 +58,17 @@ impl Settings {
                 Some(_) => Err(alloc::format!("{key} is text")),
             }
         };
-        if let Some(extra) = map
-            .keys()
-            .find(|key| !["model", "endpoint", "library", "engine"].contains(&key.as_str()))
-        {
+        if let Some(extra) = map.keys().find(|key| {
+            !["model", "endpoint", "library", "engine", "answer_seconds"].contains(&key.as_str())
+        }) {
             return Err(alloc::format!("{extra} is not a setting of this kind"));
         }
+        let answer_seconds = match map.get("answer_seconds") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(value.as_u64().filter(|seconds| *seconds >= 1).ok_or_else(
+                || "answer_seconds is a whole number of seconds, at least 1".to_string(),
+            )?),
+        };
         Ok(Self {
             model: text("model")?.ok_or_else(|| "model names the model to serve".to_string())?,
             endpoint: text("endpoint")?,
@@ -72,6 +79,7 @@ impl Settings {
                 Some(_) => return Err("engine is service or sdk".to_string()),
             },
             window: None,
+            answer_seconds,
         })
     }
 }
@@ -98,6 +106,12 @@ pub fn settings_schema() -> Value {
                 "enum": ["service", "sdk"],
                 "title": "Engine",
                 "description": "`service` (the default) uses the Foundry Local service you run, which holds the model. `sdk` runs the model inside this program through Foundry Local's SDK, which needs the native library below and loads the model into this program's memory.",
+            },
+            "answer_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "title": "Longest answer (seconds)",
+                "description": "How long one answer may take before the request to the service is ended, for the `service` engine. A large prompt on a slow model needs a long time; the default is 1800 (30 minutes), and there is no ceiling.",
             },
             "library": {
                 "type": "string",
@@ -172,6 +186,21 @@ mod tests {
         assert_eq!(sdk.engine, EngineKind::Sdk);
         assert!(Settings::from_map(&table(json!({"model": "m", "engine": "cloud"}))).is_err());
         assert!(Settings::from_map(&table(json!({"model": "m", "key": "x"}))).is_err());
+    }
+
+    #[test]
+    fn how_long_an_answer_may_take_is_a_setting_with_no_ceiling() {
+        let none = Settings::from_map(&table(json!({"model": "m"}))).expect("reads");
+        assert_eq!(none.answer_seconds, None);
+        let long = Settings::from_map(&table(json!({"model": "m", "answer_seconds": 86400})))
+            .expect("reads");
+        assert_eq!(long.answer_seconds, Some(86400));
+        for bad in [json!(0), json!("soon"), json!(-1), json!(1.5)] {
+            assert!(
+                Settings::from_map(&table(json!({"model": "m", "answer_seconds": bad}))).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

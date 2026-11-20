@@ -24,8 +24,6 @@ type Outcome = Result<Value, (i32, String)>;
 
 /// How long the app has to open the connection it was told about unless it says otherwise.
 const DEFAULT_SECONDS: u64 = 30;
-/// The longest it may ask for.
-const MAX_SECONDS: u64 = 300;
 /// How often a tunnel that cannot be split (TLS) looks at both of its ends: such a stream cannot be read and written from two
 /// threads, so one thread waits this long on each end in turn.
 const POLL: Duration = Duration::from_millis(5);
@@ -67,8 +65,8 @@ impl Tunnel {
     /// `tls` says who the server proved to be (`name`, `subject`, `sha256` of its certificate); the bytes it carries are what
     /// the app would send inside the TLS.
     ///
-    /// Either way this host then listens on the loopback `port` for the one connection the app makes within `seconds` (1 to
-    /// 300, 30 unless it says), which must begin with the `token` as the app got it and then carries the bytes both ways until
+    /// Either way this host then listens on the loopback `port` for the one connection the app makes within `seconds` (at
+    /// least 1, 30 unless it says), which must begin with the `token` as the app got it and then carries the bytes both ways until
     /// either end closes.
     pub(crate) fn run(&self, params: &Value) -> Outcome {
         let url = text_param(params, "url")?.ok_or_else(|| bad("url is needed"))?;
@@ -82,8 +80,8 @@ impl Tunnel {
             None | Some(Value::Null) => DEFAULT_SECONDS,
             Some(value) => value
                 .as_u64()
-                .filter(|seconds| (1..=MAX_SECONDS).contains(seconds))
-                .ok_or_else(|| bad("seconds is 1 to 300"))?,
+                .filter(|seconds| *seconds >= 1)
+                .ok_or_else(|| bad("seconds is a whole number, at least 1"))?,
         };
         let network = self.network.clone().unwrap_or_else(Network::current);
         let refused = |error: canoa::network::NetworkError| {

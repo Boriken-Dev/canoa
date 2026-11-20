@@ -24,8 +24,6 @@ pub(crate) const MAX_REPLY_BYTES: u64 = 16 * 1024 * 1024;
 pub(crate) const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 /// How long a request has to complete unless it says otherwise.
 const DEFAULT_SECONDS: u64 = 30;
-/// The longest a request may ask for.
-const MAX_SECONDS: u64 = 300;
 
 /// The requests the app sends through this host.
 #[derive(Clone, Default)]
@@ -65,8 +63,8 @@ impl Fetch {
             None | Some(Value::Null) => DEFAULT_SECONDS,
             Some(value) => value
                 .as_u64()
-                .filter(|seconds| (1..=MAX_SECONDS).contains(seconds))
-                .ok_or_else(|| bad("seconds is 1 to 300"))?,
+                .filter(|seconds| *seconds >= 1)
+                .ok_or_else(|| bad("seconds is a whole number, at least 1"))?,
         };
         let body = match text_param(params, "body")? {
             None => Vec::new(),

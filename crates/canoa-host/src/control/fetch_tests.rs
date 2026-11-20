@@ -60,6 +60,19 @@ fn a_proxy_that_refuses_the_login_leaves_the_request_without_an_answer() {
 }
 
 #[test]
+fn how_long_a_request_may_take_has_no_ceiling_of_the_hosts_own() {
+    let world = world("net-fetch-long", &["host.example.test"], b"slow");
+    let control = control(through(&world));
+    let answer = ask(
+        &control,
+        &Caller::Owner,
+        "network/fetch",
+        json!({"url": "https://host.example.test/", "seconds": 86400}),
+    );
+    assert_eq!(answer["result"]["status"], 200, "{answer}");
+}
+
+#[test]
 fn only_the_person_running_the_host_sends_through_its_network() {
     let world = world("net-fetch-key", &["host.example.test"], b"x");
     let control = control(through(&world));

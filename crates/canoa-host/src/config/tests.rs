@@ -1361,7 +1361,6 @@ fn host_history_has_defaults_takes_each_limit_and_refuses_zero_and_the_unknown()
         "max_sessions = 0",
         "max_session_bytes = 0",
         "max_total_bytes = 0",
-        "max_session_bytes = 999999999999",
         "unknown = 1",
     ] {
         assert!(
@@ -1369,6 +1368,35 @@ fn host_history_has_defaults_takes_each_limit_and_refuses_zero_and_the_unknown()
             "{bad}"
         );
     }
+    let large = Config::from_str_in(
+        "[host.history]
+max_session_bytes = 999999999999
+",
+        &base(),
+    )
+    .expect("a limit has no ceiling of the host's own");
+    assert_eq!(large.history.max_session_bytes, 999_999_999_999);
+}
+
+#[test]
+fn host_delegate_waits_and_dials_for_as_long_as_it_is_told() {
+    let none = Config::from_str_in("", &base()).expect("parses");
+    assert_eq!(
+        (none.delegate.wait_seconds, none.delegate.dial_seconds),
+        (300, 20)
+    );
+    let set = Config::from_str_in(
+        "[host.delegate]
+wait_seconds = 7200
+dial_seconds = 90
+",
+        &base(),
+    )
+    .expect("a limit has no ceiling of the host's own");
+    assert_eq!(
+        (set.delegate.wait_seconds, set.delegate.dial_seconds),
+        (7200, 90)
+    );
 }
 
 #[test]
@@ -2086,6 +2114,14 @@ fn host_mail_names_accounts_that_hold_no_password_and_refuses_what_would_send_on
         lan.is_ok(),
         "plain http beyond this computer is the person's choice: {lan:?}"
     );
+    let slow = parse(
+        "[host.mail.accounts.slow]
+backend = \"outlook\"
+timeout_secs = 86400
+",
+    )
+    .expect("a timeout has no ceiling of the host's own");
+    assert_eq!(slow.mail.accounts["slow"].timeout_secs, 86400);
 
     for (bad, why) in [
         (

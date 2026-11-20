@@ -17,7 +17,7 @@ use std::time::Instant;
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 
-use crate::config::plain_absolute;
+use crate::config::{WorktreeConfig, plain_absolute};
 use crate::share;
 use crate::spawn::{Command, Stdio};
 
@@ -36,10 +36,6 @@ pub(crate) const DIFF: &str = "_canoa/worktree/diff";
 pub(crate) const BRANCH_PREFIX: &str = "canoa/";
 /// The longest branch name taken, prefix included.
 pub(crate) const MAX_BRANCH: usize = 70;
-/// Worktrees one repository may hold in its `.worktrees` directory before the host makes no more.
-pub(crate) const MAX_WORKTREES: usize = 32;
-/// How long one git command may run before it is ended.
-const GIT_LIMIT: Duration = Duration::from_secs(120);
 /// The most of git's own words an error carries.
 const MAX_GIT_TEXT: usize = 1024;
 /// Repository settings that make git run a program (a filter) or read another file of settings (an include), and where
@@ -70,6 +66,7 @@ pub(crate) fn safe_branch(branch: &str) -> bool {
 pub(crate) struct Worktrees {
     roots: Vec<PathBuf>,
     on: bool,
+    limits: WorktreeConfig,
 }
 
 /// Why a request was not done, as a JSON-RPC error.
@@ -106,8 +103,18 @@ struct Found {
 }
 
 impl Worktrees {
-    pub(crate) const fn new(roots: Vec<PathBuf>, on: bool) -> Self {
-        Self { roots, on }
+    pub(crate) fn new(roots: Vec<PathBuf>, on: bool) -> Self {
+        Self {
+            roots,
+            on,
+            limits: WorktreeConfig::default(),
+        }
+    }
+
+    /// The same rule under `[host.worktrees]`' limits.
+    pub(crate) const fn with_limits(mut self, limits: WorktreeConfig) -> Self {
+        self.limits = limits;
+        self
     }
 
     /// Whether `message` is a worktree request, which never reaches the agent.
@@ -239,6 +246,10 @@ impl Worktrees {
             })
     }
 
+    fn git_limit(&self) -> Duration {
+        Duration::from_secs(self.limits.git_seconds)
+    }
+
     /// Runs `git -C dir args`, its output as text; see [`run_git`]. Git looks for a repository no higher than the roots.
     fn git(&self, dir: &Path, args: &[&OsStr]) -> Result<String, Refusal> {
         let ceilings: Vec<PathBuf> = self
@@ -247,7 +258,7 @@ impl Worktrees {
             .filter_map(|(_, root)| root.parent().map(Path::to_path_buf))
             .collect();
         let ceilings = std::env::join_paths(ceilings).unwrap_or_default();
-        match run_git(dir, args, &ceilings)? {
+        match run_git(dir, args, &ceilings, self.git_limit())? {
             (true, out) => Ok(out),
             (false, said) => Err(failed(&format!("git failed: {said}"))),
         }
@@ -279,7 +290,7 @@ impl Worktrees {
                 "--get-regexp".as_ref(),
                 UNSAFE_SETTINGS.as_ref(),
             ];
-            if let (true, _) = run_git(dir, &args, &ceilings)? {
+            if let (true, _) = run_git(dir, &args, &ceilings, self.git_limit())? {
                 return Err(refused(
                     "the repository's own configuration names a filter, an include or an attributes file, which would \
                      run or read what this host does not check: none is made, read or removed there",
@@ -336,10 +347,11 @@ impl Worktrees {
             .iter()
             .filter(|path| resolve(path).is_ok_and(|path| path.starts_with(holder)))
             .count()
-            >= MAX_WORKTREES
+            >= self.limits.max_per_repository
         {
             return Err(refused(&format!(
-                "the repository holds {MAX_WORKTREES} worktrees beside it already, the most this host makes"
+                "the repository holds {} worktrees beside it already, the most [host.worktrees] max_per_repository lets this host make",
+                self.limits.max_per_repository
             )));
         }
         let mut args = vec![
@@ -677,8 +689,13 @@ fn pointed(file: &Path, prefix: &str, base: &Path, roots: &[PathBuf]) -> Result<
 
 /// Runs `git -C dir args`: `(true, output)`, or `(false, git's own words)` for a failure. Hooks and fsmonitor are off,
 /// `ceilings` is `GIT_CEILING_DIRECTORIES`, and no `GIT_` variable of the host's reaches it, so a repository's settings
-/// cannot point it at another directory or run a hook. A git that runs past [`GIT_LIMIT`] is ended.
-fn run_git(dir: &Path, args: &[&OsStr], ceilings: &OsString) -> Result<(bool, String), Refusal> {
+/// cannot point it at another directory or run a hook. A git that runs past `limit` is ended.
+fn run_git(
+    dir: &Path,
+    args: &[&OsStr],
+    ceilings: &OsString,
+    limit: Duration,
+) -> Result<(bool, String), Refusal> {
     let no_hooks = if cfg!(windows) {
         "core.hooksPath=NUL"
     } else {
@@ -726,7 +743,7 @@ fn run_git(dir: &Path, args: &[&OsStr], ceilings: &OsString) -> Result<(bool, St
             bytes
         })
     });
-    let until = Instant::now() + GIT_LIMIT;
+    let until = Instant::now() + limit;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,

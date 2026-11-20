@@ -374,6 +374,8 @@ pub(crate) struct Control {
     overlays: Arc<Overlays>,
     /// Registry reads and the cache of what catalogs provide.
     registry: Registry,
+    /// What `[host.worktrees]` says of the worktrees this channel makes.
+    worktrees: crate::config::WorktreeConfig,
     /// The requests the app sends through this host's network.
     fetch: fetch::Fetch,
     /// The connections the app makes to a remote host, carried through this host's network.
@@ -493,6 +495,7 @@ impl Control {
             say: say::Say::default(),
             overlays: Arc::new(Overlays::default()),
             registry: Registry::default(),
+            worktrees: crate::config::WorktreeConfig::default(),
             fetch: fetch::Fetch::default(),
             tunnel: tunnel::Tunnel::default(),
             client_certificates: client_certificates::ClientCertificates::default(),
@@ -578,6 +581,16 @@ impl Control {
     #[must_use]
     pub(crate) fn with_overlays(mut self, overlays: Overlays) -> Self {
         self.overlays = Arc::new(overlays);
+        self
+    }
+
+    /// Makes the worktrees this channel's callers ask for under `[host.worktrees]`' limits.
+    #[must_use]
+    pub(crate) const fn with_worktree_limits(
+        mut self,
+        worktrees: crate::config::WorktreeConfig,
+    ) -> Self {
+        self.worktrees = worktrees;
         self
     }
 
@@ -1310,6 +1323,7 @@ impl Control {
         asked["method"] = Value::String(format!("_canoa/{method}"));
         let bytes = serde_json::to_vec(&asked).unwrap_or_default();
         Worktrees::new(roots, true)
+            .with_limits(self.worktrees)
             .answer(&bytes)
             .unwrap_or_else(|| error_line(id, BAD_PARAMS, "that request cannot be answered"))
     }
@@ -1809,6 +1823,8 @@ mod extension_install;
 mod extension_install_tests;
 mod files;
 #[cfg(test)]
+mod files_read_tests;
+#[cfg(test)]
 mod files_tests;
 #[cfg(test)]
 mod folders_tests;
@@ -1823,8 +1839,6 @@ mod looks;
 #[cfg(test)]
 mod looks_tests;
 pub(crate) mod mail_setup;
-mod files_read_tests;
-#[cfg(test)]
 #[cfg(test)]
 mod mail_setup_tests;
 pub(crate) mod panel_tabs;

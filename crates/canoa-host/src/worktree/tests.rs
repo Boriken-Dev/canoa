@@ -323,6 +323,39 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn how_many_worktrees_a_repository_may_hold_is_a_setting_and_has_no_ceiling() {
+    let Some(mut fixture) = Fixture::new("many") else {
+        return;
+    };
+    // The default is 32 beside the repository; the setting moves it either way.
+    fixture.worktrees = Worktrees::new(vec![fixture.scratch.join("src")], true).with_limits(
+        crate::config::WorktreeConfig {
+            max_per_repository: 34,
+            ..crate::config::WorktreeConfig::default()
+        },
+    );
+    for number in 0..33 {
+        fixture
+            .make(&fixture.repo, &format!("canoa/many-{number:02}"))
+            .unwrap_or_else(|why| panic!("worktree {number}: {}", why.message));
+    }
+    fixture.worktrees = Worktrees::new(vec![fixture.scratch.join("src")], true).with_limits(
+        crate::config::WorktreeConfig {
+            max_per_repository: 33,
+            ..crate::config::WorktreeConfig::default()
+        },
+    );
+    let refused = fixture
+        .make(&fixture.repo, "canoa/many-over")
+        .expect_err("past the setting");
+    assert!(
+        refused.message.contains("max_per_repository"),
+        "{}",
+        refused.message
+    );
+}
+
+#[test]
 fn two_sessions_on_one_repository_each_work_in_a_worktree_of_their_own() {
     let Some(fixture) = Fixture::new("two") else {
         return;

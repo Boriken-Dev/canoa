@@ -81,6 +81,8 @@ pub struct Config {
     pub native: NativeConfig,
     /// `[host.history]`: whether the host records the sessions it serves, and how much it keeps.
     pub history: HistoryConfig,
+    /// `[host.worktrees]`: how many worktrees a repository may hold from the host, and how long git may take.
+    pub worktrees: WorktreeConfig,
     /// `[host.usage]`: how long the host keeps the spend it records.
     pub usage: UsageConfig,
     /// `[agents.NAME]` with a `program`: the person's own agent commands, as entries reached over [`crate::Local`] only (each has
@@ -519,6 +521,32 @@ pub struct ControlConfig {
     pub max_uploads: usize,
 }
 
+/// `[host.worktrees]`: the worktrees the host makes for a session. Every limit is a setting, and none has a ceiling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct WorktreeConfig {
+    /// `max_per_repository`: worktrees one repository may hold beside it, from the host, before it makes no more.
+    pub max_per_repository: usize,
+    /// `git_seconds`: how long one git command may run before the host ends it.
+    pub git_seconds: u64,
+}
+
+impl WorktreeConfig {
+    /// The default of `max_per_repository`.
+    pub const DEFAULT_MAX_PER_REPOSITORY: usize = 32;
+    /// The default of `git_seconds`.
+    pub const DEFAULT_GIT_SECONDS: u64 = 120;
+}
+
+impl Default for WorktreeConfig {
+    fn default() -> Self {
+        Self {
+            max_per_repository: Self::DEFAULT_MAX_PER_REPOSITORY,
+            git_seconds: Self::DEFAULT_GIT_SECONDS,
+        }
+    }
+}
+
 /// `[host.history]`: the host records each session it serves in the session-history format, in its home beside the ledger, and
 /// the owner exports it or moves it to another source over the control channel. Every limit is a setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -780,6 +808,10 @@ pub struct DelegateConfig {
     pub history_bytes: usize,
     /// `context_bytes`: the most of a conversation's turns, or of the files it touched, a task may be handed as its context.
     pub context_bytes: usize,
+    /// `wait_seconds`: the longest one `task_status` call waits for a task to change, whatever its `wait_ms` asks.
+    pub wait_seconds: u64,
+    /// `dial_seconds`: how long the host has to reach another machine's agent and prove its key, for a task handed there.
+    pub dial_seconds: u64,
 }
 
 impl DelegateConfig {
@@ -797,6 +829,10 @@ impl DelegateConfig {
     pub const DEFAULT_HISTORY_BYTES: usize = 1024 * 1024;
     /// The default of `context_bytes`.
     pub const DEFAULT_CONTEXT_BYTES: usize = 32 * 1024;
+    /// The default of `wait_seconds`.
+    pub const DEFAULT_WAIT_SECONDS: u64 = 300;
+    /// The default of `dial_seconds`.
+    pub const DEFAULT_DIAL_SECONDS: u64 = 20;
 }
 
 impl Default for DelegateConfig {
@@ -812,6 +848,8 @@ impl Default for DelegateConfig {
             result_bytes: Self::DEFAULT_RESULT_BYTES,
             history_bytes: Self::DEFAULT_HISTORY_BYTES,
             context_bytes: Self::DEFAULT_CONTEXT_BYTES,
+            wait_seconds: Self::DEFAULT_WAIT_SECONDS,
+            dial_seconds: Self::DEFAULT_DIAL_SECONDS,
         }
     }
 }
@@ -829,6 +867,8 @@ struct RawDelegate {
     result_bytes: Option<usize>,
     history_bytes: Option<usize>,
     context_bytes: Option<usize>,
+    wait_seconds: Option<u64>,
+    dial_seconds: Option<u64>,
 }
 
 impl RawDelegate {
@@ -863,6 +903,8 @@ impl RawDelegate {
             result_bytes: self.result_bytes.unwrap_or(defaults.result_bytes),
             history_bytes: self.history_bytes.unwrap_or(defaults.history_bytes),
             context_bytes: self.context_bytes.unwrap_or(defaults.context_bytes),
+            wait_seconds: self.wait_seconds.unwrap_or(defaults.wait_seconds),
+            dial_seconds: self.dial_seconds.unwrap_or(defaults.dial_seconds),
         })
     }
 }
@@ -1660,6 +1702,7 @@ struct RawHost {
     control: Option<RawControl>,
     native: Option<RawNative>,
     history: Option<RawHistory>,
+    worktrees: Option<RawWorktrees>,
     usage: Option<RawHostUsage>,
     store: Option<RawStore>,
     network: Option<RawNetwork>,
@@ -1898,8 +1941,10 @@ impl RawMail {
                 _ => return Err(invalid("backend is ews, graph or outlook")),
             };
             let timeout_secs = raw.timeout_secs.unwrap_or(60);
-            if !(1..=3600).contains(&timeout_secs) {
-                return Err(invalid("timeout_secs is 1 to 3600"));
+            if timeout_secs == 0 {
+                return Err(invalid(
+                    "timeout_secs is a whole number of seconds, at least 1",
+                ));
             }
             if backend != MailBackend::Graph && (raw.client_id.is_some() || raw.tenant.is_some()) {
                 return Err(invalid("client_id and tenant are for graph"));
@@ -2047,6 +2092,14 @@ struct RawNative {
 #[serde(deny_unknown_fields)]
 struct RawHostUsage {
     keep_days: Option<u32>,
+}
+
+/// `[host.worktrees]`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawWorktrees {
+    max_per_repository: Option<usize>,
+    git_seconds: Option<u64>,
 }
 
 /// `[host.history]`.
@@ -2847,6 +2900,25 @@ impl Config {
             .map(history_of)
             .transpose()?
             .unwrap_or_default();
+        let worktrees = match host.worktrees {
+            None => WorktreeConfig::default(),
+            Some(raw) => {
+                let default = WorktreeConfig::default();
+                let config = WorktreeConfig {
+                    max_per_repository: raw
+                        .max_per_repository
+                        .unwrap_or(default.max_per_repository),
+                    git_seconds: raw.git_seconds.unwrap_or(default.git_seconds),
+                };
+                if config.max_per_repository == 0 || config.git_seconds == 0 {
+                    return Err(ConfigError::Invalid {
+                        entry: None,
+                        what: "host.worktrees: max_per_repository and git_seconds are at least 1; worktrees = false on an entry makes none".to_owned(),
+                    });
+                }
+                config
+            }
+        };
         let usage = match host.usage {
             None => UsageConfig::default(),
             Some(raw) => {
@@ -2890,6 +2962,7 @@ impl Config {
             control,
             native,
             history,
+            worktrees,
             usage,
             store,
             network,
@@ -2925,11 +2998,6 @@ fn history_of(raw: RawHistory) -> Result<HistoryConfig, ConfigError> {
     if config.max_session_bytes == 0 || config.max_sessions == 0 || config.max_total_bytes == 0 {
         return Err(refused(
             "max_session_bytes, max_sessions and max_total_bytes are at least 1; record = false records nothing",
-        ));
-    }
-    if config.max_session_bytes > crate::history::MAX_SESSION_BYTES_CEILING {
-        return Err(refused(
-            "max_session_bytes is at most 256 MiB: a history is read whole to be moved",
         ));
     }
     Ok(config)

@@ -22,7 +22,7 @@ use coqui_a2a::wire::Method;
 use serde_json::{Map, Value, json};
 
 use super::agent::DelegationAgent;
-use super::{Engine, MAX_WAIT, Session, Who, person};
+use super::{Engine, Session, Who, person};
 
 /// The tools and their input, as `tools/list` answers.
 pub(crate) fn list(engine: &Engine, session: &Session) -> Value {
@@ -220,7 +220,8 @@ fn status(engine: &Arc<Engine>, session: &Arc<Session>, args: &Value) -> Result<
     let who = who(session)?;
     let mut task = get(engine, &who, id)?;
     if wait > 0 && !task.status.state.is_terminal() {
-        let limit = Duration::from_millis(wait).min(MAX_WAIT);
+        let limit =
+            Duration::from_millis(wait).min(Duration::from_secs(engine.config.wait_seconds));
         wait_for_change(engine, &who, id, &task.status.state, limit);
         task = get(engine, &who, id)?;
     }

@@ -22,10 +22,19 @@ pub(crate) const TOKEN_VAR: &str = "CANOA_DELEGATE_TOKEN";
 const IN_FLIGHT: usize = 8;
 /// How long to wait for a connection to the tool server.
 const CONNECT_LIMIT: Duration = Duration::from_secs(5);
-/// How long an answer may take: the longest wait a call may ask of the host, and a margin.
-const ANSWER_LIMIT: Duration = Duration::from_secs(super::MAX_WAIT.as_secs() + 60);
+/// What an answer may take beyond the wait its call asks of the host.
+const ANSWER_MARGIN: Duration = Duration::from_secs(60);
 /// The largest line either way.
 const MAX_LINE: usize = crate::serve::MAX_LINE;
+
+/// How long the answer to `body` may take: the wait the call asks of the host (`wait_ms`), if any, and a margin.
+fn answer_limit(body: &[u8]) -> Duration {
+    let wait = serde_json::from_slice::<Value>(body)
+        .ok()
+        .and_then(|call| call.pointer("/params/arguments/wait_ms")?.as_u64())
+        .unwrap_or(0);
+    Duration::from_millis(wait).saturating_add(ANSWER_MARGIN)
+}
 
 /// Why the bridge will not start.
 #[derive(Debug, PartialEq, Eq)]
@@ -134,7 +143,7 @@ impl Target {
             .iter()
             .find_map(|address| TcpStream::connect_timeout(address, CONNECT_LIMIT).ok())
             .ok_or("the host's tool server is not listening")?;
-        let _ = stream.set_read_timeout(Some(ANSWER_LIMIT));
+        let _ = stream.set_read_timeout(Some(answer_limit(body)));
         let _ = stream.set_write_timeout(Some(CONNECT_LIMIT * 6));
         let mut sent = format!(
             "POST {} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\n\
@@ -317,5 +326,29 @@ where
                 &failure(&id, -32000, "the bridge could not start a request"),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_answer_may_take_the_wait_its_call_asks_for_and_a_margin_with_no_ceiling() {
+        let call = |wait: &str| {
+            format!(
+                r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"task_status","arguments":{{"taskId":"t","wait_ms":{wait}}}}}}}"#
+            )
+        };
+        assert_eq!(
+            answer_limit(call("1800000").as_bytes()),
+            Duration::from_secs(1800 + 60)
+        );
+        assert_eq!(
+            answer_limit(call("7200000").as_bytes()),
+            Duration::from_secs(7200 + 60)
+        );
+        assert_eq!(answer_limit(br#"{"method":"tools/list"}"#), ANSWER_MARGIN);
+        assert_eq!(answer_limit(b"not json"), ANSWER_MARGIN);
     }
 }

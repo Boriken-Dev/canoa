@@ -1617,7 +1617,8 @@ impl Serving {
                             options.program_args.clone(),
                         ),
                         refresh: refresh_of(entry, profiles, config, options, &items).map(Box::new),
-                        worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
+                        worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees)
+                            .with_limits(config.worktrees),
                     },
                 ),
                 EntryKind::Provider {
@@ -1820,7 +1821,8 @@ impl Serving {
                             ),
                             refresh: refresh_of(entry, profiles, config, options, &items)
                                 .map(Box::new),
-                            worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
+                            worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees)
+                                .with_limits(config.worktrees),
                         },
                     )
                 }
@@ -1837,7 +1839,8 @@ impl Serving {
                             .limit_phrases(config.limit_phrases.clone()),
                         offer: None,
                         refresh: None,
-                        worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees),
+                        worktrees: Worktrees::new(entry.working_roots.clone(), entry.worktrees)
+                            .with_limits(config.worktrees),
                     },
                 ),
             };
@@ -2156,7 +2159,9 @@ impl Serving {
                                     .map_or(control::DEFAULT_MAX_UPLOADS, |c| c.max_uploads),
                             },
                         ));
-                    let kept = kept.with_trust(Arc::clone(&trust));
+                    let kept = kept
+                        .with_worktree_limits(config.worktrees)
+                        .with_trust(Arc::clone(&trust));
                     let kept = kept.with_sessions(control::RunningSessions(Arc::new({
                         let hosted = Arc::clone(&hosted);
                         move |who| hosted.running(who)
