@@ -482,8 +482,9 @@ class _AddAgentDialogState extends State<_AddAgentDialog> {
   void _submit() {
     final parsed = parseCommand(command.text);
     final folder = root.text.trim();
-    final problem = !HostEntry.isName(name.text.trim())
-        ? 'A name is 1 to 64 letters, digits, - or _.'
+    // The host says what an entry's name may hold, in its own words, when it checks the file.
+    final problem = name.text.trim().isEmpty
+        ? 'Name the agent.'
         : parsed == null
         ? 'That is not a command: check its quotes.'
         : folder.isNotEmpty && !isWholeFolderPath(folder)

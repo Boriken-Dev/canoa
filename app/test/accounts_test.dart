@@ -72,10 +72,15 @@ void main() {
     expect(find.text("A login on disk the agent's commands can read"), findsWidgets);
     // Nothing is chosen, so nothing starts.
     expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNull);
-    await tester.enterText(find.byKey(const Key('add-account-name')), 'no spaces');
+    // What a name may hold is the host's to say: the dialog takes any text and asks for a name only when there is none.
+    await tester.enterText(find.byKey(const Key('add-account-name')), 'my work café');
     await tester.tap(find.byKey(const Key('login-method api-key')));
     await tester.pump();
-    expect(find.text('Use 1 to 64 letters, digits, - or _'), findsOneWidget);
+    expect(find.textContaining('letters, digits'), findsNothing);
+    expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNotNull);
+    await tester.enterText(find.byKey(const Key('add-account-name')), '  ');
+    await tester.pump();
+    expect(find.text('Name the account'), findsOneWidget);
     expect(tester.widget<FilledButton>(find.byKey(const Key('add-account-start'))).onPressed, isNull);
     await tester.enterText(find.byKey(const Key('add-account-name')), 'metered');
     await tester.pump();

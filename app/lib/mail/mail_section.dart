@@ -6,7 +6,6 @@ import '../settings/settings_row.dart';
 import 'mail_accounts.dart';
 
 /// The rule for a mail account's name, which the host holds to.
-final RegExp mailAccountName = RegExp(r'^[a-z0-9_-]{1,32}$');
 
 /// Settings › Mail: the mailboxes an agent can use as a source. Each row says where the mailbox is and whether its password is
 /// there, and can sign in to it to see that it works or be removed. A password is typed here once, goes to the host and is kept in
@@ -172,8 +171,9 @@ class _AddMailAccountDialogState extends State<AddMailAccountDialog> {
   bool get _exchange => _backend == 'ews';
 
   String? get _nameProblem {
+    // The host says what a name may hold, in its own words, when it refuses one.
     final name = _name.text;
-    if (!mailAccountName.hasMatch(name)) return 'Use 1 to 32 lower-case letters, digits, - or _';
+    if (name.trim().isEmpty) return 'Name the mailbox';
     if (widget.controller.named(name) != null) return 'A mailbox is called that already';
     return null;
   }

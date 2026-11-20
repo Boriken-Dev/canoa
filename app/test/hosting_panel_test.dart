@@ -113,17 +113,24 @@ void main() {
     final fields = find.descendant(of: find.byType(AlertDialog).last, matching: find.byType(TextField));
     await tester.enterText(fields.at(0), 'bad name');
     await tester.enterText(fields.at(1), 'node "my agent.mjs" --flag');
+    // What an entry's name may hold is the host's to say, and its words are shown.
+    host.refuseWith = 'an entry name has 1 to 64 letters, digits, hyphens or underscores';
     await tester.tap(find.text('Add'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('A name is 1 to 64'), findsOneWidget);
+    expect(find.text('an entry name has 1 to 64 letters, digits, hyphens or underscores'), findsOneWidget);
     expect(host.saved, isEmpty);
+    host.refuseWith = null;
 
-    await tester.enterText(fields.at(0), 'mine');
-    await tester.enterText(fields.at(2), 'relative/dir');
+    await tester.tap(find.text('Add an agent'));
+    await tester.pumpAndSettle();
+    final again = find.descendant(of: find.byType(AlertDialog).last, matching: find.byType(TextField));
+    await tester.enterText(again.at(0), 'mine');
+    await tester.enterText(again.at(1), 'node "my agent.mjs" --flag');
+    await tester.enterText(again.at(2), 'relative/dir');
     await tester.tap(find.text('Add'));
     await tester.pumpAndSettle();
     expect(find.text('The workspace must be a whole path.'), findsOneWidget);
-    await tester.enterText(fields.at(2), '/home/me/src');
+    await tester.enterText(again.at(2), '/home/me/src');
     await tester.tap(find.text('Add'));
     await tester.pumpAndSettle();
 

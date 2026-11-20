@@ -35,9 +35,6 @@ final class HostEntry {
     listen: table['listen'] is String ? table['listen'] as String : null,
   );
 
-  /// canoa's rule for an entry's name.
-  static bool isName(String name) => RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(name);
-
   final String name;
 
   /// `agent` or `provider`.
@@ -404,9 +401,6 @@ final class CanoaConfig {
     List<String> workingRoots = const [],
     String? usage,
   }) {
-    if (!HostEntry.isName(name)) {
-      throw ArgumentError.value(name, 'name', 'Use 1 to 64 letters, digits, - or _');
-    }
     if (hostEntries.any((entry) => entry.name == name)) {
       throw ArgumentError.value(name, 'name', 'Another entry has that name');
     }

@@ -13,9 +13,6 @@ import 'account_models.dart';
 import 'accounts_controller.dart';
 import 'accounts_host.dart';
 
-/// The rule for an account's name, which the host holds to as it does an entry's.
-final RegExp accountName = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
-
 /// What the person sees of a provider's name: `claude` is Claude.
 String harnessTitle(String harness) => providerCatalog.titleOf(harness);
 
@@ -74,8 +71,9 @@ class _AddAccountDialogState extends State<AddAccountDialog> {
   }
 
   String? get _nameProblem {
+    // The host says what a name may hold, in its own words, when it refuses one.
     final name = _name.text;
-    if (!accountName.hasMatch(name)) return 'Use 1 to 64 letters, digits, - or _';
+    if (name.trim().isEmpty) return 'Name the account';
     if (widget.accounts.named(name) != null) return 'An account is called that already';
     return null;
   }

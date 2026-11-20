@@ -100,10 +100,15 @@ void main() {
     await _show(tester, host);
     await tester.tap(find.byKey(const Key('add-mail-account')));
     await tester.pumpAndSettle();
+    await _fill(tester, 'mail-name', '');
+    await tester.tap(find.byKey(const Key('add-mail-submit')));
+    await tester.pump();
+    expect(find.text('Name the mailbox'), findsOneWidget);
+    // What a name may hold is the host's to say, below: this one goes on to the missing server.
     await _fill(tester, 'mail-name', 'Bad Name');
     await tester.tap(find.byKey(const Key('add-mail-submit')));
     await tester.pump();
-    expect(find.text('Use 1 to 32 lower-case letters, digits, - or _'), findsOneWidget);
+    expect(find.text('Give the server address or the mailbox\'s email address'), findsOneWidget);
     await _fill(tester, 'mail-name', 'work');
     await tester.tap(find.byKey(const Key('add-mail-submit')));
     await tester.pump();
