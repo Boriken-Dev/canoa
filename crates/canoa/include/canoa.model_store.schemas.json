@@ -77,11 +77,17 @@
           },
           "route": {
             "type": "string",
-            "description": "The path below the service's address that takes a recording."
+            "description": "The path below the service's address that takes a recording, starting with `/`; empty for a `command`.",
+            "default": ""
           },
           "local_file": {
             "type": "boolean",
             "description": "Whether the recording is written to a file on this computer and its name posted, in place of the audio being sent.",
+            "default": false
+          },
+          "command": {
+            "type": "boolean",
+            "description": "Whether it is a program run once for each recording, with the audio on its standard input, in place of a server: the offer is then installed through the type's first `program_store`, with a model chosen as that store's channel, and [`ServiceReport::command`] says how the installed copy is run.",
             "default": false
           }
         },
@@ -89,8 +95,7 @@
         "required": [
           "title",
           "summary",
-          "location",
-          "route"
+          "location"
         ],
         "description": "How the person's speech-to-text calls the service that runs these models, when it can."
       }
@@ -156,11 +161,17 @@
       },
       "route": {
         "type": "string",
-        "description": "The path below the service's address that takes a recording."
+        "description": "The path below the service's address that takes a recording, starting with `/`; empty for a `command`.",
+        "default": ""
       },
       "local_file": {
         "type": "boolean",
         "description": "Whether the recording is written to a file on this computer and its name posted, in place of the audio being sent.",
+        "default": false
+      },
+      "command": {
+        "type": "boolean",
+        "description": "Whether it is a program run once for each recording, with the audio on its standard input, in place of a server: the offer is then installed through the type's first `program_store`, with a model chosen as that store's channel, and [`ServiceReport::command`] says how the installed copy is run.",
         "default": false
       }
     },
@@ -168,8 +179,7 @@
     "required": [
       "title",
       "summary",
-      "location",
-      "route"
+      "location"
     ]
   },
   "ModelQuery": {
@@ -804,6 +814,13 @@
         ],
         "description": "The person's home folder."
       },
+      "program": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The absolute path of the host's own copy of the type's program, for a `command` service, when the host has one."
+      },
       "models": {
         "type": "boolean",
         "description": "Whether to list the models that can transcribe, which may take a request to the service.",
@@ -852,6 +869,41 @@
           "null"
         ],
         "description": "Why the service cannot take a recording now, in the offer's words; none when it can."
+      },
+      "command": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "program": {
+            "type": "string",
+            "description": "The absolute path of the program."
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Its arguments. `{language_code|auto}` is the language the person said (or `auto`) and `{vocabulary}` their own words.",
+            "default": []
+          },
+          "input": {
+            "type": "string",
+            "description": "How the audio reaches it: `wav` or `pcm`."
+          },
+          "model": {
+            "type": "string",
+            "description": "The model this copy runs, as one of [`ServiceReport::models`] names it."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "program",
+          "input",
+          "model"
+        ],
+        "description": "How to run the copy of a `command` service, when there is a copy that can be."
       }
     },
     "additionalProperties": false
@@ -873,6 +925,38 @@
     "required": [
       "id",
       "label"
+    ]
+  },
+  "SpeechRun": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "program": {
+        "type": "string",
+        "description": "The absolute path of the program."
+      },
+      "args": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Its arguments. `{language_code|auto}` is the language the person said (or `auto`) and `{vocabulary}` their own words.",
+        "default": []
+      },
+      "input": {
+        "type": "string",
+        "description": "How the audio reaches it: `wav` or `pcm`."
+      },
+      "model": {
+        "type": "string",
+        "description": "The model this copy runs, as one of [`ServiceReport::models`] names it."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "program",
+      "input",
+      "model"
     ]
   }
 }

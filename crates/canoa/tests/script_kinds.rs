@@ -30,7 +30,7 @@ use canoa::store::extension::{ExtensionInfo, ExtensionType, StoreExtensionVtable
 use canoa::store::models::{
     Fact, ModelAct, ModelActed, ModelKeep, ModelKept, ModelList, ModelQuery, ModelRow,
     ModelSettings, ModelStoreInfo, ModelStoreVtable, RowAction, Section, ServedModel, ServiceQuery,
-    ServiceReport, SpeechService, SpeechUse,
+    ServiceReport, SpeechRun, SpeechService, SpeechUse,
 };
 use canoa::store::source::{CatalogSourceProviderVtable, ReadRequest, SourceInfo};
 use canoa::usage_reader::{
@@ -186,6 +186,7 @@ fn the_committed_model_store_schemas_are_what_this_build_describes() {
             ("ServiceQuery", schema_of::<ServiceQuery>()),
             ("ServiceReport", schema_of::<ServiceReport>()),
             ("ServedModel", schema_of::<ServedModel>()),
+            ("SpeechRun", schema_of::<SpeechRun>()),
         ]),
     );
 }

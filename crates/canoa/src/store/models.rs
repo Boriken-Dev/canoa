@@ -105,8 +105,9 @@ pub struct ModelSettings {
     pub form: Option<Value>,
 }
 
-/// The service that runs a store's models, as far as the person's speech-to-text is concerned: it is called as a server that
-/// transcribes one recording, at an address that changes and that [`ModelStore::service`] finds.
+/// The service that runs a store's models, as far as the person's speech-to-text is concerned. It is either a server that
+/// transcribes one recording, at an address that changes and that [`ModelStore::service`] finds (`route` says where), or a program
+/// run once for each recording (`command`), which [`ModelStore::service`] says how to run from the copy the host installed.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::coqui_acp_api::guatiao)]
 #[non_exhaustive]
@@ -119,11 +120,17 @@ pub struct SpeechService {
     pub license: Option<String>,
     /// Where the audio goes, in a sentence or two, as the offer says it before the person sets it up.
     pub location: String,
-    /// The path below the service's address that takes a recording.
+    /// The path below the service's address that takes a recording, starting with `/`; empty for a `command`.
+    #[map(default)]
     pub route: String,
     /// Whether the recording is written to a file on this computer and its name posted, in place of the audio being sent.
     #[map(default)]
     pub local_file: bool,
+    /// Whether it is a program run once for each recording, with the audio on its standard input, in place of a server: the
+    /// offer is then installed through the type's first `program_store`, with a model chosen as that store's channel, and
+    /// [`ServiceReport::command`] says how the installed copy is run.
+    #[map(default)]
+    pub command: bool,
 }
 
 /// What a store is asked to list.
@@ -295,6 +302,8 @@ pub struct ModelKept {
 pub struct ServiceQuery {
     /// The person's home folder.
     pub home: Option<String>,
+    /// The absolute path of the host's own copy of the type's program, for a `command` service, when the host has one.
+    pub program: Option<String>,
     /// Whether to list the models that can transcribe, which may take a request to the service.
     #[map(default)]
     pub models: bool,
@@ -323,6 +332,24 @@ pub struct ServiceReport {
     pub models: Vec<ServedModel>,
     /// Why the service cannot take a recording now, in the offer's words; none when it can.
     pub unavailable: Option<String>,
+    /// How to run the copy of a `command` service, when there is a copy that can be.
+    pub command: Option<SpeechRun>,
+}
+
+/// How a program turns one recording into text, which the host writes as the person's speech provider.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+#[non_exhaustive]
+pub struct SpeechRun {
+    /// The absolute path of the program.
+    pub program: String,
+    /// Its arguments. `{language_code|auto}` is the language the person said (or `auto`) and `{vocabulary}` their own words.
+    #[map(default)]
+    pub args: Vec<String>,
+    /// How the audio reaches it: `wav` or `pcm`.
+    pub input: String,
+    /// The model this copy runs, as one of [`ServiceReport::models`] names it.
+    pub model: String,
 }
 
 impl ModelSettings {
@@ -394,12 +421,16 @@ impl ModelStoreInfo {
                 return Some(why);
             }
         }
-        if let Some(speech) = &self.speech
-            && (speech.title.trim().is_empty() || !speech.route.starts_with('/'))
-        {
-            return Some(
-                "its speech service has no title, or a route that does not start with /".into(),
-            );
+        if let Some(speech) = &self.speech {
+            if speech.title.trim().is_empty() {
+                return Some("its speech service has no title".into());
+            }
+            if speech.command && !speech.route.is_empty() {
+                return Some("its speech service is a program and has a route".into());
+            }
+            if !speech.command && !speech.route.starts_with('/') {
+                return Some("its speech service has a route that does not start with /".into());
+            }
         }
         None
     }
@@ -655,6 +686,43 @@ impl SpeechService {
             location: location.into(),
             route: route.into(),
             local_file: false,
+            command: false,
+        }
+    }
+
+    /// A program run for each recording, in an offer of `title`.
+    #[must_use]
+    pub fn program(
+        title: impl Into<String>,
+        summary: impl Into<String>,
+        location: impl Into<String>,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            summary: summary.into(),
+            license: None,
+            location: location.into(),
+            route: String::new(),
+            local_file: false,
+            command: true,
+        }
+    }
+}
+
+impl SpeechRun {
+    /// `program` run with `args`, reading `input`, with the model `model`.
+    #[must_use]
+    pub fn new(
+        program: impl Into<String>,
+        args: impl IntoIterator<Item = impl Into<String>>,
+        input: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
+        Self {
+            program: program.into(),
+            args: args.into_iter().map(Into::into).collect(),
+            input: input.into(),
+            model: model.into(),
         }
     }
 }
@@ -681,5 +749,53 @@ impl ModelKeep {
             model: model.into(),
             values: values.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info(speech: SpeechService) -> ModelStoreInfo {
+        let mut info = ModelStoreInfo::new("t", "c", "p", "m");
+        info.speech = Some(speech);
+        info
+    }
+
+    #[test]
+    fn a_speech_service_is_a_server_with_a_route_or_a_program_with_none() {
+        assert_eq!(
+            info(SpeechService::new("s", "a server", "here", "/v1/audio")).problem(),
+            None
+        );
+        assert_eq!(
+            info(SpeechService::program("s", "a program", "here")).problem(),
+            None
+        );
+        let mut routed = SpeechService::program("s", "a program", "here");
+        routed.route = "/v1/audio".to_owned();
+        assert!(
+            info(routed)
+                .problem()
+                .is_some_and(|why| why.contains("route"))
+        );
+        for route in ["", "v1/audio"] {
+            let why = info(SpeechService::new("s", "a server", "here", route)).problem();
+            assert!(why.is_some_and(|why| why.contains("route")), "{route:?}");
+        }
+        let untitled = SpeechService::program(" ", "a program", "here");
+        assert!(
+            info(untitled)
+                .problem()
+                .is_some_and(|why| why.contains("title"))
+        );
+    }
+
+    #[test]
+    fn a_run_is_the_program_its_arguments_its_input_and_the_model_it_runs() {
+        let run = SpeechRun::new("/p/stt", ["-m", "x"], "wav", "x");
+        assert_eq!(run.program, "/p/stt");
+        assert_eq!(run.args, ["-m", "x"]);
+        assert_eq!((run.input.as_str(), run.model.as_str()), ("wav", "x"));
     }
 }
