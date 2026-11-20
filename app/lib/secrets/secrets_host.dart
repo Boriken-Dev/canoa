@@ -11,7 +11,7 @@ import '../forms/schema_fields.dart' show SecretSource;
 
 /// One secret the host holds or keeps, as the table shows it: where it is kept, what it is called and how long it has left. Never its value.
 final class SecretRow {
-  const SecretRow({required this.provider, required this.name, required this.kept, this.session, this.expiresIn});
+  const SecretRow({required this.provider, required this.name, required this.kept, this.session, this.expiresIn, this.foreign = false, this.summary});
 
   /// The host's provider entry that holds it (`form` for what the person typed, `system` for the operating system's store).
   final String provider;
@@ -26,6 +26,12 @@ final class SecretRow {
   /// Seconds the host said this has left when it listed it; null when it lasts as long as it is kept.
   final int? expiresIn;
 
+  /// Whether another program wrote it: an entry of the operating system's store that Canoa lists and reads but did not make.
+  final bool foreign;
+
+  /// What the store says of a [foreign] entry besides its name, such as the user name of a credential.
+  final String? summary;
+
   String get key => '$provider/$name';
 
   static SecretRow? parse(Object? json) {
@@ -38,6 +44,8 @@ final class SecretRow {
       kept: kept,
       session: json['session'] as String?,
       expiresIn: json['expires_in'] is int ? json['expires_in'] as int : null,
+      foreign: json['foreign'] == true,
+      summary: json['summary'] is String ? json['summary'] as String : null,
     );
   }
 }

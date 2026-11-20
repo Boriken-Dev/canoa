@@ -361,11 +361,55 @@ void main() {
     expect(find.byKey(const Key('secret-name form/api_key')), findsNothing);
   });
 
+  testWidgets('a credential another program keeps is marked, is read on request, and forgetting it asks in words that say whose it is', (tester) async {
+    final (_, host) = await _page(tester, const [
+      SecretRow(provider: 'system', name: 'deploy', kept: 'stored'),
+      SecretRow(provider: 'system', name: 'git:https://example.test', kept: 'stored', foreign: true, summary: 'alice'),
+      SecretRow(provider: 'system', name: 'Wifi', kept: 'stored', foreign: true),
+    ]);
+    await tester.tap(find.byKey(const Key('secrets-index vault system')));
+    await tester.pump();
+    expect(find.byKey(const Key('secret-foreign system/deploy')), findsNothing, reason: "Canoa's own is not marked");
+    expect(find.text("Another program's, for alice"), findsOneWidget);
+    expect(find.byKey(const Key('secret-foreign system/Wifi')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('secret-show system/Wifi')));
+    await tester.pump();
+    await tester.pump();
+    expect(host.revealed, ['system/Wifi']);
+    await tester.tap(find.byKey(const Key('secret-forget system/Wifi')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('another program keeps'), findsOneWidget);
+    await tester.tap(find.text('Keep it'));
+    await tester.pumpAndSettle();
+    expect(host.forgotten, isEmpty);
+  });
+
+  testWidgets("a secret set under the name of another program's credential asks first, and goes on only after a yes", (tester) async {
+    final (_, host) = await _page(tester, const [SecretRow(provider: 'system', name: 'Wifi', kept: 'stored', foreign: true)]);
+    await tester.tap(find.byKey(const Key('secrets-index vault system')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('secret-set')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('secret-set-name')), 'Wifi');
+    await tester.tap(find.byKey(const Key('secret-set-continue')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('secret-set-shadow-confirm')), findsOneWidget);
+    expect(host.sets, isEmpty);
+    await tester.tap(find.byKey(const Key('secret-set-shadow-yes')));
+    await tester.pump();
+    expect(host.sets.single.name, 'Wifi');
+    await tester.tap(find.byKey(const Key('secret-set-cancel')));
+    await tester.pumpAndSettle();
+  });
+
   test('a row is read from what the host lists, and one that is not a row is left out', () {
     final row = SecretRow.parse({'provider': 'form', 'name': 'a', 'kept': 'process', 'session': null, 'expires_in': 5})!;
     expect((row.key, row.expiresIn, row.session), ('form/a', 5, null));
     expect(SecretRow.parse({'provider': 'form'}), isNull);
     expect(SecretRow.parse('x'), isNull);
     expect(secretKeptText(row), '5 s left');
+    expect(row.foreign, isFalse);
+    final other = SecretRow.parse({'provider': 'system', 'name': 'Wifi', 'kept': 'stored', 'foreign': true, 'summary': 'alice'})!;
+    expect((other.foreign, other.summary), (true, 'alice'));
   });
 }

@@ -70,7 +70,9 @@ class _SecretsPageState extends State<SecretsPage> {
         key: const Key('secret-forget-confirm'),
         title: Text('Forget ${row.name}?'),
         content: Text(
-          row.kept == 'stored'
+          row.foreign
+              ? '${row.name} is a credential another program keeps in the ${row.provider} vault. Forgetting it deletes it there, and that program will ask for it again. Canoa cannot bring it back.'
+              : row.kept == 'stored'
               ? '${row.name} is taken out of the ${row.provider} vault. An agent that asks for it again will ask you.'
               : 'Canoa stops holding ${row.name}. An agent that asks for it again will ask you.',
         ),
@@ -195,7 +197,15 @@ class _SecretsPageState extends State<SecretsPage> {
     final value = _secrets.shown(row);
     return DataRow(key: ValueKey('secret ${row.key}'), cells: [
       if (showVault) DataCell(Text(row.provider)),
-      DataCell(Text(row.name, key: Key('secret-name ${row.key}'))),
+      DataCell(Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(row.name, key: Key('secret-name ${row.key}')),
+        if (row.foreign)
+          Text(
+            row.summary == null ? 'Another program\'s' : 'Another program\'s, for ${row.summary}',
+            key: Key('secret-foreign ${row.key}'),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+      ])),
       DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 280),
@@ -253,6 +263,31 @@ class _SetSecretDialogState extends State<SetSecretDialog> {
     final entry = _entry ?? (_entries.isEmpty ? null : _entries.first.name);
     final name = _name.text.trim();
     if (entry == null || name.isEmpty) return;
+    if (widget.controller.rows.any((row) => row.foreign && row.provider == entry && row.name == name)) {
+      unawaited(_confirmShadow(entry, name));
+      return;
+    }
+    _begin(entry, name);
+  }
+
+  /// A name another program's credential has: Canoa keeps its own secret by that name and never writes over theirs.
+  Future<void> _confirmShadow(String entry, String name) async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const Key('secret-set-shadow-confirm'),
+        title: Text('$name is another program\'s'),
+        content: const Text('Canoa will keep its own secret by this name beside that credential and answer to it, and will not change the other program\'s.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(key: const Key('secret-set-shadow-yes'), onPressed: () => Navigator.pop(context, true), child: const Text('Set it')),
+        ],
+      ),
+    );
+    if ((sure ?? false) && mounted) _begin(entry, name);
+  }
+
+  void _begin(String entry, String name) {
     final run = widget.controller.set(provider: entry, name: name);
     run.addListener(() {
       if (mounted) setState(() {});
