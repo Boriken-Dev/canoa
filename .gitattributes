@@ -5,3 +5,4 @@
 *.zip binary
 *.tar.gz binary
 crates/** -text
+cdn/office-js/** -text

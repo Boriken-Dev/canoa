@@ -1,0 +1,38 @@
+# This workflow will run the deployment.script
+# GitHug Action Reference: https://help.github.com/actions/language-and-framework-guides/using-nodejs-with-github-actions
+
+name: NPM Package Publish Script
+
+on:
+  push:
+    branches: [ custom-*, beta, release ]
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Use Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: '14.x'
+    - name: Clean Install
+      run: npm ci
+      working-directory: deployment.script
+    - name: Build
+      run: npm run build --if-present
+      working-directory: deployment.script
+    - name: Deploy
+      env:
+        BRANCH_NAME: ${{ github.ref }}
+        # Override Previous Travis environment variables
+        TRAVIS: true
+        TRAVIS_BRANCH: ${{ github.ref }}
+        TRAVIS_PULL_REQUEST: false
+        TRAVIS_BUILD_DIR: ${{ github.workspace }}
+        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: npm run deploy --if-present
+      working-directory: deployment.script

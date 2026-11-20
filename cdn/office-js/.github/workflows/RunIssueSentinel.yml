@@ -1,0 +1,16 @@
+name: Run issue sentinel
+on:
+  issues:
+    types: [opened, edited, closed]
+
+jobs:
+  Issue:
+    permissions:
+      issues: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Issue Sentinel
+        uses: Azure/issue-sentinel@d1e433f192aa9442d44292b9b6d5d31419639aba # v1.6.1
+        with:
+          enable-similar-issues-scanning: true # Scan similar issues in your repo, default: true
+          enable-security-issues-scanning: true # Scan security issues in your repo, default: false
