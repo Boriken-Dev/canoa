@@ -280,6 +280,37 @@ fn a_source_that_fails_keeps_its_last_index_marked_stale() {
     assert_eq!(again, 0, "no attempt while the failure is fresh");
 }
 
+#[test]
+fn a_refresh_asked_as_soon_as_another_ended_asks_the_source_again() {
+    use crate::store::sources::tests::{standin_down, with_standin};
+
+    // Both refreshes can land in one millisecond, so the clock cannot tell a refresh that began after the caller arrived from one
+    // that ended before it.
+    let overlays = Arc::new(Overlays::new(None, OverlayLimits::default()));
+    let index = Arc::new(StoreIndex::new(None, Duration::from_secs(3600), 1 << 20));
+    index.use_sources(with_standin());
+    let rows = parse_sources(&json!({"again": {"provider": "everywhere"}}));
+    for round in 0..400 {
+        standin_down("again", false);
+        let worked = index.catalogs(&overlays, &rows, true).pop().expect("one");
+        assert!(
+            worked.source.get("problem").is_none(),
+            "{round}: {}",
+            worked.source
+        );
+        standin_down("again", true);
+        let failed = index.catalogs(&overlays, &rows, true).pop().expect("one");
+        standin_down("again", false);
+        assert!(
+            failed.source["problem"]
+                .as_str()
+                .is_some_and(|why| why.contains("the stand-in is down")),
+            "{round}: the source was not asked again: {}",
+            failed.source
+        );
+    }
+}
+
 fn index_runs(rig: &Rig, index: &Arc<StoreIndex>) -> usize {
     let before = rig.overlays.git_runs();
     let _ = rig.ask(index, false);

@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -194,6 +194,9 @@ struct Cached {
 struct Slot {
     /// One refresh at a time.
     gate: Mutex<()>,
+    /// How many refreshes have begun. A caller that waited at the gate takes the result of one that began after it arrived; the
+    /// clock cannot say which that is, since two refreshes can fall in one millisecond.
+    begun: AtomicU64,
     state: Mutex<Option<Cached>>,
     background: AtomicBool,
 }
@@ -389,16 +392,17 @@ impl StoreIndex {
     /// Asks the remote and, when the ref moved, fetches and indexes it. One at a time per source: a caller that waited behind
     /// another's refresh takes its result.
     fn refresh(&self, slot: &Slot, overlays: &Overlays, source: &CatalogSource) -> Cached {
-        let started = now_millis();
+        let arrived = slot.begun.load(Ordering::SeqCst);
         let _one = lock(&slot.gate);
         let prior = lock(&slot.state)
             .clone()
             .filter(|cached| cached.spec == source.spec);
         if let Some(prior) = &prior
-            && prior.attempted >= started
+            && slot.begun.load(Ordering::SeqCst) != arrived
         {
             return prior.clone();
         }
+        slot.begun.fetch_add(1, Ordering::SeqCst);
         let attempt = now_millis();
         let next = match self.refresh_once(overlays, source, prior.as_ref(), attempt) {
             Ok(next) => next,
