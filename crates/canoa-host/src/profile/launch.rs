@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, BufRead as _, Read as _};
 use std::path::PathBuf;
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -57,10 +57,12 @@ pub(crate) fn sets_path<'a>(mut names: impl Iterator<Item = &'a OsStr>) -> bool 
 
 /// Reads one line of at most `max` bytes from standard input, `{"canoa_host_launch": 1, "env": [[NAME, VALUE], ...], "args":
 /// [ARG, ...]}` (`args` is optional), then runs `program` with `args` and the line's `args` after them, and the line's
-/// variables added to this process's environment. Everything after the line goes to the program's standard input; its
-/// standard output and error are this process's. When the program ends, this process exits with its status (1 for one ended
-/// by a signal), so this returns only what went wrong first: [`io::ErrorKind::InvalidData`] for a first line that is not
-/// one of that form, longer than `max` or not ended; what the operating system says when the program cannot start.
+/// variables added to this process's environment. Everything after the line is the program's standard input; its standard
+/// output and error are this process's. On Unix this process becomes the program (`exec`): it keeps this process's id and
+/// parent, its status is the one the program's parent sees, and this returns only when the program cannot be started. On
+/// Windows it runs the program as a child, relays the rest of its standard input and exits with the program's status (1
+/// for one with none). So this returns only what went wrong first: [`io::ErrorKind::InvalidData`] for a first line that is
+/// not one of that form, longer than `max` or not ended; what the operating system says when the program cannot start.
 pub fn launch(program: &OsStr, args: &[OsString], max: usize) -> io::Error {
     match start(program, args, max) {
         Ok(never) => match never {},
@@ -68,22 +70,72 @@ pub fn launch(program: &OsStr, args: &[OsString], max: usize) -> io::Error {
     }
 }
 
-fn start(program: &OsStr, args: &[OsString], max: usize) -> io::Result<core::convert::Infallible> {
-    let mut input = io::stdin().lock();
+/// The first line of `input`, ended by a line break, of at most `max` bytes, with the break removed.
+fn first_line(input: &mut impl io::BufRead, max: usize) -> io::Result<Vec<u8>> {
     let mut line = Vec::new();
-    (&mut input)
+    input
         .take(u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1))
         .read_until(b'\n', &mut line)?;
-    let wrong = || {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "the first line is not a launch line",
-        )
-    };
     if line.pop() != Some(b'\n') {
-        return Err(wrong());
+        return Err(not_a_launch_line());
     }
-    let value: Value = serde_json::from_slice(&line).map_err(|_| wrong())?;
+    Ok(line)
+}
+
+fn not_a_launch_line() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "the first line is not a launch line",
+    )
+}
+
+#[cfg(unix)]
+fn start(program: &OsStr, args: &[OsString], max: usize) -> io::Result<core::convert::Infallible> {
+    use std::os::fd::AsFd as _;
+    use std::os::unix::process::CommandExt as _;
+
+    // A one-byte buffer reads nothing past the line: the program inherits the descriptor and reads what follows.
+    let mut input = io::BufReader::with_capacity(
+        1,
+        std::fs::File::from(io::stdin().as_fd().try_clone_to_owned()?),
+    );
+    let line = first_line(&mut input, max)?;
+    Err(command(program, args, &line)?.exec())
+}
+
+#[cfg(not(unix))]
+fn start(program: &OsStr, args: &[OsString], max: usize) -> io::Result<core::convert::Infallible> {
+    use std::process::{ExitStatus, Stdio};
+
+    let mut input = io::stdin().lock();
+    let line = first_line(&mut input, max)?;
+    let mut child = command(program, args, &line)?
+        .stdin(Stdio::piped())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()?;
+    let mut to = child
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::other("no standard input"))?;
+    // The program may end while its input is still open, so its end, not the input's, ends this process.
+    std::thread::Builder::new()
+        .name("canoa-launch".into())
+        .spawn(move || {
+            let status: io::Result<ExitStatus> = child.wait();
+            std::process::exit(status.ok().and_then(|status| status.code()).unwrap_or(1));
+        })?;
+    let _ = io::copy(&mut input, &mut to);
+    drop(to);
+    loop {
+        std::thread::park();
+    }
+}
+
+/// `program` with `args`, the line's `args` and the line's variables, its standard streams left as they are.
+fn command(program: &OsStr, args: &[OsString], line: &[u8]) -> io::Result<Command> {
+    let wrong = not_a_launch_line;
+    let value: Value = serde_json::from_slice(line).map_err(|_| wrong())?;
     if value.get(LAUNCH_KEY) != Some(&json!(1)) {
         return Err(wrong());
     }
@@ -115,28 +167,7 @@ fn start(program: &OsStr, args: &[OsString], max: usize) -> io::Result<core::con
     } else {
         program.to_owned()
     };
-    let mut child = Command::new(program)
-        .args(args)
-        .args(more)
-        .envs(env)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-    let mut to = child
-        .stdin
-        .take()
-        .ok_or_else(|| io::Error::other("no standard input"))?;
-    // The program may end while its input is still open, so its end, not the input's, ends this process.
-    std::thread::Builder::new()
-        .name("canoa-launch".into())
-        .spawn(move || {
-            let status: io::Result<ExitStatus> = child.wait();
-            std::process::exit(status.ok().and_then(|status| status.code()).unwrap_or(1));
-        })?;
-    let _ = io::copy(&mut input, &mut to);
-    drop(to);
-    loop {
-        std::thread::park();
-    }
+    let mut command = Command::new(program);
+    command.args(args).args(more).envs(env);
+    Ok(command)
 }
